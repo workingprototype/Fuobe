@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getModel, modelsFor } from "@/lib/catalog";
 import { offeredModels } from "../model-access";
 import { dualEngine, runsOn } from "@/lib/catalog/engines";
+import { currentModelId } from "@/lib/catalog/replaced";
 import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { type PlannedJob, totalCost } from "@/lib/assist";
 import { STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
@@ -75,7 +76,6 @@ function summarize(m: ModelDef) {
     ...(o.voices?.length && { voices: o.voices.slice(0, 12).map((v) => v.id) }),
     ...(o.voiceClone && { voiceClone: true }),
     ...(o.languages?.length && { languages: o.languages.length > 12 ? `${o.languages.slice(0, 12).join(", ")}…` : o.languages.join(", ") }),
-    ...(o.presets && { needs: o.presets.required ? `a ${o.presets.label} (pick in the studio)` : undefined }),
     ...(o.looks && { looks: "139 Soul looks: pass a look id as presetId (v1-general, v2-y2k-studio…), presetStrength 0–1 scales its LoRAs" }),
   };
 }
@@ -141,7 +141,7 @@ const listElementsTool = defineTool({
           description: e.description,
           referencePhotos: e.references.length,
           // The models its trained LoRAs run on (every model of each family), from LoRAs a run can use: not a demo
-          // training's stand-in or an old Higgsfield Soul ID.
+          // training's stand-in or an older Soul ID.
           trainedFor: [...new Set(e.loras.filter(runsSomewhere).flatMap((l) => familyModels(l)))],
         })),
       ),
@@ -304,8 +304,12 @@ function shotList(model: ModelDef | undefined, n: number): { prompt: string; dur
 /** The engine the user works on (the install's only one when Settings → Engine mode allows one). */
 const engineOf = (ctx: ToolContext): "cloud" | "open" => (engineMode() === "both" ? ctx.engine : (engineMode() as "cloud" | "open"));
 
-/** A job as a request; `engine` is the user's, which a Fuobe Original (both engines) runs on unless the job names one. */
-function toRequest(j: JobInput, engine?: "cloud" | "open"): GenerationRequest {
+/**
+ * A job as a request; `engine` is the user's, which a Fuobe Original (both engines) runs on unless the job names one.
+ * A retired model id (an older plan, an MCP client's saved call) runs on the model that replaced it (replaced.ts).
+ */
+function toRequest(job: JobInput, engine?: "cloud" | "open"): GenerationRequest {
+  const j = { ...job, model_id: currentModelId(job.model_id) };
   const inputs = {
     ...(j.images?.length && { images: j.images }),
     ...(j.end_image && { endImage: j.end_image }),

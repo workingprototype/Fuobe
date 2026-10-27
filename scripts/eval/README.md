@@ -52,13 +52,9 @@ harness measures what a user gets.
 - `--engine open` / `cloud` refuse a server whose engine mode excludes them. A job that would come
   back as demo media is skipped and says why: Demo mode is On, no ComfyUI is connected, or there is
   no cloud key.
-- **Never Higgsfield.** Fuobe uses no Higgsfield API: a job whose route would go through Higgsfield's
-  API is skipped, not measured. A generation's preview names its route; a studio route's estimate
-  lists where its steps run. A studio route that doesn't say (an older Fuobe) is skipped when that
-  Fuobe has a Higgsfield key. Connect fal or Replicate and set **Settings → Cloud provider** to Auto,
-  fal or Replicate.
 - **The model it names.** A job the server would run on another model than the one the case names
-  (a studio's default maker, say) is skipped, since it wouldn't measure that model.
+  (a studio's default maker, or a retired model the server runs on the Original that replaced it) is
+  skipped, since it wouldn't measure that model.
 - **Your Library stays yours.** Every generation the harness starts has the feature `eval`, a helper
   like a studio's steps: the Library and Home feeds leave it out unless **Show steps** is on. A studio
   route's steps (Genjutsu, Mixed Media) carry that studio's feature instead. `pnpm eval:trash <runId>`
@@ -100,7 +96,7 @@ Useful `run` options:
 - A cloud job or training the server can't price is skipped, because the cap can't cover it.
   `--allow-unpriced` runs it anyway: it holds whatever is left of the cap while it runs, so nothing
   starts beside it, and its cost counts once the server reports it. Such a job can take the run over
-  the cap by its own cost. A training target on Higgsfield's API never runs.
+  the cap by its own cost.
 - `--concurrency`: open 1, others 4.
 - `--resume <runId>`: runs only the failed and missing jobs again. Ctrl+C stops new jobs from
   starting; the jobs already running finish on the server.

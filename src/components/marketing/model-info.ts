@@ -32,7 +32,7 @@ export function marketingModelInfo(): Record<string, ModelInfo> {
   const ids = new Set<string>(["text-llm", "oss-text-llm", "oss-qwen-image", "oss-infinitetalk-long", "ads-studio", "nano-banana-pro", "oss-qwen-edit"]);
   for (const f of Object.keys(FORMATS) as FormatId[])
     for (const engine of ["cloud", "open"] as const)
-      for (const has of [{ product: true, avatar: true, higgsfield: true }, { product: false, avatar: false, higgsfield: true }]) for (const c of formatModels(FORMATS[f], engine, has)) ids.add(c.id);
+      for (const has of [{ product: true, avatar: true }, { product: false, avatar: false }]) for (const c of formatModels(FORMATS[f], engine, has)) ids.add(c.id);
   for (const engine of ["cloud", "open"] as const) {
     Object.values(UGC_MODELS[engine]).forEach((id) => ids.add(id));
     MULTIPLIER_MODELS[engine].forEach((c) => ids.add(c.id));

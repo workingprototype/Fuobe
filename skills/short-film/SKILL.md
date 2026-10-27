@@ -35,7 +35,7 @@ Show the shot list compactly, then go — the approval card is the user's checkp
 
 ## 3. Shots
 - Cloud: `seedance-2-5` (default; 5–12 s, native audio, multi-shot), `kling-3` for strong motion,
-  `veo-3-1` for dialogue with lip sync, `cinema-studio-4` for Higgsfield's camera controls.
+  `veo-3-1` for dialogue with lip sync, `fuobe-cinema` (Fuobe Cinema) for named camera moves.
 - Open source: `oss-wan22-14b-fast` (i2v), `oss-wan22-14b` for quality.
 - One `generate` job per shot with op `i2v`, `after` pointing at that shot's still. Write the
   prompt as action in time order, then camera, then light: "She turns from the window as the

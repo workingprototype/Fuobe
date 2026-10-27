@@ -386,7 +386,7 @@ export function deleteGeneration(id: string): void {
 /**
  * Pick the provider for a run: a configured real provider, else the demo provider (unless demo is off).
  * `images` is how many images the run sends: a route whose list takes fewer (FieldMap.maxImages: Grok
- * Imagine Image takes 5 on fal, 10 on Higgsfield) gives way to one that takes them all, or says so.
+ * Imagine Image takes 5 on fal) gives way to one that takes them all, or says so.
  * `loras` and `seconds` (the clip length asked for) prefer a route that carries every LoRA and makes that
  * length (Replicate's Wan 2.2 fast renders only 81–121 frames, fal's 17–161).
  */
@@ -526,7 +526,7 @@ function prepare(original: GenerationRequest) {
     const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
     notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
   }
-  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images; a ComfyUI graph, which makes
+  // A route that can't batch (Replicate's Nano Banana Pro beside fal's num_images; a ComfyUI graph, which makes
   // one picture a run: Fuobe Soul on the open engine) runs one job per output.
   if (!demo && !route.map?.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };

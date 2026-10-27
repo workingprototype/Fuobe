@@ -9,8 +9,6 @@ vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typ
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-image-studios-"));
 process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
-delete process.env.HF_KEY;
-delete process.env.HF_API_KEY;
 
 const { setSetting } = await import("@/server/settings");
 const gens = await import("@/server/generations");
@@ -41,7 +39,6 @@ const { getModel } = await import("@/lib/catalog");
 
 beforeAll(() => {
   setSetting("demoMode", "auto");
-  setSetting("higgsfieldKey", "");
 });
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -345,9 +342,13 @@ describe("photodump, fashion factory and character sheet runs", () => {
     const cast = await (await characterRoute.POST(json("POST", { mode: "cast", engine: "open", cast: { genre: "Western", gender: "Female", age: 30, archetype: "Rebel" } }))).json();
     expect(cast.items[0].modelId).toBe("oss-zimage-soul-cast");
     expect(cast.items[0].prompt).toMatch(/30-year-old woman, the rebel archetype/);
-    const noKey = await (await characterRoute.POST(json("POST", { mode: "cast", engine: "cloud", cast: { genre: "Drama" } }))).json();
-    expect(noKey.items[0].modelId).toBe("nano-banana-pro");
-    expect(noKey.notes[0]).toMatch(/Higgsfield key/);
+    // In the cloud the cast sheet is Fuobe Soul's, in Cinema's casting look.
+    const soul = await (await characterRoute.POST(json("POST", { mode: "cast", engine: "cloud", cast: { genre: "Drama" } }))).json();
+    expect(soul.items[0]).toMatchObject({ modelId: "fuobe-soul", engine: "cloud", presetId: "v1-realistic" });
+    expect(soul.notes ?? []).toEqual([]);
+    const described = await (await characterRoute.POST(json("POST", { mode: "describe", engine: "cloud", prompt: "a surfer from Lisbon" }))).json();
+    expect(described.error).toBeUndefined();
+    expect(described.items[0]).toMatchObject({ presetId: "app-ai-influencer", modelId: "nano-banana-pro", feature: "app:app-ai-influencer" });
     const app = await (await characterRoute.POST(json("POST", { mode: "describe", engine: "open", prompt: "a surfer from Lisbon" }))).json();
     expect(app.items[0]).toMatchObject({ presetId: "app-ai-influencer", modelId: "oss-zimage-soul-cast", feature: "app:app-ai-influencer" });
   });

@@ -18,7 +18,7 @@ export interface ModelAccess {
   /** Model ids. */
   models: string[];
   classes: LicenceClass[];
-  /** Provider ids (fal, replicate, higgsfield, comfyui, llm, local). */
+  /** Provider ids (fal, replicate, comfyui, llm, local). */
   providers: string[];
   /** ComfyUI node packs by name (src/lib/licences.ts NODE_PACKS). */
   packs: string[];

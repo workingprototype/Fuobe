@@ -12,6 +12,7 @@ import { getModel, getPreset, MODELS, supportsOp } from "./index";
 import { dualEngine, onEngine, runsOn } from "./engines";
 import { chainedWaitMessage, keyframeChain } from "./keyframes";
 import { estimateCost, inferOperation, planGeneration, routesFor, type Plan } from "./plan";
+import { replacedBy } from "./replaced";
 import {
   OPERATION_LABELS,
   OPERATION_OUTPUT,
@@ -1640,9 +1641,27 @@ export function withCurrentElements(graph: CanvasGraph, elements: readonly Eleme
 
 const NODE_TYPES = new Set(Object.keys(NODE_SPECS));
 
-/** Drop unknown node types, dangling edges and edges into handles that don't exist (after a model or op change). */
+/**
+ * A node saved on a model Fuobe retired (src/lib/catalog/replaced.ts) moves to the one that replaced it, keeping the
+ * settings it offers; an Original runs in the cloud, where the retired model ran.
+ */
+function currentNode(n: CanvasNode): CanvasNode {
+  const to = replacedBy(n.data.modelId);
+  const m = to && getModel(to.id);
+  if (!m) return n;
+  return { ...n, data: { ...n.data, modelId: m.id, params: sanitizeParams(m, n.data.params), engine: dualEngine(m) ? (n.data.engine ?? "cloud") : undefined } };
+}
+
+/** A stored board with its nodes on retired models moved to the ones that replaced them (read before any save). */
+export const withCurrentModels = (graph: CanvasGraph): CanvasGraph =>
+  graph.nodes.some((n) => replacedBy(n.data.modelId)) ? { ...graph, nodes: graph.nodes.map(currentNode) } : graph;
+
+/**
+ * Drop unknown node types, dangling edges and edges into handles that don't exist (after a model or op change), and
+ * move nodes on a retired model to the one that replaced it.
+ */
 export function cleanGraph(graph: CanvasGraph): CanvasGraph {
-  const nodes = graph.nodes.filter((n) => NODE_TYPES.has(n.type));
+  const nodes = graph.nodes.filter((n) => NODE_TYPES.has(n.type)).map(currentNode);
   const g: CanvasGraph = { ...graph, nodes, edges: [] };
   const ids = new Set(nodes.map((n) => n.id));
   const seen = new Set<string>();

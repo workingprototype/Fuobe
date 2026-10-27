@@ -33,6 +33,7 @@ import {
   planCanvas,
   rowSignature,
   silenceSeconds,
+  withCurrentModels,
   withCurrentElements,
   type Canvas,
   type CanvasGraph,
@@ -73,7 +74,7 @@ interface Row {
 const toCanvas = (r: Row): Canvas => ({
   id: r.id,
   name: r.name,
-  pages: readPages(JSON.parse(r.graph_json)),
+  pages: readPages(JSON.parse(r.graph_json)).map((p) => ({ ...p, graph: withCurrentModels(p.graph) })),
   runs: JSON.parse(r.runs_json) as CanvasRuns,
   templateId: r.template_id,
   createdAt: r.created_at,

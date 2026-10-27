@@ -254,7 +254,7 @@ describe("brand kits", () => {
   it("plans Marketing Studio runs per format and engine", () => {
     const b = brand.getBrand(brandId)!;
     const product = brand.listProducts(brandId)[0];
-    const ctx = { product, brand: b, higgsfield: false };
+    const ctx = { product, brand: b };
     const cloudAd = mk.planMarketing({ engine: "cloud", format: "ads", templateId: "ad-hero-headline" }, ctx);
     const r = cloudAd.steps[0].request;
     expect(r).toMatchObject({ modelId: "gpt-image-2-5", op: "edit", feature: "marketing", params: { aspectRatio: "4:5", numOutputs: 1 } });
@@ -294,7 +294,7 @@ describe("brand kits", () => {
     const b = brand.getBrand(brandId)!;
     const product = brand.listProducts(brandId)[0];
     const script = "Okay so I have to tell you about this granola. It is crunchy, not too sweet, and I eat it every single morning now. Try it.";
-    const cloud = mk.planMarketing({ engine: "cloud", format: "ugc-talking", hookId: "product-hit", settingId: "kitchen" }, { product, brand: b, higgsfield: false, script });
+    const cloud = mk.planMarketing({ engine: "cloud", format: "ugc-talking", hookId: "product-hit", settingId: "kitchen" }, { product, brand: b, script });
     expect(cloud.steps.map((s) => s.key)).toEqual(["voice", "still", "talk", "captions", "hook", "broll", "film"]);
     const step = (k: string) => cloud.steps.find((s) => s.key === k)!;
     expect(step("voice").request).toMatchObject({ modelId: "elevenlabs-v4", op: "tts", prompt: script });
@@ -306,8 +306,8 @@ describe("brand kits", () => {
     expect(cloud.finals).toEqual(["film"]);
     expect(cloud.meta.script).toBe(script);
 
-    expect(() => mk.planMarketing({ engine: "open", format: "ugc-talking" }, { product, brand: b, higgsfield: false, script })).toThrow(/voice sample/);
-    const open = mk.planMarketing({ engine: "open", format: "tiktok", hookId: null, voiceSample: upload("voice.png") }, { product, brand: b, higgsfield: false, script });
+    expect(() => mk.planMarketing({ engine: "open", format: "ugc-talking" }, { product, brand: b, script })).toThrow(/voice sample/);
+    const open = mk.planMarketing({ engine: "open", format: "tiktok", hookId: null, voiceSample: upload("voice.png") }, { product, brand: b, script });
     expect(open.steps.map((s) => s.key)).toEqual(["voice", "still", "talk", "captions", "broll", "film"]);
     expect(open.steps[0].request).toMatchObject({ modelId: "oss-chatterbox", inputs: { voiceAudio: expect.stringMatching(/^\/api\/files\//) } });
     expect(open.steps[2].request.modelId).toBe("oss-infinitetalk-long");
@@ -379,28 +379,28 @@ describe("Ad Multiplier", () => {
 
   it("recreates the whole ad: Kling with renumbered @images (keeps audio), Wan Animate + original sound on open", () => {
     const imgs = [upload("a.png"), upload("b.png")];
-    const cloud = mk.planMultiplier({ engine: "cloud", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "Swap the bottle for @image_2", quality: "1080p" }, { higgsfield: false });
+    const cloud = mk.planMultiplier({ engine: "cloud", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "Swap the bottle for @image_2", quality: "1080p" }, {});
     expect(cloud.steps).toHaveLength(1);
     expect(cloud.steps[0].request).toMatchObject({ modelId: "kling-o3", op: "v2v", prompt: "Swap the bottle for @Image1", inputs: { images: [imgs[1], imgs[0]] }, params: { extra: { keep_audio: true } } });
-    const open = mk.planMultiplier({ engine: "open", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "", quality: "1080p" }, { higgsfield: false });
+    const open = mk.planMultiplier({ engine: "open", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "", quality: "1080p" }, {});
     expect(open.steps.map((s) => [s.key, s.request.modelId])).toEqual([["edit", "fuobe-genjutsu-motion"], ["sound", "oss-mux"]]);
-    expect(() => mk.planMultiplier({ engine: "open", video: video(), duration: 12, mode: "prompt", quality: "720p" }, { higgsfield: false })).toThrow(/Add an image/);
+    expect(() => mk.planMultiplier({ engine: "open", video: video(), duration: 12, mode: "prompt", quality: "720p" }, {})).toThrow(/Add an image/);
   });
 
   it("adds a hook and a CTA around the original (trimmed first), from the frames the browser grabbed", () => {
     const v = video();
-    const plain = mk.planMultiplier({ engine: "cloud", video: v, duration: 20, mode: "sections", hook: "Wait for it", cta: "Shop today", quality: "720p", firstFrame: upload("f.png"), lastFrame: upload("l.png") }, { higgsfield: false });
+    const plain = mk.planMultiplier({ engine: "cloud", video: v, duration: 20, mode: "sections", hook: "Wait for it", cta: "Shop today", quality: "720p", firstFrame: upload("f.png"), lastFrame: upload("l.png") }, {});
     expect(plain.steps.map((s) => s.key)).toEqual(["hook", "cta", "film"]);
     const film = plain.steps.at(-1)!;
     expect(film.request.inputs).toEqual({ videos: [v] });
     expect(film.request.chain).toEqual([{ slot: "videos", position: "first" }, { slot: "videos", position: "last" }]);
     expect(plain.steps[0].request.prompt).toContain("“Wait for it”");
 
-    const trimmed = mk.planMultiplier({ engine: "cloud", video: v, duration: 40, start: 5, end: 20, mode: "sections", cta: "Shop today", hook: null, quality: "720p" }, { higgsfield: false });
+    const trimmed = mk.planMultiplier({ engine: "cloud", video: v, duration: 40, start: 5, end: 20, mode: "sections", cta: "Shop today", hook: null, quality: "720p" }, {});
     expect(trimmed.steps.map((s) => s.key)).toEqual(["clip", "last", "cta", "film"]);
     expect(trimmed.steps[0].request).toMatchObject({ modelId: "trim-video", params: { startTime: 5, endTime: 20 } });
     expect(trimmed.steps.at(-1)).toMatchObject({ after: ["clip", "cta"], request: { inputs: undefined } });
-    expect(() => mk.planMultiplier({ engine: "cloud", video: v, duration: 3, mode: "prompt", quality: "720p" }, { higgsfield: false })).toThrow("Video duration: 4-30 seconds");
+    expect(() => mk.planMultiplier({ engine: "cloud", video: v, duration: 3, mode: "prompt", quality: "720p" }, {})).toThrow("Video duration: 4-30 seconds");
   });
 
   it("prices a version per second and says what blocks it", async () => {
@@ -470,7 +470,7 @@ describe("Ads Studio", () => {
       { productId: products[1].id, count: 2 },
     ];
     const est = await (await adsEstimate.POST(json("POST", { brandId, engine: "open", items }))).json();
-    expect(est).toMatchObject({ route: "fuobe", modelId: "oss-qwen-edit", total: 5, demo: true });
+    expect(est).toMatchObject({ modelId: "oss-qwen-edit", total: 5, demo: true });
     const { batchId, creatives, run } = ads.createBatch({ brandId, engine: "open", items });
     expect(creatives).toHaveLength(5);
     expect(creatives.every((c) => c.status === "writing")).toBe(true);

@@ -7,7 +7,7 @@ import { DUB_STEP_MODELS, prepareSteps, translateKey, type OneShotModel } from "
 import { getModel } from "@/lib/catalog";
 import { routesFor } from "@/lib/catalog/plan";
 import { defaultSettings, genreInfo, PART_LABELS, type EpisodeAspect, type EpisodeSettings, type NarratorVoice, type StepPart } from "@/lib/catalog/faceless";
-import { AD_RATIOS, emptyKit, type AdRatio, type BrandKit, type Product } from "@/lib/catalog/marketing";
+import { AD_RATIOS, emptyKit, type BrandKit, type Product } from "@/lib/catalog/marketing";
 import { lookFromPreset, SHORTS, SHORTS_MODELS, type ShortsLook } from "@/lib/catalog/shorts";
 import type { Engine, GenerationRequest, MediaKind, Operation } from "@/lib/catalog/types";
 import { modeHref } from "@/lib/hubs";
@@ -495,12 +495,9 @@ function adsJob(i: AdsToolInput, ctx: ToolContext): Checked<{ input: BatchInput;
   const input: BatchInput = {
     brandId: kit?.id ?? "draft",
     engine,
-    // Several formats, or words to use as given, need Fuobe's compositor (every ad in 1:1, 4:5 and 9:16, its
-    // headline and call to action editable); Higgsfield renders one format per ad and writes its own copy into the picture.
-    ...((ratios.length > 1 || !!i.headline?.trim() || !!i.cta?.trim()) && { route: "fuobe" as const }),
+    // Every ad comes in 1:1, 4:5 and 9:16 from Fuobe's compositor, its headline and call to action editable.
     items: [{ productId: draftProduct.id, count: Math.max(1, Math.min(8, i.count ?? 4)) }],
     direction,
-    ratio: ratios[0] as AdRatio,
   };
   try {
     estimateBatch(input, { brand: draftBrand, product: draftProduct });
@@ -541,17 +538,14 @@ const adsRoute: StudioRoute<AdsToolInput> = {
     const job: PlannedJob = {
       tool: "create_ads",
       modelId: est.modelId,
-      modelName: est.route === "higgsfield" ? "Higgsfield Ads Studio" : est.modelName,
+      modelName: est.modelName,
       kind: "image",
       op: draft.product?.images.length ? "edit" : "t2i",
       prompt: i.brief,
       count: est.total,
       costUsd: est.costUsd,
       demo: est.demo,
-      note:
-        est.route === "higgsfield"
-          ? `${est.total} finished ad${est.total === 1 ? "" : "s"} in ${input.ratio}`
-          : `${est.total} ad${est.total === 1 ? "" : "s"} · copy by ${est.copyBy === "llm" ? "the AI copywriter" : "the offline copywriter"} · each in 1:1, 4:5 and 9:16`,
+      note: `${est.total} ad${est.total === 1 ? "" : "s"} · copy by ${est.copyBy === "llm" ? "the AI copywriter" : "the offline copywriter"} · each in 1:1, 4:5 and 9:16`,
       atomic: true,
     };
     return [job];

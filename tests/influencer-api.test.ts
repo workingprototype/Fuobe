@@ -6,8 +6,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-influencer-"));
 process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
-delete process.env.HF_KEY;
-delete process.env.HF_API_KEY;
 
 const { setSetting } = await import("@/server/settings");
 const { db } = await import("@/server/db");
@@ -19,11 +17,9 @@ const { retryPhoto } = await import("@/server/photodump");
 
 beforeAll(() => {
   setSetting("demoMode", "auto");
-  setSetting("higgsfieldKey", "");
 });
 afterEach(() => {
   setSetting("engineMode", "both");
-  setSetting("higgsfieldKey", "");
 });
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -44,12 +40,9 @@ async function settle(id: string, ms = 40_000) {
 }
 
 describe("/api/influencer", () => {
-  it("prices a cloud sheet on Nano Banana Pro (Seedream 5.0 Pro when asked), with or without a Higgsfield key", async () => {
+  it("prices a cloud sheet on Nano Banana Pro (Seedream 5.0 Pro when asked); a retired model id runs the default", async () => {
     const cloud = await (await post({ engine: "cloud", state, start: "scratch" }, true)).json();
     expect(cloud).toMatchObject({ modelId: "nano-banana-pro", modelName: "Nano Banana Pro", count: 1, steps: 1, demo: true });
-    // Fuobe uses no Higgsfield API: a key changes nothing here.
-    setSetting("higgsfieldKey", "key:secret");
-    expect(await (await post({ engine: "cloud", state, start: "scratch" }, true)).json()).toMatchObject({ modelId: "nano-banana-pro", demo: true });
     expect((await (await post({ engine: "cloud", state, start: "scratch", modelId: "ai-influencer" }, true)).json()).modelId).toBe("nano-banana-pro");
     const seedream = await (await post({ engine: "cloud", state, start: "scratch", modelId: "seedream-5-pro" }, true)).json();
     expect(seedream.modelId).toBe("seedream-5-pro");

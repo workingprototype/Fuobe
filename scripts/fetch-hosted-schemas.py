@@ -20,6 +20,7 @@ Run:  python3 scripts/fetch-hosted-schemas.py
       python3 scripts/fetch-hosted-schemas.py --only fal-ai/z-image/turbo/image-to-image/lora   (one endpoint, the rest kept)
       python3 scripts/fetch-hosted-schemas.py --trainers                                         (only the trainers' outputs)
       python3 scripts/fetch-hosted-schemas.py --base-only [endpoint …]                           (Genjutsu's plain endpoints, the rest kept)
+      python3 scripts/fetch-hosted-schemas.py --partner                                          (partner routes in partnerEndpoints, the rest kept)
 """
 import datetime
 import json
@@ -112,6 +113,14 @@ GENJUTSU = {
     "minimax/h3-max/recast": ("video-swap", {"prompt": "prompt", "video": "video_url", "images": "reference_image_urls", "resolution": "resolution", "seed": "seed"}),
 }
 
+# Partner models' fal routes that take over a route Fuobe dropped with the Higgsfield provider (build plan O7: Happy
+# Horse 1.1 ran only on Higgsfield). Read with --partner; stored in partnerEndpoints, which gen-cloud-models.py reads.
+HAPPY_HORSE = {"prompt": "prompt", "seed": "seed", "duration": "duration", "resolution": "resolution"}
+PARTNER = {
+    "alibaba/happy-horse/v1.1/text-to-video": ("t2v", {**HAPPY_HORSE, "aspectRatio": "aspect_ratio"}),
+    "alibaba/happy-horse/v1.1/image-to-video": ("i2v", {**HAPPY_HORSE, "image": "image_url"}),
+    "alibaba/happy-horse/v1.1/reference-to-video": ("ref2v", {**HAPPY_HORSE, "aspectRatio": "aspect_ratio", "images": "image_urls"}),
+}
 
 def get(url):
     req = urllib.request.Request(url, headers={"User-Agent": "fuobe-research/1.0"})
@@ -256,6 +265,14 @@ def main():
     data = json.loads(raw)
     if "--trainers" in sys.argv:
         trainer_outputs(data)
+        FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        return
+    if "--partner" in sys.argv:
+        # Add or refresh the partner routes (PARTNER) and keep every other record as it is.
+        records = {e["endpoint"]: e for e in data.get("partnerEndpoints") or []}
+        for ep, (op, kf) in PARTNER.items():
+            records[ep] = {**base_record(ep, op, kf, fal_prices(ep)), "replaces": "a route Fuobe ran on Higgsfield's API until build plan O7"}
+        data["partnerEndpoints"] = list(records.values())
         FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         return
     if "--base-only" in sys.argv:

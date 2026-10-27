@@ -15,9 +15,11 @@ for (const e of research) byId.set(`${e.provider}:${e.endpoint}`, { ...byId.get(
 const originals = JSON.parse(fs.readFileSync("docs/research/fuobe-originals-recipes-5.json", "utf8")) as {
   hostedLoraEndpoints: (Endpoint & { id: string })[];
   hostedBaseEndpoints: Endpoint[];
+  /** Partner routes read for build plan O7 (Happy Horse 1.1 on fal). */
+  partnerEndpoints?: Endpoint[];
 };
 for (const e of originals.hostedLoraEndpoints) if (e.inputs) byId.set(`${e.provider}:${e.id}`, { ...e, endpoint: e.id, verified: true });
-for (const e of originals.hostedBaseEndpoints) byId.set(`${e.provider}:${e.endpoint}`, e);
+for (const e of [...originals.hostedBaseEndpoints, ...(originals.partnerEndpoints ?? [])]) byId.set(`${e.provider}:${e.endpoint}`, e);
 /** A Replicate model run by version ("owner/name:<version>") is researched under its name. */
 const researched = (r: ModelRoute, endpoint = r.endpoint) => byId.get(`${r.provider}:${endpoint}`) ?? byId.get(`${r.provider}:${endpoint.split(":")[0]}`);
 
@@ -211,7 +213,8 @@ describe("round-3 payloads", () => {
       colors: [{ r: 255, g: 0, b: 0 }, { r: 0, g: 255, b: 128 }, { r: 18, g: 52, b: 86 }],
       background_color: { r: 255, g: 255, b: 255 },
     });
-    expect(buildPayload(route("recraft-4-1", "t2i", "higgsfield").map!, { prompt: "p", palette, extra: { background_color: "#000000" } })).toMatchObject({
+    // The [{rgb: [r, g, b]}] shape some APIs take.
+    expect(buildPayload({ palette: { key: "colors", format: "rgb-array", background: "background_color" } }, { prompt: "p", palette, extra: { background_color: "#000000" } })).toMatchObject({
       colors: [{ rgb: [255, 0, 0] }, { rgb: [0, 255, 128] }, { rgb: [18, 52, 86] }],
       background_color: { rgb: [0, 0, 0] },
     });

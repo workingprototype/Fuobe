@@ -8,7 +8,6 @@ import type { ModelDef, ModelRoute } from "@/lib/catalog/types";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-providers-"));
 process.env.FUOBE_DATA_DIR = dir;
 
-const { higgsfieldProvider } = await import("@/server/providers/higgsfield");
 const { falProvider } = await import("@/server/providers/fal");
 const { replicateProvider } = await import("@/server/providers/replicate");
 
@@ -39,55 +38,6 @@ const ctx = (route: Partial<ModelRoute>, meta: Record<string, unknown> = {}) => 
   route: { op: "t2i", provider: "fal", endpoint: "x", ...route } as ModelRoute,
   model,
   createdAt: 0,
-});
-
-describe("Higgsfield poll (S1)", () => {
-  it("returns only the media of a completed RequestStatus, not its status/cancel links", async () => {
-    const statusUrl = "https://api.higgsfield.ai/requests/req-1/status";
-    // RequestStatus as docs.higgsfield.ai/docs/openapi.json documents it.
-    const body = {
-      status: "completed",
-      request_id: "req-1",
-      status_url: statusUrl,
-      cancel_url: "https://api.higgsfield.ai/requests/req-1/cancel",
-      images: [{ url: "https://cdn.higgsfield.ai/out/a.png" }],
-    };
-    const { result } = await withFetch({ [statusUrl]: body }, () =>
-      higgsfieldProvider.poll(ctx({ provider: "higgsfield", endpoint: "higgsfield-ai/soul/v2/standard" }, { statusUrl })),
-    );
-    expect(result).toEqual({ state: "succeeded", outputs: [{ url: "https://cdn.higgsfield.ai/out/a.png", kind: "image" }] });
-  });
-
-  it("keeps videos first and extra artifacts as links on the output", async () => {
-    const statusUrl = "https://api.higgsfield.ai/requests/req-2/status";
-    const body = {
-      status: "completed",
-      request_id: "req-2",
-      status_url: statusUrl,
-      cancel_url: "https://api.higgsfield.ai/requests/req-2/cancel",
-      video: { url: "https://cdn.higgsfield.ai/out/v.mp4" },
-      zip: { url: "https://cdn.higgsfield.ai/out/frames.zip" },
-    };
-    const { result } = await withFetch({ [statusUrl]: body }, () => higgsfieldProvider.poll(ctx({ provider: "higgsfield", op: "t2v" }, { statusUrl })));
-    expect(result).toEqual({
-      state: "succeeded",
-      outputs: [{ url: "https://cdn.higgsfield.ai/out/v.mp4", kind: "video", meta: { artifacts: { zip: "https://cdn.higgsfield.ai/out/frames.zip" } } }],
-    });
-  });
-
-  it("keeps a layer's structure through the Higgsfield route too", async () => {
-    const statusUrl = "https://api.higgsfield.ai/requests/req-4/status";
-    const body = { status: "completed", request_id: "req-4", status_url: statusUrl, cancel_url: "x", images: [{ url: "https://cdn.higgsfield.ai/a.png" }, { url: "https://cdn.higgsfield.ai/b.png" }] };
-    const { result } = await withFetch({ [statusUrl]: body }, () => higgsfieldProvider.poll(ctx({ provider: "higgsfield", op: "layers" }, { statusUrl })));
-    expect(result).toMatchObject({ state: "succeeded", outputs: [{ meta: { name: "Background", z: 0 } }, { meta: { name: "Layer 1", z: 1 } }] });
-  });
-
-  it("fails cleanly when a completed status has no media", async () => {
-    const statusUrl = "https://api.higgsfield.ai/requests/req-3/status";
-    const body = { status: "completed", request_id: "req-3", status_url: statusUrl, cancel_url: "https://api.higgsfield.ai/requests/req-3/cancel" };
-    const { result } = await withFetch({ [statusUrl]: body }, () => higgsfieldProvider.poll(ctx({ provider: "higgsfield" }, { statusUrl })));
-    expect(result.state).toBe("failed");
-  });
 });
 
 describe("fal poll: structured results", () => {

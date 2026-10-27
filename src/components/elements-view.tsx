@@ -248,7 +248,7 @@ function HandleCopy({ handle }: { handle: string }) {
   );
 }
 
-/** Training, Soul ID (a LoRA that runs), Retrain (only a Higgsfield Soul ID) or Demo (only a demo training's stand-in). */
+/** Training, Soul ID (a LoRA that runs), Retrain (only an older Soul ID kept by reference) or Demo (only a demo training's stand-in). */
 function TrainedBadge({ el }: { el: StudioElement }) {
   const real = el.loras.some((l) => !l.demo && !isLegacySoulId(l));
   const legacy = !real && el.loras.some(isLegacySoulId);
@@ -260,7 +260,7 @@ function TrainedBadge({ el }: { el: StudioElement }) {
         "pointer-events-none absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-background/90 px-2 py-0.5 text-[11px] font-medium shadow-soft backdrop-blur",
         real || el.status === "training" ? "text-success" : "text-warning",
       )}
-      title={legacy ? "A Higgsfield Soul ID: retrain it for Fuobe Soul on the same photos" : undefined}
+      title={legacy ? "An older Soul ID that no longer runs: retrain it for Fuobe Soul on the same photos" : undefined}
     >
       {el.status === "training" ? <Loader2 className="size-3 animate-spin" /> : <GraduationCap className="size-3" />}
       {label}

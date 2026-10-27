@@ -60,10 +60,9 @@ describe("Genjutsu: which model runs", () => {
     expect(makersFor("cloud", "motion").map((m) => m.id)).not.toContain(ORIGINALS.motion);
   });
 
-  it("no Higgsfield model is offered, and old setups naming one open the Original that replaced it", () => {
+  it("only current models are offered, and old setups naming a retired one open the Original that replaced it", () => {
     expect(MAKERS.some((m) => m.id.startsWith("genjutsu-"))).toBe(false);
-    // Every maker runs without Higgsfield (Kling's own models may also list Higgsfield as one more provider).
-    expect(MAKERS.every((m) => onEngine(getModel(m.id)!, m.engine).routes.some((r) => r.provider !== "higgsfield"))).toBe(true);
+    expect(MAKERS.every((m) => onEngine(getModel(m.id)!, m.engine).routes.length > 0)).toBe(true);
     expect(chooseMaker({ engine: "cloud", mode: "motion", modelId: "genjutsu-motion-transfer" })).toEqual({ maker: maker(ORIGINALS.motion) });
     expect(chooseMaker({ engine: "cloud", mode: "swap", modelId: "genjutsu-lite-object-swap" })).toEqual({ maker: maker(ORIGINALS.swapLite) });
     expect(chooseMaker({ engine: "open", mode: "motion", modelId: "oss-wan22-animate" })).toEqual({ maker: maker(ORIGINALS.motion, "open") });

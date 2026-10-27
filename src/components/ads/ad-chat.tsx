@@ -11,7 +11,6 @@ import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useBrandChat, useEstimate, type ChatMessage } from "@/components/marketing/hooks";
 import { insertMention, mentionMatches, mentionQuery } from "./mention";
-import { RoutePicker, type AdRouteChoice } from "./new-ads";
 
 const NAME_KEY = "fuobe:first-name";
 const CHIPS = ["A lifestyle ad with the product in everyday use", "A clean studio shot with a bold headline", "A playful, colorful ad for social media"];
@@ -45,14 +44,11 @@ function useFirstName(): [string, (n: string) => void] {
   ];
 }
 
-function Proposal({ msg, brand, products, engine, choice, onConfirmed }: { msg: ChatMessage; brand: BrandKit; products: Product[]; engine: "cloud" | "open"; choice: AdRouteChoice; onConfirmed: (batchId: string) => void }) {
+function Proposal({ msg, brand, products, engine, onConfirmed }: { msg: ChatMessage; brand: BrandKit; products: Product[]; engine: "cloud" | "open"; onConfirmed: (batchId: string) => void }) {
   const { confirm } = useBrandChat(brand.id);
   const p = msg.proposal!;
   const total = p.items.reduce((n, i) => n + i.count, 0);
-  // The same route as New ads (Higgsfield's one-shot ads only when that's what's picked there).
-  const route = choice.route;
-  const ratio = route === "higgsfield" ? choice.ratio : undefined;
-  const est = useEstimate<{ costUsd: number | null; demo: boolean }>("/api/ads/estimate", msg.batchId ? null : { brandId: brand.id, engine, items: p.items, direction: p.direction, route, ratio });
+  const est = useEstimate<{ costUsd: number | null; demo: boolean }>("/api/ads/estimate", msg.batchId ? null : { brandId: brand.id, engine, items: p.items, direction: p.direction });
   const names = p.items.map((i) => products.find((x) => x.id === i.productId)?.name).filter(Boolean);
   return (
     <div className="mt-2 rounded-xl border bg-background p-3">
@@ -66,16 +62,11 @@ function Proposal({ msg, brand, products, engine, choice, onConfirmed }: { msg: 
         </p>
       ) : (
         <>
-          {choice.available && (
-            <div className="mt-2">
-              <RoutePicker choice={choice} compact />
-            </div>
-          )}
           <button
             type="button"
             onClick={() =>
               confirm.mutate(
-                { messageId: msg.id, engine, route, ratio },
+                { messageId: msg.id, engine },
                 { onSuccess: (r) => (toast.success(`Generating ${total} ads`, { duration: 1500 }), onConfirmed(r.batchId)), onError: (e) => toast.error((e as Error).message) },
               )
             }
@@ -97,7 +88,7 @@ function Proposal({ msg, brand, products, engine, choice, onConfirmed }: { msg: 
  * puts "@Name" in place of what was typed. `onClose` (the phone sheet) adds a close button and moves
  * "Clear chat" into a menu, so the two never sit on top of each other.
  */
-export function AdChat({ brand, products, engine, choice, onBatch, onClose, className }: { brand: BrandKit; products: Product[]; engine: "cloud" | "open"; choice: AdRouteChoice; onBatch: (batchId: string) => void; onClose?: () => void; className?: string }) {
+export function AdChat({ brand, products, engine, onBatch, onClose, className }: { brand: BrandKit; products: Product[]; engine: "cloud" | "open"; onBatch: (batchId: string) => void; onClose?: () => void; className?: string }) {
   const { query, say, clear } = useBrandChat(brand.id);
   const [name, setName] = useFirstName();
   const [text, setText] = useState("");
@@ -209,7 +200,7 @@ export function AdChat({ brand, products, engine, choice, onBatch, onClose, clas
           <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
             <div className={cn("max-w-[88%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed", m.role === "user" ? "bg-brand-faint text-foreground" : "bg-muted")}>
               <p className="whitespace-pre-wrap">{m.text}</p>
-              {m.role === "assistant" && m.proposal && <Proposal msg={m} brand={brand} products={products} engine={engine} choice={choice} onConfirmed={onBatch} />}
+              {m.role === "assistant" && m.proposal && <Proposal msg={m} brand={brand} products={products} engine={engine} onConfirmed={onBatch} />}
             </div>
           </div>
         ))}

@@ -56,7 +56,7 @@ const ENGINE_MODES = [
     title: "Open source + paid APIs",
     icon: Layers,
     body: "Every studio gets a Cloud / Open source switch. Use frontier paid models when you want them, your own GPU when you don't.",
-    needs: "A fal.ai, Replicate or Higgsfield key and/or a ComfyUI server",
+    needs: "A fal.ai or Replicate key and/or a ComfyUI server",
   },
   {
     value: "open",
@@ -70,7 +70,7 @@ const ENGINE_MODES = [
     title: "Paid APIs only",
     icon: Cloud,
     body: "Only hosted frontier models (Nano Banana, Seedance, Kling, Veo…). No GPU needed; open-source models are hidden.",
-    needs: "A fal.ai, Replicate or Higgsfield key",
+    needs: "A fal.ai or Replicate key",
   },
 ] as const;
 
@@ -266,7 +266,7 @@ export function SettingsForm({ prices }: { prices?: string }) {
       <Section
         id="cloud"
         title="Paid API configuration"
-        description="One fal.ai key unlocks Nano Banana, Seedream, GPT Image, FLUX, Kling, Seedance, Veo 3.1, Wan, MiniMax, avatars and more. Replicate hosts a subset and is used as a fallback (or first, if you prefer it). Save & test checks a key before saving it."
+        description="One fal.ai key runs the Fuobe Originals in the cloud (Soul, DoP, Genjutsu, Cinema: open weights with their LoRAs) and the partner models: Nano Banana, Seedream, GPT Image, FLUX, Kling, Seedance, Veo 3.1, Wan, MiniMax, avatars and more. Replicate hosts a subset and is used as a fallback (or first, if you prefer it). Save & test checks a key before saving it."
         inactive={mode === "open" ? "Not used in Open source only mode" : undefined}
       >
         <ConnectField
@@ -295,32 +295,15 @@ export function SettingsForm({ prices }: { prices?: string }) {
             </a>
           }
         />
-        <ConnectField
-          id="higgsfield"
-          name="higgsfieldKey"
-          setting={get("higgsfieldKey")}
-          provider="higgsfield"
-          label="Higgsfield API key"
-          placeholder="KEY_ID:KEY_SECRET"
-          hint={
-            <span>
-              Unlocks Higgsfield&apos;s own models — Soul 2.0, Soul Cinema, Soul ID, Genjutsu, Cinema Studio, Marketing &amp; Ads Studio — and is another route for Seedance, Kling, Wan and MiniMax.{" "}
-              <a href="https://console.higgsfield.ai" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text hover:underline">
-                Get a key <ExternalLink className="size-3" />
-              </a>
-            </span>
-          }
-        />
         <ChoiceField
           id="setting-cloud-provider"
           label="Preferred provider"
           value={get("cloudProvider")?.value || "auto"}
           onChange={set("cloudProvider")}
           options={[
-            { value: "auto", label: "Automatic", hint: "Tries fal.ai, then Replicate, then Higgsfield when a model is on more than one. Models only one provider hosts always use that one." },
+            { value: "auto", label: "Automatic", hint: "Tries fal.ai, then Replicate when a model is on both. Models only one provider hosts always use that one." },
             { value: "fal", label: "fal.ai first", hint: "fal.ai whenever it hosts the model. Models only one provider hosts always use that one." },
             { value: "replicate", label: "Replicate first", hint: "Replicate whenever it hosts the model. Models only one provider hosts always use that one." },
-            { value: "higgsfield", label: "Higgsfield first", hint: "Higgsfield whenever it hosts the model. Models only one provider hosts always use that one." },
           ]}
         />
       </Section>

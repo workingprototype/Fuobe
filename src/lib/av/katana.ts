@@ -1,3 +1,4 @@
+import { currentModelId } from "@/lib/catalog/replaced";
 import type { ChainSlot, Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { FRAME_MODEL, frameParams } from "./frames";
 
@@ -42,11 +43,14 @@ export const MOTION_MODELS: Record<Engine, MotionModel[]> = {
 
 export const KEYFRAME_MODEL: Record<Engine, string> = { cloud: "nano-banana-pro", open: "oss-qwen-edit" };
 
-/** Katana's earlier motion models, now Fuobe Genjutsu's Original (a saved job or an API call may still name them). */
-export const RETIRED_MOTION_MODELS: Record<string, string> = { "genjutsu-motion-transfer": "fuobe-genjutsu-motion", "oss-wan22-animate": "fuobe-genjutsu-motion" };
+/** Katana's earlier open motion model, now Fuobe Genjutsu's Original (a saved job or an API call may still name it). */
+export const RETIRED_MOTION_MODELS: Record<string, string> = { "oss-wan22-animate": "fuobe-genjutsu-motion" };
+
+/** The motion model a saved job or an API call means: a retired one (src/lib/catalog/replaced.ts too) gives way to what replaced it. */
+export const currentMotionModel = (id: string): string => RETIRED_MOTION_MODELS[id] ?? currentModelId(id);
 
 export const motionModel = (engine: Engine, id?: string): MotionModel => {
-  const want = id && (RETIRED_MOTION_MODELS[id] ?? id);
+  const want = id && currentMotionModel(id);
   return MOTION_MODELS[engine].find((m) => m.id === want) ?? MOTION_MODELS[engine][0];
 };
 

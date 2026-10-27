@@ -475,7 +475,7 @@ export function usableOn(l: Pick<ElementLora, "file" | "url" | "own" | "referenc
   return engine === "open" ? !!l.file : !!l.url || (!!l.own && !!l.file);
 }
 
-/** A Higgsfield Soul ID (from before O3): it can't be exported, so the element is retrained on its photos. */
+/** An older Soul ID (Higgsfield's, from before O3): it can't be exported, so the element is retrained on its photos. */
 export const isLegacySoulId = (l: Pick<ElementLora, "referenceId">): boolean => !!l.referenceId;
 
 /**
@@ -492,13 +492,13 @@ export function identityFor(loras: ElementLora[], model: Pick<ModelDef, "id" | "
 }
 
 /**
- * How the Train dialog names one of an element's LoRAs to remove it: a Higgsfield Soul ID by its id, a trained LoRA by
+ * How the Train dialog names one of an element's LoRAs to remove it: an older Soul ID by its reference id, a trained LoRA by
  * its family and file (one file attached for two families is two LoRAs).
  */
 export const identityKey = (l: Pick<ElementLora, "file" | "referenceId" | "modelId" | "family">): string =>
   l.referenceId || `${loraFamily(l) ?? l.modelId}:${l.file || l.modelId}`;
 
-/** A trained LoRA some run can use (not a demo's stand-in or a Higgsfield Soul ID, and on an engine where its family has a model). */
+/** A trained LoRA some run can use (not a demo's stand-in or an older Soul ID, and on an engine where its family has a model). */
 export function runsSomewhere(l: Pick<ElementLora, "file" | "url" | "own" | "referenceId" | "demo" | "family" | "modelId">): boolean {
   const fam = loraFamily(l);
   const lead = fam ? TRAINING_FAMILIES[fam].lead : { open: l.modelId, cloud: l.modelId };

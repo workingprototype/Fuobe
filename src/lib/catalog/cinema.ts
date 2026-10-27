@@ -1654,7 +1654,7 @@ function planLocation(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPla
 function videoModelFor(op: Operation, input: CinemaGenerateInput, notes: string[]): ModelDef {
   if (input.engine === "open") return op === "extend" ? getModel("oss-wan22-vace-extend")! : modelOn(CINEMA_MODEL, "open")!;
   const picked = pickModel("video", input);
-  if (picked.routes.some((r) => r.op === op && r.provider !== "higgsfield")) return picked;
+  if (picked.routes.some((r) => r.op === op)) return picked;
   const cinema = modelOn(CINEMA_MODEL, "cloud")!;
   notes.push(`${picked.name} ${op === "extend" ? "extends" : "makes prequels"} through ${cinema.name}`);
   return cinema;

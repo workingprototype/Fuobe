@@ -323,7 +323,7 @@ export function AppSidebar() {
   };
   const content = useMoreBelow<HTMLDivElement>();
   const status = useStatus().data;
-  const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured || status.providers.higgsfield?.configured);
+  const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured);
   const comfy = status?.providers.comfyui?.configured;
   const mode = useEngineMode();
   const ready = mode === "open" ? comfy : mode === "cloud" ? cloud : cloud || comfy;

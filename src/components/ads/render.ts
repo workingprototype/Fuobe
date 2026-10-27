@@ -145,7 +145,7 @@ export interface RenderInput {
   theme: AdTheme;
   image?: string | null;
   logo?: string | null;
-  /** The visual already holds the words (Higgsfield Ads Studio): draw it alone. */
+  /** The visual already holds the words (a baked ad, drawn whole before build plan O7): draw it alone. */
   baked?: boolean;
 }
 

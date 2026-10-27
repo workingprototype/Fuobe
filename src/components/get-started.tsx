@@ -123,7 +123,7 @@ export function GetStarted({
       <div className={cn("mt-4 grid gap-3", mode === "both" ? "lg:grid-cols-3" : "md:grid-cols-2")}>
         {mode !== "open" && (
           <GuideCard icon={Cloud} title="Use paid models" cost={prices ? `Pay per run with your own key: ${prices}` : "Pay per run with your own key"}>
-            <p className="text-[13px] leading-relaxed text-muted-foreground">Nano Banana, Seedance, Kling, Veo and many more through one fal.ai key. Replicate and Higgsfield keys work too (Settings).</p>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">The Fuobe Originals hosted on open weights, plus Nano Banana, Seedance, Kling, Veo and many more, through one fal.ai key. A Replicate token works too (Settings).</p>
             <ConnectField
               name="falKey"
               setting={get("falKey")}

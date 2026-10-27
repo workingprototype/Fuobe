@@ -27,7 +27,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-soul-id-"));
 process.env.FUOBE_DATA_DIR = dir;
 const { db } = await import("@/server/db");
 const { createElement, getElement, updateElement } = await import("@/server/elements");
-const { startTraining, pollTrainings, listTrainings, trainingKit, attachLora, trainedCopiesSettled, RETIRED_SOUL_ID } = await import("@/server/training");
+const { startTraining, pollTrainings, listTrainings, trainingKit, attachLora, trainedCopiesSettled, retiredTraining } = await import("@/server/training");
 const { ensureLorasOnComfy, prepareCloudLoras, listLoraCopies, TRAINED_DIR } = await import("@/server/loras");
 const { setSetting } = await import("@/server/settings");
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -331,10 +331,11 @@ describe("a finished training", () => {
     expect(listTrainings(z.el.id)[0].message).toMatch(/^Copy \/elsewhere\/output\/maya_z\.safetensors to ComfyUI/);
   });
 
-  it("retires a Higgsfield Soul ID training that was still running", async () => {
-    const { id, el } = running({ target: "soul-id-v2", provider: "higgsfield", externalId: "hf-ref" });
+  it("retires a training on an older Soul ID target that was still running, saying what replaced it", async () => {
+    const { id, el } = running({ target: "soul-id-v2", provider: "retired", externalId: "old-ref" });
     await pollTrainings();
-    expect(listTrainings(el.id).find((t) => t.id === id)).toMatchObject({ status: "failed", error: RETIRED_SOUL_ID });
+    expect(retiredTraining("soul-id-v2")).toMatch(/was retired: train the character again for Fuobe Soul on the same photos/);
+    expect(listTrainings(el.id).find((t) => t.id === id)).toMatchObject({ status: "failed", error: retiredTraining("soul-id-v2") });
     expect(getElement(el.id)!.status).toBe("ready");
   });
 });

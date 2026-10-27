@@ -47,7 +47,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
 
 /** Settings sections the palette jumps to (ids in settings-form.tsx). */
 const SETTINGS: { id: string; label: string; icon: LucideIcon; keywords: string; href?: string }[] = [
-  { id: "cloud", label: "API keys", icon: KeyRound, keywords: "fal replicate higgsfield paid cloud connect" },
+  { id: "cloud", label: "API keys", icon: KeyRound, keywords: "fal replicate paid cloud connect" },
   { id: "comfyui", label: "ComfyUI server", icon: Server, keywords: "open source gpu url connect local" },
   { id: "engine", label: "Engine mode", icon: Cpu, keywords: "open source cloud both" },
   { id: "loras", label: "LoRAs", icon: Layers, keywords: "lora folder civitai key looks motions effects download licence" },
