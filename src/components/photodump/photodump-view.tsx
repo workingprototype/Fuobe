@@ -12,7 +12,7 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { fileToList, type SlotValue } from "@/components/studio/media-slot";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useElements, useEngine, useGenerations } from "@/lib/api";
-import { customPack, DEFAULT_ASPECT, MAX_PACK_REFS, MAX_SELFIE_MB, PACKS, PHOTODUMP_ASPECTS, PHOTODUMP_MODELS, type Pack } from "@/lib/catalog/packs";
+import { customPack, DEFAULT_ASPECT, MAX_PACK_REFS, MAX_SELFIE_MB, PACKS, PHOTODUMP_ASPECTS, PHOTODUMP_MODELS, PHOTODUMP_SOUL, soulIdOf, type Pack } from "@/lib/catalog/packs";
 import type { Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -25,10 +25,9 @@ import { UploadBox } from "./upload-box";
 
 const STEPS = ["Choose a Pack", "Add your photo", "Get your photos"];
 const MODEL_NAMES: Record<string, string> = {
-  "soul-2": "Soul 2.0",
+  "fuobe-soul": "Fuobe Soul + Soul ID",
   "nano-banana-pro": "Nano Banana Pro",
   "seedream-5-pro": "Seedream 5.0 Pro",
-  "oss-z-image-turbo": "Z-Image Turbo + LoRA",
   "oss-qwen-edit": "Qwen-Image-Edit",
 };
 const TABS = [
@@ -181,10 +180,10 @@ export function PhotodumpView() {
   const character = subjectMode === "character" ? elements.data?.find((e) => e.id === elementId) : undefined;
   const choices: (string | undefined)[] = [undefined, ...PHOTODUMP_MODELS[engine]];
   const unavailable = (m?: string): string | null => {
-    if (m !== "oss-z-image-turbo") return null;
-    if (pack?.custom) return "Your own packs recreate each reference photo with Qwen-Image-Edit";
-    if (!character) return "Needs a character with a trained LoRA";
-    return character.loras.some((l) => l.modelId === "oss-z-image-turbo" && l.engine === "open" && !l.referenceId) ? null : `${character.name} has no trained LoRA yet`;
+    if (m !== PHOTODUMP_SOUL) return null;
+    if (pack?.custom) return "Your own packs recreate each reference photo with an edit model";
+    if (!character) return "Needs a character with a trained Soul ID";
+    return soulIdOf({ kind: "element", handle: character.handle, name: character.name, references: character.references, loras: character.loras }, engine) ? null : `${character.name} has no Soul ID yet`;
   };
   const pick = choices.includes(modelPick) && !unavailable(modelPick) ? modelPick : undefined;
   const body = pack && subjectReady
@@ -332,7 +331,7 @@ export function PhotodumpView() {
             ) : (
               <div className="space-y-2">
                 <CharacterPicker value={elementId} onChange={setElementId} />
-                <p className="text-[12px] text-muted-foreground">Characters with a trained Soul ID (cloud) or LoRA (open source) keep the face best; others are sent as reference photos.</p>
+                <p className="text-[12px] text-muted-foreground">Characters with a trained Soul ID keep the face best (Fuobe Soul, on either engine); others are sent as reference photos.</p>
               </div>
             )}
           </div>

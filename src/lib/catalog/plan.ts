@@ -14,7 +14,7 @@ import type {
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
 import { numFramesValue, sizeValue } from "./payload";
-import { CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
+import { characterScale, CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -240,9 +240,15 @@ export function planGeneration(
   // The user's own LoRAs (an @character's trained identity) go first: on an API that takes so many, the first
   // ones win, so a look's or motion's LoRAs give way to them (fitLoras).
   let soulPlan: Plan["soul"];
+  // The character strength (Fuobe's setting, never the provider's) scales the user's own LoRAs on every model.
+  const extra = params.extra ?? {};
+  const charStrength = typeof extra.characterStrength === "number" ? extra.characterStrength : undefined;
+  if ("characterStrength" in extra) {
+    const rest = { ...extra };
+    delete rest.characterStrength;
+    params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
+  }
   if (soul) {
-    const extra = params.extra ?? {};
-    const charStrength = typeof extra.characterStrength === "number" ? extra.characterStrength : undefined;
     const r = soulRecipe(soul, prompt, { look: req.presetId, strength: req.presetStrength, userLoras: req.loras, characterStrength: charStrength });
     prompt = r.prompt;
     loras = r.loras;
@@ -255,13 +261,11 @@ export function planGeneration(
       ...(r.grade && { grade: r.grade }),
       ...(r.overlay && { overlay: r.overlay }),
     };
-    // characterStrength is Fuobe's setting, not the provider's.
-    if ("characterStrength" in extra) {
-      const rest = { ...extra };
-      delete rest.characterStrength;
-      params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
-    }
-  } else if (req.loras?.length) loras = [...req.loras, ...loras];
+  } else if (req.loras?.length) {
+    // An @character's trained LoRA on FLUX, klein, Krea or any other model: at the character strength's scale, as on Soul.
+    const own = charStrength === undefined ? req.loras : req.loras.map((l) => ({ ...l, strength: characterScale(charStrength) }));
+    loras = [...own, ...loras];
+  }
   // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
   const kept = loras.filter((l) => (l.strength ?? 1) !== 0);
   // Its trigger word goes with it: an open motion's template starts with its LoRA's trigger ("e13c7r1c electricity
@@ -583,7 +587,7 @@ export function routeLoras(route: Pick<ModelRoute, "provider" | "map" | "loraEnd
   const why = (l: LoraRef) => {
     if (localOnly(l)) return "its licence doesn't allow hosting, so it runs only on your GPU";
     if (gated(l) && !l.hostedUrl) return "it is in a gated Hugging Face repo, so it runs only on your GPU";
-    if (!cloudPath(l) && !needsToken(l.url)) return "no URL to send to the LoRA endpoint";
+    if (!cloudPath(l) && !needsToken(l.url) && !l.own) return "no URL to send to the LoRA endpoint";
     if (!field) return "this route takes no LoRAs";
     return field.shape === "experts" ? "this API takes one LoRA per expert" : `this API takes up to ${loraCapacity(field)} LoRAs`;
   };

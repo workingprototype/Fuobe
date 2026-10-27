@@ -14,6 +14,7 @@
  */
 import type { ElementLora } from "./elements";
 import { styleWords } from "./palettes";
+import { identityFor } from "./training";
 import { FASHION_TEMPLATES, PHOTODUMP_PACKS, SOUL_CATEGORIES, SOUL_PRESETS, type FashionTemplateMeta, type PackMeta, type SoulPreset, type SoulPresetModel } from "./higgsfield-presets.generated";
 import type { Engine, GenerationRequest } from "./types";
 
@@ -407,48 +408,43 @@ export type PhotoSubject =
 
 /** What the server knows about this install, for planning. */
 export interface PlanCaps {
-  /** A Higgsfield key is set (Soul 2.0 with a Soul ID can run for real). */
+  /** A Higgsfield key is set (the Character Sheet's Soul 2.0 builder can run for real until build plan O7). */
   higgsfield: boolean;
   /** Models this install has (open-source workflows can be missing). */
   has?: (id: string) => boolean;
 }
 
+/** Fuobe Soul: a character with a trained Soul ID makes its photos there, on either engine (build plan O3). */
+export const PHOTODUMP_SOUL = "fuobe-soul";
+
 export const PHOTODUMP_MODELS: Record<Engine, string[]> = {
-  cloud: ["soul-2", "nano-banana-pro", "seedream-5-pro"],
-  open: ["oss-z-image-turbo", "oss-qwen-edit"],
+  cloud: [PHOTODUMP_SOUL, "nano-banana-pro", "seedream-5-pro"],
+  open: [PHOTODUMP_SOUL, "oss-qwen-edit"],
 };
 
-const soulId = (s: PhotoSubject) => (s.kind === "element" ? s.loras.find((l) => l.modelId === "soul-2" && l.referenceId) : undefined);
-const turboLora = (s: PhotoSubject) => (s.kind === "element" ? s.loras.find((l) => l.modelId === "oss-z-image-turbo" && l.engine === "open" && !l.referenceId) : undefined);
+/** The character's Soul ID that runs on Fuobe Soul on this engine (a demo training's stand-in doesn't count). */
+export const soulIdOf = (s: PhotoSubject, engine: Engine): ElementLora | undefined => (s.kind === "element" ? identityFor(s.loras, { id: PHOTODUMP_SOUL, engine }) : undefined);
 
 /**
- * Which model makes a subject's photos: a trained identity where there is one (Soul 2.0 + Soul ID,
- * Z-Image Turbo + the character LoRA), otherwise a multi-reference edit model with their photos.
- * `pick` is the user's choice among PHOTODUMP_MODELS, honoured when it can work.
+ * Which model makes a subject's photos: Fuobe Soul with the character's trained Soul ID (its LoRA) where there is
+ * one, on either engine; otherwise a multi-reference edit model with their photos. `pick` is the user's choice among
+ * PHOTODUMP_MODELS, honoured when it can work.
  */
-export function photodumpModel(subject: PhotoSubject, engine: Engine, caps: PlanCaps, pick?: string, custom = false): { modelId: string; note?: string } {
-  if (engine === "open") {
-    if (!custom && turboLora(subject) && pick !== "oss-qwen-edit") return { modelId: "oss-z-image-turbo" };
-    // Say why when the pick (or a character without a LoRA) ends up on Qwen-Image-Edit.
-    const note =
-      pick === "oss-z-image-turbo" && custom
-        ? "Your own packs recreate each reference photo — Qwen-Image-Edit runs them"
-        : pick === "oss-z-image-turbo" && subject.kind === "selfie"
-          ? "Z-Image Turbo + LoRA needs a character with a trained LoRA — Qwen-Image-Edit works from your photo"
-          : subject.kind === "element" && !turboLora(subject) && !custom
-            ? "No trained LoRA yet — Qwen-Image-Edit works from the character's photos"
-            : undefined;
-    return { modelId: "oss-qwen-edit", note };
-  }
-  if (!custom && soulId(subject) && caps.higgsfield && (!pick || pick === "soul-2")) return { modelId: "soul-2" };
-  const m = pick === "seedream-5-pro" ? "seedream-5-pro" : "nano-banana-pro";
+export function photodumpModel(subject: PhotoSubject, engine: Engine, _caps: PlanCaps, pick?: string, custom = false): { modelId: string; note?: string } {
+  const trained = soulIdOf(subject, engine);
+  if (!custom && trained && (!pick || pick === PHOTODUMP_SOUL)) return { modelId: PHOTODUMP_SOUL };
+  // Say why when the pick (or a character without a Soul ID) ends up on an edit model.
+  const fallback = engine === "open" ? "oss-qwen-edit" : pick === "seedream-5-pro" ? "seedream-5-pro" : "nano-banana-pro";
+  const name = fallback === "oss-qwen-edit" ? "Qwen-Image-Edit" : fallback === "seedream-5-pro" ? "Seedream 5.0 Pro" : "Nano Banana Pro";
   const note =
-    pick === "soul-2"
-      ? soulId(subject)
-        ? "Soul 2.0 needs a Higgsfield key — using Nano Banana Pro with the photos"
-        : "Soul 2.0 needs a trained Soul ID — using Nano Banana Pro with the photos"
-      : undefined;
-  return { modelId: m, note };
+    pick === PHOTODUMP_SOUL && custom
+      ? `Your own packs recreate each reference photo — ${name} runs them`
+      : pick === PHOTODUMP_SOUL && subject.kind === "selfie"
+        ? `Fuobe Soul needs a character with a trained Soul ID — ${name} works from your photo`
+        : pick === PHOTODUMP_SOUL || (engine === "open" && subject.kind === "element" && !trained && !custom)
+          ? `No Soul ID yet — ${name} works from the character's photos (train them for Fuobe Soul on the Elements page)`
+          : undefined;
+  return { modelId: fallback, note };
 }
 
 const KEEP_FACE = "Keep their exact face, identity, skin tone and hair; a new photo, not a copy of the reference";
@@ -480,7 +476,7 @@ export interface PhotodumpPlan {
 
 /**
  * One request per photo of the pack, in order ("Photo 3 of 15"), each making one image. Saved
- * characters are @mentioned (the server turns that into a Soul ID, a LoRA or reference photos);
+ * characters are @mentioned (the server turns that into their trained Soul ID LoRA or reference photos);
  * a selfie goes in as image 1. User packs add their reference photo after the subject.
  */
 export function planPhotodump(input: PhotodumpInput, caps: PlanCaps): PhotodumpPlan {
@@ -501,6 +497,8 @@ export function planPhotodump(input: PhotodumpInput, caps: PlanCaps): PhotodumpP
     return {
       feature: "photodump",
       modelId: route.modelId,
+      // Fuobe Soul runs on both engines: the run's engine picks its half.
+      engine: input.engine,
       prompt: shotPrompt(pack, shot, subject, refIndex),
       inputs: images.length ? { images } : undefined,
       params: { numOutputs: 1, ...(aspect && { aspectRatio: aspect }) },
@@ -645,6 +643,7 @@ export function fashionBaseRequest(t: FashionTemplate, subject: Extract<PhotoSub
   return {
     feature: "fashion",
     modelId,
+    engine,
     prompt: `A full-body fashion photo of ${element(subject)} in ${t.look}. A natural, relaxed model pose looking at the camera, simple fitted basics so the outfit can be changed later, photorealistic, sharp detail.`,
     params: { aspectRatio: "3:4", numOutputs: 4 },
     step: { label: "Base shots", index: 0, of: 3 },

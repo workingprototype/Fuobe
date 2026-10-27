@@ -302,6 +302,17 @@ export async function ensureLorasOnComfy(loras: LoraRef[] | undefined, listed: s
   for (const l of missing) {
     const entry = libraryEntry(l);
     const name = loraName(l);
+    // The user's own trained LoRA: Fuobe's copy goes into the folder (no download), else fal's copy is fetched.
+    const own = l.own ? ownCopy(l.file) : null;
+    if (own && dir) {
+      const dest = lorasPath(dir, l.file);
+      onProgress?.(`Copying ${name} into ComfyUI's LoRA folder`);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(own, dest);
+      recordCopy({ file: l.file, target: "comfyui", sourceUrl: `fuobe:${l.file}`, version: null, hostedUrl: null, sha256: sha256File(dest), sizeBytes: fs.statSync(dest).size, licence: null });
+      continue;
+    }
+    if (l.own && !l.url && !own) throw new LoraError(`${name} isn't on this machine any more: train the element again, or put ${l.file} in ComfyUI/models/loras`);
     if (!l.url && !entry) throw new LoraError(`ComfyUI doesn't have ${l.file}: put it in ComfyUI/models/loras`);
     if (!dir) {
       const where = entry?.page ?? (l.url ? redact(l.url) : "");
@@ -334,6 +345,10 @@ export async function prepareCloudLoras(
     const name = loraName(l);
     // The library's licence counts even when the ref carries none: a GPU-only file never reaches a provider.
     if (localOnly(l)) throw new LoraError(`${name} runs only on your GPU (its licence doesn't allow hosting it)`);
+    if (l.own && !l.hostedUrl) {
+      out.push(await sendOwnLora(l, target, upload, onProgress));
+      continue;
+    }
     if (cloudPath(l)) {
       out.push(l);
       continue;
@@ -387,6 +402,84 @@ export async function prepareCloudLoras(
     out.push({ ...l, hostedUrl });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// The user's own trained LoRAs (Fuobe Soul ID)
+
+/** Where Fuobe keeps the LoRAs its trainings made (fuobe/<handle>-<id>.safetensors under it). */
+export const TRAINED_DIR = LORA_CACHE_DIR;
+
+/** Fuobe's own copy of a trained LoRA, when it has one. */
+export function ownCopy(file: string): string | null {
+  try {
+    const p = lorasPath(TRAINED_DIR, file);
+    return fs.existsSync(p) ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keep a trained LoRA in Fuobe's own folder: copied from a file on this machine (AI-Toolkit's output, ComfyUI's
+ * folder) or downloaded from the trainer's URL (fal storage, which states no hash: the length must match).
+ */
+export async function keepTrainedLora(file: string, from: { path?: string; url?: string }): Promise<string> {
+  const dest = lorasPath(TRAINED_DIR, file);
+  await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+  if (from.path) {
+    // Asynchronous: a LoRA of a few hundred MB doesn't hold up the server while it copies.
+    if (path.resolve(from.path) !== dest) await fs.promises.copyFile(from.path, dest);
+    return dest;
+  }
+  if (!from.url) throw new LoraError(`Nowhere to copy ${file} from`);
+  return (await downloadLora({ file, url: from.url }, TRAINED_DIR)).path;
+}
+
+/** Record the URL a trainer left a LoRA at (fal's own storage), so cloud runs use it while it lives. */
+export function recordTrainedMirror(file: string, target: "fal" | "replicate", url: string): void {
+  const own = ownCopy(file);
+  recordCopy({
+    file,
+    target,
+    sourceUrl: url,
+    version: null,
+    hostedUrl: url,
+    sha256: own ? sha256File(own) : null,
+    sizeBytes: own ? fs.statSync(own).size : null,
+    licence: { own: true },
+  });
+}
+
+/**
+ * A trained LoRA on its way to fal or Replicate: the copy already there while it lives (fal's from the training, or
+ * one Fuobe sent), else Fuobe's copy sent once (the user's own LoRA, trained on their photos: no licence stops it),
+ * else the trainer's URL as a last try. A LoRA only ComfyUI has can't go.
+ */
+async function sendOwnLora(l: LoraRef, target: "fal" | "replicate", upload: (data: Buffer, name: string) => Promise<string>, onProgress?: (m: string) => void): Promise<LoraRef> {
+  const name = loraName(l);
+  const cached = getCopy(l.file, target);
+  if (cached?.hostedUrl && Date.now() - cached.createdAt < MIRROR_TTL_MS[target]) return { ...l, hostedUrl: cached.hostedUrl };
+  const comfyDir = getSetting("comfyLorasDir");
+  const inComfy = (() => {
+    if (!comfyDir) return null;
+    try {
+      const p = lorasPath(comfyDir, l.file);
+      return fs.existsSync(p) ? p : null;
+    } catch {
+      return null;
+    }
+  })();
+  const local = ownCopy(l.file) ?? inComfy;
+  if (local) {
+    onProgress?.(`Sending ${name} to ${target === "fal" ? "fal.ai" : "Replicate"} (once)`);
+    const data = fs.readFileSync(local);
+    const hostedUrl = await upload(data, path.basename(l.file));
+    recordCopy({ file: l.file, target, sourceUrl: `fuobe:${l.file}`, version: null, hostedUrl, sha256: crypto.createHash("sha256").update(data).digest("hex"), sizeBytes: data.length, licence: { own: true } });
+    return { ...l, hostedUrl };
+  }
+  if (l.url) return { ...l, hostedUrl: l.url };
+  throw new LoraError(`${name} exists only on your GPU's machine, so it can't run in the cloud: run it on your GPU, or train it in the cloud`);
 }
 
 /**

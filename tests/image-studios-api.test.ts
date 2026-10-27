@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// A route's GET opts out of prerendering with connection(), which needs a request scope.
+vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-image-studios-"));
 process.env.FUOBE_DATA_DIR = dir;
@@ -160,9 +163,16 @@ describe("moodboards", () => {
     expect(list.items.map((x) => x.id)).toContain(m.id);
     expect(list.curated).toHaveLength(33);
     expect(new Set(list.curated.map((c) => c.category))).toEqual(new Set(["All presets", "Mood", "Styles", "Camera"]));
-    // A style LoRA needs AI-Toolkit: without its URL the board says where to set it up and makes no element.
-    expect(() => moodboards.trainMoodboard(m.id)).toThrow(/AI-Toolkit URL/);
+    // A style LoRA on the GPU needs AI-Toolkit: with demo mode off and no URL, the board says where to set it up and makes no element.
+    setSetting("demoMode", "off");
+    try {
+      expect(() => moodboards.trainMoodboard(m.id, "aitk-z-image")).toThrow(/AI-Toolkit URL/);
+    } finally {
+      setSetting("demoMode", "auto");
+    }
     expect(moodboards.getMoodboard(m.id)!.lora).toBeNull();
+    // In demo mode it runs a demo training: the board shows it, and nothing real is attached.
+    expect(moodboards.trainMoodboard(m.id, "aitk-z-image").lora?.status).toBe("training");
   }, 45_000);
 
   it("prepares cloud boards on Recraft V4 Styles with the 10 most representative images", () => {
@@ -212,12 +222,12 @@ describe("moodboards", () => {
     }
   });
 
-  it("a style LoRA trains with the style preset, and is refused on a cloud-only install", async () => {
+  it("a style LoRA trains with the style preset, on the GPU or in the cloud as the engine mode allows", async () => {
     const job = aiToolkitJob({ name: "x", trigger: "nnhzfz", datasetFolder: "/d", outputFolder: "/o", kind: "style" });
     const train = job.config.process[0];
     expect(train.train.steps).toBe(1500);
     expect(train.sample.prompts.every((p: string) => p.endsWith("nnhzfz style"))).toBe(true);
-    expect(aiToolkitJob({ name: "x", trigger: "t", datasetFolder: "/d", outputFolder: "/o" }).config.process[0].train.steps).toBe(2500);
+    expect(aiToolkitJob({ name: "x", trigger: "t", datasetFolder: "/d", outputFolder: "/o" }).config.process[0].train.steps).toBe(2000);
     expect(trainingCaption("style", "nnhzfz", "the visual style of the “Neon Haze” moodboard.")).toBe("nnhzfz style, the visual style of the “Neon Haze” moodboard");
     expect(trainingCaption("character", "mayafz")).toBe("photo of mayafz");
 
@@ -226,10 +236,21 @@ describe("moodboards", () => {
     setSetting("demoMode", "auto");
     setSetting("engineMode", "cloud");
     try {
-      const res = await trainRoute.POST(json("POST"), params({ id: m.id }) as never);
+      // The GPU is ruled out on a cloud-only install, even as a demo; the cloud style trainer is what's offered.
+      const res = await trainRoute.POST(json("POST", { target: "aitk-z-image" }), params({ id: m.id }) as never);
       expect(res.status).toBe(409);
       expect((await res.json()).error).toMatch(/cloud APIs only/);
       expect(moodboards.getMoodboard(m.id)!.lora).toBeNull();
+      const targets = (await (await trainRoute.GET()).json()).targets as { id: string; price: string; blocker: string | null; demo: boolean }[];
+      expect(targets.map((t) => [t.id, t.price])).toEqual([
+        ["aitk-z-image", "Free"],
+        ["fal-z-image-style", "≈ $3.39 (1,500 steps)"],
+      ]);
+      expect(targets[0].blocker).toMatch(/cloud APIs only/);
+      // No target named: the engine mode's (the cloud), here a demo (no fal key).
+      const started = await trainRoute.POST(json("POST"), params({ id: m.id }) as never);
+      expect(started.status).toBe(202);
+      expect((await started.json()).lora.status).toBe("training");
     } finally {
       setSetting("engineMode", "both");
       moodboards.deleteMoodboard(m.id);
@@ -279,9 +300,9 @@ describe("photodump, fashion factory and character sheet runs", () => {
     expect(preview.notes.join()).toMatch(/keeps the shape of your photo/);
     const cloud = await (await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "cloud", selfie: upload(), aspectRatio: "16:9" }, "http://x/api/photodump?preview=1"))).json();
     expect(cloud.fixedAspect).toBe(false);
-    // Picking Z-Image Turbo + LoRA with a selfie says why it runs on Qwen-Image-Edit.
-    const z = await (await photodumpRoute.POST(json("POST", { packId: "zen", engine: "open", selfie: upload(), modelId: "oss-z-image-turbo" }, "http://x/api/photodump?preview=1"))).json();
-    expect(z.notes[0]).toMatch(/needs a character with a trained LoRA/);
+    // Picking Fuobe Soul with a selfie says why it runs on Qwen-Image-Edit.
+    const z = await (await photodumpRoute.POST(json("POST", { packId: "zen", engine: "open", selfie: upload(), modelId: "fuobe-soul" }, "http://x/api/photodump?preview=1"))).json();
+    expect(z.notes[0]).toMatch(/needs a character with a trained Soul ID/);
   });
 
   it("makes a user pack and a character's photodump on the open engine", async () => {

@@ -137,7 +137,7 @@ export function SaveCharacter({ item, extra, defaultName }: { item: Generation; 
       </Button>
       <p className="w-full text-[12px] text-muted-foreground">
         Use it anywhere with <AtSign className="inline size-3" />
-        mentions, in <Link href="/photodump" className="text-brand-text underline underline-offset-2">Photodump</Link> or <Link href="/fashion-factory" className="text-brand-text underline underline-offset-2">Fashion Factory</Link> — or train a Soul ID / LoRA from its page.
+        mentions, in <Link href="/photodump" className="text-brand-text underline underline-offset-2">Photodump</Link> or <Link href="/fashion-factory" className="text-brand-text underline underline-offset-2">Fashion Factory</Link> — or train its Soul ID from its page.
       </p>
     </div>
   );

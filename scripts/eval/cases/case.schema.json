@@ -1310,6 +1310,14 @@
                 "minLength": 1,
                 "maxLength": 60
               },
+              "kind": {
+                "default": "character",
+                "type": "string",
+                "enum": [
+                  "character",
+                  "style"
+                ]
+              },
               "minPhotos": {
                 "default": 5,
                 "type": "integer",

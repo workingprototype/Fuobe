@@ -1611,7 +1611,139 @@
     "num_inference_steps": "integer default=4 minimum=4 maximum=8",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "A bright, surreal scene on a vast white salt flat under a clear blue sky, featuring two fluffy white alpacas standing in the foreground. Behind them sits a sleek white supercar with its scissor doors open, creating a dramatic futuristic silhouette. The sunlight is strong and crisp, casting sharp shadows on the ground and giving the image a clean, high-contrast cinematic look. Minimalist composition, playful luxury vibe, ultra sharp detail, wide-angle perspective, high resolution."
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "The seed to use for the generation. If not provided, a random seed will be used."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 4,
+     "minimum": 4,
+     "maximum": 8,
+     "desc": "The number of inference steps to perform."
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        },
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "landscape_4_3",
+     "desc": "The size of the image to generate."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI. Output is not stored when this is True."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the generated image."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Scale factor for LoRA application (0.0 to 4.0)."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "List of LoRA weights to apply (maximum 3)."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -1642,7 +1774,168 @@
     "acceleration": "string default=\"regular\" enum=[\"none\", \"regular\", \"high\"]",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "Close shot a pianist plays in a luxurious room with tall windows overlooking a rainy metropolis. Shot with a 50mm lens at a side profile angle, soft tungsten light highlighting hands moving over keys. Capture detailed reflections in polished black piano surfaces, raindrops sliding down glass, and atmospheric warm/cool lighting contrast."
+     ]
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 2.5,
+     "minimum": 0,
+     "maximum": 20,
+     "desc": "Guidance Scale is a measure of how close you want the model to stick to your prompt when looking for a related image to show you."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "The seed to use for the generation. If not provided, a random seed will be used."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 28,
+     "minimum": 4,
+     "maximum": 50,
+     "desc": "The number of inference steps to perform."
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        },
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "landscape_4_3",
+     "desc": "The size of the image to generate. The width and height must be between 512 and 2048 pixels."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular",
+      "high"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "The acceleration level to use for the image generation.",
+     "examples": [
+      "regular"
+     ]
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, the prompt will be expanded for better results."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the generated image."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Scale factor for LoRA application (0.0 to 4.0)."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "List of LoRA weights to apply (maximum 3). Each LoRA can be a URL, HuggingFace repo ID, or local path."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -1673,7 +1966,157 @@
     "acceleration": "string default=\"none\" enum=[\"none\", \"regular\"]",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL or the path to the LoRA weights."
+   "pathAccepts": "URL or the path to the LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "Extreme close-up of a single tiger eye, direct frontal view. Detailed iris and pupil. Sharp focus on eye texture and color. Natural lighting to capture authentic eye shine and depth. The word \"FLUX\" is painted over it in big, white brush strokes with visible texture."
+     ]
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        },
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "landscape_4_3",
+     "desc": "The size of the generated image."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 28,
+     "minimum": 1,
+     "maximum": 50,
+     "desc": "The number of inference steps to perform."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "\n            The scale of the LoRA weight. This is used to scale the LoRA weight\n            before merging it with the base model.\n        "
+      },
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL or the path to the LoRA weights."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "\n            The LoRAs to use for the image generation. You can use any number of LoRAs\n            and they will be merged together to generate the final image.\n        "
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 3.5,
+     "minimum": 0,
+     "maximum": 35,
+     "desc": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate. This is always set to 1 for streaming output."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "jpeg",
+     "desc": "The format of the generated image."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "none",
+     "desc": "Acceleration level for image generation. 'regular' balances speed and quality."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -1704,7 +2147,157 @@
     "acceleration": "string default=\"none\" enum=[\"none\", \"regular\"]",
     "image_size": "anyOf[object {width:integer default=512 maximum=14142; height:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL or the path to the LoRA weights."
+   "pathAccepts": "URL or the path to the LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "Extreme close-up of a single tiger eye, direct frontal view. Detailed iris and pupil. Sharp focus on eye texture and color. Natural lighting to capture authentic eye shine and depth. The word \"FLUX\" is painted over it in big, white brush strokes with visible texture."
+     ]
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        },
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "landscape_4_3",
+     "desc": "The size of the generated image."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 28,
+     "minimum": 1,
+     "maximum": 50,
+     "desc": "The number of inference steps to perform."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "\n            The scale of the LoRA weight. This is used to scale the LoRA weight\n            before merging it with the base model.\n        "
+      },
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL or the path to the LoRA weights."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "\n            The LoRAs to use for the image generation. You can use any number of LoRAs\n            and they will be merged together to generate the final image.\n        "
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 3.5,
+     "minimum": 0,
+     "maximum": 35,
+     "desc": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate. This is always set to 1 for streaming output."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "jpeg",
+     "desc": "The format of the generated image."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "none",
+     "desc": "Acceleration level for image generation. 'regular' balances speed and quality."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -1734,7 +2327,148 @@
     "acceleration": "string default=\"none\" enum=[\"none\", \"regular\"]",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "Base text description of the image to generate.",
+     "examples": [
+      "a vintage travel poster for Mars"
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducible generation. Image *i* uses `seed + i`."
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        },
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "square_hd",
+     "desc": "The size of the generated image."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "none",
+     "desc": "The acceleration level to use for the image generation."
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the prompt is expanded with an LLM into a more detailed image-generation prompt for higher quality results. On failure, the original prompt is used unchanged."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If true, the output safety checker is enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the generated image. Default value: \"png\"."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Scale factor for LoRA application (0.0 to 4.0)."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "maxItems": 3,
+     "required": false,
+     "default": [],
+     "desc": "List of LoRA weights to apply (maximum 3)."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5026,7 +5760,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/z-image-turbo-trainer-v2",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5048,7 +5786,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/z-image-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5069,7 +5811,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-2512-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5090,7 +5836,11 @@
    "commercialWeights": true,
    "status": "unlisted (schema served, not in the catalog)",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5111,7 +5861,11 @@
    "commercialWeights": true,
    "status": "unlisted (schema served, not in the catalog)",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-edit-2511-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5132,13 +5886,17 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-edit-2509-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
    "id": "fal-ai/flux-2-klein-4b-base-trainer",
    "family": "FLUX.2 [klein] 4B base",
-   "role": "Apache image LoRAs",
+   "role": "Soul ID on FLUX.2 [klein] 4B (o/soul-id)",
    "required": [
     "image_data_url"
    ],
@@ -5154,13 +5912,18 @@
    "commercialWeights": true,
    "status": "unlisted (schema served, not in the catalog)",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2-klein-4b-base-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "Apache image LoRAs"
   },
   {
    "provider": "fal",
    "id": "fal-ai/flux-2-klein-9b-base-trainer",
    "family": "FLUX.2 [klein] 9B base",
-   "role": "not for Originals",
+   "role": "Soul ID on FLUX.2 [klein] 9B (o/soul-id; non-commercial weights, shown as information)",
    "required": [
     "image_data_url"
    ],
@@ -5176,13 +5939,18 @@
    "commercialWeights": false,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2-klein-9b-base-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "not for Originals"
   },
   {
    "provider": "fal",
    "id": "fal-ai/flux-2-trainer-v2",
    "family": "FLUX.2 [dev]",
-   "role": "not for Originals",
+   "role": "Soul ID on FLUX.2 [dev] (o/soul-id; non-commercial weights, shown as information)",
    "required": [
     "image_data_url"
    ],
@@ -5198,7 +5966,12 @@
    "commercialWeights": false,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2-trainer-v2",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "not for Originals"
   },
   {
    "provider": "fal",
@@ -5222,13 +5995,17 @@
    "commercialWeights": false,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-lora-fast-training",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
    "id": "fal-ai/flux-lora-portrait-trainer",
    "family": "FLUX.1 [dev]",
-   "role": "not for Originals",
+   "role": "Soul ID on FLUX.1 [dev] and Krea [dev] (o/soul-id; non-commercial weights, shown as information)",
    "required": [
     "images_data_url"
    ],
@@ -5248,13 +6025,18 @@
    "commercialWeights": false,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-lora-portrait-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "not for Originals"
   },
   {
    "provider": "fal",
    "id": "fal-ai/krea-2-trainer",
    "family": "Krea 2",
-   "role": "optional",
+   "role": "Soul ID on Krea 2 (o/soul-id; revenue-tier licence, shown as information)",
    "required": [
     "images_data_url"
    ],
@@ -5272,7 +6054,12 @@
    "commercialWeights": null,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/krea-2-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "optional"
   },
   {
    "provider": "fal",
@@ -5299,7 +6086,12 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-22-image-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file",
+    "high_noise_lora"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5321,7 +6113,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-22-trainer/i2v-a14b",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5343,7 +6139,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-22-trainer/t2v-a14b",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5365,7 +6165,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-trainer/i2v-720p",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5406,7 +6210,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx23-trainer-v2/i2v",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5446,7 +6254,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx23-trainer-v2/t2v",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5486,7 +6298,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx23-trainer-v2/ic-lora/v2v",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5528,7 +6344,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx23-video-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "replicate",

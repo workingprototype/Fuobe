@@ -18,7 +18,8 @@ import { appendJsonl, latestJobs, newRunId, readJson, readJsonl, runDir, writeJs
 const TERMINAL = new Set(["succeeded", "failed", "canceled"]);
 /** The cloud's spend cap when none is given (US$). The open engine and demo runs are free. */
 export const DEFAULT_CLOUD_CAP = 5;
-const MAX_ELEMENT_PHOTOS = 20;
+/** An element holds up to 80 photos, Soul ID's most (src/lib/catalog/training.ts SOUL_ID_PHOTOS.max). */
+const MAX_ELEMENT_PHOTOS = 80;
 
 const money = (n) => (n == null ? "unknown" : n === 0 ? "Free" : `$${n < 0.1 ? n.toFixed(4) : n.toFixed(2)}`);
 const sum = (xs) => xs.reduce((a, b) => a + (b ?? 0), 0);
@@ -178,11 +179,13 @@ export async function runEval(opts, io) {
     if (why) for (const x of jobs.filter((y) => y.caseId === j.caseId && !y.skip)) x.skip = why;
   }
   // What each training would cost (cloud): the server's price for its target. A Higgsfield target never runs
-  // (Fuobe measures its own Originals), and one without a price can't sit under the spend cap.
+  // (Fuobe measures its own Originals), and one without a price can't sit under the spend cap. On either real engine,
+  // a training the server would run as a demo (no trainer or key connected) or can't start is skipped: its "trained"
+  // results would measure an element that was never trained.
   const trainingUsd = new Map();
   const savedElements = dir ? readJson(path.join(dir, "elements.json"), {}) : {};
   // A training an earlier attempt started (and paid for) isn't priced again: the resume waits for it.
-  const willTrain = trainCases.filter((j) => !j.skip && engine === "cloud" && !j.train.element && !["succeeded", "training"].includes(savedElements[j.caseId]?.status));
+  const willTrain = trainCases.filter((j) => !j.skip && engine !== "demo" && !j.train.element && !["succeeded", "training"].includes(savedElements[j.caseId]?.status));
   if (willTrain.length) {
     const targets = (await client.request("GET", "/api/elements/eval-price/trainings").catch(() => null))?.targets ?? [];
     for (const j of willTrain) {
@@ -190,9 +193,11 @@ export async function runEval(opts, io) {
       const usd = trainingPrice(t);
       let why = null;
       if (t?.provider === "higgsfield") why = `training target ${j.train.target} runs on Higgsfield's API: Fuobe's evaluation never uses it (train on fal or your GPU)`;
-      else if (usd == null && !opts.allowUnpriced) why = `training on ${j.train.target} has no price${t ? ` (the server says “${t.price}”)` : ""}, so the spend cap can't cover it: --allow-unpriced runs it anyway`;
+      else if (t?.demo) why = `training on ${j.train.target} would run as a demo on that Fuobe (${facts.demoMode === "on" ? "Demo mode is On" : `no ${t.provider === "fal" ? "fal.ai key" : "AI-Toolkit"} connected`}), so nothing would be trained`;
+      else if (t?.blocker) why = `training on ${j.train.target} can't start there: ${t.blocker}`;
+      else if (engine === "cloud" && usd == null && !opts.allowUnpriced) why = `training on ${j.train.target} has no price${t ? ` (the server says “${t.price}”)` : ""}, so the spend cap can't cover it: --allow-unpriced runs it anyway`;
       if (why) for (const x of jobs.filter((y) => y.caseId === j.caseId && !y.skip)) x.skip = why;
-      else trainingUsd.set(j.caseId, usd ?? 0);
+      else if (engine === "cloud") trainingUsd.set(j.caseId, usd ?? 0);
     }
   }
 
@@ -432,7 +437,7 @@ function trainingProblem(job, engine) {
   const t = job.train;
   if (engine === "demo" || t.element) return null;
   if (!t.target) return `no training target for ${engine} in this case`;
-  if (!t.consent) return 'training needs "consent": true in the case (only when the person in the photos agreed)';
+  if (t.kind !== "style" && !t.consent) return 'training a character needs "consent": true in the case (only when the person in the photos agreed)';
   const photos = listMedia(t.photos).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
   if (photos.length < t.minPhotos) return `add at least ${t.minPhotos} photos to ${path.relative(REPO_DIR, t.photos)} (there ${photos.length === 1 ? "is" : "are"} ${photos.length})`;
   return null;
@@ -493,14 +498,22 @@ async function prepareElement(client, job, ctx) {
   const refs = [];
   for (const f of photos.slice(0, MAX_ELEMENT_PHOTOS)) refs.push(await ctx.up.url(f));
   const name = `${t.name ?? "Eval character"} ${ctx.runId.slice(-4)}`.slice(0, 60);
-  const el = await client.request("POST", "/api/elements", { json: { name, kind: "character", references: refs } });
+  const kind = t.kind ?? "character";
+  const el = await client.request("POST", "/api/elements", { json: { name, kind, references: refs } });
   const record = { id: el.id, handle: el.handle, photos: refs.length, ...(photos.length > MAX_ELEMENT_PHOTOS && { note: `the first ${MAX_ELEMENT_PHOTOS} of ${photos.length} photos (an element holds ${MAX_ELEMENT_PHOTOS})` }) };
   if (ctx.engine === "demo") {
     writeJson(file, { ...saved, [job.caseId]: { ...record, status: "demo" } });
     return record;
   }
   ctx.log(`Training ${name} on ${t.target} with ${refs.length} photos`);
-  const tr = await client.request("POST", `/api/elements/${encodeURIComponent(el.id)}/trainings`, { json: { target: t.target } });
+  // A character trains only with the person's consent (Soul ID's consent line): the case said so (trainingProblem checked).
+  const tr = await client.request("POST", `/api/elements/${encodeURIComponent(el.id)}/trainings`, { json: { target: t.target, ...(kind === "character" && { consent: t.consent === true }) } });
+  // The server trains for real or not at all: a demo training (its trainer or key went missing since the plan) would
+  // make the "trained" results measure an untrained element.
+  if (tr.provider === "demo") {
+    writeJson(file, { ...saved, [job.caseId]: { ...record, demoTraining: tr.id, target: t.target, status: "failed", error: "ran as a demo (free: nothing was trained)" } });
+    throw new Error(`the server ran the training on ${t.target} as a demo (no trainer or key connected), so nothing was trained`);
+  }
   // An earlier training of this case that failed was paid for too: its cost stays in the run's spend.
   const earlierUsd = prev?.training ? (prev.costUsd ?? prev.estimateUsd ?? 0) + (prev.earlierUsd ?? 0) : prev?.earlierUsd;
   const started = { ...record, training: tr.id, target: t.target, status: "training", startedAt: ctx.now(), estimateUsd: ctx.estimateUsd ?? null, ...(earlierUsd && { earlierUsd }) };

@@ -12,8 +12,13 @@ docs/research/fuobe-originals-recipes-5.json in the same shape as paid-model-api
 keyFields (which input is the prompt, the image, the clip…) are this script's curation, as in the
 earlier research files. scripts/gen-cloud-models.py reads both lists.
 
+- trainers[<id>].loraOutput  for fal's LoRA trainers (--trainers): the response fields that hold the trained
+  LoRA files (diffusers_lora_file, lora_file, or Wan 2.2's pair with high_noise_lora), read from each
+  trainer's OpenAPI output schema, so src/server/training.ts knows where a finished training's LoRA is.
+
 Run:  python3 scripts/fetch-hosted-schemas.py
       python3 scripts/fetch-hosted-schemas.py --only fal-ai/z-image/turbo/image-to-image/lora   (one endpoint, the rest kept)
+      python3 scripts/fetch-hosted-schemas.py --trainers                                         (only the trainers' outputs)
 """
 import datetime
 import json
@@ -51,6 +56,14 @@ LORA = {
     "fal-ai/z-image/turbo/image-to-image/lora": {**{k: v for k, v in T2I.items() if k not in ("negativePrompt", "aspectRatio")}, "image": "image_url"},
     "fal-ai/qwen-image-2512/lora": T2I,
     "prunaai/z-image-turbo-lora": {"prompt": "prompt", "width": "width", "height": "height", "seed": "seed"},
+    # Soul ID on every base fal trains (O3, o/soul-id): the models a LoRA trained on FLUX.1 [dev], FLUX.1 Krea [dev],
+    # FLUX.2 [dev], Krea 2 or FLUX.2 [klein] 9B runs on. Their licences are recorded as information, never a gate
+    # (the owner's decision of 2026-10-27: the admin turns models on or off in Settings).
+    "fal-ai/flux-lora": KLEIN,
+    "fal-ai/flux-krea-lora": KLEIN,
+    "fal-ai/flux-2/lora": KLEIN,
+    "fal-ai/krea-2/turbo/lora": KLEIN,
+    "fal-ai/flux-2/klein/9b/lora": KLEIN,
 }
 BASE = {
     "fal-ai/ltx-2.3-22b/image-to-video": ("i2v", {**{k: v for k, v in LTX.items() if k != "loras"}, "image": "image_url", "endImage": "end_image_url"}),
@@ -162,9 +175,34 @@ def fal_price(endpoint):
     return re.sub(r"^(Price:\s*)", "", m.group(0).replace("**", "").strip(" -*")) if m else None
 
 
+def trainer_outputs(data):
+    """Record which response fields of each fal trainer hold LoRA files (File fields named *lora*)."""
+    for t in data["trainers"]:
+        if t.get("provider") != "fal":
+            continue
+        ep = t["id"]
+        root = json.loads(get(f"https://fal.ai/api/openapi/queue/openapi.json?endpoint_id={ep}"))
+        result = root["paths"][f"/{ep}/requests/{{request_id}}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        props = resolve(result, root).get("properties") or {}
+        files = []
+        for name, p in props.items():
+            refs = [p] + list(p.get("anyOf") or p.get("allOf") or [])
+            if any(resolve(r, root).get("title") == "File" or str(r.get("$ref", "")).endswith("/File") for r in refs if isinstance(r, dict)):
+                # Configs, debug datasets and validation samples (LTX's video / audio) aren't LoRAs.
+                if "lora" in name:
+                    files.append(name)
+        t["loraOutput"] = files
+        t["outputChecked"] = TODAY
+        print(f"{ep}: {files}")
+
+
 def main():
     raw = FILE.read_text(encoding="utf-8")
     data = json.loads(raw)
+    if "--trainers" in sys.argv:
+        trainer_outputs(data)
+        FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        return
     by_id = {e["id"]: e for e in data["hostedLoraEndpoints"]}
     only = sys.argv[sys.argv.index("--only") + 1:] if "--only" in sys.argv else None
     for ep, kf in LORA.items():
