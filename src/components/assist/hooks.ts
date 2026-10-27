@@ -17,7 +17,12 @@ import type {
   Skill,
   SkillSummary,
 } from "@/lib/assist";
+import type { ConnectorView } from "@/lib/assist-connectors";
+import type { ScheduleRule, ScheduleView } from "@/lib/assist-schedule";
 import type { Engine, Generation } from "@/lib/catalog/types";
+
+/** A rule as the dialog sends it: the server sets when "every N hours" starts counting. */
+export type ScheduleRuleInput = ScheduleRule extends infer R ? (R extends { kind: "hours" } ? Omit<R, "from"> : R) : never;
 
 /**
  * React Query hooks for Assist's skills, memory, projects and chat lists (/api/assist/**).
@@ -307,6 +312,102 @@ export function useProjectActions() {
     removeSource: async (id: string, sourceId: string) => {
       await send(`/api/assist/projects/${id}/sources/${sourceId}`, "DELETE");
       refresh(id);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled tasks
+
+export interface ScheduleForm {
+  title: string;
+  prompt: string;
+  attachments?: string[];
+  projectId?: string | null;
+  rule: ScheduleRuleInput;
+  tz: string;
+  approval: "ask" | "auto";
+  capUsd?: number | null;
+  engine: Engine;
+  mode?: AssistModeChoice | null;
+  paused?: boolean;
+}
+
+/** Tasks, all or one project's; refreshed every 30 s so "next run" and the last result stay current. */
+export function useSchedules(projectId?: string) {
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-schedules", projectId ?? "all"],
+      queryFn: async () => (await json<{ items: ScheduleView[] }>(await fetch(`/api/assist/schedules${projectId ? `?project=${projectId}` : ""}`))).items,
+      refetchInterval: 30_000,
+    }),
+  );
+}
+
+export function useScheduleActions() {
+  const qc = useQueryClient();
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["assist-schedules"] });
+    void qc.invalidateQueries({ queryKey: ["assist-chats"] });
+  };
+  return {
+    create: async (f: ScheduleForm) => {
+      const s = await send<ScheduleView>("/api/assist/schedules", "POST", f);
+      refresh();
+      return s;
+    },
+    update: async (id: string, f: Partial<ScheduleForm>) => {
+      const s = await send<ScheduleView>(`/api/assist/schedules/${id}`, "PATCH", f);
+      refresh();
+      return s;
+    },
+    remove: async (id: string) => {
+      await send(`/api/assist/schedules/${id}`, "DELETE");
+      refresh();
+    },
+    runNow: async (id: string) => {
+      const r = await fetch(`/api/assist/schedules/${id}/run`, { method: "POST" });
+      const body = (await r.json().catch(() => ({}))) as { threadId?: string | null; error?: string };
+      if (!r.ok && r.status !== 409) throw new Error(body.error ?? `Request failed (${r.status})`);
+      refresh();
+      return body.threadId ?? null;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Custom MCP connectors (Settings → Assist connectors)
+
+export function useConnectors() {
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-connectors"],
+      queryFn: async () => (await json<{ items: ConnectorView[] }>(await fetch("/api/assist/connectors"))).items,
+    }),
+  );
+}
+
+export function useConnectorActions() {
+  const qc = useQueryClient();
+  const refresh = () => void qc.invalidateQueries({ queryKey: ["assist-connectors"] });
+  return {
+    create: async (f: { name: string; url: string; token?: string }) => {
+      const c = await send<ConnectorView>("/api/assist/connectors", "POST", f);
+      refresh();
+      return c;
+    },
+    update: async (id: string, f: { name?: string; url?: string; token?: string; enabled?: boolean }) => {
+      // Optimistic for the on / off switch.
+      if (f.enabled !== undefined) qc.setQueryData<ConnectorView[]>(["assist-connectors"], (old) => old?.map((c) => (c.id === id ? { ...c, enabled: f.enabled! } : c)));
+      try {
+        return await send<ConnectorView>(`/api/assist/connectors/${id}`, "PATCH", f);
+      } finally {
+        refresh();
+      }
+    },
+    remove: async (id: string) => {
+      await send(`/api/assist/connectors/${id}`, "DELETE");
+      refresh();
     },
   };
 }

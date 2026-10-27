@@ -15,6 +15,7 @@ import { LoraSettings } from "@/components/lora-settings";
 import { useStatus, type StatusInfo } from "@/lib/api";
 import { connectionSummary, ENGINE_MODE_LABEL, FAL_KEYS_URL, showFirstRun } from "@/lib/connections";
 import { cn } from "@/lib/utils";
+import { ConnectorSettings } from "@/components/assist/connectors-settings";
 import { NotificationSettings } from "@/components/notification-settings";
 import { SecuritySettings } from "@/components/security-settings";
 
@@ -380,6 +381,14 @@ export function SettingsForm({ prices }: { prices?: string }) {
           <ConnectField name="ollamaUrl" setting={get("ollamaUrl")} provider="llm" label="Ollama URL" placeholder="http://127.0.0.1:11434" hint="Test checks Ollama answers and has the model." />
           <ConnectField name="ollamaModel" setting={get("ollamaModel")} provider="llm" label="Ollama model" placeholder="qwen3:8b" hint="Pull it first: ollama pull qwen3:8b" />
         </div>
+      </Section>
+
+      <Section
+        id="assist-connectors"
+        title="Assist · connectors"
+        description="Give Claude in Assist the tools of your other apps — docs, tasks, CRM, analytics — through their MCP servers (a URL and, usually, a token). Only Claude chats use them."
+      >
+        <ConnectorSettings claudeReady={!!get("anthropicKey")?.isSet} />
       </Section>
 
       <Section

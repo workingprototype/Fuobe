@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Cpu, Loader2, MessageSquarePlus } from "lucide-react";
+import { Bot, CalendarClock, Cpu, Loader2, MessageSquarePlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +16,7 @@ import { AssistComposer } from "@/components/assist/composer";
 import { ChatMenu } from "@/components/assist/chat-menu";
 import { useChatActions, useChats, useProjects, useSkills } from "@/components/assist/hooks";
 import { ModePicker, useModeChoice } from "@/components/assist/mode-picker";
+import { ScheduleDialog } from "@/components/assist/schedule-dialog";
 import { ProjectDot, RailButton } from "@/components/assist/shell";
 import { SkillIcon } from "@/components/assist/skill-icon";
 import { Transcript } from "@/components/assist/transcript";
@@ -100,6 +101,7 @@ export function AssistView() {
   const skills = useSkills();
   const projects = useProjects();
   const end = useRef<HTMLDivElement>(null);
+  const [scheduling, setScheduling] = useState(false);
 
   const go = (next: string | null) => router.replace(next ? `/assist?c=${next}` : "/assist", { scroll: false });
   const thread = view.data?.thread;
@@ -158,6 +160,16 @@ export function AssistView() {
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {agentBadge}
+          {thread && thread.items.some((i) => i.role === "user") && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={() => setScheduling(true)} aria-label="Schedule this request">
+                  <CalendarClock /> <span className="hidden lg:inline">Schedule</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Run this chat&apos;s request again on a schedule</TooltipContent>
+            </Tooltip>
+          )}
           {id && (
             <Button variant="ghost" size="sm" onClick={() => go(null)} aria-label="New chat">
               <MessageSquarePlus /> <span className="hidden sm:inline">New chat</span>
@@ -243,6 +255,23 @@ export function AssistView() {
         </>
       )}
 
+      {thread && (
+        <ScheduleDialog
+          open={scheduling}
+          onOpenChange={setScheduling}
+          seed={(() => {
+            // The chat's first request is the job; later messages refine it.
+            const first = thread.items.find((i) => i.role === "user");
+            return {
+              prompt: first?.role === "user" ? `${first.skills?.length ? `${first.skills.map((n) => `/${n}`).join(" ")} ` : ""}${first.text}` : "",
+              attachments: first?.role === "user" ? first.attachments : undefined,
+              projectId: thread.projectId ?? null,
+              engine: thread.engine,
+              mode: { mode: thread.mode ?? "smart", agent: thread.agent, model: thread.model, effort: thread.effort },
+            };
+          })()}
+        />
+      )}
       {open && pos >= 0 && (
         <Viewer
           generation={viewable[pos].g}
