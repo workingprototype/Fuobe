@@ -12,7 +12,6 @@ import {
   CHARACTER_GPU,
   CHARACTER_LIMITS,
   CHARACTER_SWAP,
-  characterLicenceLine,
   HISTORY_CHOICES,
   SPEECH_LABELS,
   SWAP_LORAS,
@@ -142,7 +141,7 @@ export function CharacterControls({
         />
       </Field>
 
-      <Field label="Seed (optional)" htmlFor="gj-seed" hint={seedProblem ?? "Blank is random; the same seed repeats a take"}>
+      <Field label="Seed (optional)" htmlFor="gj-seed" hint={seedProblem ?? "Blank is random"}>
         <Input id="gj-seed" type="number" inputMode="numeric" min={0} max={CHARACTER_SWAP.maxSeed} value={seed} onChange={(e) => onSeed(e.target.value)} placeholder="Random" className="text-[13px]" aria-invalid={!!seedProblem} />
       </Field>
 
@@ -273,12 +272,10 @@ export function CharacterFacts({ engine, maker, cut }: { engine: Engine; maker: 
           </span>
         </p>
       )}
-      {maker && (
-        <p className="flex gap-1.5">
-          <Scale className="mt-0.5 size-3.5 shrink-0" />
-          <span>{characterLicenceLine(engine, maker.id)}. Your admin decides what runs (Settings → Models &amp; licences).</span>
-        </p>
-      )}
+      <p className="flex gap-1.5">
+        <Scale className="mt-0.5 size-3.5 shrink-0" />
+        <span>Licences are information: each model&apos;s is under its name above, and your admin decides what runs (Settings → Models &amp; licences).</span>
+      </p>
     </div>
   );
 }

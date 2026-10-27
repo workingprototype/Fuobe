@@ -23,7 +23,7 @@ import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { SketchEditor, type Stroke } from "@/components/studio/sketch-editor";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
 import { useEngine, useGenerations } from "@/lib/api";
-import { CHARACTER_SWAP, characterLicenceLine, cutsInPart, cutWarning, seedProblem, type CharacterOptions, type CharacterQuality } from "@/lib/catalog/character-swap";
+import { CHARACTER_SWAP, cutsInPart, cutWarning, seedProblem, type CharacterOptions, type CharacterQuality } from "@/lib/catalog/character-swap";
 import {
   chooseMaker,
   decodeSetup,
@@ -31,6 +31,7 @@ import {
   GENJUTSU_MODES,
   genjutsuProblem,
   getMode,
+  makerLicence,
   makersFor,
   MODE_TARGETS,
   OPEN_TARGET_PROBLEM,
@@ -46,7 +47,7 @@ import {
   type Maker,
 } from "@/lib/catalog/genjutsu";
 import { chainState } from "@/lib/catalog/shorts";
-import type { Engine, PixelPoint } from "@/lib/catalog/types";
+import type { PixelPoint } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
 import { cn } from "@/lib/utils";
 import { CharacterControls, CharacterFacts } from "./character-panel";
@@ -611,12 +612,12 @@ export function GenjutsuStudio() {
 
               {maker && options.length > 1 && (
                 <Field label="Model">
-                  <MakerList options={options} value={maker.pair && maker.tier === "high" ? maker.pair : maker.id} engine={engine} character={isCharacter} onChange={(id) => setPicked((p) => ({ ...p, [choiceKey]: id }))} />
+                  <MakerList options={options} value={maker.pair && maker.tier === "high" ? maker.pair : maker.id} onChange={(id) => setPicked((p) => ({ ...p, [choiceKey]: id }))} />
                 </Field>
               )}
               {maker && options.length <= 1 && (
                 <p className="text-[12px] text-muted-foreground">
-                  <SourceBadge source={maker.source} /> <span className="font-medium text-foreground">{maker.label}</span> · {maker.note}
+                  <SourceBadge source={maker.source} /> <span className="font-medium text-foreground">{maker.label}</span> · {maker.note} · {makerLicence(maker)}
                 </p>
               )}
 
@@ -823,7 +824,7 @@ function SourceBadge({ source }: { source: Maker["source"] }) {
 }
 
 /** The models for this mode and engine, one line each (where it comes from, what it's good at, its limits, its licence). */
-function MakerList({ options, value, engine, character, onChange }: { options: Maker[]; value: string; engine: Engine; character: boolean; onChange: (id: string) => void }) {
+function MakerList({ options, value, onChange }: { options: Maker[]; value: string; onChange: (id: string) => void }) {
   return (
     <div role="radiogroup" aria-label="Model" onKeyDown={radioKeys} className="space-y-1.5">
       {options.map((m) => (
@@ -845,7 +846,7 @@ function MakerList({ options, value, engine, character, onChange }: { options: M
               {m.label} <SourceBadge source={m.source} />
             </span>
             <span className="block text-[12px] leading-snug text-muted-foreground">{m.note}</span>
-            {character && <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground/90">{characterLicenceLine(engine, m.id)}</span>}
+            <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground/90">{makerLicence(m)}</span>
           </span>
         </button>
       ))}

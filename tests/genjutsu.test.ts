@@ -9,6 +9,7 @@ import {
   getMaker,
   h3Extra,
   LEGACY_MAKERS,
+  makerLicence,
   makerPrompt,
   makersFor,
   makerStepUsd,
@@ -78,6 +79,16 @@ describe("Genjutsu: which model runs", () => {
     expect(sources("open", "character", "type")).toEqual({ [ORIGINALS.character]: "original", "oss-h3-character-swap-relay": "open" });
     // A picked partner runs.
     expect(chooseMaker({ engine: "cloud", mode: "character", modelId: "h3-max-recast" })).toMatchObject({ maker: { id: "h3-max-recast" } });
+  });
+
+  it("each model's licence is a line of information in the picker", () => {
+    expect(makerLicence(maker(ORIGINALS.character))).toMatch(/^MiniMax H3 Community License — not licensed in the US, the EU, the UK and South Korea.* on fal, pay per second$/);
+    expect(makerLicence(maker(ORIGINALS.character, "open"))).toMatch(/nodes GPL-3\.0 · SAM License$/);
+    expect(makerLicence(maker("h3-max-recast"))).toMatch(/^MiniMax's closed H3 Max through fal/);
+    expect(makerLicence(maker(ORIGINALS.swap, "open"))).toBe("Wan VACE weights: Apache-2.0 · SAM 3.1: Meta's SAM License · free on your GPU");
+    expect(makerLicence(maker("scail-2"))).toBe("SCAIL-2 weights: MIT · on fal, pay per use");
+    expect(makerLicence(maker("kling-o3"))).toBe("Closed model: pay per use, under its provider's terms");
+    expect(MAKERS.every((m) => makerLicence(m).length > 10)).toBe(true);
   });
 
   it("refuses in words what an engine can't do", () => {

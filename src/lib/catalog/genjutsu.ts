@@ -21,6 +21,7 @@ import {
   anchorPrompt,
   ANCHOR_FALLBACK,
   CHARACTER_SWAP,
+  characterLicenceLine,
   characterQuality,
   cutsInPart,
   partProblem,
@@ -580,7 +581,31 @@ export const LEGACY_MAKERS: Record<string, string> = {
   "oss-wan22-vace-restyle": ORIGINALS.restyle,
 };
 
-/** The models you can pick for this engine, mode and way of pointing. */
+const SOURCE_RANK: Record<MakerSource, number> = { original: 0, open: 1, partner: 2 };
+
+/** The open weights under each model that isn't MiniMax H3 (docs/research/fuobe-originals-recipes-5.json, studios.genjutsu). */
+const WEIGHTS: Record<string, string> = {
+  [ORIGINALS.motion]: "Wan Animate weights: Apache-2.0",
+  [ORIGINALS.motionLite]: "Wan Animate weights: Apache-2.0",
+  [ORIGINALS.swap]: "Wan VACE weights: Apache-2.0 · SAM 3.1: Meta's SAM License",
+  [ORIGINALS.swapLite]: "Wan VACE weights: Apache-2.0 · SAM 3.1: Meta's SAM License",
+  [ORIGINALS.restyle]: "Wan 2.2 Fun VACE weights: Apache-2.0",
+  "scail-2": "SCAIL-2 weights: MIT",
+  "wan-motion": "Wan Animate weights: Apache-2.0",
+  "wan-22-animate-replace": "Wan 2.2 Animate weights: Apache-2.0",
+  "wan-22-vace-inpaint": "Wan 2.2 Fun VACE weights: Apache-2.0",
+  "oss-vace-insert": "Wan 2.1 VACE weights: Apache-2.0",
+};
+
+/** A model's licence in one line, as information for the picker (the admin decides what runs, in Settings). */
+export function makerLicence(m: Maker): string {
+  if (m.h3 || m.id === "h3-max-recast") return characterLicenceLine(m.engine, m.id);
+  if (m.source === "partner") return "Closed model: pay per use, under its provider's terms";
+  const where = m.engine === "open" ? "free on your GPU" : "on fal, pay per use";
+  return WEIGHTS[m.id] ? `${WEIGHTS[m.id]} · ${where}` : `Open weights · ${where}`;
+}
+
+/** The models you can pick for this engine, mode and way of pointing: Fuobe's Original first, then open weights, then partners. */
 export function makersFor(engine: Engine, mode: GenjutsuMode, target?: GenjutsuTarget): Maker[] {
   return MAKERS.filter((m) => {
     if (m.engine !== engine || !m.modes.includes(mode)) return false;
@@ -588,7 +613,7 @@ export function makersFor(engine: Engine, mode: GenjutsuMode, target?: GenjutsuT
     // Lite and the full Original are one choice in the picker (Quality: Standard / High).
     if (m.tier === "high") return false;
     return true;
-  });
+  }).sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source]);
 }
 
 export const OPEN_TARGET_PROBLEM: Partial<Record<GenjutsuMode, string>> = {
@@ -598,8 +623,6 @@ export const OPEN_TARGET_PROBLEM: Partial<Record<GenjutsuMode, string>> = {
 
 /** Clicking who to swap needs SAM 3.1's mask, which only the open graph has. */
 export const CLOUD_CLICK_PROBLEM = "Clicking the person works on your GPU (SAM 3.1 marks them) — on the cloud, pick who in words";
-
-const SOURCE_RANK: Record<MakerSource, number> = { original: 0, open: 1, partner: 2 };
 
 /**
  * The model a request runs on, or why there is none. Without a modelId: the mode's Fuobe Original (Lite unless the
