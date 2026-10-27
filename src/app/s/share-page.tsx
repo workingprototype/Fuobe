@@ -1,13 +1,14 @@
 import { Box, Download, EyeOff, FileText, Link2Off } from "lucide-react";
 import { orderForLayout, pieces, type PublicItem, type PublicMedia, type PublicShare } from "@/lib/share";
 import { cn } from "@/lib/utils";
-import { Carousel, RecreateButton } from "./share-client";
+import { Carousel, RecreateButton } from "@/components/share/share-client";
 
 /**
  * The public page of a share link (/s/<token>): what was shared, its title, model and — when the
  * owner shares prompts — each prompt with "Recreate in your Fuobe". Server-rendered from
  * PublicShare (src/server/shares.ts); every file URL is share-scoped. No app chrome, no links into
- * the studio: a visitor has nothing else to open.
+ * the studio: a visitor has nothing else to open. It lives with the /s routes, outside the studio
+ * frame, so its <main> is the page's only one (the studio's is SidebarInset).
  */
 export function SharePage({ share }: { share: PublicShare }) {
   const items = orderForLayout(share.items, share.layout, share.coverKey);

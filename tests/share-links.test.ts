@@ -31,7 +31,7 @@ const { proxy } = await import("@/proxy");
 const fileRoute = await import("@/app/s/[token]/f/[...path]/route");
 const listRoute = await import("@/app/api/shares/route");
 const idRoute = await import("@/app/api/shares/[id]/route");
-const { SharePage } = await import("@/components/share/share-page");
+const { SharePage } = await import("@/app/s/share-page");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 afterEach(() => {

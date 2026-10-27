@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { cache, Suspense } from "react";
-import { SharePage, ShareSkeleton } from "@/components/share/share-page";
+import { SharePage, ShareSkeleton } from "../share-page";
 import { authEnabled, SESSION_COOKIE, validSession } from "@/server/auth";
 import { findShare } from "@/server/share-access";
 import { buildPublicShare, recordView } from "@/server/shares";

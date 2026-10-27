@@ -1,4 +1,4 @@
-import { ShareGone } from "@/components/share/share-page";
+import { ShareGone } from "../share-page";
 
 export default function NotFound() {
   return <ShareGone />;
