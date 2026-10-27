@@ -682,6 +682,32 @@ const open: ModelDef[] = [
     routes: [comfy("video-insert", "video-insert-wan-vace", "painted region (white = where it goes) held for every frame + Wan 2.1 VACE 14B with the first reference image")],
     options: { seed: true, negativePrompt: true, maxImages: 1, requires: { mask: true, msg: "Paint where it goes on the first frame" } },
   }),
+  // H3 Relay 2.0 (akatz-ai/h3-relay): Akatz Labs' newer node pack for the same Character swap, native loops instead of the
+  // pack's controller (Genjutsu's Character swap lists it as an alternative). It needs the pack installed (H3_RELAY=1).
+  o({
+    id: "oss-h3-character-swap-relay",
+    name: "H3 Character Swap · Relay 2.0",
+    vendor: "MiniMax × Akatz Labs",
+    family: "minimax-h3",
+    kind: "video",
+    tagline: "The same H3 swap on Akatz Labs' H3 Relay 2.0 nodes (native loops, no anchor frame) · 24 GB GPU with offloading, 48 GB+ advised",
+    badges: ["new"],
+    routes: [comfy("video-swap", "video-character-swap-h3-relay", "H3 Relay toolkit: SAM 3.1 subject, 124-frame windows with 18 frames of history, the clip's sound kept")],
+    options: { seed: true, resolutions: ["480p", "768p"], maxImages: 1 },
+  }),
+  // Remove object's "Remove a person (H3)" (docs/research/openjutsu-6.md §11.1): H3 Relay's Person Removal with Akatz
+  // Labs' Person Remover LoRA, from a clean first frame (Remove object makes it, fits the clip to 24 fps, puts the sound back).
+  o({
+    id: "oss-h3-person-remove",
+    name: "H3 Person Removal · Relay 2.0",
+    vendor: "MiniMax × Akatz Labs",
+    family: "minimax-h3",
+    kind: "video",
+    tagline: "Name the person to remove: SAM 3.1 marks them, MiniMax H3 with Akatz Labs' Person Remover LoRA rebuilds what was behind them from a clean first frame · 24 GB GPU with offloading (Video tools → Remove object makes the clean frame and keeps the sound)",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-person-remove-h3-relay", "H3 Relay Person Removal: the person painted green, 22-frame windows with 18 of history from the clean first frame (image), 12 steps, silent")],
+    options: { seed: true, maxImages: 1 },
+  }),
   o({
     id: "oss-qwen-relight",
     name: "Qwen-Image-Edit Relight",
@@ -1617,6 +1643,53 @@ const originals: ModelDef[] = [
     // Wan 2.2 Lightning: 3 or 5 s, three shapes, 480p or 720p, no sound; several shots render one clip each, then join.
     engineOptions: { open: { durations: [3, 5], aspectRatios: VID_AR, resolutions: ["480p", "720p"], audio: false, multiShot: CONCAT_SHOTS } },
   },
+  // Fuobe Genjutsu (O5): Higgsfield's Genjutsu rebuilt on open weights, one model per mode on both engines, and Lite as the
+  // cheaper, faster tier of the same Original (src/lib/catalog/genjutsu.ts plans the pieces, masks, looks and sound).
+  original({
+    id: "fuobe-genjutsu-motion",
+    open: [comfy("motion-transfer", "wan-animate2", "Wan Animate 2: the whole selection in 81-frame fragments, the clip's fps and sound kept")],
+    tagline: "Your character performs the clip's moves · Wan Animate 2 free on your GPU (24 GB), Wan 2.2 Animate on fal",
+    options: { seed: true, resolutions: ["480p", "720p"], maxImages: 1, promptOptional: true },
+  }),
+  original({
+    id: "fuobe-genjutsu-motion-lite",
+    open: [comfy("motion-transfer", "wan-animate2", "Wan Animate 2 at 480p with 4 distilled steps")],
+    tagline: "The quick tier: 480p · Wan Animate 2 in 4 steps on your GPU, Wan 2.2 Animate turbo on fal",
+    options: { seed: true, resolutions: ["480p"], maxImages: 1, promptOptional: true },
+  }),
+  {
+    ...original({
+      id: "fuobe-genjutsu-swap",
+      open: [comfy("video-swap", "video-swap-wan-vace", "SAM 3.1 follows what you name, Wan 2.1 VACE 14B paints your first reference in; 81 frames per window")],
+      tagline: "Swap a thing, a person or an outfit for your reference · Wan VACE + SAM 3.1 free on your GPU (24 GB), or hosted on fal",
+      options: { seed: true, negativePrompt: true, resolutions: ["480p", "720p"], maxImages: 4 },
+    }),
+    engineOptions: { open: { maxImages: 1 } },
+  },
+  {
+    ...original({
+      id: "fuobe-genjutsu-swap-lite",
+      open: [comfy("video-swap", "video-swap-wan-vace", "SAM 3.1 + Wan 2.1 VACE 14B at 480p")],
+      tagline: "The quick tier: 480p · Wan VACE + SAM 3.1 on your GPU, accelerated Wan VACE on fal",
+      options: { seed: true, negativePrompt: true, resolutions: ["480p"], maxImages: 4 },
+    }),
+    engineOptions: { open: { maxImages: 1 } },
+  },
+  original({
+    id: "fuobe-genjutsu-restyle",
+    open: [comfy("v2v", "video-restyle-wan22-fun-vace", "the restyled first frame, then every frame with depth; 5 s segments at 16 fps")],
+    tagline: "Every frame takes a Fuobe look, motion and framing kept · Wan 2.2 Fun VACE free on your GPU (24 GB), or hosted on fal",
+    options: { seed: true, negativePrompt: true, resolutions: ["480p", "720p"], maxImages: 4 },
+  }),
+  // Character swap (Openjutsu, Akatz Labs' H3 Character Swap): MiniMax H3 with the Character Swap LoRA. On your GPU the
+  // h3_character_swap graph finds the person with SAM 3.1 and regenerates only them in 124-frame windows, keeping the
+  // clip's own sound; on fal, H3 reference-to-video with the same LoRA (no mask), the clip's sound put back.
+  original({
+    id: "fuobe-character-swap",
+    open: [comfy("video-swap", "video-character-swap-h3", "SAM 3.1 picks the person on the part's first frame; H3 regenerates them in 124-frame windows, 18 frames of history")],
+    tagline: "The person in your clip becomes your character · MiniMax H3 free on your GPU (48 GB+ advised), or hosted on fal",
+    options: { seed: true, resolutions: ["480p", "768p"], maxImages: 2 },
+  }),
 ];
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */

@@ -14276,6 +14276,225 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "wan-22-animate-replace",
+    "name": "Wan 2.2 Animate Replace (hosted)",
+    "vendor": "Alibaba Wan",
+    "family": "wan",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Swaps the person on camera for your character, lighting matched to the scene",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-14b/animate/replace",
+        "map": {
+          "prompt": false,
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1,
+      "promptless": true
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "720p; 580p $0.06, 480p $0.04 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length",
+      "byResolution": {
+        "720p": 0.08,
+        "580p": 0.06,
+        "480p": 0.04
+      }
+    }
+  },
+  {
+    "id": "scail-2",
+    "name": "SCAIL-2 (hosted)",
+    "vendor": "SCAIL",
+    "family": "scail",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Character animation without skeletons: humans, several people or animals; or replace the person",
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "fal",
+        "endpoint": "fal-ai/scail-2",
+        "map": {
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": "resolution",
+          "fixed": {
+            "mode": "animation"
+          },
+          "defaults": {
+            "prompt": "The reference character performs the motion of the video"
+          }
+        }
+      },
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "fal-ai/scail-2",
+        "map": {
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": "resolution",
+          "fixed": {
+            "mode": "replacement"
+          },
+          "defaults": {
+            "prompt": "The reference character performs the motion of the video"
+          }
+        }
+      }
+    ],
+    "options": {
+      "controls": [
+        {
+          "param": "subject_type",
+          "label": "Subject",
+          "values": [
+            "human",
+            "animal"
+          ],
+          "default": "human"
+        },
+        {
+          "param": "driving_type",
+          "label": "Driven by",
+          "values": [
+            "end_to_end",
+            "pose"
+          ],
+          "default": "end_to_end"
+        }
+      ],
+      "seed": true,
+      "resolutions": [
+        "512p",
+        "704p"
+      ],
+      "maxImages": 1,
+      "promptOptional": true
+    },
+    "defaults": {
+      "resolution": "512p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.2,
+      "note": "512p or 704p; output at 16 fps, up to 10 s a call"
+    }
+  },
+  {
+    "id": "wan-motion",
+    "name": "Wan Motion (hosted)",
+    "vendor": "Alibaba Wan",
+    "family": "wan",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Wan-Animate with pose retargeting: the motion fitted to your character's proportions",
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-motion",
+        "map": {
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "maxImages": 1
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.06,
+      "note": "720p; billed as frames \u00f7 24 (a 30 fps clip costs 1.25\u00d7 its length); +$0.08 with identity enhancement"
+    }
+  },
+  {
+    "id": "h3-max-recast",
+    "name": "MiniMax H3 Max Recast",
+    "vendor": "MiniMax",
+    "family": "hailuo",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "MiniMax's own person swap: 1\u20134 people from photos, across shots, sound kept",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "minimax/h3-max/recast",
+        "map": {
+          "omitEmptyPrompt": true,
+          "images": "reference_image_urls",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "768P",
+              "1080P"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "promptOptional": true,
+      "seed": true,
+      "resolutions": [
+        "768P",
+        "1080P"
+      ],
+      "maxImages": 4
+    },
+    "badges": [
+      "new",
+      "audio"
+    ],
+    "defaults": {
+      "resolution": "768P"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.3,
+      "note": "768p; 1080p $0.45/s; references free; 5\u201330 s, no shot over 15 s",
+      "byResolution": {
+        "768p": 0.3,
+        "1080p": 0.45
+      }
+    }
+  },
+  {
     "id": "topaz-fps-boost",
     "name": "Topaz FPS Boost",
     "vendor": "Topaz Labs",
@@ -18134,6 +18353,417 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "videoMegapixel": {
         "usd": 0.001605,
         "withLoras": 0.001805
+      }
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-motion",
+    "name": "Fuobe Genjutsu \u00b7 Motion",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Your character performs the clip's moves with its camera and framing: Wan 2.2 Animate",
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-14b/animate/move",
+        "map": {
+          "prompt": false,
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1,
+      "promptless": true
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "720p; 580p $0.06, 480p $0.04 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length",
+      "byResolution": {
+        "720p": 0.08,
+        "580p": 0.06,
+        "480p": 0.04
+      }
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-motion-lite",
+    "name": "Fuobe Genjutsu Lite \u00b7 Motion",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "The quick tier: Wan 2.2 Animate at 480p with fal's turbo pass",
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-14b/animate/move",
+        "map": {
+          "prompt": false,
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": "resolution",
+          "fixed": {
+            "use_turbo": true,
+            "resolution": "480p"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p"
+      ],
+      "maxImages": 1,
+      "promptless": true
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.04,
+      "note": "480p \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length"
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-swap",
+    "name": "Fuobe Genjutsu \u00b7 Swap",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "A thing, a person or an outfit becomes your reference: SAM 3.1 follows it, Wan VACE paints it in",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-vace-14b/inpainting",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "images": "ref_image_urls",
+          "mask": "mask_video_url",
+          "video": "video_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "16:9",
+              "1:1",
+              "9:16"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "auto",
+              "240p",
+              "360p",
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "ranges": {
+            "frames_per_second": {
+              "min": 5,
+              "max": 30,
+              "integer": true
+            }
+          },
+          "defaults": {
+            "match_input_num_frames": true,
+            "match_input_frames_per_second": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "1:1",
+        "9:16"
+      ],
+      "resolutions": [
+        "auto",
+        "240p",
+        "360p",
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 4
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "720p; 580p $0.06, 480p $0.04 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length; SAM 3.1's mask $0.01 per 16 frames",
+      "byResolution": {
+        "720p": 0.08,
+        "580p": 0.06,
+        "480p": 0.04
+      }
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-swap-lite",
+    "name": "Fuobe Genjutsu Lite \u00b7 Swap",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "The quick tier: Wan VACE at 480p with fal's accelerated sampling",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-vace-14b/inpainting",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "images": "ref_image_urls",
+          "mask": "mask_video_url",
+          "video": "video_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "ranges": {
+            "frames_per_second": {
+              "min": 5,
+              "max": 30,
+              "integer": true
+            }
+          },
+          "fixed": {
+            "resolution": "480p",
+            "acceleration": "regular"
+          },
+          "defaults": {
+            "match_input_num_frames": true,
+            "match_input_frames_per_second": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "1:1",
+        "9:16"
+      ],
+      "resolutions": [
+        "480p"
+      ],
+      "maxImages": 4
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.04,
+      "note": "480p \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length"
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-restyle",
+    "name": "Fuobe Genjutsu \u00b7 Restyle",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Every frame takes the look of a restyled first frame, motion kept by depth: Wan 2.2 Fun VACE",
+    "routes": [
+      {
+        "op": "v2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "first_frame_url",
+          "images": "ref_image_urls",
+          "video": "video_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "16:9",
+              "1:1",
+              "9:16"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "auto",
+              "240p",
+              "360p",
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "match_input_num_frames": true,
+            "match_input_frames_per_second": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "1:1",
+        "9:16"
+      ],
+      "resolutions": [
+        "auto",
+        "240p",
+        "360p",
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 4
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1,
+      "note": "720p; 580p $0.075, 480p $0.05 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length; the first frame's restyle is priced on its own",
+      "byResolution": {
+        "720p": 0.1,
+        "580p": 0.075,
+        "480p": 0.05
+      }
+    }
+  },
+  {
+    "id": "fuobe-character-swap",
+    "name": "Fuobe Character swap",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-character-swap",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "The person in your clip becomes your character, same performance, scene and sound: MiniMax H3 with Akatz Labs' swap LoRA",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "minimax/h3/reference-to-video/lora",
+        "map": {
+          "images": "reference_image_urls",
+          "videoArray": "reference_video_urls",
+          "seed": "seed",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480P",
+              "768P",
+              "2K",
+              "4K"
+            ]
+          },
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          },
+          "ranges": {
+            "duration": {
+              "min": 5,
+              "max": 15,
+              "integer": true
+            }
+          },
+          "fixed": {
+            "prompt_expansion_mode": "disabled",
+            "aspect_ratio": "adaptive"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "768p"
+      ],
+      "maxImages": 9
+    },
+    "badges": [
+      "audio"
+    ],
+    "licence": {
+      "licence": "MiniMax H3 Community License: territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax's written authorization; show \"MiniMax H3\" on the product's interface",
+      "commercial": true,
+      "note": "Information for Settings \u2192 Models & licences, never a gate (the owner's decision of 2026-10-27). Hosted on fal under fal's terms and MiniMax's (docs/research/openjutsu-6.md \u00a77)",
+      "checked": "2026-10-27"
+    },
+    "defaults": {
+      "resolution": "768p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.075,
+      "note": "768p; 480p $0.0625/s; whole seconds, 5\u201315 per call",
+      "byResolution": {
+        "768p": 0.075,
+        "480p": 0.0625
       }
     }
   }

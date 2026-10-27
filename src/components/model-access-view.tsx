@@ -123,7 +123,7 @@ function LoraRow({ l, on, onChange }: { l: LoraInfo; on: boolean; onChange: (on:
           {l.name}
         </label>
         <p className="text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
-          {l.group === "look" ? "Look" : l.group === "motion" ? "Camera motion" : "Effect"} · {l.base}
+          {l.group === "look" ? "Look" : l.group === "motion" ? "Camera motion" : l.group === "adapter" ? "Model adapter" : "Effect"} · {l.base}
         </p>
         <LicenceLine licence={l.licence} />
       </div>

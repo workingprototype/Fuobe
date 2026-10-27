@@ -60,6 +60,41 @@ for name in "${!NODES[@]}"; do
   fi
 done
 
+# Genjutsu's Character swap (docs/research/openjutsu-6.md §4): Akatz Labs' h3_character_swap pack (GPL-3.0) lives in a
+# subfolder of their H3 Character Swap tool, pinned at the commit Openjutsu uses (the last one with the pack). It is
+# used unpatched (the workflows send the resolution as "480" / "768") and needs FFmpeg and FFprobe on PATH; its own
+# requirements (numpy, scipy, Pillow, opencv-python-headless) are in the union below. H3_PACK=0 leaves it out.
+H3_TOOL_REF="${H3_TOOL_REF:-0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b}"
+if [ "${H3_PACK:-1}" = "1" ] && [ ! -d "$COMFYUI_DIR/custom_nodes/h3_character_swap" ]; then
+  h3tmp="$(mktemp -d)"
+  # Each step is guarded (set -e): a failed fetch warns and the rest of the install goes on.
+  if git clone -q --filter=blob:none --no-checkout https://github.com/akatz-labs/h3-character-swap-tool "$h3tmp/tool" \
+    && git -C "$h3tmp/tool" sparse-checkout set --no-cone /worker_nodes/h3_character_swap/ \
+    && git -C "$h3tmp/tool" checkout -q "$H3_TOOL_REF" \
+    && cp -r "$h3tmp/tool/worker_nodes/h3_character_swap" "$COMFYUI_DIR/custom_nodes/h3_character_swap"; then
+    :
+  else
+    echo "warn: could not fetch h3_character_swap at $H3_TOOL_REF"
+  fi
+  rm -rf "$h3tmp"
+fi
+if [ "${H3_PACK:-1}" = "1" ] && { ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; }; then
+  echo "warn: the h3_character_swap pack needs ffmpeg and ffprobe on PATH (Genjutsu's Character swap)"
+fi
+# H3 Relay 2.0 (Akatz Labs' newer nodes for the same swap, GPL-3.0; the video-character-swap-h3-relay workflow) registers
+# HTTP routes and an in-memory H3 layout compatibility layer when it loads, so it is opt-in: H3_RELAY=1 (or install it on
+# the isolated worker, scripts/comfy/install-isolated-worker.sh, the same way).
+H3_RELAY_REF="${H3_RELAY_REF:-e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220}"   # 2.0.1, 2026-10-21
+if [ "${H3_RELAY:-0}" = "1" ]; then
+  dest="$COMFYUI_DIR/custom_nodes/h3-relay"
+  if [ -d "$dest/.git" ] || git clone -q https://github.com/akatz-ai/h3-relay "$dest"; then
+    git -C "$dest" fetch -q --depth 1 origin "$H3_RELAY_REF" 2>/dev/null || true
+    git -C "$dest" checkout -q "$H3_RELAY_REF" 2>/dev/null || echo "warn: could not pin h3-relay to $H3_RELAY_REF"
+  else
+    echo "warn: could not fetch h3-relay"
+  fi
+fi
+
 # Union of the packs' requirements, minus GPU-only / unbuildable extras
 # (onnxruntime-gpu, cupy, groundingdino-py). triton + decord + pycocotools are needed only so
 # ComfyUI-RMBG's SAM3 module imports (otherwise the whole RMBG pack fails to load).

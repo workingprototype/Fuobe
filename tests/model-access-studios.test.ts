@@ -43,15 +43,15 @@ describe("a studio's own model menu", () => {
   it("Genjutsu and Remove object pick past a model that is off", () => {
     const motion = makersFor("cloud", "motion");
     expect(motion.length).toBeGreaterThan(1);
-    const first = chooseMaker({ engine: "cloud", mode: "motion", higgsfield: false });
+    const first = chooseMaker({ engine: "cloud", mode: "motion" });
     expect("maker" in first).toBe(true);
     const firstId = "maker" in first ? first.maker.id : "";
-    const next = chooseMaker({ engine: "cloud", mode: "motion", higgsfield: false, offered: (id) => id !== firstId });
+    const next = chooseMaker({ engine: "cloud", mode: "motion", offered: (id) => id !== firstId });
     expect("maker" in next && next.maker.id).not.toBe(firstId);
     // An explicit pick that is off isn't kept while another is on.
-    expect(chooseMaker({ engine: "cloud", mode: "motion", higgsfield: false, modelId: firstId, offered: (id) => id !== firstId })).toMatchObject({ maker: { id: expect.not.stringMatching(firstId) } });
+    expect(chooseMaker({ engine: "cloud", mode: "motion", modelId: firstId, offered: (id) => id !== firstId })).toMatchObject({ maker: { id: expect.not.stringMatching(firstId) } });
     // With every one off, the default stays: its run names the switch.
-    expect(chooseMaker({ engine: "cloud", mode: "motion", higgsfield: false, offered: () => false })).toMatchObject({ maker: { id: firstId } });
+    expect(chooseMaker({ engine: "cloud", mode: "motion", offered: () => false })).toMatchObject({ maker: { id: firstId } });
 
     const eraser = chooseEraser({ engine: "cloud", mode: "type" });
     const eraserId = "eraser" in eraser ? eraser.eraser.id : "";

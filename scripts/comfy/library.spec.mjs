@@ -91,7 +91,15 @@
 // and black-and-white videos: params.matteOutput keeps one)). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
 // segment per caption cue before submitting), "timeline", "videos" / "audios" (one loader per clip in inputs.videos / audios),
 // optionalModels (files a model control can pick instead of the graph's own,
-// listed in the manifest with optional: true so missing-model help can name their download).
+// listed in the manifest with optional: true so missing-model help can name their download),
+// packs (node packs the validation server lacks, see PACK_CLASSES; listed in customNodes), modelUrls (a file's
+// download at a pinned revision for this workflow, over KNOWN_MODELS).
+// Keys added with Genjutsu's Character swap (O5, docs/research/openjutsu-6.md). * = the provider fills it:
+//   quality*                              (H3 PrepareVideo resolution "480" | "768": params.resolution 480p / 768p)
+//   selection, subjectIndex               (who to swap: largest | leftmost | rightmost | index, and the index)
+//   positiveCoords*, negativeCoords*      (SAM3_Detect clicks: JSON [{"x","y"}] in the prepared first frame's pixels: params.points)
+//   audioGuide, useMask                   (H3 audio guide; masked regeneration off = the whole frame)
+//   windowFrames, historyFrames           (H3 window plan: "124" / "18", strings of the pack's combos)
 
 import fs from 'node:fs';
 
@@ -121,6 +129,17 @@ export const CUSTOM_NODE_REPOS = {
   // isolated worker only (process-wide side effects / old pins), see scripts/comfy/README.md
   'ComfyUI-LatentSyncWrapper': 'https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper',
   'ComfyUI-ThinkSound_Wrapper': 'https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper',
+  // Genjutsu's Character swap (docs/research/openjutsu-6.md): Akatz Labs' H3 nodes, GPL-3.0. Not installed on the
+  // validation server (entries list them with `packs`); install-comfyui.sh pins both.
+  h3_character_swap: 'https://github.com/akatz-labs/h3-character-swap-tool/tree/0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b/worker_nodes/h3_character_swap',
+  'h3-relay': 'https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220',
+};
+
+// Node classes of the packs entries list in `packs` (packs the validation server doesn't have installed): the build
+// expects them instead of reporting "not installed", and the entry's customNodes name the pack.
+export const PACK_CLASSES = {
+  h3_character_swap: /^H3CharacterSwap/,
+  'h3-relay': /^(H3Relay|LabsH3)/,
 };
 
 // Model download locations for files that the source workflow does not annotate
@@ -166,6 +185,15 @@ export const KNOWN_MODELS = {
   'lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors' },
   'Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/WanMove/Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors' },
   'sam3.1_multiplex_fp16.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+  // MiniMax H3 for the Character swap, at the revisions docs/research/openjutsu-6.md §6 read (sizes and SHA-256 there).
+  'minimax_h3_ref2va_pruned_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors' },
+  'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' },
+  'minimax_h3_video_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_video_vae_fp16.safetensors' },
+  'minimax_h3_audio_vae_fp32.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_audio_vae_fp32.safetensors' },
+  'minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/3ec17a324ced54151364f24f8b5fb6bf7e26414f/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors' },
+  'h3_character_swap_v1.5.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/d06323b7c8e70e97cdab48b78a1e05f786c8cba9/h3_character_swap_v1.5.safetensors' },
+  'h3_character_swap_pro4500_1000.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/a665bb7e3bb9804e487d2925f67744f554c8ad49/h3_character_swap_pro4500_1000.safetensors' },
+  'H3-Person-Remover-V1.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA/resolve/fe136b3dc93aea993b9f194d48ea9859fdc2de14/H3-Person-Remover-V1.safetensors' },
   'depth_anything_3_mono_large.safetensors': { folder: 'geometry_estimation', url: 'https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors' },
   // comfyui-oss-3 additions (docs/research/comfyui-oss-3.json, sizes from the Hugging Face tree API)
   'z_image_turbo_bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
@@ -2767,6 +2795,96 @@ export const SPEC = [
       'so it suits a static or slow camera (without the repeat WanVaceToVideo would pad a one-frame mask with 1 = generate and regenerate the whole clip). image = the object (best cut out on white); ' +
       'prompt = what appears where and what it does. No SAM. Changed from the research graph: the mask is read from the red channel (Fuobe\'s mask convention) instead of alpha. ' +
       'Window rules (startTime / duration in seconds, at most 81 frames), the work-size budget, paste-back and the kept sound as video-inpaint-wan-vace. Validated by /prompt only (no GPU here).',
+  },
+
+  // ---- Genjutsu Character swap (O5, docs/research/openjutsu-6.md): MiniMax H3 + Akatz Labs' Character Swap LoRA ----
+  // Openjutsu's graph (Comfy Org, MIT; derived from Akatz Labs' MIT workflow at 0670e4f) on the UNPATCHED h3_character_swap
+  // pack: the resolution goes as the string "480" / "768". The pack is not installed on the validation server, so these
+  // graphs are checked statically (core nodes against /object_info) and validate only where the pack is installed.
+  {
+    id: 'video-character-swap-h3',
+    title: 'Character swap: SAM 3.1 picks the person, MiniMax H3 + the Character Swap LoRA regenerate only them (h3_character_swap pack)',
+    capability: 'video-character-swap',
+    handBuilt: 'hand-built/video-character-swap-h3.json',
+    packs: ['h3_character_swap'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    optionalModels: ['h3_character_swap_pro4500_1000.safetensors'],
+    bindings: {
+      video: [b('30', 'file')], image: [b('9', 'image')], image2: [b('anchor_image', 'image')],
+      startTime: [b('trim', 'start_time')], duration: [b('trim', 'duration'), b('31', 'duration_seconds')], quality: [b('31', 'resolution')],
+      prompt: [b('801', 'prompt')], seed: [b('801', 'seed')], steps: [b('801', 'steps')], cfg: [b('801', 'cfg')], audioGuide: [b('801', 'audio_guide')],
+      maskPrompt: [b('101', 'text')], selection: [b('104', 'selection')], subjectIndex: [b('104', 'index')], maskGrow: [b('110', 'expansion_px')],
+      positiveCoords: [b('103', 'positive_coords')], negativeCoords: [b('103', 'negative_coords')], useMask: [b('803', 'use_mask')],
+      windowFrames: [b('805', 'window_frames')], historyFrames: [b('805', 'history_frames')],
+      lora: [b('850', 'lora_name')], loraStrength: [b('850', 'strength_model')], filenamePrefix: [b('809', 'filename_prefix')],
+    },
+    outputs: [{ node: '809', kind: 'video' }],
+    defaults: { quality: '768', maskPrompt: 'person', selection: 'largest', subjectIndex: 0, maskGrow: 64, audioGuide: true, useMask: true, windowFrames: '124', historyFrames: '18', lora: 'h3_character_swap_v1.5.safetensors' },
+    limits: { maxDurationSec: 30, maxFrames: 3592 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Character Swap LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · FL2V Turbo LoRA Apache-2.0 at the pinned revision · h3_character_swap nodes GPL-3.0 (Akatz Labs; NVIDIA INT8 kernel derivative Apache-2.0)',
+    notes:
+      'Genjutsu "Character swap" on the open engine (Openjutsu, comfy-openjutsu @ 70ec62d; Akatz Labs h3-character-swap-tool @ 0670e4f). video = the clip, image = the character, image2 = the anchor first frame ' +
+      '(absent: the provider deletes anchor_image and anchor_fit, unlinks 803.anchor and sets 803.use_anchor false); startTime / duration pick the part (trim and 31.duration_seconds both get the length, 5-15 s; up to 30 s plans more windows, beyond H3\'s trained range). ' +
+      'quality "480" | "768" (strings: the unpatched pack; Openjutsu\'s patched pack takes integers). prompt in H3\'s reference tags (<Video 1> the clip, <Picture 1> the character, <Picture 2> the anchor). ' +
+      'Who to swap: maskPrompt (SAM words, "person"), selection largest | leftmost | rightmost | index with subjectIndex, or clicks as positiveCoords / negativeCoords (JSON pixel points on the prepared first frame). ' +
+      'lora V1.5 (h3_character_swap_v1.5) or V1 (h3_character_swap_pro4500_1000); "none" deletes node 850 and feeds 800.model from the Turbo LoRA (node 4). 8 steps, CFG 1, er_sde / normal for the FL2V Turbo LoRA; windows 124 frames with 18 of history (17n+5 / 0, 1, 17n+1). ' +
+      'The clip\'s own sound is put back by the pack (807) and kept by CreateVideo; the pack also writes its own MP4 under output/H3-Character-Swap. Needs FFmpeg and FFprobe on PATH. ' +
+      'Tested by its authors on a 96 GB RTX PRO 6000 (Comfy) and a 24 GB RTX 4090 with 128 GB RAM and model offloading (Akatz); NVFP4 text encoding runs natively on compute capability 10+ (Blackwell), slower elsewhere. 46.33 GB of weights. ' +
+      'Not validated here: the h3_character_swap nodes are not installed on this server (the 22 core nodes were checked against /object_info, docs/research/openjutsu-6.md §3.3).',
+  },
+  {
+    id: 'video-character-swap-h3-relay',
+    title: 'Character swap on H3 Relay 2.0: SAM 3.1 subject, MiniMax H3 + the Character Swap LoRA in native loop windows (h3-relay pack)',
+    capability: 'video-character-swap',
+    handBuilt: 'hand-built/video-character-swap-h3-relay.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    optionalModels: ['h3_character_swap_pro4500_1000.safetensors'],
+    bindings: {
+      video: [b('source', 'file')], image: [b('reference', 'image')],
+      startTime: [b('trim', 'start_time')], duration: [b('trim', 'duration'), b('prepare', 'duration_seconds')], quality: [b('prepare', 'resolution')],
+      prompt: [b('reference_conditioning', 'prompt')], seed: [b('plan', 'seed')], steps: [b('schedule', 'steps')], cfg: [b('guider', 'cfg')], audioGuide: [b('history', 'target_audio_guide')],
+      maskPrompt: [b('subject', 'text')], selection: [b('select', 'selection')], subjectIndex: [b('select', 'index')], maskGrow: [b('expand_mask', 'expansion_px')],
+      positiveCoords: [b('detect', 'positive_coords')], negativeCoords: [b('detect', 'negative_coords')],
+      windowFrames: [b('plan', 'window_frames')], historyFrames: [b('plan', 'history_frames')],
+      lora: [b('adapter', 'lora_name')], loraStrength: [b('adapter', 'strength_model')], filenamePrefix: [b('save', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video' }],
+    defaults: { quality: '768', maskPrompt: 'person', selection: 'largest', subjectIndex: 0, maskGrow: 64, audioGuide: true, windowFrames: '124', historyFrames: '18', lora: 'h3_character_swap_v1.5.safetensors' },
+    limits: { maxDurationSec: 30, maxFrames: 3592 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Character Swap LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · FL2V Turbo LoRA Apache-2.0 at the pinned revision · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors; vendored Context Loop and Spectrum GPL-3.0); the graph is H3 Relay\'s example workflow (GPL-3.0 repository)',
+    notes:
+      'Akatz Labs\' newer route for the same swap (h3-relay @ e2a7665b, 2.0.1; example_workflows/toolkit/H3-Character-Swap.api.json, which Akatz\'s tool ships at 5f83374). Changed: a Trim Video node picks the part, the mask preview is removed, the adapter loads the V1.5 file by its Hugging Face name. ' +
+      'Bindings as video-character-swap-h3 without an anchor frame or a masked-generation switch; lora "none" deletes the adapter and feeds its users from the Turbo LoRA. H3 Relay registers HTTP routes and an in-memory H3 layout compatibility layer on import: run it on the isolated worker if you prefer (install-comfyui.sh installs it with H3_RELAY=1). ' +
+      'Needs FFmpeg and FFprobe on PATH. Not validated here: the pack is not installed on this server.',
+  },
+  // Remove object's "Remove a person (H3)" (docs/research/openjutsu-6.md §4.4, §11.1 item 9): H3 Relay 2.0's Person Removal
+  // example (akatz-ai/h3-relay @ e2a7665b, GPL-3.0) with Akatz Labs' Person Remover V1 LoRA, started from a clean first
+  // frame the app makes (the person already gone). The clip comes in at 24 fps on the 32-pixel grid (Fuobe's fit step).
+  {
+    id: 'video-person-remove-h3-relay',
+    title: 'Remove a person on H3 Relay 2.0: SAM 3.1 marks them green, MiniMax H3 + the Person Remover LoRA rebuilds the background from a clean first frame (h3-relay pack)',
+    capability: 'remove-object',
+    handBuilt: 'hand-built/video-person-remove-h3-relay.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    bindings: {
+      video: [b('source', 'file')], image: [b('anchor', 'image')],
+      maskPrompt: [b('subject', 'text')], maskGrow: [b('grow_mask', 'expand')], seed: [b('plan', 'seed')], steps: [b('schedule', 'steps')],
+      windowFrames: [b('plan', 'window_frames')], historyFrames: [b('plan', 'history_frames')],
+      lora: [b('adapter', 'lora_name')], loraStrength: [b('adapter', 'strength_model')], filenamePrefix: [b('save', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video' }],
+    defaults: { maskPrompt: 'person', maskGrow: 5, steps: 12, windowFrames: '22', historyFrames: '18', lora: 'H3-Person-Remover-V1.safetensors', loraStrength: 1 },
+    limits: { maxDurationSec: 60, maxFrames: 3592 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Person Remover V1 LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors; vendored Context Loop and Spectrum GPL-3.0); the graph is H3 Relay\'s example workflow (GPL-3.0 repository)',
+    notes:
+      'H3 Relay\'s toolkit H3-Person-Removal.api.json at e2a7665b (Akatz Labs\' tool ships the same file). Changed: the clean first frame goes through an ImageScale (centre crop) to the video\'s exact size, so an edit that came back a little larger or smaller still fits; SAM 3.1\'s words default to "person"; the save prefix. ' +
+      'video = the part already fitted to 24 fps on the 32-pixel grid (oss-fit-clip), image = the clean first frame (the app makes it with Qwen-Image-Edit from the part\'s first frame). 22-frame windows with 18 of history, 12 steps, er_sde / simple, CFG 1, LoRA 1.0, mask grown 5 px, seed 904234 by default (Akatz\'s settings). The output is silent: the app puts the clip\'s sound back. ' +
+      'Needs the h3-relay pack (H3_RELAY=1) and FFmpeg. Not validated here: the pack is not installed on this server.',
   },
 
   // ---- Faceless "Frame by frame": Ken Burns over a still ------------------------------

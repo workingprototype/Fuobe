@@ -5436,7 +5436,7 @@
    "id": "minimax/h3/image-to-video/lora",
    "family": "MiniMax H3",
    "op": "i2v",
-   "roleForOriginals": "not for Originals (territory-restricted licence)",
+   "roleForOriginals": "not used by an Original yet (its reference-to-video sibling carries Genjutsu's Character swap)",
    "lora": {
     "field": "loras",
     "required": true,
@@ -5448,9 +5448,9 @@
     "loras"
    ],
    "price": "Video costs $0.0625 per second at 480p, $0.075 per second at 768p, $0.1625 per second at 2K and $0.20 per second at 4K.",
-   "baseLicence": "MiniMax H3 Community License (territory-restricted)",
-   "commercialWeights": false,
-   "licenceNote": "Round-1 research: excludes US/EU/UK/KR users. Not for Originals",
+   "baseLicence": "MiniMax H3 Community License: territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax's written authorization; show \"MiniMax H3\" on the product's interface",
+   "commercialWeights": true,
+   "licenceNote": "Corrected 2026-10-27 (o/genjutsu-original, from docs/research/openjutsu-6.md §7): the licence allows commercial use within its territory and revenue conditions; it was recorded as non-commercial. Information, never a gate",
    "falLicenseType": "commercial",
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/image-to-video/lora",
@@ -5731,6 +5731,179 @@
    "schemaUrl": "https://replicate.com/fofr/wan2.1-with-lora/api/schema",
    "pageUrl": "https://replicate.com/fofr/wan2.1-with-lora",
    "checked": "2026-10-23"
+  },
+  {
+   "provider": "fal",
+   "id": "minimax/h3/reference-to-video/lora",
+   "family": "MiniMax H3",
+   "op": "ref2v",
+   "roleForOriginals": "Fuobe Genjutsu Character swap, cloud half (Akatz Labs' Character Swap LoRA V1.5 or V1 by Hugging Face URL)",
+   "lora": {
+    "field": "loras",
+    "required": true,
+    "itemFields": "path:string; weight_name:string; scale:number default=1 minimum=0 maximum=4",
+    "maxCount": 3
+   },
+   "keyFieldsRequired": [
+    "prompt",
+    "loras"
+   ],
+   "price": "Video costs $0.0625 per second at 480p, $0.075 per second at 768p, $0.1625 per second at 2K and $0.20 per second at 4K.",
+   "baseLicence": "MiniMax H3 Community License: territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax's written authorization; show \"MiniMax H3\" on the product's interface",
+   "commercialWeights": true,
+   "licenceNote": "Information for Settings → Models & licences, never a gate (the owner's decision of 2026-10-27). Hosted on fal under fal's terms and MiniMax's (docs/research/openjutsu-6.md §7)",
+   "status": "active",
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/reference-to-video/lora",
+   "pageUrl": "https://fal.ai/models/minimax/h3/reference-to-video/lora",
+   "pathAccepts": "URL or HuggingFace repo id (owner/repo) of the LoRA weights.",
+   "checked": "2026-10-27",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "Text prompt for video generation. Refer to reference assets by their modality and order in the reference lists: Image 1, Image 2, Video 1, Audio 1, and so on.",
+     "examples": [
+      "Image 1 is the female protagonist. Image 2 is her small dog. Keep the woman and dog consistent with their respective reference images while they walk together through a sunlit garden."
+     ]
+    },
+    "duration": {
+     "type": "integer",
+     "required": false,
+     "default": 5,
+     "minimum": 5,
+     "maximum": 15,
+     "desc": "The duration of the video in seconds."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "480P",
+      "768P",
+      "2K",
+      "4K"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "2K",
+     "desc": "The resolution of the generated video. 480P and 768P are native generation modes; 2K and 4K upscale a 768P base result."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed. A random seed is selected when omitted."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Return the generated video as base64 instead of a CDN URL."
+    },
+    "prompt_expansion_mode": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "How much effort to spend rewriting the prompt before generation. 'disabled' skips prompt expansion. 'fast' returns in about a second. 'balanced' picks per request. 'quality' spends up to ~30s on a richer prompt.",
+     "examples": [
+      "disabled"
+     ]
+    },
+    "aspect_ratio": {
+     "type": "enum",
+     "values": [
+      "adaptive",
+      "21:9",
+      "16:9",
+      "4:3",
+      "1:1",
+      "3:4",
+      "9:16"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "adaptive",
+     "desc": "The aspect ratio of the generated video."
+    },
+    "reference_image_urls": {
+     "type": "array",
+     "items": "string",
+     "maxItems": 9,
+     "required": false,
+     "desc": "URLs of subject/style reference images, referenced in the prompt as Image 1, Image 2, and so on. Reference images, videos, and audio clips must add up to at most 12 files.",
+     "examples": [
+      [
+       "https://storage.googleapis.com/falserverless/example_inputs/hailuo23/pro_i2v_in.jpg"
+      ]
+     ]
+    },
+    "reference_video_urls": {
+     "type": "array",
+     "items": "string",
+     "maxItems": 3,
+     "required": false,
+     "desc": "URLs of motion/reference video clips (2-15 seconds each, combined duration at most 15 seconds), referenced in the prompt as Video 1, Video 2, and so on. Reference images, videos, and audio clips must add up to at most 12 files."
+    },
+    "reference_audio_urls": {
+     "type": "array",
+     "items": "string",
+     "maxItems": 3,
+     "required": false,
+     "desc": "URLs of reference audio clips (2-15 seconds each, combined duration at most 15 seconds), referenced in the prompt as Audio 1, Audio 2, and so on. Images, videos, and audio can be provided individually or together. Reference images, videos, and audio clips must add up to at most 12 files."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "weight_name": {
+       "nullable": true,
+       "type": "string",
+       "required": false,
+       "desc": "Name of the LoRA weight file. Only used when `path` is a HuggingFace repo and it holds more than one LoRA."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Strength of the LoRA (0.0 to 4.0)."
+      },
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL or HuggingFace repo id (owner/repo) of the LoRA weights.",
+       "examples": [
+        "https://huggingface.co/owner/repo/resolve/main/lora.safetensors"
+       ]
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "minItems": 1,
+     "maxItems": 3,
+     "required": true,
+     "desc": "List of LoRA adapters to apply to the transformer."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "images": "reference_image_urls",
+    "video": "reference_video_urls",
+    "duration": "duration",
+    "resolution": "resolution",
+    "seed": "seed",
+    "loras": "loras"
+   },
+   "output": "video.url",
+   "inputsChecked": "2026-10-27"
   }
  ],
  "noHostedLora": [
@@ -20700,6 +20873,1296 @@
    "verified": true,
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2/klein/4b/edit",
    "checked": "2026-10-24"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan/v2.2-14b/animate/move",
+   "operation": "motion-transfer",
+   "status": "active",
+   "inputs": {
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input video.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/a6SvJg96V8eoglMlYFShU_5385885-hd_1080_1920_25fps.mp4"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input image. If the input image does not match the chosen aspect ratio, it is resized and center cropped.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/-oMlZo9Yyj_Nzoza_tgds_GmLF86r5bOt50eMMKCszy_eacc949b3933443c9915a83c98fbe85e.png"
+     ]
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality.",
+     "examples": [
+      1
+     ]
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "480p",
+     "desc": "Resolution of the generated video (480p, 580p, or 720p).",
+     "examples": [
+      "480p"
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 20,
+     "minimum": 2,
+     "maximum": 40,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer.",
+     "examples": [
+      6
+     ]
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, input data will be checked for safety before processing. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_output_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, output video will be checked for safety after generation.",
+     "examples": [
+      false
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Shift value for the video. Must be between 1.0 and 10.0.",
+     "examples": [
+      8
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the output video. Higher quality means better visual quality but larger file size.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the output video. Faster write mode means faster results but larger file size, balanced write mode is a good compromise between speed and quality, and small write mode is the slowest but produces the smallest file size.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "return_frames_zip": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, also return a ZIP archive containing per-frame images generated on GPU (lossless)."
+    },
+    "use_turbo": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, applies quality enhancement for faster generation with improved quality. When enabled, parameters are automatically optimized for best results.",
+     "examples": [
+      true
+     ]
+    }
+   },
+   "keyFields": {
+    "video": "video_url",
+    "image": "image_url",
+    "seed": "seed",
+    "resolution": "resolution"
+   },
+   "output": "video.url",
+   "price": "720p: $0.08 per video second; 580p: $0.06 per video second; 480p: $0.04 per video second; Cost = 18.75 × $0.08 = $1.50",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan/v2.2-14b/animate/move",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan/v2.2-14b/animate/replace",
+   "operation": "video-swap",
+   "status": "active",
+   "inputs": {
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input video.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/a6SvJg96V8eoglMlYFShU_5385885-hd_1080_1920_25fps.mp4"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input image. If the input image does not match the chosen aspect ratio, it is resized and center cropped.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/-oMlZo9Yyj_Nzoza_tgds_GmLF86r5bOt50eMMKCszy_eacc949b3933443c9915a83c98fbe85e.png"
+     ]
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality.",
+     "examples": [
+      1
+     ]
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "480p",
+     "desc": "Resolution of the generated video (480p, 580p, or 720p).",
+     "examples": [
+      "480p"
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 20,
+     "minimum": 2,
+     "maximum": 40,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer.",
+     "examples": [
+      6
+     ]
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, input data will be checked for safety before processing. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_output_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, output video will be checked for safety after generation.",
+     "examples": [
+      false
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Shift value for the video. Must be between 1.0 and 10.0.",
+     "examples": [
+      8
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the output video. Higher quality means better visual quality but larger file size.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the output video. Faster write mode means faster results but larger file size, balanced write mode is a good compromise between speed and quality, and small write mode is the slowest but produces the smallest file size.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "return_frames_zip": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, also return a ZIP archive containing per-frame images generated on GPU (lossless)."
+    },
+    "use_turbo": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, applies quality enhancement for faster generation with improved quality. When enabled, parameters are automatically optimized for best results.",
+     "examples": [
+      true
+     ]
+    }
+   },
+   "keyFields": {
+    "video": "video_url",
+    "image": "image_url",
+    "seed": "seed",
+    "resolution": "resolution"
+   },
+   "output": "video.url",
+   "price": "720p: $0.08 per video second; 580p: $0.06 per video second; 480p: $0.04 per video second; Cost = 18.75 × $0.08 = $1.50",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan/v2.2-14b/animate/replace",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/scail-2",
+   "operation": "motion-transfer",
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt describing the final video to generate.",
+     "examples": [
+      "A person dancing gracefully in a sunlit studio"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the reference character image. The character in this image is animated (or used to replace a subject) according to the driving video.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/-oMlZo9Yyj_Nzoza_tgds_GmLF86r5bOt50eMMKCszy_eacc949b3933443c9915a83c98fbe85e.png"
+     ]
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the driving (motion) video. The subject can be a human, multiple humans, or an animal.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/a6SvJg96V8eoglMlYFShU_5385885-hd_1080_1920_25fps.mp4"
+     ]
+    },
+    "mode": {
+     "type": "enum",
+     "values": [
+      "animation",
+      "replacement"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "animation",
+     "desc": "`animation` animates the reference character with the driving motion. `replacement` replaces the driving subject with the reference character while keeping the original scene."
+    },
+    "driving_type": {
+     "type": "enum",
+     "values": [
+      "end_to_end",
+      "pose"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "end_to_end",
+     "desc": "Driving signal for animation mode. `end_to_end` (default) drives directly from the SAM3-masked driving video and is the recommended, most robust path. `pose` renders an explicit NLF/DWPose skeleton from the driving video (more control for challenging inputs)."
+    },
+    "subject_type": {
+     "type": "enum",
+     "values": [
+      "human",
+      "animal"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "human",
+     "desc": "Type of subject in the driving video. `animal` switches the SAM3 detection prompt to non-human subjects."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "512p",
+      "704p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "512p",
+     "desc": "Output resolution. 512p outputs 896x512 (landscape) or 512x896 (portrait); 704p outputs 1280x704 or 704x1280. Orientation is chosen automatically from the reference image aspect ratio."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 40,
+     "minimum": 2,
+     "maximum": 50,
+     "desc": "Number of diffusion sampling steps. Higher improves quality but is slower."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Classifier-free guidance scale. Controls prompt adherence versus creativity."
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 3,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Flow-matching noise schedule shift. 3.0 is recommended for the 512p tier."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed. Leave empty for a random seed. The seed used is returned in the response."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Authorized callers may set false to request relaxed screening."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "video": "video_url",
+    "image": "image_url",
+    "seed": "seed",
+    "resolution": "resolution"
+   },
+   "output": "video.url",
+   "price": "SCAIL-2 is billed per second of generated video at a flat rate of $0.20 per second, the same for both output resolutions (512p and 704p).; 2. Cost = billed seconds × $0.20; Example — 5-second output: 5 × $0.20 = $1.00; Each request is capped at 10 seconds of video (160 frames at 16 fps), so the maximum cost per request is $2.00.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/scail-2",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan-motion",
+   "operation": "motion-transfer",
+   "status": "active",
+   "inputs": {
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the driving video (provides the motion).",
+     "examples": [
+      "https://v3b.fal.media/files/b/0a8f0997/JuDW2xl0mr6sJ_Kjz3Vxe_vidoeook.mp4"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the reference image (provides the character appearance).",
+     "examples": [
+      "https://v3b.fal.media/files/b/0a8f0995/slF9l2eNL_YSD7SqU7tUz_i35fsR92.jpg"
+     ]
+    },
+    "prompt": {
+     "type": "string",
+     "required": false,
+     "default": "",
+     "desc": "Optional text prompt to guide the generation.",
+     "examples": [
+      "woman dancing"
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "Acceleration level to use. 'regular' enables caching for faster generation, 'none' disables it."
+    },
+    "adapt_motion": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Adapts the driving video's motion to match the reference image's body proportions. Recommended when the driving video subject and reference image have different body shapes or sizes."
+    },
+    "enhance_identity": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Enhances identity preservation by preprocessing the reference image with Flux Kontext Edit before animation. Produces more faithful face and appearance transfer at the cost of slightly longer processing time."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, input and output will be checked for safety. Disabling it requires account authorization; unauthorized requests are always checked."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "video": "video_url",
+    "image": "image_url",
+    "seed": "seed"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.06 per video second for 720p. Video seconds are calculated at 24 frames per second. When enhance_identity is enabled, an additional $0.08 is charged for Flux 2 Edit image preprocessing.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-motion",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan-vace-14b/inpainting",
+   "operation": "video-swap",
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The text prompt to guide video generation.",
+     "examples": [
+      "The video shows a man riding a horse on a vast grassland. He has long lavender hair and wears a traditional dress of a white top and black pants. The animation style makes him look like he is doing some kind of outdoor activity or performing. The background is a spectacular mountain range and cloud sky, giving a sense of tranquility and vastness. The entire video is shot from a fixed angle, focusing on the rider and his horse."
+     ]
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": "letterboxing, borders, black bars, bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards",
+     "desc": "Negative prompt for video generation.",
+     "examples": [
+      "letterboxing, borders, black bars, bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards"
+     ]
+    },
+    "match_input_num_frames": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the number of frames in the generated video will match the number of frames in the input video. If false, the number of frames will be determined by the num_frames parameter.",
+     "examples": [
+      false
+     ]
+    },
+    "num_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 81,
+     "minimum": 17,
+     "maximum": 241,
+     "desc": "Number of frames to generate. Must be between 81 to 241 (inclusive)."
+    },
+    "match_input_frames_per_second": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the frames per second of the generated video will match the input video. If false, the frames per second will be determined by the frames_per_second parameter.",
+     "examples": [
+      false
+     ]
+    },
+    "frames_per_second": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "default": 16,
+     "minimum": 5,
+     "maximum": 30,
+     "desc": "Frames per second of the generated video. Must be between 5 to 30. Ignored if match_input_frames_per_second is true."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "auto",
+      "240p",
+      "360p",
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "auto",
+     "desc": "Resolution of the generated video."
+    },
+    "aspect_ratio": {
+     "type": "enum",
+     "values": [
+      "auto",
+      "16:9",
+      "1:1",
+      "9:16"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "auto",
+     "desc": "Aspect ratio of the generated video."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 30,
+     "minimum": 2,
+     "maximum": 50,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Guidance scale for classifier-free guidance. Higher values encourage the model to generate images closely related to the text prompt.",
+     "examples": [
+      5
+     ]
+    },
+    "sampler": {
+     "type": "enum",
+     "values": [
+      "unipc",
+      "dpm++",
+      "euler"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "unipc",
+     "desc": "Sampler to use for video generation.",
+     "examples": [
+      "unipc"
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 15,
+     "desc": "Shift parameter for video generation."
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL to the source video file. Required for inpainting.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/vace/src_video.mp4"
+     ]
+    },
+    "mask_video_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the source mask file. Required for inpainting.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/vace/src_mask.mp4"
+     ]
+    },
+    "mask_image_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the guiding mask file. If provided, the model will use this mask as a reference to create masked video using salient mask tracking. Will be ignored if mask_video_url is provided."
+    },
+    "ref_image_urls": {
+     "type": "array",
+     "items": "string",
+     "required": false,
+     "desc": "Urls to source reference image. If provided, the model will use this image as reference.",
+     "examples": [
+      [
+       "https://storage.googleapis.com/falserverless/vace/src_ref_image_1.png"
+      ]
+     ]
+    },
+    "first_frame_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the first frame of the video. If provided, the model will use this frame as a reference."
+    },
+    "last_frame_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the last frame of the video. If provided, the model will use this frame as a reference."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to enable prompt expansion.",
+     "examples": [
+      false
+     ]
+    },
+    "preprocess": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to preprocess the input video.",
+     "examples": [
+      false
+     ]
+    },
+    "acceleration": {
+     "nullable": true,
+     "type": "enum",
+     "values": [
+      "none",
+      "low",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "Acceleration to use for inference. Options are 'none' or 'regular'. Accelerated inference will very slightly affect output, but will be significantly faster.",
+     "examples": [
+      "regular"
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the generated video.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the generated video.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "num_interpolated_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 5,
+     "desc": "Number of frames to interpolate between the original frames. A value of 0 means no interpolation.",
+     "examples": [
+      0
+     ]
+    },
+    "temporal_downsample_factor": {
+     "type": "integer",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 5,
+     "desc": "Temporal downsample factor for the video. This is an integer value that determines how many frames to skip in the video. A value of 0 means no downsampling. For each downsample factor, one upsample factor will automatically be applied.",
+     "examples": [
+      0
+     ]
+    },
+    "enable_auto_downsample": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the model will automatically temporally downsample the video to an appropriate frame length for the model, then will interpolate it back to the original frame length.",
+     "examples": [
+      false
+     ]
+    },
+    "auto_downsample_min_fps": {
+     "type": "number",
+     "required": false,
+     "default": 15,
+     "minimum": 1,
+     "maximum": 60,
+     "desc": "The minimum frames per second to downsample the video to. This is used to help determine the auto downsample factor to try and find the lowest detail-preserving downsample factor. The default value is appropriate for most videos, if you are using a video with very fast motion, you may need to increase this value. If your video has a very low amount of motion, you could decrease this value to allow for higher downsampling and thus longer sequences.",
+     "examples": [
+      15
+     ]
+    },
+    "interpolator_model": {
+     "type": "enum",
+     "values": [
+      "rife",
+      "film"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "film",
+     "desc": "The model to use for frame interpolation. Options are 'rife' or 'film'.",
+     "examples": [
+      "film"
+     ]
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history.",
+     "examples": [
+      false
+     ]
+    },
+    "transparency_mode": {
+     "type": "enum",
+     "values": [
+      "content_aware",
+      "white",
+      "black"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "content_aware",
+     "desc": "The transparency mode to apply to the first and last frames. This controls how the transparent areas of the first and last frames are filled.",
+     "examples": [
+      "content_aware"
+     ]
+    },
+    "return_frames_zip": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, also return a ZIP file containing all generated frames.",
+     "examples": [
+      false
+     ]
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "negativePrompt": "negative_prompt",
+    "video": "video_url",
+    "images": "ref_image_urls",
+    "seed": "seed",
+    "resolution": "resolution",
+    "aspectRatio": "aspect_ratio",
+    "fps": "frames_per_second",
+    "mask": "mask_video_url"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.08 per video second for 720p, $0.06 per video second for 580p, $0.04 per video second for 480p. Video seconds are calculated at 16 frames per second.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-vace-14b/inpainting",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
+   "operation": "v2v",
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The text prompt to guide video generation.",
+     "examples": [
+      "A confident woman strides toward the camera down a sun-drenched, empty street. Her vibrant summer dress, a flowing emerald green with delicate white floral embroidery, billows slightly in the gentle breeze.  She carries a stylish, woven straw bag, its natural tan contrasting beautifully with the dress. The dress's fabric shimmers subtly, catching the light. The white embroidery is intricate, each tiny flower meticulously detailed.  Her expression is focused, yet relaxed, radiating self-assuredness. Her auburn hair, partially pulled back in a loose braid, catches the sunlight, creating warm highlights. The street itself is paved with warm, grey cobblestones, reflecting the bright sun. The mood is optimistic and serene, emphasizing the woman's independence and carefree spirit. High resolution 4k"
+     ]
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": "letterboxing, borders, black bars, bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards",
+     "desc": "Negative prompt for video generation.",
+     "examples": [
+      "letterboxing, borders, black bars, bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards"
+     ]
+    },
+    "match_input_num_frames": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the number of frames in the generated video will match the number of frames in the input video. If false, the number of frames will be determined by the num_frames parameter.",
+     "examples": [
+      false
+     ]
+    },
+    "num_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 81,
+     "minimum": 17,
+     "maximum": 241,
+     "desc": "Number of frames to generate. Must be between 81 to 241 (inclusive)."
+    },
+    "match_input_frames_per_second": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the frames per second of the generated video will match the input video. If false, the frames per second will be determined by the frames_per_second parameter.",
+     "examples": [
+      false
+     ]
+    },
+    "frames_per_second": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "default": 16,
+     "minimum": 5,
+     "maximum": 30,
+     "desc": "Frames per second of the generated video. Must be between 5 to 30. Ignored if match_input_frames_per_second is true."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "auto",
+      "240p",
+      "360p",
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "auto",
+     "desc": "Resolution of the generated video."
+    },
+    "aspect_ratio": {
+     "type": "enum",
+     "values": [
+      "auto",
+      "16:9",
+      "1:1",
+      "9:16"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "auto",
+     "desc": "Aspect ratio of the generated video."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 30,
+     "minimum": 2,
+     "maximum": 50,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Guidance scale for classifier-free guidance. Higher values encourage the model to generate images closely related to the text prompt.",
+     "examples": [
+      5
+     ]
+    },
+    "sampler": {
+     "type": "enum",
+     "values": [
+      "unipc",
+      "dpm++",
+      "euler"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "unipc",
+     "desc": "Sampler to use for video generation.",
+     "examples": [
+      "unipc"
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 15,
+     "desc": "Shift parameter for video generation."
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL to the source video file. Required for depth task.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/example_inputs/wan-vace-depth-video.mp4"
+     ]
+    },
+    "ref_image_urls": {
+     "type": "array",
+     "items": "string",
+     "required": false,
+     "desc": "URLs to source reference image. If provided, the model will use this image as reference."
+    },
+    "first_frame_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the first frame of the video. If provided, the model will use this frame as a reference."
+    },
+    "last_frame_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the last frame of the video. If provided, the model will use this frame as a reference."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to enable prompt expansion.",
+     "examples": [
+      false
+     ]
+    },
+    "preprocess": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to preprocess the input video.",
+     "examples": [
+      false
+     ]
+    },
+    "acceleration": {
+     "nullable": true,
+     "type": "enum",
+     "values": [
+      "none",
+      "low",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "Acceleration to use for inference. Options are 'none' or 'regular'. Accelerated inference will very slightly affect output, but will be significantly faster.",
+     "examples": [
+      "regular"
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the generated video.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the generated video.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "num_interpolated_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 5,
+     "desc": "Number of frames to interpolate between the original frames. A value of 0 means no interpolation.",
+     "examples": [
+      0
+     ]
+    },
+    "temporal_downsample_factor": {
+     "type": "integer",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 5,
+     "desc": "Temporal downsample factor for the video. This is an integer value that determines how many frames to skip in the video. A value of 0 means no downsampling. For each downsample factor, one upsample factor will automatically be applied.",
+     "examples": [
+      0
+     ]
+    },
+    "enable_auto_downsample": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the model will automatically temporally downsample the video to an appropriate frame length for the model, then will interpolate it back to the original frame length.",
+     "examples": [
+      false
+     ]
+    },
+    "auto_downsample_min_fps": {
+     "type": "number",
+     "required": false,
+     "default": 15,
+     "minimum": 1,
+     "maximum": 60,
+     "desc": "The minimum frames per second to downsample the video to. This is used to help determine the auto downsample factor to try and find the lowest detail-preserving downsample factor. The default value is appropriate for most videos, if you are using a video with very fast motion, you may need to increase this value. If your video has a very low amount of motion, you could decrease this value to allow for higher downsampling and thus longer sequences.",
+     "examples": [
+      15
+     ]
+    },
+    "interpolator_model": {
+     "type": "enum",
+     "values": [
+      "rife",
+      "film"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "film",
+     "desc": "The model to use for frame interpolation. Options are 'rife' or 'film'.",
+     "examples": [
+      "film"
+     ]
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history.",
+     "examples": [
+      false
+     ]
+    },
+    "transparency_mode": {
+     "type": "enum",
+     "values": [
+      "content_aware",
+      "white",
+      "black"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "content_aware",
+     "desc": "The transparency mode to apply to the first and last frames. This controls how the transparent areas of the first and last frames are filled.",
+     "examples": [
+      "content_aware"
+     ]
+    },
+    "return_frames_zip": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, also return a ZIP file containing all generated frames.",
+     "examples": [
+      false
+     ]
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "negativePrompt": "negative_prompt",
+    "video": "video_url",
+    "images": "ref_image_urls",
+    "seed": "seed",
+    "resolution": "resolution",
+    "aspectRatio": "aspect_ratio",
+    "fps": "frames_per_second",
+    "image": "first_frame_url"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.10 per video second for 720p, $0.075 per video second for 580p, $0.05 per video second for 480p. Video seconds are calculated at 16 frames per second.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-22-vace-fun-a14b/depth",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "minimax/h3-max/recast",
+   "operation": "video-swap",
+   "status": "active",
+   "inputs": {
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "The source video, 5 to 30 seconds long, with no single shot longer than 15 seconds.",
+     "examples": [
+      "https://v3b.fal.media/files/b/0aac8cc6/lOHY4Mitfg5x1UDerR3RB_dw9Hs7ChHU-Fqwzz0W9cq_video.mp4"
+     ]
+    },
+    "reference_image_urls": {
+     "type": "array",
+     "items": "string",
+     "minItems": 1,
+     "maxItems": 4,
+     "required": true,
+     "desc": "One photo per new person. By default they replace the main people in the video from left to right, each in every shot they appear in.",
+     "examples": [
+      [
+       "https://v3b.fal.media/files/b/0aac8d26/HVno2j68vj7tkAwGo3Qii_Nolan%203.jpg"
+      ]
+     ]
+    },
+    "prompt": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "Optional: who becomes whom, or what else to keep or change."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "768P",
+      "1080P"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "1080P"
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "minimum": 0,
+     "desc": "Random seed. Leave empty for a random one."
+    },
+    "enhance_realism": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "More natural skin textures and better blending of the new people into the scene. Off unless set.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Authorized callers may set false to request relaxed screening."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "video": "video_url",
+    "images": "reference_image_urls",
+    "resolution": "resolution",
+    "seed": "seed"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.30 per second of output video at 768p or $0.45 per second at 1080p. Reference images are included at no additional charge.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max/recast",
+   "checked": "2026-10-27"
   }
  ]
 }

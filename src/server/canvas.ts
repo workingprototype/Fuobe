@@ -528,7 +528,7 @@ function oversizedClip(graph: CanvasGraph, nodeId: string): string | null {
  * The silent tracks a run's steps name (silenceRef: a muted or soundless clip of the cloud concatenator), written
  * as WAV files when the run starts; one file per length.
  */
-function silenceWriter(): (req: GenerationRequest) => GenerationRequest {
+export function silenceWriter(): (req: GenerationRequest) => GenerationRequest {
   const files = new Map<number, string>();
   return (req) => {
     const seconds = silenceSeconds(req.inputs?.audio);

@@ -532,6 +532,48 @@ model("fuobe-cinema", "Fuobe Cinema", "Fuobe Original", "fuobe-cinema", "video",
                {"byResolution": CINEMA_PER_SECOND, "withLoras": CINEMA_PER_SECOND_LORA["720p"], "withLorasByResolution": CINEMA_PER_SECOND_LORA,
                 "videoMegapixel": {"usd": CINEMA_MP, "withLoras": CINEMA_MP_LORA}}),
       defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=8)
+# ----- Originals (O5): Fuobe Genjutsu's cloud halves on hosted open weights (research §8 genjutsu, build plan O5;
+# docs/research/openjutsu-6.md §8 for the Character swap). Motion transfer on Wan 2.2 Animate (fal bills frames ÷ 16 as
+# "video seconds"), Object swap on Wan 2.1 VACE 14B inpainting with SAM 3.1's mask video, Restyle on Wan 2.2 Fun VACE
+# depth from a restyled first frame, Character swap on MiniMax H3 with Akatz Labs' Character Swap LoRA. Lite is the
+# cheaper, faster tier of the same Original: 480p (and fal's turbo pass on Animate).
+_ANIMATE_PRICE = {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}}
+_FRAMES16 = "fal bills frames ÷ 16 as video seconds: a 30 fps clip costs about 1.9× its length"
+model("fuobe-genjutsu-motion", "Fuobe Genjutsu · Motion", "Fuobe Original", "fuobe-genjutsu", "video",
+      "Your character performs the clip's moves with its camera and framing: Wan 2.2 Animate",
+      [("motion-transfer", "fal-ai/wan/v2.2-14b/animate/move")],
+      original=True, fit_values=True, pricing=("second", 0.08, f"720p; 580p $0.06, 480p $0.04 · {_FRAMES16}", _ANIMATE_PRICE),
+      defaults={"resolution": "720p"})
+model("fuobe-genjutsu-motion-lite", "Fuobe Genjutsu Lite · Motion", "Fuobe Original", "fuobe-genjutsu", "video",
+      "The quick tier: Wan 2.2 Animate at 480p with fal's turbo pass",
+      [("motion-transfer", "fal-ai/wan/v2.2-14b/animate/move", "fal", {"fixed": {"use_turbo": True, "resolution": "480p"}})],
+      original=True, pricing=("second", 0.04, f"480p · {_FRAMES16}"), options={"resolutions": ["480p"]}, defaults={"resolution": "480p"})
+_VACE14 = "fal-ai/wan-vace-14b/inpainting"
+_VACE14_PRICE = {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}}
+model("fuobe-genjutsu-swap", "Fuobe Genjutsu · Swap", "Fuobe Original", "fuobe-genjutsu", "video",
+      "A thing, a person or an outfit becomes your reference: SAM 3.1 follows it, Wan VACE paints it in",
+      [("video-swap", _VACE14, "fal", {"keys": {"mask": "mask_video_url"}})],
+      original=True, fit_values=True, pricing=("second", 0.08, f"720p; 580p $0.06, 480p $0.04 · {_FRAMES16}; SAM 3.1's mask $0.01 per 16 frames", _VACE14_PRICE),
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "720p"})
+model("fuobe-genjutsu-swap-lite", "Fuobe Genjutsu Lite · Swap", "Fuobe Original", "fuobe-genjutsu", "video",
+      "The quick tier: Wan VACE at 480p with fal's accelerated sampling",
+      [("video-swap", _VACE14, "fal", {"keys": {"mask": "mask_video_url"}, "fixed": {"resolution": "480p", "acceleration": "regular"}})],
+      original=True, pricing=("second", 0.04, f"480p · {_FRAMES16}"), options={"resolutions": ["480p"]},
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "480p"})
+model("fuobe-genjutsu-restyle", "Fuobe Genjutsu · Restyle", "Fuobe Original", "fuobe-genjutsu", "video",
+      "Every frame takes the look of a restyled first frame, motion kept by depth: Wan 2.2 Fun VACE",
+      [("v2v", "fal-ai/wan-22-vace-fun-a14b/depth")],
+      original=True, fit_values=True, pricing=("second", 0.1, f"720p; 580p $0.075, 480p $0.05 · {_FRAMES16}; the first frame's restyle is priced on its own",
+                                               {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "720p"})
+# Character swap (Openjutsu / Akatz Labs' H3 Character Swap): the part of the clip (5–15 s) is Video 1, the character
+# Image 1 and the anchor first frame Image 2. Prompt expansion off so H3's reference tags reach the model as written.
+model("fuobe-character-swap", "Fuobe Character swap", "Fuobe Original", "fuobe-character-swap", "video",
+      "The person in your clip becomes your character, same performance, scene and sound: MiniMax H3 with Akatz Labs' swap LoRA",
+      [("video-swap", "minimax/h3/reference-to-video/lora", "fal", {"videoArray": True, "fixed": {"prompt_expansion_mode": "disabled", "aspect_ratio": "adaptive"}})],
+      original=True, fit_values=True, badges=["audio"],
+      pricing=("second", 0.075, "768p; 480p $0.0625/s; whole seconds, 5–15 per call", {"byResolution": {"768p": 0.075, "480p": 0.0625}}),
+      options={"resolutions": ["480p", "768p"]}, defaults={"resolution": "768p"})
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
@@ -875,6 +917,30 @@ model("p-video-replace", "P-Video Replace", "Pruna AI", "p-video", "video",
       pricing=("second", 0.03, "720p; 1080p $0.06", {"byResolution": {"720p": 0.03, "1080p": 0.06}}), defaults={"resolution": "720p"},
       # "Identity reference image(s) (1-3)".
       options={"maxImages": 3})
+# Genjutsu's hosted open alternatives (O5): Wan 2.2 Animate Replace and SCAIL-2 for people, Wan Motion with pose
+# retargeting; and MiniMax's own person swap, H3 Max Recast (a partner model: closed weights).
+model("wan-22-animate-replace", "Wan 2.2 Animate Replace (hosted)", "Alibaba Wan", "wan", "video",
+      "Swaps the person on camera for your character, lighting matched to the scene",
+      [("video-swap", "fal-ai/wan/v2.2-14b/animate/replace")], fit_values=True,
+      pricing=("second", 0.08, f"720p; 580p $0.06, 480p $0.04 · {_FRAMES16}", _ANIMATE_PRICE), defaults={"resolution": "720p"})
+_SCAIL_PROMPT = "The reference character performs the motion of the video"
+model("scail-2", "SCAIL-2 (hosted)", "SCAIL", "scail", "video",
+      "Character animation without skeletons: humans, several people or animals; or replace the person",
+      [("motion-transfer", "fal-ai/scail-2", "fal", {"fixed": {"mode": "animation"}}),
+       ("video-swap", "fal-ai/scail-2", "fal", {"fixed": {"mode": "replacement"}})],
+      controls=[("subject_type", "Subject"), ("driving_type", "Driven by")], api_defaults={"prompt": _SCAIL_PROMPT},
+      # Words are optional: the API's own prompt (above) goes when none are given.
+      options={"promptOptional": True},
+      pricing=("second", 0.2, "512p or 704p; output at 16 fps, up to 10 s a call"), defaults={"resolution": "512p"})
+model("wan-motion", "Wan Motion (hosted)", "Alibaba Wan", "wan", "video",
+      "Wan-Animate with pose retargeting: the motion fitted to your character's proportions",
+      [("motion-transfer", "fal-ai/wan-motion")],
+      pricing=("second", 0.06, "720p; billed as frames ÷ 24 (a 30 fps clip costs 1.25× its length); +$0.08 with identity enhancement"))
+model("h3-max-recast", "MiniMax H3 Max Recast", "MiniMax", "hailuo", "video",
+      "MiniMax's own person swap: 1–4 people from photos, across shots, sound kept",
+      [("video-swap", "minimax/h3-max/recast")], fit_values=True, badges=["new", "audio"], controls=[("enhance_realism", "Enhance realism")],
+      pricing=("second", 0.3, "768p; 1080p $0.45/s; references free; 5–30 s, no shot over 15 s", {"byResolution": {"768p": 0.3, "1080p": 0.45}}),
+      defaults={"resolution": "768p"})
 
 # ----- FPS boost, slow motion and SDR to HDR (Higgsfield's Upscale tools)
 model("topaz-fps-boost", "Topaz FPS Boost", "Topaz Labs", "topaz", "video",
@@ -1700,6 +1766,14 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             warn(f"{m['id']}: default fields {missing} not in {ep} inputs")
         if not fmap["defaults"]:
             del fmap["defaults"]
+    # LoRAs (O1): the field the route's LoRA endpoint (or the endpoint itself) takes them in, from the research.
+    # Read before the required-inputs check below: an endpoint whose LoRAs are required (MiniMax H3's /lora) fills them here.
+    lora_ep = ropts.get("loraEndpoint")
+    lf = lora_field(provider, lora_ep or ep)
+    if lf:
+        fmap["loras"] = lf
+    elif lora_ep:
+        warn(f"{m['id']}: LoRA endpoint {lora_ep} has no researched LoRA field")
     # Inputs the API requires that no canonical field fills: send the API's own documented default
     # (MiniMax H3 Max's prompt_expansion_mode), or warn when there is none to send.
     sent = set(map_fields(fmap)) | ({"prompt"} if "prompt" not in fmap else set())
@@ -1724,13 +1798,6 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # Inpaint routes say what the mask's paint means (edit routes get theirs when the inpaint route is derived).
     if op == "inpaint" and "mask" in fmap and mask_format(ep):
         fmap["maskFormat"] = mask_format(ep)
-    # LoRAs (O1): the field the route's LoRA endpoint (or the endpoint itself) takes them in, from the research.
-    lora_ep = ropts.get("loraEndpoint")
-    lf = lora_field(provider, lora_ep or ep)
-    if lf:
-        fmap["loras"] = lf
-    elif lora_ep:
-        warn(f"{m['id']}: LoRA endpoint {lora_ep} has no researched LoRA field")
     route = {"op": op, "provider": provider, "endpoint": f"{ep}:{version}" if ropts.get("pin") else ep, "map": fmap}
     if ropts.get("note"):
         route["note"] = ropts["note"]

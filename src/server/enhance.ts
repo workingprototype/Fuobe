@@ -94,8 +94,9 @@ export function llmTextBackend(): "claude" | "ollama" | null {
  * on "open source only" installs unless picked explicitly), else a local Ollama. Null when none.
  * `images` go along for a model that can see them (Content Factory's reference frames).
  */
-export async function llmText(system: string, user: string, images: LlmImage[] = []): Promise<string | null> {
-  const backend = llmTextBackend();
+export async function llmText(system: string, user: string, images: LlmImage[] = [], o: { ollamaOnly?: boolean } = {}): Promise<string | null> {
+  // The open engine never calls a paid API: Ollama, unless the AI helper is off.
+  const backend = o.ollamaOnly && llmTextBackend() === "claude" ? "ollama" : llmTextBackend();
   if (backend === "claude") return viaClaude(system, user, images).catch(() => null);
   if (backend === "ollama") return viaOllama(system, user, images).catch(() => null);
   return null;
