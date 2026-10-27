@@ -113,8 +113,8 @@ GENJUTSU = {
     "minimax/h3-max/recast": ("video-swap", {"prompt": "prompt", "video": "video_url", "images": "reference_image_urls", "resolution": "resolution", "seed": "seed"}),
 }
 
-# Partner models' fal routes that take over a route Fuobe dropped with the Higgsfield provider (build plan O7: Happy
-# Horse 1.1 ran only on Higgsfield). Read with --partner; stored in partnerEndpoints, which gen-cloud-models.py reads.
+# Partner models' fal routes that take over a route Fuobe dropped with its third cloud provider (build plan O7: Happy
+# Horse 1.1 had no other route). Read with --partner; stored in partnerEndpoints, which gen-cloud-models.py reads.
 HAPPY_HORSE = {"prompt": "prompt", "seed": "seed", "duration": "duration", "resolution": "resolution"}
 PARTNER = {
     "alibaba/happy-horse/v1.1/text-to-video": ("t2v", {**HAPPY_HORSE, "aspectRatio": "aspect_ratio"}),
@@ -271,7 +271,7 @@ def main():
         # Add or refresh the partner routes (PARTNER) and keep every other record as it is.
         records = {e["endpoint"]: e for e in data.get("partnerEndpoints") or []}
         for ep, (op, kf) in PARTNER.items():
-            records[ep] = {**base_record(ep, op, kf, fal_prices(ep)), "replaces": "a route Fuobe ran on Higgsfield's API until build plan O7"}
+            records[ep] = {**base_record(ep, op, kf, fal_prices(ep)), "replaces": "a route of the provider build plan O7 removed"}
         data["partnerEndpoints"] = list(records.values())
         FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         return

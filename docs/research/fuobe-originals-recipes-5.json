@@ -22259,7 +22259,7 @@
    "verified": true,
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=alibaba/happy-horse/v1.1/text-to-video",
    "checked": "2026-10-27",
-   "replaces": "a route Fuobe ran on Higgsfield's API until build plan O7"
+   "replaces": "a route of the provider build plan O7 removed"
   },
   {
    "provider": "fal",
@@ -22345,7 +22345,7 @@
    "verified": true,
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=alibaba/happy-horse/v1.1/image-to-video",
    "checked": "2026-10-27",
-   "replaces": "a route Fuobe ran on Higgsfield's API until build plan O7"
+   "replaces": "a route of the provider build plan O7 removed"
   },
   {
    "provider": "fal",
@@ -22452,7 +22452,7 @@
    "verified": true,
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=alibaba/happy-horse/v1.1/reference-to-video",
    "checked": "2026-10-27",
-   "replaces": "a route Fuobe ran on Higgsfield's API until build plan O7"
+   "replaces": "a route of the provider build plan O7 removed"
   }
  ]
 }

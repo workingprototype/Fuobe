@@ -493,7 +493,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
           />
         </div>
         <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-muted-foreground">
-          <Sparkles className="size-3" /> Cloud: Seedance 2.5 edit (Higgsfield), Kling O3 edit, Gemini Omni Flash · Open source: Wan 2.2 Animate, Wan 2.2 clips joined around your ad
+          <Sparkles className="size-3" /> Cloud: Kling O3 edit, Happy Horse edit, Gemini Omni Flash · Open source: Fuobe Genjutsu (Wan Animate), Wan 2.2 clips joined around your ad
         </p>
       </div>
     </div>

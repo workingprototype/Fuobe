@@ -48,8 +48,8 @@ for e in ORIGINALS["hostedLoraEndpoints"]:
                                          "inputs": e["inputs"], "keyFields": e.get("keyFields") or {}, "output": e.get("output"), "price": e.get("price")}
 for e in ORIGINALS.get("hostedBaseEndpoints") or []:
     EPS[(e["provider"], e["endpoint"])] = e
-# Partner models' fal routes read for build plan O7 (scripts/fetch-hosted-schemas.py --partner): Happy Horse 1.1 ran
-# only on Higgsfield's API before.
+# Partner models' fal routes read for build plan O7 (scripts/fetch-hosted-schemas.py --partner): Happy Horse 1.1 had
+# no fal route before.
 for e in ORIGINALS.get("partnerEndpoints") or []:
     EPS[(e["provider"], e["endpoint"])] = e
 
@@ -610,7 +610,7 @@ model("happy-horse-video-edit", "Happy Horse Video Edit", "Alibaba", "happy-hors
       [("v2v", "alibaba/happy-horse/video-edit")], badges=["new", "audio"], defaults={"resolution": "720p"},
       pricing=("second", 0.28, "720p, input + output seconds; 1080p $0.56", {"byResolution": {"720p": 0.28, "1080p": 0.56}, "inputSeconds": True}),
       controls=[("audio_setting", "Audio")])
-# Happy Horse 1.1 (build plan O7): Higgsfield resold it; fal hosts the same three endpoints (partnerEndpoints, read
+# Happy Horse 1.1 (build plan O7): fal hosts Alibaba's three endpoints (partnerEndpoints, read
 # 2026-10-27): $0.14/s at 720p, $0.18/s at 1080p; 3-15 s; up to 9 reference images.
 model("happy-horse-1-1", "Happy Horse 1.1", "Alibaba", "happy-horse", "video", "Alibaba's expressive character-animation video model",
       [("t2v", "alibaba/happy-horse/v1.1/text-to-video"), ("i2v", "alibaba/happy-horse/v1.1/image-to-video"),

@@ -555,6 +555,15 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS swap_projects_updated ON swap_projects(updated_at DESC);
   CREATE INDEX IF NOT EXISTS swap_projects_waiting ON swap_projects(waiting) WHERE waiting > 0;`,
+  // originals (o/no-higgsfield): Fuobe no longer calls Higgsfield's API (build plan O7). Its saved key is deleted (a
+  // secret nothing reads any more), a "Higgsfield first" cloud provider becomes Automatic, and the ads its Ads Studio
+  // drew whole are marked baked, which is all the Ads Studio needs to show them as they are. Jobs and trainings still
+  // waiting on it fail on their next poll with a way forward (src/server/providers/index.ts, src/server/training.ts).
+  `DELETE FROM settings WHERE key = 'higgsfield.key';
+  UPDATE settings SET value = 'auto' WHERE key = 'cloud.provider' AND value = 'higgsfield';
+  UPDATE ad_batches SET route = 'baked' WHERE route = 'higgsfield';
+  UPDATE ad_creatives SET meta_json = json_set(meta_json, '$.route', 'baked')
+    WHERE json_valid(meta_json) AND json_extract(meta_json, '$.route') = 'higgsfield';`,
 ];
 
 declare global {
