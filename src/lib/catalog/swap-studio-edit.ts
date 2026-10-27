@@ -68,7 +68,7 @@ export type SwapEdit =
   | { type: "defaults"; settings: Partial<SwapSettings> }
   | { type: "clip"; clipId: string; name?: string; review?: Decision; reviewNotes?: string }
   | { type: "remove-clip"; clipId: string }
-  | { type: "detected"; clipId: string; cuts: number[] }
+  | { type: "detected"; clipId: string; cuts: number[]; dismiss?: boolean }
   | { type: "cuts"; clipId: string; cuts: number[]; modes?: ShotMode[] }
   | { type: "voices"; clipId: string; voices: Record<string, SwapRole> }
   | { type: "shot"; clipId: string; shotId: string; patch: ShotPatch }
@@ -201,6 +201,8 @@ export function applyEdit(project: SwapProject, edit: SwapEdit, o: { active: (ge
     }
     case "detected": {
       const c = mustClip(p, edit.clipId);
+      // Dismissed: nothing waits to be confirmed (an empty list is a finding: "no edits").
+      if (edit.dismiss) return mapClip(p, c.id, (x) => ({ ...x, detected: null }));
       const cuts = tidyCuts(edit.cuts.filter((n) => Number.isInteger(n) && n > 0 && n < c.frames));
       return mapClip(p, c.id, (x) => ({ ...x, detected: cuts }));
     }

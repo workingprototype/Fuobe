@@ -180,7 +180,9 @@ export function planMask(m: MaskPlanInput): PlanStep[] {
     ];
   }
   const from = shot.start + m.frame;
-  const to = m.kind === "frame" ? from + 1 : shot.end;
+  // Update frame reads half a second from the frame (a one-frame cut is too short to trim and track); its piece is the
+  // first frame of that mask.
+  const to = m.kind === "frame" ? Math.min(shot.end, from + 12) : shot.end;
   return [
     { key: "cut", request: { ...helper(title), modelId: STUDIO_MODELS.cloud.cut, op: "trim", inputs: { video: clip.source.url }, params: { startTime: at(from), endTime: at(to) }, step: { label: "Cut from the frame", index: 0, of: 2 } } },
     {

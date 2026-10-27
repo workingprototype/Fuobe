@@ -16,7 +16,7 @@ import {
   type SwapTake,
 } from "@/lib/catalog/swap-studio";
 import { applyEdit, cleanSettings, EditError, shotBusy, type SwapEdit } from "@/lib/catalog/swap-studio-edit";
-import { frozenTakePlan } from "@/lib/catalog/swap-studio-plan";
+import { frozenTakePlan, planMask } from "@/lib/catalog/swap-studio-plan";
 
 // Character Swap Studio's edits (Akatz Labs' rules) and a queued take's frozen plan: pure, no server.
 
@@ -85,6 +85,9 @@ describe("project edits", () => {
     let p = edit(projectOf(), { type: "detected", clipId: "clip-1", cuts: [120, 0, 600, 120, 300] });
     expect(p.clips[0].detected).toEqual([120, 300]);
     expect(p.clips[0].shots).toHaveLength(1);
+    // Dismissed: nothing waits; "no edits found" is an empty list.
+    expect(edit(p, { type: "detected", clipId: "clip-1", cuts: [], dismiss: true }).clips[0].detected).toBeNull();
+    expect(edit(p, { type: "detected", clipId: "clip-1", cuts: [] }).clips[0].detected).toEqual([]);
     p = edit(p, { type: "cuts", clipId: "clip-1", cuts: [300, 120], modes: ["generate", "preserve", "generate"] });
     expect(p.clips[0]).toMatchObject({ cuts: [120, 300], detected: null, cutsReviewed: true });
     expect(p.clips[0].shots.map((s) => [s.start, s.end, s.mode])).toEqual([
@@ -248,6 +251,18 @@ describe("queued takes", () => {
     expect(r.params?.extra).toMatchObject({ selection: "largest", maskPrompt: "person", historyVideo: "/api/files/master.mkv", historyStart: items[0].end - items[0].start - seg.history, historyLength: seg.history });
     expect(r.params?.extra).not.toHaveProperty("lora");
     expect(() => frozenTakePlan(edited, clip, later, seg, { ...t, frozen: undefined }, { shot: 1, segment: 2, take: 1 }, null)).toThrow(/queue the segment again/);
+  });
+});
+
+describe("cloud mask updates", () => {
+  it("Update frame cuts half a second from the frame (within the shot); its piece is that one frame", () => {
+    const p = projectOf([clipOf()], "cloud");
+    const shot = { ...shotOf(p), start: 24, end: 120 };
+    const [cut, mask] = planMask({ engine: "cloud", clip: p.clips[0], shot, kind: "frame", frame: 90, points: [{ x: 5, y: 5 }], who: shot.who, base: null });
+    expect(cut.request.params).toEqual({ startTime: 114 / 24, endTime: 120 / 24 });
+    expect(mask.request.params).toMatchObject({ duration: 6 / 24, points: [{ x: 5, y: 5 }] });
+    const [mid] = planMask({ engine: "cloud", clip: p.clips[0], shot, kind: "frame", frame: 10, points: [{ x: 5, y: 5 }], who: shot.who, base: null });
+    expect(mid.request.params).toEqual({ startTime: 34 / 24, endTime: 46 / 24 });
   });
 });
 

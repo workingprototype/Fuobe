@@ -108,7 +108,7 @@ export function ShotsStage({ project, clip, edit, src }: StageProps) {
             <Button size="sm" className="h-7 rounded-full px-2.5 text-[12px]" onClick={() => setDraft(tidyCuts(clip.detected!))}>
               <Check className="size-3.5" /> Use them
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 rounded-full px-2.5 text-[12px]" onClick={() => void edit({ type: "detected", clipId: clip.id, cuts: [] })}>
+            <Button size="sm" variant="ghost" className="h-7 rounded-full px-2.5 text-[12px]" onClick={() => void edit({ type: "detected", clipId: clip.id, cuts: [], dismiss: true })}>
               <X className="size-3.5" /> Dismiss
             </Button>
           </div>

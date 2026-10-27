@@ -463,7 +463,7 @@ export const EditSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("defaults"), settings }),
   z.object({ type: z.literal("clip"), clipId: id, name: z.string().max(200).optional(), review: decision.optional(), reviewNotes: text(SWAP_STUDIO.maxNotesChars).optional() }),
   z.object({ type: z.literal("remove-clip"), clipId: id }),
-  z.object({ type: z.literal("detected"), clipId: id, cuts: z.array(z.number().int()).max(2000) }),
+  z.object({ type: z.literal("detected"), clipId: id, cuts: z.array(z.number().int()).max(2000), dismiss: z.boolean().optional() }),
   z.object({ type: z.literal("cuts"), clipId: id, cuts: z.array(z.number().int()).max(2000), modes: z.array(z.enum(["generate", "preserve"])).max(2001).optional() }),
   z.object({ type: z.literal("voices"), clipId: id, voices: z.record(z.string().max(80), role) }),
   z.object({
