@@ -32,6 +32,8 @@ import { offeredDefault } from "../model-access";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
 import { readRef } from "../storage";
+import { spendOf, withinCap } from "@/lib/assist-schedule";
+import { activeConnectors, connectorName, MCP_BETA, mcpParams, withoutMissingServers, type Connector } from "./connectors";
 import { canUseSkill, chatFacts } from "./context";
 import { getProject, touchProject } from "./projects";
 import { apiTools, cardTitle, executeTool, getTool, planFor, validateInput, type ToolContext } from "./tools";
@@ -62,6 +64,8 @@ export interface ModelRequest {
   settings?: { model?: string | null; effort?: AssistEffort | null };
   /** Skills loaded in the chat (the offline planner uses their hints). */
   skills?: SkillMeta[];
+  /** Custom MCP connectors (Settings → Assist): Claude gets them through the MCP connector; other agents can't use them. */
+  connectors?: Connector[];
 }
 export type ModelCall = (req: ModelRequest) => Promise<Anthropic.Beta.BetaMessage>;
 
@@ -104,6 +108,10 @@ interface StateRow {
   skills_json: string;
   context: string | null;
   sent_json: string | null;
+  schedule_id: string | null;
+  cap_usd: number | null;
+  spent_usd: number | null;
+  connectors: number | null;
 }
 
 /** Per-chat state beside the transcript (assist_thread_state). */
@@ -117,6 +125,13 @@ interface Ext {
   context: string | null;
   /** The facts the model has seen, to send only what changed. */
   sent: Record<string, string> | null;
+  /** The scheduled task that started this chat. */
+  scheduleId: string | null;
+  /** With auto-run on: the most generations may cost without asking (USD), and what they have cost. */
+  capUsd: number | null;
+  spentUsd: number;
+  /** Whether Claude gets the custom MCP connectors here (every chat, except a scheduled run whose task leaves them off). */
+  connectors: boolean;
 }
 
 interface State {
@@ -141,11 +156,24 @@ function loadExt(id: string): Ext {
     skills: r ? (JSON.parse(r.skills_json) as string[]) : [],
     context: r?.context ?? null,
     sent: r?.sent_json ? (JSON.parse(r.sent_json) as Record<string, string>) : null,
+    scheduleId: r?.schedule_id ?? null,
+    capUsd: r?.cap_usd ?? null,
+    spentUsd: r?.spent_usd ?? 0,
+    connectors: r?.connectors !== 0,
   };
 }
 
 function withExt(t: AssistThread, e: Ext): AssistThread {
-  return { ...t, projectId: e.projectId, mode: e.mode ?? (t.agent === "claude" ? "smart" : "free"), model: e.model, effort: e.effort, skills: e.skills };
+  return {
+    ...t,
+    projectId: e.projectId,
+    mode: e.mode ?? (t.agent === "claude" ? "smart" : "free"),
+    model: e.model,
+    effort: e.effort,
+    skills: e.skills,
+    ...(e.scheduleId && { scheduleId: e.scheduleId }),
+    ...(e.capUsd !== null && { capUsd: e.capUsd, spentUsd: e.spentUsd }),
+  };
 }
 
 function load(id: string): State | null {
@@ -206,10 +234,11 @@ function save(s: State): void {
       });
     db()
       .prepare(
-        `INSERT INTO assist_thread_state (thread_id, project_id, mode, model, effort, skills_json, context, sent_json)
-         VALUES (@thread_id, @project_id, @mode, @model, @effort, @skills_json, @context, @sent_json)
+        `INSERT INTO assist_thread_state (thread_id, project_id, mode, model, effort, skills_json, context, sent_json, schedule_id, cap_usd, spent_usd, connectors)
+         VALUES (@thread_id, @project_id, @mode, @model, @effort, @skills_json, @context, @sent_json, @schedule_id, @cap_usd, @spent_usd, @connectors)
          ON CONFLICT(thread_id) DO UPDATE SET project_id = @project_id, mode = @mode, model = @model, effort = @effort,
-           skills_json = @skills_json, context = @context, sent_json = @sent_json`,
+           skills_json = @skills_json, context = @context, sent_json = @sent_json, schedule_id = @schedule_id, cap_usd = @cap_usd, spent_usd = @spent_usd,
+           connectors = @connectors`,
       )
       .run({
         thread_id: s.thread.id,
@@ -220,6 +249,10 @@ function save(s: State): void {
         skills_json: JSON.stringify(s.ext.skills),
         context: s.ext.context,
         sent_json: s.ext.sent ? JSON.stringify(s.ext.sent) : null,
+        schedule_id: s.ext.scheduleId,
+        cap_usd: s.ext.capUsd,
+        spent_usd: s.ext.spentUsd,
+        connectors: s.ext.connectors ? 1 : 0,
       });
   })();
 }
@@ -322,6 +355,7 @@ export async function updateThread(id: string, patch: ThreadPatch): Promise<Assi
     s.ext.model = r.model;
     s.ext.effort = r.effort;
     if (r.note) push(s, { role: "notice", tone: "info", text: r.note });
+    connectorNote(s);
   }
   save(s);
   return s.thread;
@@ -416,6 +450,18 @@ export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<R
   return { mode: "manual", agent: "offline", model: null, effort: null };
 }
 
+/** The connectors Claude gets in this chat: none on other agents, or in a scheduled run that leaves them off. */
+const chatConnectors = (s: State): Connector[] => (s.thread.agent === "claude" && s.ext.connectors ? activeConnectors() : []);
+
+/** Connectors need Claude: a chat on Ollama or the offline planner (that would otherwise use them) says so once. */
+function connectorNote(s: State): void {
+  if (s.thread.agent === "claude" || !s.ext.connectors || s.thread.items.some((i) => i.role === "notice" && i.text.startsWith(CONNECTOR_NOTE))) return;
+  const names = activeConnectors().map((c) => c.name);
+  if (!names.length) return;
+  push(s, { role: "notice", tone: "info", text: `${CONNECTOR_NOTE} (${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}); this chat runs on ${s.thread.agent === "ollama" ? "a local model" : "the offline planner"}, so it can't use them.` });
+}
+const CONNECTOR_NOTE = "Connectors work in Claude chats";
+
 export function createThread(opts: {
   engine: Engine;
   agent: AssistThread["agent"];
@@ -425,6 +471,13 @@ export function createThread(opts: {
   mode?: AssistMode | null;
   model?: string | null;
   effort?: AssistEffort | null;
+  /** A scheduled run: the task that started it, and auto-run's cost cap for it. */
+  scheduleId?: string | null;
+  capUsd?: number | null;
+  /** false: Claude doesn't get the custom MCP connectors here (a scheduled run that leaves them off). */
+  connectors?: boolean;
+  /** A quiet line at the top of the chat (a scheduled run says which task it is). */
+  note?: string;
 }): AssistThread {
   const now = Date.now();
   if (opts.projectId && !getProject(opts.projectId)) throw new Error("That project doesn't exist anymore");
@@ -432,8 +485,22 @@ export function createThread(opts: {
     thread: { id: nanoid(12), title: opts.title ?? "New chat", status: "idle", agent: opts.agent, engine: opts.engine, autoApprove: !!opts.autoApprove, items: [], createdAt: now, updatedAt: now },
     messages: [],
     pending: null,
-    ext: { projectId: opts.projectId ?? null, mode: opts.mode ?? null, model: opts.model ?? null, effort: opts.effort ?? null, skills: [], context: null, sent: null },
+    ext: {
+      projectId: opts.projectId ?? null,
+      mode: opts.mode ?? null,
+      model: opts.model ?? null,
+      effort: opts.effort ?? null,
+      skills: [],
+      context: null,
+      sent: null,
+      scheduleId: opts.scheduleId ?? null,
+      capUsd: opts.capUsd ?? null,
+      spentUsd: 0,
+      connectors: opts.connectors !== false,
+    },
   };
+  if (opts.note) push(s, { role: "notice", tone: "info", text: opts.note });
+  connectorNote(s);
   save(s);
   if (opts.projectId) touchProject(opts.projectId);
   return s.thread;
@@ -540,11 +607,17 @@ const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude
  */
 export const maxTokensFor = (effort: AssistEffort): number => (effort === "xhigh" || effort === "max" ? 64_000 : 32_000);
 
-export const claude: ModelCall = async ({ system, messages, tools, settings }) => {
+export const claude: ModelCall = async ({ system, messages, tools, settings, connectors }) => {
   const client = new Anthropic({ apiKey: getSetting("anthropicKey") });
   const model = settings?.model && CLAUDE_MODELS.some((m) => m.id === settings.model) ? settings.model : DEFAULT_CLAUDE_MODEL;
   const fallback = FALLBACK_MODELS.has(model);
   const effort = settings?.effort ?? DEFAULT_EFFORT;
+  // Custom MCP connectors: Anthropic's servers call them; their tools come after Fuobe's own. Under
+  // mcp-client-2025-11-20 each request lists the servers' tools again; a connector switched on, off or
+  // deleted mid-chat changes `tools` (and a deleted one's history is rewritten below), so Claude's
+  // earlier thinking in that chat is dropped (drop_block) and re-done — a cost, not an error.
+  const mcp = mcpParams(connectors ?? []);
+  const history = withoutMissingServers(messages, new Set(mcp?.mcp_servers.map((m) => m.name)));
   // Streamed, so long thinking at high effort never runs into an HTTP timeout; only the final
   // message is used (the UI shows the reply once it's complete).
   const stream = client.beta.messages.stream({
@@ -554,7 +627,7 @@ export const claude: ModelCall = async ({ system, messages, tools, settings }) =
     // before contexts were frozen) is dropped instead of failing the request.
     thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
     output_config: { effort },
-    betas: [...(fallback ? (["server-side-fallback-2026-07-01"] as const) : []), "thinking-binding-controls-2026-08-01"],
+    betas: [...(fallback ? (["server-side-fallback-2026-07-01"] as const) : []), "thinking-binding-controls-2026-08-01", ...(mcp ? [MCP_BETA] : [])],
     ...(fallback && { fallbacks: "default" as const }),
     // The fixed instructions and the chat's frozen context are cached; so is the conversation so far.
     cache_control: { type: "ephemeral" },
@@ -562,8 +635,9 @@ export const claude: ModelCall = async ({ system, messages, tools, settings }) =
       { type: "text", text: system.stable, cache_control: { type: "ephemeral" } },
       { type: "text", text: system.turn, cache_control: { type: "ephemeral" } },
     ],
-    tools,
-    messages: await hydrate(messages),
+    tools: mcp ? [...tools, ...mcp.toolsets] : tools,
+    ...(mcp && { mcp_servers: mcp.mcp_servers }),
+    messages: await hydrate(history),
   });
   return stream.finalMessage();
 };
@@ -1062,8 +1136,16 @@ function ordered(results: ToolResult[], order: string[]): ToolResult[] {
  * The chat's system prompt and, when something changed since the model last looked, the
  * "Context update" message to append. The first call freezes the context into the system prompt.
  */
-function contextFor(s: State): { system: ModelRequest["system"]; update: MessageParam | null; sent: Record<string, string> } {
-  const facts = chatFacts({ engine: s.thread.engine, autoApprove: s.thread.autoApprove, projectId: s.ext.projectId, skills: s.ext.skills });
+function contextFor(s: State, connectors: Connector[]): { system: ModelRequest["system"]; update: MessageParam | null; sent: Record<string, string> } {
+  const facts = chatFacts({
+    engine: s.thread.engine,
+    autoApprove: s.thread.autoApprove,
+    projectId: s.ext.projectId,
+    skills: s.ext.skills,
+    capUsd: s.ext.capUsd,
+    scheduleId: s.ext.scheduleId,
+    connectors: connectors.map((c) => c.name),
+  });
   const sent = factMap(facts);
   if (!s.ext.context) {
     s.ext.context = renderContext(facts);
@@ -1075,9 +1157,24 @@ function contextFor(s: State): { system: ModelRequest["system"]; update: Message
   return { system: { stable: STABLE_SYSTEM, turn: s.ext.context }, update: text ? { role: "system", content: text } : null, sent };
 }
 
+/** "Notion · search_pages": each connector tool Claude used in a reply, marked when it failed. */
+function connectorItems(s: State, content: Anthropic.Beta.BetaContentBlock[]): void {
+  const shown = new Map<string, AssistItem>();
+  for (const b of content) {
+    if (b.type === "mcp_tool_use") {
+      const name = connectorName(b.server_name);
+      shown.set(b.id, push(s, { role: "tool", text: `${name} · ${b.name}`, connector: name }));
+    } else if (b.type === "mcp_tool_result" && b.is_error) {
+      const item = shown.get(b.tool_use_id);
+      if (item?.role === "tool") item.failed = true;
+    }
+  }
+}
+
 async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
   const ctx = toolCtx(s);
-  const { system, update, sent } = contextFor(s);
+  const connectors = chatConnectors(s);
+  const { system, update, sent } = contextFor(s, connectors);
   const active = s.ext.skills.map((n) => getSkill(n)).filter((x): x is NonNullable<typeof x> => !!x);
   const res = await model({
     system,
@@ -1086,6 +1183,7 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     ctx,
     settings: { model: s.ext.model, effort: s.ext.effort },
     skills: active,
+    ...(connectors.length && { connectors }),
   });
 
   if (res.stop_reason === "refusal") {
@@ -1103,6 +1201,7 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     s.ext.sent = sent;
   }
   s.messages.push({ role: "assistant", content: res.content });
+  connectorItems(s, res.content);
   const text = res.content
     .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
     .map((b) => b.text)
@@ -1125,23 +1224,39 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
 
   const results: ToolResult[] = [];
   const gated: Pending["gated"] = [];
+  // Why auto-run left a plan for the user: it would pass this chat's cost cap.
+  const held: string[] = [];
   // The rule-based planner says so in a quiet line under its plan (or under the jobs it started).
   const offlineNote = () => {
     if (model === offline) push(s, { role: "notice", tone: "info", text: OFFLINE_NOTE });
   };
   for (const u of uses) {
-    if (getTool(u.name)?.gated && !s.thread.autoApprove) {
-      // Malformed arguments (common from small local models) go straight back as an error the model can fix, not onto an approval card.
-      const invalid = validateInput(u.name, u.input);
-      if (invalid) {
-        results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: invalid });
+    let price: number | null = null;
+    if (getTool(u.name)?.gated) {
+      let ask = !s.thread.autoApprove;
+      // Auto-run with a cap (a scheduled run): what fits starts on its own, the rest waits for the user.
+      if (!ask && s.ext.capUsd !== null) {
+        price = spendOf(planFor(u.name, u.input, ctx).jobs);
+        const fits = withinCap(s.ext.capUsd, s.ext.spentUsd, price);
+        if (!fits.ok) {
+          ask = true;
+          held.push(fits.reason);
+        }
+      }
+      if (ask) {
+        // Malformed arguments (common from small local models) go straight back as an error the model can fix, not onto an approval card.
+        const invalid = validateInput(u.name, u.input);
+        if (invalid) {
+          results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: invalid });
+          continue;
+        }
+        gated.push({ id: u.id, name: u.name, input: u.input });
         continue;
       }
-      gated.push({ id: u.id, name: u.name, input: u.input });
-      continue;
     }
     const { result, items } = await runTool(u.name, u.input, ctx);
     results.push({ ...result, tool_use_id: u.id });
+    if (price && !result.is_error) s.ext.spentUsd = Math.round((s.ext.spentUsd + price) * 1000) / 1000;
     for (const it of items) push(s, it);
   }
   const order = uses.map((u) => u.id);
@@ -1154,6 +1269,7 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     // Two calls that fall back for the same reason say it once.
     const notes = [...new Set(plans.flatMap((p) => (p.fallback ? [`${p.fallback}.`] : [])))];
     const item = push(s, { role: "approval", summary, jobs, totalUsd: total, status: "pending", ...(opens.length && { opens }), ...(notes.length && { notes }) });
+    if (held.length) push(s, { role: "notice", tone: "info", text: `Waiting for you: ${[...new Set(held)].join("; ")}. Auto-run only starts what fits the cap.` });
     offlineNote();
     s.pending = { approvalItemId: item.id, results, gated, order };
     s.thread.status = "waiting";
@@ -1211,6 +1327,7 @@ function refreshFlags(s: State): void {
 function errorText(e: unknown): string {
   if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → API keys.";
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limited right now. Try again in a minute.";
+  if (e instanceof Anthropic.BadRequestError && /\bmcp\b|connector/i.test(e.message)) return `A connector didn't work: ${e.message}. Check it in Settings → Assist connectors, or switch it off.`;
   if (e instanceof Anthropic.APIError) return `Claude returned an error (${e.status ?? "network"}): ${e.message}`;
   if (e instanceof DOMException && e.name === "TimeoutError") return "The model took too long to answer. Try again, or pick a smaller model.";
   return (e as Error).message || "Something went wrong";
@@ -1229,7 +1346,8 @@ export function addMessage(id: string, text: string, attachments: string[] = [])
   const titles = slash.skills.map((n) => getSkill(n)?.title ?? n);
   // With only "/katana" (and files), the model still needs words to act on.
   const words = slash.text || (slash.skills.length ? `Use the ${titles.join(" and ")} skill${titles.length > 1 ? "s" : ""}${attachments.length ? " with the attached files" : ""}.` : text);
-  if (!s.thread.items.some((i) => i.role === "user")) s.thread.title = threadTitle(slash.text || titles.join(", ") || text);
+  // The first message names the chat, unless it was started with a name (a scheduled run's).
+  if (!s.thread.items.some((i) => i.role === "user") && s.thread.title === "New chat") s.thread.title = threadTitle(slash.text || titles.join(", ") || text);
   // Tool results first: they answer the assistant's last turn.
   const results = s.pending ? decline(s, "The user replied with new instructions instead of approving; follow them.") : [];
   if (!results.length) closeDanglingToolUses(s.messages);

@@ -1,6 +1,6 @@
 "use client";
 
-import { AppWindow, ArrowUpRight, AudioLines, Box, Brain, Captions, Check, CircleAlert, Clapperboard, Film, FileText, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Scissors, Search, Sparkles, Video } from "lucide-react";
+import { AppWindow, ArrowUpRight, AudioLines, Box, Brain, Captions, Check, CircleAlert, Clapperboard, Film, FileText, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Plug, Scissors, Search, Sparkles, Video } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -290,6 +290,14 @@ export function Transcript({
             );
           case "tool":
             if (item.studio && item.href) return <StudioCard key={item.id} text={item.text} studio={item.studio} href={item.href} />;
+            // A custom MCP connector's tool Claude used (Settings → Assist connectors).
+            if (item.connector)
+              return (
+                <p key={item.id} className={cn("flex items-center gap-1.5 text-[12px]", item.failed ? "text-destructive" : "text-muted-foreground")}>
+                  <Plug className="size-3" aria-hidden /> <span className="sr-only">Connector:</span> {item.text}
+                  {item.failed && " — didn't work"}
+                </p>
+              );
             return item.href ? (
               <Link key={item.id} href={item.href} className="flex w-fit items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground">
                 <Search className="size-3" /> {item.text} <ArrowUpRight className="size-3" />
