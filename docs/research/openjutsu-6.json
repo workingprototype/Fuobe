@@ -1,0 +1,2115 @@
+{
+ "asOf": "2026-10-27",
+ "scope": "Openjutsu (Comfy-Org/comfy-openjutsu) and everything in Akatz Labs' H3 Character Swap tool (akatz-labs/h3-character-swap-tool), researched for a Character swap mode in Fuobe's Genjutsu on both engines. Licences recorded as information (owner's decision 2026-10-27). Read-only: no code from these repositories was run or installed; nothing ran on a GPU or a paid API.",
+ "openjutsu": {
+  "repo": "https://github.com/Comfy-Org/comfy-openjutsu",
+  "commit": "70ec62df0eda7c58697ea3ac2050588513651583",
+  "commitDate": "2026-10-26",
+  "licence": "MIT (Comfy Org 2026)",
+  "app": "Next.js 16 + React 19, @comfyorg/sdk 0.5.0, Node >= 22.6",
+  "hub": "https://comfy.org/hub/apps/openjutsu/",
+  "competition": "https://comfy.org/open-source-higgsfield/ (Openjutsu is its 'Swap a character in a video' prompt; entries close 2026-10-30)",
+  "limits": {
+   "partSeconds": [
+    5,
+    15
+   ],
+   "partStep": 0.1,
+   "roundTo": 0.01,
+   "videoTypes": [
+    "video/mp4",
+    "video/quicktime"
+   ],
+   "maxVideoBytes": 104857600,
+   "imageTypes": [
+    "image/png",
+    "image/jpeg",
+    "image/webp"
+   ],
+   "maxImageBytes": 20971520,
+   "maxDirectionChars": 500,
+   "seed": [
+    0,
+    4294967295
+   ],
+   "qualities": {
+    "480p": 480,
+    "768p": 768
+   },
+   "uiDefaultQuality": "768p",
+   "anchorDefault": true,
+   "pollMs": 3000,
+   "pollRetryMs": 5000,
+   "activeStatuses": [
+    "queued",
+    "running",
+    "pending"
+   ],
+   "resultOutput": "the output whose name matches /result/i"
+  },
+  "prompt": {
+   "template": "Replace the selected person in <Video 1> with the character in <Picture 1>. Preserve the source performance, scene and audio timing.[ Start from the first frame in <Picture 2>.][ <direction>]",
+   "tags": {
+    "<Video 1>": "source performance",
+    "<Picture 1>": "character reference",
+    "<Picture 2>": "optional anchor first frame"
+   },
+   "source": "lib/swap.ts L22-29"
+  },
+  "errors": {
+   "upload": [
+    "Choose a video clip.",
+    "Upload an MP4 or MOV video.",
+    "Keep clips under 100 MB.",
+    "Choose <what>.",
+    "Use a PNG, JPEG or WebP for <what>.",
+    "Keep <what> under 20 MB."
+   ],
+   "settings": [
+    "Choose where the part starts.",
+    "Choose a part between 5 and 15 seconds long.",
+    "Choose 480p or 768p.",
+    "Use a whole-number seed, or leave it blank."
+   ],
+   "client": [
+    "Choose a clip at least 5 seconds long.",
+    "Could not read this video. Try an MP4.",
+    "Could not read a frame from this video."
+   ],
+   "server": {
+    "missingKey": "COMFY_API_KEY is not configured. (503)",
+    "submit": "502 with the error text",
+    "anchor": "400/502; the page then swaps without the anchor ('<error> Swapping without it…')"
+   },
+   "job": {
+    "missingNode": "This Comfy deployment is missing the “X” node. Add the custom nodes listed in build/model-files.md, publish a Build release, and redeploy.",
+    "other": "Comfy could not run this workflow. Check the deployment logs and try again."
+   },
+   "graph": [
+    "SAM found no subject. Adjust the subject text and inspect the mask preview.",
+    "SAM lost the selected person at frames [...]. Correct the selection or split the source shot before generating.",
+    "The upload does not contain a video stream.",
+    "Could not prepare the uploaded video: ...",
+    "Video must contain 1–3592 frames at 24 fps",
+    "Completed video does not cover the exact source timeline",
+    "Anchor conditioning requires an anchor image."
+   ]
+  },
+  "readmeLimits": [
+   "clips up to 100 MB, MP4 or MOV; part 5-15 s",
+   "one continuous shot; a hard cut breaks the swap at the cut",
+   "a person must be in the part's first frame",
+   "with several people the largest is swapped",
+   "a silent clip gives a silent result",
+   "reloading clears the job"
+  ],
+  "hardware": "run on a 96 GB GPU (RTX PRO 6000); smaller configurations have not been tested; 5 s at 480p took about two minutes on a warm worker",
+  "examples": {
+   "base": "https://media.comfy.org/website/workshop/openjutsu/examples",
+   "pairs": [
+    [
+     "singer",
+     "diva"
+    ],
+    [
+     "boxer",
+     "comfy-tee"
+    ],
+    [
+     "painter",
+     "ronin"
+    ],
+    [
+     "cowboy",
+     "chrome-robot"
+    ]
+   ],
+   "licence": "not stated; do not copy"
+  },
+  "comfyuiVersion": "98cc0bf84b7cb1383654c5b402e7612d875d6d22 (v0.41.0)"
+ },
+ "workflow": {
+  "file": "workflows/swap.api.json",
+  "nodeCount": 32,
+  "coreNodes": 22,
+  "packNodes": 10,
+  "derivedFrom": "akatz-labs/h3-character-swap-tool@0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b workflows/H3 Character Swap.api.json",
+  "changesFromAkatz": [
+   "swap LoRA V1 -> h3_character_swap_v1.5.safetensors",
+   "Video Slice (trim) before nodes 31 and 803",
+   "H3CharacterSwapOptionalAnchor (309) -> core LoadImage + ImageScale (center crop)",
+   "CreateVideo (808) + SaveVideo (809) after 807",
+   "mask preview 111/112 removed",
+   "31.resolution integer 768 (patched pack), 31.duration_seconds 5.0"
+  ],
+  "nodes": [
+   {
+    "id": "1",
+    "class": "UNETLoader",
+    "title": "H3 Ref2VA · INT8",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+     "weight_dtype": "default"
+    },
+    "links": {}
+   },
+   {
+    "id": "2",
+    "class": "MiniMaxH3SigmaShift",
+    "title": "H3 sampling shift",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "shift_video": 12,
+     "shift_audio": 3
+    },
+    "links": {
+     "model": [
+      "1",
+      0
+     ]
+    }
+   },
+   {
+    "id": "3",
+    "class": "ModelAttentionBackend",
+    "title": "Optimized attention",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "attention": "comfy kitchen attention"
+    },
+    "links": {
+     "model": [
+      "2",
+      0
+     ]
+    }
+   },
+   {
+    "id": "4",
+    "class": "LoraLoaderModelOnly",
+    "title": "FL2V Turbo · 8-step LoRA",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+     "strength_model": 1
+    },
+    "links": {
+     "model": [
+      "3",
+      0
+     ]
+    }
+   },
+   {
+    "id": "6",
+    "class": "CLIPLoader",
+    "title": "Qwen · H3 text encoder",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+     "type": "minimax",
+     "device": "default"
+    },
+    "links": {}
+   },
+   {
+    "id": "7",
+    "class": "VAELoader",
+    "title": "H3 video VAE",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "links": {}
+   },
+   {
+    "id": "8",
+    "class": "VAELoader",
+    "title": "H3 audio VAE",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "links": {}
+   },
+   {
+    "id": "9",
+    "class": "LoadImage",
+    "title": "2 · Character reference",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "image": "reference.png"
+    },
+    "links": {}
+   },
+   {
+    "id": "30",
+    "class": "LoadVideo",
+    "title": "1 · Source performance video",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "file": "source.mp4"
+    },
+    "links": {}
+   },
+   {
+    "id": "31",
+    "class": "H3CharacterSwapPrepareVideo",
+    "title": "Prepare · 24 fps / pixel budget",
+    "origin": "h3_character_swap pack",
+    "literals": {
+     "resolution": 768,
+     "duration_seconds": 5.0
+    },
+    "links": {
+     "video": [
+      "trim",
+      0
+     ]
+    }
+   },
+   {
+    "id": "58",
+    "class": "SelectCLIPDevice",
+    "title": "Text encoder device",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "device": "gpu:0"
+    },
+    "links": {
+     "clip": [
+      "6",
+      0
+     ]
+    }
+   },
+   {
+    "id": "100",
+    "class": "CheckpointLoaderSimple",
+    "title": "SAM 3.1 · model",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "links": {}
+   },
+   {
+    "id": "101",
+    "class": "CLIPTextEncode",
+    "title": "4 · Find the subject",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "text": "person"
+    },
+    "links": {
+     "clip": [
+      "100",
+      1
+     ]
+    }
+   },
+   {
+    "id": "102",
+    "class": "ImageFromBatch",
+    "title": "Detection frame · first frame",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "batch_index": 0,
+     "length": 1
+    },
+    "links": {
+     "image": [
+      "31",
+      0
+     ]
+    }
+   },
+   {
+    "id": "103",
+    "class": "SAM3_Detect",
+    "title": "Detect individual people",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "threshold": 0.35,
+     "refine_iterations": 2,
+     "individual_masks": true
+    },
+    "links": {
+     "model": [
+      "100",
+      0
+     ],
+     "image": [
+      "102",
+      0
+     ],
+     "conditioning": [
+      "101",
+      0
+     ]
+    }
+   },
+   {
+    "id": "104",
+    "class": "H3CharacterSwapSelectSubject",
+    "title": "Select the person to replace",
+    "origin": "h3_character_swap pack",
+    "literals": {
+     "selection": "largest",
+     "index": 0
+    },
+    "links": {
+     "masks": [
+      "103",
+      0
+     ]
+    }
+   },
+   {
+    "id": "105",
+    "class": "SAM3_VideoTrack",
+    "title": "Track selected person",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "detection_threshold": 0.5,
+     "max_objects": 1,
+     "detect_interval": 1
+    },
+    "links": {
+     "images": [
+      "31",
+      0
+     ],
+     "model": [
+      "100",
+      0
+     ],
+     "initial_mask": [
+      "104",
+      0
+     ],
+     "conditioning": [
+      "101",
+      0
+     ]
+    }
+   },
+   {
+    "id": "106",
+    "class": "SAM3_TrackToMask",
+    "title": "Selected track → mask",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "object_indices": ""
+    },
+    "links": {
+     "track_data": [
+      "105",
+      0
+     ]
+    }
+   },
+   {
+    "id": "107",
+    "class": "H3CharacterSwapRecoverMasks",
+    "title": "Recover empty frames · same as app",
+    "origin": "h3_character_swap pack",
+    "literals": {
+     "recover_empty_frames": true
+    },
+    "links": {
+     "source_frames": [
+      "31",
+      5
+     ],
+     "masks": [
+      "106",
+      0
+     ],
+     "images": [
+      "31",
+      0
+     ],
+     "model": [
+      "100",
+      0
+     ],
+     "conditioning": [
+      "101",
+      0
+     ],
+     "selection": [
+      "104",
+      1
+     ]
+    }
+   },
+   {
+    "id": "110",
+    "class": "H3CharacterSwapExpandMask",
+    "title": "Expand mask · matches the app",
+    "origin": "h3_character_swap pack",
+    "literals": {
+     "expansion_px": 64
+    },
+    "links": {
+     "source_frames": [
+      "31",
+      5
+     ],
+     "masks": [
+      "107",
+      0
+     ],
+     "images": [
+      "31",
+      0
+     ]
+    }
+   },
+   {
+    "id": "800",
+    "class": "H3CharacterSwapModels",
+    "title": "Shared models",
+    "origin": "h3_character_swap pack",
+    "literals": {},
+    "links": {
+     "model": [
+      "850",
+      0
+     ],
+     "clip": [
+      "58",
+      0
+     ],
+     "video_vae": [
+      "7",
+      0
+     ],
+     "audio_vae": [
+      "8",
+      0
+     ]
+    }
+   },
+   {
+    "id": "801",
+    "class": "H3CharacterSwapSettings",
+    "title": "5 · Prompt & audio guide",
+    "origin": "h3_character_swap pack",
+    "literals": {
+     "prompt": "Replace the selected person with the reference character. Preserve source performance, scene and audio timing.",
+     "seed": 904239,
+     "audio_guide": true,
+     "steps": 8,
+     "cfg": 1,
+     "sampler_name": "er_sde",
+     "scheduler": "normal",
+     "activation_memory_gib": 17
+    },
+    "links": {}
+   },
+   {
+    "id": "803",
+    "class": "H3CharacterSwapShot",
+    "title": "Prepare swap inputs",
+    "origin": "h3_character_swap pack",
+    "literals": {
+     "use_anchor": true,
+     "use_mask": true,
+     "shot_id": "character-swap"
+    },
+    "links": {
+     "source_frames": [
+      "31",
+      5
+     ],
+     "fps": [
+      "31",
+      6
+     ],
+     "source_video": [
+      "trim",
+      0
+     ],
+     "source": [
+      "31",
+      0
+     ],
+     "source_audio": [
+      "31",
+      1
+     ],
+     "reference": [
+      "9",
+      0
+     ],
+     "anchor": [
+      "anchor_fit",
+      0
+     ],
+     "body_mask": [
+      "110",
+      0
+     ]
+    }
+   },
+   {
+    "id": "805",
+    "class": "H3CharacterSwapWindowPlan",
+    "title": "Continuation · window / history",
+    "origin": "h3_character_swap pack",
+    "literals": {
+     "window_frames": "124",
+     "history_frames": "18"
+    },
+    "links": {
+     "shot": [
+      "803",
+      0
+     ],
+     "settings": [
+      "801",
+      0
+     ]
+    }
+   },
+   {
+    "id": "806",
+    "class": "H3CharacterSwapController",
+    "title": "6 · Generate character swap",
+    "origin": "h3_character_swap pack",
+    "literals": {},
+    "links": {
+     "models": [
+      "800",
+      0
+     ],
+     "shot": [
+      "803",
+      0
+     ],
+     "plan": [
+      "805",
+      0
+     ]
+    }
+   },
+   {
+    "id": "807",
+    "class": "H3CharacterSwapAssemble",
+    "title": "7 · Result with source audio",
+    "origin": "h3_character_swap pack",
+    "literals": {
+     "filename_prefix": "character-swap"
+    },
+    "links": {
+     "state": [
+      "806",
+      0
+     ],
+     "shot": [
+      "806",
+      1
+     ]
+    }
+   },
+   {
+    "id": "850",
+    "class": "LoraLoaderModelOnly",
+    "title": "Character Swap · V1 LoRA",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "lora_name": "h3_character_swap_v1.5.safetensors",
+     "strength_model": 1
+    },
+    "links": {
+     "model": [
+      "4",
+      0
+     ]
+    }
+   },
+   {
+    "id": "trim",
+    "class": "Video Slice",
+    "title": "The chosen part",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "start_time": 0,
+     "duration": 5.0,
+     "strict_duration": false
+    },
+    "links": {
+     "video": [
+      "30",
+      0
+     ]
+    }
+   },
+   {
+    "id": "anchor_image",
+    "class": "LoadImage",
+    "title": "First frame made by the app",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "image": "anchor.png"
+    },
+    "links": {}
+   },
+   {
+    "id": "anchor_fit",
+    "class": "ImageScale",
+    "title": "Anchor at the video's exact size",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "upscale_method": "lanczos",
+     "crop": "center"
+    },
+    "links": {
+     "image": [
+      "anchor_image",
+      0
+     ],
+     "width": [
+      "31",
+      2
+     ],
+     "height": [
+      "31",
+      3
+     ]
+    }
+   },
+   {
+    "id": "808",
+    "class": "CreateVideo",
+    "title": "Video for the app",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "fps": 24,
+     "bit_depth": 8,
+     "color_space": "sRGB",
+     "codec": "none"
+    },
+    "links": {
+     "images": [
+      "807",
+      0
+     ],
+     "audio": [
+      "807",
+      1
+     ]
+    }
+   },
+   {
+    "id": "809",
+    "class": "SaveVideo",
+    "title": "Save result",
+    "origin": "core ComfyUI 0.41 (live /object_info)",
+    "literals": {
+     "filename_prefix": "openjutsu/result",
+     "format": "mp4",
+     "format.codec": "h264"
+    },
+    "links": {
+     "video": [
+      "808",
+      0
+     ]
+    }
+   }
+  ],
+  "liveCheck": {
+   "server": "http://127.0.0.1:8188 ComfyUI 0.41.0 (core fc04da91), CPU, comfy-kitchen 0.2.37",
+   "method": "GET /object_info/<class> + static comparison of literal inputs (combos, min/max, required)",
+   "result": "all 22 core classes present; literals OK except model/upload file names (no weights here); ModelAttentionBackend 'comfy kitchen attention' and SelectCLIPDevice 'gpu:0' are outside the CPU combo lists but both nodes define validate_inputs for that input, so ComfyUI skips the combo check (execution.py L1032)",
+   "notChecked": "POST /prompt of the full graph (pack nodes not installed and must not be installed here); any run"
+  },
+  "bindings": {
+   "video": [
+    {
+     "node": "30",
+     "input": "file"
+    }
+   ],
+   "image": [
+    {
+     "node": "9",
+     "input": "image"
+    }
+   ],
+   "startTime": [
+    {
+     "node": "trim",
+     "input": "start_time"
+    }
+   ],
+   "duration": [
+    {
+     "node": "trim",
+     "input": "duration"
+    },
+    {
+     "node": "31",
+     "input": "duration_seconds"
+    }
+   ],
+   "resolution": [
+    {
+     "node": "31",
+     "input": "resolution",
+     "values": {
+      "unpatched": [
+       "480",
+       "768"
+      ],
+      "patched": [
+       480,
+       768
+      ]
+     }
+    }
+   ],
+   "prompt": [
+    {
+     "node": "801",
+     "input": "prompt"
+    }
+   ],
+   "seed": [
+    {
+     "node": "801",
+     "input": "seed"
+    }
+   ],
+   "anchorImage": [
+    {
+     "node": "anchor_image",
+     "input": "image",
+     "whenMissing": "delete nodes anchor_image and anchor_fit, delete 803.anchor, set 803.use_anchor=false"
+    }
+   ],
+   "maskPrompt": [
+    {
+     "node": "101",
+     "input": "text"
+    }
+   ],
+   "selection": [
+    {
+     "node": "104",
+     "input": "selection",
+     "values": [
+      "largest",
+      "leftmost",
+      "rightmost",
+      "index"
+     ]
+    }
+   ],
+   "subjectIndex": [
+    {
+     "node": "104",
+     "input": "index"
+    }
+   ],
+   "maskGrow": [
+    {
+     "node": "110",
+     "input": "expansion_px",
+     "min": 0,
+     "max": 256
+    }
+   ],
+   "audioGuide": [
+    {
+     "node": "801",
+     "input": "audio_guide"
+    }
+   ],
+   "useMask": [
+    {
+     "node": "803",
+     "input": "use_mask"
+    }
+   ],
+   "steps": [
+    {
+     "node": "801",
+     "input": "steps"
+    }
+   ],
+   "cfg": [
+    {
+     "node": "801",
+     "input": "cfg"
+    }
+   ],
+   "sampler": [
+    {
+     "node": "801",
+     "input": "sampler_name"
+    }
+   ],
+   "scheduler": [
+    {
+     "node": "801",
+     "input": "scheduler"
+    }
+   ],
+   "windowFrames": [
+    {
+     "node": "805",
+     "input": "window_frames",
+     "values": "strings 22..362 step 17"
+    }
+   ],
+   "historyFrames": [
+    {
+     "node": "805",
+     "input": "history_frames",
+     "values": "strings 0, 1, 18..341 step 17"
+    }
+   ],
+   "lora": [
+    {
+     "node": "850",
+     "input": "lora_name",
+     "whenNone": "delete 850 and set 800.model=[\"4\",0]"
+    }
+   ],
+   "loraStrength": [
+    {
+     "node": "850",
+     "input": "strength_model"
+    }
+   ],
+   "filenamePrefix": [
+    {
+     "node": "809",
+     "input": "filename_prefix"
+    }
+   ]
+  },
+  "outputs": [
+   {
+    "node": "809",
+    "kind": "video"
+   }
+  ],
+  "defaults": {
+   "resolution": "768",
+   "duration": 5,
+   "startTime": 0,
+   "maskPrompt": "person",
+   "selection": "largest",
+   "subjectIndex": 0,
+   "maskGrow": 64,
+   "audioGuide": true,
+   "useMask": true,
+   "steps": 8,
+   "cfg": 1,
+   "sampler": "er_sde",
+   "scheduler": "normal",
+   "activationMemoryGib": 17,
+   "windowFrames": "124",
+   "historyFrames": "18",
+   "shiftVideo": 12,
+   "shiftAudio": 3,
+   "loraStrength": 1,
+   "turboStrength": 1,
+   "samDetectThreshold": 0.35,
+   "samRefineIterations": 2,
+   "samTrackThreshold": 0.5,
+   "samMaxObjects": 1,
+   "fps": 24,
+   "seedAkatzWorkflow": 904239,
+   "seedAkatzApp": 194729
+  },
+  "prepareVideoOutputs": [
+   "reference_frames",
+   "source_audio",
+   "width",
+   "height",
+   "h3_length",
+   "source_frames",
+   "fps",
+   "summary",
+   "prepared_video"
+  ],
+  "windowPlans": {
+   "5s": {
+    "frames": 120,
+    "h3Length": 124,
+    "windows": 1
+   },
+   "7.5s": {
+    "frames": 180,
+    "h3Length": 192,
+    "windows": 2
+   },
+   "10s": {
+    "frames": 240,
+    "h3Length": 243,
+    "windows": 2
+   },
+   "12.5s": {
+    "frames": 300,
+    "h3Length": 311,
+    "windows": 3
+   },
+   "15s": {
+    "frames": 360,
+    "h3Length": 362,
+    "windows": 3
+   }
+  },
+  "maxFrames": 3592
+ },
+ "akatz": {
+  "repo": "https://github.com/akatz-labs/h3-character-swap-tool",
+  "commits": {
+   "openjutsuPin": "0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b (2026-10-16, last with worker_nodes/h3_character_swap)",
+   "latest": "5f83374bc4f6fbc458f369f5bbe058c4a65816dc (2026-10-17, H3 Relay 2.0 migration)"
+  },
+  "licences": {
+   "app": "MIT (Akatz Labs 2026)",
+   "appKit": "MIT",
+   "workflows": "MIT",
+   "nodes": "GPL-3.0 (h3_character_swap at 0670e4f; vendored H3 Relay archive at 5f83374); NVIDIA INT8 Triton kernel derivative Apache-2.0"
+  },
+  "qualifiedRuntime": "ComfyUI 79be670e2d9be63e238785af307369d2b9039ed1, frontend 1.53.6, Python 3.12, PyTorch 2.11.0 + CUDA 12.8, comfy-kitchen 0.2.35, Linux x86-64 NVIDIA; tested host RTX 4090 24 GB + 128 GB RAM (needs model offloading)",
+  "jobKinds": [
+   "cuts",
+   "transcribe",
+   "anchor",
+   "mask",
+   "mask_edit",
+   "render",
+   "segment_assemble",
+   "assemble",
+   "prompts",
+   "refine_plate",
+   "refine_extract",
+   "refine_mask",
+   "refine_face",
+   "refine_compose",
+   "backplate_anchor",
+   "backplate"
+  ],
+  "modes": [
+   {
+    "id": "batches-import",
+    "what": "batches; import .mp4 .mov .mkv .webm .avi by upload or server folder; normalize to 24 fps",
+    "limits": "clip <= 149.66 s (3592 frames)",
+    "fitsFuobe": "Library already holds clips; the 24 fps normalisation is inside the graph"
+   },
+   {
+    "id": "shots",
+    "what": "Detect edits (ffmpeg scene > 0.32), edit cuts, per shot Replace character (generate) / Keep original (preserve), layout history",
+    "fitsFuobe": "yes: warn about cuts in the part; optional per-shot replace/keep"
+   },
+   {
+    "id": "transcription",
+    "what": "install Whisper as a resource; Transcribe clip; words feed dialogue per shot/segment",
+    "fitsFuobe": "yes: Fuobe's ASR (Qwen3-ASR open, cloud transcription)"
+   },
+   {
+    "id": "character",
+    "what": "one reference image + written character description per clip",
+    "fitsFuobe": "yes: image + optional description ('Describe my character' with the text model)"
+   },
+   {
+    "id": "performance-prompt",
+    "what": "Build shot prompts from description, dialogue and speaker (target/other/offscreen/none); exact prompt editable per shot and segment",
+    "fitsFuobe": "yes"
+   },
+   {
+    "id": "scene-anchor",
+    "what": "import an anchor or Generate anchor with the local Codex image tool; variants, approval, anchor instructions, custom anchor base prompt (<= 20,000 chars)",
+    "fitsFuobe": "yes: GPT Image 2.5 Sunburst / Nano Banana Pro / Qwen-Image-Edit 2511"
+   },
+   {
+    "id": "who-to-swap",
+    "what": "SAM text (default 'person'); largest / leftmost / rightmost / index (0-100)",
+    "fitsFuobe": "yes"
+   },
+   {
+    "id": "masks",
+    "what": "Track masks, per-frame recovery, point corrections (include/exclude; Update frame / Track shot), versions, playback, approval; expansion 0-256 (64)",
+    "fitsFuobe": "yes: Click it -> SAM3_Detect positive/negative coords; Paint it -> saved NPZ mask (H3CharacterSwapLoadMask), unverified"
+   },
+   {
+    "id": "generation",
+    "what": "LoRA V1.5 / V1 / none; anchor on/off; masked generation on/off; render size 0.1-1.0 MP (0.5='480', 1.0='768'); seed; diffusion window 22..362; history 0,1,18..341; retry with model offloading",
+    "fitsFuobe": "yes (Advanced)"
+   },
+   {
+    "id": "segments",
+    "what": "5/10/15 s segments; split/move/merge; per segment dialogue, speaker, prompt, seed, Starts fresh / Continues previous (history), anchor mode scene / segment reference / none; Queue segment / all / from here; lossless continuation masters",
+    "limits": "a segment must fit one pass (<= 362 frames incl. boundary)",
+    "fitsFuobe": "partly: longer parts up to 30 s; per-segment controls later"
+   },
+   {
+    "id": "takes-review",
+    "what": "takes, favourites, Use this take, side-by-side comparisons, keep/maybe/skip with notes, Export decisions",
+    "fitsFuobe": "Library variants and compare"
+   },
+   {
+    "id": "assembly",
+    "what": "segment_assemble and assemble with the original audio",
+    "fitsFuobe": "existing joinWithSound plumbing"
+   },
+   {
+    "id": "finish-refine",
+    "what": "clean backplate (H3RelayPersonRemover + h3-removal-continuation/B-step2000 LoRA, 12 steps, strength 2.0, seed 904234), alpha extraction (templates/alpha.json, <= 145 frames), face protection (H3WorkbenchTrackFace), compose",
+    "status": "not runnable from the public release: templates/alpha.json and the removal-continuation LoRA are missing; UI says 'Raw assembly migration is pending'",
+    "fitsFuobe": "no (record only)"
+   },
+   {
+    "id": "workers",
+    "what": "local/SSH GPU workers, shared executor, auto placement, release idle worker, pause queue, cancel/stop",
+    "fitsFuobe": "Fuobe's ComfyUI settings (main + isolated worker)"
+   }
+  ],
+  "notInPublicTool": [
+   "performance transfer as a separate mode",
+   "outfit-only or face-only swap",
+   "automatic face tracking (needs the private H3 Performance provider H3PerformanceFacePrepare)"
+  ],
+  "anchorBrief": "Image 1 is the source frame to edit. Image 2 is character identity only: <description>. Replace ONLY <target> with that single character. Match the exact source pose, face angle, gaze, mouth opening, expression, limb placement, scale and occlusions. Preserve all other people, the entire original scene, camera framing, lighting and aspect ratio. Keep the reference identity and costume; do not copy the reference pose or background. One full-aspect edited source frame.",
+  "cleanBrief": "Remove the selected person (<selection>) from this source frame and reconstruct the empty background. Preserve camera framing, scene geometry, lighting, all unrelated people and objects. Produce a clean opening backplate at the exact same aspect ratio.",
+  "workflows": [
+   {
+    "id": "H3 Character Swap (pack)",
+    "path": "workflows/H3 Character Swap.json / .api.json @ 0670e4f",
+    "apiNodes": 30,
+    "canvasNodes": "36 incl. 6 notes",
+    "needs": "h3_character_swap pack, ffmpeg + ffprobe, 7 model files (V1 LoRA path)"
+   },
+   {
+    "id": "App render template",
+    "path": "templates/render.json @ 0670e4f",
+    "apiNodes": 19,
+    "needs": "the pack; an NPZ person mask in ComfyUI input"
+   },
+   {
+    "id": "H3 Character Swap (Relay 2.0)",
+    "path": "workflows/H3 Character Swap.api.json @ 5f83374 = akatz-ai/h3-relay example_workflows/toolkit/H3-Character-Swap.api.json",
+    "apiNodes": 45,
+    "canvasNodes": "43 executable + 5 notes",
+    "needs": "H3 Relay, ffmpeg + ffprobe, 7 files (V1.5 at loras/h3-v2-challenge-eval-20261013/v2-1000.safetensors)"
+   },
+   {
+    "id": "H3 Person Removal V1",
+    "path": "akatz-ai/h3-relay example_workflows/toolkit/H3-Person-Removal.api.json",
+    "apiNodes": 44,
+    "needs": "H3 Relay, Person Remover V1 LoRA, a clean first frame at the same size, 24 fps source with sides divisible by 32",
+    "defaults": {
+     "loraStrength": 1,
+     "windowFrames": "22",
+     "historyFrames": "18",
+     "steps": 12,
+     "sampler": "er_sde",
+     "scheduler": "simple",
+     "cfg": 1,
+     "seed": 904234,
+     "seedMode": "increment",
+     "maskGrowPx": 5,
+     "audio": "silent by default"
+    }
+   }
+  ]
+ },
+ "nodePack": {
+  "name": "h3_character_swap",
+  "repo": "https://github.com/akatz-labs/h3-character-swap-tool",
+  "path": "worker_nodes/h3_character_swap",
+  "pinnedCommit": "0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b",
+  "licence": "GPL-3.0-only (pyproject); NVIDIA INT8 kernel derivative Apache-2.0 (LICENSE-Apache-2.0); vendored context loop GPL-3.0 (NikoDemon80, ethanfel)",
+  "requirements": [
+   "numpy",
+   "scipy",
+   "Pillow",
+   "opencv-python-headless"
+  ],
+  "system": [
+   "ffmpeg (ffv1, pcm_s16le, libx264, aac)",
+   "ffprobe"
+  ],
+  "registered": [
+   "H3CharacterSwapPrepareVideo",
+   "H3CharacterSwapSelectSubject",
+   "H3CharacterSwapExpandMask",
+   "H3CharacterSwapRecoverMasks",
+   "H3CharacterSwapOptionalAnchor",
+   "H3CharacterSwapShot",
+   "H3CharacterSwapTrim",
+   "H3CharacterSwapMaskedRegeneration",
+   "H3CharacterSwapReference",
+   "H3CharacterSwapWorkspace",
+   "H3CharacterSwapLoadMask",
+   "H3CharacterSwapSaveMask",
+   "H3CharacterSwapRefineMask",
+   "H3CharacterSwapWindowInputs",
+   "H3CharacterSwapModels",
+   "H3CharacterSwapSettings",
+   "H3CharacterSwapWindowPlan",
+   "H3CharacterSwapHistory",
+   "H3CharacterSwapBodyWindow",
+   "H3CharacterSwapCheckpoint",
+   "H3CharacterSwapRestore",
+   "H3CharacterSwapAppend",
+   "H3CharacterSwapRun",
+   "H3CharacterSwapController",
+   "H3CharacterSwapAssemble"
+  ],
+  "inputs": {
+   "H3CharacterSwapPrepareVideo": {
+    "video": "VIDEO",
+    "resolution": "['480','768'] default '480' (patched: [480,768])",
+    "duration_seconds": "FLOAT 0..149.66 step 0.1, 0 = full clip"
+   },
+   "H3CharacterSwapSelectSubject": {
+    "masks": "MASK",
+    "selection": "largest|leftmost|rightmost|index",
+    "index": "INT >= 0"
+   },
+   "H3CharacterSwapExpandMask": {
+    "masks": "MASK",
+    "images": "IMAGE",
+    "source_frames": "INT",
+    "expansion_px": "INT 0..256 default 64"
+   },
+   "H3CharacterSwapRecoverMasks": {
+    "masks": "MASK",
+    "images": "IMAGE",
+    "model": "MODEL",
+    "conditioning": "CONDITIONING",
+    "selection": "H3_SUBJECT_SELECTION",
+    "source_frames": "INT",
+    "recover_empty_frames": "BOOLEAN default true"
+   },
+   "H3CharacterSwapOptionalAnchor": {
+    "image": "'(none)' or an input image"
+   },
+   "H3CharacterSwapShot": {
+    "source_video": "VIDEO",
+    "source": "IMAGE",
+    "source_audio": "AUDIO",
+    "source_frames": "INT",
+    "fps": "FLOAT",
+    "reference": "IMAGE",
+    "use_anchor": "BOOLEAN",
+    "use_mask": "BOOLEAN",
+    "shot_id": "STRING",
+    "optional": "anchor IMAGE, body_mask MASK, segment_mode BOOLEAN, history_file STRING (.npz), segment_reference IMAGE"
+   },
+   "H3CharacterSwapModels": {
+    "model": "MODEL",
+    "clip": "CLIP",
+    "video_vae": "VAE",
+    "audio_vae": "VAE"
+   },
+   "H3CharacterSwapSettings": {
+    "prompt": "STRING",
+    "seed": "INT 0..2^64-1 default 194731",
+    "audio_guide": "BOOLEAN true",
+    "steps": "INT 8",
+    "cfg": "FLOAT 1",
+    "sampler_name": "STRING er_sde",
+    "scheduler": "STRING normal",
+    "activation_memory_gib": "FLOAT 17 (0..128)"
+   },
+   "H3CharacterSwapWindowPlan": {
+    "shot": "H3_RELAY_SHOT",
+    "settings": "H3_RELAY_BODY_SETTINGS",
+    "window_frames": "strings 22..362 step 17 default '124'",
+    "history_frames": "strings 0,1,18..341 default '18'"
+   },
+   "H3CharacterSwapController": {
+    "models": "H3_RELAY_MODELS",
+    "shot": "H3_RELAY_SHOT",
+    "plan": "H3_RELAY_PLAN"
+   },
+   "H3CharacterSwapAssemble": {
+    "state": "H3_RELAY_STATE",
+    "shot": "H3_RELAY_SHOT",
+    "filename_prefix": "STRING [A-Za-z0-9_-]+"
+   },
+   "H3CharacterSwapLoadMask": {
+    "mask_file": "STRING person-mask.npz",
+    "images": "IMAGE",
+    "source_frames": "INT",
+    "expansion_px": "INT 0..256"
+   },
+   "H3CharacterSwapSaveMask": {
+    "masks": "MASK",
+    "filename_prefix": "STRING",
+    "frames": "INT"
+   },
+   "H3CharacterSwapRefineMask": {
+    "model": "MODEL",
+    "image": "IMAGE (one frame)",
+    "positive_coords": "JSON",
+    "negative_coords": "JSON",
+    "prior_file": "STRING",
+    "frame": "INT"
+   }
+  },
+  "leftOutOfRegistration": [
+   "relay/inputs.Shot (called directly)",
+   "video.py LabsH3PrepareVideo / LabsH3TrimOutput (own mapping; exposed as subclass and Trim alias)",
+   "vendor/context_loop MiniMaxH3MotionContext, MiniMaxH3LoopTrim, MiniMaxH3MotionContextSaveLatent, MiniMaxH3MotionContextLoadLatent (never imported by the pack)"
+  ],
+  "workbenchPack": {
+   "path": "worker_nodes/h3_workbench_masks",
+   "classes": [
+    "H3WorkbenchRefineMask",
+    "H3WorkbenchTrackFace",
+    "H3WorkbenchGenerationShot",
+    "H3WorkbenchGenerationBodyWindow",
+    "H3WorkbenchGenerationRun",
+    "H3WorkbenchGenerationController"
+   ],
+   "note": "app-only; automatic face tracking needs the private H3PerformanceFacePrepare provider; generation nodes target H3RelayPerformance* classes"
+  },
+  "runtimePack": {
+   "path": "worker_nodes/h3_workbench_runtime (latest only)",
+   "classes": [],
+   "note": "session cache hook only"
+  },
+  "provenance": {
+   "video.py": "h3-performance/core/video_prep.py",
+   "mask_geometry.py": "h3-performance/core/vendor/mask_geometry.py",
+   "masked_latent.py": "h3-performance/core/vendor/mask_nodes.py",
+   "sampling.py": "h3-performance/staging.py",
+   "identity.py": "h3-relay/h3_relay/removal_cache.py",
+   "planning.py": "h3-relay/h3_relay/windowed_edit.py",
+   "relay/*": "h3-relay/h3_relay/performance/*",
+   "masks.py": "h3_saved_masks/__init__.py",
+   "correction.py": "h3_workbench_masks/__init__.py",
+   "triton_int8_large.py": "h3_1mp_pilots/triton_int8_large.py",
+   "vendor/context_loop/*": "h3-relay/h3_relay/vendor/context_loop/*"
+  },
+  "h3PerformancePublic": false,
+  "openjutsuPatch": {
+   "file": "build/h3_character_swap.patch",
+   "lines": 175,
+   "licence": "GPL-3.0",
+   "date": "2026-10-16",
+   "changes": [
+    "new ffmpeg_tools.py: ensure_ffmpeg_on_path() links imageio-ffmpeg as ffmpeg on PATH when none is installed; probe_video_stream() reads width, height, SAR, rotation with PyAV",
+    "__init__.py calls ensure_ffmpeg_on_path() before importing nodes",
+    "video.py: ffprobe subprocess replaced by probe_video_stream(); resolution choices [480, 768] integers (default 480) so the Comfy app proxy can price on a numeric tier; prepare() converts back to str",
+    "requirements.txt and pyproject.toml add imageio-ffmpeg",
+    "SOURCE_PROVENANCE.json gains comfyDeploymentPatch"
+   ]
+  },
+  "unpatchedOnNormalComfyUI": "works by design with system ffmpeg AND ffprobe on PATH (Akatz's qualification); the graph must then send '480'/'768' strings; ComfyUI rejects integer 480 against ['480','768'] (value_not_in_list, execution.py combo check). Static API check against ComfyUI v0.41 (fc04da91) found every private H3 symbol the pack imports. This machine has /usr/bin/ffmpeg and ffprobe 6.1.1, PyAV 19.0.2, imageio-ffmpeg 0.6.0. INT8 kernel fix applies only to comfy-kitchen 0.2.35 (here 0.2.37).",
+  "install": "sparse-clone akatz-labs/h3-character-swap-tool at 0670e4f, copy worker_nodes/h3_character_swap to custom_nodes/h3_character_swap (build/model-files.md); optionally git apply -p1 build/h3_character_swap.patch"
+ },
+ "h3Relay": {
+  "repo": "https://github.com/akatz-ai/h3-relay",
+  "akatzPin": "8c313cc6bd23298be3b475d95a3af4cde6e7f10b (vendor tarball SHA-256 e61e0a8a582ae4fe9c4bd9c96e406838f84a55b455ea46977bc70f99a9ba7d38)",
+  "main": "e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220 (2.0.1, 2026-10-21)",
+  "licence": "GPL-3.0 (Sendy Software LLC and contributors); vendored Context Loop and Spectrum GPL-3.0, Hybrid Loader MIT; comfy-kitchen kernel derivative Apache-2.0",
+  "requires": "ComfyUI >= 0.37.0; FFmpeg + FFprobe on PATH",
+  "sideEffects": "registers HTTP routes and installs an in-memory H3 layout compatibility layer on import",
+  "classCount": 69,
+  "groups": {
+   "toolkit": [
+    "H3RelayPrepareSource",
+    "H3RelayWindowPlan",
+    "H3RelayWindowInputs",
+    "H3RelayApplyHistory",
+    "H3RelayApplyEditMask",
+    "H3RelayAppendWindow",
+    "H3RelayFinishWindows",
+    "H3RelayReviewWindows",
+    "H3RelaySelectMask",
+    "H3RelayExpandMask",
+    "H3RelayRecoverMasks",
+    "H3RelayLoadMask",
+    "H3RelaySaveMask",
+    "H3RelayRefineMask",
+    "H3RelayLoadHistory",
+    "H3RelaySaveHistory",
+    "H3RelayTextMemory",
+    "H3RelaySamplingMemory",
+    "LabsH3PrepareVideo",
+    "LabsH3TrimOutput"
+   ],
+   "personRemover": [
+    "H3RelayGreenMask",
+    "H3RelaySourceHistory",
+    "H3RelayRemovalWindow",
+    "H3RelayRemovalAppend",
+    "H3RelayRemovalRestore",
+    "H3RelayPersonRemover"
+   ],
+   "windowedEdit": [
+    "H3RelayEditWindow",
+    "H3RelayEditHistory",
+    "H3RelayEditAppend",
+    "H3RelayWindowedEdit"
+   ],
+   "longForm": [
+    "H3RelayH3HybridModelLoader",
+    "H3RelayH3ModelLoader",
+    "H3RelayFastH3VSAModelLoader",
+    "H3RelayLTXModelLoader",
+    "H3RelayLTXModelAdapter",
+    "H3RelayInterpolationModelLoader",
+    "H3RelayCacheManager",
+    "H3RelayModelLoRA",
+    "H3RelayAttention",
+    "H3RelaySequenceStart",
+    "H3RelayGenerateShot",
+    "H3RelayAcceptedRawLatent",
+    "H3RelayEnhanceShot",
+    "H3RelayUltimateEnhanceShot",
+    "H3RelayInterpolateShot",
+    "H3RelayAssembleRaw",
+    "H3RelayAssemble"
+   ],
+   "internal": 22
+  }
+ },
+ "gpu": {
+  "defaultFilesBytes": 46327436111,
+  "personRemovalBytes": 44371242903,
+  "tested": {
+   "openjutsu": "96 GB RTX PRO 6000 only",
+   "akatz": "24 GB RTX 4090 + 128 GB RAM with model offloading (full residency OOM at 22.05 GiB allocated)"
+  },
+  "flags": "--reserve-vram 0 --disable-dynamic-vram --enable-triton-backend --cache-classic (+ --highvram for full residency)",
+  "int8": "ComfyUI int8_tensorwise/convrot matmul everywhere except MPS, Intel XPU, DirectML, ixuca (supports_int8_compute)",
+  "nvfp4": "native only on NVIDIA compute capability >= 10 (supports_nvfp4_compute); otherwise disabled format -> full-precision matmul per layer (comfy/ops.py get_disabled_quant_formats)",
+  "fuobeGuidance": ">= 24 GB VRAM with offloading and ~64-128 GB RAM (inferred); 48 GB+ for 768p; Blackwell for full-speed NVFP4"
+ },
+ "models": [
+  {
+   "file": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+   "folder": "diffusion_models",
+   "bytes": 20970379616,
+   "sha256": "9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779",
+   "repo": "Comfy-Org/MiniMax-H3",
+   "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+   "akatzRevision": "e5eb578a89295337b8ff433a035929ce0279e0b6",
+   "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+   "licence": "MiniMax H3 Community License Agreement",
+   "role": "H3 Ref2VA diffusion model (pruned INT8 ConvRot)",
+   "default": true,
+   "vram": "INT8 matmul on CUDA/AMD/CPU (supports_int8_compute false only on MPS, Intel XPU, DirectML, ixuca)"
+  },
+  {
+   "file": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+   "folder": "text_encoders",
+   "bytes": 15687142551,
+   "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+   "repo": "Comfy-Org/MiniMax-H3",
+   "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+   "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+   "licence": "MiniMax H3 Community License Agreement (H3 packaging); base Qwen3-VL-32B Apache-2.0 per the licence's Additional Note",
+   "role": "H3 text encoder (CLIPLoader type minimax)",
+   "default": true,
+   "vram": "native NVFP4 matmul only on NVIDIA compute capability >= 10 (Blackwell); older GPUs run these layers at full precision (slower)",
+   "alternatives": [
+    {
+     "file": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+     "bytes": 27141342152,
+     "sha256": "bc2ced0fbea64757fa9acddccfc0b3f4819d1dcf1da6c124d690d368be283923"
+    },
+    {
+     "file": "qwen3vl_32b_minimax_h3_bf16.safetensors",
+     "bytes": 51506295256,
+     "sha256": "600d567f6a9629c8574e8e7041b199bdd9c59a986afa7906910a81919610607d"
+    }
+   ]
+  },
+  {
+   "file": "minimax_h3_video_vae_fp16.safetensors",
+   "folder": "vae",
+   "bytes": 5207808496,
+   "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+   "repo": "Comfy-Org/MiniMax-H3",
+   "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+   "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_video_vae_fp16.safetensors",
+   "licence": "MiniMax H3 Community License Agreement",
+   "role": "H3 video VAE",
+   "default": true
+  },
+  {
+   "file": "minimax_h3_audio_vae_fp32.safetensors",
+   "folder": "vae",
+   "bytes": 605254808,
+   "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+   "repo": "Comfy-Org/MiniMax-H3",
+   "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+   "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_audio_vae_fp32.safetensors",
+   "licence": "MiniMax H3 Community License Agreement",
+   "role": "H3 audio VAE",
+   "default": true
+  },
+  {
+   "file": "sam3.1_multiplex_fp16.safetensors",
+   "folder": "checkpoints",
+   "bytes": 1745546848,
+   "sha256": "9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03",
+   "repo": "Comfy-Org/sam3.1",
+   "revision": "7bb8374780a725b4353ed31f3a9395c9742b5621",
+   "url": "https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors",
+   "licence": "SAM License (Last Updated November 19, 2025)",
+   "role": "SAM 3.1 detection + tracking (and its CLIP for the subject text)",
+   "default": true
+  },
+  {
+   "file": "h3_character_swap_v1.5.safetensors",
+   "folder": "loras",
+   "bytes": 155110792,
+   "sha256": "8f2c3c3eba161df8d0c6099598b4730f641f5ce01e04cd16d2427cff8a35218f",
+   "repo": "akatz-ai/MiniMax-H3-Character-Swap-LoRA",
+   "revision": "d06323b7c8e70e97cdab48b78a1e05f786c8cba9",
+   "akatzRevision": "0f409f0c2a18f123f3985041ec52982c813f5a9c",
+   "akatzGraphPath": "loras/h3-v2-challenge-eval-20261013/v2-1000.safetensors",
+   "url": "https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/d06323b7c8e70e97cdab48b78a1e05f786c8cba9/h3_character_swap_v1.5.safetensors",
+   "licence": "MiniMax H3 Community License Agreement (repo LICENSE byte-identical to MiniMax's, SHA-256 59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44)",
+   "role": "Akatz Character Swap LoRA V1.5 (V2-1000), strength 1",
+   "default": true
+  },
+  {
+   "file": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+   "folder": "loras",
+   "bytes": 1956193000,
+   "sha256": "08cfe946033af7d27719b964b6e0a0e50c32138daabbd6ce4137e23df6bf9980",
+   "repo": "lightx2v/Minimax-h3-Turbo",
+   "revision": "3ec17a324ced54151364f24f8b5fb6bf7e26414f",
+   "url": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/3ec17a324ced54151364f24f8b5fb6bf7e26414f/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+   "licence": "Apache-2.0 (model card front matter at 3ec17a32; the main card 30f485ed drops the tag and the repo has no LICENSE file)",
+   "role": "FL2V Turbo 8-step LoRA, strength 1 (8 steps, CFG 1, er_sde, normal)",
+   "default": true
+  },
+  {
+   "file": "h3_character_swap_pro4500_1000.safetensors",
+   "folder": "loras",
+   "bytes": 155110320,
+   "sha256": "4b2a3f420ae804c0aa3422761ff84dbd1bf52eef6900ffab6d2e66df63cb4e79",
+   "repo": "akatz-ai/MiniMax-H3-Character-Swap-LoRA",
+   "revision": "a665bb7e3bb9804e487d2925f67744f554c8ad49",
+   "akatzGraphPath": "loras/h3-character-swap-v1/h3_character_swap_pro4500_1000.safetensors",
+   "url": "https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/a665bb7e3bb9804e487d2925f67744f554c8ad49/h3_character_swap_pro4500_1000.safetensors",
+   "licence": "MiniMax H3 Community License Agreement",
+   "role": "Character Swap LoRA V1 (alternative)",
+   "default": false
+  },
+  {
+   "file": "H3-Person-Remover-V1.safetensors",
+   "folder": "loras",
+   "bytes": 155110584,
+   "sha256": "b01dc9fe888c2f4e455a8eb3b4878dfd4038ee0e2320a7b186c7935e65c93ba5",
+   "repo": "akatz-ai/MiniMax-H3-Person-Remover-LoRA",
+   "revision": "fe136b3dc93aea993b9f194d48ea9859fdc2de14",
+   "url": "https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA/resolve/fe136b3dc93aea993b9f194d48ea9859fdc2de14/H3-Person-Remover-V1.safetensors",
+   "licence": "MiniMax H3 Community License Agreement",
+   "role": "H3 Relay Person Removal V1 (strength 1, 12 steps, er_sde/simple, 22-frame windows)",
+   "default": false
+  },
+  {
+   "file": "minimax_h3_ref2v_turbo_8step_v1.1_768p_comfyui_bf16.safetensors",
+   "folder": "loras",
+   "bytes": 1956193000,
+   "sha256": "e56863a7524e0300729cbb7b64cc8b548d90698c1abbf7d83898b0122fbe1e81",
+   "repo": "lightx2v/Minimax-h3-Turbo",
+   "revision": "30f485ed874aa44c8183348ad361c5eabad318da",
+   "licence": "not stated at main (no front-matter licence, no LICENSE file)",
+   "role": "newer Ref2V Turbo LoRA (2026-10-20), untested with the swap LoRA",
+   "default": false
+  },
+  {
+   "file": "loras/minimax_h3_character_swap_v1.1_ref2va_fro.safetensors",
+   "folder": "loras",
+   "bytes": 80673112,
+   "sha256": "ab21167bed71db99ac09527ad1f26f5f3517687ebf2e1f1bd5e91cc0bdf9b9c3",
+   "repo": "Alissonerdx/Minimax-H3-ComfyUI",
+   "revision": "f7910496f97c0acfbb1d7566ca29910a4301ecad",
+   "licence": "BFS Character Swap Community License 1.1 (commercial OK; attribution above US$1M revenue; no hosted API/SaaS/remote inference)",
+   "role": "another author's character swap LoRA (2026-10-18), alternative only",
+   "default": false
+  }
+ ],
+ "licences": [
+  {
+   "id": "minimax-h3-community",
+   "name": "MiniMax H3 Community License Agreement",
+   "date": "2026-08-02",
+   "licensor": "Nanonoble Pte. Ltd.",
+   "url": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE",
+   "bytes": 17604,
+   "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44",
+   "class": "regions",
+   "excludes": [
+    "European Union",
+    "United Kingdom",
+    "Republic of Korea",
+    "United States of America"
+   ],
+   "commercial": "allowed in the Applicable Territory; separate written authorization from MiniMax (api@minimax.io) if commercial products/services exceed US$20M yearly revenue; must prominently display 'MiniMax H3' on the UI of a commercial product or service that uses it",
+   "redistribution": "copy of the Agreement to recipients; mark modified files; NOTICE: 'MiniMax H3 is licensed under the MiniMax H3 Community License Agreement, Copyright © 2026 MiniMax. All Rights Reserved.'",
+   "encouraged": [
+    "'Powered by MiniMax H3' notice",
+    "AI-generation identifier on outputs",
+    "a public post"
+   ],
+   "restrictions": [
+    "comply with law and the Acceptable Use Policy (Exhibit A, 20 items)",
+    "bind recipients/users to terms at least as protective",
+    "no using the Works or Outputs to improve any other AI model",
+    "no use outside the Applicable Territory",
+    "service providers must keep safeguards and a reporting mechanism"
+   ],
+   "outputs": "MiniMax claims no rights over the Outputs",
+   "law": "Hong Kong SAR",
+   "appliesTo": [
+    "MiniMax H3 diffusion, VAEs, packaged encoder",
+    "Character Swap LoRA V1/V1.5",
+    "Person Remover V1"
+   ]
+  },
+  {
+   "id": "minimax-commercial-via-comfy",
+   "name": "MiniMax Commercial License (Comfy, official reseller)",
+   "url": "https://comfy.org/minimax/license/",
+   "professional": "from $5,000/month; ~46,250 video-seconds; $0.108/s in bundle; $0.036/s overage; up to 10 users; 1 domain; distilled open-weight versions; monthly",
+   "enterprise": "custom; no user cap; all versions incl. undistilled; 12-month minimum",
+   "note": "needed for the US, EU, UK, South Korea; Comfy Cloud subscriptions include commercial rights to outputs; not covered: reselling, marketplaces, API aggregators, inference-as-a-service; also https://platform.minimax.io/h3-license"
+  },
+  {
+   "id": "sam-license",
+   "name": "SAM License",
+   "date": "2025-11-19",
+   "url": "https://huggingface.co/Comfy-Org/sam3.1/blob/7bb8374780a725b4353ed31f3a9395c9742b5621/LICENSE",
+   "bytes": 7352,
+   "class": "conditions",
+   "summary": "non-exclusive, worldwide, royalty-free; distribute with a copy of the Agreement; acknowledge in publications; trade controls; no ITAR, military, nuclear, espionage or weapons uses; California law"
+  },
+  {
+   "id": "turbo-apache",
+   "name": "Apache-2.0",
+   "appliesTo": "lightx2v FL2V Turbo 8-step LoRA at 3ec17a32",
+   "note": "current main card (30f485ed) drops the licence tag; repo has no LICENSE file"
+  },
+  {
+   "id": "gpl-3.0-nodes",
+   "name": "GPL-3.0",
+   "appliesTo": [
+    "h3_character_swap pack",
+    "Openjutsu's patch",
+    "H3 Relay"
+   ]
+  },
+  {
+   "id": "mit-apps",
+   "name": "MIT",
+   "appliesTo": [
+    "Akatz app, App Kit and workflows (Akatz Labs 2026)",
+    "Openjutsu (Comfy Org 2026)"
+   ]
+  },
+  {
+   "id": "bfs-character-swap",
+   "name": "BFS Character Swap Community License 1.1",
+   "appliesTo": "Alissonerdx character swap LoRA v1.0/v1.1 (alternative)",
+   "summary": "commercial use allowed; attribution above US$1M revenue; no hosted API, SaaS or remote inference service"
+  }
+ ],
+ "hosted": {
+  "summary": "Hosted MiniMax H3 exists (fal, Replicate, MiniMax API, Comfy Router), including an H3 LoRA route that can load Akatz's swap LoRA and MiniMax's own person swap (H3 Max Recast). No hosted route does SAM-masked regeneration.",
+  "endpoints": [
+   {
+    "provider": "fal",
+    "id": "minimax/h3/reference-to-video/lora",
+    "role": "cloud half of the Fuobe Character swap Original",
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/reference-to-video/lora",
+    "inputs": {
+     "prompt": "string, required, <= 50,000; refer to Image 1, Video 1, Audio 1",
+     "loras": "required, 1-3 of {path: URL or HF owner/repo, weight_name, scale 0-4 default 1}",
+     "reference_image_urls": "<= 9",
+     "reference_video_urls": "<= 3, 2-15 s each, <= 15 s total",
+     "reference_audio_urls": "<= 3",
+     "duration": "integer 5-15, default 5",
+     "resolution": "480P|768P|2K|4K default 2K (2K/4K upscale a 768P result)",
+     "aspect_ratio": "adaptive|21:9|16:9|4:3|1:1|3:4|9:16 default adaptive",
+     "seed": "integer|null",
+     "prompt_expansion_mode": "disabled|fast|balanced|quality default balanced",
+     "enable_safety_checker": "default true",
+     "sync_mode": "default false",
+     "referencesTotal": "<= 12 files"
+    },
+    "output": [
+     "video",
+     "expanded_prompt"
+    ],
+    "price": {
+     "480p": 0.0625,
+     "768p": 0.075,
+     "2k": 0.1625,
+     "4k": 0.2,
+     "unit": "USD per second"
+    },
+    "fuobePayload": {
+     "loras": [
+      {
+       "path": "akatz-ai/MiniMax-H3-Character-Swap-LoRA",
+       "weight_name": "h3_character_swap_v1.5.safetensors",
+       "scale": 1
+      }
+     ],
+     "reference_video_urls": [
+      "<the part, 5-15 s>"
+     ],
+     "reference_image_urls": [
+      "<character>",
+      "<anchor, optional>"
+     ],
+     "duration": "ceil(seconds)",
+     "resolution": "480P|768P",
+     "aspect_ratio": "adaptive",
+     "prompt_expansion_mode": "disabled"
+    }
+   },
+   {
+    "provider": "fal",
+    "id": "minimax/h3-max/recast",
+    "role": "partner: MiniMax's own hosted person swap",
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max/recast",
+    "inputs": {
+     "video_url": "required, 5-30 s, no shot > 15 s",
+     "reference_image_urls": "required, 1-4 (one photo per new person; left to right by default)",
+     "prompt": "optional, <= 2,000 (who becomes whom)",
+     "resolution": "768P|1080P default 1080P",
+     "enhance_realism": "default false",
+     "seed": "integer >= 0|null",
+     "enable_safety_checker": "default true"
+    },
+    "output": [
+     "video",
+     "seed"
+    ],
+    "price": {
+     "768p": 0.3,
+     "1080p": 0.45,
+     "unit": "USD per second of output; reference images free"
+    }
+   },
+   {
+    "provider": "fal",
+    "id": "minimax/h3/reference-to-video",
+    "price": {
+     "480p": 0.05,
+     "768p": 0.06,
+     "2k": 0.13,
+     "4k": 0.16,
+     "unit": "USD per second; first 5 images free, then $0.08 each"
+    }
+   },
+   {
+    "provider": "fal",
+    "id": "minimax/h3-max/reference-to-video",
+    "price": {
+     "480p": 0.05,
+     "768p": 0.08,
+     "1080p": 0.16,
+     "unit": "USD per second + reference tokens over 4,096 at $0.02/1,000"
+    }
+   },
+   {
+    "provider": "replicate",
+    "id": "minimax/h3",
+    "inputs": [
+     "prompt",
+     "first_frame_image",
+     "last_frame_image",
+     "reference_image_urls",
+     "reference_video_urls",
+     "reference_audio_urls",
+     "duration 4-15",
+     "resolution 768P|2K",
+     "ratio"
+    ],
+    "price": {
+     "768p": 0.08,
+     "2k": 0.13,
+     "unit": "USD per second"
+    },
+    "source": "https://replicate.com/minimax/h3 (page; API schema not read)"
+   },
+   {
+    "provider": "minimax",
+    "id": "POST https://api.minimax.io/v2/video_generation",
+    "models": [
+     "MiniMax-H3",
+     "MiniMax-H3-Highspeed",
+     "MiniMax-H3-Lite",
+     "MiniMax-H3-Max"
+    ],
+    "inputs": "content[] items text/image_url/video_url/audio_url with role first_frame|last_frame|reference_image|reference_video|reference_audio; reference clips 2-15 s, <= 15 s total; duration 4-15 (Max 5-15); resolution per model",
+    "price": {
+     "MiniMax-H3": {
+      "768p": 0.08,
+      "2k": 0.13,
+      "inputVideoPerSecond": "same as output",
+      "imageBeyond5": 0.04
+     },
+     "MiniMax-H3-Highspeed": {
+      "768p": 0.06
+     },
+     "MiniMax-H3-Lite": {
+      "768p": 0.04,
+      "480p": 0.025
+     },
+     "MiniMax-H3-Max": {
+      "768p": 0.08,
+      "480p": 0.05,
+      "inputVideoPerSecond": {
+       "768p": 0.143,
+       "480p": 0.0553
+      },
+      "imageBeyond2": 0.074
+     },
+     "regeneration768to2k": 0.05
+    },
+    "note": "no swap task; the 'video regeneration' task upscales an H3 768P video to 2K"
+   },
+   {
+    "provider": "comfy-router",
+    "id": "minimax/minimax-h3",
+    "endpoint": "POST https://api.comfy.org/v2/models/minimax/minimax-h3",
+    "auth": "X-API-Key",
+    "inputs": "content[] (roles incl. reference_video, base_video), duration 4-15, resolution 2K|768P, ratio, seed, aigc_watermark, callback_url",
+    "output": "task.content.url (re-hosted 12 h)",
+    "price": "not published per model; billed as the provider bills Comfy"
+   },
+   {
+    "provider": "comfy-router",
+    "id": "fal/h3-max",
+    "note": "listed Text, Image, Video, Audio; documented schema: prompt, prompt_expansion_mode, duration, resolution 480P|768P, aspect_ratio, seed, enable_safety_checker, sync_mode",
+    "price": "not published"
+   }
+  ],
+  "existingFuobeSwapRoutes": [
+   {
+    "id": "kling-o3 (video-to-video edit)",
+    "price": "$0.168/s"
+   },
+   {
+    "id": "prunaai/p-video-replace",
+    "price": "$0.03/s"
+   },
+   {
+    "id": "fal-ai/wan-22-vace-fun-a14b/inpainting",
+    "price": "per second"
+   },
+   {
+    "id": "fal-ai/wan/v2.2-14b/animate/replace",
+    "price": "$0.04-0.08/s"
+   },
+   {
+    "id": "fal-ai/scail-2 (replacement)",
+    "price": "$0.20/s"
+   }
+  ]
+ },
+ "comfyPlatform": {
+  "deployments": {
+   "url": "https://{deployment}.run.comfy.app",
+   "api": "Comfy API v2 (/api/v2/assets, /api/v2/jobs, SSE events, cancel, logs)",
+   "auth": "Authorization: Bearer <api-key>",
+   "build": "comfy build init / push --release --target linux/nvidia; comfy deploy refs compute; --min/--max workers; --min 0 scales to zero",
+   "billing": "active workers per second while running; flex workers from start-up through a 30 s idle window; network storage per GB-month while any deployment of the Build exists in the region; builds stored free"
+  },
+  "prices": {
+   "source": "https://comfy.org/pricing (2026-10-27)",
+   "perHour": {
+    "RTX PRO 6000 96GB": 3.49,
+    "RTX PRO 6000 MIG 48GB": 1.75,
+    "H100 SXM 80GB": 6.23,
+    "H200 SXM 141GB": 7.71,
+    "B200 180GB": 11.23
+   },
+   "networkStoragePerGbMonth": 0.2,
+   "plans": {
+    "Standard": "$20/month, 5 builds, 2 deployments, <= 2 workers",
+    "Creator": "$35/month, same Comfy API limits",
+    "Pro": "$100/month, 10 builds, 5 deployments, <= 10 workers",
+    "Team": "$700/month, 40 builds, 20 deployments, <= 20 workers"
+   },
+   "note": "All available models can be used for commercial purposes",
+   "thisBuild": {
+    "storageGb": 46.33,
+    "storagePerMonth": 9.27,
+    "warm5s480pGpuUsd": 0.12
+   }
+  },
+  "sdk": {
+   "package": "@comfyorg/sdk",
+   "version": "0.5.0",
+   "published": "2026-10-10",
+   "licence": "MIT",
+   "tarballSha1": "20afbb1d143b8d4e35cb16b4a695bb8dfb19a341",
+   "deps": [
+    "zod",
+    "hash-wasm",
+    "eventsource-parser"
+   ],
+   "usedByOpenjutsu": [
+    "new Comfy({ apiKey, clientInfo: 'comfy-openjutsu' })",
+    "client.assets.fromBytes(bytes, { filename, contentType })",
+    "client.workflows.fromJson(graph)",
+    "client.submit(workflow)",
+    "client.jobs.get(id)",
+    "output.getDownloadUrl()",
+    "comfy.models.run('openai/gpt-image-2.5-sunburst', body)"
+   ],
+   "routes": {
+    "assets": [
+     "GET /api/v2/assets/by-hash/{hash}",
+     "POST /api/v2/assets/from-hash",
+     "POST /api/v2/assets (multipart)",
+     "GET /api/v2/assets/{id}",
+     "GET /api/v2/assets/{id}/content (302 to a signed URL ~6 h)",
+     "DELETE /api/v2/assets/{id}"
+    ],
+    "jobs": [
+     "POST /api/v2/jobs",
+     "GET /api/v2/jobs",
+     "GET /api/v2/jobs/{id}",
+     "GET /api/v2/jobs/{id}/events (SSE)",
+     "POST /api/v2/jobs/{id}/cancel",
+     "GET /api/v2/jobs/{id}/logs",
+     "GET /api/v2/jobs/{id}/workflow"
+    ],
+    "router": [
+     "POST https://api.comfy.org/v2/models/{provider}/{model}",
+     "…/requests (queue)",
+     "GET /v2/models",
+     "GET /v2/models/{provider}/{model}/openapi.json"
+    ]
+   },
+   "assetBinding": "{ __type: 'core/ASSET', info: { id, hash, file_path } } in a loader's file widget",
+   "partnerKey": "extra_data.api_key_comfy_org"
+  },
+  "router": {
+   "anchorModel": "openai/gpt-image-2.5-sunburst",
+   "anchorBody": {
+    "quality": "low",
+    "size": "auto",
+    "n": 1,
+    "moderation": "auto",
+    "image": "[frame, character] as data URLs"
+   },
+   "price": "not published per model (docs: billed when the provider bills Comfy; X-Comfy-Credits-Used on some models)"
+  },
+  "plainComfyUI": {
+   "answer": "no (as documented)",
+   "detail": "deployments serve the v2 API only; /prompt, /history, /ws are documented for ComfyUI itself and the deprecated v1 Cloud API, not for deployments. Fuobe's comfyui provider (Bearer token supported) calls /prompt, /history, /view, /upload/image and /ws, so it needs a v2 client ('comfyapi' provider) to drive a deployment. Untested: no deployment available."
+  }
+ },
+ "anchor": {
+  "openjutsu": {
+   "model": "openai/gpt-image-2.5-sunburst via Comfy Router",
+   "quality": "low",
+   "prompt": "Replace the person in image 1 with the character from image 2, including their face, hair, body and complete outfit exactly as shown in image 2. Do not keep any of the original person's clothing. Keep image 1's pose, framing, background and lighting.",
+   "frame": "grabbed in the browser at the part's start (canvas PNG)",
+   "graph": "LoadImage anchor_image -> ImageScale lanczos center crop to [31,2]x[31,3] -> 803.anchor; prompt adds 'Start from the first frame in <Picture 2>.'",
+   "fallback": "on any failure the swap runs without the anchor (nodes removed, use_anchor false)"
+  },
+  "akatz": {
+   "providers": [
+    "manual import",
+    "codex-local (Codex CLI builtin image generation)"
+   ],
+   "brief": "see akatz.anchorBrief",
+   "finding": "An anchor improved the opening frame but did not ensure sustained identity."
+  },
+  "fuobe": {
+   "cloud": [
+    {
+     "model": "gpt-image-2-5-sunburst",
+     "route": "fal openai/gpt-image-2.5/sunburst/edit",
+     "quality": "low",
+     "price": "token-priced (image $8/M input, $30/M output)"
+    },
+    {
+     "model": "nano-banana-pro",
+     "route": "fal-ai/nano-banana-pro/edit",
+     "price": "$0.15/image"
+    },
+    {
+     "model": "comfy-router openai/gpt-image-2.5-sunburst",
+     "when": "a Comfy key is set"
+    }
+   ],
+   "open": [
+    {
+     "workflow": "qwen-image-edit-2511-multi",
+     "model": "Qwen-Image-Edit 2511",
+     "licence": "Apache-2.0"
+    }
+   ],
+   "genjutsuToday": "four modes (Motion transfer, Object swap, Restyle, Insert); 4-30 s; pieces joined with the clip's sound; open people swap only via oss-vace-swap (SAM 3.1 + Wan 2.1 VACE, 81-frame windows)"
+  }
+ },
+ "plan": {
+  "package": "O5b · Character swap (in Fuobe Genjutsu)",
+  "mode": {
+   "id": "character",
+   "label": "Character swap",
+   "hint": "The person in your clip becomes your character; the performance, the scene and the clip's sound stay.",
+   "limits": {
+    "partSeconds": [
+     5,
+     15
+    ],
+    "sourceMaxSeconds": 30,
+    "clipMaxBytes": 209715200,
+    "images": 1,
+    "directionChars": 500,
+    "seed": [
+     0,
+     4294967295
+    ],
+    "qualities": [
+     "480p",
+     "768p"
+    ],
+    "qualityMap": {
+     "720p": "768p",
+     "1080p": "768p"
+    }
+   },
+   "controls": [
+    "who to swap: largest/leftmost/rightmost/#n + SAM words",
+    "click on the first frame -> SAM3_Detect positive/negative coords",
+    "mask grow 0-256 (64)",
+    "first frame on/off + model",
+    "character description (+ Describe my character)",
+    "speech: target/other/offscreen/none (+ transcript words)",
+    "Advanced: LoRA V1.5/V1/none, audio guide, masked generation, steps 8, CFG 1, window 124/history 18"
+   ]
+  },
+  "openWorkflows": [
+   {
+    "id": "video-character-swap-h3",
+    "graph": "Openjutsu swap.api.json with 31.resolution as string",
+    "pack": "h3_character_swap @ 0670e4f (unpatched)",
+    "output": "809 video"
+   },
+   {
+    "id": "video-character-swap-h3-noanchor",
+    "graph": "same without anchor_image/anchor_fit (or a provider hook dropping nodes whose binding is empty)"
+   },
+   {
+    "id": "video-character-swap-h3-relay",
+    "graph": "akatz-ai/h3-relay example_workflows/toolkit/H3-Character-Swap.api.json",
+    "pack": "h3-relay @ e2a7665b (2.0.1) or 8c313cc6 (Akatz's pin)",
+    "bindings": {
+     "video": "source.file",
+     "image": "reference.image",
+     "prompt": "reference_conditioning.prompt",
+     "seed": "plan.seed",
+     "resolution": "prepare.resolution ('480'|'768')",
+     "duration": "prepare.duration_seconds",
+     "maskPrompt": "subject.text",
+     "selection": "select.selection / select.index",
+     "maskGrow": "expand_mask.expansion_px",
+     "lora": "adapter.lora_name",
+     "filenamePrefix": "save.filename_prefix"
+    }
+   },
+   {
+    "id": "video-person-remove-h3-relay",
+    "graph": "akatz-ai/h3-relay example_workflows/toolkit/H3-Person-Removal.api.json",
+    "studio": "Remove object -> Remove a person (H3)"
+   }
+  ],
+  "installPins": {
+   "h3-relay": "https://github.com/akatz-ai/h3-relay e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220 (NODES table)",
+   "h3_character_swap": "sparse clone https://github.com/akatz-labs/h3-character-swap-tool @ 0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b, copy worker_nodes/h3_character_swap to custom_nodes/h3_character_swap",
+   "consider": "isolated worker for H3 Relay (routes + in-memory compat layer)"
+  },
+  "modelDefs": [
+   "oss-h3-character-swap",
+   "oss-h3-character-swap-relay",
+   "oss-h3-person-remove",
+   "fuobe-character-swap (Original: open -> oss-h3-character-swap; cloud -> fal minimax/h3/reference-to-video/lora)",
+   "h3-max-recast (partner, fal minimax/h3-max/recast)"
+  ],
+  "providerWork": [
+   "string resolution mapping",
+   "drop optional nodes (anchor) and LoRA none (rewire 800.model to [4,0])",
+   "SAM3_Detect points",
+   "prefetch the swap LoRA via src/server/loras.ts",
+   "optional comfyapi (Comfy API v2) provider for deployments, Comfy Cloud and comfy-api-proxy"
+  ],
+  "pricesShown": {
+   "open": "free on your GPU; needs >= 24 GB VRAM with offloading; ~2 min per 5 s at 480p on a warm RTX PRO 6000 (Openjutsu)",
+   "falH3Lora": "$0.0625/s 480p, $0.075/s 768p on ceil(seconds) (5 s 768p $0.375; 15 s $1.125)",
+   "recast": "$0.30/s 768p, $0.45/s 1080p (10 s 768p $3.00)",
+   "anchor": "GPT Image 2.5 Sunburst low (fal tokens) or Nano Banana Pro $0.15",
+   "comfyDeployment": "$3.49/h RTX PRO 6000 per GPU-second (~$0.12 warm 5 s 480p) + $9.27/month storage"
+  },
+  "verifyHere": {
+   "yes": [
+    "unit tests",
+    "static check of the 22 core nodes against /object_info (done)",
+    "manifest/bindings shape",
+    "prices",
+    "fal payloads against stored OpenAPI"
+   ],
+   "no": [
+    "POST /prompt of the H3 graphs (pack/H3 Relay nodes not installed and must not be installed here)",
+    "any run (46 GB weights, GPU)"
+   ]
+  },
+  "tests": [
+   "tests/character-swap.test.ts: prompt builder, part limits, seed, resolution strings, window counts 5s->1 10s->2 15s->3, cut warning",
+   "tests/genjutsu-comfy.test.ts: video-character-swap-h3 bindings, anchor removal, LoRA none rewiring, output 809",
+   "tests/genjutsu.test.ts: character mode makers per engine, chooseMaker picks the Original, plan anchor->swap->mux, anchor failure path, prices",
+   "tests/cloud-catalog-*.test.ts: fal H3 LoRA and Recast payloads vs OpenAPI",
+   "tests/comfy-library-6.test.ts: manifest models/sizes/pins/licence text; install-comfyui.sh pins",
+   "tests/licences.test.ts: MiniMax H3 Community -> regions with excludes and 'MiniMax H3' notice; GPL-3.0 packs; Turbo Apache-2.0",
+   "scripts/eval/cases/genjutsu.json: genjutsu/character-swap cases (open, cloud Original, Recast, Kling O3, P-Video)"
+  ]
+ },
+ "risks": [
+  "nothing ran: no GPU run, no paid call, no /prompt validation of the H3 graphs here; Akatz calls quality experimental (identity drift; generic prompts weak)",
+  "the h3_character_swap pack was removed upstream a day after 0670e4f in favour of H3 Relay; fixes land in H3 Relay only",
+  "resolution type: Openjutsu's graph needs the patched pack (integers); the unpatched pack needs strings",
+  "unpatched pack needs system ffmpeg and ffprobe; Assemble writes a second MP4 into output/H3-Character-Swap/",
+  "46.33 GB of weights; 24 GB GPUs need offloading and lots of RAM; NVFP4 native only on compute capability >= 10; INT8 kernel fix only for comfy-kitchen 0.2.35 (0.2.37 here; upstream fix comfy-kitchen PR #172 unverified)",
+  "comfyui-oss-4.md says single-head H3 LoRAs need core PR #17239; Openjutsu (v0.41.0) and Akatz (79be670e) report the swap LoRA working, so it seems not to apply; unverified here",
+  "H3 Relay registers HTTP routes and an in-memory H3 layout compatibility layer on import",
+  "licence information: MiniMax H3 territory exclusion (US, EU, UK, South Korea), US$20M revenue condition, 'display MiniMax H3', no Outputs to improve other models (affects training Fuobe LoRAs on other bases from H3 outputs), operator safeguards/reporting duties; Turbo LoRA licence tag dropped at main; BFS alternative forbids hosted inference",
+  "hosted: fal's H3 LoRA route has no mask and no steps control and integer durations; Recast is a closed MiniMax model; Comfy Router publishes no per-model prices; a Comfy deployment needs a v2 client",
+  "Openjutsu's example media have no stated licence"
+ ],
+ "sources": [
+  "https://github.com/Comfy-Org/comfy-openjutsu @ 70ec62df0eda7c58697ea3ac2050588513651583 (local clone /home/user/comfy-org/comfy-openjutsu)",
+  "https://github.com/akatz-labs/h3-character-swap-tool @ 0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b and 5f83374bc4f6fbc458f369f5bbe058c4a65816dc",
+  "https://github.com/akatz-ai/h3-relay @ e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220; vendor/h3-relay-8c313cc6bd23.tar.gz",
+  "https://huggingface.co/api/models/{repo}/tree/{revision} for Comfy-Org/MiniMax-H3, Comfy-Org/sam3.1, akatz-ai/MiniMax-H3-Character-Swap-LoRA, akatz-ai/MiniMax-H3-Person-Remover-LoRA, lightx2v/Minimax-h3-Turbo, MiniMaxAI/MiniMax-H3, Alissonerdx/Minimax-H3-ComfyUI",
+  "http://127.0.0.1:8188/object_info/<class> (ComfyUI 0.41.0, fc04da91) and /home/user/ComfyUI source",
+  "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/reference-to-video/lora (+ minimax/h3-max/recast, minimax/h3/reference-to-video, minimax/h3-max/reference-to-video)",
+  "https://fal.ai/models/minimax/h3/reference-to-video/lora/llms.txt ; https://fal.ai/models/minimax/h3-max/recast/llms.txt",
+  "https://replicate.com/minimax/h3",
+  "https://platform.minimax.io/docs/api-reference/video-generation-v2-create.md ; https://platform.minimax.io/docs/pricing/overview.md",
+  "https://comfy.org/pricing.md ; https://comfy.org/platform.md ; https://comfy.org/minimax/license/ ; https://comfy.org/open-source-higgsfield/",
+  "https://docs.comfy.org/development/comfy-router/models.md ; …/models/minimax/minimax-h3/code.md ; …/models/fal/h3-max/code.md ; …/models/openai/gpt-image-2-5-sunburst/code.md ; …/comfy-router/billing.md",
+  "https://docs.comfy.org/development/serverless/overview.md ; https://docs.comfy.org/api-reference/v2/overview.md ; https://docs.comfy.org/development/api-development/sdks-design.md ; https://platform.comfy.org/llms.txt",
+  "https://registry.npmjs.org/@comfyorg/sdk (0.5.0)"
+ ]
+}
