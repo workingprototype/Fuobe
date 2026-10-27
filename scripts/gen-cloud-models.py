@@ -929,6 +929,8 @@ model("scail-2", "SCAIL-2 (hosted)", "SCAIL", "scail", "video",
       [("motion-transfer", "fal-ai/scail-2", "fal", {"fixed": {"mode": "animation"}}),
        ("video-swap", "fal-ai/scail-2", "fal", {"fixed": {"mode": "replacement"}})],
       controls=[("subject_type", "Subject"), ("driving_type", "Driven by")], api_defaults={"prompt": _SCAIL_PROMPT},
+      # Words are optional: the API's own prompt (above) goes when none are given.
+      options={"promptOptional": True},
       pricing=("second", 0.2, "512p or 704p; output at 16 fps, up to 10 s a call"), defaults={"resolution": "512p"})
 model("wan-motion", "Wan Motion (hosted)", "Alibaba Wan", "wan", "video",
       "Wan-Animate with pose retargeting: the motion fitted to your character's proportions",

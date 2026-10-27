@@ -42,7 +42,8 @@ import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
 import { loraByFile, needsToken } from "@/lib/catalog/loras";
-import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, swapTarget } from "@/lib/catalog/genjutsu";
+import { packResolution, samCoords, SWAP_LORAS, windowFrames as h3WindowFrames, historyFrames as h3HistoryFrames } from "@/lib/catalog/character-swap";
+import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, ORIGINALS, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
 import { imageSize } from "@/lib/image-size";
@@ -906,13 +907,36 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     }
     if (b.prompt) values.prompt = REMOVE_SCENE;
   }
+  // Genjutsu's Character swap (MiniMax H3 on the h3_character_swap / H3 Relay packs): the part, the quality as the
+  // unpatched pack's string, who to swap (SAM words, largest / leftmost / rightmost / index, or clicks moved into H3's
+  // canvas), the swap LoRA's release, the window plan; the anchor first frame is images[1] (absent: its nodes go).
+  const characterSwap = manifest.capability === "video-character-swap";
+  let dropAnchor = false;
+  let dropSwapLora = false;
+  if (characterSwap) {
+    values.quality = packResolution(input.resolution);
+    if (extra.windowFrames !== undefined) extra.windowFrames = h3WindowFrames(Number(extra.windowFrames));
+    if (extra.historyFrames !== undefined) extra.historyFrames = h3HistoryFrames(Number(extra.historyFrames));
+    const lora = typeof extra.lora === "string" ? extra.lora : undefined;
+    delete extra.lora;
+    if (lora === "none") dropSwapLora = true;
+    else if (lora === "v1" || lora === "v1.5") values.lora = SWAP_LORAS[lora].file;
+    if (input.points?.length) {
+      if (!clip?.width || !clip.height) throw new ProviderError("Couldn't read the clip's size to place your clicks — pick who to swap instead");
+      const [pos, neg] = samCoords(input.points, { width: clip.width, height: clip.height }, input.resolution);
+      values.positiveCoords = pos;
+      values.negativeCoords = neg;
+    }
+    if (b.image2 && !values.image2) dropAnchor = true;
+    if (!values.prompt && typeof d.prompt === "string") values.prompt = d.prompt;
+  }
   // Genjutsu's Object swap: SAM 3.1 follows what goes (params.extra.maskPrompt, or the "replace … with" part of the prompt,
   // as Genjutsu sends it), the reference comes in, the prompt describes the result. Insert: the painted spot and the
   // reference, the prompt says what appears there. Neither graph takes clicked points.
-  if (ctx.op === "video-swap" || ctx.op === "video-insert") {
+  if ((ctx.op === "video-swap" || ctx.op === "video-insert") && !characterSwap) {
     if (input.points?.length && !input.mask && typeof extra.maskPrompt !== "string") throw new ProviderError(OPEN_TARGET_PROBLEM[ctx.op === "video-insert" ? "insert" : "swap"]!);
     const words = input.prompt?.trim() ?? "";
-    const vace = getMaker(ctx.op === "video-swap" ? "oss-vace-swap" : "oss-vace-insert")!;
+    const vace = getMaker(ctx.op === "video-swap" ? ORIGINALS.swap : "oss-vace-insert", "open")!;
     if (ctx.op === "video-swap" && b.maskPrompt) {
       const named = typeof extra.maskPrompt === "string" ? extra.maskPrompt.trim() : "";
       if (!named && !words) throw new ProviderError("Say what to swap, e.g. “the red car”");
@@ -967,8 +991,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
       }
     }
   }
+  // The Character swap without an anchor frame: its loader and fit are taken out after binding.
+  if (dropAnchor) left.push("image2");
   for (const [k, prev] of [["image2", "image"], ["image3", "image2"], ["image4", "image3"]] as const) {
-    if (rules.views || !b[k] || values[k] !== undefined || rules.required?.includes(k)) continue;
+    if (rules.views || !b[k] || values[k] !== undefined || rules.required?.includes(k) || left.includes(k)) continue;
     if (values[prev] === undefined && !left.includes(prev)) continue;
     const bypassed = b[k]!.length === 1 ? bypassReference(graph, b[k]![0].node) : null;
     if (bypassed) {
@@ -1003,6 +1029,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (bound.missing.length) throw new ProviderError(`Workflow ${manifest.id} bindings point at missing nodes: ${bound.missing.join(", ")}`);
   let wf = bound.workflow;
   const outputIds = manifest.outputs.map((o) => o.node);
+  if (dropAnchor) wf = withoutAnchor(wf, b.image2![0].node);
+  // LoRA "none": the swap LoRA's loader is linked out (H3 runs with the Turbo LoRA alone).
+  if (dropSwapLora && b.lora?.length === 1) wf = bypassNode(wf, b.lora[0].node, "model", outputIds);
   // FPS Boost to a lower rate, or one the clip divides into: no interpolation, only every n-th frame.
   if (finish.bypassInterpolation) {
     const id = Object.keys(wf).find((k) => wf[k].class_type === "FrameInterpolate");
@@ -1062,6 +1091,30 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     workflow: wf,
     meta: { workflowId: manifest.id, nodeCount: Object.keys(wf).length, prefix: `fuobe/${ctx.generationId}`, ...(metaBatch ? { metaBatch: true } : {}) },
   };
+}
+
+/**
+ * The Character swap graph without its anchor frame (Openjutsu's swapWorkflow): the anchor's loader and every node that
+ * reads only it go, the swap's input takes no anchor and its use_anchor switch is off.
+ */
+export function withoutAnchor(wf: ComfyWorkflow, loaderId: string): ComfyWorkflow {
+  const out = JSON.parse(JSON.stringify(wf)) as ComfyWorkflow;
+  const gone = new Set([loaderId]);
+  // The loader's direct readers that exist only to fit it (anchor_fit): an image node fed by nothing else.
+  for (const [id, n] of Object.entries(out)) {
+    const links = Object.values(n.inputs).filter((v) => Array.isArray(v)) as [string, number][];
+    if (links.some((v) => v[0] === loaderId) && n.class_type === "ImageScale") gone.add(id);
+  }
+  for (const id of gone) delete out[id];
+  for (const n of Object.values(out)) {
+    for (const [k, v] of Object.entries(n.inputs)) {
+      if (Array.isArray(v) && gone.has(String(v[0]))) {
+        delete n.inputs[k];
+        if ("use_anchor" in n.inputs) n.inputs.use_anchor = false;
+      }
+    }
+  }
+  return out;
 }
 
 /** Friendlier words for errors that a workflow's nodes report in their own terms. */

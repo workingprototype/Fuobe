@@ -1,12 +1,14 @@
 import "server-only";
 import { z } from "zod";
 import { getModel } from "@/lib/catalog";
+import { onEngine } from "@/lib/catalog/engines";
+import { ANCHOR_MODELS, anchorModel, CHARACTER_GPU, CHARACTER_LIMITS, CHARACTER_SWAP, characterLicenceLine, cutWarning, h3Windows, type CharacterOptions } from "@/lib/catalog/character-swap";
 import {
   chooseMaker,
+  cutsInPart,
   GENJUTSU,
   genjutsuProblem,
   genjutsuTitle,
-  getMaker,
   makersFor,
   MODE_TARGETS,
   planGenjutsu,
@@ -14,12 +16,14 @@ import {
   qualityFor,
   makerStepUsd,
   resolutionWords,
+  SOURCE_LABELS,
   type GenjutsuLook,
   type GenjutsuMode,
   type GenjutsuPlanInput,
   type GenjutsuTarget,
   type GenjutsuTier,
   type Maker,
+  type MakerSource,
 } from "@/lib/catalog/genjutsu";
 import { MASK_TRACKER, REMOVE_TOOLS, scalePoints, wholeClip, type RemoveRange, type RemoveSource } from "@/lib/catalog/remove-object";
 import { planSegments, type PlanStep } from "@/lib/catalog/shorts";
@@ -32,10 +36,10 @@ import { engineMode } from "./settings";
 import { probeSource, ShortsError } from "./shorts";
 
 /**
- * Genjutsu (/genjutsu): plans, prices and starts a Motion transfer, Object swap, Restyle or Insert
+ * Fuobe Genjutsu (/genjutsu): plans, prices and starts a Motion transfer, Character swap, Object swap, Restyle or Insert
  * (src/lib/catalog/genjutsu.ts) as one pipeline of ordinary generations: feature "genjutsu" for the finished video,
- * "genjutsu-step" for the cuts, tracks, pieces and joins. No table of its own: the page's history is a feed, and a
- * setup travels as a code (encodeSetup), not a row.
+ * "genjutsu-step" for the cuts, tracks, anchor frames, pieces and joins. No table of its own: the page's history is a
+ * feed, and a setup travels as a code (encodeSetup), not a row. No Higgsfield model runs here.
  */
 
 export { ShortsError as GenjutsuError };
@@ -43,14 +47,15 @@ export { ShortsError as GenjutsuError };
 export interface GenjutsuBody {
   engine: Engine;
   mode: GenjutsuMode;
-  /** The model picked (defaults per engine, mode and key). */
+  /** The model picked (defaults per engine and mode: the Fuobe Original). */
   modelId?: string;
-  /** Genjutsu Lite ("standard") or the full model ("high"). */
+  /** Lite ("standard") or the full Original ("high"). */
   tier?: GenjutsuTier;
   quality?: string;
   target?: GenjutsuTarget;
   /** Object swap: what goes. */
   subject?: string;
+  /** Guidance (Character swap: your direction). */
   prompt?: string;
   points?: PixelPoint[];
   /** The picture the points or the paint were made on (the first frame the browser showed). */
@@ -61,6 +66,10 @@ export interface GenjutsuBody {
   source: { url: string; name?: string; duration?: number; fps?: number; width?: number; height?: number; hasAudio?: boolean };
   range?: RemoveRange;
   seed?: number;
+  /** Character swap's settings. */
+  character?: CharacterOptions;
+  /** Hard cuts the browser found in the clip (seconds), for the "one continuous shot" warning. */
+  cuts?: number[];
 }
 
 const fileUrl = z.string().startsWith("/api/files/").max(500);
@@ -68,17 +77,33 @@ const seconds = z.number().finite().min(0).max(3600);
 const point = z.object({ x: z.number().finite().min(0).max(20000), y: z.number().finite().min(0).max(20000), label: z.enum(["positive", "negative"]).optional() });
 const look = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("preset"), id: z.string().max(80) }),
-  z.object({ kind: z.literal("higgsfield"), id: z.string().max(80), name: z.string().max(120).optional() }),
+  z.object({ kind: z.literal("soul"), id: z.string().max(80) }),
   z.object({ kind: z.literal("custom"), images: z.array(fileUrl).max(GENJUTSU.maxLookImages), words: z.string().max(300).optional() }),
 ]);
+const character = z.object({
+  who: z.enum(["largest", "leftmost", "rightmost", "index"]).optional(),
+  index: z.number().int().min(0).max(CHARACTER_SWAP.maxPeople - 1).optional(),
+  subject: z.string().max(120).optional(),
+  maskGrow: z.number().int().min(0).max(256).optional(),
+  anchor: z.boolean().optional(),
+  anchorModel: z.enum(["gpt-image-2-5-sunburst", "nano-banana-pro", "oss-qwen-edit"]).optional(),
+  description: z.string().max(CHARACTER_SWAP.maxDescriptionChars).optional(),
+  speech: z.enum(["character", "other", "offscreen", "none"]).optional(),
+  dialogue: z.string().max(2000).optional(),
+  lora: z.enum(["v1.5", "v1", "none"]).optional(),
+  audioGuide: z.boolean().optional(),
+  useMask: z.boolean().optional(),
+  windowFrames: z.number().int().min(22).max(362).optional(),
+  historyFrames: z.number().int().min(0).max(341).optional(),
+});
 
 /** The body of /api/genjutsu (and /estimate). */
 export const GenjutsuBodySchema = z.object({
   engine: z.enum(["cloud", "open"]),
-  mode: z.enum(["motion", "swap", "restyle", "insert"]),
+  mode: z.enum(["motion", "character", "swap", "restyle", "insert"]),
   modelId: z.string().max(80).optional(),
   tier: z.enum(["standard", "high"]).optional(),
-  quality: z.enum(["480p", "720p", "1080p"]).optional(),
+  quality: z.enum(["480p", "720p", "768p", "1080p"]).optional(),
   target: z.enum(["type", "click", "paint"]).optional(),
   subject: z.string().max(300).optional(),
   prompt: z.string().max(GENJUTSU.maxPromptChars).optional(),
@@ -98,6 +123,8 @@ export const GenjutsuBodySchema = z.object({
   }),
   range: z.object({ start: seconds, end: seconds }).optional(),
   seed: z.number().int().min(0).max(2 ** 48).optional(),
+  character: character.optional(),
+  cuts: z.array(seconds).max(200).optional(),
   /** A client nonce for one submit: a repeat gets the first answer (see once()). */
   requestId: z.string().trim().min(8).max(64).optional(),
 });
@@ -116,9 +143,6 @@ const mustMatchMode = (engine: Engine) => {
   }
 };
 
-/** A Higgsfield key is set (Genjutsu and Genjutsu Lite run on it). */
-export const higgsfieldReady = () => provider("higgsfield").isConfigured();
-
 interface Planned {
   input: GenjutsuPlanInput;
   maker: Maker;
@@ -127,7 +151,7 @@ interface Planned {
 
 async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<Planned> {
   mustMatchMode(body.engine);
-  const picked = chooseMaker({ engine: body.engine, mode: body.mode, target: body.target, tier: body.tier, look: body.look, modelId: body.modelId, higgsfield: higgsfieldReady() });
+  const picked = chooseMaker({ engine: body.engine, mode: body.mode, target: body.target, tier: body.tier, look: body.look, modelId: body.modelId });
   if ("problem" in picked) throw new ShortsError(picked.problem, 422);
   const maker = picked.maker;
   // The header's facts win over what the browser read (the estimate runs before the upload is read).
@@ -141,24 +165,26 @@ async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<
     // Sound we couldn't read counts as none (putting it back would fail after the work was paid for).
     hasAudio: opts.probe ? (info.hasAudio ?? false) : (body.source.hasAudio ?? false),
   };
-  const range = body.range ?? (source.duration ? { start: 0, end: Math.min(source.duration, GENJUTSU.maxSeconds) } : null);
+  // Character swap's part defaults to the first 15 s (Openjutsu's Length); the other modes take up to 30 s.
+  const longest = body.mode === "character" ? CHARACTER_SWAP.maxSeconds : GENJUTSU.maxSeconds;
+  const range = body.range ?? (source.duration ? { start: 0, end: Math.min(source.duration, longest) } : null);
   if (!range) throw new ShortsError("Reading the clip… try again in a moment");
   const target = MODE_TARGETS[body.mode].length ? (body.target ?? MODE_TARGETS[body.mode][0]) : undefined;
   const references = body.references ?? [];
   const clicks = (body.points ?? []).filter((p) => p.label !== "negative").length;
-  const problem = genjutsuProblem({ mode: body.mode, maker, source, range, references: references.length, target, subject: body.subject, prompt: body.prompt, points: clicks, mask: !!body.mask, look: body.look });
+  const problem = genjutsuProblem({ mode: body.mode, maker, source, range, references: references.length, target, subject: body.subject, prompt: body.prompt, points: clicks, mask: !!body.mask, look: body.look, seed: body.seed });
   if (problem) throw new ShortsError(problem, 422);
 
-  // Clicks on the first frame, in the clip's pixels; paint over several hosted VACE pieces is followed from its deepest points.
+  // Clicks on the first frame, in the clip's pixels; paint is followed from its deepest points (SAM 3.1 on fal).
   let points: PixelPoint[] | undefined;
   const size = source.width && source.height ? { width: source.width, height: source.height } : null;
   if (target === "click") points = body.frame && size ? scalePoints(body.points!.slice(0, GENJUTSU.maxPoints), body.frame, size) : body.points;
   const pieces = planMakerPieces(maker, source, range);
-  // Restyle on Fuobe's looks runs in the Shorts chain's segments.
-  const n = (body.mode === "restyle" && maker.looks === "fuobe" ? planSegments(range, maker.engine).length : pieces.length) || 1;
-  if (target === "paint" && maker.engine === "cloud" && body.mode === "swap" && n > 1) {
-    points = opts.probe ? await pointsFromPaint(body.mask!, source, "Paint over what to swap first") : [{ x: 1, y: 1, label: "positive" }];
-  }
+  // Restyle on Fuobe's looks runs in the Shorts chain's segments (the open Original and partners).
+  const shortsChain = body.mode === "restyle" && maker.looks === "fuobe" && !(maker.engine === "cloud" && maker.source === "original");
+  const n = (shortsChain ? planSegments(range, maker.engine).length : pieces.length) || 1;
+  const tracksPaint = maker.engine === "cloud" && body.mode === "swap" && target === "paint" && (maker.source === "original" || n > 1);
+  if (tracksPaint) points = opts.probe ? await pointsFromPaint(body.mask!, source, "Paint over what to swap first") : [{ x: 1, y: 1, label: "positive" }];
 
   const notes = notesFor(body, maker, source, range, n, references.length);
   const name = (body.source.name ?? "").replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, 40);
@@ -173,7 +199,7 @@ async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<
       title: name ? `${title} · ${name}` : title,
       source,
       range,
-      quality: body.quality ?? GENJUTSU.defaultQuality,
+      quality: body.quality ?? (body.mode === "character" ? CHARACTER_SWAP.defaultQuality : GENJUTSU.defaultQuality),
       references,
       target,
       subject: body.subject?.trim() || undefined,
@@ -182,6 +208,7 @@ async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<
       mask: target === "paint" ? body.mask : undefined,
       look: body.look,
       ...(body.seed !== undefined ? { seed: body.seed } : {}),
+      ...(body.mode === "character" ? { character: body.character ?? {} } : {}),
     },
   };
 }
@@ -191,31 +218,54 @@ function notesFor(body: GenjutsuBody, m: Maker, source: RemoveSource, range: Rem
   const name = getModel(m.id)?.name ?? m.label;
   const fps = source.fps ?? 30;
   const fuobeLook = body.mode === "restyle" && m.looks === "fuobe";
-  if (n > 1) {
+  const len = range.end - range.start;
+  if (body.mode === "character" && m.h3) {
+    const c = body.character ?? {};
+    if (m.engine === "open") {
+      const windows = h3Windows(len, c.windowFrames);
+      notes.push(`MiniMax H3 swaps it in ${windows} window${windows > 1 ? "s" : ""} of ${c.windowFrames ?? CHARACTER_SWAP.window} frames at 24 fps, each continuing the one before; the clip's sound stays`);
+    } else if (n > 1) notes.push(`fal's H3 takes up to 15 s a call: the part runs as ${n} pieces, joined with the clip's own sound. Each piece starts fresh (no history between them)`);
+    if (len > CHARACTER_SWAP.maxSeconds + 0.05) notes.push("Past 15 s is beyond what H3 was trained on: quality there is unverified");
+    if (m.h3.anchor && c.anchor !== false) {
+      const am = anchorModel(m.engine, c.anchorModel);
+      notes.push(`${am.label} first puts your character into the part's first frame${m.engine === "cloud" && n > 1 ? " (one per piece)" : ""}; if that fails the swap runs without it`);
+    } else if (!m.h3.anchor) notes.push(`${name} runs without an anchor frame`);
+    if (m.engine === "cloud") notes.push("On fal, H3 has no mask: who to swap is said in words, and the whole frame is regenerated around them");
+    if (body.points?.length && body.quality === "480p" && m.engine === "open") notes.push("Clicks are placed in H3's 480p frame by estimate: if the wrong person is picked, choose them by position instead");
+    const warn = cutWarning(cutsInPart(body.cuts, range));
+    if (warn) notes.push(warn);
+    notes.push(characterLicenceLine(m.engine, m.id));
+  } else if (body.mode === "character") {
+    notes.push(m.id === "h3-max-recast" ? characterLicenceLine(m.engine, m.id) : `${SOURCE_LABELS[m.source]}: ${m.note}`);
+    const warn = m.id === "h3-max-recast" ? null : cutWarning(cutsInPart(body.cuts, range));
+    if (warn) notes.push(warn);
+  }
+  if (n > 1 && body.mode !== "character") {
     if (m.engine === "open" && m.window) {
       notes.push(`${name} works on ${m.window.cap} frames at a time (${(m.window.cap / fps).toFixed(1)} s of this clip): it runs as ${n} windows, joined with the clip's own sound. Seams between windows aren't tested on a GPU yet`);
     } else if (fuobeLook) {
-      notes.push(`${name} restyles ${m.engine === "open" ? "5 s" : "up to 10 s"} at a time: the clip runs as ${n} segments, joined with its own sound`);
+      notes.push(`${name} restyles ${m.engine === "open" ? "5 s" : m.window ? `${m.window.cap} frames (${(m.window.cap / fps).toFixed(1)} s of this clip)` : "up to 10 s"} at a time: the clip runs as ${n} segments, joined with its own sound`);
     } else {
       const limit = m.window ? `${m.window.cap} frames (${(m.window.cap / fps).toFixed(1)} s of this clip)` : `${m.maxSeconds} s`;
       notes.push(`${name} takes up to ${limit} a call: the clip runs as ${n} pieces, joined with its own sound. Seams between pieces aren't tested yet`);
     }
   }
   if (body.mode !== "restyle" && refs > m.refs.max) notes.push(m.refs.max === 1 ? `${name} uses your first reference image` : `${name} takes ${m.refs.max} references — your first ${m.refs.max} go`);
-  if (fuobeLook && refs) notes.push("Character references go with Higgsfield's looks (Genjutsu Restyle); this look restyles what is filmed");
+  if (fuobeLook && refs) notes.push("Restyle changes the whole shot: character references aren't used — try Motion transfer or Character swap for a character");
   if (fuobeLook && body.look?.kind === "custom" && m.readsLookImages && body.look.images.length > m.readsLookImages) notes.push(`${name} reads ${m.readsLookImages} of your look's images`);
-  if (body.mode === "restyle" && m.looks === "higgsfield" && refs > m.refs.max) notes.push(`Genjutsu Restyle takes ${m.refs.max} character references — your first ${m.refs.max} go`);
-  const quality = body.quality ?? GENJUTSU.defaultQuality;
+  if (fuobeLook && body.look?.kind === "soul" && m.source === "original") notes.push("The Soul look's LoRAs restyle the first frame (Fuobe Soul's edit); every frame then follows it");
+  const quality = body.quality ?? (body.mode === "character" ? CHARACTER_SWAP.defaultQuality : GENJUTSU.defaultQuality);
   const res = resolutionWords(m, quality);
   if (res) notes.push(`${name} ${res}${m.qualities ? "" : " (it has no resolution setting)"}`);
   if (m.id === "wan-22-vace-inpaint") {
     notes.push(body.mode === "insert" ? "The spot stays where you painted it for the whole shot — best with a still or slow camera" : "Only the area you marked changes; SAM 3.1 follows it through the selection when it runs as pieces or you clicked");
   }
+  if (m.source === "original" && body.mode === "swap" && m.engine === "cloud") notes.push("SAM 3.1 follows what you named, clicked or painted through the selection; Wan VACE paints your reference into its mask");
+  if (m.billFps && m.engine === "cloud" && source.fps && source.fps > m.billFps + 0.5) notes.push(`fal bills this clip's ${Math.round(source.fps)} fps as ${(source.fps / m.billFps).toFixed(1)}× its length (video seconds at ${m.billFps} fps)`);
   if (m.id === "oss-vace-insert") notes.push("The spot stays where you painted it for the whole shot — best with a still or slow camera");
-  if (m.people) notes.push("P-Video Replace swaps the person on camera — for objects, pick Genjutsu or Kling O3");
-  if (m.higgsfield) notes.push(`${m.tier === "standard" ? "Genjutsu Lite" : "Genjutsu"} is at 50% off on Higgsfield right now (2026-10-22) — the price here is the list price`);
-  if (m.engine === "open") {
-    if (m.id === "oss-wan22-animate") notes.push("Wan Animate 2 needs a 24 GB GPU · Apache-2.0");
+  if (m.people && body.mode === "swap") notes.push(`${name} swaps the person on camera — for objects, pick Fuobe Genjutsu or Kling O3`);
+  if (m.engine === "open" && body.mode !== "character") {
+    if (m.modes.includes("motion")) notes.push("Wan Animate 2 needs a 24 GB GPU · Apache-2.0");
     else if (m.window) notes.push(`Wan 2.1 VACE 14B needs a 24 GB GPU · Apache-2.0${body.mode === "swap" ? " (SAM 3.1: Meta's SAM License)" : ""}`);
   }
   if (!wholeClip(range, source.duration)) notes.push("Only the selected part comes out (the rest of the clip isn't kept)");
@@ -230,12 +280,18 @@ const HELPER_WORDS: Record<string, string> = {
   [REMOVE_TOOLS.cloud.join]: "joining the pieces",
   [REMOVE_TOOLS.cloud.mux]: "putting the sound back",
   [MASK_TRACKER]: "following what you marked",
-  "extract-frame": "following what you marked",
+  "extract-frame": "taking the first frame",
   "scale-video": "fitting the clip",
+  "gpt-image-2-5-sunburst": "the first frame with your character",
+  "nano-banana-pro": "the first frame with your character",
 };
 
-/** The providers a step's model runs its operation on (any one of them will do). */
-const providersOf = (s: PlanStep): ProviderId[] => [...new Set((getModel(s.request.modelId)?.routes ?? []).filter((r) => !s.request.op || r.op === s.request.op).map((r) => r.provider))];
+/** The providers a step's model runs its operation on, on the step's engine (any one of them will do). */
+const providersOf = (s: PlanStep): ProviderId[] => {
+  const m = getModel(s.request.modelId);
+  const routes = m ? (s.request.engine ? onEngine(m, s.request.engine) : m).routes : [];
+  return [...new Set(routes.filter((r) => !s.request.op || r.op === s.request.op).map((r) => r.provider))];
+};
 
 const listWords = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 const cap = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
@@ -249,8 +305,8 @@ interface StepMode {
 /**
  * A run is all real or all a demo (chainMode in src/server/generations.ts): a real step after a demo one runs as a demo
  * too, a demo step after a real one fails, both after the paid steps were made. So when only some of the steps have a
- * provider — a Higgsfield key without fal for the cuts and joins, or fal without Higgsfield for Genjutsu — say which key
- * is missing (and the way around it) before anything is paid for.
+ * provider — Replicate's P-Video without fal for the cuts and joins, say — name the missing key (and the way around
+ * it) before anything is paid for.
  */
 function mixProblem(modes: StepMode[], cannot: boolean, input: GenjutsuPlanInput): string | null {
   const missing = modes.filter((x) => x.demo);
@@ -266,46 +322,35 @@ function mixProblem(modes: StepMode[], cannot: boolean, input: GenjutsuPlanInput
   if (own.length) parts.push(`${makerName} runs on ${label(ownIds)}`);
   if (helpers.length) {
     const jobs = [...new Set(helpers.map((x) => HELPER_WORDS[x.step.request.modelId] ?? getModel(x.step.request.modelId)?.name ?? x.step.request.modelId))];
-    parts.push(`${own.length ? listWords(jobs) : cap(listWords(jobs))} ${jobs.length > 1 || own.length ? "run" : "runs"} on ${label(helperIds)}`);
+    parts.push(`${own.length ? listWords(jobs) : cap(listWords(jobs))} ${jobs.length > 1 ? "run" : "runs"} on ${label(helperIds)}`);
   }
   // The fewest keys that cover it: one provider both need, else one for each.
   const both = ownIds.filter((id) => helperIds.includes(id));
   const key = !own.length ? `a ${label(helperIds)} key` : !helpers.length ? `a ${label(ownIds)} key` : both.length ? `a ${label(both.slice(0, 1))} key` : `a ${label(helperIds)} key and a ${label(ownIds)} key`;
-  const around = own.length ? otherModel(input) : oneCall(input);
+  const around = own.length ? otherModel(input) : undefined;
   return `${parts.join(", and ")} — add ${key} in Settings → API keys${around ? `, or ${around}` : ""}`;
 }
 
-/** Another model for the same job that doesn't need Higgsfield (the way around a missing Higgsfield key). */
+/** Another model for the same job that runs with the keys set now (the way around a missing key). */
 function otherModel(input: GenjutsuPlanInput): string | undefined {
-  const other = makersFor(input.engine, input.mode, input.target, input.look).find((x) => x.id !== input.maker.id && !x.higgsfield);
+  const runs = (id: string) => {
+    const m = getModel(id);
+    return !!m && onEngine(m, input.engine).routes.some((r) => provider(r.provider).isConfigured());
+  };
+  const other = makersFor(input.engine, input.mode, input.target).find((x) => x.id !== input.maker.id && x.pair !== input.maker.id && runs(x.id));
   return other ? `pick ${other.label}` : undefined;
-}
-
-/** How a Higgsfield model runs without fal's cuts and joins: the whole clip, in one call. */
-function oneCall(input: GenjutsuPlanInput): string | undefined {
-  const m = input.maker;
-  if (!m.higgsfield || !m.maxSeconds) return undefined;
-  const high = m.tier === "standard" && m.pair ? getMaker(m.pair) : undefined;
-  const d = input.source.duration;
-  const len = input.range.end - input.range.start;
-  const fits = (t: number | undefined, s: number | undefined) => t !== undefined && s !== undefined && t <= s + 0.05;
-  if (!wholeClip(input.range, d)) {
-    if (fits(d, m.maxSeconds)) return "use the whole clip";
-    if (high && fits(d, high.maxSeconds)) return `use the whole clip with Quality: High (up to ${high.maxSeconds} s in one call)`;
-    return `add a clip of ${high?.maxSeconds ?? m.maxSeconds} s or less and use all of it`;
-  }
-  if (high && fits(len, high.maxSeconds)) return `pick Quality: High (up to ${high.maxSeconds} s in one call)`;
-  return undefined;
 }
 
 /** Whether a step's model has no route it could run on now (demo mode off: it would refuse). */
 const unrunnable = (s: PlanStep) => !providersOf(s).some((id) => provider(id).isConfigured());
 
 /** What the steps cost together (null when a price is unknown) and whether they would run as a demo. */
-function price(steps: PlanStep[], input: GenjutsuPlanInput): { costUsd: number | null; demo: boolean; providers: ProviderId[] } {
+function price(steps: PlanStep[], input: GenjutsuPlanInput): { costUsd: number | null; demo: boolean; providers: ProviderId[]; tokenBilled: string[] } {
   let cost: number | null = 0;
   const modes: StepMode[] = [];
   const providers = new Set<ProviderId>();
+  // Steps fal bills by tokens (the Sunburst first frame): left out of the total, and named.
+  const tokenBilled = new Set<string>();
   let cannot = false;
   for (const s of steps) {
     let p: ReturnType<typeof previewChained>;
@@ -322,24 +367,30 @@ function price(steps: PlanStep[], input: GenjutsuPlanInput): { costUsd: number |
     }
     modes.push({ step: s, demo: p.demo });
     providers.add(p.providerId);
-    // Genjutsu's tiers and Kling O3's edit price aren't in the catalog per resolution: the planner's table.
+    // Kling O3's edit price isn't the catalog's: the planner's table.
     const own = p.demo ? null : makerStepUsd(s.request.modelId, s.request.params);
     const usd = own ?? p.costUsd;
+    const tokens = usd === null ? ANCHOR_MODELS.cloud.find((m) => m.id === s.request.modelId && m.tokens) : undefined;
+    if (tokens) {
+      tokenBilled.add(`${tokens.label}'s first frame is billed by tokens (${tokens.tokens}) and isn't in the price`);
+      continue;
+    }
     cost = cost === null || usd === null ? null : cost + usd;
   }
   const problem = mixProblem(modes, cannot, input);
   if (problem) throw new ShortsError(problem, 422);
-  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo: modes.some((x) => x.demo), providers: [...providers] };
+  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo: modes.some((x) => x.demo), providers: [...providers], tokenBilled: [...tokenBilled] };
 }
 
 export interface GenjutsuEstimate {
   costUsd: number | null;
   demo: boolean;
-  /** Where the steps run ("mock" for demo steps): the evaluation harness refuses a route through Higgsfield's API. */
+  /** Where the steps run ("mock" for demo steps). */
   providers: ProviderId[];
-  /** The model that runs (the default, or the one picked) and its tier. */
+  /** The model that runs (the default, or the one picked), its tier and where it comes from. */
   modelId: string;
   modelName: string;
+  source: MakerSource;
   tier?: GenjutsuTier;
   /** The resolution it is asked for (none: it keeps the clip's size). */
   quality?: string;
@@ -347,8 +398,10 @@ export interface GenjutsuEstimate {
   seconds: number;
   steps: number;
   notes: string[];
-  /** A Higgsfield key is set. */
-  higgsfield: boolean;
+  /** Character swap: anchor frames made, the limits, and the GPU the open route was tested on. */
+  anchors?: number;
+  limits?: string[];
+  gpu?: { weightsGb: number; tested: string; advice: string; speed: string };
 }
 
 export async function estimateGenjutsu(body: GenjutsuBody): Promise<GenjutsuEstimate> {
@@ -359,17 +412,22 @@ export async function estimateGenjutsu(body: GenjutsuBody): Promise<GenjutsuEsti
   } catch (e) {
     throw new ShortsError((e as Error).message, 422);
   }
+  const character = body.mode === "character";
+  const { tokenBilled, ...cost } = price(plan.steps, input);
   return {
-    ...price(plan.steps, input),
+    ...cost,
     modelId: maker.id,
     modelName: getModel(maker.id)?.name ?? maker.label,
+    source: maker.source,
     ...(maker.tier ? { tier: maker.tier } : {}),
     ...(qualityFor(maker, input.quality) ? { quality: qualityFor(maker, input.quality) } : {}),
     pieces: plan.pieces,
     seconds: Math.round((input.range.end - input.range.start) * 100) / 100,
     steps: plan.steps.length,
-    notes,
-    higgsfield: higgsfieldReady(),
+    notes: cost.demo ? notes : [...notes, ...tokenBilled],
+    ...(plan.anchors !== undefined ? { anchors: plan.anchors } : {}),
+    ...(character ? { limits: [...CHARACTER_LIMITS] } : {}),
+    ...(character && maker.h3 && maker.engine === "open" ? { gpu: { ...CHARACTER_GPU } } : {}),
   };
 }
 

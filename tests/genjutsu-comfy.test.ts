@@ -2,16 +2,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { getMaker, OPEN_TARGET_PROBLEM, planGenjutsu } from "@/lib/catalog/genjutsu";
+import { getMaker, OPEN_TARGET_PROBLEM, ORIGINALS, planGenjutsu } from "@/lib/catalog/genjutsu";
 import type { GenInput, Operation } from "@/lib/catalog/types";
 import type { MediaInfo } from "@/lib/media-probe";
 
-// The comfyui provider driving Genjutsu's open graphs (Wan 2.1 VACE swap / insert, Wan Animate 2), bound for real on
-// the library graphs, and a planned window going through it.
+// The comfyui provider driving Genjutsu's open graphs (Wan 2.1 VACE swap / insert, Wan Animate 2, MiniMax H3's
+// Character swap), bound for real on the library graphs, and planned steps going through it.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-genjutsu-comfy-"));
 process.env.FUOBE_DATA_DIR = tmp;
 process.env.COMFYUI_URL = "http://comfy.test:8188";
-const { prepareWorkflow } = await import("@/server/providers/comfyui");
+const { prepareWorkflow, withoutAnchor } = await import("@/server/providers/comfyui");
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const clip: MediaInfo = { container: "mp4", hasVideo: true, hasAudio: true, duration: 12, videoDuration: 12, width: 1280, height: 720, fps: 30, frames: 360 };
@@ -62,7 +62,7 @@ describe("Genjutsu's open graphs through the provider", () => {
     const plan = planGenjutsu({
       engine: "open",
       mode: "swap",
-      maker: getMaker("oss-vace-swap")!,
+      maker: getMaker(ORIGINALS.swap, "open")!,
       title: "t",
       source: { url: "/api/files/clip.mp4", duration: 12, fps: 30, width: 1280, height: 720, hasAudio: true },
       range: { start: 0, end: 12 },
@@ -85,5 +85,102 @@ describe("Genjutsu's open graphs through the provider", () => {
     expect(at(wf, "240", "file")).toBe("clip.mp4");
     expect(at(wf, "672:582", "text")).toBe("A knight in silver armour");
     expect([at(wf, "672:600", "resize_type.width"), at(wf, "672:600", "resize_type.height")]).toEqual([1280, 720]);
+  });
+});
+
+describe("Character swap's open graphs through the provider (MiniMax H3)", () => {
+  type Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+  const h3 = (input: Partial<GenInput>) => prepare("video-character-swap-h3", input, "video-swap").then((r) => r.workflow as Graph);
+  const relay = (input: Partial<GenInput>) => prepare("video-character-swap-h3-relay", input, "video-swap").then((r) => r.workflow as Graph);
+
+  it("the clip, the character, the part, the quality as the pack's string, the words and the seed", async () => {
+    const wf = await h3({ images: ["hero.png", "anchor.png"], startTime: 2, endTime: 9, resolution: "768p", seed: 77, prompt: "Replace the selected person in <Video 1> with the character in <Picture 1>." });
+    expect(at(wf, "30", "file")).toBe("clip.mp4");
+    expect(at(wf, "9", "image")).toBe("hero.png");
+    expect(at(wf, "anchor_image", "image")).toBe("anchor.png");
+    expect([at(wf, "trim", "start_time"), at(wf, "trim", "duration"), at(wf, "31", "duration_seconds")]).toEqual([2, 7, 7]);
+    expect(at(wf, "31", "resolution")).toBe("768");
+    expect(at(wf, "801", "prompt")).toBe("Replace the selected person in <Video 1> with the character in <Picture 1>.");
+    expect(at(wf, "801", "seed")).toBe(77);
+    expect(at(wf, "803", "use_anchor")).toBe(true);
+    expect(at(wf, "803", "anchor")).toEqual(["anchor_fit", 0]);
+    // The swap LoRA v1.5 by default; the output is the saved video.
+    expect(at(wf, "850", "lora_name")).toBe("h3_character_swap_v1.5.safetensors");
+    expect(wf["809"].class_type).toBe("SaveVideo");
+    const low = await h3({ images: ["hero.png"], startTime: 0, endTime: 5, resolution: "480p" });
+    expect(at(low, "31", "resolution")).toBe("480");
+  });
+
+  it("who to swap: SAM 3.1's words, largest / leftmost / rightmost / by number, the mask's margin", async () => {
+    const wf = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, extra: { selection: "index", subjectIndex: 2, maskPrompt: "the dancer", maskGrow: 32, useMask: false, audioGuide: false } });
+    expect(at(wf, "101", "text")).toBe("the dancer");
+    expect([at(wf, "104", "selection"), at(wf, "104", "index")]).toEqual(["index", 2]);
+    expect(at(wf, "110", "expansion_px")).toBe(32);
+    expect(at(wf, "803", "use_mask")).toBe(false);
+    expect(at(wf, "801", "audio_guide")).toBe(false);
+  });
+
+  it("clicks are moved into H3's canvas for SAM 3.1 (positive and negative)", async () => {
+    const wf = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, resolution: "768p", points: [{ x: 640, y: 360, label: "positive" }, { x: 10, y: 10, label: "negative" }] });
+    // 1280×720 → 1344×768 at 768p: the clip's middle stays the canvas's middle.
+    expect(JSON.parse(String(at(wf, "103", "positive_coords")))).toEqual([{ x: 672, y: 384 }]);
+    expect(JSON.parse(String(at(wf, "103", "negative_coords")))).toHaveLength(1);
+  });
+
+  it("the window plan as the pack's choices, and the LoRA's release (v1, or none: the Turbo LoRA alone)", async () => {
+    const wf = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, extra: { windowFrames: 120, historyFrames: 20, lora: "v1" } });
+    expect([at(wf, "805", "window_frames"), at(wf, "805", "history_frames")]).toEqual(["124", "18"]);
+    expect(at(wf, "850", "lora_name")).toBe("h3_character_swap_pro4500_1000.safetensors");
+    const bare = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, extra: { lora: "none" } });
+    expect(bare["850"]).toBeUndefined();
+    expect(at(bare, "800", "model")).toEqual(["4", 0]);
+  });
+
+  it("no anchor frame: its loader and fit go, the shot takes none and its switch is off", async () => {
+    const wf = await h3({ images: ["hero.png"], startTime: 0, endTime: 6 });
+    expect(wf.anchor_image).toBeUndefined();
+    expect(wf.anchor_fit).toBeUndefined();
+    expect(at(wf, "803", "anchor")).toBeUndefined();
+    expect(at(wf, "803", "use_anchor")).toBe(false);
+    expect(at(wf, "803", "reference")).toEqual(["9", 0]);
+    // withoutAnchor leaves a graph with no dangling links.
+    const ids = new Set(Object.keys(wf));
+    for (const n of Object.values(wf)) for (const v of Object.values(n.inputs)) if (Array.isArray(v) && typeof v[0] === "string") expect(ids.has(v[0])).toBe(true);
+    expect(withoutAnchor({ a: { class_type: "LoadImage", inputs: { image: "x" } }, b: { class_type: "Shot", inputs: { anchor: ["a", 0], use_anchor: true } } }, "a")).toEqual({ b: { class_type: "Shot", inputs: { use_anchor: false } } });
+  });
+
+  it("H3 Relay: the same part, quality, words, seed and who, on Akatz's relay graph", async () => {
+    const wf = await relay({ images: ["hero.png"], startTime: 1, endTime: 11, resolution: "480p", seed: 5, prompt: "Replace the selected person in <Video 1> with the character in <Picture 1>.", extra: { selection: "leftmost", maskPrompt: "the singer" } });
+    expect(at(wf, "source", "file")).toBe("clip.mp4");
+    expect(at(wf, "reference", "image")).toBe("hero.png");
+    expect([at(wf, "trim", "start_time"), at(wf, "trim", "duration"), at(wf, "prepare", "duration_seconds")]).toEqual([1, 10, 10]);
+    expect(at(wf, "prepare", "resolution")).toBe("480");
+    expect(at(wf, "plan", "seed")).toBe(5);
+    expect(at(wf, "reference_conditioning", "prompt")).toMatch(/<Picture 1>/);
+    expect([at(wf, "select", "selection"), at(wf, "subject", "text")]).toEqual(["leftmost", "the singer"]);
+    expect(wf.save.class_type).toBe("SaveVideo");
+  });
+
+  it("a planned open Character swap is what the graph is given", async () => {
+    const p = planGenjutsu({
+      engine: "open",
+      mode: "character",
+      maker: getMaker(ORIGINALS.character, "open")!,
+      title: "t",
+      source: { url: "/api/files/clip.mp4", duration: 12, fps: 30, width: 1280, height: 720, hasAudio: true },
+      range: { start: 2, end: 9 },
+      quality: "768p",
+      references: ["/api/files/hero.png"],
+      seed: 11,
+      character: { who: "rightmost", subject: "the drummer" },
+    });
+    const req = p.steps.find((s) => s.key === "swap")!.request;
+    const wf = (await prepare("video-character-swap-h3", { prompt: req.prompt, images: ["hero.png", "anchor.png"], ...req.params } as Partial<GenInput>, "video-swap")).workflow as Graph;
+    expect([at(wf, "trim", "start_time"), at(wf, "trim", "duration")]).toEqual([2, 7]);
+    expect(at(wf, "31", "resolution")).toBe("768");
+    expect([at(wf, "104", "selection"), at(wf, "101", "text")]).toEqual(["rightmost", "the drummer"]);
+    expect(at(wf, "801", "seed")).toBe(11);
+    expect(at(wf, "801", "prompt")).toMatch(/<Video 1>.*<Picture 1>.*<Picture 2>/s);
+    expect(at(wf, "anchor_image", "image")).toBe("anchor.png");
   });
 });

@@ -14398,7 +14398,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "512p",
         "704p"
       ],
-      "maxImages": 1
+      "maxImages": 1,
+      "promptOptional": true
     },
     "defaults": {
       "resolution": "512p"

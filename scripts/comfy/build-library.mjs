@@ -15,7 +15,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SPEC, KNOWN_MODELS, CUSTOM_NODE_REPOS } from './library.spec.mjs';
+import { SPEC, KNOWN_MODELS, CUSTOM_NODE_REPOS, PACK_CLASSES } from './library.spec.mjs';
 import * as G from './lib/graph.mjs';
 import { resolveSource } from './export-templates.mjs';
 
@@ -122,6 +122,8 @@ export const BINDING_KEYS = new Set([
   'every', 'slowdown', 'shortSide', 'colorSpace',
   // Fuobe Soul (Originals O2): image to image at Soul's tier
   'megapixels',
+  // Genjutsu's Character swap (Originals O5): MiniMax H3 with the h3_character_swap / H3 Relay packs
+  'quality', 'selection', 'subjectIndex', 'positiveCoords', 'negativeCoords', 'audioGuide', 'useMask', 'windowFrames', 'historyFrames',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
@@ -253,7 +255,9 @@ async function main() {
     for (const id of G.outputNodeIds(graph, objectInfo)) if (!outIds.includes(id)) delete graph[id];
     G.prune(graph, objectInfo, outIds);
     graph = G.sortGraph(graph);
-    errs.push(...G.lint(graph, objectInfo));
+    // Classes of a pack this server doesn't have (spec.packs, PACK_CLASSES) are expected: the entry names the pack instead.
+    const packClass = (cls) => (spec.packs || []).some((p) => PACK_CLASSES[p]?.test(cls));
+    errs.push(...G.lint(graph, objectInfo).filter((e) => !/ not installed$/.test(e) || !packClass(e.match(/class (.+) not installed$/)?.[1] ?? '')));
 
     // ---- bindings
     const bindings = { ...spec.bindings };
@@ -312,7 +316,8 @@ async function main() {
         if (models.has(val)) continue;
         const m = metaByName[val];
         const known = KNOWN_MODELS[val];
-        const url = m?.url || known?.url;
+        // A workflow may pin its own revision of a shared file (spec.modelUrls: the same bytes at a researched commit).
+        const url = spec.modelUrls?.[val] || m?.url || known?.url;
         if (m?.directory && m.directory !== folder) errs.push(`model ${val}: template says ${m.directory}, loader reads ${folder}`);
         if (!url) errs.push(`model ${val} (${folder}): no download URL known`);
         const size = url ? await hfSize(url, sizeCache) : null;
@@ -345,6 +350,8 @@ async function main() {
       const m = mod.match(/^custom_nodes\.([^.]+)/);
       if (m) custom.add(m[1]);
     }
+    // Packs this server doesn't have installed (their classes have no python_module here): declared by the entry.
+    for (const p of spec.packs || []) custom.add(p);
     const customNodes = [...custom].sort().map((name) => ({ name, repo: CUSTOM_NODE_REPOS[name] || null }));
     for (const c of customNodes) if (!c.repo) errs.push(`custom node pack ${c.name} has no repo URL`);
 

@@ -43,6 +43,7 @@ import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
@@ -756,9 +757,13 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
  * "prompt" slot can't be told from the prompt, so it stays.
  */
 export function unfilledRequest(req: GenerationRequest, deps: number): GenerationRequest {
-  const { chainFilled, ...rest } = req;
-  if (!chainFilled) return rest;
-  const slots = slotsFor(rest, deps);
+  const { chainFilled, chainSkipped, ...rest } = req;
+  // A fallback's notice belongs to the run that fell back, not to a retry.
+  delete rest.notice;
+  if (!chainFilled) return chainSkipped ? { ...rest, ...(chainSkipped.prompt !== undefined ? { prompt: chainSkipped.prompt } : {}) } : rest;
+  // Optional slots left out filled nothing; the fallback's prompt goes back to the one planned.
+  if (chainSkipped?.prompt !== undefined) rest.prompt = chainSkipped.prompt;
+  const slots = filledSlots({ ...rest, chainSkipped }, deps);
   const inputs = { ...rest.inputs };
   for (const k of ["images", "videos", "audios"] as const) {
     const count = (pos: "first" | "last") => slots.filter((s) => s.slot === k && (s.position ?? "last") === pos).length;
@@ -849,26 +854,57 @@ function dropUnused(ids: string[]): void {
   }
 }
 
+/**
+ * A step with optional inputs whose steps failed (ChainSlot.optional): its chain without those slots, the fallback's
+ * prompt and notice, and what was left out (so a retry can put the request back as it was: unfilledRequest).
+ */
+export function withoutSkipped(req: GenerationRequest, slots: ChainSlot[], skipped: number[]): GenerationRequest {
+  const left = skipped.map((i) => slots[i]);
+  const prompt = left.map((s) => s.optional?.prompt).find((p) => p !== undefined);
+  const notice = [req.notice, ...left.map((s) => s.optional?.notice)].filter(Boolean).join(" · ");
+  return {
+    ...req,
+    chainSkipped: { slots: skipped, ...(prompt !== undefined && req.prompt !== undefined ? { prompt: req.prompt } : {}) },
+    ...(prompt !== undefined ? { prompt } : {}),
+    ...(notice ? { notice } : {}),
+  };
+}
+
+/** The chain slots a step fills: its own, less the optional ones left out (chainSkipped). */
+const filledSlots = (req: GenerationRequest, n: number): ChainSlot[] => slotsFor(req, n).filter((_, i) => !req.chainSkipped?.slots.includes(i));
+
 /** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
 async function advanceDependents(): Promise<void> {
   const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
   for (const r of rows) {
     if (submitting().has(r.id)) continue;
-    const request = JSON.parse(r.request_json) as GenerationRequest;
-    const ids = depIds(r.depends_on);
-    const slots = slotsFor(request, ids.length);
-    const deps = ids.map((id) => db().prepare("SELECT status, provider, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json"> | undefined);
-    const earlier = request.frame ? "The previous frame" : "An earlier step";
+    const stored = JSON.parse(r.request_json) as GenerationRequest;
+    const allIds = depIds(r.depends_on);
+    const allSlots = slotsFor(stored, allIds.length);
+    const allDeps = allIds.map(
+      (id) => db().prepare("SELECT status, provider, outputs_json, request_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json" | "request_json"> | undefined,
+    );
+    const earlier = stored.frame ? "The previous frame" : "An earlier step";
     const fail = (error: string) => {
       update(r.id, { status: "failed", error, message: null, completed_at: Date.now() });
       // Steps waiting only to feed this one (the other lanes of a per-frame render) are dropped before they are paid for.
-      dropUnused(ids);
+      dropUnused(allIds);
     };
-    if (deps.some((d) => !d || d.status === "failed" || d.status === "canceled")) {
-      fail(waitedOnFailure(!!request.frame));
+    const broken = (d: (typeof allDeps)[number]) => !d || d.status === "failed" || d.status === "canceled";
+    // An optional input whose step failed is left out (Genjutsu's anchor frame): the step runs without it.
+    const skipped = allSlots.flatMap((s, i) => (s.optional && broken(allDeps[i]) ? [i] : []));
+    if (allDeps.some((d, i) => broken(d) && !skipped.includes(i))) {
+      fail(waitedOnFailure(!!stored.frame));
       continue;
     }
+    const keep = (_: unknown, i: number) => !skipped.includes(i);
+    const deps = allDeps.filter(keep);
+    const slots = allSlots.filter(keep);
     if (deps.some((d) => d!.status !== "succeeded")) continue;
+    const request = skipped.length ? withoutSkipped(stored, allSlots, skipped) : stored;
+    // What changed upstream (an earlier fallback) is said on this step too, down to the finished result.
+    const notices = [request.notice, ...deps.map((d) => (JSON.parse(d!.request_json) as GenerationRequest).notice)].filter((x): x is string => !!x);
+    if (notices.length) request.notice = [...new Set(notices)].join(" · ");
     const outputs = deps.map((d) => JSON.parse(d!.outputs_json) as OutputFile[]);
     const short = slots.map((s, i) => listShortfall(outputs[i], s)).find(Boolean);
     if (short) {
@@ -889,7 +925,9 @@ async function advanceDependents(): Promise<void> {
       const model = getModel(request.modelId);
       if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
       if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
-      const original: GenerationRequest = { ...withChainInputs(request, values as string[]), chainFilled: true };
+      // Filled with the slots that have an input; stored with its whole chain (and what was skipped) for a retry.
+      const filled = withChainInputs({ ...request, chain: slots }, values as string[]);
+      const original: GenerationRequest = { ...filled, chain: request.chain, chainFilled: true };
       const prepared = prepare(original);
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
       if (mode.error) throw new Error(mode.error);
@@ -1006,8 +1044,9 @@ async function submit(
     // file mirrored once to the provider's storage (the civitai key never leaves this server).
     if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
       input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
-    } else if (input.loras?.length && providerId === "comfyui") {
-      await ensureLorasOnComfy(input.loras, await comfyLoraFiles(route), (message) => update(id, { message }));
+    } else if (providerId === "comfyui" && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
+      // A graph that loads its own LoRAs (Genjutsu's Character swap: the Turbo and swap LoRAs) gets them downloaded too.
+      await ensureLorasOnComfy([...(input.loras ?? []), ...graphLoras(route.endpoint, input.extra)], await comfyLoraFiles(route), (message) => update(id, { message }));
     }
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
     const now = Date.now();

@@ -575,6 +575,18 @@
     "error": null,
     "at": "2026-10-23T16:47:53.446Z"
   },
+  "video-character-swap-h3": {
+    "sha256": "37496982555a84ada4ccb22a155639d6ed8817b0cf0a868aa1497bd05c1c9de2",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'Prepare · 24 fps / pixel budget' not found. The custom node may not be installed. (Node ID '#31')",
+    "at": "2026-10-27T04:10:39.868Z"
+  },
+  "video-character-swap-h3-relay": {
+    "sha256": "7ff9fd0074152ee5bd15e187b04faec8d876164ea77b0df07224f2c41e677ee6",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'H3RelayAppendWindow' not found. The custom node may not be installed. (Node ID '#append')",
+    "at": "2026-10-27T04:10:39.895Z"
+  },
   "video-concat-2": {
     "sha256": "3d08966f5a3c2da662dc112df537ad4245bcd5dbb90e0451a0beb5c54d8db581",
     "validated": true,

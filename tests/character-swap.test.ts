@@ -1,0 +1,222 @@
+import { describe, expect, it } from "vitest";
+import {
+  alignFrames,
+  anchorModel,
+  anchorPrompt,
+  CHARACTER_LICENCES,
+  CHARACTER_SWAP,
+  characterLicenceLine,
+  characterQuality,
+  cutsInPart,
+  cutWarning,
+  falResolution,
+  graphLoras,
+  h3Canvas,
+  h3Windows,
+  H3_NODE_PACKS,
+  historyFrames,
+  MINIMAX_H3_LICENCE,
+  packResolution,
+  partProblem,
+  samCoords,
+  seedProblem,
+  speechLine,
+  swapLoraRef,
+  swapPrompt,
+  TURBO_LORA,
+  whoWords,
+  windowFrames,
+} from "@/lib/catalog/character-swap";
+import { licenceTerms } from "@/lib/licences";
+
+// Genjutsu's Character swap (docs/research/openjutsu-6.md): Openjutsu's prompt and limits, H3's windows and canvas,
+// who to swap, the anchor frame, and the licences as information.
+
+describe("Character swap: the prompt", () => {
+  it("Openjutsu's instruction in H3's tags, the anchor sentence only with an anchor", () => {
+    expect(swapPrompt({ engine: "open", anchor: true })).toBe(
+      "Replace the selected person in <Video 1> with the character in <Picture 1>. Preserve the source performance, scene and audio timing. Start from the first frame in <Picture 2>.",
+    );
+    expect(swapPrompt({ engine: "open", anchor: false })).toBe("Replace the selected person in <Video 1> with the character in <Picture 1>. Preserve the source performance, scene and audio timing.");
+  });
+
+  it("fal names the inputs Video 1 / Image 1 / Image 2, and says who in words (no mask in the cloud)", () => {
+    expect(swapPrompt({ engine: "cloud", anchor: true, who: "leftmost" })).toBe(
+      "Replace the person on the left in Video 1 with the character in Image 1. Preserve the source performance, scene and audio timing. Start from the first frame in Image 2.",
+    );
+    expect(swapPrompt({ engine: "cloud", anchor: false })).toMatch(/^Replace the main person in Video 1/);
+    expect(swapPrompt({ engine: "cloud", anchor: false, subject: "man in the red jacket" })).toMatch(/^Replace the man in the red jacket in Video 1/);
+  });
+
+  it("description, speaker and direction follow; the direction is trimmed to 500 characters", () => {
+    const p = swapPrompt({ engine: "open", anchor: false, description: "a chrome robot with blue eyes.", speech: "character", dialogue: "Hello there", direction: "keep the glasses. " });
+    expect(p).toBe(
+      'Replace the selected person in <Video 1> with the character in <Picture 1>. Preserve the source performance, scene and audio timing. The character: a chrome robot with blue eyes. The character speaks the clip\'s lines, lips in sync with its audio. The words: "Hello there". Keep the glasses.',
+    );
+    const long = swapPrompt({ engine: "open", anchor: false, direction: "x".repeat(900) });
+    expect(long.length).toBeLessThan(160 + CHARACTER_SWAP.maxDirectionChars);
+  });
+
+  it("who speaks, as Akatz Labs' speaker choice", () => {
+    expect(speechLine("other")).toMatch(/Someone else speaks/);
+    expect(speechLine("offscreen", "Over here!")).toMatch(/off screen.*"Over here!"/);
+    expect(speechLine("none")).toBe("Nobody speaks in this part.");
+    expect(speechLine(undefined)).toBe("");
+  });
+
+  it("who to swap, in words", () => {
+    expect(whoWords({})).toBe("the main person");
+    expect(whoWords({ who: "rightmost" })).toBe("the person on the right");
+    expect(whoWords({ who: "index", index: 1 })).toBe("the second person from the left");
+    expect(whoWords({ subject: "person" })).toBe("the main person");
+    expect(whoWords({ subject: "a woman in a hat" })).toBe("a woman in a hat");
+  });
+
+  it("the anchor's edit: Openjutsu's instruction, or Akatz Labs' brief when the character is described", () => {
+    expect(anchorPrompt({})).toMatch(/^Replace the person in image 1 with the character from image 2/);
+    const brief = anchorPrompt({ description: "a ronin in black armour", who: "leftmost" });
+    expect(brief).toMatch(/^Image 1 is the source frame to edit\. Image 2 is character identity only: a ronin in black armour\. Replace ONLY the person on the left/);
+    expect(brief).toMatch(/One full-aspect edited source frame\.$/);
+  });
+
+  it("the anchor model per engine: GPT Image 2.5 Sunburst (low) or Nano Banana Pro in the cloud, Qwen-Image-Edit on your GPU", () => {
+    expect(anchorModel("cloud")).toMatchObject({ id: "gpt-image-2-5-sunburst", extra: { quality: "low" } });
+    expect(anchorModel("cloud", "nano-banana-pro").id).toBe("nano-banana-pro");
+    expect(anchorModel("open").id).toBe("oss-qwen-edit");
+    // Another engine's model falls back to the engine's own.
+    expect(anchorModel("open", "nano-banana-pro").id).toBe("oss-qwen-edit");
+  });
+});
+
+describe("Character swap: limits", () => {
+  it("a part of 5–15 s (up to 30 s continued), inside a clip of at least 5 s", () => {
+    expect(partProblem({ start: 0, end: 4 })).toMatch(/Pick a part of 5–15 seconds/);
+    expect(partProblem({ start: 0, end: 5 })).toBeNull();
+    expect(partProblem({ start: 2, end: 17 })).toBeNull();
+    expect(partProblem({ start: 0, end: 30 })).toBeNull();
+    expect(partProblem({ start: 0, end: 31 })).toMatch(/up to 30 seconds/);
+    expect(partProblem({ start: 0, end: 4 }, 4)).toBe("Choose a clip at least 5 seconds long");
+    expect(partProblem({ start: 8, end: 14 }, 12)).toBe("The part runs past the end of the clip");
+    expect(partProblem({ start: -1, end: 6 })).toBe("Choose where the part starts");
+  });
+
+  it("seeds are whole numbers 0 … 2³²−1, blank is random", () => {
+    expect(seedProblem(undefined)).toBeNull();
+    expect(seedProblem(0)).toBeNull();
+    expect(seedProblem(2 ** 32 - 1)).toBeNull();
+    expect(seedProblem(2 ** 32)).toMatch(/whole-number seed/);
+    expect(seedProblem(1.5)).toMatch(/whole-number seed/);
+  });
+
+  it("qualities: 480p stays, the rest is 768p; the unpatched pack takes strings, fal its enum", () => {
+    expect(characterQuality("480p")).toBe("480p");
+    expect(characterQuality("720p")).toBe("768p");
+    expect(characterQuality("1080p")).toBe("768p");
+    expect(characterQuality(undefined)).toBe("768p");
+    expect(packResolution("480p")).toBe("480");
+    expect(packResolution("768p")).toBe("768");
+    expect(packResolution("768p", true)).toBe(768);
+    expect(falResolution("480p")).toBe("480P");
+    expect(falResolution("1080p")).toBe("768P");
+  });
+
+  it("H3's windows: 5 s → 1, 7.5 and 10 s → 2, 12.5 and 15 s → 3 (124 frames, padded to 17n+5)", () => {
+    expect(alignFrames(120)).toBe(124);
+    expect(alignFrames(240)).toBe(243);
+    expect(alignFrames(360)).toBe(362);
+    expect(h3Windows(5)).toBe(1);
+    expect(h3Windows(7.5)).toBe(2);
+    expect(h3Windows(10)).toBe(2);
+    expect(h3Windows(12.5)).toBe(3);
+    expect(h3Windows(15)).toBe(3);
+    expect(h3Windows(30)).toBe(6);
+    // A longer window means fewer.
+    expect(h3Windows(15, 362)).toBe(1);
+    // Window sizes are the pack's combo strings (17n+5 and 0, 1, 17n+1).
+    expect(windowFrames(124)).toBe("124");
+    expect(windowFrames(130)).toBe("124");
+    expect(windowFrames(undefined)).toBe("124");
+    expect(historyFrames(18)).toBe("18");
+    expect(historyFrames(0)).toBe("0");
+    expect(historyFrames(40)).toBe("35");
+  });
+
+  it("H3's canvas and clicks moved into it", () => {
+    // ComfyUI's adapt_canvas: a 768 short edge, capped at 768 × 1344, each side on the 32 grid.
+    expect(h3Canvas(1920, 1080, "768p")).toEqual({ width: 1344, height: 768 });
+    expect(h3Canvas(1080, 1920, "768p")).toEqual({ width: 768, height: 1344 });
+    expect(h3Canvas(1024, 1024, "768p")).toEqual({ width: 768, height: 768 });
+    expect(h3Canvas(1280, 720, "480p")).toEqual({ width: 832, height: 480 });
+    const [pos, neg] = samCoords(
+      [
+        { x: 960, y: 540, label: "positive" },
+        { x: 100, y: 100, label: "negative" },
+      ],
+      { width: 1920, height: 1080 },
+      "768p",
+    );
+    expect(JSON.parse(pos)).toEqual([{ x: 672, y: 384 }]);
+    expect(JSON.parse(neg)).toEqual([{ x: 70, y: 71 }]);
+    expect(samCoords(undefined, { width: 10, height: 10 }, "768p")).toEqual(["", ""]);
+  });
+
+  it("warns about a hard cut inside the part, not at its edges", () => {
+    expect(cutsInPart([1, 7.2, 15], { start: 2, end: 12 })).toEqual([7.2]);
+    expect(cutsInPart([2.1, 11.9], { start: 2, end: 12 })).toEqual([]);
+    expect(cutWarning([7.2])).toBe("Your part has a cut at 7.2 s — the swap breaks at a cut. Move the part, or pick one continuous shot");
+    expect(cutWarning([])).toBeNull();
+  });
+});
+
+describe("Character swap: LoRAs", () => {
+  it("the swap LoRA at its pinned revision (V1.5 by default, V1 on request), hostable on fal", () => {
+    const v15 = swapLoraRef(undefined);
+    expect(v15).toMatchObject({ file: "h3_character_swap_v1.5.safetensors", weightName: "h3_character_swap_v1.5.safetensors", strength: 1, version: "d06323b7c8e70e97cdab48b78a1e05f786c8cba9" });
+    expect(v15.url).toBe("https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/d06323b7c8e70e97cdab48b78a1e05f786c8cba9/h3_character_swap_v1.5.safetensors");
+    expect(v15.licence).toMatchObject({ commercial: true, hostedOk: true, name: "MiniMax H3 Community License" });
+    expect(swapLoraRef("v1").file).toBe("h3_character_swap_pro4500_1000.safetensors");
+  });
+
+  it("the files an open Character swap graph loads itself, downloaded before it runs", () => {
+    expect(graphLoras("video-character-swap-h3", {}).map((l) => l.file)).toEqual([TURBO_LORA.file, "h3_character_swap_v1.5.safetensors"]);
+    expect(graphLoras("video-character-swap-h3-relay", { lora: "v1" }).map((l) => l.file)).toEqual([TURBO_LORA.file, "h3_character_swap_pro4500_1000.safetensors"]);
+    expect(graphLoras("video-character-swap-h3", { lora: "none" }).map((l) => l.file)).toEqual([TURBO_LORA.file]);
+    expect(graphLoras("wan-animate2", {})).toEqual([]);
+    expect(TURBO_LORA.url).toContain("/resolve/3ec17a324ced54151364f24f8b5fb6bf7e26414f/");
+  });
+});
+
+describe("Character swap: licences are information", () => {
+  it("records the MiniMax H3 Community License with its regions, revenue condition and notice", () => {
+    expect(MINIMAX_H3_LICENCE).toMatchObject({ name: "MiniMax H3 Community License", class: "regions", excludes: "the US, the EU, the UK and South Korea", notices: ["MiniMax H3"] });
+    expect(MINIMAX_H3_LICENCE.note).toMatch(/US\$20M/);
+    expect(MINIMAX_H3_LICENCE.url).toContain("MiniMaxAI/MiniMax-H3");
+  });
+
+  it("every part the swap touches has a licence: the SAM License, the GPL-3.0 packs, the Turbo LoRA, MIT workflows, the paid API", () => {
+    const by = Object.fromEntries(CHARACTER_LICENCES.map((l) => [l.item.split(" (")[0], l]));
+    expect(by["SAM 3.1"]).toMatchObject({ name: "Meta SAM License", class: "conditions" });
+    expect(by["FL2V Turbo 8-step LoRA"]).toMatchObject({ name: "Apache-2.0", class: "commercial" });
+    expect(by["h3_character_swap node pack"]).toMatchObject({ name: "GPL-3.0" });
+    expect(by["H3 Relay 2.0 node pack"]).toMatchObject({ name: "GPL-3.0" });
+    expect(CHARACTER_LICENCES.find((l) => l.class === "paid-api")?.item).toMatch(/fal/);
+    expect(CHARACTER_LICENCES.every((l) => l.url.startsWith("https://"))).toBe(true);
+    expect(H3_NODE_PACKS.map((p) => p.name)).toEqual(["h3_character_swap", "h3-relay"]);
+    expect(H3_NODE_PACKS[0].licence).toMatchObject({ name: "GPL-3.0" });
+  });
+
+  it("the model picker's line says it, as information", () => {
+    expect(characterLicenceLine("open", "fuobe-character-swap")).toMatch(/not licensed in the US, the EU, the UK and South Korea.*show "MiniMax H3".*GPL-3.0/);
+    expect(characterLicenceLine("cloud", "fuobe-character-swap")).toMatch(/pay per second/);
+    expect(characterLicenceLine("cloud", "h3-max-recast")).toMatch(/closed H3 Max/);
+  });
+
+  it("the manifest's licence text reads as restricted regions with the notice (About & licences)", async () => {
+    const { default: manifest } = await import("../workflows/comfyui/manifest.json");
+    const wf = (manifest as { workflows: { id: string; license?: string }[] }).workflows.find((w) => w.id === "video-character-swap-h3")!;
+    const terms = licenceTerms(wf.license!);
+    expect(terms.flags).toContain("territory");
+    expect(terms.excludes).toBe("the US, the EU, the UK and South Korea");
+    expect(terms.notices).toContain("MiniMax H3");
+  });
+});

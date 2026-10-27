@@ -836,6 +836,13 @@ export interface GenerationRequest {
   /** Server-set when the runner filled the chain slots from the earlier steps' outputs (a retry takes them out again: unfilledRequest). */
   chainFilled?: boolean;
   /**
+   * Server-set when the runner left out optional chain slots whose steps failed (ChainSlot.optional): their indexes, and
+   * the prompt the request had before the fallback replaced it (a retry puts it back).
+   */
+  chainSkipped?: { slots: number[]; prompt?: string };
+  /** Server-set: what changed while the job ran (an optional input left out), said on the result and carried down the chain. */
+  notice?: string;
+  /**
    * A step only worth making for the steps after it (a per-frame render's frame edits and clips): while it still
    * waits for its inputs (nothing spent yet), the runner cancels it once every step that would use it has failed
    * or been canceled, so one failed frame doesn't leave the other lanes running up the bill.
@@ -891,6 +898,12 @@ export interface ChainSlot {
    * frames is not).
    */
   of?: number;
+  /**
+   * An input the step can do without (Genjutsu's anchor first frame): when the step it comes from fails or is canceled,
+   * this step runs without it instead of failing. `prompt` then replaces the request's prompt (the words that named the
+   * missing input go), and `notice` is said on the result and on the steps after it.
+   */
+  optional?: { prompt?: string; notice: string };
 }
 
 /** How many outputs a planned list (ChainSlot.of) may be short of before the steps reading it fail. */
