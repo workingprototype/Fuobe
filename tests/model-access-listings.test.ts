@@ -75,11 +75,13 @@ describe("Models & licences in listings and picks", () => {
     expect(plan()).not.toBe("nano-banana-pro");
   });
 
-  it("sends a switched-off model in the ⌘K palette to Models & licences instead of its studio", () => {
+  it("leaves a switched-off model out of the ⌘K palette, and an Original off on one engine out of that engine's list", () => {
     const index = paletteIndex();
-    const entry = (access?: { off: string[] }) => indexEntries(index, "both", access).find((e) => e.key === "model:nano-banana-pro")!;
-    expect(entry().href).not.toBe("/settings/models");
-    expect(entry({ off: ["nano-banana-pro"] })).toMatchObject({ href: "/settings/models", hint: "Google · turned off in Models & licences" });
+    expect(indexEntries(index, "both").some((e) => e.key === "model:nano-banana-pro")).toBe(true);
+    expect(indexEntries(index, "both", { off: ["nano-banana-pro"] }).some((e) => e.key === "model:nano-banana-pro")).toBe(false);
+    const soulOpenOnly = { off: [], engines: { "fuobe-soul": ["open" as const] } };
+    expect(indexEntries(index, "cloud", soulOpenOnly).some((e) => e.key === "model:fuobe-soul")).toBe(false);
+    expect(indexEntries(index, "open", soulOpenOnly).some((e) => e.key === "model:fuobe-soul")).toBe(true);
   });
 
   it("refuses a model that is off through the API, naming the switch", async () => {
@@ -92,7 +94,17 @@ describe("Models & licences in listings and picks", () => {
   it("lists every model, LoRA and node pack with its licence, and flips switches through the settings API", async () => {
     const list = (await (await settingsRoute.GET()).json()) as import("@/lib/model-access").AccessList;
     expect(list.models.length).toBeGreaterThan(300);
-    expect(list.loras.length).toBe(114);
+    // The library's 114 LoRAs and the preset LoRA map's files that aren't library files, each once.
+    expect(list.loras.length).toBe(166);
+    expect(new Set(list.loras.map((l) => l.file)).size).toBe(list.loras.length);
+    expect(list.loras.find((l) => l.file === "crane_up.safetensors")).toMatchObject({
+      name: "Crane up",
+      group: "motion",
+      licence: { class: "commercial", name: "Apache-2.0", url: "https://huggingface.co/Remade-AI/Crane_up" },
+      on: true,
+    });
+    expect(list.loras.find((l) => l.file === "crane_up.safetensors")!.licence.note).toMatch(/In the preset LoRA map: Jib Up/);
+    expect(list.loras.find((l) => l.file === "cakeify_16_epochs.safetensors")).toMatchObject({ group: "effect" });
     expect(list.packs.find((p) => p.name === "ComfyUI-Whisper")).toMatchObject({ licence: { class: "non-commercial" }, models: 1, on: true });
     expect(list.models.find((m) => m.id === "fuobe-soul")).toMatchObject({ licence: { class: "commercial" }, cloud: { class: "paid-api" }, engines: ["open", "cloud"], on: true });
     expect(list.loras.find((l) => l.file === "BTSMovieSet_LTX25_v1.safetensors")!.licence.note).toMatch(/research holds this licence/);
@@ -101,6 +113,14 @@ describe("Models & licences in listings and picks", () => {
     expect((await put([{ kind: "class", id: "free", on: false }])).status).toBe(400);
     expect((await put([{ kind: "model", on: false }])).status).toBe(400);
     expect((await put([])).status).toBe(400);
+    // A switch that names nothing this install has is refused, not stored.
+    for (const [kind, id] of [["model", "nano-bananna-pro"], ["provider", "nope"], ["pack", "ComfyUI-Nope"], ["lora", "nope.safetensors"]]) {
+      const res = await put([{ kind, id, on: false }]);
+      expect(res.status, `${kind} ${id}`).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/isn't one this install has/);
+    }
+    expect((await put([{ kind: "lora", id: "crane_up.safetensors", on: false }])).status).toBe(200);
+    expect((await put([{ kind: "lora", id: "crane_up.safetensors", on: true }])).status).toBe(200);
     const after = (await (await put([{ kind: "provider", id: "fal", on: false }, { kind: "keepGpuOnlyLoras", on: true }])).json()) as import("@/lib/model-access").AccessList;
     expect(after.access).toMatchObject({ providers: ["fal"], keepGpuOnlyLoras: true });
     expect(after.providers.find((p) => p.id === "fal")!.on).toBe(false);

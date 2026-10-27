@@ -219,14 +219,15 @@ export function fitLoras(loras: LoraRef[], route: Pick<ModelRoute, "provider" | 
   const unsent = loras.filter((l) => !localOnly(l) && !gated(l) && !sendable(l));
   if (unsent.length) notes.push(`${list(unsent.map(loraName))} ${unsent.length > 1 ? "exist" : "exists"} only on your ComfyUI, so this cloud run leaves ${unsent.length > 1 ? "them" : "it"} out`);
   const cloud = sendableToCloud(loras);
-  const gpuOnly = [...new Set(cloud.filter(gpuOnlyLicence).map(loraName))];
-  if (gpuOnly.length) notes.push(`${list(gpuOnly)}: ${gpuOnly.length > 1 ? "their licences allow your GPU only (civitai lists no “Rent”); they run" : "its licence allows your GPU only (civitai lists no “Rent”); it runs"} in the cloud because Settings → Models & licences lets such LoRAs go there`);
   const field = routeLoraField(route);
   if (!field) {
     if (cloud.length) notes.push(`This model takes no LoRAs in the cloud, so ${list(cloud.map(loraName))} ${cloud.length > 1 ? "are" : "is"} left out`);
     return { loras: [], notes };
   }
   const { kept, over } = fitSlots(field, cloud);
+  // Said only of the LoRAs this run really sends (not of one the route or its capacity leaves out).
+  const gpuOnly = [...new Set(kept.filter(gpuOnlyLicence).map(loraName))];
+  if (gpuOnly.length) notes.push(`${list(gpuOnly)}: ${gpuOnly.length > 1 ? "their licences allow your GPU only (civitai lists no “Rent”); they run" : "its licence allows your GPU only (civitai lists no “Rent”); it runs"} in the cloud because Settings → Models & licences lets such LoRAs go there`);
   if (over.length) {
     const why = field.shape === "experts" ? "one LoRA per expert" : `up to ${loraCapacity(field)} LoRA${loraCapacity(field) > 1 ? "s" : ""}`;
     notes.push(`This API takes ${why}, so ${list(over.map(loraName))} ${over.length > 1 ? "are" : "is"} left out`);

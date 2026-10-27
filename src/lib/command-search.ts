@@ -191,12 +191,10 @@ export function indexEntries(index: PaletteIndex, mode: "both" | "cloud" | "open
     ...presets(index.motions, "motion", (id) => `/video?preset=${id}`),
     ...presets(index.effects, "effect", (id) => `/video?preset=${id}`),
     ...index.models
-      .filter((m) => mode === "both" || (m.engines ?? [m.engine]).includes(mode))
+      // Settings → Models & licences: a model switched off isn't offered here either (its switch is on that page,
+      // which has its own entry).
+      .filter((m) => (mode === "both" || (m.engines ?? [m.engine]).includes(mode)) && offered(access, m.id, mode === "both" ? undefined : mode))
       .map((m): PaletteEntry => {
-        // Settings → Models & licences: a model switched off opens the switches, not a studio that would refuse it.
-        if (!offered(access, m.id, mode === "both" ? undefined : mode)) {
-          return { key: `model:${m.id}`, kind: "model", label: m.name, hint: `${m.vendor} · turned off in Models & licences`, href: "/settings/models", keywords: `${m.ops} turned off licence` };
-        }
         const both = (m.engines?.length ?? 0) > 1;
         return {
           key: `model:${m.id}`,

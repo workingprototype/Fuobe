@@ -230,6 +230,17 @@ export function ModelAccessView() {
   }
 
   const offModels = data.models.filter((m) => !modelOn(m) || m.offBy.length).length;
+  const offLoras = data.loras.filter((l) => access.loras.includes(l.file) || access.classes.includes(l.licence.class)).length;
+  // What the switches do, each said once: models that no longer run, LoRAs left out, and the GPU-only LoRA rule.
+  const summary = allOn(access)
+    ? "Everything is on. Switch off what this install shouldn't offer: it leaves the pickers and the server refuses it."
+    : [
+        offModels ? `${offModels} ${offModels === 1 ? "model is" : "models are"} turned off by the switches below` : "Every model still runs",
+        offLoras > 0 && `${offLoras} ${offLoras === 1 ? "LoRA is" : "LoRAs are"} left out of runs`,
+        access.keepGpuOnlyLoras && "LoRAs licensed for your GPU only stay off the cloud",
+      ]
+        .filter(Boolean)
+        .join(". ") + ".";
   const tabs: { value: Tab; label: string; count: number }[] = [
     { value: "models", label: "Models", count: data.models.length },
     { value: "loras", label: "LoRAs", count: data.loras.length },
@@ -251,13 +262,11 @@ export function ModelAccessView() {
           <p className="text-[15px] font-semibold tabular-nums">
             {data.models.length - offModels} of {data.models.length} models offered
           </p>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">
-            {allOn(access) ? "Everything is on. Switch off what this install shouldn't offer: it leaves the pickers and the server refuses it." : `${offModels} ${offModels === 1 ? "model is" : "models are"} turned off by the switches below.`}
-          </p>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">{summary}</p>
         </div>
         {!allOn(access) && (
           <Button variant="secondary" size="sm" className="h-9 shrink-0 self-start sm:self-center" onClick={() => flip({ kind: "reset" })} disabled={change.isPending}>
-            <RotateCcw /> Turn everything back on
+            <RotateCcw /> Back to the defaults
           </Button>
         )}
       </div>

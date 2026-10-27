@@ -100,6 +100,9 @@ describe("fal LoRA payloads (generated FieldMap.loras)", () => {
     expect(loraFields(r.map!.loras!, [{ ...wiggle, keepOnGpu: true, hostedUrl: "https://v3.fal.media/x" }])).toEqual({});
     // The open engine carries every LoRA.
     expect(fitLoras([{ ...wiggle, keepOnGpu: true }, keep], { provider: "comfyui" }).loras).toHaveLength(2);
+    // A route that takes no LoRAs says only that: the licence note is for LoRAs a run really sends.
+    const none = fitLoras([wiggle], { provider: "fal", map: {} });
+    expect(none).toEqual({ loras: [], notes: ["This model takes no LoRAs in the cloud, so Wiggle Redmond is left out"] });
   });
 
   it("never sends a civitai URL (the user's key stays home): only its mirror", () => {

@@ -386,11 +386,21 @@ export async function prepareCloudLoras(
       hostedUrl,
       sha256: facts?.sha256 ?? crypto.createHash("sha256").update(data).digest("hex"),
       sizeBytes: data.length,
-      licence: { ...licenceSnapshot(l, entry, now), ...(!now?.includes("Rent") && { hosting: "copied without civitai's “Rent” permission: Settings → Models & licences lets LoRAs licensed for your GPU only go to the cloud" }) },
+      licence: { ...licenceSnapshot(l, entry, now), ...(hostingNote(now) && { hosting: hostingNote(now) }) },
     });
     out.push({ ...l, hostedUrl });
   }
   return out;
+}
+
+/**
+ * What a mirror records about the hosting right it was copied under (nothing when civitai lists "Rent"): civitai
+ * didn't answer, so it is unknown, or civitai lists no "Rent" and the admin lets such LoRAs go to the cloud.
+ */
+function hostingNote(now: string[] | null): string | undefined {
+  if (!now) return "copied without civitai's current permissions: civitai didn't answer, so its hosting right wasn't confirmed";
+  if (!now.includes("Rent")) return "copied without civitai's “Rent” permission: Settings → Models & licences lets LoRAs licensed for your GPU only go to the cloud";
+  return undefined;
 }
 
 /**

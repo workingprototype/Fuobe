@@ -1,8 +1,9 @@
 import "server-only";
-import { MODELS } from "@/lib/catalog";
+import { getPreset, MODELS } from "@/lib/catalog";
 import { onEngine, providerEngine } from "@/lib/catalog/engines";
 import { LORA_LIBRARY, MOTION_EFFECT_LORAS } from "@/lib/catalog/lora-library.generated";
 import { libraryEntry, loraName } from "@/lib/catalog/loras";
+import { OSS_LORAS, type OssLora } from "@/lib/catalog/oss-loras.generated";
 import type { Engine, LoraRef, ModelDef, ModelRoute } from "@/lib/catalog/types";
 import type { ManifestWorkflow } from "@/lib/comfy";
 import {
@@ -14,6 +15,7 @@ import {
   licenceInfo,
   loraLicenceInfo,
   mergeLicences,
+  modelCardOf,
   NODE_PACKS,
   paidApiLicence,
   PROVIDER_NAME,
@@ -33,6 +35,7 @@ import {
   type AccessChange,
   type AccessList,
   type AccessSummary,
+  type LoraInfo,
   type ModelEntry,
   type FactsOf,
   type ModelAccess,
@@ -161,14 +164,11 @@ export function isOffered(id: string | undefined, engine?: Engine): boolean {
 }
 
 /**
- * An automatic pick: the first of these that is on. When none is, the error says what to turn on (the first
- * one's switch), so a studio never silently runs something else.
+ * A studio's default among its own models (Shorts' restyle models, a Layers tool's): the first that is on, else
+ * the first (its run then refuses, naming the switch to turn back on).
  */
-export function pickOffered(ids: (string | undefined)[], engine?: Engine): string {
-  const id = ids.find((x) => isOffered(x, engine));
-  if (id) return id;
-  const first = ids.map((x) => (x ? MODELS.find((m) => m.id === x) : undefined)).find(Boolean);
-  throw new Error(first ? offReason(first) : `No model for this is turned on in ${ACCESS_PLACE}`);
+export function firstOn(ids: readonly string[], engine?: Engine): string | undefined {
+  return ids.find((id) => isOffered(id, engine)) ?? ids[0];
 }
 
 /**
@@ -236,6 +236,60 @@ export function modelLicence(m: ModelDef): { licence: LicenceInfo; cloud?: Licen
   return { licence: cloudLicence ?? { name: "Not recorded", class: "unknown", note: "" }, packs };
 }
 
+/** The presets a map key names: a map v2 preset id, or a round-1 slug (the motion, effect or app it matches). */
+const presetsOf = (key: string) => (getPreset(key) ? [getPreset(key)!] : ["motion", "effect", "app"].flatMap((k) => getPreset(`${k}-${key}`) ?? []));
+
+/** A map LoRA's name as its download names it: the Hugging Face repo ("Remade-AI/Crane_up" → "Crane up"), else its file. */
+function mapLoraName(l: OssLora): string {
+  const repo = l.url && /^https:\/\/huggingface\.co\/[^/]+\/([^/]+)\//.exec(l.url)?.[1];
+  return (repo || l.file.replace(/\.safetensors$/i, "")).replace(/[_-]+/g, " ").trim();
+}
+
+/**
+ * Every LoRA a run can load, with its licence: the library's, then the preset LoRA map's files that aren't
+ * library files (the round-1 Wan LoRAs camera motions and effects load), their licence as the map records it.
+ */
+function loraRows(access: ModelAccess): LoraInfo[] {
+  const rows: LoraInfo[] = LORA_LIBRARY.map((e) => {
+    const row = MOTION_EFFECT_LORAS.find((r) => r.loras.includes(e.key));
+    const hold = row?.status === "licence-hold" ? "The research holds this licence: its Hugging Face and civitai pages disagree" : undefined;
+    return { file: e.file, name: e.name, group: e.group, base: e.base, licence: loraLicenceInfo(e.licence, e.page, hold), on: !access.loras.includes(e.file) };
+  });
+  const map = new Map<string, { ref: OssLora; keys: string[] }>();
+  for (const [key, refs] of Object.entries(OSS_LORAS)) {
+    for (const ref of refs) {
+      if (libraryEntry(ref)) continue;
+      const hit = map.get(ref.file);
+      if (hit) hit.keys.push(key);
+      else map.set(ref.file, { ref, keys: [key] });
+    }
+  }
+  for (const [file, { ref, keys }] of map) {
+    const presets = [...new Map(keys.flatMap(presetsOf).map((p) => [p.id, p])).values()];
+    const motion = presets.length ? presets.every((p) => p.id.startsWith("motion-")) : keys.every((k) => k.startsWith("motion-"));
+    const used = presets.length ? `In the preset LoRA map: ${presets.map((p) => p.name).join(", ")}` : "In the preset LoRA map";
+    rows.push({ file, name: mapLoraName(ref), group: motion ? "motion" : "effect", base: ref.base, licence: loraLicenceInfo(ref.licence, modelCardOf(ref.url), used), on: !access.loras.includes(file) });
+  }
+  return rows;
+}
+
+/**
+ * Whether a switch names something this install has (a model, a provider in use, a node pack, a LoRA the
+ * library or the preset map loads): the settings API refuses a typo rather than storing a switch that does nothing.
+ */
+export function knownSwitch(kind: "model" | "provider" | "pack" | "lora", id: string): boolean {
+  switch (kind) {
+    case "model":
+      return MODELS.some((m) => m.id === id);
+    case "provider":
+      return MODELS.some((m) => m.routes.some((r) => r.provider === id));
+    case "pack":
+      return NODE_PACKS.some((p) => p.name === id);
+    case "lora":
+      return LORA_LIBRARY.some((e) => e.file === id) || Object.values(OSS_LORAS).some((refs) => refs.some((r) => r.file === id));
+  }
+}
+
 export function accessList(): AccessList {
   const access = readAccess();
   const models: ModelEntry[] = MODELS.map((m) => {
@@ -266,11 +320,7 @@ export function accessList(): AccessList {
     return new Set(m.routes.map((r) => factsOf(r, m).class));
   };
   const classesOf = new Map(models.map((e) => [e.id, routeClasses(e.id)]));
-  const loras = LORA_LIBRARY.map((e) => {
-    const row = MOTION_EFFECT_LORAS.find((r) => r.loras.includes(e.key));
-    const hold = row?.status === "licence-hold" ? "The research holds this licence: its Hugging Face and civitai pages disagree" : undefined;
-    return { file: e.file, name: e.name, group: e.group, base: e.base, licence: loraLicenceInfo(e.licence, e.page, hold), on: !access.loras.includes(e.file) };
-  });
+  const loras = loraRows(access);
   return {
     access,
     classes: LICENCE_CLASSES.map((id) => ({

@@ -233,6 +233,18 @@ describe("Before a cloud run", () => {
     expect(mirror.licence).toMatchObject({ permissionsNow: ["Image", "RentCivit"], hosting: expect.stringMatching(/without civitai's “Rent” permission: Settings → Models & licences/) });
   });
 
+  it("records an unconfirmed hosting right, not a missing one, when civitai doesn't answer", async () => {
+    setSetting("civitaiKey", KEY);
+    const routes = civitaiRoutes(Y2K_BODY);
+    net = network({ ...routes, "https://civitai.com/api/v1/models/2979601": () => new Response("down", { status: 503 }) });
+    const up = upload();
+    const out = (await prepareCloudLoras([y2k], "replicate", up.fn)) as LoraRef[];
+    expect(out[0].hostedUrl).toBe("https://v3.fal.media/files/civitai-3422541-y2k.safetensors");
+    const mirror = listLoraCopies().find((c) => c.target === "replicate")!;
+    expect(mirror.licence?.hosting).toMatch(/civitai didn't answer, so its hosting right wasn't confirmed/);
+    expect(mirror.licence?.hosting).not.toMatch(/without civitai's “Rent” permission/);
+  });
+
   it("goes back to civitai's hosting permission while Settings → Models & licences keeps GPU-only LoRAs on the GPU", async () => {
     setSetting("civitaiKey", KEY);
     net = network(civitaiRoutes(Y2K_BODY, { permissions: ["Image", "RentCivit"] }));

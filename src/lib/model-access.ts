@@ -207,6 +207,16 @@ export function firstOffered(summary: AccessSummary | undefined, ids: (string | 
   return ids.find((id) => offered(summary, id, engine));
 }
 
+/**
+ * A studio menu's choices as this install offers them: the ones that are on, in their order. With every one off
+ * the menu keeps them all, so the studio still shows what it does and a run names the switch to turn back on.
+ * `on` says whether an item is on (the browser: offered(summary, …); the server: isOffered).
+ */
+export function keepOffered<T>(items: readonly T[], on: (item: T) => boolean): T[] {
+  const kept = items.filter(on);
+  return kept.length ? kept : [...items];
+}
+
 // ---------------------------------------------------------------------------
 // What Settings → Models & licences lists (GET /api/settings/models, built by src/server/model-access.ts)
 
