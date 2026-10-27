@@ -538,6 +538,23 @@ const MIGRATIONS: string[] = [
   ALTER TABLE assist_thread_state ADD COLUMN spent_usd REAL NOT NULL DEFAULT 0;
   ALTER TABLE assist_thread_state ADD COLUMN connectors INTEGER NOT NULL DEFAULT 1;
   CREATE INDEX IF NOT EXISTS assist_thread_state_schedule ON assist_thread_state(schedule_id);`,
+  // originals (o/h3-studio): Character Swap Studio projects — the character (picture and description), the clips with
+  // their 24 fps copies, cuts and shots, transcripts and voices, masks and anchors, segments with their takes, review
+  // decisions and assemblies, as one document (data_json; revision counts saves, so an open page knows it changed).
+  // Every job is an ordinary generation the document names by id. `waiting`: takes queued behind the segments they
+  // continue from, which the studio's sweep launches once those are made.
+  `CREATE TABLE IF NOT EXISTS swap_projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    waiting INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS swap_projects_updated ON swap_projects(updated_at DESC);
+  CREATE INDEX IF NOT EXISTS swap_projects_waiting ON swap_projects(waiting) WHERE waiting > 0;`,
 ];
 
 declare global {

@@ -37,6 +37,8 @@ const EXT_BY_TYPE: Record<string, string> = {
   "model/x-ksplat": "ksplat",
   // Pro exports: FFV1 in Matroska, EXR frames (ComfyUI's /view says image/aces) and their zip.
   "video/x-matroska": "mkv",
+  // Character Swap Studio takes AVI clips (Akatz Labs' tool does).
+  "video/x-msvideo": "avi",
   "image/x-exr": "exr",
   "image/aces": "exr",
   "application/zip": "zip",
@@ -68,6 +70,7 @@ const TYPE_BY_EXT: Record<string, string> = {
   spz: "model/x-spz",
   ksplat: "model/x-ksplat",
   mkv: "video/x-matroska",
+  avi: "video/x-msvideo",
   exr: "image/x-exr",
   zip: "application/zip",
 };

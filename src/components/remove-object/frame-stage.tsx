@@ -28,6 +28,7 @@ export function FrameStage({
   clickable,
   maxPoints,
   children,
+  words = { positive: "remove", negative: "keep", ask: "Click what to remove", frame: "First frame" },
 }: {
   frame: Frame;
   points: PixelPoint[];
@@ -39,6 +40,8 @@ export function FrameStage({
   clickable: boolean;
   maxPoints: number;
   children?: React.ReactNode;
+  /** What the points mean, for the labels (Character Swap Studio: include / exclude on any frame). */
+  words?: { positive: string; negative: string; ask: string; frame: string };
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
@@ -74,7 +77,7 @@ export function FrameStage({
           role={clickable ? "application" : undefined}
           aria-label={
             clickable
-              ? `First frame. Click what to remove${pointLabel === "negative" ? " — marking what to keep" : ""}. Arrow keys move a crosshair, Enter adds a point, Delete removes the last. ${points.length} point${points.length === 1 ? "" : "s"} so far.`
+              ? `${words.frame}. ${words.ask}${pointLabel === "negative" ? ` — marking what to ${words.negative}` : ""}. Arrow keys move a crosshair, Enter adds a point, Delete removes the last. ${points.length} point${points.length === 1 ? "" : "s"} so far.`
               : undefined
           }
           onKeyDown={onKey}
@@ -94,7 +97,7 @@ export function FrameStage({
           style={{ aspectRatio: `${frame.width} / ${frame.height}`, width: `min(100%, calc(min(46vh, 520px) * ${(frame.width / frame.height).toFixed(4)}))` }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={overlay ?? frame.url} alt="The first frame of the selection" className="absolute inset-0 size-full object-contain select-none" draggable={false} />
+          <img src={overlay ?? frame.url} alt={words.frame === "First frame" ? "The first frame of the selection" : words.frame} className="absolute inset-0 size-full object-contain select-none" draggable={false} />
           {points.map((p, i) => (
             <span
               key={i}
@@ -124,10 +127,10 @@ export function FrameStage({
                 type="button"
                 onClick={() => onPoints(points.filter((_, j) => j !== i))}
                 className="inline-flex h-7 items-center gap-1 rounded-full bg-muted px-2.5 text-[12px] font-medium hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                aria-label={`Take away point ${i + 1} (${p.label === "negative" ? "keep" : "remove"})`}
+                aria-label={`Take away point ${i + 1} (${p.label === "negative" ? words.negative : words.positive})`}
               >
                 <span className={cn("size-2 rounded-full", p.label === "negative" ? "bg-zinc-500" : "bg-success")} />
-                {i + 1} · {p.label === "negative" ? "keep" : "remove"}
+                {i + 1} · {p.label === "negative" ? words.negative : words.positive}
                 <X className="size-3 text-muted-foreground" />
               </button>
             </li>

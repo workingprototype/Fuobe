@@ -64,7 +64,8 @@ export interface ManifestOutput {
    * Round 4: OCR "lines" (JSON, boxes 0–1000) and the "frame" the model saw, an EXR sequence's "frames", a whole-"scene" GLB and its
    * "depth" map, a Gaussian "splat", a reference video's style "brief"; a painted eraser's last tracked "mask" (handed to the next
    * window), and a matte graph's "cutout" (transparent video) and "matte" (black and white) videos. A "preview" is the clip shown
-   * for an EXR export (the frames ride along zipped).
+   * for an EXR export (the frames ride along zipped). A "master" is a lossless copy a later job continues from (Character Swap
+   * Studio's segment, 16-bit FFV1).
    */
   role?:
     | "cues"
@@ -85,7 +86,8 @@ export interface ManifestOutput {
     | "mask"
     | "cutout"
     | "matte"
-    | "preview";
+    | "preview"
+    | "master";
 }
 
 export interface ManifestWorkflow {

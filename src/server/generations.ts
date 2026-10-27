@@ -295,6 +295,8 @@ export const ASSET_REFS: AssetRef[] = [
   { table: "content_series", cols: ["data_json"], what: "Content Factory series", name: "COALESCE(json_extract(data_json, '$.name'), json_extract(data_json, '$.reference.title'))" },
   // Assist's scheduled tasks: the files the prompt runs with.
   { table: "assist_schedules", cols: ["attachments_json"], what: "scheduled task", name: "title" },
+  // Character Swap Studio: the character picture, each clip and its 24 fps copy, masks, anchors, takes and their masters.
+  { table: "swap_projects", cols: ["data_json"], what: "Character Swap project", name: "name" },
 ];
 
 /**

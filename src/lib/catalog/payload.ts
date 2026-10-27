@@ -210,7 +210,8 @@ export function pointsValue(format: NonNullable<FieldMap["points"]>["format"], p
     const x = Math.round(p.x);
     const y = Math.round(p.y);
     const positive = p.label !== "negative";
-    return format === "bria" ? `{'x':${x}, 'y':${y}, 'type':'${positive ? "positive" : "negative"}'}` : { x, y, label: positive ? 1 : 0 };
+    if (format === "bria") return `{'x':${x}, 'y':${y}, 'type':'${positive ? "positive" : "negative"}'}`;
+    return { x, y, label: positive ? 1 : 0, ...(Number.isInteger(p.frame) && p.frame! > 0 ? { frame_index: p.frame } : {}) };
   });
 }
 

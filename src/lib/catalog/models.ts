@@ -708,6 +708,31 @@ const open: ModelDef[] = [
     routes: [comfy("remove-object", "video-person-remove-h3-relay", "H3 Relay Person Removal: the person painted green, 22-frame windows with 18 of history from the clean first frame (image), 12 steps, silent")],
     options: { seed: true, maxImages: 1 },
   }),
+  // Character Swap Studio (/character-swap, o/h3-studio): Akatz Labs' workbench for whole clips. A segment is one H3 Relay
+  // pass (its approved mask, anchor and the previous take's lossless master as history); a mask is SAM 3.1 on any frame
+  // of a shot, spliced into the version it corrects. Both run through the studio, not the composer.
+  o({
+    id: "oss-h3-swap-segment",
+    name: "H3 Character Swap · studio segment",
+    vendor: "MiniMax × Akatz Labs",
+    family: "minimax-h3",
+    kind: "video",
+    tagline: "One Character Swap Studio segment: a single H3 Relay pass with the approved mask, an anchor and the previous take's lossless master as history · 24 GB GPU with offloading, 48 GB+ advised",
+    routes: [comfy("video-swap", "video-character-swap-h3-segment", "H3 Relay segment schedule; saves the segment and its 16-bit FFV1 master")],
+    options: { seed: true, resolutions: ["480p", "768p"], maxImages: 2 },
+    hidden: true,
+  }),
+  o({
+    id: "oss-h3-person-mask",
+    name: "SAM 3.1 person mask · H3 Relay",
+    vendor: "Meta × Akatz Labs",
+    family: "sam",
+    kind: "video",
+    tagline: "Who to swap in a shot: SAM 3.1 finds them on any frame (words, largest / leftmost / rightmost / #n, or clicks) and follows them; corrections splice into the mask",
+    routes: [comfy("bg-remove-video", "video-mask-h3-relay", "a black-and-white mask video at H3's canvas size, 24 fps")],
+    options: { keepsNamed: true, matteOutputs: ["matte"] },
+    hidden: true,
+  }),
   o({
     id: "oss-qwen-relight",
     name: "Qwen-Image-Edit Relight",

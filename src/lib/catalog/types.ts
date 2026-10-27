@@ -235,6 +235,8 @@ export interface PixelPoint {
   x: number;
   y: number;
   label?: "positive" | "negative";
+  /** A video's frame the point is on (0, the first, when unset): SAM 3.1 video's `frame_index` on fal. */
+  frame?: number;
 }
 
 /** A position on a picture as fractions of its width and height (0–1 from the top left). */

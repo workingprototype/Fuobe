@@ -2887,6 +2887,66 @@ export const SPEC = [
       'Needs the h3-relay pack (H3_RELAY=1) and FFmpeg. Not validated here: the pack is not installed on this server.',
   },
 
+  // Character Swap Studio (o/h3-studio; docs/research/openjutsu-6.md §4.2): Akatz Labs' H3 Character Swap workbench for whole
+  // clips. A segment is one H3 Relay 2.0 pass ("segment" schedule) over its frames plus the history before it; the
+  // previous take's lossless master supplies that history (Akatz's continuation masters), the approved mask replaces
+  // SAM's own when there is one, and an anchor is Picture 2 (Picture 3 after the boundary). The mask graph is the same
+  // SAM 3.1 chain on any frame of a shot, spliced into the version it corrects.
+  {
+    id: 'video-character-swap-h3-segment',
+    title: 'Character Swap Studio segment: one H3 Relay 2.0 pass with the approved mask, an anchor and the previous take\'s lossless master as history (h3-relay pack)',
+    capability: 'video-character-swap',
+    handBuilt: 'hand-built/video-character-swap-h3-segment.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    optionalModels: ['h3_character_swap_pro4500_1000.safetensors'],
+    bindings: {
+      video: [b('source', 'file')], image: [b('reference', 'image')], image2: [b('anchor_image', 'image')],
+      startTime: [b('trim', 'start_time')], duration: [b('trim', 'duration'), b('prepare', 'duration_seconds')], quality: [b('prepare', 'resolution')],
+      prompt: [b('reference_conditioning', 'prompt')], seed: [b('plan', 'seed')], steps: [b('schedule', 'steps')], cfg: [b('guider', 'cfg')], audioGuide: [b('history', 'target_audio_guide')],
+      maskPrompt: [b('subject', 'text')], selection: [b('select', 'selection')], subjectIndex: [b('select', 'index')], maskGrow: [b('expand_mask', 'expansion_px')],
+      positiveCoords: [b('detect', 'positive_coords')], negativeCoords: [b('detect', 'negative_coords')],
+      windowFrames: [b('plan', 'window_frames')], historyFrames: [b('plan', 'history_frames')],
+      historyVideo: [b('history_source', 'file')], historyStart: [b('history_tail', 'batch_index')], historyLength: [b('history_tail', 'length')],
+      lora: [b('adapter', 'lora_name')], loraStrength: [b('adapter', 'strength_model')], filenamePrefix: [b('save', 'filename_prefix'), b('save_master', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video' }, { node: 'save_master', kind: 'video', role: 'master' }],
+    defaults: { quality: '768', maskPrompt: 'person', selection: 'largest', subjectIndex: 0, maskGrow: 64, audioGuide: true, windowFrames: '124', historyFrames: '18', lora: 'h3_character_swap_v1.5.safetensors' },
+    limits: { maxDurationSec: 30, maxFrames: 703 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Character Swap LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · FL2V Turbo LoRA Apache-2.0 at the pinned revision · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors; vendored Context Loop and Spectrum GPL-3.0); the graph is built from H3 Relay\'s example workflow (GPL-3.0 repository)',
+    notes:
+      'One segment of Character Swap Studio on your GPU, built from video-character-swap-h3-relay: the window plan runs H3 Relay\'s "segment" schedule (one pass, at most 362 frames with its continuation boundary). ' +
+      'video = the clip at 24 fps (oss-fit-clip), startTime / duration = the segment and the history frames before it (the app starts half a frame early and runs a quarter frame long, so Trim Video and PrepareVideo keep exactly those frames), image = the character, image2 = the anchor (absent: the provider deletes it, unlinks the window\'s anchor, drops Picture 2 and the first-frame guide unless there is history). ' +
+      'historyVideo = the previous take\'s lossless master (save_master, 16-bit FFV1), historyStart / historyLength = its last frames, which become initial_history on the plan, the window and the append (Akatz\'s H3RelayLoadHistory route, with frames instead of an NPZ); absent: the provider deletes that branch. With history and an anchor the anchor is Picture 3 (the window\'s anchor output is then the generated boundary). ' +
+      'The approved mask (params.extra.maskVideo, a whole-shot mask at 24 fps from video-mask-h3-relay) is added by the provider: Trim Video at maskStart for the same duration, fitted to the canvas, red channel to a mask, into the expansion instead of SAM\'s own chain; useMask false bypasses the edit mask (the whole frame is regenerated). ' +
+      'Outputs: the segment (H.264) and its lossless master (role master) for the next segment. Needs the h3-relay pack (H3_RELAY=1), VideoHelperSuite and FFmpeg. Not validated here: the pack is not installed on this server.',
+  },
+  {
+    id: 'video-mask-h3-relay',
+    title: 'Character Swap Studio mask: SAM 3.1 finds the person on any frame of a shot (words, largest / leftmost / rightmost / #n, or clicks), follows them to the end of the shot or redoes one frame, spliced into the mask it corrects (h3-relay pack)',
+    capability: 'person-mask',
+    handBuilt: 'hand-built/video-mask-h3-relay.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    bindings: {
+      video: [b('source', 'file')], startTime: [b('trim', 'start_time')], duration: [b('trim', 'duration'), b('prepare', 'duration_seconds')], quality: [b('prepare', 'resolution')],
+      maskPrompt: [b('subject', 'text')], selection: [b('select', 'selection')], subjectIndex: [b('select', 'index')],
+      positiveCoords: [b('detect', 'positive_coords')], negativeCoords: [b('detect', 'negative_coords')],
+      keyFrame: [b('key_frame', 'batch_index'), b('span', 'batch_index'), b('head', 'length')], spanFrames: [b('span', 'length'), b('recover', 'source_frames')],
+      tailStart: [b('tail', 'batch_index')], tailFrames: [b('tail', 'length')], prevMask: [b('prev_source', 'file')],
+      filenamePrefix: [b('save', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video', role: 'matte' }],
+    defaults: { quality: '768', maskPrompt: 'person', selection: 'largest', subjectIndex: 0, keyFrame: 0, spanFrames: 120 },
+    limits: { maxDurationSec: 150, maxFrames: 3592 },
+    vramGb: 6,
+    license: 'SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors)',
+    notes:
+      'Who to swap in one shot, as a black-and-white mask video at H3\'s canvas size and 24 fps (white = the person): the shot is prepared like a segment (H3 Relay\'s PrepareSource), SAM 3.1 detects on frame keyFrame from the words (maskPrompt) and the clicks (positiveCoords / negativeCoords, moved into the canvas by the provider; a click makes its detection first, so selection becomes index 0), H3RelaySelectMask picks largest / leftmost / rightmost / #n as the swap graphs do, SAM 3.1 tracks it for spanFrames (the rest of the shot for Track shot, 1 for Update frame) and recovers empty frames. ' +
+      'prevMask = the version it corrects: its frames before (head) and after (tail) the new part are spliced around it; without one the provider links the new part straight to the video (and puts blank frames before a track that starts mid-shot). Akatz Labs\' app does the same with its own nodes (mask versions, Update frame, Track shot). Needs the h3-relay pack. Not validated here: the pack is not installed on this server.',
+  },
+
   // ---- Faceless "Frame by frame": Ken Burns over a still ------------------------------
   {
     id: 'kenburns-still',
