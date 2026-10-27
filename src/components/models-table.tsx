@@ -5,7 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { memo, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useProgressive } from "@/components/use-progressive";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useEngine } from "@/lib/api";
+import Link from "next/link";
+import { useEngine, useModelAccess } from "@/lib/api";
+import { offered } from "@/lib/model-access";
 import type { Engine, MediaKind } from "@/lib/catalog/types";
 import { enginesLabel, modelSearchText, type ModelRow } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
@@ -115,11 +117,18 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
   const [kind, setKind] = useState<MediaKind | "all">("all");
   const [q, setQ] = useState("");
   const term = useDeferredValue(q.trim().toLowerCase());
-  const index = useMemo(() => models.map((m) => [m, modelSearchText(m)] as const), [models]);
+  // Settings → Models & licences: what is switched off leaves the list (an Original stays for the engine still on).
+  const access = useModelAccess();
+  const on = useMemo(() => (access ? models.filter((m) => offered(access, m.id)) : models), [models, access]);
+  const switchedOff = models.length - on.length;
+  const index = useMemo(() => on.map((m) => [m, modelSearchText(m)] as const), [on]);
   const kinds = useMemo(() => [...new Set(models.map((m) => m.kind))], [models]);
   const list = useMemo(
-    () => index.filter(([m, text]) => (engine === "all" || m.engines.includes(engine)) && (kind === "all" || m.kind === kind) && (!term || text.includes(term))).map(([m]) => m),
-    [index, engine, kind, term],
+    () =>
+      index
+        .filter(([m, text]) => (engine === "all" || (m.engines.includes(engine) && offered(access, m.id, engine))) && (kind === "all" || m.kind === kind) && (!term || text.includes(term)))
+        .map(([m]) => m),
+    [index, engine, kind, term, access],
   );
   // 40 rows in the page's HTML, the rest as you scroll.
   const { shown, hasMore, moreFrom, sentinel, left } = useProgressive(list.length, `${engine}|${kind}|${term}`, 40, 60);
@@ -166,6 +175,15 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
           {list.length} models
         </span>
       </div>
+      {switchedOff > 0 && (
+        <p className="text-[13px] text-muted-foreground">
+          {switchedOff} {switchedOff === 1 ? "model is" : "models are"} turned off in{" "}
+          <Link href="/settings/models" className="text-brand-text underline-offset-2 hover:underline">
+            Settings → Models &amp; licences
+          </Link>
+          .
+        </p>
+      )}
       <div className="overflow-x-auto rounded-xl border">
         <table className="w-full text-left text-[13px]">
           <thead className="bg-muted/50 text-[12px] text-muted-foreground">

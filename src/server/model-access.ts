@@ -1,6 +1,6 @@
 import "server-only";
 import { MODELS } from "@/lib/catalog";
-import { onEngine } from "@/lib/catalog/engines";
+import { onEngine, providerEngine } from "@/lib/catalog/engines";
 import { libraryEntry, loraName } from "@/lib/catalog/loras";
 import type { Engine, LoraRef, ModelDef, ModelRoute } from "@/lib/catalog/types";
 import type { ManifestWorkflow } from "@/lib/comfy";
@@ -159,6 +159,20 @@ export function pickOffered(ids: (string | undefined)[], engine?: Engine): strin
   if (id) return id;
   const first = ids.map((x) => (x ? MODELS.find((m) => m.id === x) : undefined)).find(Boolean);
   throw new Error(first ? offReason(first) : `No model for this is turned on in ${ACCESS_PLACE}`);
+}
+
+/**
+ * A default that is on, else the next model that is on and does the same job on this engine (same kind, an
+ * operation in common, not a hidden helper), else the default itself: a run of it then refuses, naming the switch
+ * to turn back on. Assist's own picks and the studios' defaults in /api/models go through it.
+ */
+export function offeredDefault(id: string | undefined, engine: Engine): string | undefined {
+  if (!id || isOffered(id, engine)) return id;
+  const own = MODELS.find((m) => m.id === id);
+  if (!own) return id;
+  const ops = new Set(onEngine(own, engine).routes.map((r) => r.op));
+  const next = MODELS.find((m) => !m.hidden && m.id !== id && m.kind === own.kind && isOffered(m.id, engine) && onEngine(offeredModel(m)!, engine).routes.some((r) => ops.has(r.op) && providerEngine(r.provider) === engine));
+  return next?.id ?? id;
 }
 
 /** The summary the browser filters its pickers with (undefined while everything is on). */
