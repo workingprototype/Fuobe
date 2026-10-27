@@ -58,6 +58,28 @@ describe("LoRA stacks on ComfyUI graphs", () => {
     expect(chainAfter(wf, loaderOf(wf, /z_image_turbo/))).toEqual(looks.map((l) => ({ file: l.file, strength: l.strength })));
   });
 
+  it("takes a trained Soul ID on every open model of each training family (Z-Image, Qwen-Image, FLUX.1, FLUX.2)", async () => {
+    const { TRAINING_FAMILIES, TRAINING_FAMILY_IDS } = await import("@/lib/catalog/training");
+    const { onEngine, runsOn } = await import("@/lib/catalog/engines");
+    const open: string[] = [];
+    for (const f of TRAINING_FAMILY_IDS) {
+      for (const id of TRAINING_FAMILIES[f].models) {
+        const m = getModel(id);
+        if (!m || !runsOn(m, "open")) continue;
+        for (const r of onEngine(m, "open").routes.filter((x) => x.provider === "comfyui" && (x.op === "t2i" || x.op === "edit"))) {
+          open.push(`${f}:${id}:${r.endpoint}`);
+          expect(canTakeLoras(getWorkflow(r.endpoint).workflow), `${id} → ${r.endpoint}`).toBe(true);
+        }
+      }
+    }
+    expect(open.map((x) => x.split(":")[0])).toEqual(expect.arrayContaining(["z-image-turbo", "qwen-image-2512", "flux1-dev", "flux2-dev"]));
+    // A FLUX.1 [dev] Soul ID (a fal or AI-Toolkit file) goes right after FLUX.1's loader, ahead of nothing else.
+    const soulId = { file: "fuobe/maya-abc123.safetensors", strength: 0.9, trigger: "myfz", own: true as const };
+    const { workflow: wf } = await prepare("flux1-dev-t2i", { prompt: "myfz on a beach", aspectRatio: "3:4", loras: [soulId] }, "t2i");
+    const loader = Object.entries(wf).find(([, n]) => n.class_type === "UNETLoader")![0];
+    expect(chainAfter(wf, loader)).toEqual([{ file: soulId.file, strength: 0.9 }]);
+  });
+
   it("refuses LoRAs on a graph with no model loader instead of dropping them", async () => {
     const graph = "video-trim";
     expect(canTakeLoras(getWorkflow(graph).workflow)).toBe(false);
