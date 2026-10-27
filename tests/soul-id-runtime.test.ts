@@ -116,6 +116,17 @@ describe("starting a Soul ID training", () => {
     expect(listTrainings(el.id)[0]).toMatchObject({ status: "running", costUsd: 1.7, family: "z-image-turbo", photos: 6 });
     db().prepare("UPDATE trainings SET status = 'failed' WHERE id = ?").run(t.id);
   });
+
+  it("trains on a non-commercial base too (licences are information): FLUX's portrait trainer gets images_data_url and the trigger", async () => {
+    routes["https://queue.fal.run/fal-ai/flux-lora-portrait-trainer"] = () => json({ request_id: "req-f", status_url: "https://queue.fal.test/s/f", response_url: "https://queue.fal.test/r/f" });
+    const el = character(6);
+    const t = startTraining(el.id, "fal-flux1-portrait", { consent: true });
+    await wait(() => listTrainings(el.id)[0].status === "running");
+    const body = JSON.parse(calls.find((c) => c.url.includes("flux-lora-portrait-trainer"))!.body!);
+    expect(body).toEqual({ images_data_url: expect.stringMatching(/dataset\.zip$/), steps: 2500, trigger_phrase: t.trigger });
+    expect(listTrainings(el.id)[0]).toMatchObject({ costUsd: 6, family: "flux1-dev" });
+    db().prepare("UPDATE trainings SET status = 'failed' WHERE id = ?").run(t.id);
+  });
 });
 
 describe("a finished training", () => {
@@ -160,6 +171,18 @@ describe("a finished training", () => {
       .run(el.id, JSON.stringify({ statusUrl: "https://queue.fal.test/s/3", responseUrl: "https://queue.fal.test/r/3" }), Date.now(), Date.now());
     await pollTrainings();
     expect(getElement(el.id)!.loras.map((x) => x.family)).toEqual(["qwen-image-2512", "z-image-turbo"]);
+  });
+
+  it("reads Krea 2's LoRA from lora_file and records it for Krea 2's hosted LoRA model", async () => {
+    routes["https://queue.fal.test/s/k"] = () => json({ status: "COMPLETED" });
+    routes["https://queue.fal.test/r/k"] = () => json({ lora_file: { url: "https://v3.fal.media/files/krea.safetensors" }, config_file: { url: "https://v3.fal.media/files/c.json" } });
+    routes["https://v3.fal.media/files/krea.safetensors"] = () => new Response(Buffer.from("krea"), { headers: { "content-length": "4" } });
+    const { el } = running({ target: "fal-krea-2", provider: "fal", externalId: "req-k", meta: { statusUrl: "https://queue.fal.test/s/k", responseUrl: "https://queue.fal.test/r/k", family: "krea-2" } });
+    await pollTrainings();
+    const l = getElement(el.id)!.loras[0];
+    expect(l).toMatchObject({ family: "krea-2", modelId: "krea-2-turbo-lora-cloud", url: "https://v3.fal.media/files/krea.safetensors" });
+    expect(identityFor([l], getModel("krea-2-turbo-lora-cloud")!)).toBe(l);
+    expect(identityFor([l], onEngine(getModel("fuobe-soul")!, "cloud"))).toBeUndefined();
   });
 
   it("copies an AI-Toolkit LoRA into ComfyUI's folder and keeps Fuobe's copy, so the cloud can use it too", async () => {
@@ -229,6 +252,15 @@ describe("training anywhere", () => {
     expect(names).toContain("dataset/001.png");
     expect(names).toContain("dataset/005.txt");
     expect(names).toContain("README.md");
+    // Another base: FLUX.1 [dev]'s config, and its licence in the README.
+    const flux = await trainingKit(el.id, "flux1-dev");
+    expect(flux.name).toMatch(/-flux1-dev-training-kit\.zip$/);
+    const fluxFile = path.join(dir, flux.name);
+    fs.writeFileSync(fluxFile, flux.data);
+    const read = (name: string) => execFileSync("python3", ["-I", "-c", "import sys,zipfile;print(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]).decode())", fluxFile, name]).toString();
+    const yaml = names.find((n) => n.endsWith(".yaml"))!;
+    expect(JSON.parse(read(yaml)).config.process[0].model).toMatchObject({ arch: "flux", name_or_path: "black-forest-labs/FLUX.1-dev" });
+    expect(read("README.md")).toMatch(/FLUX\.1 \[dev\] Non-Commercial License · non-commercial weights/);
   });
 
   it("attaches a LoRA trained elsewhere for the family, keeping a copy when ComfyUI's folder is here", async () => {
@@ -240,5 +272,11 @@ describe("training anywhere", () => {
     await attachLora(el.id, { file: "mine/maya.safetensors", trigger: "mayafz" });
     expect(getElement(el.id)!.loras[0]).toMatchObject({ engine: "open", modelId: "fuobe-soul", family: "z-image-turbo", own: true });
     await expect(attachLora(el.id, { file: "../x.safetensors", trigger: "" })).rejects.toThrow(/file name/);
+    // A FLUX.1 [dev] LoRA sits beside it and runs on FLUX.1 [dev] and Krea [dev] on the GPU, and in the cloud from Fuobe's copy.
+    await attachLora(el.id, { file: "mine/maya.safetensors", trigger: "mayafz", family: "flux1-dev" });
+    const flux = getElement(el.id)!.loras.find((l) => l.family === "flux1-dev")!;
+    expect(flux).toMatchObject({ modelId: "oss-flux1-dev", own: true });
+    expect(identityFor([flux], getModel("oss-flux1-krea")!)).toBe(flux);
+    expect(identityFor([flux], getModel("flux-1-dev-lora-cloud")!)).toBe(flux);
   });
 });

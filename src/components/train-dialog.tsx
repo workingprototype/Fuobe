@@ -1,18 +1,22 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, CircleCheck, Cloud, Cpu, Download, GraduationCap, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleCheck, Cloud, Cpu, Download, GraduationCap, Loader2, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ElementLora, StudioElement } from "@/lib/catalog/elements";
 import {
+  AITK_FAMILIES,
   identityKey,
+  licenceNote,
   loraFamily,
   needsConsent,
   photosBlocker,
@@ -36,7 +40,7 @@ interface Training {
   createdAt: number;
 }
 
-type Target = TrainingTarget & { blocker: string | null; demo: boolean; licence: string };
+type Target = TrainingTarget & { blocker: string | null; demo: boolean };
 
 function useTrainings(id: string, open: boolean) {
   return useQuery({
@@ -57,6 +61,12 @@ function engines(l: ElementLora): string {
 
 const price = (t: Target) => (t.costUsd === 0 ? "Free" : `$${t.costUsd.toFixed(2)}`);
 
+/** Where a family's LoRA runs: both engines, or the one it has models on. */
+function familyEngines(f: TrainingFamily): string {
+  const lead = TRAINING_FAMILIES[f].lead;
+  return lead.open && lead.cloud ? "Runs on your GPU and in the cloud" : lead.cloud ? "Runs in the cloud" : "Runs on your GPU";
+}
+
 /**
  * Fuobe Soul ID: train the element once (on your GPU or in the cloud), then every @mention on Fuobe Soul, Soul Cinema
  * and Soul HD uses the trained LoRA on both engines instead of reference photos. Photo rules and the consent line come
@@ -66,6 +76,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
   const qc = useQueryClient();
   const q = useTrainings(element.id, open);
   const [file, setFile] = useState("");
+  const [kitFamily, setKitFamily] = useState<TrainingFamily>("z-image-turbo");
   const [consent, setConsent] = useState(false);
   const consentId = useId();
   const photos = element.references.filter((r) => !/\.(wav|mp3|ogg|flac|m4a|webm)$/i.test(r));
@@ -101,7 +112,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
       const res = await fetch(`/api/elements/${element.id}/lora`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file, trigger: triggerFor(element.handle) }),
+        body: JSON.stringify({ file, trigger: triggerFor(element.handle), family: kitFamily }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error);
@@ -126,9 +137,86 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
   const targets = q.data?.targets ?? [];
   const families = [...new Set(targets.map((t) => t.family))] as TrainingFamily[];
   const hasFamily = (f: TrainingFamily) => trained.some((l) => !l.demo && loraFamily(l) === f);
+  const busyFamily = (f: TrainingFamily) => targets.some((t) => t.family === f && ["queued", "running"].includes(latest(t.id)?.status ?? ""));
+  const originals = families.filter((f) => TRAINING_FAMILIES[f].original);
+  const more = families.filter((f) => !TRAINING_FAMILIES[f].original);
   const busyAny = q.data?.items.some((t) => t.status === "queued" || t.status === "running");
   // "Retrain for Fuobe Soul" on a Higgsfield Soul ID: the first option that can run now.
   const retrainTarget = targets.find((t) => t.family === "z-image-turbo" && !t.blocker && !t.demo) ?? targets.find((t) => t.family === "z-image-turbo" && !t.blocker);
+
+
+  const anyTrained = families.some((g) => hasFamily(g));
+  /** One family: its models, its licence (information), and where it trains with each one's price first. */
+  const familySection = (f: TrainingFamily) => {
+    const fam = TRAINING_FAMILIES[f];
+    const lic = targets.find((t) => t.family === f);
+    return (
+      <section key={f} aria-label={fam.name} className="space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+          <h3 className="text-[14px] font-semibold">{fam.name}</h3>
+          <p className="text-[12px] text-muted-foreground">
+            {fam.base} LoRA · {familyEngines(f)}
+            {anyTrained && !hasFamily(f) ? " · upgrade: the same photos, another model" : ""}
+          </p>
+        </div>
+        {lic && (
+          <p className={cn("text-[11.5px]", lic.commercial === true ? "text-muted-foreground" : "text-warning")}>Licence: {licenceNote(lic)}</p>
+        )}
+        {targets
+          .filter((t) => t.family === f)
+          .map((t) => {
+            const job = latest(t.id);
+            const busy = job && (job.status === "queued" || job.status === "running");
+            const needConsent = person && !consent;
+            const label = busy ? "Training" : hasFamily(f) ? "Retrain" : anyTrained ? "Upgrade" : "Train";
+            return (
+              <div key={t.id} className={cn("rounded-xl border p-3", busy && "border-primary")}>
+                <div className="flex flex-wrap items-start gap-3">
+                  <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+                    {t.engine === "open" ? <Cpu className="size-4" /> : <Cloud className="size-4" />}
+                  </span>
+                  <div className="min-w-0 flex-1 basis-48">
+                    <p className="flex flex-wrap items-center gap-x-2 text-[14px] font-medium">
+                      {t.name}
+                      <span className={cn("rounded-full px-2 py-px text-[11.5px] font-medium tabular-nums", t.costUsd === 0 ? "bg-success/15 text-success" : "bg-muted text-foreground")}>{price(t)}</span>
+                      <span className="text-[12px] font-normal text-muted-foreground">{t.eta}</span>
+                    </p>
+                    <p className="text-[12px] text-muted-foreground">{t.description}</p>
+                    <p className="mt-0.5 text-[11.5px] text-muted-foreground tabular-nums">{t.steps.toLocaleString("en-US")} steps</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="ml-auto"
+                    variant={busy ? "secondary" : "default"}
+                    disabled={!!t.blocker || !!tooFew || !!busy || start.isPending || needConsent}
+                    onClick={() => start.mutate(t.id)}
+                  >
+                    {busy && <Loader2 className="animate-spin" />}
+                    {label}
+                  </Button>
+                </div>
+                {!busy && (t.blocker || t.demo) && (
+                  <p className="mt-2 text-[12px] text-muted-foreground">
+                    {t.blocker ?? (t.provider === "fal" ? "No fal.ai key yet: this runs as a demo and trains nothing." : "No AI-Toolkit set up yet: this runs as a demo and trains nothing.")}{" "}
+                    <Link href="/settings" className="text-brand-text underline underline-offset-2">
+                      Open Settings
+                    </Link>
+                  </p>
+                )}
+                {busy && (
+                  <div className="mt-3 space-y-1">
+                    <Progress value={(job.progress ?? 0.05) * 100} className="h-1.5" />
+                    <p className="text-[12px] text-muted-foreground">{job.message}</p>
+                  </div>
+                )}
+                {job?.status === "failed" && <p className="mt-2 text-[12px] text-destructive">{job.error}</p>}
+                {job?.status === "succeeded" && job.message && <p className="mt-2 text-[12px] text-warning">{job.message}</p>}
+              </div>
+            );
+          })}
+      </section>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -239,73 +327,21 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
         {/* Where to train, by family */}
         <div className="space-y-4">
           {q.isLoading && <p className="text-[13px] text-muted-foreground">Loading training options…</p>}
-          {families.map((f, i) => {
-            const otherTrained = families.some((g) => g !== f && hasFamily(g));
-            return (
-              <section key={f} aria-label={TRAINING_FAMILIES[f].name} className="space-y-2">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-                  <h3 className="text-[14px] font-semibold">{TRAINING_FAMILIES[f].name}</h3>
-                  <p className="text-[12px] text-muted-foreground">
-                    {TRAINING_FAMILIES[f].base} LoRA{i > 0 && otherTrained && !hasFamily(f) ? " · upgrade: the same photos, another model" : ""}
-                  </p>
-                </div>
-                {targets
-                  .filter((t) => t.family === f)
-                  .map((t) => {
-                    const job = latest(t.id);
-                    const busy = job && (job.status === "queued" || job.status === "running");
-                    const needConsent = person && !consent;
-                    const label = busy ? "Training" : hasFamily(f) ? "Retrain" : otherTrained ? "Upgrade" : "Train";
-                    return (
-                      <div key={t.id} className={cn("rounded-xl border p-3", busy && "border-primary")}>
-                        <div className="flex flex-wrap items-start gap-3">
-                          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-                            {t.engine === "open" ? <Cpu className="size-4" /> : <Cloud className="size-4" />}
-                          </span>
-                          <div className="min-w-0 flex-1 basis-48">
-                            <p className="flex flex-wrap items-center gap-x-2 text-[14px] font-medium">
-                              {t.name}
-                              <span className={cn("rounded-full px-2 py-px text-[11.5px] font-medium tabular-nums", t.costUsd === 0 ? "bg-success/15 text-success" : "bg-muted text-foreground")}>{price(t)}</span>
-                              <span className="text-[12px] font-normal text-muted-foreground">{t.eta}</span>
-                            </p>
-                            <p className="text-[12px] text-muted-foreground">{t.description}</p>
-                            <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                              {t.steps.toLocaleString("en-US")} steps · {t.licence} weights, commercial use
-                            </p>
-                          </div>
-                          <Button
-                            size="sm"
-                            className="ml-auto"
-                            variant={busy ? "secondary" : "default"}
-                            disabled={!!t.blocker || !!tooFew || !!busy || start.isPending || needConsent}
-                            onClick={() => start.mutate(t.id)}
-                          >
-                            {busy && <Loader2 className="animate-spin" />}
-                            {label}
-                          </Button>
-                        </div>
-                        {!busy && (t.blocker || t.demo) && (
-                          <p className="mt-2 text-[12px] text-muted-foreground">
-                            {t.blocker ?? (t.provider === "fal" ? "No fal.ai key yet: this runs as a demo and trains nothing." : "No AI-Toolkit set up yet: this runs as a demo and trains nothing.")}{" "}
-                            <Link href="/settings" className="text-brand-text underline underline-offset-2">
-                              Open Settings
-                            </Link>
-                          </p>
-                        )}
-                        {busy && (
-                          <div className="mt-3 space-y-1">
-                            <Progress value={(job.progress ?? 0.05) * 100} className="h-1.5" />
-                            <p className="text-[12px] text-muted-foreground">{job.message}</p>
-                          </div>
-                        )}
-                        {job?.status === "failed" && <p className="mt-2 text-[12px] text-destructive">{job.error}</p>}
-                        {job?.status === "succeeded" && job.message && <p className="mt-2 text-[12px] text-warning">{job.message}</p>}
-                      </div>
-                    );
-                  })}
-              </section>
-            );
-          })}
+          {originals.map(familySection)}
+          {more.length > 0 && (
+            <Collapsible defaultOpen={more.some((f) => hasFamily(f) || busyFamily(f))} className="rounded-xl border">
+              <CollapsibleTrigger className="group flex w-full items-center gap-2 px-3 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-semibold">More models</span>
+                  <span className="block text-[12px] text-muted-foreground">{more.map((f) => TRAINING_FAMILIES[f].name).join(" · ")}</span>
+                </span>
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-4 px-3 pb-3">
+                {more.map(familySection)}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
           {person && !consent && targets.length > 0 && <p className="text-[12px] text-muted-foreground">Tick the consent line above to train.</p>}
         </div>
 
@@ -315,8 +351,20 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
             Download a ready-to-run AI-Toolkit kit (photos, captions, config), train on any GPU, then attach the LoRA file you copied into ComfyUI/models/loras.
           </p>
           <div className="flex flex-wrap gap-2">
+            <Select value={kitFamily} onValueChange={(v) => setKitFamily(v as TrainingFamily)}>
+              <SelectTrigger size="sm" className="h-8 w-auto min-w-0" aria-label="Base model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AITK_FAMILIES.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {TRAINING_FAMILIES[f].base}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button asChild variant="outline" size="sm">
-              <a href={`/api/elements/${element.id}/training-kit`}>
+              <a href={`/api/elements/${element.id}/training-kit?family=${kitFamily}`}>
                 <Download /> Training kit
               </a>
             </Button>

@@ -2258,6 +2258,345 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "flux-1-dev-lora-cloud",
+    "name": "FLUX.1 [dev] with LoRAs (hosted)",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "FLUX.1 [dev] with your trained characters and styles \u00b7 non-commercial weights, fal clears its outputs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.035
+    }
+  },
+  {
+    "id": "flux-1-krea-lora-cloud",
+    "name": "FLUX.1 Krea [dev] with LoRAs (hosted)",
+    "vendor": "Black Forest Labs \u00d7 Krea",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Natural photoreal FLUX.1 Krea with FLUX.1 LoRAs \u00b7 non-commercial weights, fal clears its outputs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-krea-lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.035
+    }
+  },
+  {
+    "id": "flux-2-dev-lora-cloud",
+    "name": "FLUX.2 [dev] with LoRAs (hosted)",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "FLUX.2 [dev] with your trained characters and styles \u00b7 non-commercial weights, fal clears its outputs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-2/lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.021
+    }
+  },
+  {
+    "id": "flux-2-klein-9b-lora-cloud",
+    "name": "FLUX.2 [klein] 9B with LoRAs (hosted)",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "The 9B FLUX.2 [klein] with your LoRAs \u00b7 non-commercial weights, fal clears its outputs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-2/klein/9b/lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "badges": [
+      "fast"
+    ],
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.015
+    }
+  },
+  {
+    "id": "krea-2-turbo-lora-cloud",
+    "name": "Krea 2 Turbo with LoRAs (hosted)",
+    "vendor": "Krea",
+    "family": "krea",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Krea 2's aesthetic with your trained characters and styles \u00b7 Krea 2 Community licence (revenue tiers)",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/krea-2/turbo/lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "badges": [
+      "fast"
+    ],
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.01
+    }
+  },
+  {
     "id": "imagen-4",
     "name": "Imagen 4",
     "vendor": "Google",

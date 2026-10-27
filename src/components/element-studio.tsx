@@ -24,9 +24,9 @@ export function ElementStudio({ id }: { id: string }) {
   const el = q.data;
   const config = useMemo<StudioConfig | null>(() => {
     if (!el) return null;
-    // A trained Soul ID runs on its family's lead model (Fuobe Soul, or Soul HD) on both engines: start there.
+    // A trained Soul ID runs on its family's lead model (Fuobe Soul, Soul HD, FLUX…): start there, on each engine it has.
     const fam = el.loras.filter((l) => !l.demo).map(loraFamily).find(Boolean);
-    const soul = fam ? TRAINING_FAMILIES[fam].lead : null;
+    const lead = fam ? TRAINING_FAMILIES[fam].lead : null;
     return {
       feature: `element:${el.id}`,
       title: el.name,
@@ -38,7 +38,7 @@ export function ElementStudio({ id }: { id: string }) {
             : el.kind === "prop"
               ? `Where should ${el.name} show up?`
               : `What should look like ${el.name}?`,
-      subtitle: soul
+      subtitle: lead
         ? `Trained: @${el.handle} uses its Soul ID on ${TRAINING_FAMILIES[fam!].name}. Mention it in any studio to use ${el.kind === "character" ? "them" : "it"} there too.`
         : `Mention @${el.handle} in any studio to use ${el.kind === "character" ? "them" : "it"} there too.`,
       placeholder: `Describe a scene with @${el.handle}…`,
@@ -47,7 +47,7 @@ export function ElementStudio({ id }: { id: string }) {
       feed: { features: [`element:${el.id}`, `character:${el.id}`] },
       slots: [],
       multiRef: { label: "Add ref", max: 8 },
-      defaultModels: soul ? { cloud: soul, open: soul } : { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
+      defaultModels: { cloud: lead?.cloud ?? "nano-banana-pro", open: lead?.open ?? "oss-qwen-edit" },
     };
   }, [el]);
 

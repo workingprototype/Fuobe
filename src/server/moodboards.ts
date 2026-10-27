@@ -192,16 +192,19 @@ export function deleteMoodboard(id: string): boolean {
 /** The model a trained board's look runs on. */
 const STYLE_MODEL = "fuobe-soul";
 
+/** A trained board is a Fuobe look: it trains on Fuobe Soul's base (Z-Image Turbo), on the GPU or in the cloud. */
+const lookTargets = () => targetsFor("style").filter((t) => t.modelIds.includes(STYLE_MODEL));
+
 /** The style trainings a board can run on (AI-Toolkit on the user's GPU, fal in the cloud), with what stops each. */
 export function moodboardTrainingTargets() {
-  return describeTargets(targetsFor("style"));
+  return describeTargets(lookTargets());
 }
 
 /** The style training a board runs when none is named: the engine mode's, else the board's own engine. */
 function defaultStyleTarget(m: Moodboard): TrainingTarget {
   const mode = engineMode();
   const engine = mode === "both" ? m.engine : mode;
-  return targetsFor("style").find((t) => t.engine === engine) ?? targetsFor("style")[0];
+  return lookTargets().find((t) => t.engine === engine) ?? lookTargets()[0];
 }
 
 /**
@@ -214,7 +217,7 @@ export function trainMoodboard(id: string, targetId?: string): Moodboard {
   if (!m) throw new Error("Moodboard not found");
   if (m.status !== "complete") throw new Error("This moodboard is still training. Try again once it is ready.");
   const target = targetId ? getTrainingTarget(targetId) : defaultStyleTarget(m);
-  if (!target || !target.kinds.includes("style")) throw new Error("Pick a style training");
+  if (!target || !lookTargets().includes(target)) throw new Error("Pick a style training for Fuobe Soul");
   // Say what's missing (a key, an AI-Toolkit URL, the engine mode) before making the style element, so a refusal leaves nothing behind.
   const blocker = trainingBlocker(target);
   if (blocker && !demoTraining(target)) throw new Error(blocker);

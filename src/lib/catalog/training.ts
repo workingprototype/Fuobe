@@ -2,14 +2,17 @@
  * Fuobe Soul ID (build plan O3): a character or a style trained as a LoRA on open weights, on either engine
  * (AI-Toolkit on the user's GPU, or fal's hosted trainers), then used whenever the element is @mentioned on a
  * model of the family it was trained for: Fuobe Soul and Soul Cinema (Z-Image Turbo), Fuobe Soul HD
- * (Qwen-Image 2512), and the plain open-weight models of the same base. Pure logic, no I/O.
+ * (Qwen-Image 2512), and every other base fal or AI-Toolkit trains (FLUX.1 / FLUX.2 [dev], FLUX.2 [klein] 4B and 9B,
+ * Krea 2) on the models of that base. Pure logic, no I/O.
  *
- * - A LoRA belongs to a family (its base), not to one model, and works on both engines: a LoRA trained on fal is
- *   downloaded into ComfyUI for open runs, one trained on the user's GPU is copied to the cloud provider for cloud
- *   runs (src/server/loras.ts). Another family means training again on the same photos ("Upgrade character"), as
- *   Higgsfield retrains a Soul ID per model family.
- * - The hosted trainers' fields and prices are generated from the research (trainers.generated.ts by
- *   scripts/gen-trainers.py); every one a target uses trains on commercial weights (Apache-2.0).
+ * - A LoRA belongs to a family (its base), not to one model, and works on both engines where the family has models:
+ *   a LoRA trained on fal is downloaded into ComfyUI for open runs, one trained on the user's GPU is copied to the
+ *   cloud provider for cloud runs (src/server/loras.ts). Another family means training again on the same photos
+ *   ("Upgrade character"), as Higgsfield retrains a Soul ID per model family.
+ * - The hosted trainers' fields, prices, response fields and licences are generated from the research
+ *   (trainers.generated.ts by scripts/gen-trainers.py). Licences are information, never a gate (the owner's decision
+ *   of 2026-10-27): every target says the licence of the weights it trains on and whether they allow selling
+ *   outputs, and the admin turns models on or off in Settings.
  * - Photo rules and the consent line follow Higgsfield's character flow (docs/research/higgsfield-originals-5.md
  *   §3.4, higgsfield-delta-4.md G18): 20+ photos recommended, 80 at most, one person, a full-body shot, consent
  *   before a person's photos are trained.
@@ -21,7 +24,7 @@ import type { Engine, ModelDef } from "./types";
 export type TrainingProvider = "fal" | "ai-toolkit";
 
 /** The base a LoRA is trained on. A trained LoRA works on every model of its family. */
-export type TrainingFamily = "z-image-turbo" | "qwen-image-2512";
+export type TrainingFamily = "z-image-turbo" | "qwen-image-2512" | "flux1-dev" | "flux2-dev" | "flux2-klein-4b" | "flux2-klein-9b" | "krea-2";
 
 /** What a training learns: a subject (a person, a place, an object) or a style (a moodboard). */
 export type TrainingKind = "subject" | "style";
@@ -32,7 +35,7 @@ export interface TrainerField {
   default?: string | number | boolean;
   min?: number;
   max?: number;
-  enum?: string[];
+  enum?: (string | number)[];
 }
 
 /** A hosted LoRA trainer (generated from the research by scripts/gen-trainers.py). */
@@ -44,13 +47,17 @@ export interface HostedTrainer {
   family: string;
   /** The base as a slug ("z-image-turbo", "z-image", "qwen-image-2512"). */
   base: string;
+  /** What it learns from: photos (a subject or a look) or clips (a motion). */
+  media: "image" | "video";
   role: string;
-  /** Where the zip of 001.jpg + 001.txt pairs goes. */
+  /** Where the zip of 001.jpg + 001.txt pairs goes (image_data_url, images_data_url or training_data_url). */
   dataField: string;
+  /** The response fields that hold the trained LoRA, the one to use first (diffusers_lora_file, lora_file). */
+  loraOutput: string[];
   fields: Record<string, TrainerField>;
   licence: string;
-  /** The weights it trains on allow selling outputs. */
-  commercial: boolean;
+  /** The weights it trains on allow selling outputs: true, false (non-commercial) or null (a revenue tier decides). Information, not a gate. */
+  commercial: boolean | null;
   status: string;
   checked: string;
   schemaUrl: string;
@@ -64,7 +71,7 @@ export interface TrainingTarget {
   id: string;
   /** Short: where it trains ("Your GPU", "Cloud"). The family says what for. */
   name: string;
-  /** The engine the training runs on (the LoRA then works on both). */
+  /** The engine the training runs on (the LoRA then works on both where its family has models). */
   engine: Engine;
   provider: TrainingProvider;
   family: TrainingFamily;
@@ -73,9 +80,9 @@ export interface TrainingTarget {
   trainer?: string;
   steps: number;
   learningRate?: number;
-  /** Other fields sent to the trainer (fal's training_type). */
-  extra?: Record<string, string>;
-  /** Models the trained LoRA applies to (the family's, on both engines). */
+  /** Other fields sent to the trainer when its schema has them (fal's training_type, Krea 2's resolution). */
+  extra?: Record<string, string | number | boolean>;
+  /** Models the trained LoRA applies to (the family's, on the engines each runs on). */
   modelIds: string[];
   minImages: number;
   description: string;
@@ -85,23 +92,97 @@ export interface TrainingTarget {
   costUsd: number;
   /** Rough wall-clock time. */
   eta: string;
+  /** The licence of the weights it trains on (the LoRA inherits it), shown as information. */
+  licence: string;
+  /** Those weights allow selling outputs: true, false (non-commercial) or null (a revenue tier decides). */
+  commercial: boolean | null;
 }
 
-/** The families, in the order the Train dialog shows them; `lead` is the model a trained element is shown for. */
-export const TRAINING_FAMILIES: Record<TrainingFamily, { name: string; base: string; lead: string; models: string[] }> = {
+export interface FamilyInfo {
+  /** What the dialog calls it: the models a trained LoRA runs on. */
+  name: string;
+  /** The base model the LoRA is trained on. */
+  base: string;
+  /** A Fuobe Original's family (Fuobe Soul, Soul HD): shown first; the others are under "More models". */
+  original: boolean;
+  /** The model a trained element opens on, per engine (an Original's is the same model on both). */
+  lead: Partial<Record<Engine, string>>;
+  /** Every model a LoRA of this family runs on (on the engines each runs on). */
+  models: string[];
+  /** fal's trainer for this base: the family's licence is the licence of the weights it trains. */
+  trainer: string;
+}
+
+/**
+ * The families, in the order the Train dialog shows them: Fuobe's Originals first, then every other base a hosted
+ * trainer or AI-Toolkit trains, on the models of that base Fuobe runs (both engines where it has them).
+ */
+export const TRAINING_FAMILIES: Record<TrainingFamily, FamilyInfo> = {
   "z-image-turbo": {
     name: "Fuobe Soul and Soul Cinema",
     base: "Z-Image Turbo",
-    lead: "fuobe-soul",
+    original: true,
+    lead: { open: "fuobe-soul", cloud: "fuobe-soul" },
     models: ["fuobe-soul", "fuobe-soul-cinema", "oss-z-image-turbo", "z-image-turbo-cloud"],
+    trainer: "fal-ai/z-image-turbo-trainer-v2",
   },
   "qwen-image-2512": {
     name: "Fuobe Soul HD",
     base: "Qwen-Image 2512",
-    lead: "fuobe-soul-hd",
+    original: true,
+    lead: { open: "fuobe-soul-hd", cloud: "fuobe-soul-hd" },
     models: ["fuobe-soul-hd", "oss-qwen-image", "oss-qwen-image-lightning", "qwen-image-2512-cloud"],
+    trainer: "fal-ai/qwen-image-2512-trainer",
+  },
+  "flux1-dev": {
+    name: "FLUX.1 [dev] and Krea [dev]",
+    base: "FLUX.1 [dev]",
+    original: false,
+    lead: { open: "oss-flux1-dev", cloud: "flux-1-dev-lora-cloud" },
+    models: ["oss-flux1-dev", "oss-flux1-krea", "flux-1-dev-lora-cloud", "flux-1-krea-lora-cloud"],
+    trainer: "fal-ai/flux-lora-portrait-trainer",
+  },
+  "flux2-dev": {
+    name: "FLUX.2 [dev]",
+    base: "FLUX.2 [dev]",
+    original: false,
+    lead: { open: "oss-flux2-dev", cloud: "flux-2-dev-lora-cloud" },
+    models: ["oss-flux2-dev", "oss-flux2-dev-turbo", "flux-2-dev-lora-cloud"],
+    trainer: "fal-ai/flux-2-trainer-v2",
+  },
+  "flux2-klein-4b": {
+    name: "FLUX.2 [klein] 4B",
+    base: "FLUX.2 [klein] 4B",
+    original: false,
+    lead: { cloud: "flux-2-klein-4b-cloud" },
+    models: ["flux-2-klein-4b-cloud"],
+    trainer: "fal-ai/flux-2-klein-4b-base-trainer",
+  },
+  "flux2-klein-9b": {
+    name: "FLUX.2 [klein] 9B",
+    base: "FLUX.2 [klein] 9B",
+    original: false,
+    lead: { cloud: "flux-2-klein-9b-lora-cloud" },
+    models: ["flux-2-klein-9b-lora-cloud"],
+    trainer: "fal-ai/flux-2-klein-9b-base-trainer",
+  },
+  "krea-2": {
+    name: "Krea 2",
+    base: "Krea 2",
+    original: false,
+    lead: { cloud: "krea-2-turbo-lora-cloud" },
+    models: ["krea-2-turbo-lora-cloud"],
+    trainer: "fal-ai/krea-2-trainer",
   },
 };
+
+export const TRAINING_FAMILY_IDS = Object.keys(TRAINING_FAMILIES) as TrainingFamily[];
+
+/** The model a family's LoRA is recorded for, and a trained element opens on: the engine's own lead, else the other's. */
+export function familyLead(f: TrainingFamily, engine?: Engine): string {
+  const lead = TRAINING_FAMILIES[f].lead;
+  return (engine && lead[engine]) || lead.cloud || lead.open || "";
+}
 
 /** Higgsfield's character flow, as limits (research §3.4): 20+ photos recommended, 80 at most on the web. */
 export const SOUL_ID_PHOTOS = { min: 5, recommended: 20, max: 80, minSide: 512 } as const;
@@ -128,6 +209,18 @@ export const SOUL_ID_COPY = {
 const trainers = new Map(HOSTED_TRAINERS.map((t) => [t.id, t]));
 export const getTrainer = (id: string | undefined): HostedTrainer | undefined => (id ? trainers.get(id) : undefined);
 
+/** The licence of a family's base weights (its fal trainer's), as information. */
+export function familyLicence(f: TrainingFamily): { licence: string; commercial: boolean | null } {
+  const tr = getTrainer(TRAINING_FAMILIES[f].trainer);
+  return { licence: tr?.licence ?? "", commercial: tr?.commercial ?? null };
+}
+
+/** How the licence reads next to a price: "Apache-2.0 · commercial use", "… · non-commercial weights", "… · check its revenue tiers". */
+export function licenceNote(l: { licence: string; commercial: boolean | null }): string {
+  const use = l.commercial === true ? "commercial use" : l.commercial === false ? "non-commercial weights" : "check its revenue tiers";
+  return l.licence ? `${l.licence} · ${use}` : use;
+}
+
 /** What fal bills for this many steps on this trainer (its per-step price above its minimum), in US dollars. */
 export function trainerCost(trainer: Pick<HostedTrainer, "usdPerStep" | "minBilledSteps"> | undefined, steps: number): number | null {
   if (!trainer?.usdPerStep) return null;
@@ -137,22 +230,29 @@ export function trainerCost(trainer: Pick<HostedTrainer, "usdPerStep" | "minBill
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const thousands = (n: number) => n.toLocaleString("en-US");
 
-function target(t: Omit<TrainingTarget, "modelIds" | "price" | "costUsd" | "minImages">): TrainingTarget {
+function target(t: Omit<TrainingTarget, "modelIds" | "price" | "costUsd" | "minImages" | "licence" | "commercial">): TrainingTarget {
   const cost = t.provider === "fal" ? trainerCost(getTrainer(t.trainer), t.steps) : 0;
   if (cost === null) throw new Error(`${t.id}: its trainer ${t.trainer} has no price (run pnpm gen:catalog)`);
+  const tr = getTrainer(t.trainer);
   return {
     ...t,
     modelIds: TRAINING_FAMILIES[t.family].models,
     minImages: SOUL_ID_PHOTOS.min,
     costUsd: cost,
     price: cost === 0 ? "Free" : `≈ ${usd(cost)} (${thousands(t.steps)} steps)`,
+    ...(tr ? { licence: tr.licence, commercial: tr.commercial } : familyLicence(t.family)),
   };
 }
 
+const LOCAL = "Nothing leaves your machine.";
+const TO_FAL = "Your photos go to fal for the training.";
+
 /**
- * Where a Soul ID trains (research §3.3, §4.5, plan O3). Z-Image Turbo: AI-Toolkit with ostris's training adapter v2 on
- * the user's GPU, or fal's Z-Image Turbo trainer v2 (2,000 steps at 5e-4). A style (a moodboard) on the cloud trains on
- * fal's Z-Image trainer with training_type style. Fuobe Soul HD: fal's Qwen-Image 2512 trainer.
+ * Where a Soul ID trains (research §3.3, §4.5, plan O3), family by family. Fuobe Soul (Z-Image Turbo): AI-Toolkit
+ * with ostris's training adapter v2 on the user's GPU, or fal's Z-Image Turbo trainer v2 (2,000 steps at 5e-4); a
+ * style (a moodboard) in the cloud trains on fal's Z-Image trainer with training_type style. Fuobe Soul HD: fal's
+ * Qwen-Image 2512 trainer, or AI-Toolkit. The other bases train on their fal trainer at its own defaults (steps,
+ * learning rate), and on AI-Toolkit where it supports the base and Fuobe runs it on the open engine.
  */
 export const TRAINING_TARGETS: TrainingTarget[] = [
   target({
@@ -163,7 +263,7 @@ export const TRAINING_TARGETS: TrainingTarget[] = [
     family: "z-image-turbo",
     kinds: ["subject", "style"],
     steps: 2000,
-    description: "AI-Toolkit on your own GPU (24 GB), with ostris's Z-Image Turbo training adapter. Nothing leaves your machine.",
+    description: `AI-Toolkit on your own GPU (24 GB), with ostris's Z-Image Turbo training adapter. ${LOCAL}`,
     eta: "~30–60 min on a 24 GB GPU",
   }),
   target({
@@ -176,7 +276,7 @@ export const TRAINING_TARGETS: TrainingTarget[] = [
     trainer: "fal-ai/z-image-turbo-trainer-v2",
     steps: 2000,
     learningRate: 0.0005,
-    description: "fal's Z-Image Turbo trainer. Your photos go to fal for the training.",
+    description: `fal's Z-Image Turbo trainer. ${TO_FAL}`,
     eta: "~10 min",
   }),
   target({
@@ -193,17 +293,122 @@ export const TRAINING_TARGETS: TrainingTarget[] = [
     eta: "~15–30 min",
   }),
   target({
+    id: "aitk-qwen-2512",
+    name: "Your GPU",
+    engine: "open",
+    provider: "ai-toolkit",
+    family: "qwen-image-2512",
+    kinds: ["subject", "style"],
+    steps: 2000,
+    description: `AI-Toolkit on your own GPU (32 GB; 20B weights in 8-bit). ${LOCAL}`,
+    eta: "~1–2 h on a 32 GB GPU",
+  }),
+  target({
     id: "fal-qwen-2512",
     name: "Cloud",
     engine: "cloud",
     provider: "fal",
     family: "qwen-image-2512",
-    kinds: ["subject"],
+    kinds: ["subject", "style"],
     trainer: "fal-ai/qwen-image-2512-trainer",
     steps: 1000,
     learningRate: 0.0005,
-    description: "fal's Qwen-Image 2512 trainer, for Fuobe Soul HD (clean lettering). Your photos go to fal for the training.",
+    description: `fal's Qwen-Image 2512 trainer, for Fuobe Soul HD (clean lettering). ${TO_FAL}`,
     eta: "~10–20 min",
+  }),
+  target({
+    id: "aitk-flux1-dev",
+    name: "Your GPU",
+    engine: "open",
+    provider: "ai-toolkit",
+    family: "flux1-dev",
+    kinds: ["subject", "style"],
+    steps: 2000,
+    description: `AI-Toolkit on your own GPU (24 GB, 8-bit). Needs a Hugging Face token with FLUX.1 [dev]'s licence accepted. ${LOCAL}`,
+    eta: "~1–2 h on a 24 GB GPU",
+  }),
+  target({
+    id: "fal-flux1-portrait",
+    name: "Cloud",
+    engine: "cloud",
+    provider: "fal",
+    family: "flux1-dev",
+    kinds: ["subject"],
+    trainer: "fal-ai/flux-lora-portrait-trainer",
+    steps: 2500,
+    description: `fal's FLUX portrait trainer: it crops to the face and trains at several sizes. ${TO_FAL}`,
+    eta: "~20–30 min",
+  }),
+  target({
+    id: "aitk-flux2-dev",
+    name: "Your GPU",
+    engine: "open",
+    provider: "ai-toolkit",
+    family: "flux2-dev",
+    kinds: ["subject", "style"],
+    steps: 2000,
+    description: `AI-Toolkit on your own GPU (32B weights: 48 GB, or 24 GB in 8-bit with offloading, slower). Needs a Hugging Face token with FLUX.2 [dev]'s licence accepted. ${LOCAL}`,
+    eta: "~2–4 h on a 48 GB GPU",
+  }),
+  target({
+    id: "fal-flux2-dev",
+    name: "Cloud",
+    engine: "cloud",
+    provider: "fal",
+    family: "flux2-dev",
+    kinds: ["subject", "style"],
+    trainer: "fal-ai/flux-2-trainer-v2",
+    steps: 1000,
+    description: `fal's FLUX.2 [dev] trainer. ${TO_FAL}`,
+    eta: "~20–40 min",
+  }),
+  target({
+    id: "aitk-flux2-klein-4b",
+    name: "Your GPU",
+    engine: "open",
+    provider: "ai-toolkit",
+    family: "flux2-klein-4b",
+    kinds: ["subject", "style"],
+    steps: 2000,
+    description: `AI-Toolkit on your own GPU (16 GB), on the FLUX.2 [klein] 4B base; Fuobe sends the LoRA to fal when a run uses it. ${LOCAL}`,
+    eta: "~30–60 min on a 16 GB GPU",
+  }),
+  target({
+    id: "fal-flux2-klein-4b",
+    name: "Cloud",
+    engine: "cloud",
+    provider: "fal",
+    family: "flux2-klein-4b",
+    kinds: ["subject", "style"],
+    trainer: "fal-ai/flux-2-klein-4b-base-trainer",
+    steps: 1000,
+    description: `fal's FLUX.2 [klein] 4B base trainer. ${TO_FAL}`,
+    eta: "~10–20 min",
+  }),
+  target({
+    id: "fal-flux2-klein-9b",
+    name: "Cloud",
+    engine: "cloud",
+    provider: "fal",
+    family: "flux2-klein-9b",
+    kinds: ["subject", "style"],
+    trainer: "fal-ai/flux-2-klein-9b-base-trainer",
+    steps: 1000,
+    description: `fal's FLUX.2 [klein] 9B base trainer. ${TO_FAL}`,
+    eta: "~15–30 min",
+  }),
+  target({
+    id: "fal-krea-2",
+    name: "Cloud",
+    engine: "cloud",
+    provider: "fal",
+    family: "krea-2",
+    kinds: ["subject", "style"],
+    trainer: "fal-ai/krea-2-trainer",
+    steps: 1000,
+    extra: { resolution: 1024 },
+    description: `fal's Krea 2 trainer, at 1024 px. ${TO_FAL}`,
+    eta: "~15–30 min",
   }),
 ];
 
@@ -244,7 +449,7 @@ export function photoTips(photos: { key: string; width?: number; height?: number
 
 /** The family a model's LoRAs belong to (undefined for a model no Soul ID applies to). */
 export function familyOfModel(modelId: string): TrainingFamily | undefined {
-  return (Object.keys(TRAINING_FAMILIES) as TrainingFamily[]).find((f) => TRAINING_FAMILIES[f].models.includes(modelId));
+  return TRAINING_FAMILY_IDS.find((f) => TRAINING_FAMILIES[f].models.includes(modelId));
 }
 
 /** A trained LoRA's family: recorded since O3; read from the model it was trained for before that. */
@@ -308,28 +513,97 @@ const clampField = (f: TrainerField | undefined, v: number) => (f ? Math.min(f.m
 
 /**
  * The request a hosted trainer gets: the dataset zip in its data field, then only the fields its schema has (steps
- * within its limits, the caption every photo shares, the learning rate, training_type for a style).
+ * within its limits, the caption every photo shares, the trigger for trainers that take one, the learning rate,
+ * and the target's own fields such as training_type for a style).
  */
-export function falTrainingInput(t: TrainingTarget, zipUrl: string, caption: string): Record<string, unknown> {
+export function falTrainingInput(t: TrainingTarget, zipUrl: string, caption: string, trigger?: string): Record<string, unknown> {
   const tr = getTrainer(t.trainer);
   if (!tr) throw new Error(`${t.id} has no hosted trainer`);
   const f = tr.fields;
   const body: Record<string, unknown> = { [tr.dataField]: zipUrl };
   if (f.steps) body.steps = clampField(f.steps, t.steps);
   if (f.default_caption) body.default_caption = caption;
+  if (trigger && f.trigger_phrase) body.trigger_phrase = trigger;
+  else if (trigger && f.trigger_word) body.trigger_word = trigger;
   if (f.learning_rate && t.learningRate !== undefined) body.learning_rate = t.learningRate;
-  for (const [k, v] of Object.entries(t.extra ?? {})) if (f[k] && (!f[k].enum || f[k].enum.includes(v))) body[k] = v;
+  for (const [k, v] of Object.entries(t.extra ?? {})) if (f[k] && (!f[k].enum || f[k].enum.includes(v as string | number))) body[k] = v;
   return body;
 }
 
+/** The trained LoRA's URL in a hosted trainer's response: the trainer's own LoRA field first. */
+export function trainedLoraUrl(t: Pick<TrainingTarget, "trainer">, out: Record<string, unknown>): string | undefined {
+  const fields = [...(getTrainer(t.trainer)?.loraOutput ?? []), "diffusers_lora_file", "lora_file"];
+  for (const k of fields) {
+    const url = (out[k] as { url?: unknown } | undefined)?.url;
+    if (typeof url === "string" && url) return url;
+  }
+  return undefined;
+}
+
 /**
- * AI-Toolkit job config for a Z-Image Turbo LoRA (research §4.5: ostris's training adapter v2, rank 16–32,
- * 1,500–2,500 steps). A larger photo set gets rank 32 (more to learn); a style (a moodboard) gets fewer steps and
- * samples of new scenes in the look, instead of portraits of the person.
+ * The AI-Toolkit model and sample settings per base (its supported models and example configs, read 2026-10-27:
+ * arch names from extensions_built_in/diffusion_models; FLUX.1 and Qwen-Image from config/examples). Z-Image Turbo
+ * trains with ostris's training adapter v2 (research §4.5); the gated FLUX [dev] repos need an HF token.
  */
-export function aiToolkitJob(opts: { name: string; trigger: string; datasetFolder: string; outputFolder: string; steps?: number; kind?: "character" | "style"; photos?: number }) {
+const AITK_MODELS: Partial<Record<TrainingFamily, { model: Record<string, unknown>; guidance: number; sampleSteps: number }>> = {
+  "z-image-turbo": {
+    model: {
+      name_or_path: "Tongyi-MAI/Z-Image-Turbo",
+      arch: "zimage:turbo",
+      assistant_lora_path: "ostris/zimage_turbo_training_adapter/zimage_turbo_training_adapter_v2.safetensors",
+      quantize: true,
+      qtype: "qfloat8",
+      quantize_te: true,
+      qtype_te: "qfloat8",
+      low_vram: true,
+    },
+    guidance: 1,
+    sampleSteps: 9,
+  },
+  "qwen-image-2512": {
+    model: { name_or_path: "Qwen/Qwen-Image-2512", arch: "qwen_image", quantize: true, qtype: "qfloat8", quantize_te: true, qtype_te: "qfloat8", low_vram: true },
+    guidance: 3,
+    sampleSteps: 25,
+  },
+  "flux1-dev": {
+    model: { name_or_path: "black-forest-labs/FLUX.1-dev", arch: "flux", quantize: true, low_vram: true },
+    guidance: 4,
+    sampleSteps: 20,
+  },
+  "flux2-dev": {
+    model: { name_or_path: "black-forest-labs/FLUX.2-dev", arch: "flux2", quantize: true, qtype: "qfloat8", quantize_te: true, qtype_te: "qfloat8", low_vram: true },
+    guidance: 4,
+    sampleSteps: 25,
+  },
+  "flux2-klein-4b": {
+    model: { name_or_path: "black-forest-labs/FLUX.2-klein-base-4B", arch: "flux2_klein_4b", quantize: true, qtype: "qfloat8", quantize_te: true, qtype_te: "qfloat8", low_vram: true },
+    guidance: 4,
+    sampleSteps: 25,
+  },
+};
+
+/** The bases AI-Toolkit trains for Fuobe (the training kit's choices). */
+export const AITK_FAMILIES = Object.keys(AITK_MODELS) as TrainingFamily[];
+
+/**
+ * AI-Toolkit job config for a LoRA on a family's base (research §4.5 for Z-Image Turbo: ostris's training adapter v2,
+ * rank 16–32, 1,500–2,500 steps). A larger photo set gets rank 32 (more to learn); a style (a moodboard) gets fewer
+ * steps and samples of new scenes in the look, instead of portraits of the person.
+ */
+export function aiToolkitJob(opts: {
+  name: string;
+  trigger: string;
+  datasetFolder: string;
+  outputFolder: string;
+  steps?: number;
+  kind?: "character" | "style";
+  photos?: number;
+  family?: TrainingFamily;
+}) {
   const style = opts.kind === "style";
   const rank = !style && (opts.photos ?? 0) >= SOUL_ID_PHOTOS.recommended ? 32 : 16;
+  const base = AITK_MODELS[opts.family ?? "z-image-turbo"];
+  if (!base) throw new Error(`AI-Toolkit doesn't train ${TRAINING_FAMILIES[opts.family!].base} for Fuobe: train it in the cloud`);
   return {
     job: "extension",
     config: {
@@ -361,16 +635,7 @@ export function aiToolkitJob(opts: { name: string; trigger: string; datasetFolde
             steps: opts.steps ?? (style ? 1500 : 2000),
             timestep_type: "weighted",
           },
-          model: {
-            name_or_path: "Tongyi-MAI/Z-Image-Turbo",
-            arch: "zimage:turbo",
-            assistant_lora_path: "ostris/zimage_turbo_training_adapter/zimage_turbo_training_adapter_v2.safetensors",
-            quantize: true,
-            qtype: "qfloat8",
-            quantize_te: true,
-            qtype_te: "qfloat8",
-            low_vram: true,
-          },
+          model: base.model,
           sample: {
             sampler: "flowmatch",
             sample_every: 500,
@@ -382,8 +647,8 @@ export function aiToolkitJob(opts: { name: string; trigger: string; datasetFolde
               ? [`a city street at night, ${opts.trigger} style`, `a bowl of fruit on a wooden table, ${opts.trigger} style`, `a portrait of a woman in a garden, ${opts.trigger} style`]
               : [`photo of ${opts.trigger}, close-up portrait, natural window light`, `${opts.trigger} walking in a neon-lit street at night, full body`],
             neg: "",
-            guidance_scale: 1,
-            sample_steps: 9,
+            guidance_scale: base.guidance,
+            sample_steps: base.sampleSteps,
           },
         },
       ],

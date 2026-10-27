@@ -7,14 +7,17 @@ import {
   aiToolkitJob,
   datasetName,
   falTrainingInput,
+  familyLead,
+  familyLicence,
   familyOfModel,
-  getTrainer,
   getTrainingTarget,
+  licenceNote,
   needsConsent,
   photosBlocker,
   SOUL_ID_COPY,
   SOUL_ID_PHOTOS,
   TRAINING_FAMILIES,
+  trainedLoraUrl,
   trainingCaption,
   trainingKind,
   triggerFor,
@@ -147,11 +150,11 @@ export function demoTraining(t: TrainingTarget): boolean {
   return demo === "on" || (!!why && demo !== "off");
 }
 
-/** The targets as the API lists them: each with what stops it and whether it would run as a demo. */
+/** The targets as the API lists them: each with what stops it and whether it would run as a demo (its licence is information). */
 export const describeTargets = (targets: TrainingTarget[]) =>
   targets.map((t) => {
     const demo = demoTraining(t);
-    return { ...t, blocker: demo ? null : trainingBlocker(t), demo, licence: getTrainer(t.trainer)?.licence ?? "Apache-2.0" };
+    return { ...t, blocker: demo ? null : trainingBlocker(t), demo };
   });
 
 const isAudio = (r: string) => /\.(wav|mp3|ogg|flac|m4a|webm)$/i.test(r);
@@ -284,7 +287,7 @@ async function submit(id: string, el: StudioElement, t: TrainingTarget, trigger:
     const { files, caption } = await dataset(el, trigger, images);
     update(id, { message: `Uploading ${images.length} photos` });
     const zipUrl = await falProvider.prepareFile(zip(files), "application/zip", "dataset.zip");
-    const res = (await falFetch(falQueueUrl(t.trainer!), { method: "POST", body: JSON.stringify(falTrainingInput(t, zipUrl, caption)) })) as {
+    const res = (await falFetch(falQueueUrl(t.trainer!), { method: "POST", body: JSON.stringify(falTrainingInput(t, zipUrl, caption, trigger)) })) as {
       request_id: string;
       status_url: string;
       response_url: string;
@@ -306,7 +309,16 @@ async function submit(id: string, el: StudioElement, t: TrainingTarget, trigger:
   fs.mkdirSync(folder, { recursive: true });
   for (const f of files) fs.writeFileSync(path.join(folder, f.name), f.data);
   const name = `fuobe_${el.handle.toLowerCase()}_${id.slice(0, 6)}`.replace(/[^a-z0-9_]/g, "_");
-  const job = aiToolkitJob({ name, trigger, datasetFolder: folder, outputFolder: path.join(root, "output"), kind: el.kind === "style" ? "style" : "character", steps: t.steps, photos: images.length });
+  const job = aiToolkitJob({
+    name,
+    trigger,
+    datasetFolder: folder,
+    outputFolder: path.join(root, "output"),
+    kind: el.kind === "style" ? "style" : "character",
+    steps: t.steps,
+    photos: images.length,
+    family: t.family,
+  });
   const created = await aitk("/api/jobs", { method: "POST", body: JSON.stringify({ name, gpu_ids: "0", job_config: job }) });
   const jobId = String(created.id);
   await aitk(`/api/jobs/${jobId}/start`);
@@ -344,7 +356,7 @@ export async function pollTrainings(): Promise<void> {
 function trainedLora(r: Row, t: TrainingTarget, file: string, fields: Partial<ElementLora>): ElementLora {
   return {
     engine: t.engine,
-    modelId: TRAINING_FAMILIES[t.family].lead,
+    modelId: familyLead(t.family, t.engine),
     family: t.family,
     target: t.id,
     file,
@@ -381,8 +393,8 @@ async function pollOne(r: Row) {
       update(r.id, { progress: step ? Number(step[1]) / Number(step[2]) : r.progress, message: s.status === "IN_QUEUE" ? "In fal's queue" : (last ?? "Training") });
       return;
     }
-    const out = (await falFetch(meta.responseUrl!)) as { diffusers_lora_file?: { url: string }; lora_file?: { url: string } };
-    const url = out.diffusers_lora_file?.url ?? out.lora_file?.url;
+    const out = (await falFetch(meta.responseUrl!)) as Record<string, unknown>;
+    const url = trainedLoraUrl(t, out);
     if (!url) return fail(r.id, r.element_id, `No LoRA in fal's response: ${JSON.stringify(out).slice(0, 200)}`);
     // Fuobe keeps its own copy (fal's storage isn't forever): open runs copy it into ComfyUI, cloud runs send it again
     // once fal's copy is old. fal's URL serves cloud runs until then.
@@ -443,7 +455,7 @@ function done(r: Row, message: string | null = null) {
 // ---------------------------------------------------------------------------
 // Download kit for training anywhere (AI-Toolkit CLI)
 
-export async function trainingKit(elementId: string): Promise<{ name: string; data: Buffer }> {
+export async function trainingKit(elementId: string, family: TrainingFamily = "z-image-turbo"): Promise<{ name: string; data: Buffer }> {
   const el = getElement(elementId);
   if (!el) throw new Error("Element not found");
   const images = photosOf(el);
@@ -451,23 +463,25 @@ export async function trainingKit(elementId: string): Promise<{ name: string; da
   const trigger = triggerFor(el.handle);
   const { files } = await dataset(el, trigger, images);
   const name = `fuobe_${el.handle.toLowerCase()}`.replace(/[^a-z0-9_]/g, "_");
-  const job = aiToolkitJob({ name, trigger, datasetFolder: "./dataset", outputFolder: "./output", kind: el.kind === "style" ? "style" : "character", photos: images.length });
+  const job = aiToolkitJob({ name, trigger, datasetFolder: "./dataset", outputFolder: "./output", kind: el.kind === "style" ? "style" : "character", photos: images.length, family });
+  const fam = TRAINING_FAMILIES[family];
   const file = `fuobe/${el.handle.toLowerCase().replace(/[^a-z0-9_-]/g, "") || "element"}.safetensors`;
-  const readme = `# Train ${el.name} with AI-Toolkit
+  const readme = `# Train ${el.name} with AI-Toolkit (${fam.base})
 
-1. Install AI-Toolkit: https://github.com/ostris/ai-toolkit (24 GB GPU recommended)
+1. Install AI-Toolkit: https://github.com/ostris/ai-toolkit (see its README for the GPU ${fam.base} needs)
 2. Unzip this kit next to it and run:
 
        python run.py ${name}.yaml
 
 3. Copy the newest file from ./output/${name}/*.safetensors to ComfyUI/models/loras/${file}
-4. In Fuobe, open ${el.name} → Train → "Train anywhere" and attach that file name.
+4. In Fuobe, open ${el.name} → Train → "Train anywhere", pick ${fam.base} and attach that file name.
 
-Trigger word: ${trigger} — Fuobe adds it to the prompt whenever you @${el.handle} on Fuobe Soul, Soul Cinema or
-Z-Image Turbo. Train only on photos you have the right to use${el.kind === "character" ? ", of a person who agreed to it" : ""}.
+Trigger word: ${trigger} — Fuobe adds it to the prompt whenever you @${el.handle} on ${fam.name}.
+Licence of the base weights: ${licenceNote(familyLicence(family))}.
+Train only on photos you have the right to use${el.kind === "character" ? ", of a person who agreed to it" : ""}.
 `;
   return {
-    name: `${name}-training-kit.zip`,
+    name: `${name}-${family}-training-kit.zip`,
     // JSON is valid YAML, so AI-Toolkit reads the config as-is.
     data: zip([
       ...files.map((f) => ({ name: `dataset/${f.name}`, data: f.data })),
@@ -478,8 +492,8 @@ Z-Image Turbo. Train only on photos you have the right to use${el.kind === "char
 }
 
 /**
- * Register a Z-Image Turbo LoRA trained elsewhere (already in ComfyUI/models/loras). When the LoRA folder is on this
- * machine, Fuobe keeps a copy too, so cloud runs can use it.
+ * Register a LoRA trained elsewhere (already in ComfyUI/models/loras) for its family (Z-Image Turbo unless it says
+ * which). When the LoRA folder is on this machine, Fuobe keeps a copy too, so cloud runs can use it.
  */
 export async function attachLora(elementId: string, input: { file: string; trigger: string; family?: TrainingFamily }) {
   const file = input.file.trim().replace(/^\/+/, "");
@@ -501,7 +515,7 @@ export async function attachLora(elementId: string, input: { file: string; trigg
   }
   addIdentity(elementId, {
     engine: "open",
-    modelId: TRAINING_FAMILIES[family].lead,
+    modelId: familyLead(family, "open"),
     family,
     file,
     trigger: input.trigger.trim(),

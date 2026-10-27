@@ -203,6 +203,25 @@ model("flux-2-klein-4b-cloud", "FLUX.2 [klein] 4B (hosted)", "Black Forest Labs"
 model("wan-2-2-a14b-image-cloud", "Wan 2.2 A14B Image (hosted)", "Alibaba Wan", "wan", "image",
       "Open-weights Wan 2.2 stills that take Wan LoRAs",
       [("t2i", "fal-ai/wan/v2.2-a14b/text-to-image/lora", "fal")], defaults={"aspectRatio": "16:9"})
+# Soul ID on every base fal trains (O3, o/soul-id): a character or style LoRA trained on FLUX.1 [dev], FLUX.2 [dev],
+# Krea 2 or FLUX.2 [klein] 9B runs on these. The weights' licences are information shown with the model, never a gate
+# (the owner's decision of 2026-10-27): FLUX [dev] and klein 9B weights are non-commercial (fal clears its own hosted
+# outputs), Krea 2 has revenue tiers. The admin turns models on or off in Settings.
+model("flux-1-dev-lora-cloud", "FLUX.1 [dev] with LoRAs (hosted)", "Black Forest Labs", "flux", "image",
+      "FLUX.1 [dev] with your trained characters and styles · non-commercial weights, fal clears its outputs",
+      [("t2i", "fal-ai/flux-lora", "fal")], defaults={"aspectRatio": "3:4"})
+model("flux-1-krea-lora-cloud", "FLUX.1 Krea [dev] with LoRAs (hosted)", "Black Forest Labs × Krea", "flux", "image",
+      "Natural photoreal FLUX.1 Krea with FLUX.1 LoRAs · non-commercial weights, fal clears its outputs",
+      [("t2i", "fal-ai/flux-krea-lora", "fal")], defaults={"aspectRatio": "3:4"})
+model("flux-2-dev-lora-cloud", "FLUX.2 [dev] with LoRAs (hosted)", "Black Forest Labs", "flux", "image",
+      "FLUX.2 [dev] with your trained characters and styles · non-commercial weights, fal clears its outputs",
+      [("t2i", "fal-ai/flux-2/lora", "fal")], defaults={"aspectRatio": "3:4"})
+model("flux-2-klein-9b-lora-cloud", "FLUX.2 [klein] 9B with LoRAs (hosted)", "Black Forest Labs", "flux", "image",
+      "The 9B FLUX.2 [klein] with your LoRAs · non-commercial weights, fal clears its outputs",
+      [("t2i", "fal-ai/flux-2/klein/9b/lora", "fal")], badges=["fast"], defaults={"aspectRatio": "3:4"})
+model("krea-2-turbo-lora-cloud", "Krea 2 Turbo with LoRAs (hosted)", "Krea", "krea", "image",
+      "Krea 2's aesthetic with your trained characters and styles · Krea 2 Community licence (revenue tiers)",
+      [("t2i", "fal-ai/krea-2/turbo/lora", "fal")], badges=["fast"], defaults={"aspectRatio": "3:4"})
 # ----- Originals (O2): Fuobe Soul's cloud halves on hosted open weights (docs/research/fuobe-originals-recipes-5.md §4).
 # models.ts joins each to its ComfyUI routes as one model that runs on both engines (ModelDef.engines). Sizes are
 # Soul's table per tier (soul.settings.comfyui.sizes); steps, prompt expansion and format follow the recipe (§4.3).
