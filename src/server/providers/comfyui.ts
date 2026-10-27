@@ -417,19 +417,23 @@ async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promi
 // Reachability. Routing (chooseRoute) is synchronous, so the first check for a server URL is a blocking probe
 // (a worker thread does the fetch); after that the cached result is refreshed in the background every 10 s.
 // A server that refuses the connection (or a name that doesn't resolve) is down at once. One that doesn't answer
-// GET /system_stats in time isn't: a CPU ComfyUI busy with a job can take seconds to, but it still takes the
-// connection. So a late answer keeps the server reachable when it answered lately or its port takes a connection;
-// only a server that does neither (a machine that is off, a firewall that drops) is unreachable.
+// GET /system_stats in time may only be busy: a CPU ComfyUI working on a job can take seconds to. So a late answer
+// keeps the server reachable when it answered lately. When it didn't, and its port takes a connection, it gets one
+// longer look (none again for a while once one goes unanswered): reachable if it answers then. A port that takes the
+// connection isn't enough on its own: an ssh tunnel or a proxy whose ComfyUI is gone (or a hung ComfyUI) takes it too.
 
 declare global {
-  /** Reachability of the ComfyUI server, its RAM (bytes) when /system_stats said, and when it last answered. */
-  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number; seen?: number } | undefined;
+  /** Reachability of the ComfyUI server, its RAM (bytes) when /system_stats said, when it last answered, and when a longer look last went unanswered. */
+  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number; seen?: number; silent?: number } | undefined;
   /** The check under way: callers in the meantime share its answer. */
   var __fuobeComfyProbe: { url: string; done: Promise<boolean> } | undefined;
 }
 
-/** How long a check waits for /system_stats, then for the port to take a connection; how long an answer counts as recent. */
-export const REACH = { answerMs: 2000, connectMs: 3000, answeredLatelyMs: 2 * 60_000 };
+/**
+ * How long a check waits for /system_stats, then for the port to take a connection, then for the longer look; how long
+ * an answer (or an unanswered longer look) counts as recent.
+ */
+export const REACH = { answerMs: 2000, connectMs: 3000, lookMs: 10_000, answeredLatelyMs: 2 * 60_000 };
 
 /** Host and port of a server address, for the connection check (undefined when it isn't a URL). */
 function hostPort(url: string): { host: string; port: number } | undefined {
@@ -458,9 +462,9 @@ function takesConnection(url: string, timeoutMs: number): Promise<boolean> {
 }
 
 /** What GET /system_stats got: an answer (with the RAM it says), a no (an HTTP error, a refused connection), or nothing in time. */
-async function askComfy(url: string): Promise<{ answer: "yes"; ram?: number } | { answer: "no" | "late" }> {
+async function askComfy(url: string, timeoutMs = REACH.answerMs): Promise<{ answer: "yes"; ram?: number } | { answer: "no" | "late" }> {
   try {
-    const r = await fetch(`${url}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(REACH.answerMs) });
+    const r = await fetch(`${url}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(timeoutMs) });
     if (!r.ok) return { answer: "no" };
     const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
     return { answer: "yes", ...(typeof total === "number" && total > 0 ? { ram: total } : {}) };
@@ -470,16 +474,25 @@ async function askComfy(url: string): Promise<{ answer: "yes"; ram?: number } | 
 }
 
 async function checkComfy(url: string): Promise<boolean> {
-  const asked = await askComfy(url);
+  let asked = await askComfy(url);
   const prev = globalThis.__fuobeComfyReach?.url === url ? globalThis.__fuobeComfyReach : undefined;
-  // Late is busy, not down, when it answered lately or its port still takes a connection (the one longer look).
-  const busy = asked.answer === "late" && ((!!prev?.seen && Date.now() - prev.seen < REACH.answeredLatelyMs) || (await takesConnection(url, REACH.connectMs)));
+  const lately = (t?: number) => !!t && Date.now() - t < REACH.answeredLatelyMs;
+  // Late is busy, not down, when it answered lately. Otherwise it gets the longer look, when its port takes a
+  // connection and no longer look went unanswered lately (a silent server isn't waited on at every check).
+  const busy = asked.answer === "late" && lately(prev?.seen);
+  let silent = prev?.silent;
+  if (asked.answer === "late" && !busy && !lately(silent) && (await takesConnection(url, REACH.connectMs))) {
+    asked = await askComfy(url, REACH.lookMs);
+    if (asked.answer !== "yes") silent = Date.now();
+  }
   const at = Date.now();
-  // A busy server keeps the RAM and the time of its last answer.
+  // A busy server keeps the RAM and the time of its last answer; a down one, when it last went silent.
   const ram = asked.answer === "yes" ? (asked.ram ?? prev?.ram) : prev?.ram;
   const seen = asked.answer === "yes" ? at : prev?.seen;
   const ok = asked.answer === "yes" || busy;
-  globalThis.__fuobeComfyReach = ok ? { ok, at, url, ...(ram ? { ram } : {}), ...(seen ? { seen } : {}) } : { ok, at, url };
+  const reach = ok ? { ok, at, url, ...(ram ? { ram } : {}), ...(seen ? { seen } : {}) } : { ok, at, url, ...(silent ? { silent } : {}) };
+  // The address may have changed while this ran: the new one's check speaks for it.
+  if (url === baseUrl()) globalThis.__fuobeComfyReach = reach;
   return ok;
 }
 
@@ -516,8 +529,9 @@ fetch(workerData.url, { headers: workerData.headers, signal: AbortSignal.timeout
 
 /**
  * Blocking reachability check: a few ms for a server that answers or a refused port, at most `timeoutMs` otherwise.
- * A server that takes the connection but doesn't answer in time is busy, so reachable. One that doesn't even take it
- * is unreachable for now, and the unhurried check (probeComfy) goes on in the background to say for sure.
+ * A server that takes the connection but doesn't answer in time is taken as busy, so reachable, for now; one that
+ * doesn't even take it as unreachable. Either way the unhurried check (probeComfy) goes on in the background to say
+ * for sure.
  */
 export function probeComfySync(timeoutMs = 1500): boolean {
   const url = baseUrl();
@@ -535,7 +549,7 @@ export function probeComfySync(timeoutMs = 1500): boolean {
   const at = Date.now();
   const ok = answer === 1 || (answer !== 2 && connected);
   globalThis.__fuobeComfyReach = { ok, at, url, ...(answer === 1 ? { seen: at } : {}) };
-  if (!ok && answer !== 2) void probeComfy(true).catch(() => false);
+  if (answer !== 1 && answer !== 2) void probeComfy(true).catch(() => false);
   return ok;
 }
 

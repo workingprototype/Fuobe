@@ -43,6 +43,17 @@ async function closedPort(): Promise<number> {
   return port;
 }
 
+/** What `f` gives once it's truthy (polled every 100 ms, for at most `ms`). */
+const until = async <T>(f: () => T | undefined | null | false, ms = 20_000): Promise<T> => {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = f();
+    if (v) return v;
+    if (Date.now() > end) throw new Error("timed out waiting");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+};
+
 /** Forget what the probes found, as a fresh start does. */
 const forget = () => {
   globalThis.__fuobeComfyReach = undefined;
@@ -52,8 +63,8 @@ const forget = () => {
 beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   comfyUrl = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`;
-  // Checks give up sooner here, so a late answer is quick to make.
-  Object.assign(REACH, { answerMs: 300, connectMs: 1000 });
+  // Checks give up sooner here, so a late answer is quick to make (a 3 s answer still makes the longer look).
+  Object.assign(REACH, { answerMs: 300, connectMs: 1000, lookMs: 5000 });
   setSetting("demoMode", "auto");
 });
 afterAll(() => {
@@ -116,7 +127,7 @@ describe("ComfyUI reachability under load", () => {
     }
   });
 
-  it("the first check of a slow but alive server says reachable (blocking, then in the background)", async () => {
+  it("the first check of a slow but alive server says reachable (blocking, then in the longer look)", async () => {
     delay = 3000;
     // The routing question right after start: the server takes the connection while it's busy.
     const t0 = Date.now();
@@ -124,24 +135,49 @@ describe("ComfyUI reachability under load", () => {
     expect(Date.now() - t0).toBeLessThan(3000);
     forget();
     expect(await probeComfy(true)).toBe(true);
-    // Callers while a check runs share it.
+    // Callers while a check runs share it: one quick ask, one longer look.
     forget();
     asked = 0;
     expect(await Promise.all([probeComfy(true), probeComfy(true), probeComfy()])).toEqual([true, true, true]);
-    expect(asked).toBe(1);
+    expect(asked).toBe(2);
+  });
+
+  it("a port that takes the connection but never answers (a tunnel or proxy whose ComfyUI is gone) is unreachable after the longer look", async () => {
+    const silent = net.createServer(() => {});
+    await new Promise<void>((r) => silent.listen(0, "127.0.0.1", r));
+    try {
+      setSetting("comfyUrl", `http://127.0.0.1:${(silent.address() as net.AddressInfo).port}`);
+      // The first, blocking check can only see the connection taken, as for a busy server; the background check says for sure.
+      comfyProvider.isConfigured();
+      await until(() => globalThis.__fuobeComfyReach?.ok === false);
+      // Found silent: no longer look again for a while, so the next checks are quick.
+      const t0 = Date.now();
+      for (let i = 0; i < 2; i++) expect(await probeComfy(true)).toBe(false);
+      expect(Date.now() - t0).toBeLessThan(2 * REACH.answerMs + 500);
+      expect(comfyProvider.isConfigured()).toBe(false);
+    } finally {
+      silent.close();
+    }
+  });
+
+  it("a late server that answers the longer look is reachable; a check of an address changed meanwhile keeps to itself", async () => {
+    delay = 1000;
+    const old = probeComfy(true);
+    // While that check runs, the address changes and the new one is checked.
+    setSetting("comfyUrl", `http://127.0.0.1:${await closedPort()}`);
+    expect(await probeComfy(true)).toBe(false);
+    const now = globalThis.__fuobeComfyReach;
+    expect(await old).toBe(true);
+    expect(globalThis.__fuobeComfyReach).toBe(now);
+    setSetting("comfyUrl", comfyUrl);
+    forget();
+    expect(await probeComfy(true)).toBe(true);
+    expect(globalThis.__fuobeComfyReach?.seen).toBeGreaterThan(Date.now() - 1000);
+    expect(comfyRam()).toBe(RAM);
   });
 });
 
 describe("a chain step after real ComfyUI steps", () => {
-  const until = async <T>(f: () => T | undefined | null | false, ms = 20_000): Promise<T> => {
-    const end = Date.now() + ms;
-    for (;;) {
-      const v = f();
-      if (v) return v;
-      if (Date.now() > end) throw new Error("timed out waiting");
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
   const clip = () => saveFile({ data: Buffer.from("not really a video"), contentType: "video/mp4", source: "generation" }).url;
   /** Two clips that ran on ComfyUI, and the join waiting for them. */
   const join = () => {
