@@ -26,6 +26,7 @@ const { SETTINGS, getSetting } = await import("@/server/settings");
 const { db } = await import("@/server/db");
 const { withCurrentModels } = await import("@/lib/catalog/canvas");
 const generationsRoute = await import("@/app/api/generations/route");
+const { getGeneration, listGenerations } = await import("@/server/generations");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -215,6 +216,22 @@ describe("stored ids resolve where they are read", () => {
     expect(body.error).toBeUndefined();
     expect(body).toMatchObject({ modelId: "fuobe-soul", engine: "cloud" });
     expect(body.notes?.[0]).toMatch(/Fuobe Soul/);
+  });
+
+  it("keeps a past run on a retired model in the Library, named as it ran, with its outputs", async () => {
+    const res = await generationsRoute.POST(
+      new Request("http://x/api/generations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ feature: "image", modelId: "fuobe-soul", prompt: "an old portrait" }) }),
+    );
+    const { items } = (await res.json()) as { items: { id: string }[] };
+    const id = items[0].id;
+    // As a row stored before the switch reads: the retired model and provider, a finished output.
+    db()
+      .prepare("UPDATE generations SET model_id = 'soul-2', provider = 'higgsfield', status = 'succeeded', outputs_json = ? WHERE id = ?")
+      .run(JSON.stringify([{ url: "/api/files/old.png", kind: "image" }]), id);
+    const g = getGeneration(id)!;
+    expect(g).toMatchObject({ modelId: "soul-2", modelName: REPLACED_BY["soul-2"].was, status: "succeeded" });
+    expect(g.outputs).toHaveLength(1);
+    expect(listGenerations({ feature: "image" }).map((x) => x.id)).toContain(id);
   });
 
   it("moves a saved Canvas node on a retired model to its replacement, in the cloud", () => {

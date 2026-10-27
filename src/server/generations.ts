@@ -4,6 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
+import { replacedBy } from "@/lib/catalog/replaced";
 import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
@@ -127,7 +128,8 @@ export function toGeneration(r: Row): Generation {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
-    modelName: model?.name ?? r.model_id,
+    // A run on a model Fuobe retired keeps the name it ran under (replaced.ts `was`); Reuse moves it to the replacement.
+    modelName: model?.name ?? replacedBy(r.model_id)?.was ?? r.model_id,
     // A Fuobe Soul look is named like a preset ("Look · Y2K" in the viewer).
     presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? (soulKind(r.model_id) ? (soulLook(r.preset_id)?.name ?? null) : null)) : null,
     aspectRatio: ar && ar !== "auto" ? ar : null,
