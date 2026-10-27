@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, ChevronLeft, Clapperboard, Copy, FileText, Folder, FolderOpen, FolderTree, Heart, Library, MoreHorizontal, Pin, PinOff, Settings2, Upload } from "lucide-react";
+import { Bot, ChevronLeft, Clapperboard, Copy, FileText, Folder, FolderOpen, FolderTree, Heart, Library, MoreHorizontal, Pin, PinOff, Settings2, Share2, Upload } from "lucide-react";
 import { nanoid } from "nanoid";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -31,6 +31,7 @@ import { formatUsd } from "./money";
 import { foreign, useAutosave, useCinemaGenerate, useCinemaItems, useCinemaProject, useItemActions, useStudioGenerations, useUpdateProject, type CinemaGeneration, type ProjectView } from "./hooks";
 import { cutGrid } from "./media";
 import { ProjectDialog } from "./project-settings";
+import { useShare } from "@/components/share/share-provider";
 import { PromptBar, useAddRefs } from "./prompt-bar";
 import { SceneCreateDialog, askSceneConfirmAgain, sceneTake, skipSceneConfirm, usePlanPrice, useScenePlan, type SceneTake } from "./scene-actions";
 import { SidePanel } from "./side-panel";
@@ -165,6 +166,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
   const { project, folders, spentUsd, context } = data;
   const id = project.id;
   const router = useRouter();
+  const share = useShare();
   const [engine, setEngine] = useEngine();
   const [view, setView] = useState<CinemaView>({ kind: "home" });
   const [nested, setNested] = useState(true);
@@ -461,6 +463,16 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
           </TooltipTrigger>
           <TooltipContent>Project brief — prepended to every prompt</TooltipContent>
         </Tooltip>
+        {share && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={() => share.share({ kind: "cinema", id, title: project.name })} aria-label="Share a read-only link" className="shrink-0 max-sm:hidden">
+                <Share2 />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Share a read-only link to the project&apos;s takes</TooltipContent>
+          </Tooltip>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon-sm" aria-label="Project menu" className="shrink-0">
@@ -482,6 +494,11 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
             >
               <Copy /> Copy link
             </DropdownMenuItem>
+            {share && (
+              <DropdownMenuItem onClick={() => share.share({ kind: "cinema", id, title: project.name })}>
+                <Share2 /> Share read-only link…
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
               <Link href="/cinema">

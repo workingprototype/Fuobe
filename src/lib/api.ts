@@ -26,6 +26,7 @@ import {
   type StreamEvent,
 } from "./generation-stream";
 import { cursorAfter, filterToSearch, type AssetUse, type FeedFilter, type Folder } from "./library";
+import type { ShareCreated, ShareInfo, ShareListItem, SharePatch, ShareRequest } from "./share";
 
 export interface Asset {
   id: string;
@@ -674,6 +675,39 @@ export function useFolderActions() {
         void qc.invalidateQueries({ queryKey: ["library"] });
         void qc.invalidateQueries({ queryKey: ["generations"] });
       },
+    };
+  }, [qc]);
+}
+
+// ---------------------------------------------------------------------------
+// Share links (Library → Shared, the Share dialog, the Publish wizard)
+
+/** Every link, and whether sign-in is on (a link to a studio without a password opens more than the page). */
+export function useShares(opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ["shares"],
+    queryFn: async () => json<{ items: ShareListItem[]; signIn: boolean }>(await fetch("/api/shares")),
+    staleTime: 10_000,
+    enabled: opts.enabled ?? true,
+  });
+}
+
+export function useShareActions() {
+  const qc = useQueryClient();
+  return useMemo(() => {
+    const send = async <T,>(url: string, method: string, body?: unknown) => {
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const out = res.status === 204 ? (undefined as T) : await json<T>(res);
+      void qc.invalidateQueries({ queryKey: ["shares"] });
+      return out;
+    };
+    return {
+      /** A new link; the answer carries its token once. */
+      create: (body: ShareRequest) => send<ShareCreated>("/api/shares", "POST", body),
+      /** Change it; with newLink, a new token (in the answer) replaces the old one. */
+      update: (id: string, patch: SharePatch) => send<{ share: ShareInfo; token?: string; path?: string }>(`/api/shares/${id}`, "PATCH", patch),
+      /** Revoke: the link stops working at once. */
+      revoke: (id: string) => send<void>(`/api/shares/${id}`, "DELETE"),
     };
   }, [qc]);
 }

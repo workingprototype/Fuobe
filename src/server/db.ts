@@ -469,6 +469,29 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS content_series_updated ON content_series(updated_at DESC);`,
+  // round 4 (r4/share-links): read-only share links and published pages. `id` is the token's first 12 characters
+  // (the lookup key); only the SHA-256 of the whole token is kept. A share names generations, folders or projects,
+  // never files: its page shows what still exists.
+  `CREATE TABLE IF NOT EXISTS shares (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    layout TEXT NOT NULL DEFAULT 'grid',
+    items_json TEXT NOT NULL DEFAULT '[]',
+    cover_id TEXT,
+    cover_index INTEGER NOT NULL DEFAULT 0,
+    show_prompts INTEGER NOT NULL DEFAULT 0,
+    expires_at INTEGER,
+    views INTEGER NOT NULL DEFAULT 0,
+    last_viewed_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS shares_target ON shares(kind, target_id);`,
 ];
 
 declare global {

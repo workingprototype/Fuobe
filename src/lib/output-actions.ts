@@ -9,6 +9,7 @@ import type { Generation, OutputFile, VideoFormat } from "./catalog/types";
 import { cueText, type Cue } from "./cues";
 import { downloadHref, downloadName, extensionOf } from "./library";
 import { PRESETS as GRADE_PRESETS } from "./grade";
+import { storedPath } from "./share";
 
 export type OutputActionId =
   | "animate"
@@ -38,6 +39,7 @@ export type OutputActionId =
   | "compare"
   | "reuse"
   | "copy-prompt"
+  | "share"
   | "pin"
   | "review"
   | "delete"
@@ -149,6 +151,8 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   if (ctx.compare) out.push({ id: "compare", label: "Compare with original", placement: "menu" });
   if (ctx.reuse) out.push({ id: "reuse", label: "Reuse settings", placement: "menu" });
   if (g.prompt) out.push({ id: "copy-prompt", label: "Copy prompt", placement: "menu" });
+  // A read-only link (src/lib/share.ts): finished results whose files Fuobe keeps.
+  if (g.status === "succeeded" && g.outputs.some((x) => storedPath(x.url))) out.push({ id: "share", label: "Share link…", placement: "menu" });
   // Library: pinned results stay at the top of their view; the review status is a sub-menu of its own.
   out.push({ id: "pin", label: g.pinnedAt ? "Unpin" : "Pin to top", placement: "menu" }, { id: "review", label: "Review status", placement: "menu" });
   out.push({ id: "delete", label: "Delete", placement: "menu", destructive: true });

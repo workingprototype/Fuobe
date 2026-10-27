@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { APPS } from "@/lib/catalog/apps";
 import { recordForPath, unknownHubMode } from "@/lib/record-pages";
-import { authEnabled, crossSite, hostAllowed, SESSION_COOKIE, validSession, validToken } from "@/server/auth";
+import { countsAsView, SHARE_VIEW_HEADER, shareRoute } from "@/lib/share";
+import { authEnabled, crossSite, hostAllowed, LoginGuard, SESSION_COOKIE, validSession, validToken } from "@/server/auth";
 import { recordExists } from "@/server/records";
+import { findShare, shareGuard, shareTargetExists } from "@/server/share-access";
 
-/** Paths that work signed out: the login page and its API. */
+/** Paths that work signed out: the login page and its API (and share links: openShare). */
 const OPEN = new Set(["/login", "/api/auth/login"]);
 
 const APP_IDS = new Set(APPS.map((a) => a.id));
@@ -26,6 +28,51 @@ function pass(request: NextRequest): NextResponse {
 }
 
 const notFound = (request: NextRequest) => NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+
+/** Share pages and their files: never indexed, and the token never leaks to another site in a Referer. */
+const SHARE_HEADERS = { "X-Robots-Tag": "noindex, nofollow, noarchive", "Referrer-Policy": "no-referrer" };
+
+const signedIn = (request: NextRequest) => validSession(request.cookies.get(SESSION_COOKIE)?.value) || validToken(request.headers.get("authorization"));
+
+const tooMany = (seconds: number) =>
+  new NextResponse("Too many wrong links. Try again in a minute.", { status: 429, headers: { ...SHARE_HEADERS, "Retry-After": String(seconds) } });
+
+/**
+ * A share link (/s/<token>, /s/<token>/f/<file>): open without a session when the token is a live
+ * share whose result, folder or project still exists, else a 404 (a "link unavailable" page). A
+ * live link always opens: wrong tokens count against ShareGuard, which answers them 429 past its
+ * budget and locks out only a client it can tell apart (never everyone, never the signed-in owner).
+ * The page and the files route check the token again, and the files route serves only files that
+ * page shows. A page view by a visitor (a browser's GET, not a prefetch, a HEAD or a link-preview
+ * bot) is passed on to the page as SHARE_VIEW_HEADER, which the page counts.
+ */
+function openShare(request: NextRequest, token: string, file: boolean): NextResponse {
+  const owner = authEnabled() && signedIn(request);
+  const guard = shareGuard();
+  const key = LoginGuard.clientKey(request.headers);
+  if (!owner) {
+    const wait = guard.blockedFor(key);
+    if (wait > 0) return tooMany(Math.ceil(wait / 1000));
+  }
+  const row = findShare(token);
+  let res: NextResponse;
+  if (!row || !shareTargetExists(row)) {
+    if (!row && !owner) {
+      const spent = guard.saturated();
+      guard.miss(key, token, key === LoginGuard.DIRECT);
+      if (spent) return tooMany(60);
+    }
+    res = NextResponse.rewrite(new URL("/s/gone", request.url), { status: 404 });
+  } else {
+    // Only the proxy says what counts as a view: a visitor can't send the header themselves.
+    const headers = new Headers(request.headers);
+    headers.delete(SHARE_VIEW_HEADER);
+    if (!file && !owner && countsAsView(request.method, request.headers)) headers.set(SHARE_VIEW_HEADER, "1");
+    res = NextResponse.next({ request: { headers } });
+  }
+  for (const [k, v] of Object.entries(SHARE_HEADERS)) res.headers.set(k, v);
+  return res;
+}
 
 function safeDecode(s: string): string {
   try {
@@ -49,10 +96,13 @@ export function proxy(request: NextRequest) {
   if (crossSite(request, request.nextUrl.host)) {
     return NextResponse.json({ error: "Blocked a request from another website. Use Fuobe from its own address (or add it to FUOBE_ALLOWED_ORIGINS)." }, { status: 403 });
   }
-  if (!authEnabled()) return pass(request);
   const { pathname, search } = request.nextUrl;
+  // Share links are read-only and public, password or not: exactly a share's page and its files.
+  const share = (request.method === "GET" || request.method === "HEAD") && shareRoute(pathname);
+  if (share) return openShare(request, share.token, !!share.file);
+  if (!authEnabled()) return pass(request);
   if (OPEN.has(pathname)) return NextResponse.next();
-  if (validSession(request.cookies.get(SESSION_COOKIE)?.value) || validToken(request.headers.get("authorization"))) return pass(request);
+  if (signedIn(request)) return pass(request);
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Sign in, or send an API token as Authorization: Bearer fuobe_…" }, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="fuobe"' } });
   }
