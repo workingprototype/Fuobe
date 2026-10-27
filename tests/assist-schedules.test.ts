@@ -58,6 +58,8 @@ describe("scheduled tasks", () => {
     expect(() => sched.createSchedule({ ...base, title: "x", projectId: "nope", rule: { kind: "daily", time: "09:00" } }, now)).toThrow(/project/);
     const s = sched.createSchedule({ ...base, title: "Every 6h", rule: { kind: "hours", every: 6 } }, now);
     expect(s.rule).toEqual({ kind: "hours", every: 6, from: now });
+    // Saving a task makes sure the sweep is running (it also starts at boot).
+    expect(globalThis.__fuobeScheduleRunner).toBeDefined();
     expect(s.nextRunAt).toBe(now + 6 * 3_600_000);
     // Ask first has no cap; auto gets the default unless one is given.
     expect(s.capUsd).toBeNull();
