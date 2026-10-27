@@ -2,7 +2,22 @@ import "server-only";
 import { z } from "zod";
 import { getModel } from "@/lib/catalog";
 import { onEngine } from "@/lib/catalog/engines";
-import { ANCHOR_MODELS, anchorModel, CHARACTER_GPU, CHARACTER_LIMITS, CHARACTER_SWAP, characterLicenceLine, cutWarning, h3Windows, type CharacterOptions } from "@/lib/catalog/character-swap";
+import {
+  ANCHOR_MODELS,
+  anchorModel,
+  CHARACTER_GPU,
+  CHARACTER_LIMITS,
+  CHARACTER_SWAP,
+  characterLicenceLine,
+  cutWarning,
+  h3Windows,
+  swapLoraRef,
+  SWAP_LORAS,
+  TURBO_LORA,
+  windowPlan,
+  type CharacterOptions,
+} from "@/lib/catalog/character-swap";
+import { ACCESS_PLACE } from "@/lib/model-access";
 import {
   chooseMaker,
   cutsInPart,
@@ -28,13 +43,17 @@ import {
 import { MASK_TRACKER, REMOVE_TOOLS, scalePoints, wholeClip, type RemoveRange, type RemoveSource } from "@/lib/catalog/remove-object";
 import { planSegments, type PlanStep } from "@/lib/catalog/shorts";
 import type { Engine, Generation, PixelPoint, ProviderId } from "@/lib/catalog/types";
+import { silenceWriter } from "./canvas";
 import { createPipeline } from "./chains";
-import { previewChained } from "./generations";
-import { isOffered } from "./model-access";
+import { llmText, llmTextBackend } from "./enhance";
+import { createGenerations, previewChained } from "./generations";
+import { isOffered, offeredLoras, offeredModel } from "./model-access";
 import { provider } from "./providers";
+import { probeOllama } from "./providers/llm";
 import { pointsFromPaint } from "./remove-object";
-import { engineMode } from "./settings";
+import { engineMode, getSetting } from "./settings";
 import { probeSource, ShortsError } from "./shorts";
+import { readRef } from "./storage";
 
 /**
  * Fuobe Genjutsu (/genjutsu): plans, prices and starts a Motion transfer, Character swap, Object swap, Restyle or Insert
@@ -181,8 +200,9 @@ async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<
   const target = MODE_TARGETS[body.mode].length ? (body.target ?? MODE_TARGETS[body.mode][0]) : undefined;
   const references = body.references ?? [];
   const clicks = (body.points ?? []).filter((p) => p.label !== "negative").length;
-  const problem = genjutsuProblem({ mode: body.mode, maker, source, range, references: references.length, target, subject: body.subject, prompt: body.prompt, points: clicks, mask: !!body.mask, look: body.look, seed: body.seed });
+  const problem = genjutsuProblem({ mode: body.mode, maker, source, range, references: references.length, target, subject: body.subject, prompt: body.prompt, points: clicks, mask: !!body.mask, look: body.look, seed: body.seed, character: body.character });
   if (problem) throw new ShortsError(problem, 422);
+  const switched = body.mode === "character" && maker.h3 ? characterSwitches(maker, body.character ?? {}) : { character: body.character, notes: [] };
 
   // Clicks on the first frame, in the clip's pixels; paint is followed from its deepest points (SAM 3.1 on fal).
   let points: PixelPoint[] | undefined;
@@ -195,7 +215,7 @@ async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<
   const tracksPaint = maker.engine === "cloud" && body.mode === "swap" && target === "paint" && (maker.source === "original" || n > 1);
   if (tracksPaint) points = opts.probe ? await pointsFromPaint(body.mask!, source, "Paint over what to swap first") : [{ x: 1, y: 1, label: "positive" }];
 
-  const notes = notesFor(body, maker, source, range, n, references.length);
+  const notes = [...switched.notes, ...notesFor({ ...body, character: switched.character }, maker, source, range, n, references.length)];
   const name = (body.source.name ?? "").replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, 40);
   const title = genjutsuTitle({ mode: body.mode, subject: body.subject, look: body.look });
   return {
@@ -217,9 +237,35 @@ async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<
       mask: target === "paint" ? body.mask : undefined,
       look: body.look,
       ...(body.seed !== undefined ? { seed: body.seed } : {}),
-      ...(body.mode === "character" ? { character: body.character ?? {} } : {}),
+      ...(body.mode === "character" ? { character: switched.character ?? {} } : {}),
     },
   };
+}
+
+/**
+ * The Character swap with what Settings → Models & licences switched off taken out: the first-frame model (the next one
+ * that is on, else no first frame) and the swap LoRA (on your GPU H3 runs without it; fal's route needs one). Turbo off
+ * on the open engine stops the run: the 8-step graph can't go without it.
+ */
+function characterSwitches(m: Maker, c: CharacterOptions): { character: CharacterOptions; notes: string[] } {
+  const notes: string[] = [];
+  let out = c;
+  if (m.h3?.anchor && c.anchor !== false) {
+    const wanted = anchorModel(m.engine, c.anchorModel);
+    if (!isOffered(wanted.id, m.engine)) {
+      const next = ANCHOR_MODELS[m.engine].find((a) => isOffered(a.id, m.engine));
+      out = next ? { ...out, anchorModel: next.id } : { ...out, anchor: false };
+      notes.push(next ? `${wanted.label} is switched off in ${ACCESS_PLACE}: ${next.label} makes the first frame` : `The first-frame models are switched off in ${ACCESS_PLACE}: the swap runs without a first frame`);
+    }
+  }
+  const lora = c.lora ?? "v1.5";
+  if (lora !== "none" && offeredLoras([swapLoraRef(lora)]).dropped.length) {
+    if (m.engine === "cloud") throw new ShortsError(`The swap LoRA (${SWAP_LORAS[lora].label}) is switched off in ${ACCESS_PLACE}, and fal's H3 route needs one — turn it on, or pick the other release`, 422);
+    out = { ...out, lora: "none" };
+    notes.push(`The swap LoRA is switched off in ${ACCESS_PLACE}: H3 runs with the Turbo LoRA alone`);
+  }
+  if (m.engine === "open" && offeredLoras([TURBO_LORA]).dropped.length) throw new ShortsError(`The H3 Turbo LoRA is switched off in ${ACCESS_PLACE}, and the Character swap's 8-step graph needs it — turn it on to run it on your GPU`, 422);
+  return { character: out, notes };
 }
 
 function notesFor(body: GenjutsuBody, m: Maker, source: RemoveSource, range: RemoveRange, n: number, refs: number): string[] {
@@ -231,16 +277,24 @@ function notesFor(body: GenjutsuBody, m: Maker, source: RemoveSource, range: Rem
   if (body.mode === "character" && m.h3) {
     const c = body.character ?? {};
     if (m.engine === "open") {
-      const windows = h3Windows(len, c.windowFrames);
-      notes.push(`MiniMax H3 swaps it in ${windows} window${windows > 1 ? "s" : ""} of ${c.windowFrames ?? CHARACTER_SWAP.window} frames at 24 fps, each continuing the one before; the clip's sound stays`);
-    } else if (n > 1) notes.push(`fal's H3 takes up to 15 s a call: the part runs as ${n} pieces, joined with the clip's own sound. Each piece starts fresh (no history between them)`);
-    if (len > CHARACTER_SWAP.maxSeconds + 0.05) notes.push("Past 15 s is beyond what H3 was trained on: quality there is unverified");
+      const plan = windowPlan(c.windowFrames, c.historyFrames);
+      const windows = h3Windows(len, plan.window, plan.history);
+      notes.push(
+        windows > 1
+          ? `MiniMax H3 swaps it in ${windows} windows of up to ${plan.window} frames at 24 fps, each continuing from the ${plan.history} frames before it; the clip's sound stays`
+          : `MiniMax H3 swaps it in one window of up to ${plan.window} frames at 24 fps; the clip's sound stays`,
+      );
+      // One prompt for the whole part: past H3's trained range (~362 frames) the pack itself says quality is unverified.
+      if (len > CHARACTER_SWAP.maxSeconds + 0.05) notes.push("Past 15 s is beyond what H3 was trained on: quality there is unverified");
+    } else if (n > 1) notes.push(`fal's H3 takes up to 15 s a call: the part runs as ${n} pieces, joined with the clip's own sound. Each piece starts fresh (no history between them), so a seam can show where they meet`);
+    if (m.engine === "cloud" && !source.hasAudio) notes.push("Your clip has no sound, and neither will the result: fal's H3 makes a soundtrack of its own, which is replaced with silence");
     if (m.h3.anchor && c.anchor !== false) {
       const am = anchorModel(m.engine, c.anchorModel);
       notes.push(`${am.label} first puts your character into the part's first frame${m.engine === "cloud" && n > 1 ? " (one per piece)" : ""}; if that fails the swap runs without it`);
     } else if (!m.h3.anchor) notes.push(`${name} runs without an anchor frame`);
     if (m.engine === "cloud") notes.push("On fal, H3 has no mask: who to swap is said in words, and the whole frame is regenerated around them");
-    if (body.points?.length && body.quality === "480p" && m.engine === "open") notes.push("Clicks are placed in H3's 480p frame by estimate: if the wrong person is picked, choose them by position instead");
+    if (m.engine === "open" && c.who === "index" && !body.points?.length) notes.push("Person numbers follow SAM 3.1's detections, the one it is surest of first — not left to right");
+    if (m.engine === "open" && !m.h3.maskSwitch && c.useMask === false) notes.push(`${name} always regenerates only the person: its graph has no switch for the whole frame`);
     const warn = cutWarning(cutsInPart(body.cuts, range));
     if (warn) notes.push(warn);
     notes.push(characterLicenceLine(m.engine, m.id));
@@ -447,10 +501,87 @@ export async function createGenjutsu(body: GenjutsuBody): Promise<{ final: Gener
     const plan = planGenjutsu(input);
     // The same check as the estimate: nothing starts when only some of the steps have a provider.
     price(plan.steps, input);
-    const p = createPipeline(plan.steps);
+    // A silent clip's cloud swap ends on silence: its WAV is written now (silenceRef, as Canvas mutes a clip).
+    const withSilence = silenceWriter();
+    const p = createPipeline(plan.steps.map((s) => ({ ...s, request: withSilence(s.request) })));
     return { final: p.byKey[plan.final], items: p.items };
   } catch (e) {
     if (e instanceof ShortsError) throw e;
+    throw new ShortsError((e as Error).message, 422);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Character swap helpers: "Describe my character" and the part's words (Akatz Labs' description and transcript)
+
+const DESCRIBE_SYSTEM =
+  "You describe a character from one reference picture for a video model that will put them into a scene. Say only who they are and what they wear: " +
+  "apparent age range, build, face, hair, skin tone, clothing, shoes, accessories and their colours. No pose, background, lighting, camera or art style, " +
+  "no names, no guesses about personality. One plain sentence under 60 words, starting with \"a\" or \"an\", no quotes, no preamble.";
+
+export const DescribeSchema = z.object({ engine: z.enum(["cloud", "open"]), image: z.string().startsWith("/api/files/").max(500) });
+
+/**
+ * "Describe my character": the engine's text model looks at the character picture and writes the description the
+ * prompt and the anchor brief carry (Akatz Labs found generic prompts weak). Cloud: Claude, else Ollama; your GPU:
+ * Ollama with a vision model. A text model switched off in Settings → Models & licences doesn't answer.
+ */
+export async function describeCharacter(body: z.infer<typeof DescribeSchema>): Promise<{ description: string }> {
+  mustMatchMode(body.engine);
+  const textModel = getModel(body.engine === "open" ? "oss-text-llm" : "text-llm");
+  if (!textModel || !offeredModel(textModel)) throw new ShortsError(`The text model is switched off in ${ACCESS_PLACE} — describe your character in your own words`, 422);
+  // Ollama is asked on your GPU's engine (and when no Anthropic key is set): it has to be running.
+  const backend = llmTextBackend();
+  const ollama = backend === "ollama" || (backend === "claude" && body.engine === "open");
+  if (getSetting("demoMode") === "on" || !backend || (ollama && !(await probeOllama()))) {
+    throw new ShortsError("Describing needs a text model: add an Anthropic key, or run Ollama with a vision model (Settings → AI helper)", 422);
+  }
+  let file: Awaited<ReturnType<typeof readRef>>;
+  try {
+    file = await readRef(body.image);
+  } catch {
+    throw new ShortsError("Couldn't read the character picture — add it again", 422);
+  }
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.contentType)) throw new ShortsError("Describe works on a PNG, JPEG or WebP picture", 422);
+  const answer = await llmText(DESCRIBE_SYSTEM, "Describe the character in this picture.", [{ data: file.data, contentType: file.contentType }], { ollamaOnly: body.engine === "open" });
+  const description = answer
+    ?.replace(/^["“'\s]+|["”'\s]+$/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.\s]+$/, "")
+    .slice(0, CHARACTER_SWAP.maxDescriptionChars);
+  if (!description) throw new ShortsError(body.engine === "open" ? "Ollama didn't describe the picture — it needs a vision model (qwen3-vl, gemma3…)" : "The text model didn't answer — try again, or describe your character in your own words", 422);
+  return { description };
+}
+
+/** The transcriber per engine (Fuobe's Transcribe studio's defaults). */
+export const TRANSCRIBERS: Record<Engine, string> = { cloud: "scribe-v2", open: "oss-qwen3-asr" };
+
+export const TranscribeSchema = z.object({
+  engine: z.enum(["cloud", "open"]),
+  source: z.object({ url: z.string().startsWith("/api/files/").max(500), duration: z.number().finite().positive().max(3600).optional() }),
+});
+
+/**
+ * The clip's words, for "What's said": one transcription of the whole clip (word-timed cues), so any part picked
+ * afterwards takes its own lines from it in the browser (partWords). A Genjutsu step: it stays out of the page's feed.
+ */
+export function transcribeClip(body: z.infer<typeof TranscribeSchema>): { id: string; modelId: string } {
+  mustMatchMode(body.engine);
+  const modelId = TRANSCRIBERS[body.engine];
+  if (!isOffered(modelId, body.engine)) throw new ShortsError(`${getModel(modelId)?.name ?? modelId} is switched off in ${ACCESS_PLACE} — type the words instead`, 422);
+  const seconds = body.source.duration;
+  try {
+    const [g] = createGenerations({
+      feature: GENJUTSU.stepFeature,
+      batchTitle: "Genjutsu · the clip's words",
+      modelId,
+      op: "transcribe",
+      inputs: { video: body.source.url },
+      ...(seconds ? { params: { duration: seconds, sourceDuration: seconds } } : {}),
+      step: { label: "The clip's words", index: 0, of: 1 },
+    });
+    return { id: g.id, modelId };
+  } catch (e) {
     throw new ShortsError((e as Error).message, 422);
   }
 }

@@ -1,8 +1,10 @@
 // Fuobe Genjutsu on the Originals, browser check (build plan O5 + Openjutsu): /genjutsu runs Fuobe's Originals by
 // default on both engines, with open weights and partners as labelled alternatives, and a Character swap mode
 // (MiniMax H3). At 1440 and 390 px, light and dark: the Character swap mode shows who to swap, the quality, the first
-// frame switch, the limits and the licence line; the model list badges each model's source; a run is made in demo mode
-// and finishes; the open engine allows clicking the person and shows the GPU line; Motion and Restyle list the
+// frame switch, the limits and the licence line; Describe my character and the clip's words; the swap LoRA's choices
+// per engine; partners' resolutions; the model list badges each model's source; a run is made in demo mode and
+// finishes; the open engine allows clicking the person, shows the GPU line, SAM's detection numbers, the History list
+// under the window and the mask switch on the Original's graph only; Motion and Restyle list the
 // Originals first and Restyle has Soul looks; no Higgsfield anywhere; nothing scrolls sideways.
 // Usage: node tests/e2e/genjutsu-original.mjs [appUrl] [--shots <dir>]   (app running in demo mode, ComfyUI unreachable).
 // Exits 1 on a failed check.
@@ -79,6 +81,36 @@ try {
       check(`${tag}: the limits are shown`, /One continuous shot: a hard cut breaks the swap/.test(body) && /The person must be visible in the part's first frame/.test(body));
       check(`${tag}: no Higgsfield anywhere`, !/higgsfield/i.test(body));
       check(`${tag}: no sideways scroll (Character swap)`, (await sideways()) <= 1, `${await sideways()} px`);
+      // Describe my character (no text model in demo mode: said in words); the clip's words fill "What's said".
+      const describe = page.getByRole("button", { name: "Describe my character" });
+      check(`${tag}: "Describe my character" is offered with the picture in`, (await describe.count()) === 1 && !(await describe.isDisabled()));
+      await describe.click();
+      check(
+        `${tag}: describing without a text model says so`,
+        await page
+          .getByText(/Describing needs a text model/)
+          .first()
+          .waitFor({ timeout: 20_000 })
+          .then(() => true)
+          .catch(() => false),
+      );
+      await page.getByText("Advanced").first().click();
+      const loras = (await page.getByRole("radiogroup", { name: "Swap LoRA" }).getByRole("radio").allInnerTexts()).join("|");
+      check(`${tag}: cloud: the swap LoRA is V1.5 or V1 (fal's route needs one)`, loras === "V1.5|V1", loras);
+      await page.getByRole("button", { name: "Use the clip's words" }).click();
+      const said = page.locator("#gj-dialogue");
+      const filled = await page
+        .waitForFunction(() => /demo transcript/.test(document.querySelector("#gj-dialogue")?.value ?? ""), null, { timeout: 60_000 })
+        .then(() => true)
+        .catch(() => false);
+      check(`${tag}: "Use the clip's words" fills What's said with the part's lines`, filled, JSON.stringify((await said.inputValue()).slice(0, 60)));
+      // A partner in Character swap takes Genjutsu's resolutions (Recast renders 768p or 1080p).
+      await models.getByRole("radio", { name: /H3 Max Recast/ }).click();
+      await page.waitForTimeout(300);
+      const res = (await page.getByRole("radiogroup", { name: "Resolution" }).getByRole("radio").allInnerTexts()).join("|");
+      check(`${tag}: partners: the resolutions to pick from (1080p for Recast)`, res === "480p|720p|1080p", res);
+      await models.getByRole("radio").first().click();
+      await page.waitForTimeout(300);
       await shot("genjutsu-character-cloud");
 
       // A demo run: the steps run through and the result comes back.
@@ -100,8 +132,28 @@ try {
       const openBody = await text();
       check(`${tag}: open: the GPU it was tested on`, /Tested by its authors on a 96 GB RTX PRO 6000/.test(openBody));
       check(`${tag}: open: the H3 Relay is an open alternative`, /H3 Relay/.test(openBody));
-      await page.getByText("Advanced").first().click();
+      // Advanced is still open from the cloud: on your GPU "None" is a choice, and the mask switch is the Original's.
+      if (!(await page.getByRole("radiogroup", { name: "Swap LoRA" }).isVisible().catch(() => false))) await page.getByText("Advanced").first().click();
       check(`${tag}: open: Advanced has the LoRA release and the window`, (await page.getByRole("radiogroup", { name: "Swap LoRA" }).count()) === 1 && (await page.getByText("Window", { exact: true }).count()) >= 1);
+      check(`${tag}: open: no swap LoRA is a choice on your GPU`, (await page.getByRole("radiogroup", { name: "Swap LoRA" }).getByRole("radio", { name: "None" }).count()) === 1);
+      check(`${tag}: open: Masked generation on the Original's graph`, (await page.getByRole("switch", { name: "Masked generation" }).count()) === 1);
+      await page.getByRole("radiogroup", { name: "Who to swap" }).getByRole("radio", { name: "Person #" }).click();
+      check(`${tag}: open: person numbers are SAM's detections, said so`, (await page.getByText("Detection number", { exact: true }).count()) === 1 && /not left to right/.test(await text()));
+      // The History list stops below the window (the pack refuses a history as long as it).
+      await page.locator("#gj-window").click();
+      await page.getByRole("option", { name: "22 frames" }).click();
+      await page.locator("#gj-history").click();
+      const histories = (await page.getByRole("option").allInnerTexts()).join("|");
+      await page.keyboard.press("Escape");
+      check(`${tag}: open: History under a 22-frame window is 0, 1 or 18`, histories === "0 frames|1 frames|18 frames", histories);
+      await page.locator("#gj-window").click();
+      await page.getByRole("option", { name: "124 frames" }).click();
+      // H3 Relay has no switch for the whole frame.
+      await page.getByRole("radiogroup", { name: "Model", exact: true }).getByRole("radio", { name: /H3 Relay/ }).click();
+      await page.waitForTimeout(300);
+      check(`${tag}: open: the Relay graph has no mask switch`, (await page.getByRole("switch", { name: "Masked generation" }).count()) === 0);
+      await page.getByRole("radiogroup", { name: "Model", exact: true }).getByRole("radio").first().click();
+      await page.getByRole("radiogroup", { name: "Who to swap" }).getByRole("radio", { name: "Largest" }).click();
       check(`${tag}: no sideways scroll (open)`, (await sideways()) <= 1, `${await sideways()} px`);
       await shot("genjutsu-character-open");
 

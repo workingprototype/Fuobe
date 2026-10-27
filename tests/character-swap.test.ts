@@ -13,7 +13,7 @@ import {
   graphLoras,
   h3Canvas,
   h3Windows,
-  H3_NODE_PACKS,
+  historyChoicesFor,
   historyFrames,
   MINIMAX_H3_LICENCE,
   packResolution,
@@ -24,10 +24,16 @@ import {
   swapLoraRef,
   swapPrompt,
   TURBO_LORA,
+  anchorAspect,
+  CHARACTER_LORAS,
+  partWords,
+  toH3Canvas,
   whoWords,
   windowFrames,
+  windowPlan,
+  windowProblem,
 } from "@/lib/catalog/character-swap";
-import { licenceTerms } from "@/lib/licences";
+import { licenceInfo, licenceTerms, NODE_PACKS } from "@/lib/licences";
 
 // Genjutsu's Character swap (docs/research/openjutsu-6.md): Openjutsu's prompt and limits, H3's windows and canvas,
 // who to swap, the anchor frame, and the licences as information.
@@ -120,7 +126,7 @@ describe("Character swap: limits", () => {
     expect(falResolution("1080p")).toBe("768P");
   });
 
-  it("H3's windows: 5 s → 1, 7.5 and 10 s → 2, 12.5 and 15 s → 3 (124 frames, padded to 17n+5)", () => {
+  it("H3's windows: the pack's plan_windows (5 s → 1, 7.5 and 10 s → 2, 12.5 and 15 s → 3)", () => {
     expect(alignFrames(120)).toBe(124);
     expect(alignFrames(240)).toBe(243);
     expect(alignFrames(360)).toBe(362);
@@ -130,8 +136,12 @@ describe("Character swap: limits", () => {
     expect(h3Windows(12.5)).toBe(3);
     expect(h3Windows(15)).toBe(3);
     expect(h3Windows(30)).toBe(6);
-    // A longer window means fewer.
+    // Later windows start on the last frame made: 247 frames (10.29 s) fit two windows of 124, not three.
+    expect(h3Windows(247 / 24)).toBe(2);
+    expect(h3Windows(248 / 24)).toBe(3);
+    // A longer window means fewer; no history means each later window delivers its whole length.
     expect(h3Windows(15, 362)).toBe(1);
+    expect(h3Windows(10.25, 124, 0)).toBe(2);
     // Window sizes are the pack's combo strings (17n+5 and 0, 1, 17n+1).
     expect(windowFrames(124)).toBe("124");
     expect(windowFrames(130)).toBe("124");
@@ -141,12 +151,42 @@ describe("Character swap: limits", () => {
     expect(historyFrames(40)).toBe("35");
   });
 
-  it("H3's canvas and clicks moved into it", () => {
-    // ComfyUI's adapt_canvas: a 768 short edge, capped at 768 × 1344, each side on the 32 grid.
-    expect(h3Canvas(1920, 1080, "768p")).toEqual({ width: 1344, height: 768 });
-    expect(h3Canvas(1080, 1920, "768p")).toEqual({ width: 768, height: 1344 });
-    expect(h3Canvas(1024, 1024, "768p")).toEqual({ width: 768, height: 768 });
-    expect(h3Canvas(1280, 720, "480p")).toEqual({ width: 832, height: 480 });
+  it("refuses a history as long as the window, as the pack's validate_settings does", () => {
+    expect(windowProblem({})).toBeNull();
+    expect(windowProblem({ windowFrames: 124, historyFrames: 18 })).toBeNull();
+    expect(windowProblem({ windowFrames: 22, historyFrames: 35 })).toBe("History (35 frames) must be shorter than the window (22 frames)");
+    expect(windowProblem({ windowFrames: 39, historyFrames: 52 })).toMatch(/must be shorter/);
+    expect(historyChoicesFor(22)).toEqual([0, 1, 18]);
+    expect(historyChoicesFor(124).at(-1)).toBe(120);
+    // The provider's last guard: snapped to the grid, the history comes down below the window.
+    expect(windowPlan(22, 35)).toEqual({ window: 22, history: 18 });
+    expect(windowPlan(undefined, undefined)).toEqual({ window: 124, history: 18 });
+  });
+
+  it("H3's canvas is the pack's canvas_dimensions (0.5 / 1.0 MP budgets on the 32 grid)", () => {
+    // Values from the pinned pack's own function (video.py at 0670e4f), run in Python.
+    expect(h3Canvas(1920, 1080, "768p")).toEqual({ width: 1344, height: 736 });
+    expect(h3Canvas(1080, 1920, "768p")).toEqual({ width: 736, height: 1344 });
+    expect(h3Canvas(1024, 1024, "768p")).toEqual({ width: 992, height: 992 });
+    expect(h3Canvas(1080, 1080, "768p")).toEqual({ width: 992, height: 992 });
+    expect(h3Canvas(1280, 720, "480p")).toEqual({ width: 928, height: 512 });
+    expect(h3Canvas(1280, 720, "768p")).toEqual({ width: 1344, height: 736 });
+    expect(h3Canvas(720, 1280, "480p")).toEqual({ width: 512, height: 928 });
+    // A clip already on the grid and within the budget keeps its size.
+    expect(h3Canvas(1024, 576, "768p")).toEqual({ width: 1024, height: 576 });
+    expect(h3Canvas(640, 480, "480p")).toEqual({ width: 640, height: 480 });
+  });
+
+  it("moves clicks into the prepared frame: scaled to cover, the middle cropped", () => {
+    // 1920×1080 at 768: scaled to 1344×756, 10 rows cropped off the top and bottom.
+    expect(toH3Canvas({ x: 960, y: 540 }, { width: 1920, height: 1080 }, "768p")).toEqual({ x: 672, y: 368 });
+    expect(toH3Canvas({ x: 100, y: 100 }, { width: 1920, height: 1080 }, "768p")).toEqual({ x: 70, y: 60 });
+    // A square clip at 768 is 992×992 (not 768×768): a click 80 % across stays 80 % across.
+    expect(toH3Canvas({ x: 864, y: 540 }, { width: 1080, height: 1080 }, "768p")).toEqual({ x: 794, y: 496 });
+    expect(toH3Canvas({ x: 1024, y: 360 }, { width: 1280, height: 720 }, "480p")).toEqual({ x: 742, y: 256 });
+    expect(toH3Canvas({ x: 864, y: 960 }, { width: 1080, height: 1920 }, "768p")).toEqual({ x: 595, y: 672 });
+    // In the cropped margin: the nearest edge.
+    expect(toH3Canvas({ x: 1079, y: 0 }, { width: 1080, height: 1920 }, "768p")).toEqual({ x: 735, y: 0 });
     const [pos, neg] = samCoords(
       [
         { x: 960, y: 540, label: "positive" },
@@ -155,9 +195,30 @@ describe("Character swap: limits", () => {
       { width: 1920, height: 1080 },
       "768p",
     );
-    expect(JSON.parse(pos)).toEqual([{ x: 672, y: 384 }]);
-    expect(JSON.parse(neg)).toEqual([{ x: 70, y: 71 }]);
+    expect(JSON.parse(pos)).toEqual([{ x: 672, y: 368 }]);
+    expect(JSON.parse(neg)).toEqual([{ x: 70, y: 60 }]);
     expect(samCoords(undefined, { width: 10, height: 10 }, "768p")).toEqual(["", ""]);
+  });
+
+  it("the first frame keeps the part's shape: auto when the model takes it, else the nearest ratio", () => {
+    expect(anchorAspect(["auto", "16:9", "1:1"], { width: 1280, height: 720 })).toBe("auto");
+    expect(anchorAspect(["1:1", "4:3", "3:4", "16:9", "9:16"], { width: 1280, height: 720 })).toBe("16:9");
+    expect(anchorAspect(["1:1", "4:3", "3:4", "16:9", "9:16"], { width: 1080, height: 1920 })).toBe("9:16");
+    expect(anchorAspect(["1:1", "4:3", "3:4", "16:9", "9:16"], { width: 1440, height: 1080 })).toBe("4:3");
+    expect(anchorAspect(["1:1", "16:9"], {})).toBeUndefined();
+    expect(anchorAspect(undefined, { width: 1, height: 1 })).toBeUndefined();
+  });
+
+  it("the part's words from a transcription of the whole clip", () => {
+    const cues = [
+      { start: 0, end: 2, text: "Before the part." },
+      { start: 4.5, end: 6, text: "Hello there," },
+      { start: 6, end: 8, text: "how are you?" },
+      { start: 12, end: 14, text: "After it." },
+    ];
+    expect(partWords(cues, { start: 5, end: 10 })).toBe("Hello there, how are you?");
+    expect(partWords(cues, { start: 2, end: 4 })).toBe("");
+    expect(partWords(undefined, { start: 0, end: 5 })).toBe("");
   });
 
   it("warns about a hard cut inside the part, not at its edges", () => {
@@ -201,8 +262,30 @@ describe("Character swap: licences are information", () => {
     expect(by["H3 Relay 2.0 node pack"]).toMatchObject({ name: "GPL-3.0" });
     expect(CHARACTER_LICENCES.find((l) => l.class === "paid-api")?.item).toMatch(/fal/);
     expect(CHARACTER_LICENCES.every((l) => l.url.startsWith("https://"))).toBe(true);
-    expect(H3_NODE_PACKS.map((p) => p.name)).toEqual(["h3_character_swap", "h3-relay"]);
-    expect(H3_NODE_PACKS[0].licence).toMatchObject({ name: "GPL-3.0" });
+  });
+
+  it("Settings → Models & licences knows the packs, the LoRAs and the H3 licence by name", () => {
+    const packs = NODE_PACKS.filter((p) => p.name === "h3_character_swap" || p.name === "h3-relay");
+    expect(packs.map((p) => [p.name, p.licence.name])).toEqual([
+      ["h3_character_swap", "GPL-3.0"],
+      ["h3-relay", "GPL-3.0"],
+    ]);
+    expect(packs[0].repo).toContain("/tree/0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b/");
+    expect(packs[1].repo).toContain("/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220");
+    // The swap LoRA's releases are MiniMax H3 work (restricted regions); Turbo is Apache-2.0.
+    expect(CHARACTER_LORAS.map((l) => [l.file, l.licence.class])).toEqual([
+      ["h3_character_swap_v1.5.safetensors", "regions"],
+      ["h3_character_swap_pro4500_1000.safetensors", "regions"],
+      [TURBO_LORA.file, "commercial"],
+    ]);
+  });
+
+  it("the H3 workflows' licence text reads as the MiniMax H3 Community License, not SAM's", async () => {
+    const { default: manifest } = await import("../workflows/comfyui/manifest.json");
+    for (const id of ["video-character-swap-h3", "video-character-swap-h3-relay"]) {
+      const wf = (manifest as { workflows: { id: string; license?: string }[] }).workflows.find((w) => w.id === id)!;
+      expect(licenceInfo(wf.license!)).toMatchObject({ name: "MiniMax H3 Community License", class: "regions", excludes: "the US, the EU, the UK and South Korea", notices: ["MiniMax H3"] });
+    }
   });
 
   it("the model picker's line says it, as information", () => {

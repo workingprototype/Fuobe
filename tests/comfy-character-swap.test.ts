@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ComfyWorkflow, Manifest } from "@/lib/comfy";
-import { H3_NODE_PACKS, H3_WORKFLOWS, SWAP_LORAS, TURBO_LORA } from "@/lib/catalog/character-swap";
+import { H3_WORKFLOWS, SWAP_LORAS, TURBO_LORA } from "@/lib/catalog/character-swap";
+import { nodePack } from "@/lib/licences";
 import { getModel } from "@/lib/catalog";
 
 // Genjutsu's Character swap in the ComfyUI library (docs/research/openjutsu-6.md): the two MiniMax H3 graphs, their
@@ -52,16 +53,20 @@ describe("Character swap's ComfyUI graphs", () => {
       expect(l).toMatch(/SAM License/);
       expect(l).toMatch(/GPL-3\.0/);
     }
-    expect(H3_NODE_PACKS.map((p) => [p.name, p.licence.name])).toEqual([["h3_character_swap", "GPL-3.0"], ["h3-relay", "GPL-3.0"]]);
+    // Settings → Models & licences knows each pack a graph loads (and its licence).
+    for (const id of IDS) for (const n of entry(id).customNodes) expect(nodePack(n.name)?.licence.name, n.name).toBe("GPL-3.0");
   });
 
   it("name their node packs, pinned the same in install-comfyui.sh", () => {
     expect(entry(SWAP).customNodes).toEqual([expect.objectContaining({ name: "h3_character_swap", repo: expect.stringContaining("0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b") })]);
-    expect(entry(RELAY).customNodes).toEqual([expect.objectContaining({ name: "h3-relay", repo: "https://github.com/akatz-ai/h3-relay" })]);
+    expect(entry(RELAY).customNodes).toEqual([expect.objectContaining({ name: "h3-relay", repo: "https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220" })]);
     expect(install).toContain('H3_TOOL_REF="${H3_TOOL_REF:-0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b}"');
     expect(install).toContain('H3_RELAY_REF="${H3_RELAY_REF:-e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220}"');
     // The Relay changes the server's routes when it loads: opt-in.
     expect(install).toMatch(/H3_RELAY:-0\}" = "1"/);
+    // A failed fetch warns and the install goes on (set -e): each git step is inside an if.
+    expect(install).toMatch(/if git clone -q --filter=blob:none --no-checkout https:\/\/github\.com\/akatz-labs\/h3-character-swap-tool/);
+    expect(install).toMatch(/if \[ -d "\$dest\/\.git" \] \|\| git clone -q https:\/\/github\.com\/akatz-ai\/h3-relay "\$dest"; then/);
   });
 
   it("their core nodes are on this server; the pack's are not, so /prompt names one of them", () => {

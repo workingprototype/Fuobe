@@ -132,7 +132,7 @@ export const CUSTOM_NODE_REPOS = {
   // Genjutsu's Character swap (docs/research/openjutsu-6.md): Akatz Labs' H3 nodes, GPL-3.0. Not installed on the
   // validation server (entries list them with `packs`); install-comfyui.sh pins both.
   h3_character_swap: 'https://github.com/akatz-labs/h3-character-swap-tool/tree/0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b/worker_nodes/h3_character_swap',
-  'h3-relay': 'https://github.com/akatz-ai/h3-relay',
+  'h3-relay': 'https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220',
 };
 
 // Node classes of the packs entries list in `packs` (packs the validation server doesn't have installed): the build

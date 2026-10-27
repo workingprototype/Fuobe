@@ -1,6 +1,7 @@
 "use client";
 
-import { Cpu, Scale, TriangleAlert } from "lucide-react";
+import { AudioLines, Cpu, Loader2, Scale, Sparkles, TriangleAlert } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -12,9 +13,10 @@ import {
   CHARACTER_GPU,
   CHARACTER_LIMITS,
   CHARACTER_SWAP,
-  HISTORY_CHOICES,
+  historyChoicesFor,
   SPEECH_LABELS,
   SWAP_LORAS,
+  WHO_INDEX_LABEL,
   WHO_LABELS,
   WINDOW_CHOICES,
   type CharacterOptions,
@@ -26,10 +28,19 @@ import {
 import type { GenjutsuTarget, Maker } from "@/lib/catalog/genjutsu";
 import type { Engine } from "@/lib/catalog/types";
 
+/** A helper the panel offers (Describe my character, the clip's words): its action, whether it's running or can run. */
+export interface PanelHelper {
+  run: () => void;
+  busy: boolean;
+  /** Why it can't run yet (it is disabled with this as its hint). */
+  blocked?: string | null;
+}
+
 /**
  * Character swap's own settings (Openjutsu's and Akatz Labs' H3 Character Swap tool's, on Genjutsu): who to swap,
- * the quality, the first frame made first, what the character looks like, the seed, and under Advanced the speech,
- * the swap LoRA's release and the H3 settings of the open graph. The limits and the GPU line sit under it.
+ * the quality, the first frame made first, what the character looks like (or Describe it from the picture), the seed,
+ * and under Advanced the speech (or the clip's own words), the swap LoRA's release and the H3 settings of the open
+ * graph. The limits and the GPU line sit under it.
  */
 export function CharacterControls({
   engine,
@@ -42,6 +53,8 @@ export function CharacterControls({
   seed,
   onSeed,
   seedProblem,
+  describe,
+  words,
 }: {
   engine: Engine;
   maker: Maker | null;
@@ -53,12 +66,24 @@ export function CharacterControls({
   seed: string;
   onSeed: (s: string) => void;
   seedProblem?: string | null;
+  /** "Describe my character" from the character picture (the engine's text model). */
+  describe?: PanelHelper;
+  /** "Use the clip's words": the part's lines from a transcription of the clip. */
+  words?: PanelHelper;
 }) {
   const set = (patch: Partial<CharacterOptions>) => onChange({ ...value, ...patch });
   const h3 = !!maker?.h3;
   const open = engine === "open";
   const anchors = ANCHOR_MODELS[engine];
   const who: SwapWho = value.who ?? "largest";
+  const window = value.windowFrames ?? CHARACTER_SWAP.window;
+  const histories = historyChoicesFor(window);
+  // fal's H3 route needs a swap LoRA: "None" is a GPU choice.
+  const loraChoices = [
+    { value: "v1.5" as const, label: "V1.5", title: SWAP_LORAS["v1.5"].label },
+    { value: "v1" as const, label: "V1", title: SWAP_LORAS.v1.label },
+    ...(open ? [{ value: "none" as const, label: "None", title: "MiniMax H3 with the Turbo LoRA only" }] : []),
+  ];
   return (
     <div className="space-y-4">
       {target === "type" && (
@@ -70,9 +95,9 @@ export function CharacterControls({
             options={(Object.keys(WHO_LABELS) as SwapWho[]).map((w) => ({ value: w, label: WHO_LABELS[w] }))}
           />
           {who === "index" && (
-            <div className="flex items-center gap-2 pt-1">
-              <label htmlFor="gj-person" className="text-[12px] text-muted-foreground">
-                Person number, from the left
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <label htmlFor="gj-person" className="text-[12px] text-muted-foreground" title={WHO_INDEX_LABEL[engine].hint}>
+                {WHO_INDEX_LABEL[engine].label}
               </label>
               <Input
                 id="gj-person"
@@ -84,6 +109,7 @@ export function CharacterControls({
                 onChange={(e) => set({ index: Math.max(0, Math.min(CHARACTER_SWAP.maxPeople - 1, Math.round(Number(e.target.value) || 1) - 1)) })}
                 className="h-8 w-20 text-[13px]"
               />
+              {open && <p className="w-full text-[12px] leading-snug text-muted-foreground">{WHO_INDEX_LABEL.open.hint}.</p>}
             </div>
           )}
         </Field>
@@ -130,15 +156,22 @@ export function CharacterControls({
         </div>
       )}
 
-      <Field label="What your character looks like (optional)" htmlFor="gj-description">
-        <Input
-          id="gj-description"
-          value={value.description ?? ""}
-          onChange={(e) => set({ description: e.target.value || undefined })}
-          maxLength={CHARACTER_SWAP.maxDescriptionChars}
-          placeholder="e.g. “a young woman with short silver hair and a green raincoat”"
-          className="text-[13px]"
-        />
+      <Field label="What your character looks like (optional)" htmlFor="gj-description" hint={describe?.blocked ?? undefined}>
+        <div className="flex flex-col items-start gap-1.5">
+          <Input
+            id="gj-description"
+            value={value.description ?? ""}
+            onChange={(e) => set({ description: e.target.value || undefined })}
+            maxLength={CHARACTER_SWAP.maxDescriptionChars}
+            placeholder="e.g. “a young woman with short silver hair and a green raincoat”"
+            className="text-[13px]"
+          />
+          {describe && (
+            <Button type="button" size="sm" variant="outline" className="rounded-full" disabled={describe.busy || !!describe.blocked} onClick={describe.run}>
+              {describe.busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} Describe my character
+            </Button>
+          )}
+        </div>
       </Field>
 
       <Field label="Seed (optional)" htmlFor="gj-seed" hint={seedProblem ?? "Blank is random"}>
@@ -166,7 +199,7 @@ export function CharacterControls({
               </Select>
             </Field>
             {value.speech !== "none" && (
-              <Field label="What's said (optional)" htmlFor="gj-dialogue">
+              <Field label="What's said (optional)" htmlFor="gj-dialogue" hint={words?.blocked ?? undefined}>
                 <Textarea
                   id="gj-dialogue"
                   value={value.dialogue ?? ""}
@@ -176,19 +209,15 @@ export function CharacterControls({
                   placeholder="The words in the part, so the lips follow them"
                   className="resize-none text-[13px]"
                 />
+                {words && (
+                  <Button type="button" size="sm" variant="outline" className="mt-1.5 rounded-full" disabled={words.busy || !!words.blocked} onClick={words.run}>
+                    {words.busy ? <Loader2 className="size-3.5 animate-spin" /> : <AudioLines className="size-3.5" />} {words.busy ? "Listening to the clip…" : "Use the clip's words"}
+                  </Button>
+                )}
               </Field>
             )}
-            <Field label="Swap LoRA" hint="Akatz Labs' Character Swap LoRA">
-              <Segmented
-                label="Swap LoRA"
-                value={value.lora ?? "v1.5"}
-                onChange={(l: SwapLora) => set({ lora: l === "v1.5" ? undefined : l })}
-                options={[
-                  { value: "v1.5" as const, label: "V1.5", title: SWAP_LORAS["v1.5"].label },
-                  { value: "v1" as const, label: "V1", title: SWAP_LORAS.v1.label },
-                  { value: "none" as const, label: "None", title: "MiniMax H3 with the Turbo LoRA only" },
-                ]}
-              />
+            <Field label="Swap LoRA" hint={open ? "Akatz Labs' Character Swap LoRA" : "Akatz Labs' Character Swap LoRA (fal's route needs one)"}>
+              <Segmented label="Swap LoRA" value={value.lora ?? "v1.5"} onChange={(l: SwapLora) => set({ lora: l === "v1.5" ? undefined : l })} options={loraChoices} />
             </Field>
             {open && (
               <>
@@ -198,12 +227,14 @@ export function CharacterControls({
                   </span>
                   <Switch checked={value.audioGuide !== false} onCheckedChange={(on) => set({ audioGuide: on ? undefined : false })} aria-label="Audio guide" />
                 </label>
-                <label className="flex items-center justify-between gap-3 text-[13px]">
-                  <span>
-                    Masked generation <span className="text-[12px] text-muted-foreground">· only the person is remade</span>
-                  </span>
-                  <Switch checked={value.useMask !== false} onCheckedChange={(on) => set({ useMask: on ? undefined : false })} aria-label="Masked generation" />
-                </label>
+                {maker?.h3?.maskSwitch && (
+                  <label className="flex items-center justify-between gap-3 text-[13px]">
+                    <span>
+                      Masked generation <span className="text-[12px] text-muted-foreground">· only the person is remade</span>
+                    </span>
+                    <Switch checked={value.useMask !== false} onCheckedChange={(on) => set({ useMask: on ? undefined : false })} aria-label="Masked generation" />
+                  </label>
+                )}
                 <Field label="Mask margin" htmlFor="gj-grow" hint="Pixels around the person">
                   <Input
                     id="gj-grow"
@@ -217,8 +248,19 @@ export function CharacterControls({
                   />
                 </Field>
                 <div className="grid grid-cols-2 gap-2">
-                  <FrameSelect id="gj-window" label="Window" value={value.windowFrames ?? CHARACTER_SWAP.window} choices={WINDOW_CHOICES} onChange={(n) => set({ windowFrames: n === CHARACTER_SWAP.window ? undefined : n })} />
-                  <FrameSelect id="gj-history" label="History" value={value.historyFrames ?? CHARACTER_SWAP.history} choices={HISTORY_CHOICES} onChange={(n) => set({ historyFrames: n === CHARACTER_SWAP.history ? undefined : n })} />
+                  <FrameSelect
+                    id="gj-window"
+                    label="Window"
+                    value={window}
+                    choices={WINDOW_CHOICES}
+                    onChange={(n) => {
+                      // The pack refuses a history as long as the window: it comes down with it.
+                      const h = value.historyFrames ?? CHARACTER_SWAP.history;
+                      const fit = h < n ? h : Math.max(...historyChoicesFor(n));
+                      set({ windowFrames: n === CHARACTER_SWAP.window ? undefined : n, historyFrames: fit === CHARACTER_SWAP.history ? undefined : fit });
+                    }}
+                  />
+                  <FrameSelect id="gj-history" label="History" value={value.historyFrames ?? CHARACTER_SWAP.history} choices={histories} onChange={(n) => set({ historyFrames: n === CHARACTER_SWAP.history ? undefined : n })} />
                 </div>
               </>
             )}

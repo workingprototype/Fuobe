@@ -47,6 +47,14 @@ export type SwapSpeech = "character" | "other" | "offscreen" | "none";
 export type SwapLora = "v1.5" | "v1" | "none";
 
 export const WHO_LABELS: Record<SwapWho, string> = { largest: "Largest", leftmost: "Leftmost", rightmost: "Rightmost", index: "Person #" };
+/**
+ * What "Person #n" counts, per engine: fal's prompt names the nth person from the left; the open graph's SelectSubject
+ * takes SAM 3.1's nth detection, and SAM orders its detections by confidence (the surest first), not by position.
+ */
+export const WHO_INDEX_LABEL: Record<Engine, { label: string; hint: string }> = {
+  cloud: { label: "Person number, from the left", hint: "Said in the prompt" },
+  open: { label: "Detection number", hint: "In SAM 3.1's order: the person it is surest of first, not left to right — for a position, pick Leftmost or Rightmost, or click them" },
+};
 export const SPEECH_LABELS: Record<SwapSpeech, { label: string; hint: string }> = {
   character: { label: "My character speaks", hint: "Lips follow the clip's own voice" },
   other: { label: "Someone else speaks", hint: "The character listens" },
@@ -72,11 +80,18 @@ export const SWAP_LORAS: Record<Exclude<SwapLora, "none">, { label: string; file
 
 const H3_LORA_LICENCE = { commercial: true, hostedOk: true, snapshotDate: "2026-10-27", name: "MiniMax H3 Community License" };
 
-/** The swap LoRA a run carries (fal loads it by its pinned Hugging Face URL; ComfyUI gets the file downloaded). */
-export function swapLoraRef(lora: SwapLora | undefined): LoraRef {
+/**
+ * The swap LoRA a run carries (fal loads it by its pinned Hugging Face URL; ComfyUI gets the file downloaded). "none"
+ * has no file: the open graph runs H3 with the Turbo LoRA alone, and fal's route (which needs a LoRA) refuses it
+ * (CLOUD_NO_LORA) rather than quietly running V1.5.
+ */
+export function swapLoraRef(lora: Exclude<SwapLora, "none"> | undefined): LoraRef {
   const l = SWAP_LORAS[lora === "v1" ? "v1" : "v1.5"];
   return { file: l.file, url: l.url, weightName: l.file, strength: 1, version: l.url.split("/resolve/")[1]?.split("/")[0], licence: H3_LORA_LICENCE };
 }
+
+/** fal's H3 + LoRA route takes 1–3 LoRAs: "no swap LoRA" is the open graph's choice only. */
+export const CLOUD_NO_LORA = "On the cloud, fal's H3 route runs with a swap LoRA — pick V1.5 or V1 (no LoRA runs on your GPU)";
 
 /** lightx2v's FL2V Turbo 8-step LoRA the open graphs load (Apache-2.0 at this revision). */
 export const TURBO_LORA: LoraRef = {
@@ -151,49 +166,107 @@ export function alignFrames(n: number): number {
   return f;
 }
 
-/** Frames of a part at H3's 24 fps. */
-export const partFrames = (seconds: number) => Math.max(1, Math.round(seconds * CHARACTER_SWAP.fps));
-
-/**
- * How many diffusion windows a part takes (the pack plans source-aligned windows over the part padded to H3's grid):
- * 5 s → 1, 7.5 s and 10 s → 2, 12.5 s and 15 s → 3 (docs/research/openjutsu-6.md §3.4).
- */
-export function h3Windows(seconds: number, windowFrames: number = CHARACTER_SWAP.window): number {
-  return Math.max(1, Math.ceil(alignFrames(partFrames(seconds)) / Math.max(22, windowFrames)));
-}
+/** Frames of a part at H3's 24 fps, as the pack's PrepareVideo keeps them (floor(seconds × 24)). */
+export const partFrames = (seconds: number) => Math.max(1, Math.floor(seconds * CHARACTER_SWAP.fps + 1e-6));
 
 /** Window sizes the pack takes (17n + 5, 22 … 362) and continuation history (0, 1 or 17n + 1, 18 … 341). */
 export const WINDOW_CHOICES = Array.from({ length: 21 }, (_, i) => 22 + 17 * i);
 export const HISTORY_CHOICES = [0, 1, ...Array.from({ length: 20 }, (_, i) => 18 + 17 * i)];
 
 const nearest = (xs: number[], v: number) => xs.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
-export const windowFrames = (v: number | undefined) => String(nearest(WINDOW_CHOICES, v ?? CHARACTER_SWAP.window));
-export const historyFrames = (v: number | undefined) => String(nearest(HISTORY_CHOICES, v ?? CHARACTER_SWAP.history));
 
-/**
- * The size H3 works at for a clip: the short edge at 768 (or 480) px, the area capped at 768 × 1344 (480 × 840), each side
- * rounded to 32 (ComfyUI's adapt_canvas). Clicks on the first frame are moved into these pixels. For 480p the pack's own
- * rule isn't published: this scales ComfyUI's 768 rule, so clicks there are an estimate.
- */
-export function h3Canvas(width: number, height: number, quality: string | undefined): { width: number; height: number } {
-  const short = characterQuality(quality) === "480p" ? 480 : 768;
-  const maxArea = short * Math.round((short * 1344) / 768);
-  const ratio = width / height;
-  let [w, h] = ratio >= 1 ? [short * ratio, short] : [short, short / ratio];
-  if (w * h > maxArea) {
-    const s = Math.sqrt(maxArea / (w * h));
-    w *= s;
-    h *= s;
-  }
-  const r32 = (v: number) => Math.max(32, Math.round(v / 32) * 32);
-  return { width: r32(w), height: r32(h) };
+/** The pack's window and history for what was asked (each snapped to its grid; history shorter than the window). */
+export function windowPlan(window: number | undefined, history: number | undefined): { window: number; history: number } {
+  const w = nearest(WINDOW_CHOICES, window ?? CHARACTER_SWAP.window);
+  const h = nearest(HISTORY_CHOICES, history ?? CHARACTER_SWAP.history);
+  // planning.validate_settings: "History must be smaller than the generation window."
+  return { window: w, history: h < w ? h : Math.max(...HISTORY_CHOICES.filter((x) => x < w)) };
+}
+export const windowFrames = (v: number | undefined) => String(windowPlan(v, 0).window);
+export const historyFrames = (v: number | undefined, window?: number) => String(windowPlan(window ?? 362, v).history);
+
+/** The history lengths a window takes (the pack refuses a history as long as the window). */
+export const historyChoicesFor = (window: number) => HISTORY_CHOICES.filter((h) => h < window);
+
+/** What the pack would refuse in a window and history asked for, or null. */
+export function windowProblem(c: { windowFrames?: number; historyFrames?: number }): string | null {
+  if (c.windowFrames === undefined && c.historyFrames === undefined) return null;
+  const w = nearest(WINDOW_CHOICES, c.windowFrames ?? CHARACTER_SWAP.window);
+  const h = nearest(HISTORY_CHOICES, c.historyFrames ?? CHARACTER_SWAP.history);
+  return h >= w ? `History (${h} frames) must be shorter than the window (${w} frames)` : null;
 }
 
-/** Clicks in the clip's pixels → SAM3_Detect's JSON points in H3's canvas: [positive, negative] ("" when none). */
+/**
+ * How many diffusion windows a part takes: the pack's plan_windows (planning.py at 0670e4f, the same in H3 Relay). The
+ * first window has no history; each later one starts on the last frame already made (history before it) and delivers
+ * up to window − 1 new frames, its size the smallest on H3's grid that fits what is left. 5 s → 1, 10 s → 2, 15 s → 3.
+ */
+export function h3Windows(seconds: number, window?: number, history?: number): number {
+  const p = windowPlan(window, history);
+  const count = partFrames(seconds);
+  let n = 0;
+  let covered = 0;
+  while (covered < count) {
+    const eh = n ? p.history : 0;
+    const start = covered - (eh ? 1 : 0);
+    const needed = Math.min(count - start, p.window);
+    const size = WINDOW_CHOICES.find((v) => v >= needed && v > eh) ?? p.window;
+    covered = Math.min(count, start + size);
+    n++;
+  }
+  return Math.max(1, n);
+}
+
+/** The pixel budgets of the pack's PrepareVideo (video.py PIXEL_BUDGETS; H3 Relay's video_prep.py is the same). */
+export const H3_PIXEL_BUDGET: Record<CharacterQuality, number> = { "480p": 500_000, "768p": 1_000_000 };
+
+/**
+ * The size H3 works at for a clip: the pack's canvas_dimensions. A clip already on the 32-pixel grid and within the
+ * budget (0.5 MP at "480", 1.0 MP at "768") keeps its size; otherwise the shape on the 32-pixel grid within the budget
+ * nearest the ideal area-scaled one (squared log distances on each side; the larger area on a tie).
+ */
+export function h3Canvas(width: number, height: number, quality: string | undefined): { width: number; height: number } {
+  const budget = H3_PIXEL_BUDGET[characterQuality(quality)];
+  if (!(width > 0 && height > 0) || !Number.isFinite(width * height)) return { width: 32, height: 32 };
+  if (width * height <= budget && width % 32 === 0 && height % 32 === 0) return { width, height };
+  const ratio = width / height;
+  const iw = Math.sqrt(budget * ratio);
+  const ih = Math.sqrt(budget / ratio);
+  let best: [number, number, number, number] | null = null;
+  const less = (a: [number, number, number, number], b: [number, number, number, number]) => {
+    for (let i = 0; i < 4; i++) if (a[i] !== b[i]) return a[i] < b[i];
+    return false;
+  };
+  for (let w = 32; w <= Math.min(16384, Math.floor(budget / 32)); w += 32) {
+    const maxH = Math.min(16384, Math.floor(Math.floor(budget / w) / 32) * 32);
+    for (const h of new Set([Math.max(32, Math.min(maxH, Math.floor(ih / 32) * 32)), Math.max(32, Math.min(maxH, Math.ceil(ih / 32) * 32))])) {
+      const c: [number, number, number, number] = [Math.log(w / iw) ** 2 + Math.log(h / ih) ** 2, -(w * h), w, h];
+      if (!best || less(c, best)) best = c;
+    }
+  }
+  return { width: best![2], height: best![3] };
+}
+
+/**
+ * A point in the clip's pixels → the same spot in H3's prepared frame: the pack scales the clip to cover the canvas
+ * (FFmpeg scale=ceil(max(w, h·dar)) × ceil(max(h, w/dar))) and crops the middle, so a point in the cut-off margin lands
+ * on the nearest edge.
+ */
+export function toH3Canvas(p: { x: number; y: number }, clip: { width: number; height: number }, quality: string | undefined): { x: number; y: number } {
+  const c = h3Canvas(clip.width, clip.height, quality);
+  const dar = clip.width / clip.height;
+  const sw = Math.ceil(Math.max(c.width, c.height * dar) - 1e-6);
+  const sh = Math.ceil(Math.max(c.height, c.width / dar) - 1e-6);
+  const x0 = Math.floor((sw - c.width) / 2);
+  const y0 = Math.floor((sh - c.height) / 2);
+  const clamp = (v: number, max: number) => Math.max(0, Math.min(max - 1, Math.round(v)));
+  return { x: clamp((p.x / clip.width) * sw - x0, c.width), y: clamp((p.y / clip.height) * sh - y0, c.height) };
+}
+
+/** Clicks in the clip's pixels → SAM3_Detect's JSON points in H3's prepared frame: [positive, negative] ("" when none). */
 export function samCoords(points: PixelPoint[] | undefined, clip: { width: number; height: number }, quality: string | undefined): [string, string] {
   if (!points?.length || !clip.width || !clip.height) return ["", ""];
-  const c = h3Canvas(clip.width, clip.height, quality);
-  const at = (p: PixelPoint) => ({ x: Math.round((p.x / clip.width) * c.width), y: Math.round((p.y / clip.height) * c.height) });
+  const at = (p: PixelPoint) => toH3Canvas(p, clip, quality);
   const pos = points.filter((p) => p.label !== "negative").map(at);
   const neg = points.filter((p) => p.label === "negative").map(at);
   return [pos.length ? JSON.stringify(pos) : "", neg.length ? JSON.stringify(neg) : ""];
@@ -237,6 +310,21 @@ export function speechLine(speech: SwapSpeech | undefined, dialogue?: string): s
     default:
       return "";
   }
+}
+
+/**
+ * The words spoken in a part, from a transcription of the whole clip (cues in clip seconds): every cue that overlaps
+ * the part, in order (Akatz Labs feed each segment's dialogue into its prompt the same way).
+ */
+export function partWords(cues: { start: number; end: number; text: string }[] | undefined, part: { start: number; end: number }): string {
+  const inside = (cues ?? []).filter((c) => Number.isFinite(c.start) && Number.isFinite(c.end) && c.end > part.start + 0.05 && c.start < part.end - 0.05);
+  return tidy(
+    inside
+      .sort((a, b) => a.start - b.start)
+      .map((c) => c.text.trim())
+      .filter(Boolean)
+      .join(" "),
+  ).slice(0, 2000);
 }
 
 export interface SwapPromptInput extends Pick<CharacterOptions, "who" | "index" | "subject" | "description" | "speech" | "dialogue"> {
@@ -295,6 +383,24 @@ export const ANCHOR_MODELS: Record<Engine, { id: string; label: string; note: st
 };
 
 export const anchorModel = (engine: Engine, id?: string) => ANCHOR_MODELS[engine].find((m) => m.id === id) ?? ANCHOR_MODELS[engine][0];
+
+/**
+ * The aspect ratio the anchor edit is asked for, so the first frame keeps the part's shape: "auto" (the first image's
+ * shape) when the model takes it, else the ratio it lists nearest the clip's. Undefined: the model has no ratios, or
+ * the clip's size isn't known.
+ */
+export function anchorAspect(ratios: readonly string[] | undefined, clip: { width?: number; height?: number }): string | undefined {
+  if (!ratios?.length) return undefined;
+  if (ratios.includes("auto")) return "auto";
+  if (!clip.width || !clip.height) return undefined;
+  const want = Math.log(clip.width / clip.height);
+  const value = (r: string) => {
+    const [a, b] = r.split(":").map(Number);
+    return a > 0 && b > 0 ? Math.log(a / b) : NaN;
+  };
+  const listed = ratios.filter((r) => Number.isFinite(value(r)));
+  return listed.length ? listed.reduce((best, r) => (Math.abs(value(r) - want) < Math.abs(value(best) - want) ? r : best)) : undefined;
+}
 
 /** What a run says when the anchor frame couldn't be made (the swap goes ahead without it). */
 export const ANCHOR_FALLBACK = "Couldn't make the first frame — swapped without it";
@@ -405,7 +511,7 @@ export const CHARACTER_LICENCES: CharacterLicence[] = [
     item: "H3 Relay 2.0 node pack (Akatz Labs)",
     name: "GPL-3.0",
     class: "commercial",
-    url: "https://github.com/akatz-ai/h3-relay",
+    url: "https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220",
     note: "GPL-3.0 code (Sendy Software LLC and contributors); vendored Context Loop and Spectrum GPL-3.0",
   },
   {
@@ -424,12 +530,20 @@ export const CHARACTER_LICENCES: CharacterLicence[] = [
   },
 ];
 
-/** The node packs, in the shape Settings → Models & licences lists packs (src/lib/licences.ts NODE_PACKS on model-access). */
-export const H3_NODE_PACKS = CHARACTER_LICENCES.filter((l) => l.item.includes("node pack")).map((l) => ({
-  name: l.item.startsWith("h3_character_swap") ? "h3_character_swap" : "h3-relay",
-  repo: l.url,
-  licence: { name: l.name, class: l.class, url: l.url, note: l.note },
-}));
+/** Turbo's licence at the pinned revision (Apache-2.0; the current card dropped the tag). */
+const TURBO_LICENCE = CHARACTER_LICENCES.find((l) => l.item.startsWith("FL2V Turbo"))!;
+
+/**
+ * The LoRA files the Character swap loads, with their licence, for Settings → Models & licences (the LoRA rows and
+ * the run-time class check): the swap LoRA's releases are MiniMax H3 Community License work, Turbo is Apache-2.0.
+ */
+export const CHARACTER_LORAS: { file: string; name: string; url: string; licence: CharacterLicence }[] = [
+  { file: SWAP_LORAS["v1.5"].file, name: "H3 Character Swap LoRA V1.5 (Akatz Labs)", url: SWAP_LORAS["v1.5"].url, licence: MINIMAX_H3_LICENCE },
+  { file: SWAP_LORAS.v1.file, name: "H3 Character Swap LoRA V1 (Akatz Labs)", url: SWAP_LORAS.v1.url, licence: MINIMAX_H3_LICENCE },
+  { file: TURBO_LORA.file, name: "MiniMax H3 FL2V Turbo 8-step (lightx2v)", url: TURBO_LORA.url!, licence: TURBO_LICENCE },
+];
+
+export const characterLora = (file: string) => CHARACTER_LORAS.find((l) => l.file === file);
 
 /** One line for a model picker: the licence that matters most for the route, as information. */
 export function characterLicenceLine(engine: Engine, modelId: string): string {

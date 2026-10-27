@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import http from "node:http";
+import { CLOUD_NO_LORA } from "@/lib/catalog/character-swap";
 import { CLOUD_CLICK_PROBLEM } from "@/lib/catalog/genjutsu";
 import type { Generation } from "@/lib/catalog/types";
 
@@ -21,6 +23,9 @@ const { encodePng } = await import("@/server/png");
 const { db } = await import("@/server/db");
 const createRoute = await import("@/app/api/genjutsu/route");
 const estimateRoute = await import("@/app/api/genjutsu/estimate/route");
+const describeRoute = await import("@/app/api/genjutsu/describe/route");
+const transcribeRoute = await import("@/app/api/genjutsu/transcribe/route");
+const { changeAccess } = await import("@/server/model-access");
 
 const json = (body?: unknown) => new Request("http://x/api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
@@ -132,7 +137,7 @@ describe("Genjutsu: estimates", () => {
   it("Character swap on the open engine: free on your GPU, the windows, the GPU it was tested on and the licences", async () => {
     const e = await (await estimateRoute.POST(json(body({ engine: "open", mode: "character", source: { url: clip, ...src }, range: { start: 2, end: 9 } })))).json();
     expect(e).toMatchObject({ modelId: "fuobe-character-swap", source: "original", costUsd: 0, anchors: 1, gpu: { weightsGb: 46.33 } });
-    expect(e.notes.join(" ")).toMatch(/2 windows of 124 frames at 24 fps/);
+    expect(e.notes.join(" ")).toMatch(/2 windows of up to 124 frames at 24 fps, each continuing from the 18 frames before it/);
     expect(e.notes.join(" ")).toMatch(/nodes GPL-3\.0 · SAM License/);
     expect(e.notes.join(" ")).toMatch(/Qwen-Image-Edit 2511 first puts your character into the part's first frame/);
   });
@@ -184,9 +189,107 @@ describe("Genjutsu: estimates", () => {
     expect(await say(body({ mode: "character", source: { url: clip, ...src }, range: { start: 0, end: 4.5 } }))).toMatch(/Pick a part of 5–15 seconds/);
     expect(await say(body({ mode: "character", target: "click", source: { url: clip, ...src }, range: { start: 0, end: 6 } }))).toBe(CLOUD_CLICK_PROBLEM);
     expect(await say(body({ engine: "open", mode: "character", target: "click", source: { url: clip, ...src }, range: { start: 0, end: 6 } }))).toBe("Click the person to swap on the first frame");
+    // fal's H3 route needs a swap LoRA; the pack refuses a history as long as the window.
+    expect(await say(body({ mode: "character", source: { url: clip, ...src }, range: { start: 0, end: 6 }, character: { lora: "none" } }))).toBe(CLOUD_NO_LORA);
+    expect(await say(body({ engine: "open", mode: "character", source: { url: clip, ...src }, range: { start: 0, end: 6 }, character: { windowFrames: 22, historyFrames: 35 } }))).toBe(
+      "History (35 frames) must be shorter than the window (22 frames)",
+    );
     setSetting("engineMode", "open");
     expect(await say(body({ source: { url: clip, ...src } }))).toMatch(/open-source models only/);
     setSetting("engineMode", "both");
+  });
+});
+
+describe("Character swap and Settings → Models & licences", () => {
+  afterAll(() => changeAccess([{ kind: "reset" }]));
+  const estimate = async (b: Record<string, unknown>) => {
+    const res = await estimateRoute.POST(json(body({ mode: "character", source: { url: clip, ...src }, range: { start: 0, end: 6 }, ...b })));
+    const out = await res.json();
+    return { status: res.status, ...out } as { status: number; error?: string; notes: string[]; anchors?: number };
+  };
+
+  it("a first-frame model switched off gives way to the next one that is on, else no first frame", async () => {
+    changeAccess([{ kind: "model", id: "gpt-image-2-5-sunburst", on: false }]);
+    const next = await estimate({});
+    expect(next.status).toBe(200);
+    expect(next.notes).toContain("GPT Image 2.5 Sunburst is switched off in Settings → Models & licences: Nano Banana Pro makes the first frame");
+    expect(next.anchors).toBe(1);
+    changeAccess([{ kind: "model", id: "nano-banana-pro", on: false }]);
+    const none = await estimate({});
+    expect(none.notes).toContain("The first-frame models are switched off in Settings → Models & licences: the swap runs without a first frame");
+    expect(none.anchors).toBe(0);
+    changeAccess([{ kind: "reset" }]);
+  });
+
+  it("the swap LoRA switched off: H3 alone on your GPU; refused on fal, which needs one", async () => {
+    changeAccess([{ kind: "lora", id: "h3_character_swap_v1.5.safetensors", on: false }]);
+    const open = await estimate({ engine: "open" });
+    expect(open.status).toBe(200);
+    expect(open.notes).toContain("The swap LoRA is switched off in Settings → Models & licences: H3 runs with the Turbo LoRA alone");
+    const cloud = await estimate({});
+    expect(cloud.status).toBe(422);
+    expect(cloud.error).toMatch(/V1\.5 \(recommended\)\) is switched off in Settings → Models & licences, and fal's H3 route needs one/);
+    // The other release is on: picking it runs.
+    expect((await estimate({ character: { lora: "v1" } })).status).toBe(200);
+    changeAccess([{ kind: "lora", id: "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors", on: false }]);
+    expect((await estimate({ engine: "open", character: { lora: "v1" } })).error).toMatch(/Turbo LoRA is switched off/);
+    changeAccess([{ kind: "reset" }]);
+  });
+});
+
+describe("Character swap helpers: Describe my character and the clip's words", () => {
+  let server: http.Server;
+  let seen: { images?: string[]; system?: string } = {};
+  beforeAll(async () => {
+    // A stand-in Ollama with a vision model: it answers /api/chat with a description.
+    server = http.createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const b = JSON.parse(raw || "{}") as { messages?: { role: string; content: string; images?: string[] }[] };
+        seen = { images: b.messages?.find((m) => m.role === "user")?.images, system: b.messages?.find((m) => m.role === "system")?.content };
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ message: { content: '"A tall knight in silver armour with a red cape."' } }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    setSetting("ollamaUrl", `http://127.0.0.1:${(server.address() as { port: number }).port}`);
+  });
+  afterAll(async () => {
+    setSetting("ollamaUrl", "http://127.0.0.1:9");
+    await new Promise((r) => server.close(r));
+  });
+
+  it("describes the character from their picture with the engine's text model (Ollama sees the picture)", async () => {
+    const res = await describeRoute.POST(json({ engine: "open", image: hero }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ description: "A tall knight in silver armour with a red cape" });
+    expect(seen.images).toHaveLength(1);
+    expect(seen.system).toMatch(/who they are and what they wear/);
+  });
+
+  it("says why it can't: demo mode, a switched-off text model, a picture that isn't one", async () => {
+    setSetting("demoMode", "on");
+    expect(await (await describeRoute.POST(json({ engine: "cloud", image: hero }))).json()).toMatchObject({ error: expect.stringMatching(/needs a text model/) });
+    setSetting("demoMode", "auto");
+    changeAccess([{ kind: "model", id: "oss-text-llm", on: false }]);
+    expect(await (await describeRoute.POST(json({ engine: "open", image: hero }))).json()).toMatchObject({ error: expect.stringMatching(/text model is switched off/) });
+    changeAccess([{ kind: "reset" }]);
+    expect((await describeRoute.POST(json({ engine: "open", image: clip }))).status).toBe(422);
+    expect((await describeRoute.POST(json({ engine: "open", image: "https://example.com/x.png" }))).status).toBe(400);
+  });
+
+  it("transcribes the clip once, as a Genjutsu step, on the engine's transcriber (timed lines for any part)", async () => {
+    const res = await transcribeRoute.POST(json({ engine: "cloud", source: { url: clip, duration: 12 } }));
+    expect(res.status).toBe(201);
+    const out = (await res.json()) as { id: string; modelId: string };
+    expect(out.modelId).toBe("scribe-v2");
+    const g = await settle(out.id);
+    expect(g).toMatchObject({ status: "succeeded", feature: "genjutsu-step", modelId: "scribe-v2" });
+    const text = g.outputs.find((o) => o.kind === "text")!;
+    expect(Array.isArray(text.meta?.cues)).toBe(true);
+    const open = (await (await transcribeRoute.POST(json({ engine: "open", source: { url: clip } }))).json()) as { modelId: string };
+    expect(open.modelId).toBe("oss-qwen3-asr");
   });
 });
 
@@ -264,6 +367,19 @@ describe("Genjutsu: runs (demo)", () => {
     // The character first, then the anchor frame made from the part's first frame.
     const anchor = gens.getGeneration(rows.find((r) => r.model_id === "gpt-image-2-5-sunburst")!.id)!;
     expect(swap.request.inputs?.images).toEqual([hero, anchor.outputs[0].url]);
+  });
+
+  it("Character swap on fal of a silent clip: silent too (H3's own soundtrack replaced with the clip's silence)", async () => {
+    const silent = saveFile({ data: fs.readFileSync(path.join(__dirname, "fixtures/shorts-silent.webm")), contentType: "video/webm", source: "upload", name: "silent.webm" }).url;
+    const { final } = await run(body({ mode: "character", source: { url: silent, name: "silent.webm" }, range: { start: 0, end: 5 }, character: { anchor: false } }));
+    expect(final).toMatchObject({ modelId: "merge-audio-video", op: "mux", feature: "genjutsu" });
+    // The silent track is a real WAV the run wrote, as long as the part.
+    const audio = final.request.inputs?.audio ?? "";
+    expect(audio).toMatch(/^\/api\/files\//);
+    expect((await settle(final.id)).status).toBe("succeeded");
+    const rows = batchOf(final.id);
+    expect(rows.map((r) => `${r.model_id}:${r.op}`)).toEqual(expect.arrayContaining(["fuobe-character-swap:video-swap", "merge-audio-video:mux"]));
+    expect(rows.filter((r) => r.feature === "genjutsu")).toHaveLength(1);
   });
 
   it("Character swap on the open engine: the first frame, the anchor on Qwen-Image-Edit, one H3 job on the upload", async () => {

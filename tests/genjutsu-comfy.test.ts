@@ -120,16 +120,30 @@ describe("Character swap's open graphs through the provider (MiniMax H3)", () =>
     expect(at(wf, "801", "audio_guide")).toBe(false);
   });
 
-  it("clicks are moved into H3's canvas for SAM 3.1 (positive and negative)", async () => {
-    const wf = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, resolution: "768p", points: [{ x: 640, y: 360, label: "positive" }, { x: 10, y: 10, label: "negative" }] });
-    // 1280×720 → 1344×768 at 768p: the clip's middle stays the canvas's middle.
-    expect(JSON.parse(String(at(wf, "103", "positive_coords")))).toEqual([{ x: 672, y: 384 }]);
-    expect(JSON.parse(String(at(wf, "103", "negative_coords")))).toHaveLength(1);
+  it("clicks are moved into the pack's prepared frame for SAM 3.1, and the clicked mask is the one taken", async () => {
+    const wf = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, resolution: "768p", points: [{ x: 640, y: 360, label: "positive" }, { x: 20, y: 20, label: "negative" }], extra: { selection: "largest", subjectIndex: 0 } });
+    // 1280×720 at "768": the pack's canvas is 1344×736 (scaled to 1344×756, 10 rows cropped top and bottom).
+    expect(JSON.parse(String(at(wf, "103", "positive_coords")))).toEqual([{ x: 672, y: 368 }]);
+    expect(JSON.parse(String(at(wf, "103", "negative_coords")))).toEqual([{ x: 21, y: 11 }]);
+    // SAM3_Detect returns the point mask first, then the "person" detections: SelectSubject takes index 0, not "largest".
+    expect([at(wf, "104", "selection"), at(wf, "104", "index")]).toEqual(["index", 0]);
+    const relayWf = await relay({ images: ["hero.png"], startTime: 0, endTime: 6, resolution: "480p", points: [{ x: 1024, y: 360 }] });
+    // 1280×720 at "480": 928×512 (scaled to 928×522).
+    expect(JSON.parse(String(at(relayWf, "detect", "positive_coords")))).toEqual([{ x: 742, y: 256 }]);
+    expect([at(relayWf, "select", "selection"), at(relayWf, "select", "index")]).toEqual(["index", 0]);
+    // Without clicks, the choice made stays.
+    const words = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, extra: { selection: "largest" } });
+    expect([at(words, "103", "positive_coords"), at(words, "104", "selection")]).toEqual(["", "largest"]);
   });
 
   it("the window plan as the pack's choices, and the LoRA's release (v1, or none: the Turbo LoRA alone)", async () => {
     const wf = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, extra: { windowFrames: 120, historyFrames: 20, lora: "v1" } });
     expect([at(wf, "805", "window_frames"), at(wf, "805", "history_frames")]).toEqual(["124", "18"]);
+    // A history as long as the window would stop the pack's WindowPlan: it comes down below the window.
+    const short = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, extra: { windowFrames: 22, historyFrames: 35 } });
+    expect([at(short, "805", "window_frames"), at(short, "805", "history_frames")]).toEqual(["22", "18"]);
+    const onlyHistory = await relay({ images: ["hero.png"], startTime: 0, endTime: 6, extra: { historyFrames: 137 } });
+    expect([at(onlyHistory, "plan", "window_frames"), at(onlyHistory, "plan", "history_frames")]).toEqual(["124", "120"]);
     expect(at(wf, "850", "lora_name")).toBe("h3_character_swap_pro4500_1000.safetensors");
     const bare = await h3({ images: ["hero.png"], startTime: 0, endTime: 6, extra: { lora: "none" } });
     expect(bare["850"]).toBeUndefined();
@@ -147,6 +161,12 @@ describe("Character swap's open graphs through the provider (MiniMax H3)", () =>
     const ids = new Set(Object.keys(wf));
     for (const n of Object.values(wf)) for (const v of Object.values(n.inputs)) if (Array.isArray(v) && typeof v[0] === "string") expect(ids.has(v[0])).toBe(true);
     expect(withoutAnchor({ a: { class_type: "LoadImage", inputs: { image: "x" } }, b: { class_type: "Shot", inputs: { anchor: ["a", 0], use_anchor: true } } }, "a")).toEqual({ b: { class_type: "Shot", inputs: { use_anchor: false } } });
+    // No words given: Openjutsu's instruction without the anchor sentence (the graph's own text names <Picture 2>).
+    expect(at(wf, "801", "prompt")).toBe("Replace the selected person in <Video 1> with the character in <Picture 1>. Preserve the source performance, scene and audio timing.");
+    const anchored = await h3({ images: ["hero.png", "anchor.png"], startTime: 0, endTime: 6 });
+    expect(at(anchored, "801", "prompt")).toMatch(/Start from the first frame in <Picture 2>\.$/);
+    const relayed = await relay({ images: ["hero.png"], startTime: 0, endTime: 6 });
+    expect(at(relayed, "reference_conditioning", "prompt")).not.toMatch(/Picture 2/);
   });
 
   it("H3 Relay: the same part, quality, words, seed and who, on Akatz's relay graph", async () => {

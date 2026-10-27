@@ -311,6 +311,11 @@ node validate-workflows.mjs video-character-swap-h3 video-character-swap-h3-rela
 - **Licences, as information**: MiniMax H3 Community License (territory excludes the US, the EU, the UK and South Korea;
   over US$20M yearly revenue needs MiniMax's written authorization; show "MiniMax H3"), Meta's SAM License, Apache-2.0
   (Turbo LoRA), GPL-3.0 (both packs). The admin decides what runs (Settings → Models & licences).
+- **Clicks**: the provider moves them into the frame the pack prepares (its `canvas_dimensions`: a 0.5 / 1.0 MP budget
+  on the 32-pixel grid, the clip scaled to cover and the middle cropped) and sets SelectSubject to `index` 0, since
+  `SAM3_Detect` returns the clicked mask first and the "person" detections after it. Person numbers (`index`) are SAM's
+  detections in order of confidence, not left to right. A window and history the pack's `validate_settings` would
+  refuse (history ≥ window) is brought below the window.
 - **GPU**: tested by their authors on a 96 GB RTX PRO 6000 and on a 24 GB RTX 4090 with 128 GB RAM and offloading.
 - **Comfy Developer Platform** (what Openjutsu deploys to): a deployment is not a plain ComfyUI server — it is driven by
   the v2 API (`@comfyorg/sdk`: upload, job, poll), not `/prompt` and `/history` — so Fuobe does not add a provider for it.

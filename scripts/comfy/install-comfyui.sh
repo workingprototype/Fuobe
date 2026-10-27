@@ -67,10 +67,15 @@ done
 H3_TOOL_REF="${H3_TOOL_REF:-0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b}"
 if [ "${H3_PACK:-1}" = "1" ] && [ ! -d "$COMFYUI_DIR/custom_nodes/h3_character_swap" ]; then
   h3tmp="$(mktemp -d)"
-  git clone -q --filter=blob:none --no-checkout https://github.com/akatz-labs/h3-character-swap-tool "$h3tmp/tool"
-  git -C "$h3tmp/tool" sparse-checkout set --no-cone /worker_nodes/h3_character_swap/
-  git -C "$h3tmp/tool" checkout -q "$H3_TOOL_REF" && cp -r "$h3tmp/tool/worker_nodes/h3_character_swap" "$COMFYUI_DIR/custom_nodes/h3_character_swap" \
-    || echo "warn: could not fetch h3_character_swap at $H3_TOOL_REF"
+  # Each step is guarded (set -e): a failed fetch warns and the rest of the install goes on.
+  if git clone -q --filter=blob:none --no-checkout https://github.com/akatz-labs/h3-character-swap-tool "$h3tmp/tool" \
+    && git -C "$h3tmp/tool" sparse-checkout set --no-cone /worker_nodes/h3_character_swap/ \
+    && git -C "$h3tmp/tool" checkout -q "$H3_TOOL_REF" \
+    && cp -r "$h3tmp/tool/worker_nodes/h3_character_swap" "$COMFYUI_DIR/custom_nodes/h3_character_swap"; then
+    :
+  else
+    echo "warn: could not fetch h3_character_swap at $H3_TOOL_REF"
+  fi
   rm -rf "$h3tmp"
 fi
 if [ "${H3_PACK:-1}" = "1" ] && { ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; }; then
@@ -82,9 +87,12 @@ fi
 H3_RELAY_REF="${H3_RELAY_REF:-e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220}"   # 2.0.1, 2026-10-21
 if [ "${H3_RELAY:-0}" = "1" ]; then
   dest="$COMFYUI_DIR/custom_nodes/h3-relay"
-  [ -d "$dest/.git" ] || git clone -q https://github.com/akatz-ai/h3-relay "$dest"
-  git -C "$dest" fetch -q --depth 1 origin "$H3_RELAY_REF" 2>/dev/null || true
-  git -C "$dest" checkout -q "$H3_RELAY_REF" 2>/dev/null || echo "warn: could not pin h3-relay to $H3_RELAY_REF"
+  if [ -d "$dest/.git" ] || git clone -q https://github.com/akatz-ai/h3-relay "$dest"; then
+    git -C "$dest" fetch -q --depth 1 origin "$H3_RELAY_REF" 2>/dev/null || true
+    git -C "$dest" checkout -q "$H3_RELAY_REF" 2>/dev/null || echo "warn: could not pin h3-relay to $H3_RELAY_REF"
+  else
+    echo "warn: could not fetch h3-relay"
+  fi
 fi
 
 # Union of the packs' requirements, minus GPU-only / unbuildable extras

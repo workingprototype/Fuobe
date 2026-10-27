@@ -42,7 +42,7 @@ import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
 import { loraByFile, needsToken } from "@/lib/catalog/loras";
-import { packResolution, samCoords, SWAP_LORAS, windowFrames as h3WindowFrames, historyFrames as h3HistoryFrames } from "@/lib/catalog/character-swap";
+import { CHARACTER_SWAP, packResolution, samCoords, swapPrompt, SWAP_LORAS, windowPlan } from "@/lib/catalog/character-swap";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, ORIGINALS, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
@@ -915,8 +915,12 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   let dropSwapLora = false;
   if (characterSwap) {
     values.quality = packResolution(input.resolution);
-    if (extra.windowFrames !== undefined) extra.windowFrames = h3WindowFrames(Number(extra.windowFrames));
-    if (extra.historyFrames !== undefined) extra.historyFrames = h3HistoryFrames(Number(extra.historyFrames));
+    // The pack's planning.validate_settings: windows 17n + 5, history 0, 1 or 17n + 1 and shorter than the window.
+    if (extra.windowFrames !== undefined || extra.historyFrames !== undefined) {
+      const plan = windowPlan(Number(extra.windowFrames ?? d.windowFrames ?? CHARACTER_SWAP.window), Number(extra.historyFrames ?? d.historyFrames ?? CHARACTER_SWAP.history));
+      extra.windowFrames = String(plan.window);
+      extra.historyFrames = String(plan.history);
+    }
     const lora = typeof extra.lora === "string" ? extra.lora : undefined;
     delete extra.lora;
     if (lora === "none") dropSwapLora = true;
@@ -926,9 +930,14 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
       const [pos, neg] = samCoords(input.points, { width: clip.width, height: clip.height }, input.resolution);
       values.positiveCoords = pos;
       values.negativeCoords = neg;
+      // SAM3_Detect puts the clicked mask first and the "person" detections after it: SelectSubject takes that first one
+      // ("largest" would take whoever is biggest).
+      extra.selection = "index";
+      extra.subjectIndex = 0;
     }
     if (b.image2 && !values.image2) dropAnchor = true;
-    if (!values.prompt && typeof d.prompt === "string") values.prompt = d.prompt;
+    // No words: Openjutsu's instruction, with the anchor sentence only when the anchor goes in (the graph's own text names it).
+    if (!(typeof values.prompt === "string" && values.prompt.trim())) values.prompt = swapPrompt({ engine: "open", anchor: !!b.image2 && !dropAnchor });
   }
   // Genjutsu's Object swap: SAM 3.1 follows what goes (params.extra.maskPrompt, or the "replace … with" part of the prompt,
   // as Genjutsu sends it), the reference comes in, the prompt describes the result. Insert: the painted spot and the

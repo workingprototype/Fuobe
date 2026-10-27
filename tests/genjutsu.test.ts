@@ -24,7 +24,8 @@ import {
   type GenjutsuPlanInput,
   type Maker,
 } from "@/lib/catalog/genjutsu";
-import { ANCHOR_FALLBACK } from "@/lib/catalog/character-swap";
+import { ANCHOR_FALLBACK, CLOUD_NO_LORA } from "@/lib/catalog/character-swap";
+import { buildPayload } from "@/lib/catalog/payload";
 import { estimateCost, planGeneration } from "@/lib/catalog/plan";
 import { getModel, getPreset } from "@/lib/catalog";
 import { onEngine } from "@/lib/catalog/engines";
@@ -335,6 +336,69 @@ describe("Genjutsu: Character swap", () => {
     expect(step(p, "join").after).toEqual(["swap0", "swap1"]);
   });
 
+  it("open: a click selects the clicked person (SAM 3.1's point mask, first among its detections)", () => {
+    const p = ch({ maker: maker(ORIGINALS.character, "open"), target: "click", character: { who: "largest" }, points: [{ x: 900, y: 300, label: "positive" }] });
+    expect(step(p, "swap").request.params?.extra).toMatchObject({ selection: "index", subjectIndex: 0 });
+    const relay = ch({ maker: maker("oss-h3-character-swap-relay", "open"), target: "click", points: [{ x: 900, y: 300, label: "positive" }] });
+    expect(step(relay, "swap").request.params?.extra).toMatchObject({ selection: "index", subjectIndex: 0 });
+    // Without clicks, who you picked stays.
+    expect(step(ch({ maker: maker(ORIGINALS.character, "open"), character: { who: "rightmost" } }), "swap").request.params?.extra).toMatchObject({ selection: "rightmost" });
+  });
+
+  it("cloud: the first frame keeps the part's shape (Sunburst's nearest size, Nano Banana Pro's auto), not the square default", () => {
+    const wide = ch({ maker: maker(ORIGINALS.character) });
+    const sunburst = step(wide, "anchor0").request;
+    expect(sunburst.params).toMatchObject({ aspectRatio: "16:9" });
+    const route = onEngine(getModel("gpt-image-2-5-sunburst")!, "cloud").routes.find((r) => r.op === "edit")!;
+    expect(buildPayload(route.map!, { prompt: sunburst.prompt, images: [ref, ref], aspectRatio: "16:9", extra: { quality: "low" } })).toMatchObject({ image_size: "landscape_16_9", quality: "low" });
+    const tall = ch({ maker: maker(ORIGINALS.character), source: { ...clip, width: 1080, height: 1920 } });
+    expect(step(tall, "anchor0").request.params).toMatchObject({ aspectRatio: "9:16" });
+    const nano = ch({ maker: maker(ORIGINALS.character), character: { anchorModel: "nano-banana-pro" } });
+    expect(step(nano, "anchor0").request.params).toMatchObject({ aspectRatio: "auto" });
+    const nanoRoute = onEngine(getModel("nano-banana-pro")!, "cloud").routes.find((r) => r.op === "edit" && r.provider === "fal")!;
+    expect(buildPayload(nanoRoute.map!, { prompt: "p", images: [ref, ref], aspectRatio: "auto" })).toMatchObject({ aspect_ratio: "auto" });
+    // Through the catalog the ratio stays (no square default merged over it).
+    const planned = planGeneration({ ...sunburst, inputs: { images: ["/api/files/f.png", ref] } }, getModel, getPreset);
+    expect(planned.params.aspectRatio).toBe("16:9");
+    // The open first frame is Qwen-Image-Edit's own size (the graph fits it to the clip): no ratio is asked.
+    expect(step(ch({ maker: maker(ORIGINALS.character, "open") }), "anchor").request.params?.aspectRatio).toBeUndefined();
+  });
+
+  it("cloud: a silent clip's result is silent too (H3's own soundtrack is replaced with silence)", () => {
+    const p = ch({ maker: maker(ORIGINALS.character), source: { ...clip, hasAudio: false }, range: { start: 2, end: 9.4 } });
+    expect(p.steps.map((s) => s.key)).toEqual(["cut0", "frame0", "anchor0", "swap0", "fit0", "mute"]);
+    expect(step(p, "fit0").request.feature).toBe("genjutsu-step");
+    expect(step(p, "mute").request).toMatchObject({ op: "mux", modelId: "merge-audio-video", feature: "genjutsu", inputs: { audio: "silence:7.4" } });
+    expect(step(p, "mute").after).toEqual(["fit0"]);
+    expect(p.final).toBe("mute");
+    const pieces = ch({ maker: maker(ORIGINALS.character), source: { ...clip, hasAudio: false }, range: { start: 0, end: 20 } });
+    expect(step(pieces, "join").request.feature).toBe("genjutsu-step");
+    expect(step(pieces, "mute").after).toEqual(["join"]);
+  });
+
+  it("cloud: fal's route needs a swap LoRA, so \"None\" is refused there (it runs on your GPU)", () => {
+    expect(() => ch({ maker: maker(ORIGINALS.character), character: { lora: "none" } })).toThrow(CLOUD_NO_LORA);
+    const check = { mode: "character" as const, source: clip, range: { start: 2, end: 12 }, references: 1 };
+    expect(genjutsuProblem({ ...check, maker: maker(ORIGINALS.character), character: { lora: "none" } })).toBe(CLOUD_NO_LORA);
+    expect(genjutsuProblem({ ...check, maker: maker(ORIGINALS.character, "open"), character: { lora: "none" } })).toBeNull();
+    expect(step(ch({ maker: maker(ORIGINALS.character, "open"), character: { lora: "none" } }), "swap").request.params?.extra).toMatchObject({ lora: "none" });
+    // The window plan the pack would refuse is said before anything runs.
+    expect(genjutsuProblem({ ...check, maker: maker(ORIGINALS.character, "open"), character: { windowFrames: 22, historyFrames: 35 } })).toMatch(/must be shorter than the window/);
+  });
+
+  it("Settings → Models & licences: a switched-off tier gives way to the other; an entry stays while either is on", () => {
+    const off = (ids: string[]) => (id: string) => !ids.includes(id);
+    // Lite off, the full Original on: the Original stays the pick (High), not a partner.
+    expect(chooseMaker({ engine: "cloud", mode: "motion", offered: off([ORIGINALS.motionLite]) })).toMatchObject({ maker: { id: ORIGINALS.motion } });
+    expect(chooseMaker({ engine: "cloud", mode: "motion", tier: "standard", offered: off([ORIGINALS.motionLite]) })).toMatchObject({ maker: { id: ORIGINALS.motion } });
+    expect(chooseMaker({ engine: "cloud", mode: "motion", modelId: ORIGINALS.motionLite, offered: off([ORIGINALS.motionLite]) })).toMatchObject({ maker: { id: ORIGINALS.motion } });
+    // The full Original off: High falls back to Lite.
+    expect(chooseMaker({ engine: "cloud", mode: "motion", tier: "high", offered: off([ORIGINALS.motion]) })).toMatchObject({ maker: { id: ORIGINALS.motionLite } });
+    // Both off: the next model that is on.
+    const both = chooseMaker({ engine: "cloud", mode: "motion", offered: off([ORIGINALS.motion, ORIGINALS.motionLite]) });
+    expect("maker" in both && both.maker.source).not.toBe("original");
+  });
+
   it("partners in Character swap: MiniMax's Recast, Wan Animate Replace, Kling O3 with who in words", () => {
     const r = ch({ maker: maker("h3-max-recast"), range: { start: 2, end: 20 }, quality: "1080p", character: { who: "leftmost", description: "a ronin" } });
     expect(r.steps.map((s) => s.key)).toEqual(["cut0", "make0"]);
@@ -392,6 +456,7 @@ describe("Genjutsu: the steps plan as catalog generations", () => {
       plan({ mode: "character", maker: maker("h3-max-recast"), range: { start: 0, end: 12 } }),
       plan({ mode: "character", maker: maker("scail-2"), range: { start: 0, end: 8 } }),
       plan({ mode: "character", maker: maker("oss-h3-character-swap-relay", "open"), range: { start: 0, end: 8 } }),
+      plan({ mode: "character", maker: maker(ORIGINALS.character), source: { ...clip, hasAudio: false }, range: { start: 0, end: 20 }, character: { anchorModel: "nano-banana-pro" } }),
     ];
     for (const p of plans) {
       for (const s of p.steps) {

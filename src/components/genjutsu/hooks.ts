@@ -76,3 +76,28 @@ export function useGenjutsuRun() {
     },
   });
 }
+
+/** "Describe my character": the engine's text model writes the description from the character picture. */
+export function useDescribeCharacter() {
+  return useMutation({ mutationFn: (b: { engine: Engine; image: string }) => send<{ description: string }>("/api/genjutsu/describe", "POST", b) });
+}
+
+/** The clip's words (one transcription; the page takes the part's lines from its cues). */
+export function useTranscribeClip() {
+  return useMutation({ mutationFn: (b: { engine: Engine; source: { url: string; duration?: number } }) => send<{ id: string; modelId: string }>("/api/genjutsu/transcribe", "POST", b) });
+}
+
+/** Waits for one generation to finish (polling; the page's helpers that fill a field from it). */
+export async function waitForGeneration(id: string, o: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Generation> {
+  const deadline = Date.now() + (o.timeoutMs ?? 15 * 60_000);
+  while (Date.now() < deadline) {
+    if (o.signal?.aborted) throw new Error("Stopped");
+    const res = await fetch(`/api/generations/${id}`, { signal: o.signal });
+    if (!res.ok) throw new Error(res.status === 404 ? "That job is gone" : `Request failed (${res.status})`);
+    const g = (await res.json()) as Generation;
+    if (g.status === "succeeded") return g;
+    if (g.status === "failed" || g.status === "canceled") throw new Error(g.error || "It didn't finish");
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  throw new Error("It is taking too long — try again later");
+}

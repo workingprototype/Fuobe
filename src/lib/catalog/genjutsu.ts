@@ -17,11 +17,14 @@
  * comfyui-oss-4.md §c.
  */
 import { keepOffered } from "@/lib/model-access";
+import { silenceRef } from "./canvas";
 import {
+  anchorAspect,
   anchorModel,
   anchorPrompt,
   ANCHOR_FALLBACK,
   CHARACTER_SWAP,
+  CLOUD_NO_LORA,
   characterLicenceLine,
   characterQuality,
   cutsInPart,
@@ -30,6 +33,7 @@ import {
   swapLoraRef,
   swapPrompt,
   whoWords,
+  windowProblem,
   type CharacterOptions,
   type SwapLora,
   type SwapSpeech,
@@ -52,6 +56,7 @@ import {
   type RemoveSource,
 } from "./remove-object";
 import { firstFramePrompt, getShortsPreset, lookFromPreset, planShorts, segmentPrompt, type PlanStep, type ShortsLook } from "./shorts";
+import { getModel } from "./index";
 import { soulLook } from "./soul";
 import type { ChainSlot, Engine, GenerationRequest, PixelPoint } from "./types";
 
@@ -167,8 +172,11 @@ export interface Maker {
   billFps?: number;
   /** params.extra its open route gets (Lite: Wan Animate 2 in 4 steps). */
   extra?: Record<string, unknown>;
-  /** Character swap on MiniMax H3: who to swap, the anchor first frame and the H3 settings apply. */
-  h3?: { anchor: boolean };
+  /**
+   * Character swap on MiniMax H3: who to swap, the anchor first frame and the H3 settings apply. `maskSwitch`: its graph
+   * can regenerate the whole frame instead of only the person (Openjutsu's use_mask; H3 Relay's graph has no switch).
+   */
+  h3?: { anchor: boolean; maskSwitch?: boolean };
 }
 
 /** fal's hosted Wan VACE (2.1 14B and 2.2 Fun): 17–241 frames (4n+1, the clip's own count and rate), at most 30 fps. */
@@ -355,7 +363,7 @@ export const MAKERS: Maker[] = [
     refs: { min: 1, max: 1 },
     keepsSound: true,
     qualities: ["480p", "768p"],
-    h3: { anchor: true },
+    h3: { anchor: true, maskSwitch: true },
     promptOptional: true,
   },
   {
@@ -606,6 +614,12 @@ export function makerLicence(m: Maker): string {
   return WEIGHTS[m.id] ? `${WEIGHTS[m.id]} · ${where}` : `Open weights · ${where}`;
 }
 
+/**
+ * Whether Settings → Models & licences offers a picker entry: Lite and the full Original are one entry, offered while
+ * either tier is on.
+ */
+export const makerOffered = (m: Maker, on: (id: string) => boolean) => on(m.id) || (!!m.pair && on(m.pair));
+
 /** The models you can pick for this engine, mode and way of pointing: Fuobe's Original first, then open weights, then partners. */
 export function makersFor(engine: Engine, mode: GenjutsuMode, target?: GenjutsuTarget): Maker[] {
   return MAKERS.filter((m) => {
@@ -646,18 +660,24 @@ export function chooseMaker(o: {
   if (target && !MODE_TARGETS[o.mode].includes(target)) return { problem: `${getMode(o.mode).label} doesn't take ${target === "click" ? "clicks" : target === "paint" ? "paint" : "that"} — pick another way` };
   const on = o.offered;
   const all = makersFor(o.engine, o.mode, target);
-  const options = on ? keepOffered(all, (m) => on(m.id)) : all;
+  const options = on ? keepOffered(all, (m) => makerOffered(m, on)) : all;
   if (!options.length) {
     if (o.engine === "cloud" && o.mode === "character" && target === "click") return { problem: CLOUD_CLICK_PROBLEM };
     return { problem: (o.engine === "open" && OPEN_TARGET_PROBLEM[o.mode]) || "Nothing on this engine does that yet" };
   }
-  const withTier = (m: Maker) => (m.pair && o.tier && m.tier !== o.tier ? (getMaker(m.pair, m.engine) ?? m) : m);
+  // A tier switched off while the other one is on: the one that is on.
+  const usable = (m: Maker) => {
+    if (!on || on(m.id)) return m;
+    const other = m.pair ? getMaker(m.pair, m.engine) : undefined;
+    return other && on(other.id) ? other : m;
+  };
+  const withTier = (m: Maker) => usable(m.pair && o.tier && m.tier !== o.tier ? (getMaker(m.pair, m.engine) ?? m) : m);
   const id = o.modelId && (LEGACY_MAKERS[o.modelId] ?? o.modelId);
   const picked = getMaker(id, o.engine);
   if (picked) {
     // The picker lists Lite; a High pick (or a setup naming the full Original) is the same choice.
     const lite = picked.tier === "high" && picked.pair ? getMaker(picked.pair, picked.engine)! : picked;
-    if (options.includes(lite)) return { maker: o.tier ? withTier(lite) : picked };
+    if (options.includes(lite)) return { maker: o.tier ? withTier(lite) : usable(picked) };
   }
   const first = [...options].sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source])[0];
   // Restyle with your own look's images on a partner list: a model that reads them.
@@ -844,6 +864,8 @@ export interface GenjutsuCheck {
   mask?: boolean;
   look?: GenjutsuLook;
   seed?: number;
+  /** Character swap's settings (the LoRA and the window plan are checked). */
+  character?: CharacterOptions;
 }
 
 /** What's wrong with the selection whatever the model, or null. */
@@ -894,6 +916,9 @@ export function genjutsuProblem(c: GenjutsuCheck): string | null {
   if (c.mode === "character") {
     const seed = seedProblem(c.seed);
     if (seed) return seed;
+    if (m.h3 && m.engine === "cloud" && c.character?.lora === "none") return CLOUD_NO_LORA;
+    const windows = m.h3 && m.engine === "open" ? windowProblem(c.character ?? {}) : null;
+    if (windows) return windows;
     if (target === "click" && !c.points) return "Click the person to swap on the first frame";
     return null;
   }
@@ -1181,6 +1206,8 @@ function planCharacterSwap(input: GenjutsuPlanInput): GenjutsuPlan {
   const seed = input.seed !== undefined ? { seed: input.seed } : {};
   const anchorOn = !!m.h3?.anchor && c.anchor !== false;
   const am = anchorModel(m.engine, c.anchorModel);
+  // The first frame keeps the part's shape ("auto", or the clip's nearest ratio): the model's default is square.
+  const aspect = anchorAspect(getModel(am.id)?.options.aspectRatios, input.source);
   const steps: PlanStep[] = [];
   const promptWith = (anchor: boolean) => makerPrompt({ mode: "character", maker: m, prompt: input.prompt, refs: 1, character: c, anchor })!;
   const anchorStep = (key: string, frameKey: string, label: { label: string; index: number; of: number }): PlanStep => ({
@@ -1191,7 +1218,7 @@ function planCharacterSwap(input: GenjutsuPlanInput): GenjutsuPlan {
       op: "edit",
       prompt: anchorPrompt(c),
       inputs: { images: character },
-      params: { ...(am.extra ? { extra: { ...am.extra } } : {}), ...seed },
+      params: { ...(aspect ? { aspectRatio: aspect } : {}), ...(am.extra ? { extra: { ...am.extra } } : {}), ...seed },
       step: label,
     },
     after: [frameKey],
@@ -1224,7 +1251,8 @@ function planCharacterSwap(input: GenjutsuPlanInput): GenjutsuPlan {
           resolution: quality,
           ...(input.points?.length ? { points: input.points } : {}),
           ...seed,
-          extra: h3Extra(c),
+          // Clicked: SAM 3.1's point mask comes first among its detections (the text ones follow), so take that one.
+          extra: { ...h3Extra(c), ...(input.points?.length ? { selection: "index", subjectIndex: 0 } : {}) },
         },
         step: { label: "Swap the character (MiniMax H3)", index: 0, of: 1 },
       },
@@ -1233,7 +1261,8 @@ function planCharacterSwap(input: GenjutsuPlanInput): GenjutsuPlan {
     return { steps, final: "swap", pieces: 1, sound: false, tracked: false, anchors: anchorOn ? 1 : 0 };
   }
 
-  // Cloud: fal's H3 takes 5–15 s of reference video and whole seconds of output.
+  // Cloud: fal's H3 takes 5–15 s of reference video and whole seconds of output, and needs a swap LoRA.
+  if (c.lora === "none") throw new Error(CLOUD_NO_LORA);
   const pieces = planCloudPieces(input.range, CHARACTER_SWAP.maxSeconds, input.source.fps);
   const n = pieces.length;
   const sound = !!input.source.hasAudio;
@@ -1253,11 +1282,11 @@ function planCharacterSwap(input: GenjutsuPlanInput): GenjutsuPlan {
       chain.push(anchorSlot());
     }
     const fit = callSecs - secs > 0.05;
-    const own = n === 1 && !sound && !fit;
+    // The pieces are steps: the finished video is the join with the clip's sound, or its silence (below).
     steps.push({
       key: `swap${i}`,
       request: {
-        ...(own ? { ...base, title: input.title } : helper),
+        ...helper,
         modelId: m.id,
         op: "video-swap",
         prompt: promptWith(anchorOn),
@@ -1271,12 +1300,24 @@ function planCharacterSwap(input: GenjutsuPlanInput): GenjutsuPlan {
     });
     if (fit) {
       // H3 makes whole seconds: the extra is cut off, so the pieces stay on the clip's sound.
-      steps.push({ key: `fit${i}`, request: { ...(n === 1 && !sound ? { ...base, title: input.title } : helper), modelId: REMOVE_TOOLS.cloud.cut, op: "trim", params: { startTime: 0, endTime: secs }, step: label("trim to the part") }, after: [`swap${i}`], chain: [{ slot: "video" }] });
+      steps.push({ key: `fit${i}`, request: { ...helper, modelId: REMOVE_TOOLS.cloud.cut, op: "trim", params: { startTime: 0, endTime: secs }, step: label("trim to the part") }, after: [`swap${i}`], chain: [{ slot: "video" }] });
       keys.push(`fit${i}`);
     } else keys.push(`swap${i}`);
   });
-  const final = n === 1 && !sound ? keys[0] : joinWithSound(steps, { engine: "cloud", title: input.title, base, helper, source: input.source, range: input.range, pieces: keys, sound });
-  return { steps, final, pieces: n, sound, tracked: false, anchors: anchorOn ? n : 0 };
+  if (sound) {
+    const final = joinWithSound(steps, { engine: "cloud", title: input.title, base, helper, source: input.source, range: input.range, pieces: keys, sound });
+    return { steps, final, pieces: n, sound, tracked: false, anchors: anchorOn ? n : 0 };
+  }
+  // A silent clip: fal's H3 (reference to video and audio) makes a soundtrack of its own, so the result gets the clip's
+  // silence instead (a silent track the server writes as the run starts, as Canvas mutes a clip).
+  const picture = n === 1 ? keys[0] : joinWithSound(steps, { engine: "cloud", title: input.title, base: helper, helper, source: input.source, range: input.range, pieces: keys, sound: false });
+  steps.push({
+    key: "mute",
+    request: { ...base, title: input.title, modelId: REMOVE_TOOLS.cloud.mux, op: "mux", inputs: { audio: silenceRef(r3(input.range.end - input.range.start)) }, step: { label: "Keep it silent, like the clip", index: 1200, of: 1000 } },
+    after: [picture],
+    chain: [{ slot: "video" }],
+  });
+  return { steps, final: "mute", pieces: n, sound, tracked: false, anchors: anchorOn ? n : 0 };
 }
 
 // ---------------------------------------------------------------------------

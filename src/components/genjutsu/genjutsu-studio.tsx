@@ -23,7 +23,7 @@ import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { SketchEditor, type Stroke } from "@/components/studio/sketch-editor";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
 import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
-import { CHARACTER_SWAP, cutsInPart, cutWarning, seedProblem, type CharacterOptions, type CharacterQuality } from "@/lib/catalog/character-swap";
+import { CHARACTER_SWAP, cutsInPart, cutWarning, partWords, seedProblem, type CharacterOptions, type CharacterQuality } from "@/lib/catalog/character-swap";
 import {
   chooseMaker,
   decodeSetup,
@@ -32,6 +32,7 @@ import {
   genjutsuProblem,
   getMode,
   makerLicence,
+  makerOffered,
   makersFor,
   MODE_TARGETS,
   OPEN_TARGET_PROBLEM,
@@ -47,12 +48,12 @@ import {
   type Maker,
 } from "@/lib/catalog/genjutsu";
 import { chainState } from "@/lib/catalog/shorts";
-import type { PixelPoint } from "@/lib/catalog/types";
+import type { Generation, PixelPoint } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { CharacterControls, CharacterFacts } from "./character-panel";
-import { useGenjutsuEstimate, useGenjutsuRun, type GenjutsuBody } from "./hooks";
+import { useDescribeCharacter, useGenjutsuEstimate, useGenjutsuRun, useTranscribeClip, waitForGeneration, type GenjutsuBody } from "./hooks";
 import { LookPicker, type LookSource } from "./look-picker";
 import { SetupCode } from "./setup-code";
 import { useClipCuts } from "./use-cuts";
@@ -165,7 +166,7 @@ export function GenjutsuStudio() {
   const isOn = (id: string) => offered(access, id, engine);
   const choice = chooseMaker({ engine, mode, target, tier, look: effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined), modelId: picked[choiceKey], offered: isOn });
   const maker: Maker | null = "maker" in choice ? choice.maker : null;
-  const options = keepOffered(makersFor(engine, mode, target), (m) => isOn(m.id));
+  const options = keepOffered(makersFor(engine, mode, target), (m) => makerOffered(m, isOn));
   const references = mode === "restyle" ? [] : ready(refs);
   const showRefs = mode !== "restyle";
   const maxRefs = isCharacter ? Math.max(1, maker?.refs.max ?? 1) : GENJUTSU.maxReferences;
@@ -175,6 +176,51 @@ export function GenjutsuStudio() {
   const partCuts = isCharacter && range ? cutsInPart(cuts ?? undefined, { start: range.startTime, end: range.endTime }) : [];
   const cut = cutWarning(partCuts);
   const seedNumber = seedOf(seed);
+  // Character swap's H3 makers take H3's two qualities; the other makers (Recast, P-Video…) Genjutsu's own.
+  const askedQuality = isCharacter && maker?.h3 ? charQuality : quality;
+
+  // "Describe my character" (the engine's text model) and "Use the clip's words" (one transcription of the clip; any
+  // part takes its own lines from it, so it is kept per clip).
+  const describeMutation = useDescribeCharacter();
+  const transcribeMutation = useTranscribeClip();
+  const [clipWords, setClipWords] = useState<{ url: string; g: Generation } | null>(null);
+  const [listening, setListening] = useState(false);
+  const alive = useRef<AbortController | null>(null);
+  useEffect(() => () => alive.current?.abort(), []);
+  const describeCharacter = () => {
+    const image = refs.find((r) => !r.uploading)?.ref;
+    if (!image) return;
+    describeMutation
+      .mutateAsync({ engine, image })
+      .then((r) => setCharacter((c) => ({ ...c, description: r.description })))
+      .catch((e: Error) => toast.error(friendly(e.message)));
+  };
+  const fillClipWords = async () => {
+    if (!clip?.url || !range) return;
+    const url = clip.url;
+    const part = { start: range.startTime, end: range.endTime };
+    setListening(true);
+    alive.current?.abort();
+    const ctl = new AbortController();
+    alive.current = ctl;
+    try {
+      let g = clipWords?.url === url ? clipWords.g : null;
+      if (!g) {
+        const { id } = await transcribeMutation.mutateAsync({ engine, source: { url, ...(duration ? { duration } : {}) } });
+        g = await waitForGeneration(id, { signal: ctl.signal });
+        setClipWords({ url, g });
+      }
+      const out = g.outputs.find((o) => o.kind === "text");
+      const cues = Array.isArray(out?.meta?.cues) ? (out.meta.cues as { start: number; end: number; text: string }[]) : undefined;
+      const text = cues ? partWords(cues, part) : (out?.text ?? "").trim().slice(0, 2000);
+      if (text) setCharacter((c) => ({ ...c, dialogue: text }));
+      else toast("Nobody speaks in this part of the clip", { description: "Pick “No dialogue”, or type the words." });
+    } catch (e) {
+      if (!ctl.signal.aborted) toast.error(friendly((e as Error).message));
+    } finally {
+      if (alive.current === ctl) setListening(false);
+    }
+  };
 
   // The selection's first frame, grabbed by the browser: what points and paint are made on.
   const startAt = range ? Math.round(range.startTime * 100) / 100 : null;
@@ -218,6 +264,7 @@ export function GenjutsuStudio() {
     if (s.tier) setTier(s.tier);
     if (s.mode === "character") {
       if (s.quality === "480p" || s.quality === "768p") setCharQuality(s.quality);
+      if (s.quality && (GENJUTSU.qualities as string[]).includes(s.quality)) setQuality(s.quality);
       setCharacter(s.character ?? {});
     } else if (s.quality) setQuality(s.quality);
     const t = s.target ?? MODE_TARGETS[s.mode][0];
@@ -286,7 +333,7 @@ export function GenjutsuStudio() {
     engine,
     ...(maker ? { model: maker.id } : {}),
     ...(maker?.tier ? { tier: maker.tier } : {}),
-    quality: isCharacter ? charQuality : quality,
+    quality: askedQuality,
     ...(target ? { target } : {}),
     ...(mode === "swap" && subject.trim() ? { subject: subject.trim() } : {}),
     ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
@@ -330,7 +377,7 @@ export function GenjutsuStudio() {
           points: clicks,
           mask: !!paint,
           look: effLook,
-          ...(isCharacter ? { seed: seedNumber } : {}),
+          ...(isCharacter ? { seed: seedNumber, character } : {}),
         })
       : null;
   const body: GenjutsuBody | null =
@@ -340,7 +387,7 @@ export function GenjutsuStudio() {
           mode,
           modelId: maker.id,
           ...(maker.tier ? { tier: maker.tier } : {}),
-          quality: isCharacter ? charQuality : quality,
+          quality: askedQuality,
           ...(target ? { target } : {}),
           ...(mode === "swap" && subject.trim() ? { subject: subject.trim() } : {}),
           ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
@@ -596,6 +643,8 @@ export function GenjutsuStudio() {
                   seed={seed}
                   onSeed={setSeed}
                   seedProblem={seedProblem(seedNumber)}
+                  describe={{ run: describeCharacter, busy: describeMutation.isPending, blocked: refs.some((r) => !r.uploading) ? null : "Add your character's picture to describe it" }}
+                  words={{ run: () => void fillClipWords(), busy: listening, blocked: clip?.url && !clip.uploading && range ? null : "Add the clip first" }}
                 />
               )}
 
@@ -640,12 +689,8 @@ export function GenjutsuStudio() {
               )}
 
               {(!isCharacter || !maker?.h3) && (
-                <Field label="Resolution" hint={maker ? upFirst(resolutionWords(maker, isCharacter ? charQuality : quality)) : undefined}>
-                  {isCharacter ? (
-                    <Segmented label="Resolution" value={charQuality} onChange={setCharQuality} options={CHARACTER_SWAP.qualities.map((q) => ({ value: q, label: q }))} />
-                  ) : (
-                    <Segmented label="Resolution" value={quality} onChange={setQuality} options={GENJUTSU.qualities.map((q) => ({ value: q, label: q }))} />
-                  )}
+                <Field label="Resolution" hint={maker ? upFirst(resolutionWords(maker, quality)) : undefined}>
+                  <Segmented label="Resolution" value={quality} onChange={setQuality} options={GENJUTSU.qualities.map((q) => ({ value: q, label: q }))} />
                 </Field>
               )}
 
