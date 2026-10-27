@@ -98,6 +98,8 @@ describe("starting a Soul ID training", () => {
     setSetting("engineMode", "open");
     const el = character();
     expect(() => startTraining(el.id, "fal-z-image", { consent: true })).toThrow(/open source only/);
+    // A GPU training whose LoRA only cloud models run (FLUX.2 [klein] 4B) is refused there too.
+    expect(() => startTraining(el.id, "aitk-flux2-klein-4b", { consent: true })).toThrow(/FLUX.2 \[klein\] 4B runs only in the cloud/);
   });
 
   it("sends fal a zip of 001.png + 001.txt pairs with the trainer's fields, priced first", async () => {

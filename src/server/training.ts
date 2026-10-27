@@ -134,6 +134,11 @@ export function trainingBlocker(t: TrainingTarget): string | null {
       ? `This install is set to open source only (Settings → ${ENGINE_MODE}): train on your GPU`
       : `This install is set to paid cloud APIs only (Settings → ${ENGINE_MODE}): train in the cloud`;
   }
+  // A LoRA nothing here could run: its family's models are all on the engine this install turned off.
+  const fam = TRAINING_FAMILIES[t.family];
+  if (mode !== "both" && !fam.lead[mode]) {
+    return `${fam.name} runs only ${mode === "open" ? "in the cloud" : "on your GPU"}, which this install turned off (Settings → ${ENGINE_MODE})`;
+  }
   if (t.provider === "fal" && !getSetting("falKey")) return "Add a fal.ai key in Settings";
   if (t.provider === "ai-toolkit" && !getSetting("aiToolkitUrl")) return "Set your AI-Toolkit URL in Settings (or download the training kit)";
   return null;
