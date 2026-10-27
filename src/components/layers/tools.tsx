@@ -125,8 +125,8 @@ function Scope({ node }: { node?: LayerNode }) {
 }
 
 function ModelSelect({ tool, ids, value, onChange, label = "Model" }: { tool: LayerTool; ids?: string[]; value?: string; onChange: (id: string) => void; label?: string }) {
-  const { engine, models } = useEditor();
-  const options = modelsFor(models, ids ?? TOOL_MODELS[tool][engine]);
+  const { engine, models, offeredIds } = useEditor();
+  const options = modelsFor(models, offeredIds(ids ?? TOOL_MODELS[tool][engine]));
   if (options.length < 2) return options[0] ? <p className="text-[12px] text-muted-foreground">{label} · {options[0].name}</p> : null;
   return (
     <Field label={label}>
@@ -148,9 +148,9 @@ function ModelSelect({ tool, ids, value, onChange, label = "Model" }: { tool: La
 
 /** The model the tool will run (picked, or the engine's default); `picked` is what the user chose, if anything. */
 function useToolModel(tool: LayerTool, ids?: string[]) {
-  const { engine, models } = useEditor();
+  const { engine, models, offeredIds } = useEditor();
   const [picked, setPicked] = useState<string | undefined>();
-  const options = ids ?? TOOL_MODELS[tool][engine];
+  const options = offeredIds(ids ?? TOOL_MODELS[tool][engine]);
   const chosen = picked && options.includes(picked) ? picked : undefined;
   const id = chosen ?? options[0];
   return { modelId: id, model: id ? models[id] : undefined, setModelId: setPicked, picked: chosen };

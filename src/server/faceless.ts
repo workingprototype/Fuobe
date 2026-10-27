@@ -86,7 +86,7 @@ import { llmBackends, probeOllama } from "./providers/llm";
 import { fetchRemote } from "./remote-fetch";
 import { engineMode, getSetting } from "./settings";
 import { fileUrl, saveFile } from "./storage";
-import { offeredModel } from "./model-access";
+import { firstOn, offeredModel } from "./model-access";
 
 /**
  * Faceless Studio and the Explainer on the server: channels (genre, saved style, narrator, aspect,
@@ -715,9 +715,21 @@ function runsAsDemo(modelId: string, op: GenerationRequest["op"]): boolean {
   }
 }
 
+/**
+ * An episode's settings with the video model Settings → Models & licences offers: without a pick, a default that is
+ * switched off gives way to the next video choice that is on (a pick that is off stays, and its run names the switch).
+ */
+export function withOfferedVideo(s: EpisodeSettings): EpisodeSettings {
+  if (s.animation === "frames") return s;
+  const m = ENGINE_MODELS[s.engine];
+  if (s.videoModel && m.videoChoices.includes(s.videoModel)) return s;
+  const id = firstOn([m.video, ...m.videoChoices], s.engine);
+  return !id || id === m.video ? s : { ...s, videoModel: id };
+}
+
 function graphInput(ep: FacelessEpisode, blocks = ep.script.blocks, stillEdits?: StillEdits): GraphInput {
   const genre = genreInfo(ep.channelId ? getChannel(ep.channelId)?.genre : "education");
-  const s = ep.settings;
+  const s = withOfferedVideo(ep.settings);
   const narration = ENGINE_MODELS[s.engine].narration;
   let fallbackVoice: string | undefined;
   if (s.engine === "open" && s.voice?.kind !== "sample") {
@@ -828,7 +840,7 @@ function narrationCues(ep: FacelessEpisode): TimedText[] | null {
 function advance(ep: FacelessEpisode): FacelessEpisode {
   const plan = ep.plan!;
   const blocks = ep.script.blocks;
-  const video = getModel(resolveModels(ep.settings, narrationText(blocks).length, getModel).video);
+  const video = getModel(resolveModels(withOfferedVideo(ep.settings), narrationText(blocks).length, getModel).video);
   const cues = narrationCues(ep);
   const spoken = cues ? spokenTimes(blocks, cues) : null;
   const timing = spoken ? sceneTiming(blocks, spoken, video, plan.timing) : (plan.timing ?? plannedTiming(blocks, video));
@@ -1202,7 +1214,7 @@ function graphInputSafe(ep: FacelessEpisode): GraphInput {
   try {
     return graphInput(ep);
   } catch {
-    return { feature: ep.kind, title: ep.title, genre: genreInfo(ep.channelId ? getChannel(ep.channelId)?.genre : "education"), settings: ep.settings, blocks: ep.script.blocks, fallbackVoice: "/api/files/placeholder.wav" };
+    return { feature: ep.kind, title: ep.title, genre: genreInfo(ep.channelId ? getChannel(ep.channelId)?.genre : "education"), settings: withOfferedVideo(ep.settings), blocks: ep.script.blocks, fallbackVoice: "/api/files/placeholder.wav" };
   }
 }
 
@@ -1314,7 +1326,7 @@ export function estimateEpisode(input: { kind: "faceless" | "explainer"; setting
 /** What the render will do differently from what was asked (nothing that stops it). */
 function notesFor(settings: EpisodeSettings, seconds: number): { notes?: string[] } {
   const notes: string[] = [];
-  const m = resolveModels(settings, 0, getModel);
+  const m = resolveModels(withOfferedVideo(settings), 0, getModel);
   const limit = styleRefLimit(settings.engine, getModel);
   if (settings.styleRefs.length > limit) notes.push(`The open-source picture model follows the first ${limit} style references.`);
   if (settings.engine === "open" && settings.styleRefs.length && settings.sourceImages?.length) notes.push("Your style references set the look; the attached images aren't used for the open-source pictures.");

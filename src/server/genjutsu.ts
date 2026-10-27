@@ -26,6 +26,7 @@ import { planSegments, type PlanStep } from "@/lib/catalog/shorts";
 import type { Engine, Generation, PixelPoint, ProviderId } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
+import { isOffered } from "./model-access";
 import { provider } from "./providers";
 import { pointsFromPaint } from "./remove-object";
 import { engineMode } from "./settings";
@@ -127,7 +128,16 @@ interface Planned {
 
 async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<Planned> {
   mustMatchMode(body.engine);
-  const picked = chooseMaker({ engine: body.engine, mode: body.mode, target: body.target, tier: body.tier, look: body.look, modelId: body.modelId, higgsfield: higgsfieldReady() });
+  const picked = chooseMaker({
+    engine: body.engine,
+    mode: body.mode,
+    target: body.target,
+    tier: body.tier,
+    look: body.look,
+    modelId: body.modelId,
+    higgsfield: higgsfieldReady(),
+    offered: (id) => isOffered(id, body.engine),
+  });
   if ("problem" in picked) throw new ShortsError(picked.problem, 422);
   const maker = picked.maker;
   // The header's facts win over what the browser read (the estimate runs before the upload is read).
@@ -277,7 +287,7 @@ function mixProblem(modes: StepMode[], cannot: boolean, input: GenjutsuPlanInput
 
 /** Another model for the same job that doesn't need Higgsfield (the way around a missing Higgsfield key). */
 function otherModel(input: GenjutsuPlanInput): string | undefined {
-  const other = makersFor(input.engine, input.mode, input.target, input.look).find((x) => x.id !== input.maker.id && !x.higgsfield);
+  const other = makersFor(input.engine, input.mode, input.target, input.look).find((x) => x.id !== input.maker.id && !x.higgsfield && isOffered(x.id, input.engine));
   return other ? `pick ${other.label}` : undefined;
 }
 

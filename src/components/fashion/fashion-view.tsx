@@ -14,7 +14,8 @@ import { useRun, useRunPreview } from "@/components/photodump/hooks";
 import { RunLine, Steps } from "@/components/photodump/steps";
 import { CharacterPicker } from "@/components/photodump/subject";
 import { UploadBox } from "@/components/photodump/upload-box";
-import { useEngine, useGenerations } from "@/lib/api";
+import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { FASHION, FASHION_START, FASHION_STEPS, fashionBlocker, fashionReducer, getTemplate, type FashionState } from "@/lib/catalog/packs";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
@@ -63,7 +64,11 @@ export function FashionView() {
   const [s, dispatch] = useStoredReducer<FashionState, Parameters<typeof fashionReducer>[1]>("fuobe.fashion", fashionReducer, FASHION_START);
   const [engine, setEngine] = useEngine();
   const [garment, setGarment] = useState<SlotValue | null>(null);
-  const [outfitModel, setOutfitModel] = useState<string>("fashn-tryon");
+  const [pickedOutfit, setOutfitModel] = useState<string>("fashn-tryon");
+  // Outfit models switched off in Settings → Models & licences leave the choice; the pick falls back to one that is on.
+  const access = useModelAccess();
+  const outfitModels = keepOffered(OUTFIT_MODELS, ([id]) => offered(access, id, "cloud"));
+  const outfitModel = outfitModels.some(([id]) => id === pickedOutfit) ? pickedOutfit : outfitModels[0][0];
   const [bannerSeen, hideBanner] = useBannerSeen();
   const { data } = useGenerations({ features: ["fashion"], limit: 200 });
   const base = useRun<Record<string, unknown>>("/api/photodump/fashion");
@@ -238,7 +243,7 @@ export function FashionView() {
             </div>
             {engine === "cloud" && (
               <div role="radiogroup" aria-label="Outfit model" onKeyDown={radioKeys} className="flex flex-wrap gap-1">
-                {OUTFIT_MODELS.map(([id, label]) => (
+                {outfitModels.map(([id, label]) => (
                   <button key={id} role="radio" aria-checked={outfitModel === id} tabIndex={radioTab(outfitModel === id)} onClick={() => setOutfitModel(id)} className={cn("h-8 rounded-full border px-2.5 text-[12.5px] font-medium transition-colors", outfitModel === id ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent")}>
                     {label}
                   </button>

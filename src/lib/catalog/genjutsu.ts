@@ -13,6 +13,7 @@
  * the shareable setup code), shared by the page, the server (src/server/genjutsu.ts) and the tests.
  * Research: docs/research/higgsfield-delta-4.md §4.2, paid-model-apis-4.md §4, comfyui-oss-4.md §c.
  */
+import { keepOffered } from "@/lib/model-access";
 import {
   joinWithSound,
   MASK_TRACKER,
@@ -389,10 +390,17 @@ export function chooseMaker(o: {
   modelId?: string;
   /** A Higgsfield key is set. */
   higgsfield: boolean;
+  /**
+   * Whether Settings → Models & licences offers a model: one switched off isn't picked while another is on (with
+   * all of them off the pick stays, and its run names the switch).
+   */
+  offered?: (id: string) => boolean;
 }): { maker: Maker } | { problem: string } {
   const target = MODE_TARGETS[o.mode].length ? (o.target ?? MODE_TARGETS[o.mode][0]) : undefined;
   if (target && !MODE_TARGETS[o.mode].includes(target)) return { problem: `${getMode(o.mode).label} doesn't take ${target === "click" ? "clicks" : "that"} — pick another way` };
-  const options = makersFor(o.engine, o.mode, target, o.look);
+  const on = o.offered;
+  const all = makersFor(o.engine, o.mode, target, o.look);
+  const options = on ? keepOffered(all, (m) => on(m.id)) : all;
   if (!options.length) {
     if (o.engine === "open" && o.mode === "restyle" && o.look?.kind === "higgsfield") return { problem: OPEN_LOOK_PROBLEM };
     return { problem: (o.engine === "open" && OPEN_TARGET_PROBLEM[o.mode]) || "Nothing on this engine does that yet" };

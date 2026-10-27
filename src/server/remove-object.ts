@@ -25,6 +25,7 @@ import type { PlanStep } from "@/lib/catalog/shorts";
 import type { Engine, GenParams, Generation, PixelPoint } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
+import { isOffered } from "./model-access";
 import { decodePng } from "./png";
 import { engineMode } from "./settings";
 import { probeSource, ShortsError } from "./shorts";
@@ -145,7 +146,7 @@ interface Planned {
 
 async function planInput(body: RemovalBody, opts: { probe: boolean; preview?: boolean }): Promise<Planned> {
   mustMatchMode(body.engine);
-  const picked = chooseEraser({ engine: body.engine, mode: body.mode, effects: body.effects, modelId: body.modelId });
+  const picked = chooseEraser({ engine: body.engine, mode: body.mode, effects: body.effects, modelId: body.modelId, offered: (id) => isOffered(id, body.engine) });
   if ("problem" in picked) throw new ShortsError(picked.problem, 422);
   const eraser = picked.eraser;
   // The header's facts win over what the browser read (the estimate runs before the upload is read).

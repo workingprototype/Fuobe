@@ -15,7 +15,7 @@ import { FailedTile, PendingTile } from "@/components/studio/feed";
 import { MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { MediaDrop } from "@/components/av/media-drop";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
-import { useCreateGeneration, useEngine, useGenerations } from "@/lib/api";
+import { useCreateGeneration, useEngine, useGenerations, useModelAccess } from "@/lib/api";
 import {
   MAX_3D_PROMPT,
   MODEL3D_FEATURE,
@@ -34,6 +34,7 @@ import {
   type ViewSide,
 } from "@/lib/av/model3d";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { priceLine, useRunPreview } from "./hooks";
 import { ModelCard } from "./model-card";
@@ -122,6 +123,7 @@ function ModePicker({ mode, onChange }: { mode: Model3dMode; onChange: (m: Model
 /** Image to 3D: a photo, several photos, words, an object in a photo or a splat → a model to spin, download, rig and animate. */
 export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
   const [engine, setEngine, engineMode] = useEngine();
+  const access = useModelAccess();
   const create = useCreateGeneration();
   const results = useGenerations({ features: [MODEL3D_FEATURE, "app:app-image-to-3d"], limit: 24 });
   const [mode, setMode] = useState<Model3dMode>("image");
@@ -140,8 +142,10 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
     },
     [setEngine],
   );
-  const choices = MODELS_3D[mode][engine];
-  const modelId = model3dFor(mode, engine, picked[`${mode}:${engine}`]);
+  // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const choices = keepOffered(MODELS_3D[mode][engine], (m) => offered(access, m.id, engine));
+  const wanted = picked[`${mode}:${engine}`];
+  const modelId = model3dFor(mode, engine, wanted && choices.some((m) => m.id === wanted) ? wanted : choices[0]?.id);
   const sides = Object.fromEntries(VIEW_SIDES.flatMap((s) => (views[s] ? [[s, views[s]!.ref]] : []))) as Partial<Record<ViewSide, string>>;
   const input: Model3dInput = { engine, mode, modelId: modelId ?? undefined, photo: photo?.ref, views: sides, prompt: mode === "text" ? text : mode === "objects" ? object : undefined };
   const uploading = !!photo?.uploading || VIEW_SIDES.some((s) => views[s]?.uploading);
