@@ -24,7 +24,8 @@ export function identityLabel(el: StudioElement): string {
 /** The character-creation copy (src/lib/catalog/training.ts SOUL_ID_COPY, Higgsfield's rules): saving is the consent. */
 const CREATE_COPY = {
   ...SOUL_ID_COPY,
-  consent: `By clicking Save character, ${SOUL_ID_COPY.consent.charAt(0).toLowerCase()}${SOUL_ID_COPY.consent.slice(1)}`,
+  // The line starts with "I consent", which stays a capital I mid-sentence.
+  consent: `By clicking Save character, ${SOUL_ID_COPY.consent}`,
 } as const;
 
 const MAX_PHOTOS = SOUL_ID_PHOTOS.max;

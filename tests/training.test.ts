@@ -18,7 +18,9 @@ import {
   getTrainer,
   getTrainingTarget,
   identityFor,
+  identityKey,
   loraFamily,
+  runsSomewhere,
   needsConsent,
   photosBlocker,
   photoTips,
@@ -129,8 +131,13 @@ describe("Fuobe Soul ID targets (build plan O3)", () => {
       "fal-flux2-klein-9b",
       "fal-krea-2",
     ]);
-    // The portrait trainer crops to a face: no style on it. Fuobe Soul's style trains on fal's Z-Image trainer.
+    // The portrait trainer crops to a face: no style on it, and no place or object either (they train on FLUX.1 on the GPU).
+    // Fuobe Soul's style trains on fal's Z-Image trainer.
     expect(targetsFor("style").map((t) => t.id)).not.toContain("fal-flux1-portrait");
+    for (const kind of ["location", "prop"] as const) {
+      expect(targetsFor(kind).map((t) => t.id)).not.toContain("fal-flux1-portrait");
+      expect(targetsFor(kind).map((t) => t.id)).toContain("aitk-flux1-dev");
+    }
     expect(targetsFor("style").map((t) => t.id).slice(0, 2)).toEqual(["aitk-z-image", "fal-z-image-style"]);
     expect(targetsFor("voice")).toEqual([]);
     expect(needsConsent("character")).toBe(true);
@@ -160,7 +167,15 @@ describe("Fuobe Soul ID targets (build plan O3)", () => {
     // Trainers that take the zip in images_data_url and a trigger phrase instead of a default caption.
     expect(falTrainingInput(getTrainingTarget("fal-flux1-portrait")!, "z", "photo of mayafz", "mayafz")).toEqual({ images_data_url: "z", steps: 2500, trigger_phrase: "mayafz" });
     expect(falTrainingInput(getTrainingTarget("fal-krea-2")!, "z", "photo of mayafz", "mayafz")).toEqual({ images_data_url: "z", steps: 1000, trigger_phrase: "mayafz", resolution: 1024 });
-    expect(falTrainingInput(getTrainingTarget("fal-flux2-dev")!, "z", "photo of mayafz", "mayafz")).toEqual({ image_data_url: "z", steps: 1000, default_caption: "photo of mayafz" });
+    // FLUX.2 [dev] also runs on ComfyUI: its LoRA comes back with ComfyUI's key names. The cloud-only klein families keep fal's.
+    expect(falTrainingInput(getTrainingTarget("fal-flux2-dev")!, "z", "photo of mayafz", "mayafz")).toEqual({
+      image_data_url: "z",
+      steps: 1000,
+      default_caption: "photo of mayafz",
+      output_lora_format: "comfy",
+    });
+    expect(falTrainingInput(getTrainingTarget("fal-flux2-klein-9b")!, "z", "photo of mayafz")).not.toHaveProperty("output_lora_format");
+    expect(falTrainingInput(getTrainingTarget("fal-flux2-klein-4b")!, "z", "photo of mayafz")).not.toHaveProperty("output_lora_format");
     expect(datasetName(0, "jpg")).toBe("001.jpg");
     expect(datasetName(11, "txt")).toBe("012.txt");
   });
@@ -203,6 +218,13 @@ describe("Fuobe Soul ID targets (build plan O3)", () => {
       const body = buildPayload(route.map!, { prompt: "x", loras: [{ file: "fuobe/m.safetensors", url: "https://x/m.safetensors", strength: 0.9 }] });
       expect(body.loras, id).toEqual([{ path: "https://x/m.safetensors", scale: 0.9 }]);
     }
+    // Each carries its weights' licence as data for Settings (information, never a gate).
+    expect(getModel("flux-1-dev-lora-cloud")!.licence).toMatchObject({ licence: "FLUX.1 [dev] Non-Commercial License", commercial: false });
+    expect(getModel("flux-2-dev-lora-cloud")!.licence).toMatchObject({ licence: "FLUX [dev] Non-Commercial License", commercial: false });
+    expect(getModel("flux-2-klein-9b-lora-cloud")!.licence).toMatchObject({ commercial: false });
+    expect(getModel("krea-2-turbo-lora-cloud")!.licence).toMatchObject({ licence: expect.stringMatching(/Krea 2 Community/), commercial: null });
+    expect(getModel("flux-1-krea-lora-cloud")!.licence?.note).toMatch(/non-commercial/);
+    expect(getModel("z-image-turbo-cloud")!.licence).toMatchObject({ licence: "Apache-2.0", commercial: true });
   });
 
   it("switches hosted Z-Image to its LoRA endpoint only when a LoRA URL is present", () => {
@@ -293,6 +315,36 @@ describe("a Soul ID on every model of its family, on both engines", () => {
   it("never uses a demo training or a Higgsfield Soul ID", () => {
     expect(identityFor([lora({ demo: true, url: "x" })], cloudSoul)).toBeUndefined();
     expect(identityFor([{ engine: "cloud", modelId: "fuobe-soul", file: "", trigger: "", referenceId: "ref" }], cloudSoul)).toBeUndefined();
+    // What Assist reports as trained: only LoRAs some run can use.
+    expect(runsSomewhere(lora({ demo: true, url: "x" }))).toBe(false);
+    expect(runsSomewhere(lora({ modelId: "soul-2", family: undefined, file: "", referenceId: "ref" }))).toBe(false);
+    expect(runsSomewhere(lora({ url: "x" }))).toBe(true);
+    // A GPU LoRA without Fuobe's copy, for a family that runs only in the cloud: nothing can run it.
+    expect(runsSomewhere(lora({ engine: "open", modelId: "flux-2-klein-4b-cloud", family: "flux2-klein-4b" }))).toBe(false);
+    expect(runsSomewhere(lora({ engine: "open", modelId: "flux-2-klein-4b-cloud", family: "flux2-klein-4b", own: true }))).toBe(true);
+  });
+
+  it("names one file attached for two families as two LoRAs, so removing one keeps the other", () => {
+    const z = lora({ file: "mine/maya.safetensors", own: true });
+    const flux = lora({ file: "mine/maya.safetensors", own: true, modelId: "oss-flux1-dev", family: "flux1-dev" });
+    expect(identityKey(z)).not.toBe(identityKey(flux));
+    expect([z, flux].filter((l) => ![identityKey(flux)].includes(identityKey(l)))).toEqual([z]);
+    expect(identityKey(lora({ modelId: "soul-2", family: undefined, file: "", referenceId: "ref-1" }))).toBe("ref-1");
+  });
+
+  it("scales an @character's LoRA by the character strength on FLUX too, and never sends the setting to the provider", () => {
+    const flux = getModel("flux-1-dev-lora-cloud")!;
+    const el = maya([lora({ url: "https://v3.fal.media/maya.safetensors", own: true, modelId: "flux-1-dev-lora-cloud", family: "flux1-dev" })]);
+    const { request } = applyMentions({ feature: "image", modelId: flux.id, prompt: "@Maya on a beach" }, flux, [el]);
+    const plan = planGeneration({ ...request, params: { extra: { characterStrength: 0.5 } } }, getModel, getPreset);
+    expect(plan.loras[0]).toMatchObject({ file: "fuobe/maya-abc123.safetensors", strength: 0.8 });
+    expect(plan.params.extra?.characterStrength).toBeUndefined();
+    // The server sends Fuobe's own LoRA by the copy it picks (prepareCloudLoras sets hostedUrl).
+    const body = buildPayload(flux.routes[0].map!, { ...plan.params, prompt: plan.prompt, loras: plan.loras.map((l) => ({ ...l, hostedUrl: l.url })) });
+    expect(body.loras).toEqual([{ path: "https://v3.fal.media/maya.safetensors", scale: 0.8 }]);
+    expect(body).not.toHaveProperty("characterStrength");
+    // Without the setting the LoRA keeps its own strength.
+    expect(planGeneration(request, getModel, getPreset).loras[0].strength).toBe(1);
   });
 
   it("puts the @character's LoRA first on Fuobe Soul, at the character strength's scale", () => {

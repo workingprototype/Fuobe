@@ -20,6 +20,7 @@ import {
   trainedLoraUrl,
   trainingCaption,
   trainingKind,
+  trainsKind,
   triggerFor,
   type TrainingFamily,
   type TrainingTarget,
@@ -85,6 +86,10 @@ interface Meta {
   photos?: number;
   /** When the person's consent was confirmed (characters only). */
   consentAt?: number;
+  /** The LoRA's file name (fuobe/<handle>-<id>.safetensors), once trained. */
+  file?: string;
+  /** Fuobe's own copy of a hosted trainer's LoRA: downloading in the background, kept, or not kept (the trainer's URL serves). */
+  keep?: "pending" | "kept" | "failed";
 }
 
 const metaOf = (r: Pick<Row, "meta_json">): Meta => JSON.parse(r.meta_json ?? "{}") as Meta;
@@ -175,6 +180,7 @@ export function startTraining(elementId: string, targetId: string, opts: { conse
   if (!target.kinds.includes(trainingKind(el.kind))) {
     throw new Error(trainingKind(el.kind) === "style" ? `${el.name} is a style: pick a style training` : `That training is for styles: pick a character training for ${el.name}`);
   }
+  if (!trainsKind(target, el.kind)) throw new Error(`That training is for ${target.onlyFor?.join(" and ")}s only: pick another one for ${el.name}`);
   if (needsConsent(el.kind) && !opts.consent) throw new Error(SOUL_ID_COPY.needsConsent);
   const images = photosOf(el);
   const few = photosBlocker(images.length, el.name);
@@ -244,13 +250,16 @@ function settleElement(elementId: string) {
 /**
  * Put a trained LoRA on the element. A retrain replaces the earlier LoRA of the same family (and the per-model LoRAs
  * from before O3 that family covers); another family's LoRA stays (Fuobe Soul and Fuobe Soul HD side by side).
+ * A demo's stand-in never replaces a real LoRA: it goes on only where the family has none. Returns whether it went on.
  */
-function addIdentity(elementId: string, lora: ElementLora) {
+function addIdentity(elementId: string, lora: ElementLora): boolean {
   const el = getElement(elementId);
-  if (!el) return;
+  if (!el) return false;
   const fam = lora.family;
   const covered = (l: ElementLora) => !l.referenceId && (fam ? (l.family ?? familyOfModel(l.modelId)) === fam : l.modelId === lora.modelId);
+  if (lora.demo && el.loras.some((l) => covered(l) && !l.demo)) return false;
   updateElement(elementId, { loras: [...el.loras.filter((l) => !covered(l)), lora] });
+  return true;
 }
 
 /** A trained LoRA's file in ComfyUI's loras folder (and Fuobe's copy): one name per training, so a retrain never reuses a cached one. */
@@ -346,6 +355,8 @@ export async function pollTrainings(): Promise<void> {
     .all(Date.now() - STALE_TRAINING_MS) as Row[];
   for (const r of stale) if (!submittingTrainings().has(r.id)) fail(r.id, r.element_id, "Interrupted before it reached the trainer — start it again");
   for (const r of db().prepare("SELECT * FROM trainings WHERE provider = 'higgsfield' AND status IN ('queued','running')").all() as Row[]) fail(r.id, r.element_id, RETIRED_SOUL_ID);
+  // Copies of hosted LoRAs a restart cut off: start them again.
+  for (const r of db().prepare(`SELECT * FROM trainings WHERE status = 'succeeded' AND meta_json LIKE '%"keep":"pending"%'`).all() as Row[]) keepInBackground(r);
   const rows = db().prepare("SELECT * FROM trainings WHERE status = 'running' AND external_id IS NOT NULL").all() as Row[];
   await Promise.all(
     rows.map((r) =>
@@ -355,6 +366,47 @@ export async function pollTrainings(): Promise<void> {
       }),
     ),
   );
+}
+
+/** Downloads of hosted trainers' LoRAs into Fuobe's folder, by training id (shared across hot reloads). */
+declare global {
+  var __fuobeLoraKeeps: Map<string, Promise<void>> | undefined;
+}
+const keeping = (): Map<string, Promise<void>> => (globalThis.__fuobeLoraKeeps ??= new Map());
+
+/** Wait for the LoRA copies still downloading (tests, and a clean shutdown). */
+export async function trainedCopiesSettled(): Promise<void> {
+  while (keeping().size) await Promise.all([...keeping().values()]);
+}
+
+function setKeep(id: string, keep: Meta["keep"], message?: string | null) {
+  const r = db().prepare("SELECT meta_json FROM trainings WHERE id = ?").get(id) as Pick<Row, "meta_json"> | undefined;
+  if (!r) return;
+  update(id, { meta_json: JSON.stringify({ ...metaOf(r), keep }), ...(message !== undefined && { message }) });
+}
+
+/**
+ * Fuobe's own copy of a LoRA a hosted trainer made (fal's storage isn't forever), downloaded in the background so the
+ * runner's polling never waits on it (a FLUX LoRA is hundreds of MB). Until it lands, fal's URL serves cloud runs and
+ * the GPU downloads it from there; once it lands the element's LoRA is marked as Fuobe's own.
+ */
+function keepInBackground(r: Pick<Row, "id" | "element_id" | "meta_json">) {
+  if (keeping().has(r.id)) return;
+  const meta = metaOf(r);
+  const el = getElement(r.element_id);
+  const lora = el?.loras.find((l) => l.file === meta.file && l.url);
+  if (!el || !lora?.url || !meta.file) return setKeep(r.id, "failed");
+  const { file, url } = { file: meta.file, url: lora.url };
+  const job = keepTrainedLora(file, { url })
+    .then(() => {
+      recordTrainedMirror(file, "fal", url);
+      const now = getElement(r.element_id);
+      if (now) updateElement(r.element_id, { loras: now.loras.map((l) => (l.file === file && l.url === url ? { ...l, own: true as const } : l)) });
+      setKeep(r.id, "kept");
+    })
+    .catch((e) => setKeep(r.id, "failed", `The LoRA is on fal, but Fuobe couldn't keep a copy (${(e as Error).message}): your GPU downloads it from fal when a run needs it`))
+    .finally(() => keeping().delete(r.id));
+  keeping().set(r.id, job);
 }
 
 /** The LoRA a finished training puts on the element. */
@@ -383,9 +435,15 @@ async function pollOne(r: Row) {
   if (r.provider === "demo") {
     const p = Math.min(1, (Date.now() - r.created_at) / DEMO_TRAINING_MS);
     if (p < 1) return update(r.id, { progress: p, message: `Demo training · step ${Math.round(p * t.steps)}/${t.steps}` });
-    // Nothing real was trained: the element keeps working from its photos.
-    addIdentity(r.element_id, trainedLora(r, t, file, { demo: true }));
-    return done(r, "Demo: no LoRA was trained. Add a fal.ai key or your AI-Toolkit in Settings, then train again");
+    // Nothing real was trained: the element keeps working from its photos, or from the real LoRA it already has.
+    const added = addIdentity(r.element_id, trainedLora(r, t, file, { demo: true }));
+    const fam = TRAINING_FAMILIES[t.family].name;
+    return done(
+      r,
+      added
+        ? "Demo: no LoRA was trained. Add a fal.ai key or your AI-Toolkit in Settings, then train again"
+        : `Demo: no LoRA was trained, so the ${fam} Soul ID you trained before stays. Add a fal.ai key or your AI-Toolkit in Settings to retrain`,
+    );
   }
 
   if (r.provider === "fal") {
@@ -401,20 +459,15 @@ async function pollOne(r: Row) {
     const out = (await falFetch(meta.responseUrl!)) as Record<string, unknown>;
     const url = trainedLoraUrl(t, out);
     if (!url) return fail(r.id, r.element_id, `No LoRA in fal's response: ${JSON.stringify(out).slice(0, 200)}`);
-    // Fuobe keeps its own copy (fal's storage isn't forever): open runs copy it into ComfyUI, cloud runs send it again
-    // once fal's copy is old. fal's URL serves cloud runs until then.
-    update(r.id, { message: "Saving the LoRA" });
-    let message: string | null = null;
-    let own = false;
-    try {
-      await keepTrainedLora(file, { url });
-      own = true;
-    } catch (e) {
-      message = `The LoRA is on fal, but Fuobe couldn't keep a copy (${(e as Error).message}): your GPU downloads it from fal when a run needs it`;
-    }
+    // The LoRA runs at once from fal's URL (cloud runs use it, the GPU downloads it); Fuobe's own copy follows in the
+    // background (keepInBackground), for when fal's copy is gone.
     recordTrainedMirror(file, "fal", url);
-    addIdentity(r.element_id, trainedLora(r, t, file, { url, ...(own && { own: true as const }) }));
-    return done(r, message);
+    addIdentity(r.element_id, trainedLora(r, t, file, { url }));
+    const finished = { ...r, meta_json: JSON.stringify({ ...meta, file, keep: "pending" }) };
+    update(r.id, { meta_json: finished.meta_json });
+    done(r);
+    keepInBackground(finished);
+    return;
   }
 
   // AI-Toolkit
@@ -433,23 +486,25 @@ async function pollOne(r: Row) {
   const latest = files.at(-1);
   if (!latest) return fail(r.id, r.element_id, "AI-Toolkit finished but saved no .safetensors file");
   const lorasDir = getSetting("comfyLorasDir");
-  let message: string | null = null;
-  let own = false;
-  if (fs.existsSync(latest)) {
-    // Fuobe's copy (for cloud runs and safe keeping), then ComfyUI's.
-    await keepTrainedLora(file, { path: latest });
-    own = true;
-    if (lorasDir) {
-      const dest = lorasPath(lorasDir, file);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.copyFileSync(latest, dest);
+  const fam = TRAINING_FAMILIES[t.family];
+  if (!fs.existsSync(latest)) {
+    // AI-Toolkit runs on another machine: the file has to be copied by hand. A family with no model on the GPU runs
+    // only in the cloud, which needs Fuobe to have the file: nothing goes on the element until it's attached here.
+    if (!fam.lead.open) {
+      return done(r, `AI-Toolkit saved the LoRA on its own machine (${latest}). ${fam.name} runs only in the cloud, so Fuobe needs the file: copy it into the LoRA folder on this machine (Settings → LoRAs) as ${file}, then attach it under Train anywhere`);
     }
-  } else {
-    // AI-Toolkit runs on another machine: the file has to be copied by hand.
-    message = `Copy ${latest} to ComfyUI/models/loras/${file}`;
+    addIdentity(r.element_id, trainedLora(r, t, file, {}));
+    return done(r, `Copy ${latest} to ComfyUI/models/loras/${file}`);
   }
-  addIdentity(r.element_id, trainedLora(r, t, file, own ? { own: true } : {}));
-  return done(r, message);
+  // Fuobe's copy (for cloud runs and safe keeping), then ComfyUI's.
+  await keepTrainedLora(file, { path: latest });
+  if (lorasDir) {
+    const dest = lorasPath(lorasDir, file);
+    await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+    await fs.promises.copyFile(latest, dest);
+  }
+  addIdentity(r.element_id, trainedLora(r, t, file, { own: true }));
+  return done(r);
 }
 
 function done(r: Row, message: string | null = null) {
@@ -504,6 +559,7 @@ export async function attachLora(elementId: string, input: { file: string; trigg
   const file = input.file.trim().replace(/^\/+/, "");
   if (!/\.safetensors$/.test(file) || file.includes("..")) throw new Error("Enter the LoRA's file name inside ComfyUI/models/loras, ending in .safetensors");
   const family = input.family ?? "z-image-turbo";
+  const fam = TRAINING_FAMILIES[family];
   const dir = getSetting("comfyLorasDir");
   let own = !!ownCopy(file);
   if (!own && dir) {
@@ -517,6 +573,10 @@ export async function attachLora(elementId: string, input: { file: string; trigg
       await keepTrainedLora(file, { path: src });
       own = true;
     }
+  }
+  // A family with no model on the GPU runs only in the cloud, from Fuobe's copy of the file.
+  if (!own && !fam.lead.open) {
+    throw new Error(`${fam.name} runs only in the cloud, so Fuobe needs the file itself: put ${file} in the LoRA folder on this machine (Settings → LoRAs), then attach it again`);
   }
   addIdentity(elementId, {
     engine: "open",

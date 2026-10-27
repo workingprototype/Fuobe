@@ -1830,6 +1830,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "fast"
     ],
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Z-Image Turbo / base weights are Apache-2.0 (HF Tongyi-MAI/Z-Image-Turbo, Tongyi-MAI/Z-Image)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "1:1"
     },
@@ -1900,6 +1906,12 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4:5"
       ],
       "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
     },
     "defaults": {
       "aspectRatio": "1:1"
@@ -2003,6 +2015,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       "maxOutputs": 4,
       "maxImages": 10
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "1:1"
     },
@@ -2074,6 +2092,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       ],
       "maxOutputs": 4,
       "maxImages": 10
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
     },
     "pricing": {
       "unit": "megapixel",
@@ -2180,6 +2204,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "fast"
     ],
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "FLUX.2 [klein] 4B is Apache-2.0 (HF black-forest-labs/FLUX.2-klein-4B)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "1:1"
     },
@@ -2249,6 +2279,12 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4:5"
       ]
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.1 / 2.2 weights are Apache-2.0",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9"
     },
@@ -2314,6 +2350,12 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4:5"
       ],
       "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "FLUX.1 [dev] Non-Commercial License",
+      "commercial": false,
+      "note": "Weights are non-commercial; the fal page says 'All generated images are cleared for commercial use' (fal's licence, not the weights')",
+      "checked": "2026-10-23"
     },
     "defaults": {
       "aspectRatio": "3:4"
@@ -2381,6 +2423,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       ],
       "maxOutputs": 4
     },
+    "licence": {
+      "licence": "FLUX.1 [dev] Non-Commercial License",
+      "commercial": false,
+      "note": "Weights are non-commercial; the fal page says 'All generated images are cleared for commercial use' (fal's licence, not the weights')",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "3:4"
     },
@@ -2447,6 +2495,12 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4:5"
       ],
       "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "FLUX [dev] Non-Commercial License",
+      "commercial": false,
+      "note": "Weights are non-commercial; fal marks the hosted endpoint 'Commercial use'",
+      "checked": "2026-10-23"
     },
     "defaults": {
       "aspectRatio": "3:4"
@@ -2518,6 +2572,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "fast"
     ],
+    "licence": {
+      "licence": "FLUX Non-Commercial License",
+      "commercial": false,
+      "note": "FLUX.2 [klein] 9B weights are non-commercial; fal's page marks its own API output 'Commercial use'",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "3:4"
     },
@@ -2588,6 +2648,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "fast"
     ],
+    "licence": {
+      "licence": "Krea 2 Community License (gated, revenue tiers)",
+      "commercial": null,
+      "note": "Free for individuals and small teams; an enterprise tier above Krea's thresholds (round-1 research). Not a default for Originals",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "3:4"
     },
@@ -6679,6 +6745,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       "endFrame": true,
       "maxImages": 1
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.1 / 2.2 weights are Apache-2.0",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9",
       "duration": 5,
@@ -6918,6 +6990,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "audio"
     ],
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9",
       "duration": 5,
@@ -16843,6 +16921,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "maxOutputs": 4,
       "maxImages": 1
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Z-Image Turbo / base weights are Apache-2.0 (HF Tongyi-MAI/Z-Image-Turbo, Tongyi-MAI/Z-Image)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "3:4",
       "resolution": "720p"
@@ -16969,6 +17053,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "negativePrompt": true,
       "seed": true,
       "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
     },
     "defaults": {
       "aspectRatio": "3:4",
@@ -17188,6 +17278,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "seed": true,
       "maxOutputs": 4
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Z-Image Turbo / base weights are Apache-2.0 (HF Tongyi-MAI/Z-Image-Turbo, Tongyi-MAI/Z-Image)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9",
       "resolution": "720p"
@@ -17369,6 +17465,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       ],
       "maxImages": 1
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.1 / 2.2 weights are Apache-2.0",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "auto",
       "duration": 5,
@@ -17519,6 +17621,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
         "4:5"
       ],
       "maxImages": 1
+    },
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1)",
+      "checked": "2026-10-23"
     },
     "defaults": {
       "aspectRatio": "auto",
@@ -17996,6 +18104,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
     "badges": [
       "audio"
     ],
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9",
       "duration": 5,

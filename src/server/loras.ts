@@ -426,9 +426,10 @@ export function ownCopy(file: string): string | null {
  */
 export async function keepTrainedLora(file: string, from: { path?: string; url?: string }): Promise<string> {
   const dest = lorasPath(TRAINED_DIR, file);
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  await fs.promises.mkdir(path.dirname(dest), { recursive: true });
   if (from.path) {
-    if (path.resolve(from.path) !== dest) fs.copyFileSync(from.path, dest);
+    // Asynchronous: a LoRA of a few hundred MB doesn't hold up the server while it copies.
+    if (path.resolve(from.path) !== dest) await fs.promises.copyFile(from.path, dest);
     return dest;
   }
   if (!from.url) throw new LoraError(`Nowhere to copy ${file} from`);

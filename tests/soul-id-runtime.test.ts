@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { onEngine } from "@/lib/catalog/engines";
 import { getModel } from "@/lib/catalog";
-import { identityFor, SOUL_ID_COPY } from "@/lib/catalog/training";
+import { identityFor, identityKey, SOUL_ID_COPY } from "@/lib/catalog/training";
 
 // fal's storage upload goes through its client: the dataset zip and a LoRA sent to fal land here instead.
 const uploads = vi.hoisted(() => [] as { data: Buffer; type: string; name?: string }[]);
@@ -27,7 +27,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-soul-id-"));
 process.env.FUOBE_DATA_DIR = dir;
 const { db } = await import("@/server/db");
 const { createElement, getElement, updateElement } = await import("@/server/elements");
-const { startTraining, pollTrainings, listTrainings, trainingKit, attachLora, RETIRED_SOUL_ID } = await import("@/server/training");
+const { startTraining, pollTrainings, listTrainings, trainingKit, attachLora, trainedCopiesSettled, RETIRED_SOUL_ID } = await import("@/server/training");
 const { ensureLorasOnComfy, prepareCloudLoras, listLoraCopies, TRAINED_DIR } = await import("@/server/loras");
 const { setSetting } = await import("@/server/settings");
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -59,7 +59,9 @@ beforeEach(() => {
   setSetting("engineMode", "both");
   setSetting("demoMode", "auto");
 });
-afterEach(() => {
+afterEach(async () => {
+  // LoRA copies still downloading in the background finish on the fake network.
+  await trainedCopiesSettled();
   globalThis.fetch = realFetch;
 });
 
@@ -89,6 +91,9 @@ describe("starting a Soul ID training", () => {
   it("refuses too few photos, the wrong kind of training and a Higgsfield target", () => {
     const few = character(3);
     expect(() => startTraining(few.id, "fal-z-image", { consent: true })).toThrow(/at least 5 photos/);
+    // FLUX's portrait trainer crops to a face: a place doesn't train on it.
+    const room = createElement({ name: "Loft", kind: "location", references: photos(6) });
+    expect(() => startTraining(room.id, "fal-flux1-portrait")).toThrow(/for characters only/);
     const el = character();
     expect(() => startTraining(el.id, "fal-z-image-style", { consent: true })).toThrow(/for styles/);
     expect(() => startTraining(el.id, "soul-id-v2", { consent: true })).toThrow(/Unknown training target/);
@@ -154,6 +159,7 @@ describe("a finished training", () => {
     const { id, el } = running({ target: "fal-z-image", provider: "fal", externalId: "req-2", meta: { statusUrl: "https://queue.fal.test/s/2", responseUrl: "https://queue.fal.test/r/2", family: "z-image-turbo" } });
     await pollTrainings();
     expect(listTrainings(el.id).find((t) => t.id === id)).toMatchObject({ status: "succeeded", message: null });
+    await trainedCopiesSettled();
     const after = getElement(el.id)!;
     expect(after.status).toBe("ready");
     const l = after.loras[0];
@@ -173,6 +179,61 @@ describe("a finished training", () => {
       .run(el.id, JSON.stringify({ statusUrl: "https://queue.fal.test/s/3", responseUrl: "https://queue.fal.test/r/3" }), Date.now(), Date.now());
     await pollTrainings();
     expect(getElement(el.id)!.loras.map((x) => x.family)).toEqual(["qwen-image-2512", "z-image-turbo"]);
+  });
+
+  it("finishes a fal training without waiting for Fuobe's copy of the LoRA, which follows in the background", async () => {
+    const LORA = Buffer.from("big-lora".repeat(64));
+    let release = () => {};
+    routes["https://queue.fal.test/s/bg"] = () => json({ status: "COMPLETED" });
+    routes["https://queue.fal.test/r/bg"] = () => json({ diffusers_lora_file: { url: "https://v3.fal.media/files/bg.safetensors" } });
+    // The download hangs until released: the runner's poll must not wait on it.
+    routes["https://v3.fal.media/files/bg.safetensors"] = (c) =>
+      c.method === "HEAD" ? new Response(null, { status: 200 }) : (new Promise<Response>((resolve) => (release = () => resolve(new Response(LORA, { headers: { "content-length": String(LORA.length) } })))) as unknown as Response);
+    const { id, el } = running({ target: "fal-flux2-dev", provider: "fal", externalId: "req-bg", meta: { statusUrl: "https://queue.fal.test/s/bg", responseUrl: "https://queue.fal.test/r/bg", family: "flux2-dev" } });
+    await pollTrainings();
+    expect(listTrainings(el.id).find((t) => t.id === id)).toMatchObject({ status: "succeeded" });
+    expect(getElement(el.id)!.status).toBe("ready");
+    const before = getElement(el.id)!.loras[0];
+    expect(before).toMatchObject({ family: "flux2-dev", url: "https://v3.fal.media/files/bg.safetensors" });
+    expect(before.own).toBeUndefined();
+    // It already runs on both engines from fal's URL; the next poll doesn't start a second copy.
+    expect(identityFor([before], getModel("oss-flux2-dev")!)).toBe(before);
+    await pollTrainings();
+    await wait(() => calls.some((c) => c.url === "https://v3.fal.media/files/bg.safetensors" && c.method === "GET"));
+    release();
+    await trainedCopiesSettled();
+    const after = getElement(el.id)!.loras[0];
+    expect(after).toMatchObject({ own: true, url: before.url });
+    expect(fs.readFileSync(path.join(TRAINED_DIR, after.file))).toEqual(LORA);
+    expect(calls.filter((c) => c.url === "https://v3.fal.media/files/bg.safetensors" && c.method === "GET")).toHaveLength(1);
+  });
+
+  it("starts again a LoRA copy a restart cut off, and says so when it can't be kept", async () => {
+    const el = character();
+    const file = "fuobe/restart-abc123.safetensors";
+    updateElement(el.id, { loras: [{ engine: "cloud", modelId: "fuobe-soul", family: "z-image-turbo", file, url: "https://v3.fal.media/files/restart.safetensors", trigger: "t" }] });
+    const insert = (id: string) =>
+      db()
+        .prepare(`INSERT INTO trainings (id, element_id, target, provider, status, external_id, meta_json, trigger_word, created_at, updated_at) VALUES (?, ?, 'fal-z-image', 'fal', 'succeeded', 'r', ?, 't', ?, ?)`)
+        .run(id, el.id, JSON.stringify({ file, keep: "pending" }), Date.now(), Date.now());
+    insert("trestart1");
+    routes["https://v3.fal.media/files/restart.safetensors"] = () => new Response(Buffer.from("restart"), { headers: { "content-length": "7" } });
+    await pollTrainings();
+    await trainedCopiesSettled();
+    expect(getElement(el.id)!.loras[0].own).toBe(true);
+    expect(JSON.parse((db().prepare("SELECT meta_json FROM trainings WHERE id = 'trestart1'").get() as { meta_json: string }).meta_json).keep).toBe("kept");
+    // fal's copy gone: the training says the GPU fetches it from fal, and it isn't tried again.
+    updateElement(el.id, { loras: [{ engine: "cloud", modelId: "fuobe-soul", family: "z-image-turbo", file: "fuobe/gone-abc123.safetensors", url: "https://v3.fal.media/files/gone.safetensors", trigger: "t" }] });
+    db()
+      .prepare(`INSERT INTO trainings (id, element_id, target, provider, status, external_id, meta_json, trigger_word, created_at, updated_at) VALUES ('trestart2', ?, 'fal-z-image', 'fal', 'succeeded', 'r', ?, 't', ?, ?)`)
+      .run(el.id, JSON.stringify({ file: "fuobe/gone-abc123.safetensors", keep: "pending" }), Date.now(), Date.now());
+    await pollTrainings();
+    await trainedCopiesSettled();
+    expect(listTrainings(el.id).find((t) => t.id === "trestart2")?.message).toMatch(/couldn't keep a copy/);
+    const tries = calls.filter((c) => c.url.includes("gone.safetensors")).length;
+    await pollTrainings();
+    await trainedCopiesSettled();
+    expect(calls.filter((c) => c.url.includes("gone.safetensors"))).toHaveLength(tries);
   });
 
   it("reads Krea 2's LoRA from lora_file and records it for Krea 2's hosted LoRA model", async () => {
@@ -236,6 +297,40 @@ describe("a finished training", () => {
     expect(identityFor([l], onEngine(getModel("fuobe-soul")!, "cloud"))).toBeUndefined();
   });
 
+  it("never lets a demo retrain replace a real Soul ID of the family", async () => {
+    // GPU trained for real; no fal key, demo mode auto: the cloud card's Retrain runs as a demo.
+    setSetting("falKey", "");
+    const { el } = running({ target: "fal-z-image", provider: "demo", externalId: "demo", age: 9_000 });
+    const real = { engine: "open" as const, modelId: "fuobe-soul", family: "z-image-turbo" as const, target: "aitk-z-image", file: "fuobe/real-abc123.safetensors", trigger: "mayafz", own: true as const, trainedAt: 1 };
+    updateElement(el.id, { loras: [real] });
+    await pollTrainings();
+    expect(getElement(el.id)!.loras).toEqual([real]);
+    expect(listTrainings(el.id)[0].message).toMatch(/Fuobe Soul and Soul Cinema Soul ID you trained before stays/);
+    expect(identityFor(getElement(el.id)!.loras, onEngine(getModel("fuobe-soul")!, "open"))).toEqual(real);
+    // The same through the API's own path: a demo started now, finished later.
+    const t = startTraining(el.id, "fal-z-image", { consent: true });
+    expect(t.provider).toBe("demo");
+    db().prepare("UPDATE trainings SET created_at = ? WHERE id = ?").run(Date.now() - 9_000, t.id);
+    await pollTrainings();
+    expect(getElement(el.id)!.loras).toEqual([real]);
+  });
+
+  it("puts nothing on the element when a remote AI-Toolkit trains a family that runs only in the cloud, and says how to bring the file", async () => {
+    routes["http://aitk.test/api/jobs?id=job-k4"] = () => json({ job: { status: "completed" } });
+    routes["http://aitk.test/api/jobs/job-k4/files"] = () => json({ files: [{ path: "/elsewhere/output/maya_000002000.safetensors" }] });
+    const { id, el } = running({ target: "aitk-flux2-klein-4b", provider: "ai-toolkit", externalId: "job-k4" });
+    await pollTrainings();
+    expect(getElement(el.id)!.loras).toEqual([]);
+    expect(listTrainings(el.id).find((t) => t.id === id)).toMatchObject({ status: "succeeded", message: expect.stringMatching(/FLUX\.2 \[klein\] 4B runs only in the cloud, so Fuobe needs the file/) });
+    // A family with a GPU model still gets the LoRA, to copy into ComfyUI by hand.
+    routes["http://aitk.test/api/jobs?id=job-z"] = () => json({ job: { status: "completed" } });
+    routes["http://aitk.test/api/jobs/job-z/files"] = () => json({ files: [{ path: "/elsewhere/output/maya_z.safetensors" }] });
+    const z = running({ target: "aitk-z-image", provider: "ai-toolkit", externalId: "job-z" });
+    await pollTrainings();
+    expect(getElement(z.el.id)!.loras[0]).toMatchObject({ engine: "open", family: "z-image-turbo" });
+    expect(listTrainings(z.el.id)[0].message).toMatch(/^Copy \/elsewhere\/output\/maya_z\.safetensors to ComfyUI/);
+  });
+
   it("retires a Higgsfield Soul ID training that was still running", async () => {
     const { id, el } = running({ target: "soul-id-v2", provider: "higgsfield", externalId: "hf-ref" });
     await pollTrainings();
@@ -280,5 +375,17 @@ describe("training anywhere", () => {
     expect(flux).toMatchObject({ modelId: "oss-flux1-dev", own: true });
     expect(identityFor([flux], getModel("oss-flux1-krea")!)).toBe(flux);
     expect(identityFor([flux], getModel("flux-1-dev-lora-cloud")!)).toBe(flux);
+    // Removing the FLUX one in the Train dialog keeps the Z-Image one with the same file.
+    const route = await import("@/app/api/elements/[id]/route");
+    const res = await route.PATCH(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ removeIdentities: [identityKey(flux)] }) }),
+      { params: Promise.resolve({ id: el.id }) } as Parameters<typeof route.PATCH>[1],
+    );
+    expect(res.status).toBe(200);
+    expect(getElement(el.id)!.loras.map((l) => l.family)).toEqual(["z-image-turbo"]);
+    // A cloud-only family needs the file here to send it: a name alone can't run anywhere.
+    await expect(attachLora(el.id, { file: "mine/elsewhere.safetensors", trigger: "t", family: "flux2-klein-4b" })).rejects.toThrow(/runs only in the cloud, so Fuobe needs the file/);
+    await attachLora(el.id, { file: "mine/maya.safetensors", trigger: "t", family: "flux2-klein-4b" });
+    expect(getElement(el.id)!.loras.find((l) => l.family === "flux2-klein-4b")).toMatchObject({ own: true, modelId: "flux-2-klein-4b-cloud" });
   });
 });

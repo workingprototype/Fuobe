@@ -76,6 +76,8 @@ export interface TrainingTarget {
   provider: TrainingProvider;
   family: TrainingFamily;
   kinds: TrainingKind[];
+  /** Only these kinds of element (FLUX's portrait trainer crops to faces: people only); every kind of its training kinds when unset. */
+  onlyFor?: ElementKind[];
   /** fal: the hosted trainer's endpoint (HOSTED_TRAINERS). */
   trainer?: string;
   steps: number;
@@ -334,6 +336,7 @@ export const TRAINING_TARGETS: TrainingTarget[] = [
     provider: "fal",
     family: "flux1-dev",
     kinds: ["subject"],
+    onlyFor: ["character"],
     trainer: "fal-ai/flux-lora-portrait-trainer",
     steps: 2500,
     description: `fal's FLUX portrait trainer: it crops to the face and trains at several sizes. ${TO_FAL}`,
@@ -417,8 +420,12 @@ export const getTrainingTarget = (id: string) => TRAINING_TARGETS.find((t) => t.
 /** A style element trains as a style; characters, places and objects as subjects. */
 export const trainingKind = (kind: ElementKind): TrainingKind => (kind === "style" ? "style" : "subject");
 
+/** This target trains this kind of element: its training kind, and the element kinds it's limited to (people for a face trainer). */
+export const trainsKind = (t: Pick<TrainingTarget, "kinds" | "onlyFor">, kind: ElementKind): boolean =>
+  kind !== "voice" && t.kinds.includes(trainingKind(kind)) && (!t.onlyFor || t.onlyFor.includes(kind));
+
 /** The targets an element of this kind can train on, in the dialog's order. */
-export const targetsFor = (kind: ElementKind): TrainingTarget[] => (kind === "voice" ? [] : TRAINING_TARGETS.filter((t) => t.kinds.includes(trainingKind(kind))));
+export const targetsFor = (kind: ElementKind): TrainingTarget[] => TRAINING_TARGETS.filter((t) => trainsKind(t, kind));
 
 /** Only a person needs the consent line (biometric data). */
 export const needsConsent = (kind: ElementKind): boolean => kind === "character";
@@ -484,8 +491,19 @@ export function identityFor(loras: ElementLora[], model: Pick<ModelDef, "id" | "
   return fits.sort((a, b) => Number(b.engine === model.engine) - Number(a.engine === model.engine) || (b.trainedAt ?? 0) - (a.trainedAt ?? 0))[0];
 }
 
-/** How the Train dialog names one of an element's LoRAs to remove it: its file, its Soul ID, or its model. */
-export const identityKey = (l: Pick<ElementLora, "file" | "referenceId" | "modelId">): string => l.file || l.referenceId || l.modelId;
+/**
+ * How the Train dialog names one of an element's LoRAs to remove it: a Higgsfield Soul ID by its id, a trained LoRA by
+ * its family and file (one file attached for two families is two LoRAs).
+ */
+export const identityKey = (l: Pick<ElementLora, "file" | "referenceId" | "modelId" | "family">): string =>
+  l.referenceId || `${loraFamily(l) ?? l.modelId}:${l.file || l.modelId}`;
+
+/** A trained LoRA some run can use (not a demo's stand-in or a Higgsfield Soul ID, and on an engine where its family has a model). */
+export function runsSomewhere(l: Pick<ElementLora, "file" | "url" | "own" | "referenceId" | "demo" | "family" | "modelId">): boolean {
+  const fam = loraFamily(l);
+  const lead = fam ? TRAINING_FAMILIES[fam].lead : { open: l.modelId, cloud: l.modelId };
+  return (!!lead.open && usableOn(l, "open")) || (!!lead.cloud && usableOn(l, "cloud"));
+}
 
 /** The families an element has a trained LoRA for. */
 export const trainedFamilies = (loras: ElementLora[]): TrainingFamily[] => [...new Set(loras.map(loraFamily).filter((f): f is TrainingFamily => !!f))];
@@ -526,6 +544,10 @@ export function falTrainingInput(t: TrainingTarget, zipUrl: string, caption: str
   if (trigger && f.trigger_phrase) body.trigger_phrase = trigger;
   else if (trigger && f.trigger_word) body.trigger_word = trigger;
   if (f.learning_rate && t.learningRate !== undefined) body.learning_rate = t.learningRate;
+  // The FLUX.2 trainers name the LoRA's weights fal's way unless asked ("Dictates the naming scheme for the output
+  // weights", schema read 2026-10-27): a family that also runs on ComfyUI gets ComfyUI's names, the same file an
+  // AI-Toolkit training makes, which Fuobe sends to fal for cloud runs too.
+  if (f.output_lora_format?.enum?.includes("comfy") && TRAINING_FAMILIES[t.family].lead.open) body.output_lora_format = "comfy";
   for (const [k, v] of Object.entries(t.extra ?? {})) if (f[k] && (!f[k].enum || f[k].enum.includes(v as string | number))) body[k] = v;
   return body;
 }

@@ -590,6 +590,18 @@ export interface Pricing {
   animationUsd?: number;
 }
 
+/** A model's weights licence, as read in the research: information, never a gate (the owner's decision of 2026-10-27). */
+export interface ModelLicence {
+  /** As written ("FLUX.1 [dev] Non-Commercial License"). */
+  licence: string;
+  /** The weights allow selling outputs: true, false (non-commercial) or null (a revenue tier decides). */
+  commercial: boolean | null;
+  /** What else the research noted (fal's own terms for its hosted outputs). */
+  note?: string;
+  /** When it was read (YYYY-MM-DD). */
+  checked?: string;
+}
+
 export interface ModelDef {
   id: string;
   name: string;
@@ -605,6 +617,11 @@ export interface ModelDef {
   pricing?: Pricing;
   /** Trained identities this model accepts by id (Higgsfield Soul ID). */
   identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
+  /**
+   * The licence of the open weights a hosted model runs (generated from the research), as information: nothing is
+   * hidden or refused for it; the admin turns models on or off in Settings.
+   */
+  licence?: ModelLicence;
   /**
    * A Fuobe Original that runs on both engines: its routes cover ComfyUI and the hosted open weights on fal /
    * Replicate. `engine` is the one it shows first; a request picks one with GenerationRequest.engine, and

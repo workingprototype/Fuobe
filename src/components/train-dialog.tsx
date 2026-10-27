@@ -141,9 +141,10 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
   const originals = families.filter((f) => TRAINING_FAMILIES[f].original);
   const more = families.filter((f) => !TRAINING_FAMILIES[f].original);
   const busyAny = q.data?.items.some((t) => t.status === "queued" || t.status === "running");
-  // "Retrain for Fuobe Soul" on a Higgsfield Soul ID: the first option that can run now.
+  // "Retrain for Fuobe Soul" on a Higgsfield Soul ID: the first option that can run now. Once a real Fuobe Soul LoRA
+  // is trained, the old Soul ID is only there to remove.
   const retrainTarget = targets.find((t) => t.family === "z-image-turbo" && !t.blocker && !t.demo) ?? targets.find((t) => t.family === "z-image-turbo" && !t.blocker);
-
+  const replaced = hasFamily("z-image-turbo");
 
   const anyTrained = families.some((g) => hasFamily(g));
   /** One family: its models, its licence (information), and where it trains with each one's price first. */
@@ -198,7 +199,8 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                 </div>
                 {!busy && (t.blocker || t.demo) && (
                   <p className="mt-2 text-[12px] text-muted-foreground">
-                    {t.blocker ?? (t.provider === "fal" ? "No fal.ai key yet: this runs as a demo and trains nothing." : "No AI-Toolkit set up yet: this runs as a demo and trains nothing.")}{" "}
+                    {t.blocker ??
+                      `${t.provider === "fal" ? "No fal.ai key yet" : "No AI-Toolkit set up yet"}: this runs as a demo and trains nothing${hasFamily(f) ? ", and the Soul ID you trained stays" : ""}.`}{" "}
                     <Link href="/settings" className="text-brand-text underline underline-offset-2">
                       Open Settings
                     </Link>
@@ -298,20 +300,28 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
               );
             })}
             {legacy.map((l) => (
-              <div key={identityKey(l)} className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 px-3 py-2 text-[13px]">
-                <AlertTriangle className="size-4 shrink-0 text-warning" />
-                <span className="min-w-0 flex-1">
+              <div key={identityKey(l)} className={cn("flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-[13px]", !replaced && "border-warning/40")}>
+                {replaced ? <CircleCheck className="size-4 shrink-0 text-muted-foreground" /> : <AlertTriangle className="size-4 shrink-0 text-warning" />}
+                {/* Wide enough to read on a phone: the buttons wrap under it there. */}
+                <span className="min-w-0 flex-1 basis-48">
                   <span className="block font-medium">Higgsfield Soul ID</span>
-                  <span className="block text-[12px] text-muted-foreground">It can&apos;t be exported. Retrain on the same photos for Fuobe Soul.</span>
+                  <span className="block text-[12px] text-muted-foreground">
+                    {replaced ? "Your Fuobe Soul ID replaces it: remove it when you no longer need it." : "It can't be exported. Retrain on the same photos for Fuobe Soul."}
+                  </span>
                 </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={!retrainTarget || !!tooFew || (person && !consent) || start.isPending || busyAny}
-                  onClick={() => retrainTarget && start.mutate(retrainTarget.id)}
-                >
-                  <RotateCcw /> Retrain for Fuobe Soul
-                </Button>
+                {!replaced && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={!retrainTarget || !!tooFew || (person && !consent) || start.isPending || busyAny}
+                    onClick={() => retrainTarget && start.mutate(retrainTarget.id)}
+                  >
+                    <RotateCcw /> Retrain for Fuobe Soul
+                  </Button>
+                )}
+                <button onClick={() => void remove(l)} className="shrink-0 p-1 text-muted-foreground hover:text-destructive" aria-label="Remove the Higgsfield Soul ID">
+                  <Trash2 className="size-3.5" />
+                </button>
               </div>
             ))}
           </section>

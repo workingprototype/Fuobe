@@ -1827,6 +1827,14 @@ for m in M:
     }
     if m["badges"]:
         d["badges"] = m["badges"]
+    # The open weights' licence, from the hosted LoRA endpoint the model runs on or with (hostedLoraEndpoints): data the
+    # admin reads in Settings, never a gate (the owner's decision of 2026-10-27).
+    lic = next((HOSTED_LORA[(r["provider"], ep)] for r in routes for ep in (r["endpoint"], r.get("loraEndpoint"))
+                if ep and HOSTED_LORA.get((r["provider"], ep), {}).get("baseLicence")), None)
+    if lic:
+        d["licence"] = {"licence": lic["baseLicence"], "commercial": lic.get("commercialWeights"),
+                        **({"note": lic["licenceNote"]} if lic.get("licenceNote") else {}),
+                        **({"checked": lic["checked"]} if lic.get("checked") else {})}
     defaults = {k: v for k, v in m["defaults"].items()}
     # Drop defaults the model can't take.
     if "aspectRatio" in defaults and defaults["aspectRatio"] not in opts.get("aspectRatios", [defaults["aspectRatio"]]):
