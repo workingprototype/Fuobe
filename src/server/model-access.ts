@@ -1,16 +1,22 @@
 import "server-only";
 import { MODELS } from "@/lib/catalog";
 import { onEngine, providerEngine } from "@/lib/catalog/engines";
+import { LORA_LIBRARY, MOTION_EFFECT_LORAS } from "@/lib/catalog/lora-library.generated";
 import { libraryEntry, loraName } from "@/lib/catalog/loras";
 import type { Engine, LoraRef, ModelDef, ModelRoute } from "@/lib/catalog/types";
 import type { ManifestWorkflow } from "@/lib/comfy";
 import {
   BROWSER_LICENCE,
+  CLASS_HINT,
+  CLASS_LABEL,
+  LICENCE_CLASSES,
   llmLicence,
   licenceInfo,
   loraLicenceInfo,
   mergeLicences,
+  NODE_PACKS,
   paidApiLicence,
+  PROVIDER_NAME,
   workflowLicence,
   type LicenceInfo,
 } from "@/lib/licences";
@@ -23,8 +29,11 @@ import {
   offSwitches,
   parseAccess,
   routeOff,
+  switchLabel,
   type AccessChange,
+  type AccessList,
   type AccessSummary,
+  type ModelEntry,
   type FactsOf,
   type ModelAccess,
 } from "@/lib/model-access";
@@ -207,4 +216,78 @@ export function offeredLoras(loras: LoraRef[]): { loras: LoraRef[]; notes: strin
   }
   const notes = dropped.length ? [`${dropped.map((d) => loraName({ file: d.file })).join(", ")} ${dropped.length > 1 ? "are" : "is"} left out: turned off in ${ACCESS_PLACE}`] : [];
   return { loras: kept, notes, dropped };
+}
+
+// ---------------------------------------------------------------------------
+// Settings → Models & licences: everything with its licence and its switch
+
+const isOpenRoute = (r: ModelRoute) => providerEngine(r.provider) === "open";
+
+/** A model's licence as the list shows it: the open half names it, the cloud half is said beside it. */
+export function modelLicence(m: ModelDef): { licence: LicenceInfo; cloud?: LicenceInfo; packs: string[] } {
+  const open = m.routes.filter(isOpenRoute);
+  const cloud = m.routes.filter((r) => !isOpenRoute(r));
+  const packs = [...new Set(open.flatMap((r) => (r.provider === "comfyui" ? comfyFacts(r.endpoint).packs : [])))];
+  const openLicence = open.length ? mergeLicences([...new Map(open.map((r) => [r.endpoint, routeLicence(r, m)])).values()]) : undefined;
+  const cloudRoutes = cloud.filter((r) => r.provider !== "llm");
+  const cloudLicence = cloudRoutes.length ? paidApiLicence(m.vendor, cloudRoutes) : cloud.length ? routeLicence(cloud[0], m) : undefined;
+  if (openLicence) return { licence: openLicence, ...(cloudLicence && { cloud: cloudLicence }), packs };
+  return { licence: cloudLicence ?? { name: "Not recorded", class: "unknown", note: "" }, packs };
+}
+
+export function accessList(): AccessList {
+  const access = readAccess();
+  const models: ModelEntry[] = MODELS.map((m) => {
+    const { licence, cloud, packs } = modelLicence(m);
+    const others = { ...access, models: access.models.filter((x) => x !== m.id) };
+    const off = m.routes.map((r) => routeOff(m, r, others, factsOf)).filter((s): s is NonNullable<typeof s> => !!s);
+    const labels = [...new Set(off.map(switchLabel))];
+    const all = off.length === m.routes.length;
+    return {
+      id: m.id,
+      name: m.name,
+      vendor: m.vendor,
+      kind: m.kind,
+      ...(m.hidden && { hidden: true as const }),
+      engines: m.engines ?? [m.engine],
+      providers: [...new Set(m.routes.map((r) => r.provider))],
+      licence,
+      ...(cloud && { cloud }),
+      packs,
+      on: !access.models.includes(m.id),
+      offBy: all ? labels : [],
+      partly: all ? [] : labels,
+    };
+  });
+  const count = (f: (e: ModelEntry) => boolean) => models.filter(f).length;
+  const routeClasses = (id: string) => {
+    const m = MODELS.find((x) => x.id === id)!;
+    return new Set(m.routes.map((r) => factsOf(r, m).class));
+  };
+  const classesOf = new Map(models.map((e) => [e.id, routeClasses(e.id)]));
+  const loras = LORA_LIBRARY.map((e) => {
+    const row = MOTION_EFFECT_LORAS.find((r) => r.loras.includes(e.key));
+    const hold = row?.status === "licence-hold" ? "The research holds this licence: its Hugging Face and civitai pages disagree" : undefined;
+    return { file: e.file, name: e.name, group: e.group, base: e.base, licence: loraLicenceInfo(e.licence, e.page, hold), on: !access.loras.includes(e.file) };
+  });
+  return {
+    access,
+    classes: LICENCE_CLASSES.map((id) => ({
+      id,
+      label: CLASS_LABEL[id],
+      hint: CLASS_HINT[id],
+      models: count((e) => classesOf.get(e.id)!.has(id)),
+      loras: loras.filter((l) => l.licence.class === id).length,
+      on: !access.classes.includes(id),
+    })),
+    providers: [...new Set(MODELS.flatMap((m) => m.routes.map((r) => r.provider)))].map((id) => ({
+      id,
+      label: PROVIDER_NAME[id] ?? id,
+      models: count((e) => e.providers.includes(id)),
+      on: !access.providers.includes(id),
+    })),
+    packs: NODE_PACKS.map((p) => ({ ...p, models: count((e) => e.packs.includes(p.name)), on: !access.packs.includes(p.name) })),
+    models,
+    loras,
+  };
 }

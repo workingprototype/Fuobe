@@ -20,6 +20,7 @@ process.env.OLLAMA_URL = "http://127.0.0.1:9";
 const { GET: listModels } = await import("@/app/api/models/route");
 const { GET: status } = await import("@/app/api/status/route");
 const { POST: postGeneration } = await import("@/app/api/generations/route");
+const settingsRoute = await import("@/app/api/settings/models/route");
 const { changeAccess } = await import("@/server/model-access");
 const tools = await import("@/server/assist/tools");
 const { offlinePlan } = await import("@/server/assist/agent");
@@ -86,5 +87,24 @@ describe("Models & licences in listings and picks", () => {
     const res = await postGeneration(new Request("http://localhost/api/generations?preview=1", { method: "POST", body: JSON.stringify({ feature: "image", modelId: "oss-flux1-dev", prompt: "a cat" }) }));
     expect(res.status).toBe(422);
     expect(((await res.json()) as { error: string }).error).toMatch(/^FLUX\.1 \[dev\] is turned off in Settings → Models & licences \(Non-commercial is switched off\)/);
+  });
+
+  it("lists every model, LoRA and node pack with its licence, and flips switches through the settings API", async () => {
+    const list = (await (await settingsRoute.GET()).json()) as import("@/lib/model-access").AccessList;
+    expect(list.models.length).toBeGreaterThan(300);
+    expect(list.loras.length).toBe(114);
+    expect(list.packs.find((p) => p.name === "ComfyUI-Whisper")).toMatchObject({ licence: { class: "non-commercial" }, models: 1, on: true });
+    expect(list.models.find((m) => m.id === "fuobe-soul")).toMatchObject({ licence: { class: "commercial" }, cloud: { class: "paid-api" }, engines: ["open", "cloud"], on: true });
+    expect(list.loras.find((l) => l.file === "BTSMovieSet_LTX25_v1.safetensors")!.licence.note).toMatch(/research holds this licence/);
+    expect(list.classes.find((c) => c.id === "non-commercial")).toMatchObject({ on: true });
+    const put = (changes: unknown) => settingsRoute.PUT(new Request("http://localhost/api/settings/models", { method: "PUT", body: JSON.stringify({ changes }) }));
+    expect((await put([{ kind: "class", id: "free", on: false }])).status).toBe(400);
+    expect((await put([{ kind: "model", on: false }])).status).toBe(400);
+    expect((await put([])).status).toBe(400);
+    const after = (await (await put([{ kind: "provider", id: "fal", on: false }, { kind: "keepGpuOnlyLoras", on: true }])).json()) as import("@/lib/model-access").AccessList;
+    expect(after.access).toMatchObject({ providers: ["fal"], keepGpuOnlyLoras: true });
+    expect(after.providers.find((p) => p.id === "fal")!.on).toBe(false);
+    // A model only fal hosts is off by that switch, and says which.
+    expect(after.models.find((m) => m.id === "fal-ai-flux-dev" || (m.providers.length === 1 && m.providers[0] === "fal"))!.offBy).toEqual(["fal.ai is switched off"]);
   });
 });

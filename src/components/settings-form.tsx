@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Cloud, Cpu, ExternalLink, Info, Layers, Link2 } from "lucide-react";
+import { CheckCircle2, Cloud, Cpu, ExternalLink, Info, Layers, Link2, Scale } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -353,7 +353,7 @@ export function SettingsForm({ prices }: { prices?: string }) {
       <Section
         id="loras"
         title="LoRAs · looks, motions and effects"
-        description="Looks, camera moves and effects add LoRA files to open models, on your GPU and in the cloud. Fuobe fetches the pinned version a run needs and follows each file's licence: one that may only run on your GPU is never sent to a cloud API."
+        description="Looks, camera moves and effects add LoRA files to open models, on your GPU and in the cloud. Fuobe fetches the pinned version a run needs and shows each file's licence; what may run where is your call in Models & licences."
       >
         <LoraSettings folder={get("comfyLorasDir")} civitaiKey={get("civitaiKey")} />
       </Section>
@@ -410,6 +410,16 @@ export function SettingsForm({ prices }: { prices?: string }) {
             { value: "off", label: "Never", hint: "A model that isn't connected shows an error instead of a demo." },
           ]}
         />
+      </Section>
+
+      <Section
+        id="models"
+        title="Models & licences"
+        description="Every model, LoRA and node pack with its licence, as information. Everything is on: switch off a model, a whole kind of licence (say, all non-commercial ones), a provider or a node pack, and it leaves the pickers and is refused on the server."
+      >
+        <Link href="/settings/models" className="inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-[13px] font-medium transition-colors hover:bg-accent">
+          <Scale className="size-4 text-muted-foreground" /> Open Models &amp; licences
+        </Link>
       </Section>
 
       <Section id="about" title="About & licences" description="Fuobe's version, and the licence of every open model it can run — some are non-commercial or exclude some countries.">

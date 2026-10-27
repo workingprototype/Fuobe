@@ -9,7 +9,7 @@
  * A model is off when none of its routes is on; a Fuobe Original with one engine's routes off runs on the
  * other one only.
  */
-import { CLASS_LABEL, LICENCE_CLASSES, PROVIDER_NAME, type LicenceClass } from "./licences";
+import { CLASS_LABEL, LICENCE_CLASSES, PROVIDER_NAME, type LicenceClass, type LicenceInfo } from "./licences";
 import { enginesOf, providerEngine } from "./catalog/engines";
 import type { Engine, ModelDef, ModelRoute } from "./catalog/types";
 
@@ -205,4 +205,56 @@ export function offered(summary: AccessSummary | undefined, id: string | undefin
 /** The first of these that is offered: a default that is off falls back to the next one in line. */
 export function firstOffered(summary: AccessSummary | undefined, ids: (string | undefined)[], engine?: Engine): string | undefined {
   return ids.find((id) => offered(summary, id, engine));
+}
+
+// ---------------------------------------------------------------------------
+// What Settings → Models & licences lists (GET /api/settings/models, built by src/server/model-access.ts)
+
+export interface ModelEntry {
+  id: string;
+  name: string;
+  vendor: string;
+  kind: string;
+  hidden?: true;
+  engines: Engine[];
+  providers: string[];
+  /** The licence that names it: its weights' on your GPU, else the provider's terms. */
+  licence: LicenceInfo;
+  /** A Fuobe Original's cloud half (open weights hosted by fal or Replicate, under their terms). */
+  cloud?: LicenceInfo;
+  packs: string[];
+  /** Its own switch. */
+  on: boolean;
+  /** Other switches that turn all its routes off (it doesn't run), or some of them. */
+  offBy: string[];
+  partly: string[];
+}
+
+export interface LoraInfo {
+  file: string;
+  name: string;
+  group: string;
+  base: string;
+  licence: LicenceInfo;
+  on: boolean;
+}
+
+export interface PackInfo {
+  name: string;
+  repo: string;
+  licence: LicenceInfo;
+  worker?: "isolated";
+  /** Catalog models that load it. */
+  models: number;
+  on: boolean;
+}
+
+export interface AccessList {
+  access: ModelAccess;
+  /** Each class with how many models (any of their routes) and library LoRAs it covers. */
+  classes: { id: LicenceClass; label: string; hint: string; models: number; loras: number; on: boolean }[];
+  providers: { id: string; label: string; models: number; on: boolean }[];
+  packs: PackInfo[];
+  models: ModelEntry[];
+  loras: LoraInfo[];
 }
