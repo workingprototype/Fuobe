@@ -13,9 +13,10 @@ import { accessSummary, ALL_ON, applyChange, firstOffered, gateModel, offered, o
 // The switches live in the settings table: a throwaway database.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-model-access-"));
 process.env.FUOBE_DATA_DIR = dir;
-const { changeAccess, factsOf, isOffered, offeredLoras, offeredModels, offeredSummary, pickOffered, readAccess, routeLicence } = await import("@/server/model-access");
-const { previewGeneration } = await import("@/server/generations");
+const { changeAccess, factsOf, isOffered, offeredDefault, offeredLoras, offeredModels, offeredSummary, readAccess, routeLicence } = await import("@/server/model-access");
+const { createGenerations, previewGeneration } = await import("@/server/generations");
 const { setSetting } = await import("@/server/settings");
+const { db } = await import("@/server/db");
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(process.cwd(), "workflows/comfyui/manifest.json"), "utf8")) as Manifest;
@@ -215,10 +216,17 @@ describe("the switches on the server", () => {
     expect(() => previewGeneration({ feature: "image", modelId: "nano-banana-pro", prompt: "a cat" })).toThrow(/open source only/);
   });
 
-  it("picks the next model that is on, or says what to turn on", () => {
+  it("picks the next model that is on, or keeps the default so its run says what to turn on", () => {
     changeAccess([{ kind: "model", id: "nano-banana-pro", on: false }]);
-    expect(pickOffered(["nano-banana-pro", "seedream-5-pro"])).toBe("seedream-5-pro");
-    expect(() => pickOffered(["nano-banana-pro"])).toThrow(/^Nano Banana Pro is turned off in Settings → Models & licences/);
+    const next = offeredDefault("nano-banana-pro", "cloud")!;
+    expect(next).not.toBe("nano-banana-pro");
+    expect(isOffered(next, "cloud")).toBe(true);
+    expect(model(next).kind).toBe("image");
+    expect(offeredDefault("seedream-5-pro", "cloud")).toBe("seedream-5-pro");
+    changeAccess([{ kind: "class", id: "paid-api", on: false }]);
+    // No cloud image model is on: the default stays, and its run refuses naming the switch.
+    expect(offeredDefault("nano-banana-pro", "cloud")).toBe("nano-banana-pro");
+    expect(() => previewGeneration({ feature: "image", modelId: "nano-banana-pro", prompt: "a cat" })).toThrow(/^Nano Banana Pro is turned off in Settings → Models & licences/);
   });
 
   it("leaves out LoRAs switched off by file or licence class, and marks GPU-only ones when the admin keeps them home", () => {
@@ -235,5 +243,68 @@ describe("the switches on the server", () => {
     reset();
     changeAccess([{ kind: "keepGpuOnlyLoras", on: true }]);
     expect(offeredLoras([aw]).loras[0]).toMatchObject({ file: aw.file, keepOnGpu: true });
+  });
+});
+
+describe("chains and Originals refuse a switched-off step before anything is queued", () => {
+  const rows = () => (db().prepare("SELECT COUNT(*) AS n FROM generations").get() as { n: number }).n;
+  const relight = { feature: "motion", modelId: "fuobe-dop", presetId: "effect-window", prompt: "a woman reading", inputs: { images: ["/api/files/uploads/a.png"] } };
+  beforeEach(() => {
+    reset();
+    setSetting("demoMode", "on");
+    setSetting("engineMode", "both");
+  });
+
+  it("refuses the model itself before a chain queues its first step", () => {
+    changeAccess([{ kind: "model", id: "fuobe-dop", on: false }]);
+    const before = rows();
+    expect(() => createGenerations({ ...relight, engine: "cloud" })).toThrow(/^Fuobe DoP is turned off in Settings → Models & licences \(the model is switched off\)/);
+    expect(rows()).toBe(before);
+  });
+
+  it("refuses a chain whose helper step is off, before any step is queued", () => {
+    changeAccess([{ kind: "model", id: "join-clips", on: false }]);
+    let before = rows();
+    expect(() => createGenerations({ feature: "extend", modelId: "kling-3", op: "extend", prompt: "she keeps running", inputs: { video: "/api/files/placeholder.mp4" } })).toThrow(
+      /^Join clips is turned off in Settings → Models & licences/,
+    );
+    expect(rows()).toBe(before);
+    reset();
+    changeAccess([{ kind: "model", id: "oss-join-clips", on: false }]);
+    before = rows();
+    const shots = [
+      { prompt: "wide shot", duration: 3 },
+      { prompt: "close-up", duration: 5 },
+    ];
+    expect(() => createGenerations({ feature: "video", modelId: "oss-wan22-14b-fast", prompt: "A fox", params: { aspectRatio: "16:9", shots } })).toThrow(/turned off in Settings → Models & licences/);
+    expect(rows()).toBe(before);
+    reset();
+    changeAccess([{ kind: "model", id: "qwen-image-edit-2509-cloud", on: false }]);
+    before = rows();
+    expect(() => createGenerations({ ...relight, engine: "cloud" })).toThrow(/turned off in Settings → Models & licences/);
+    expect(rows()).toBe(before);
+  });
+
+  it("refuses a relight effect on the engine asked for when that engine is off, in the preview as when it's created", () => {
+    changeAccess([{ kind: "class", id: "paid-api", on: false }]);
+    const before = rows();
+    const refusal = /^Fuobe DoP in the cloud is turned off in Settings → Models & licences \(Proprietary paid API is switched off\)/;
+    expect(() => previewGeneration({ ...relight, engine: "cloud" })).toThrow(refusal);
+    expect(() => createGenerations({ ...relight, engine: "cloud" })).toThrow(refusal);
+    expect(rows()).toBe(before);
+    // Without an engine asked for, it runs on the one still on, the relight step with it.
+    const [clip, relit] = createGenerations(relight);
+    expect(clip).toMatchObject({ modelId: "fuobe-dop", engine: "open" });
+    expect(relit.modelId).toBe("oss-qwen-relight");
+  });
+
+  it("names the switch, not Engine mode, when cloud only meets an Original whose cloud half is off", () => {
+    setSetting("engineMode", "cloud");
+    changeAccess([{ kind: "class", id: "paid-api", on: false }]);
+    expect(() => previewGeneration({ feature: "image", modelId: "fuobe-soul", prompt: "a cat" })).toThrow(
+      /^Fuobe Soul in the cloud is turned off in Settings → Models & licences \(Proprietary paid API is switched off\)/,
+    );
+    // Engine mode still refuses the engine it rules out first.
+    expect(() => previewGeneration({ feature: "image", modelId: "fuobe-soul", prompt: "a cat", engine: "open" })).toThrow(/paid cloud APIs only/);
   });
 });

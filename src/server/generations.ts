@@ -44,7 +44,7 @@ import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
-import { offeredLoras, offeredModel, offeredRoutes, requireOffered } from "./model-access";
+import { offeredLoras, offeredRoutes, requireOffered } from "./model-access";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
@@ -451,6 +451,18 @@ export function relightStep(req: GenerationRequest, model: ModelDef): { engine: 
   return { engine, step: preset.prestep[engine] };
 }
 
+/**
+ * The model a request may run, as Settings → Models & licences offers it (only its routes that are on). Engine mode
+ * refuses an Original's engine it rules out first; then a model that is off is refused naming the switch, and so is
+ * an Original's engine that is off when it is the one asked for, or the one the install's engine mode runs it on.
+ * Every run and every chain (createGenerations, before any step is queued) goes through it.
+ */
+export function offeredFor(m: ModelDef, asked: Engine | undefined): ModelDef {
+  const mode = engineMode();
+  if (dualEngine(m)) pickEngine(m, asked, mode, () => true);
+  return requireOffered(m, asked ?? (mode === "both" ? undefined : mode));
+}
+
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
@@ -460,7 +472,7 @@ function prepare(original: GenerationRequest) {
   // Settings → Models & licences: a model (or the engine of an Original asked for) that is switched off is refused,
   // naming the switch; an Original otherwise runs on an engine that is still on, with the routes that are on.
   const found = getModel(worded.modelId);
-  const allowed = found && requireOffered(found, worded.engine);
+  const allowed = found && offeredFor(found, worded.engine);
   const model = allowed && dualEngine(allowed) ? onEngine(allowed, engineFor(allowed, worded.engine)) : allowed;
   const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
   const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
@@ -576,9 +588,10 @@ const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (J
 export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
   // Open models make multi-shot films shot by shot, then join the clips. A Fuobe Original is taken on the engine it runs
   // on (Fuobe DoP's Frames mode is a GPU chain).
-  // An Original runs on an engine still on in Settings → Models & licences (prepare refuses a model that is off).
+  // A model (or an Original's engine asked for) switched off in Settings → Models & licences is refused here, before a
+  // chain queues any step; an Original otherwise runs on an engine still on.
   const catalogModel = getModel(original.modelId);
-  const found = catalogModel && (offeredModel(catalogModel) ?? catalogModel);
+  const found = catalogModel && offeredFor(catalogModel, original.engine);
   const shotModel = found && dualEngine(found) ? onEngine(found, engineFor(found, original.engine)) : found;
   if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
     return createShotFilm(original, shotModel);
