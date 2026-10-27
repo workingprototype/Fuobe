@@ -1,6 +1,7 @@
 "use client";
 
-import { AudioLines, Cpu, Loader2, Scale, Sparkles, TriangleAlert } from "lucide-react";
+import { AudioLines, Cpu, Drama, Loader2, Scale, Sparkles, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -318,6 +319,11 @@ export function CharacterFacts({ engine, maker, cut }: { engine: Engine; maker: 
         <Scale className="mt-0.5 size-3.5 shrink-0" />
         <span>Licences are information: each model&apos;s is under its name above, and your admin decides what runs (Settings → Models &amp; licences).</span>
       </p>
+      {/* Whole clips, shot by shot, with masks, anchors, segments and takes: the studio built on the same H3 recipe. */}
+      <Link href="/character-swap" className="inline-flex items-center gap-1 font-medium text-brand-text hover:underline">
+        <Drama className="size-3.5" /> Open in Character Swap Studio
+        <span className="font-normal text-muted-foreground">— whole clips, shot by shot</span>
+      </Link>
     </div>
   );
 }

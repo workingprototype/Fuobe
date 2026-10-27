@@ -1,6 +1,7 @@
 "use client";
 
 import { Brush, Download, Info, Loader2, RotateCcw, Sparkles, Undo2, Wand2 } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { nanoid } from "nanoid";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -446,7 +447,15 @@ export function GenjutsuStudio() {
 
   return (
     <ToolShell title="Genjutsu" tabs={tabs} header={<SetupCode setup={setup} onPaste={apply} />} wide>
-      {!clip && <ToolHero title={modeInfo.label} subtitle={`${modeInfo.hint} Priced before it runs; free on your own ComfyUI.`} />}
+      {!clip && (
+        <ToolHero title={modeInfo.label} subtitle={`${modeInfo.hint} Priced before it runs; free on your own ComfyUI.`}>
+          {isCharacter && (
+            <Link href="/character-swap" className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-brand-text hover:underline">
+              Whole clips, shot by shot? Open in Character Swap Studio
+            </Link>
+          )}
+        </ToolHero>
+      )}
       <div className={cn("mx-auto", clip ? "pt-4" : "mt-8 max-w-[640px]")}>
         {!clip ? (
           <ClipDrop
