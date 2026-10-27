@@ -125,11 +125,12 @@ export function makeCovers(dir, opts = {}) {
       continue;
     }
     const rows = L.rows.filter((r) => r.caseId === caseId && r.variant === variant && r.status === "succeeded");
-    // Licence: a render whose LoRAs can't be sold isn't shipped as a cover.
+    // Licence: information on the cover (`licence`); with --commercial-only a render whose LoRAs can't be sold is left out.
     const lib = new Map((rows[0]?.recipe?.loras ?? []).map((l) => [l.file, l]));
     const blocked = (rows[0]?.recipe?.applied ?? []).filter((l) => lib.get(l.file)?.commercial === false);
-    if (rows[0]?.recipe?.commercialOk === false || blocked.length) {
-      skipped.push({ caseId, why: `non-commercial LoRA${blocked.length > 1 ? "s" : ""} ${blocked.map((l) => l.file).join(", ")}`.trim() });
+    const licence = rows[0]?.recipe?.commercialOk === false || blocked.length ? `non-commercial LoRA${blocked.length > 1 ? "s" : ""} ${blocked.map((l) => l.file).join(", ")}`.trim() : undefined;
+    if (licence && opts.commercialOnly) {
+      skipped.push({ caseId, why: `${licence} (--commercial-only)` });
       continue;
     }
     const metric = verdict?.mainMetric ?? null;
@@ -138,11 +139,11 @@ export function makeCovers(dir, opts = {}) {
       skipped.push({ caseId, why: `no ${variant} render` });
       continue;
     }
-    picked.push({ caseId, key: coverKey(best), row: best, metric, score: metric ? (jobScores(best, L.metrics)[metric] ?? null) : null });
+    picked.push({ caseId, key: coverKey(best), row: best, metric, score: metric ? (jobScores(best, L.metrics)[metric] ?? null) : null, ...(licence && { licence }) });
   }
   const result = { runId: L.run.runId, engine: L.run.engine, variant, covers: [], skipped, manifest: opts.manifest ?? MANIFEST_FILE, folder: outDir };
   if (opts.dryRun) {
-    result.covers = picked.map((p) => ({ key: p.key, caseId: p.caseId, job: p.row.id, metric: p.metric, score: p.score }));
+    result.covers = picked.map((p) => ({ key: p.key, caseId: p.caseId, job: p.row.id, metric: p.metric, score: p.score, ...(p.licence && { licence: p.licence }) }));
     return result;
   }
   if (picked.length) fs.mkdirSync(outDir, { recursive: true });
@@ -152,7 +153,7 @@ export function makeCovers(dir, opts = {}) {
     const files = encode(path.join(dir, out.file), out.kind, path.join(outDir, safeName(p.key)));
     const web = (f) => `/${path.relative(publicDir, f).split(path.sep).join("/")}`;
     manifest[p.key] = { poster: web(files.poster), ...(files.video && { video: web(files.video) }), run: L.run.runId, engine: L.run.engine, model: p.row.model?.id ?? "", variant };
-    result.covers.push({ key: p.key, caseId: p.caseId, job: p.row.id, metric: p.metric, score: p.score, ...manifest[p.key] });
+    result.covers.push({ key: p.key, caseId: p.caseId, job: p.row.id, metric: p.metric, score: p.score, ...(p.licence && { licence: p.licence }), ...manifest[p.key] });
   }
   if (picked.length) writeManifest(manifest, opts.manifest);
   return result;

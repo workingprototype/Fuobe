@@ -15,7 +15,8 @@ import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useEngine, useGenerations } from "@/lib/api";
+import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import {
   categoriesFor,
   CREATURE_TYPES,
@@ -123,10 +124,14 @@ export function InfluencerBuilder() {
   const [photo, setPhoto] = useState<SlotValue | null>(null);
   const [clothing, setClothing] = useState<SlotValue[]>([]);
   const [direction, setDirection] = useState("");
-  const [modelId, setModelId] = useState(CLOUD_MODELS[0].id);
+  const [picked, setModelId] = useState(CLOUD_MODELS[0].id);
   const [ids, setIds] = useState<string[]>([]);
   const clothingInput = useRef<HTMLInputElement>(null);
-  const model = CLOUD_MODELS.find((m) => m.id === modelId) ?? CLOUD_MODELS[0];
+  // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const access = useModelAccess();
+  const cloudModels = useMemo(() => keepOffered(CLOUD_MODELS, (m) => offered(access, m.id, "cloud")), [access]);
+  const model = cloudModels.find((m) => m.id === picked) ?? cloudModels[0];
+  const modelId = model.id;
 
   const categories = useMemo(() => categoriesFor(state.tier), [state.tier]);
   const category = categories.find((c) => c.id === active);
@@ -376,7 +381,7 @@ export function InfluencerBuilder() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CLOUD_MODELS.map((m) => (
+                    {cloudModels.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
                         {m.label}
                       </SelectItem>

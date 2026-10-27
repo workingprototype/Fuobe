@@ -35,6 +35,7 @@ import {
 import { createPipeline, type PipelineStep } from "./chains";
 import { db } from "./db";
 import { cancelGeneration, getGeneration, previewGeneration } from "./generations";
+import { firstOn } from "./model-access";
 import { getAsset } from "./storage";
 
 /**
@@ -176,13 +177,14 @@ export const JobInputSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Jobs → generation requests (pure: no database)
+// Jobs → generation requests (no database, but for the switches a default model reads)
 
 /** The tool's model on this engine: the one asked for (when the tool offers it) or its default. */
 export function toolModel(tool: LayerTool, engine: Engine, modelId?: string, list: string[] = TOOL_MODELS[tool][engine]): ModelDef {
   if (!list.length) throw new LayersError(`${TOOL_LABELS[tool]} has no ${engine === "open" ? "open-source" : "cloud"} model yet`);
   if (modelId && !list.includes(modelId)) throw new LayersError("That model can't run this tool", 400);
-  const m = getModel(modelId ?? list[0]);
+  // Without one asked for: the tool's first model switched on in Settings → Models & licences.
+  const m = getModel(modelId ?? firstOn(list, engine)!);
   if (!m) throw new LayersError("That model isn't in the catalog", 400);
   return m;
 }

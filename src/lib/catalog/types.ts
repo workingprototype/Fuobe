@@ -763,6 +763,11 @@ export interface LoraRef {
    * sends it to the cloud provider itself (src/server/loras.ts), whichever engine trained it.
    */
   own?: true;
+  /**
+   * Set by the server on a run's LoRAs while Settings → Models & licences keeps LoRAs licensed for your GPU only
+   * off the cloud: a cloud route then leaves such a LoRA out (localOnly). Without it they are sent like any other.
+   */
+  keepOnGpu?: true;
 }
 
 /** Scale limits of a LoRA field. */

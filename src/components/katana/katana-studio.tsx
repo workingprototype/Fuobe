@@ -18,9 +18,10 @@ import { frameDiff, openVideo, releaseVideo, sampleFrames } from "@/components/a
 import { MediaDrop } from "@/components/av/media-drop";
 import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
-import { useEngine } from "@/lib/api";
+import { useEngine, useModelAccess } from "@/lib/api";
 import { formatCueTime } from "@/lib/av/cue-edit";
 import { detectCutIndices, KATANA_LIMITS, katanaProgress, katanaStage, motionModel, MOTION_MODELS, nearestAspect, planSegments, refineCut, refineTimes, type KatanaJobView, type Segment } from "@/lib/av/katana";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { useKatanaActions, useKatanaJobs, useKatanaPreview, type KatanaBody } from "./hooks";
 
@@ -71,7 +72,10 @@ export function KatanaStudio() {
   const [scanning, setScanning] = useState<number | null>(null);
   const [modelId, setModelId] = useState<string | undefined>(undefined);
   const [keepAudio, setKeepAudio] = useState(true);
-  const m = motionModel(engine, modelId);
+  // Motion models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const access = useModelAccess();
+  const motionModels = keepOffered(MOTION_MODELS[engine], (x) => offered(access, x.id, engine));
+  const m = motionModel(engine, modelId && motionModels.some((x) => x.id === modelId) ? modelId : motionModels[0].id);
   const len = Math.min(m.max, Math.max(m.min, length ?? m.max));
 
   const segments = useMemo<Segment[] | null>(() => {
@@ -253,7 +257,7 @@ export function KatanaStudio() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {MOTION_MODELS[engine].map((x) => (
+                  {motionModels.map((x) => (
                     <SelectItem key={x.id} value={x.id}>
                       {x.label} · {x.min}–{x.max} s
                     </SelectItem>

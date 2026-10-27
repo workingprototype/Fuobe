@@ -3,12 +3,14 @@ import { nanoid } from "nanoid";
 import { getModel, supportsOp } from "@/lib/catalog";
 import { MODEL3D_STEP_FEATURE, stillPromptFor3d } from "@/lib/av/model3d";
 import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
+import { onEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
 import type { ChainSlot, Engine, Generation, GenerationRequest, LoraRef, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
 import { db } from "./db";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained, previewGeneration } from "./generations";
 import { provider } from "./providers";
 import { loadManifest } from "./providers/comfyui";
+import { offeredRoutes, requireOffered } from "./model-access";
 
 /**
  * Multi-step jobs built from chained generations: each step waits for the ones it needs and
@@ -24,6 +26,8 @@ interface ModeStep {
   label: string;
   modelId: string;
   op: Operation;
+  /** The engine a Fuobe Original's step runs on (its routes there are the ones checked). */
+  engine?: Engine;
 }
 
 /** Who can run a model's operation, as Settings names them ("fal.ai", "Claude or Ollama"). */
@@ -31,13 +35,16 @@ export const providerNames = (m: ModelDef, op: Operation) => [...new Set(routesF
 
 /**
  * A chain must not mix paid and demo steps: a demo join of paid clips (or a paid step fed a demo
- * placeholder) wastes the money and returns the wrong result. Throws before any row is created.
+ * placeholder) wastes the money and returns the wrong result. Nor can it reach a step that is switched off in
+ * Settings → Models & licences (the refusal names the switch). Throws before any row is created.
  */
 export function assertOneMode(steps: ModeStep[]): void {
   const modes = steps.map((s) => {
-    const m = getModel(s.modelId);
-    if (!m) throw new Error(`Unknown model ${s.modelId}`);
-    return { ...s, model: m, demo: chooseRoute(routesFor(m, s.op)).demo };
+    const found = getModel(s.modelId);
+    if (!found) throw new Error(`Unknown model ${s.modelId}`);
+    const m = requireOffered(found, s.engine);
+    const routes = offeredRoutes(found, routesFor(s.engine ? onEngine(found, s.engine) : found, s.op));
+    return { ...s, model: m, demo: chooseRoute(routes).demo };
   });
   const demo = modes.find((s) => s.demo);
   if (demo && modes.some((s) => !s.demo)) {
@@ -109,8 +116,14 @@ export function joinClips(ids: string[], o: JoinOptions): Generation {
   // Fold the first `max` clips into one until the rest fit in a final join (8 clips → 3 joins).
   let level = ids;
   const room = max - (o.before?.length ?? 0);
-  while (level.length > room) level = [join(level.slice(0, max), false).id, ...level.slice(max)];
-  return join(level, true);
+  try {
+    while (level.length > room) level = [join(level.slice(0, max), false).id, ...level.slice(max)];
+    return join(level, true);
+  } catch (e) {
+    // A join that can't be made (switched off in Settings → Models & licences, say): clips still waiting aren't paid for.
+    cancelWaiting(ids);
+    throw e;
+  }
 }
 
 /**
@@ -127,7 +140,7 @@ export function createShotFilm(original: GenerationRequest, model: ModelDef): Ge
   const canT2v = supportsOp(model, "t2v");
   const firstOp: Operation = original.inputs?.images?.length || !canT2v ? "i2v" : "t2v";
   assertOneMode([
-    { label: `${model.name} shots`, modelId: model.id, op: firstOp },
+    { label: `${model.name} shots`, modelId: model.id, op: firstOp, engine: model.engine },
     { label: "Joining the shots", modelId: joinModelId(model.engine), op: "concat" },
   ]);
   const batchId = nanoid(10);
@@ -136,34 +149,43 @@ export function createShotFilm(original: GenerationRequest, model: ModelDef): Ge
   delete params.shots;
   delete params.multiShot;
   const n = shots.length;
-  const clips = shots.map((s, i) => {
-    const { images, endImage, ...rest } = original.inputs ?? {};
-    const inputs = { ...rest, ...((i === 0 || !canT2v) && images?.length && { images }), ...(i === n - 1 && endImage && { endImage }) };
-    return createGenerations(
+  const clips: Generation[] = [];
+  try {
+    for (const [i, s] of shots.entries()) {
+      const { images, endImage, ...rest } = original.inputs ?? {};
+      const inputs = { ...rest, ...((i === 0 || !canT2v) && images?.length && { images }), ...(i === n - 1 && endImage && { endImage }) };
+      clips.push(
+        createGenerations(
+          {
+            ...original,
+            op: undefined,
+            prompt: overall ? `${overall}. ${s.prompt.trim()}` : s.prompt.trim(),
+            inputs: Object.keys(inputs).length ? inputs : undefined,
+            params: { ...params, duration: s.duration, numOutputs: 1 },
+            step: { label: `Shot ${i + 1} of ${n}`, index: i, of: n },
+          },
+          { batchId },
+        )[0],
+      );
+    }
+    const film = joinClips(
+      clips.map((c) => c.id),
       {
-        ...original,
-        op: undefined,
-        prompt: overall ? `${overall}. ${s.prompt.trim()}` : s.prompt.trim(),
-        inputs: Object.keys(inputs).length ? inputs : undefined,
-        params: { ...params, duration: s.duration, numOutputs: 1 },
-        step: { label: `Shot ${i + 1} of ${n}`, index: i, of: n },
+        engine: model.engine,
+        feature: original.feature,
+        batchId,
+        title: overall || shots.map((s) => tidy(s.prompt)).join(" / "),
+        aspectRatio: params.aspectRatio,
+        resolution: params.resolution,
+        step: { label: `Film · ${n} shots`, index: n, of: n + 1 },
       },
-      { batchId },
-    )[0];
-  });
-  const film = joinClips(
-    clips.map((c) => c.id),
-    {
-      engine: model.engine,
-      feature: original.feature,
-      batchId,
-      title: overall || shots.map((s) => tidy(s.prompt)).join(" / "),
-      aspectRatio: params.aspectRatio,
-      resolution: params.resolution,
-      step: { label: `Film · ${n} shots`, index: n, of: n + 1 },
-    },
-  );
-  return [film, ...clips];
+    );
+    return [film, ...clips];
+  } catch (e) {
+    // Don't leave shots rendering for a film that can't be made.
+    for (const g of clips) void cancelGeneration(g.id);
+    throw e;
+  }
 }
 
 /**
@@ -187,8 +209,8 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
   });
   const tail = clips.some((c) => c.to === null);
   assertOneMode([
-    { label: `${model.name} clips`, modelId: model.id, op: "flf2v" },
-    ...(tail ? [{ label: `${model.name} after the last frame`, modelId: model.id, op: "i2v" as const }] : []),
+    { label: `${model.name} clips`, modelId: model.id, op: "flf2v", engine: model.engine },
+    ...(tail ? [{ label: `${model.name} after the last frame`, modelId: model.id, op: "i2v" as const, engine: model.engine }] : []),
     ...(clips.length > 1 ? [{ label: "Joining the clips", modelId: joinModelId(model.engine), op: "concat" as const }] : []),
   ]);
   const batchId = nanoid(10);
@@ -243,7 +265,7 @@ export function createExtendChain(original: GenerationRequest, model: ModelDef):
   const frameModel = model.engine === "open" ? "oss-extract-frame" : "extract-frame";
   assertOneMode([
     { label: "Taking the last frame", modelId: frameModel, op: "frame" },
-    { label: model.name, modelId: model.id, op: "i2v" },
+    { label: model.name, modelId: model.id, op: "i2v", engine: model.engine },
     { label: "Joining the clips", modelId: joinModelId(model.engine), op: "concat" },
   ]);
   const batchId = nanoid(10);
@@ -251,29 +273,36 @@ export function createExtendChain(original: GenerationRequest, model: ModelDef):
     { feature: original.feature, modelId: frameModel, op: "frame", inputs: { video }, step: { label: "Last frame", index: 0, of: 3 } },
     { batchId },
   )[0];
-  const rest = { ...original.inputs };
-  delete rest.video;
-  delete rest.videos;
-  const clip = createGenerations(
-    {
-      ...original,
-      op: "i2v",
-      prompt: original.prompt?.trim() || "Continue the shot naturally, same subject, same camera move",
-      inputs: Object.keys(rest).length ? rest : undefined,
-      chain: [{ slot: "images", position: "first" }],
-      step: { label: "Continuation", index: 1, of: 3 },
-    },
-    { batchId, dependsOn: frame.id },
-  )[0];
-  const film = joinClips([clip.id], {
-    engine: model.engine,
-    feature: original.feature,
-    batchId,
-    title: tidy(original.prompt) || "Extended video",
-    before: [video],
-    step: { label: "Extended video", index: 2, of: 3 },
-  });
-  return [film, clip, frame];
+  const made = [frame];
+  try {
+    const rest = { ...original.inputs };
+    delete rest.video;
+    delete rest.videos;
+    const clip = createGenerations(
+      {
+        ...original,
+        op: "i2v",
+        prompt: original.prompt?.trim() || "Continue the shot naturally, same subject, same camera move",
+        inputs: Object.keys(rest).length ? rest : undefined,
+        chain: [{ slot: "images", position: "first" }],
+        step: { label: "Continuation", index: 1, of: 3 },
+      },
+      { batchId, dependsOn: frame.id },
+    )[0];
+    made.push(clip);
+    const film = joinClips([clip.id], {
+      engine: model.engine,
+      feature: original.feature,
+      batchId,
+      title: tidy(original.prompt) || "Extended video",
+      before: [video],
+      step: { label: "Extended video", index: 2, of: 3 },
+    });
+    return [film, clip, frame];
+  } catch (e) {
+    for (const g of made) void cancelGeneration(g.id);
+    throw e;
+  }
 }
 
 /** The still the open text-to-3D route draws first. */
@@ -337,9 +366,12 @@ export function createRelitClip(original: GenerationRequest, relight: { engine: 
   const [image, ...rest] = original.inputs?.images ?? [];
   if (!image) throw new Error("Add a start frame to relight");
   const { engine, step } = relight;
+  // The clip runs on the engine asked for, never quietly on the other one (createGenerations refuses an engine that is off).
+  const where = (e: Engine) => (e === "open" ? "on your GPU" : "in the cloud");
+  if (original.engine && original.engine !== engine) throw new Error(`This relight effect was planned ${where(engine)}, but ${where(original.engine)} was asked for`);
   assertOneMode([
-    { label: "Relighting the start frame", modelId: step.modelId, op: step.op },
-    { label: getModel(original.modelId)?.name ?? original.modelId, modelId: original.modelId, op: original.op ?? "i2v" },
+    { label: "Relighting the start frame", modelId: step.modelId, op: step.op, engine },
+    { label: getModel(original.modelId)?.name ?? original.modelId, modelId: original.modelId, op: original.op ?? "i2v", engine },
   ]);
   const batchId = nanoid(10);
   const relit = createGenerations(
@@ -354,17 +386,22 @@ export function createRelitClip(original: GenerationRequest, relight: { engine: 
     },
     { batchId },
   )[0];
-  const clip = createGenerations(
-    {
-      ...original,
-      engine,
-      inputs: { ...original.inputs, images: rest.length ? rest : undefined },
-      chain: [{ slot: "images", position: "first" }],
-      step: { label: "Relit clip", index: 1, of: 2 },
-    },
-    { batchId, dependsOn: relit.id },
-  )[0];
-  return [clip, relit];
+  try {
+    const clip = createGenerations(
+      {
+        ...original,
+        engine,
+        inputs: { ...original.inputs, images: rest.length ? rest : undefined },
+        chain: [{ slot: "images", position: "first" }],
+        step: { label: "Relit clip", index: 1, of: 2 },
+      },
+      { batchId, dependsOn: relit.id },
+    )[0];
+    return [clip, relit];
+  } catch (e) {
+    void cancelGeneration(relit.id);
+    throw e;
+  }
 }
 
 /** The model a storyboard film is animated with. */

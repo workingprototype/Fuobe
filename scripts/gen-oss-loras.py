@@ -17,10 +17,11 @@ Each LoRA carries its base (wan2.2-i2v-a14b high / low, wan2.1 on both experts, 
 ltx-2.5-22b, qwen-image-edit-2509) and its licence flags (commercial: outputs may be sold; hostedOk: it may
 run on fal / Replicate). src/lib/catalog/dop.ts turns this into each preset's open and cloud routes.
 
-Licence rules (build plan → "Licence rules for Originals"): a round-1 LoRA whose licence isn't a known
-commercial-use licence (e.g. "unspecified (check card)") is left out of the map; a map v2 row that would make a
-non-commercial LoRA a default, or send a hostedOk: false LoRA to the cloud outside a local-only row, fails the
-generator (gen-lora-library.py checks the same rows).
+Licences are information (the owner's decision of 2026-10-27; Settings → Models & licences has the switches): every
+LoRA goes into the map with its licence as recorded. A round-1 LoRA whose licence isn't a known commercial-use
+licence (e.g. "unspecified (check card)") is kept with commercial: false and its licence named; a map v2 row that
+makes a non-commercial LoRA a default, sends a hostedOk: false LoRA to the cloud, or is on licence hold is listed
+as a note, never a failure.
 
 Run:  python3 scripts/gen-oss-loras.py
 """
@@ -35,14 +36,14 @@ RECIPES = json.loads((ROOT / "docs/research/fuobe-originals-recipes-5.json").rea
 
 # Licences that allow selling outputs and running the weights anywhere (the user's GPU, fal, Replicate).
 COMMERCIAL = {"Apache-2.0", "MIT", "CC0-1.0", "CreativeML OpenRAIL-M", "BigScience OpenRAIL-M"}
-# Map v2 statuses whose LoRAs a preset uses by default (as in gen-lora-library.py).
-DEFAULT_STATUSES = {"add-lora", "replace", "relight-route", "weak-candidate", "local-only"}
+# Map v2 statuses whose LoRAs a preset uses by default (as in gen-lora-library.py). A licence on hold is information.
+DEFAULT_STATUSES = {"add-lora", "replace", "relight-route", "weak-candidate", "local-only", "licence-hold"}
 # Wan 2.2 Fun Camera's poses (wan22-fun-camera-14b cameraMotion), LTX-2.3's camera_lora and LTX-2.5's camera_motion.
 FUN_POSES = {"Static", "Pan Up", "Pan Down", "Pan Left", "Pan Right", "Zoom In", "Zoom Out", "Anti Clockwise (ACW)", "ClockWise (CW)"}
 LTX_CAMERA = {"dolly_in", "dolly_out", "dolly_left", "dolly_right", "jib_up", "jib_down", "static"}
 LTX25_MOTION = LTX_CAMERA | {"focus_shift"}
 errors = []
-skipped = []
+notes = []
 
 
 def slug(s):
@@ -53,14 +54,15 @@ def slug(s):
 # Round 1: Wan I2V LoRAs from comfyui-oss.json (bare slugs)
 
 round1 = {}
-for l in ROUND1["loras"]:
+# Commercial-use LoRAs first: one whose licence isn't recorded fills a preset nothing else covers, and never
+# displaces one that is (the presets kept their LoRA when the gate became information; see the notes).
+ROUND1_LORAS = sorted(ROUND1["loras"], key=lambda l: (l.get("license") or "").strip() not in COMMERCIAL)
+for l in ROUND1_LORAS:
     base = l.get("baseModel", "")
     if l["type"] not in ("camera", "vfx") or not (base.startswith("wan2.1-i2v") or base.startswith("wan2.2-i2v")):
         continue
     licence = (l.get("license") or "").strip()
-    if licence not in COMMERCIAL:
-        skipped.append(f"{l['name']} ({licence or 'no licence'})")
-        continue
+    commercial = licence in COMMERCIAL
     eq = l.get("higgsfieldEquivalent") or ""
     names = [re.sub(r"\(.*?\)", "", n).strip() for n in re.split(r"/|,", eq)]
     names = [n for n in names if n and n != "-"]
@@ -79,13 +81,19 @@ for l in ROUND1["loras"]:
         "target": noise,
         **({"trigger": trigger} if trigger else {}),
         "base": base,
-        "licence": {"commercial": True, "hostedOk": not l.get("gated"), "snapshotDate": ROUND1["asOf"], "name": licence},
+        "licence": {"commercial": commercial, "hostedOk": not l.get("gated"), "snapshotDate": ROUND1["asOf"], "name": licence or "not recorded"},
     }
     for n in names:
         key = slug(n)
         if not key:
             continue
         cur = round1.setdefault(key, [])
+        if not commercial:
+            if cur and not any(c["file"] == ref["file"] for c in cur):
+                notes.append(f"{l['name']} (licence {licence or 'not recorded'}): {key} keeps {cur[0]['file']}; a candidate to compare")
+                continue
+            if not cur:
+                notes.append(f"{l['name']}: licence {licence or 'not recorded'}, used for {key} as commercial: false")
         # Prefer native Wan 2.2 LoRAs over 2.1 ones for the same preset.
         if base.startswith("wan2.2") and cur and all(c["base"].startswith("wan2.1") for c in cur):
             cur.clear()
@@ -107,9 +115,9 @@ def v2_lora(raw, where, status):
     if perms:
         licence["permissions"] = [p for p in (re.sub(r"\(.*?\)", "", x).strip() for x in perms.group(1).split(",")) if p]
     if not licence["commercial"]:
-        errors.append(f"{where}: {raw['name']} has commercial: false, so it can't be a default")
-    elif status != "local-only" and not licence["hostedOk"]:
-        errors.append(f"{where}: {raw['name']} has hostedOk: false outside a local-only row")
+        notes.append(f"{where}: {raw['name']} is non-commercial")
+    elif not licence["hostedOk"]:
+        notes.append(f"{where}: {raw['name']} is licensed for the user's GPU only")
     base = raw.get("base") or ""
     target = raw.get("target") or ("both" if not base.startswith("wan2.2") else "high")
     out = {"file": raw["file"], "url": raw["url"], "strength": raw.get("strength", 1.0), "target": target}
@@ -198,5 +206,5 @@ ts = (
 )
 (ROOT / "src/lib/catalog/oss-loras.generated.ts").write_text(ts, encoding="utf-8")
 print(f"wrote {len(v2)} map v2 presets + {len(round1)} round-1 keys and {len(recipes)} DoP recipes")
-if skipped:
-    print(f"left out (licence not cleared for a default): {', '.join(skipped)}")
+if notes:
+    print("licence notes (information, shown in Settings → Models & licences):\n  " + "\n  ".join(dict.fromkeys(notes)))

@@ -42,7 +42,8 @@ import { PromptInput, ELEMENT_ICONS, type PromptInputHandle } from "@/components
 import { ShotsEditor } from "@/components/studio/shots-editor";
 import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { useEdgeFade } from "@/components/studio/use-edge-fade";
-import { uploadFile, useAssets, useStatus } from "@/lib/api";
+import { uploadFile, useAssets, useModelAccess, useStatus } from "@/lib/api";
+import { offered } from "@/lib/model-access";
 import { getModel } from "@/lib/catalog";
 import {
   BATCH,
@@ -438,7 +439,12 @@ export function PromptBar(props: PromptBarProps) {
   };
 
   const modelKey = `${draft.mode}:${engine}` as const;
-  const modelList = CINEMA_MODELS[draft.mode][engine];
+  // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to the next one on
+  // (with all of them off the menu stays, and a run says which switch to turn back on).
+  const access = useModelAccess();
+  const allModels = CINEMA_MODELS[draft.mode][engine];
+  const onModels = allModels.filter((id) => offered(access, id, engine));
+  const modelList = onModels.length ? onModels : allModels;
   // The model picked in the menu (a take may run on another: Fuobe DoP for a move's Wan camera LoRA, a references edit…).
   const chosen = draft.models[modelKey];
   const picked = chosen && modelList.includes(chosen) ? chosen : modelList[0];

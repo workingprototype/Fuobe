@@ -15,7 +15,8 @@ import { SourceLanguageSelect, TargetLanguages } from "@/components/av/language-
 import { MediaDrop } from "@/components/av/media-drop";
 import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
-import { useEngine } from "@/lib/api";
+import { useEngine, useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cueProblems } from "@/lib/av/cue-edit";
 import { BACKGROUND_DB, crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, voiceOnly, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
 import { languageByCode, supportsTarget, type DubRoute } from "@/lib/av/languages";
@@ -93,7 +94,11 @@ function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
   const [video, setVideo] = useState<SlotValue | null>(null);
   const [duration, setDuration] = useState<number | undefined>(undefined);
   const [mode, setMode] = useState<"steps" | "oneshot">("steps");
-  const [model, setModel] = useState<OneShotModel>("heygen-translate");
+  const [picked, setModel] = useState<OneShotModel>("heygen-translate");
+  // One-shot dubbing models switched off in Settings → Models & licences leave the menu; the pick falls back to one that is on.
+  const access = useModelAccess();
+  const oneShotModels = keepOffered(ONE_SHOT_MODELS, (m) => offered(access, m, "cloud"));
+  const model: OneShotModel = oneShotModels.includes(picked) ? picked : oneShotModels[0];
   const [source, setSource] = useState("auto");
   const [targets, setTargets] = useState<string[]>(["es"]);
   const oneShot = mode === "oneshot" && engine === "cloud";
@@ -158,7 +163,7 @@ function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ONE_SHOT_MODELS.map((m) => (
+                  {oneShotModels.map((m) => (
                     <SelectItem key={m} value={m}>
                       {ONE_SHOT[m].name}
                     </SelectItem>

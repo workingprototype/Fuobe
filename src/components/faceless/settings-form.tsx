@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { fileToList, SlotPreview, type SlotValue } from "@/components/studio/media-slot";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
-import { useElements } from "@/lib/api";
+import { useElements, useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import {
   ANIMATION_MODES,
   DEFAULT_RESOLUTION,
@@ -130,7 +131,14 @@ export function EpisodeSettingsForm({
   // Frame by frame moves a camera over each picture (Ken Burns, no video model); Fully animated picks a video model.
   const frames = value.animation === "frames";
   const camera = picker.cameraMoves?.[value.engine];
-  const videos = frames ? [] : picker.videoModels.filter((m) => m.engine === value.engine);
+  // Video models switched off in Settings → Models & licences leave the list; the default falls back to one that is on.
+  const access = useModelAccess();
+  const videos = frames ? [] : keepOffered(picker.videoModels.filter((m) => m.engine === value.engine), (m) => offered(access, m.id, value.engine));
+  // A video model picked before it was switched off counts as no pick (the next one that is on runs).
+  const offPick = !!value.videoModel && videos.length > 0 && !videos.some((m) => m.id === value.videoModel);
+  useEffect(() => {
+    if (offPick) onChange({ videoModel: undefined, resolution: undefined });
+  }, [offPick, onChange]);
   const video = frames ? (camera && { ...camera, engine: value.engine }) : (videos.find((m) => m.id === value.videoModel) ?? videos.find((m) => m.id === ENGINE_MODELS[value.engine].video) ?? videos[0]);
   const resolution = value.resolution && video?.resolutions.includes(value.resolution) ? value.resolution : (DEFAULT_RESOLUTION[video?.id ?? ""]?.[value.animation] ?? video?.resolutions[0]);
   return (

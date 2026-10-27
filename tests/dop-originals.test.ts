@@ -328,8 +328,8 @@ describe("review fixes", () => {
     expect(plan("cloud", { presetId: "motion-whip-pan" }, "fuobe-dop").model.id).toBe("fuobe-dop");
   });
 
-  it("never puts a local-only LoRA (or its trigger) on a cloud route, and prices Wiggle as what runs", () => {
-    for (const p of [...MOTIONS, ...EFFECTS]) for (const l of p.cloud?.loras ?? []) expect(l.licence?.hostedOk, `${p.id} ${l.file}`).not.toBe(false);
+  it("says when a cloud route carries a LoRA licensed for the GPU only, and prices Wiggle as what runs", () => {
+    for (const p of [...MOTIONS, ...EFFECTS]) if ((p.cloud?.loras ?? []).some((l) => l.licence?.hostedOk === false)) expect(p.parity, p.id).toMatch(/licensed for your GPU only/);
     const wiggle = getPreset("motion-wiggle")!;
     expect(wiggle.open!.loras!.every((l) => l.licence?.hostedOk === false)).toBe(true);
     expect(wiggle.cloud).toMatchObject({ modelId: "kling-2-5-turbo", partner: true });

@@ -109,14 +109,14 @@ async function layerFromImage(url: string, name: string, doc: { width: number; h
 }
 
 function AddLayer() {
-  const { doc, commit, select, run, engine, models, isDemo } = useEditor();
+  const { doc, commit, select, run, engine, models, offeredIds, isDemo } = useEditor();
   const file = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [ref, setRef] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const options = modelsFor(models, TOOL_MODELS["generate-layer"][engine]);
+  const options = modelsFor(models, offeredIds(TOOL_MODELS["generate-layer"][engine]));
   const [modelId, setModelId] = useState<string | undefined>();
   const model = options.find((m) => m.id === modelId) ?? options[0];
 
@@ -491,10 +491,10 @@ function LayerRow({
 
 /** Per-layer AI: “Layer edit prompt” + reference → Generate / Regenerate, and the layer's revisions. */
 function SelectedLayer({ node }: { node: LayerNode }) {
-  const { doc, commit, run, engine, models, isDemo, endJob, busyJob, failedJob, showJob, tool } = useEditor();
+  const { doc, commit, run, engine, models, offeredIds, isDemo, endJob, busyJob, failedJob, showJob, tool } = useEditor();
   const [prompt, setPrompt] = useState(node.prompt ?? "");
   const [ref, setRef] = useState<string | null>(node.refSrc ?? null);
-  const options = modelsFor(models, TOOL_MODELS.regenerate[engine]);
+  const options = modelsFor(models, offeredIds(TOOL_MODELS.regenerate[engine]));
   const [modelId, setModelId] = useState<string | undefined>();
   const model = options.find((m) => m.id === modelId) ?? options[0];
   // Layers cut out of a picture keep their transparency; full pictures (the bottom layer, a whole-image result) don't.

@@ -46,13 +46,17 @@ describe("the map v2", () => {
     }
   });
 
-  it("only makes commercial LoRAs defaults; a LoRA of unknown licence stays out", () => {
-    for (const loras of Object.values(OSS_LORAS)) for (const l of loras) expect(l.licence.commercial, l.file).toBe(true);
-    // wolfer45's Bullet Time LoRA has no licence on its card: round 1's Remade matrix-shot (Apache-2.0) runs instead.
+  it("keeps every LoRA with its licence as information, without changing which LoRA a preset runs", () => {
+    // Licences are information: a non-commercial LoRA is in the map with its licence named.
+    const bts = OSS_LORAS["motion-bts"];
+    expect(bts.map((l) => l.file)).toEqual(["BTSMovieSet_LTX25_v1.safetensors"]);
+    expect(bts[0].licence).toMatchObject({ commercial: false, hostedOk: false });
+    // wolfer45's Bullet Time LoRA has no licence on its card: it doesn't displace round 1's matrix-shot (Apache-2.0),
+    // which the preset ran before (a candidate for the evaluation harness, not a default change).
     expect(OSS_LORAS["bullet-time"].map((l) => l.file)).toEqual(["matrix_shot.safetensors"]);
-    // BTS's licence is on hold: its preset runs its words.
-    expect(OSS_LORAS["motion-bts"]).toBeUndefined();
+    // BTS's licence is on hold in the research: its preset keeps running its words until it is evaluated, and says why.
     expect(getPreset("motion-bts")!.open!.loras).toBeUndefined();
+    expect(getPreset("motion-bts")!.parity).toMatch(/BTS Movie Set is in Fuobe's LoRA library, but the research holds its licence/);
   });
 
   it("knows each LoRA's family", () => {
@@ -138,19 +142,23 @@ describe("every motion and effect on Fuobe DoP", () => {
     expect(thunder.cloud!.promptTemplate).toBe(thunder.open!.promptTemplate);
   });
 
-  it("keeps a local-only LoRA on the user's GPU: a cloud run leaves it out and says so", () => {
+  it("sends a GPU-only LoRA to the cloud only when asked, and keeps the preset's partner route until it's evaluated", () => {
     const wiggle = getPreset("motion-wiggle")!;
     expect(wiggle.open!.loras).toHaveLength(2);
-    // The cloud route carries neither the LoRA nor its trigger: the words, on the partner model.
+    // The cloud route stays the partner model on the words (the default it had), and says why.
     expect(wiggle.cloud).toMatchObject({ modelId: "kling-2-5-turbo", partner: true });
     expect(wiggle.cloud!.loras).toBeUndefined();
     expect(wiggle.cloud!.promptTemplate).toBeUndefined();
-    // Sent to fal anyway (a Mix, a hand-made request), fitLoras still leaves it out and says so.
+    expect(wiggle.parity).toMatch(/licensed for your GPU only \(civitai lists no “Rent”\), so the cloud keeps the preset's partner route until Fuobe DoP with it is evaluated/);
+    // Sent to fal (a Mix, a hand-made request), it goes and the run says what the licence says...
     const fal = getModel(DOP_MODEL)!.routes.find((r) => r.provider === "fal" && r.op === "i2v")!;
-    const fitted = fitLoras(wiggle.open!.loras ?? [], fal);
-    expect(fitted.loras).toEqual([]);
-    expect(fitted.notes.join(" ")).toMatch(/only on your GPU/);
-    expect(wiggle.parity).toMatch(/your GPU only/);
+    const sent = fitLoras(wiggle.open!.loras ?? [], fal);
+    expect(sent.loras).toHaveLength(2);
+    expect(sent.notes.join(" ")).toMatch(/licence allows your GPU only/);
+    // ...unless Settings → Models & licences keeps such LoRAs on the GPU.
+    const kept = fitLoras((wiggle.open!.loras ?? []).map((l) => ({ ...l, keepOnGpu: true as const })), fal);
+    expect(kept.loras).toEqual([]);
+    expect(kept.notes.join(" ")).toMatch(/keeps such LoRAs off the cloud/);
   });
 
   it("grades the colour-grade effects and relights the relight effects first", () => {

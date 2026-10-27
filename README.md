@@ -103,7 +103,7 @@ Uploads up to 200 MB work with sign-in on. Inputs given as URLs are fetched only
 
 ### Setting up the open-source engine
 
-1. Install ComfyUI on a machine with a GPU (24 GB VRAM covers almost every workflow; Z-Image Turbo, Wan 2.2 5B and SDXL run in 8–16 GB; VOID, Remove object's "Shadows and reflections too", may need up to 40 GB). `scripts/comfy/install-comfyui.sh` installs ComfyUI and the 15 custom node packs at the commits Fuobe was validated with (`NC_PACKS=1` adds the non-commercial ComfyUI-Whisper).
+1. Install ComfyUI on a machine with a GPU (24 GB VRAM covers almost every workflow; Z-Image Turbo, Wan 2.2 5B and SDXL run in 8–16 GB; VOID, Remove object's "Shadows and reflections too", may need up to 40 GB). `scripts/comfy/install-comfyui.sh` installs ComfyUI and the 16 custom node packs at the commits Fuobe was validated with, the non-commercial ComfyUI-Whisper included (`NC_PACKS=0` leaves it out; Settings → Models & licences switches packs and models off per install).
 2. Open **ComfyUI workflows** in Fuobe. Each workflow lists the model files it needs, which are already installed (✓) and a **Copy install commands** button that produces the exact `wget` / `git clone` lines.
 3. Switch the engine toggle (top-right of every studio) to **Open source**.
 4. For LoRAs (camera motions, effects, trained characters), set **Settings → LoRAs → LoRA folder** to ComfyUI's `models/loras`, and add a civitai key for civitai files. Fuobe then downloads a LoRA ComfyUI doesn't have before the run.

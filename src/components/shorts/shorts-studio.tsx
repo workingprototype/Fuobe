@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { VideoTrimmer } from "@/components/studio/video-trimmer";
-import { useEngine } from "@/lib/api";
+import { useEngine, useModelAccess } from "@/lib/api";
 import {
   clipShapeProblem,
   rangeProblem,
@@ -24,6 +24,7 @@ import {
 import type { RestyleModelInfo } from "@/lib/catalog/shorts-models";
 import type { Engine } from "@/lib/catalog/types";
 import type { TrimRange } from "@/lib/trim-range";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { CustomPresetDialog } from "./custom-preset-dialog";
 import { useShortsActions, useShortsEstimate, useShortsPresets, useSubmitGuard, type ShortsBody } from "./hooks";
@@ -41,6 +42,9 @@ const CUSTOM = "Created by you";
 export function ShortsStudio({ models }: { models: Record<Engine, ModelChoice[]> }) {
   const [tab, setTab] = useState<"presets" | "history">("presets");
   const [engine, setEngine] = useEngine();
+  // Restyle models switched off in Settings → Models & licences leave the menu (the default is the first one on).
+  const access = useModelAccess();
+  const engineModels = keepOffered(models[engine], (m) => offered(access, m.id, engine));
   const [presetId, setPresetId] = useState<string | null>(null);
   const source = useSourceClip(SHORTS.maxBytes);
   const { clip } = source;
@@ -107,7 +111,7 @@ export function ShortsStudio({ models }: { models: Record<Engine, ModelChoice[]>
             </div>
             <Workspace
               engine={engine}
-              models={models[engine]}
+              models={engineModels}
               presetId={presetId}
               setPresetId={setPresetId}
               source={source}
@@ -313,7 +317,9 @@ function SetupPanel({
   // A custom preset is its reference images: on cloud, start on the first model that reads them
   // (Kling O3 4K Edit, then Happy Horse) unless a model was picked.
   const refModel = models.find((m) => m.refs > 0)?.id;
-  const modelId = pickedModel[engine] || (customRefs > 0 && engine === "cloud" && refModel ? refModel : models[0]?.id);
+  // A pick that has since been switched off in Settings → Models & licences counts as no pick.
+  const pickedOn = models.some((m) => m.id === pickedModel[engine]) ? pickedModel[engine] : "";
+  const modelId = pickedOn || (customRefs > 0 && engine === "cloud" && refModel ? refModel : models[0]?.id);
   const model = models.find((m) => m.id === modelId);
   const duration = clipDuration(clip);
   const actions = useShortsActions();

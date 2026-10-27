@@ -18,13 +18,14 @@ import { createGenerations, previewGeneration } from "./generations";
 import { encodePng } from "./png";
 import { engineMode, getSetting } from "./settings";
 import { saveFile } from "./storage";
+import { isOffered } from "./model-access";
 
 /**
  * What this install can run right now (cloud fallbacks such as reading a take's first frame, the workflows it has, a
  * camera LoRA that downloads from civitai, which fal gets only with the user's civitai key).
  */
 export function cinemaContext(): CinemaContext {
-  return { cloudAllowed: engineMode() !== "open", has: (id) => !!getModel(id), civitai: !!getSetting("civitaiKey") };
+  return { cloudAllowed: engineMode() !== "open", has: (id) => !!getModel(id) && isOffered(id), civitai: !!getSetting("civitaiKey") };
 }
 
 declare global {

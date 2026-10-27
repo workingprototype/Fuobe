@@ -21,7 +21,7 @@ import { fileToList, MediaSlot, type SlotValue } from "@/components/studio/media
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { SketchEditor, type Stroke } from "@/components/studio/sketch-editor";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
-import { useEngine, useGenerations, useStatus } from "@/lib/api";
+import { useEngine, useGenerations, useModelAccess, useStatus } from "@/lib/api";
 import {
   chooseMaker,
   decodeSetup,
@@ -45,6 +45,7 @@ import {
 import { chainState } from "@/lib/catalog/shorts";
 import type { PixelPoint } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { useGenjutsuEstimate, useGenjutsuRun, type GenjutsuBody } from "./hooks";
 import { LookPicker, type LookSource } from "./look-picker";
@@ -81,6 +82,7 @@ const ready = (xs: SlotValue[]) => xs.filter((x) => !x.uploading).map((x) => x.r
  */
 export function GenjutsuStudio() {
   const [engine, setEngine, engineMode] = useEngine();
+  const access = useModelAccess();
   const status = useStatus().data;
   const higgsfield = !!status?.providers.higgsfield?.configured;
   const [mode, setModeState] = useState<GenjutsuMode>("motion");
@@ -139,9 +141,11 @@ export function GenjutsuStudio() {
           : undefined;
   const lookKind = mode === "restyle" ? (lookSource === "higgsfield" ? "higgsfield" : "fuobe") : "";
   const choiceKey = `${engine}:${mode}:${target ?? ""}:${lookKind}`;
-  const choice = chooseMaker({ engine, mode, target, tier, look: effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined), modelId: picked[choiceKey], higgsfield });
+  // Models switched off in Settings → Models & licences leave the list, and the pick falls back to one that is on.
+  const isOn = (id: string) => offered(access, id, engine);
+  const choice = chooseMaker({ engine, mode, target, tier, look: effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined), modelId: picked[choiceKey], higgsfield, offered: isOn });
   const maker: Maker | null = "maker" in choice ? choice.maker : null;
-  const options = makersFor(engine, mode, target, effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined));
+  const options = keepOffered(makersFor(engine, mode, target, effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined)), (m) => isOn(m.id));
   const references = mode === "restyle" && lookSource !== "higgsfield" ? [] : ready(refs);
   const showRefs = mode !== "restyle" || lookSource === "higgsfield";
   const needsFrame = (mode === "swap" && (target === "click" || target === "paint")) || (mode === "insert" && target === "paint");

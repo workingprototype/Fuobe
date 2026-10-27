@@ -43,14 +43,14 @@ describe("Soul looks (soul-originals.generated.ts)", () => {
     }
   });
 
-  it("gives every look at most 3 LoRAs, each in the library and commercial-safe on both engines", () => {
+  it("gives every look at most 3 LoRAs, each in the library with its licence recorded (information, not a rule)", () => {
     for (const l of SOUL_ORIGINALS) {
       expect(l.loras.length, l.id).toBeLessThanOrEqual(3);
       for (const x of l.loras) {
         const e = loraEntry(x.key);
         expect(e, `${l.id}: ${x.key}`).toBeDefined();
-        expect(e!.licence.commercial, `${l.id}: ${x.key}`).toBe(true);
-        expect(e!.licence.hostedOk, `${l.id}: ${x.key}`).toBe(true);
+        expect(e!.licence.name, `${l.id}: ${x.key}`).toBeTruthy();
+        expect(typeof e!.licence.commercial, `${l.id}: ${x.key}`).toBe("boolean");
         expect(x.strength).toBeGreaterThan(0);
       }
     }

@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { fileToList, type SlotValue } from "@/components/studio/media-slot";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
-import { useElements, useEngine, useGenerations } from "@/lib/api";
+import { useElements, useEngine, useGenerations, useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { customPack, DEFAULT_ASPECT, MAX_PACK_REFS, MAX_SELFIE_MB, PACKS, PHOTODUMP_ASPECTS, PHOTODUMP_MODELS, PHOTODUMP_SOUL, soulIdOf, type Pack } from "@/lib/catalog/packs";
 import type { Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
@@ -178,7 +179,9 @@ export function PhotodumpView() {
   // The Model choice follows the engine: a pick the other engine had counts as Auto (one radio is always checked).
   const elements = useElements();
   const character = subjectMode === "character" ? elements.data?.find((e) => e.id === elementId) : undefined;
-  const choices: (string | undefined)[] = [undefined, ...PHOTODUMP_MODELS[engine]];
+  // Models switched off in Settings → Models & licences leave the choices (Auto picks among the ones on).
+  const access = useModelAccess();
+  const choices: (string | undefined)[] = [undefined, ...keepOffered(PHOTODUMP_MODELS[engine], (m) => offered(access, m, engine))];
   const unavailable = (m?: string): string | null => {
     if (m !== PHOTODUMP_SOUL) return null;
     if (pack?.custom) return "Your own packs recreate each reference photo with an edit model";

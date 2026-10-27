@@ -45,6 +45,11 @@ export interface EditorCtx {
   select: (id: string | null) => void;
   engine: Engine;
   models: Record<string, LayerModelInfo>;
+  /**
+   * A tool's model ids as Settings → Models & licences offers them: the ones switched off leave its menu and its
+   * default (all of them stay when none is on, and a run names the switch).
+   */
+  offeredIds: (ids: readonly string[]) => string[];
   isDemo: (m: LayerModelInfo | undefined) => boolean;
   jobs: LayerJob[];
   /** The job still working on a layer (queued, running, or finished but not laid out yet). */

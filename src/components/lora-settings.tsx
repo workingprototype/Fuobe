@@ -133,7 +133,7 @@ function LoraRow({ l, folder, onDownload, busy }: { l: LibraryLora; folder: bool
             {l.target ? ` · ${l.target}-noise half` : ""}
           </span>
           <span aria-hidden>·</span>
-          <span className={cn(!l.commercial && "text-destructive", l.commercial && !l.hostedOk && "text-foreground")}>{l.licence}</span>
+          <span className={cn(l.commercial && !l.hostedOk && "text-foreground")}>{l.licence}</span>
           <span aria-hidden>·</span>
           <span>{SOURCE[l.download]}</span>
           {l.mirrored.length > 0 && (
