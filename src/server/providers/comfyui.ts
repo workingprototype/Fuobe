@@ -1,5 +1,6 @@
 import "server-only";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { tracksFor, type MotionPaths } from "@/lib/motion-paths";
@@ -415,27 +416,85 @@ async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promi
 // ---------------------------------------------------------------------------
 // Reachability. Routing (chooseRoute) is synchronous, so the first check for a server URL is a blocking probe
 // (a worker thread does the fetch); after that the cached result is refreshed in the background every 10 s.
+// A server that refuses the connection (or a name that doesn't resolve) is down at once. One that doesn't answer
+// GET /system_stats in time isn't: a CPU ComfyUI busy with a job can take seconds to, but it still takes the
+// connection. So a late answer keeps the server reachable when it answered lately or its port takes a connection;
+// only a server that does neither (a machine that is off, a firewall that drops) is unreachable.
 
 declare global {
-  /** Reachability of the ComfyUI server, and its RAM (bytes) when /system_stats said. */
-  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number } | undefined;
+  /** Reachability of the ComfyUI server, its RAM (bytes) when /system_stats said, and when it last answered. */
+  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number; seen?: number } | undefined;
+  /** The check under way: callers in the meantime share its answer. */
+  var __fuobeComfyProbe: { url: string; done: Promise<boolean> } | undefined;
 }
 
-export async function probeComfy(force = false): Promise<boolean> {
-  const cur = globalThis.__fuobeComfyReach;
-  if (!force && cur && cur.url === baseUrl() && Date.now() - cur.at < 10_000) return cur.ok;
-  let ok = false;
-  let ram: number | undefined;
+/** How long a check waits for /system_stats, then for the port to take a connection; how long an answer counts as recent. */
+export const REACH = { answerMs: 2000, connectMs: 3000, answeredLatelyMs: 2 * 60_000 };
+
+/** Host and port of a server address, for the connection check (undefined when it isn't a URL). */
+function hostPort(url: string): { host: string; port: number } | undefined {
   try {
-    const r = await fetch(`${baseUrl()}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(2000) });
-    ok = r.ok;
-    if (ok) {
-      const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
-      if (typeof total === "number" && total > 0) ram = total;
-    }
-  } catch {}
-  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url: baseUrl(), ...(ram ? { ram } : {}) };
+    const u = new URL(url);
+    return { host: u.hostname.replace(/^\[|\]$/g, ""), port: Number(u.port) || (u.protocol === "https:" ? 443 : 80) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether the server's port takes a TCP connection within `timeoutMs` (a refusal says no at once). */
+function takesConnection(url: string, timeoutMs: number): Promise<boolean> {
+  const at = hostPort(url);
+  if (!at) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const socket = net.connect(at);
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    socket.once("connect", () => done(true)).once("error", () => done(false));
+  });
+}
+
+/** What GET /system_stats got: an answer (with the RAM it says), a no (an HTTP error, a refused connection), or nothing in time. */
+async function askComfy(url: string): Promise<{ answer: "yes"; ram?: number } | { answer: "no" | "late" }> {
+  try {
+    const r = await fetch(`${url}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(REACH.answerMs) });
+    if (!r.ok) return { answer: "no" };
+    const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
+    return { answer: "yes", ...(typeof total === "number" && total > 0 ? { ram: total } : {}) };
+  } catch (e) {
+    return { answer: (e as Error)?.name === "TimeoutError" ? "late" : "no" };
+  }
+}
+
+async function checkComfy(url: string): Promise<boolean> {
+  const asked = await askComfy(url);
+  const prev = globalThis.__fuobeComfyReach?.url === url ? globalThis.__fuobeComfyReach : undefined;
+  // Late is busy, not down, when it answered lately or its port still takes a connection (the one longer look).
+  const busy = asked.answer === "late" && ((!!prev?.seen && Date.now() - prev.seen < REACH.answeredLatelyMs) || (await takesConnection(url, REACH.connectMs)));
+  const at = Date.now();
+  // A busy server keeps the RAM and the time of its last answer.
+  const ram = asked.answer === "yes" ? (asked.ram ?? prev?.ram) : prev?.ram;
+  const seen = asked.answer === "yes" ? at : prev?.seen;
+  const ok = asked.answer === "yes" || busy;
+  globalThis.__fuobeComfyReach = ok ? { ok, at, url, ...(ram ? { ram } : {}), ...(seen ? { seen } : {}) } : { ok, at, url };
   return ok;
+}
+
+/** Is the ComfyUI server reachable? Cached for 10 s (`force` checks now); one check runs at a time. */
+export async function probeComfy(force = false): Promise<boolean> {
+  const url = baseUrl();
+  const cur = globalThis.__fuobeComfyReach;
+  if (!force && cur && cur.url === url && Date.now() - cur.at < 10_000) return cur.ok;
+  const running = globalThis.__fuobeComfyProbe;
+  if (running?.url === url) return running.done;
+  const done: Promise<boolean> = checkComfy(url).finally(() => {
+    if (globalThis.__fuobeComfyProbe?.done === done) globalThis.__fuobeComfyProbe = undefined;
+  });
+  globalThis.__fuobeComfyProbe = { url, done };
+  return done;
 }
 
 /** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
@@ -444,25 +503,39 @@ export function comfyRam(): number | undefined {
   return cur?.ok && cur.url === baseUrl() ? cur.ram : undefined;
 }
 
+// flag[0]: the answer (1 yes, 2 no or refused, 3 none in time); flag[1]: 1 once the port took the connection.
 const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
 const flag = new Int32Array(workerData.sab);
+if (workerData.at) {
+  const socket = require("node:net").connect(workerData.at);
+  socket.once("connect", () => (Atomics.store(flag, 1, 1), socket.destroy())).once("error", () => {});
+}
 fetch(workerData.url, { headers: workerData.headers, signal: AbortSignal.timeout(workerData.timeout) })
-  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), () => Atomics.store(flag, 0, 2))
+  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), (e) => Atomics.store(flag, 0, e && e.name === "TimeoutError" ? 3 : 2))
   .finally(() => Atomics.notify(flag, 0));`;
 
-/** Blocking reachability check (a few ms for a refused port, at most `timeoutMs` for a host that doesn't answer). */
+/**
+ * Blocking reachability check: a few ms for a server that answers or a refused port, at most `timeoutMs` otherwise.
+ * A server that takes the connection but doesn't answer in time is busy, so reachable. One that doesn't even take it
+ * is unreachable for now, and the unhurried check (probeComfy) goes on in the background to say for sure.
+ */
 export function probeComfySync(timeoutMs = 1500): boolean {
   const url = baseUrl();
-  let ok = false;
+  let answer = 0;
+  let connected = false;
   try {
-    const sab = new SharedArrayBuffer(4);
+    const sab = new SharedArrayBuffer(8);
     const flag = new Int32Array(sab);
-    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/system_stats`, headers: authHeaders(), timeout: timeoutMs } });
+    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/system_stats`, at: hostPort(url), headers: authHeaders(), timeout: timeoutMs } });
     Atomics.wait(flag, 0, 0, timeoutMs + 1000);
-    ok = Atomics.load(flag, 0) === 1;
+    answer = Atomics.load(flag, 0);
+    connected = Atomics.load(flag, 1) === 1;
     void worker.terminate();
   } catch {}
-  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url };
+  const at = Date.now();
+  const ok = answer === 1 || (answer !== 2 && connected);
+  globalThis.__fuobeComfyReach = { ok, at, url, ...(answer === 1 ? { seen: at } : {}) };
+  if (!ok && answer !== 2) void probeComfy(true).catch(() => false);
   return ok;
 }
 
@@ -1309,7 +1382,7 @@ export const comfyProvider: ProviderAdapter = {
     const cur = globalThis.__fuobeComfyReach;
     // First check for this server: wait for the answer, so a request right after start isn't sent to demo.
     if (!cur || cur.url !== baseUrl()) return probeComfySync();
-    if (Date.now() - cur.at > 10_000) void probeComfy();
+    if (Date.now() - cur.at > 10_000) void probeComfy().catch(() => false);
     return cur.ok;
   },
 

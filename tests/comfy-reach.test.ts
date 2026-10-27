@@ -1,0 +1,209 @@
+import fs from "node:fs";
+import http from "node:http";
+import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Generation } from "@/lib/catalog/types";
+
+vi.setConfig({ testTimeout: 30_000 });
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-comfy-reach-"));
+process.env.FUOBE_DATA_DIR = dir;
+process.env.COMFYUI_URL = "http://127.0.0.1:9";
+
+const { setSetting } = await import("@/server/settings");
+const { comfyProvider, comfyRam, probeComfy, REACH } = await import("@/server/providers/comfyui");
+const gens = await import("@/server/generations");
+const { db } = await import("@/server/db");
+const { saveFile } = await import("@/server/storage");
+
+const RAM = 16 * 2 ** 30;
+/** A stand-in ComfyUI: /system_stats answers `status` after `delay` ms (a busy CPU server answers late, but takes the connection). */
+let delay = 0;
+let status = 200;
+let asked = 0;
+const server = http.createServer((req, res) => {
+  if (req.url !== "/system_stats") return void res.writeHead(404).end();
+  asked++;
+  setTimeout(() => {
+    if (res.destroyed) return;
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ system: { comfyui_version: "0.41.0", ram_total: RAM }, devices: [] }));
+  }, delay);
+});
+let comfyUrl = "";
+const reach = { ...REACH };
+
+/** A port nothing listens on: connecting is refused at once. */
+async function closedPort(): Promise<number> {
+  const s = net.createServer();
+  await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+  const { port } = s.address() as net.AddressInfo;
+  await new Promise((r) => s.close(r));
+  return port;
+}
+
+/** Forget what the probes found, as a fresh start does. */
+const forget = () => {
+  globalThis.__fuobeComfyReach = undefined;
+  globalThis.__fuobeComfyProbe = undefined;
+};
+
+beforeAll(async () => {
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  comfyUrl = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`;
+  // Checks give up sooner here, so a late answer is quick to make.
+  Object.assign(REACH, { answerMs: 300, connectMs: 1000 });
+  setSetting("demoMode", "auto");
+});
+afterAll(() => {
+  Object.assign(REACH, reach);
+  server.closeAllConnections();
+  server.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+beforeEach(() => {
+  delay = 0;
+  status = 200;
+  setSetting("comfyUrl", comfyUrl);
+  forget();
+});
+
+describe("ComfyUI reachability under load", () => {
+  it("a busy server that answered before stays reachable, with its RAM", async () => {
+    expect(await probeComfy(true)).toBe(true);
+    expect(comfyRam()).toBe(RAM);
+    // Busy with a job: the answer comes long after the check gives up.
+    delay = 2000;
+    for (let i = 0; i < 2; i++) expect(await probeComfy(true)).toBe(true);
+    expect(comfyRam()).toBe(RAM);
+    expect(comfyProvider.isConfigured()).toBe(true);
+    // Back to answering: still reachable, and the answer counts again.
+    delay = 0;
+    expect(await probeComfy(true)).toBe(true);
+    expect(globalThis.__fuobeComfyReach?.seen).toBeGreaterThan(Date.now() - 1000);
+  });
+
+  it("a refused port is unreachable at once, in the blocking first check and the background one", async () => {
+    setSetting("comfyUrl", `http://127.0.0.1:${await closedPort()}`);
+    let t0 = Date.now();
+    expect(comfyProvider.isConfigured()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(1500);
+    t0 = Date.now();
+    expect(await probeComfy(true)).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(comfyRam()).toBeUndefined();
+  });
+
+  it("no answer in time is busy when the server answered lately, unreachable when it didn't and its port refuses", async () => {
+    const url = `http://127.0.0.1:${await closedPort()}`;
+    setSetting("comfyUrl", url);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }) as typeof fetch;
+    try {
+      expect(await probeComfy(true)).toBe(false);
+      // It answered a minute ago: busy, so still reachable.
+      globalThis.__fuobeComfyReach = { ok: true, at: Date.now() - 60_000, url, ram: RAM, seen: Date.now() - 60_000 };
+      expect(await probeComfy(true)).toBe(true);
+      expect(comfyRam()).toBe(RAM);
+      // Its last answer is long past, and nothing takes the connection.
+      globalThis.__fuobeComfyReach = { ok: true, at: Date.now() - 60_000, url, seen: Date.now() - REACH.answeredLatelyMs - 1000 };
+      expect(await probeComfy(true)).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("the first check of a slow but alive server says reachable (blocking, then in the background)", async () => {
+    delay = 3000;
+    // The routing question right after start: the server takes the connection while it's busy.
+    const t0 = Date.now();
+    expect(comfyProvider.isConfigured()).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(3000);
+    forget();
+    expect(await probeComfy(true)).toBe(true);
+    // Callers while a check runs share it.
+    forget();
+    asked = 0;
+    expect(await Promise.all([probeComfy(true), probeComfy(true), probeComfy()])).toEqual([true, true, true]);
+    expect(asked).toBe(1);
+  });
+});
+
+describe("a chain step after real ComfyUI steps", () => {
+  const until = async <T>(f: () => T | undefined | null | false, ms = 20_000): Promise<T> => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const v = f();
+      if (v) return v;
+      if (Date.now() > end) throw new Error("timed out waiting");
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
+  const clip = () => saveFile({ data: Buffer.from("not really a video"), contentType: "video/mp4", source: "generation" }).url;
+  /** Two clips that ran on ComfyUI, and the join waiting for them. */
+  const join = () => {
+    const ids = ["a", "b"].map((k) => `comfy-clip-${k}-${Math.random().toString(36).slice(2, 8)}`);
+    for (const id of ids) {
+      db()
+        .prepare(
+          `INSERT INTO generations (id, feature, model_id, engine, provider, op, kind, status, request_json, outputs_json, external_id, created_at, updated_at, completed_at)
+           VALUES (?, 'canvas', 'oss-fit-clip', 'open', 'comfyui', 'video-fit', 'video', 'succeeded', '{"feature":"canvas","modelId":"oss-fit-clip"}', ?, 'x', ?, ?, ?)`,
+        )
+        .run(id, JSON.stringify([{ url: clip(), kind: "video", contentType: "video/mp4" }]), Date.now(), Date.now(), Date.now());
+    }
+    return gens.createGenerations({ feature: "canvas", modelId: "oss-join-encoded", op: "concat", chain: [{ slot: "videos" }, { slot: "videos" }] }, { dependsOn: ids })[0];
+  };
+  /** A missed check, as a busy server that didn't answer in time left it. */
+  const missed = () => (globalThis.__fuobeComfyReach = { ok: false, at: Date.now(), url: comfyUrl });
+  const launched = (id: string) => until(() => {
+    const g = gens.getGeneration(id)!;
+    return (g.provider === "comfyui" && g.message !== "Waits for the earlier steps") || g.status === "failed" ? g : undefined;
+  });
+
+  it("isn't failed on one missed check: ComfyUI is asked again and the step runs on it", async () => {
+    missed();
+    const g = join();
+    const done = await launched(g.id);
+    expect(done.error ?? "").not.toMatch(/needs ComfyUI to continue/);
+    expect(done.provider).toBe("comfyui");
+  });
+
+  it("waits while ComfyUI doesn't answer, then runs on it when it does", async () => {
+    status = 503;
+    missed();
+    const g = join();
+    const waiting = await until(() => {
+      const x = gens.getGeneration(g.id)!;
+      return x.message === "Waits for ComfyUI to answer" ? x : undefined;
+    });
+    expect(waiting.status).toBe("queued");
+    // Still waiting a few sweeps later.
+    await new Promise((r) => setTimeout(r, 3500));
+    expect(gens.getGeneration(g.id)!.status).toBe("queued");
+    status = 200;
+    expect(await probeComfy(true)).toBe(true);
+    const done = await launched(g.id);
+    expect(done.provider).toBe("comfyui");
+    expect(done.error ?? "").not.toMatch(/needs ComfyUI to continue/);
+  });
+
+  it("fails as before once the wait is over and ComfyUI still doesn't answer", async () => {
+    const wait = gens.COMFY_WAIT.ms;
+    gens.COMFY_WAIT.ms = 1000;
+    try {
+      status = 503;
+      missed();
+      const g = join();
+      const done: Generation = await until(() => {
+        const x = gens.getGeneration(g.id)!;
+        return x.status === "failed" ? x : undefined;
+      });
+      expect(done.error).toMatch(/Join clips \(copy\) needs ComfyUI to continue what the earlier steps made for real/);
+    } finally {
+      gens.COMFY_WAIT.ms = wait;
+    }
+  });
+});
