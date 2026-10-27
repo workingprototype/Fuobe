@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { checkConnectorUrl, MAX_CONNECTOR_NAME, MAX_CONNECTORS, type ConnectorView } from "@/lib/assist-connectors";
+import { checkConnectorUrl, MAX_CONNECTOR_NAME, MAX_CONNECTORS, parseToolList, type ConnectorView } from "@/lib/assist-connectors";
 import { useConnectorActions, useConnectors } from "./hooks";
 
 /**
@@ -38,10 +38,17 @@ export function ConnectorSettings({ claudeReady }: { claudeReady: boolean }) {
     <div className="space-y-4">
       <div className="flex items-start gap-2.5 rounded-xl bg-muted px-3 py-2.5 text-[13px] text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
-        <p>
-          Connectors work in Claude chats (Smart, or Manual with a Claude model){claudeReady ? "" : " — add an Anthropic API key above first"}. Claude reaches them from Anthropic&apos;s servers, so each needs a
-          public https address. Chats on Ollama or the offline planner can&apos;t use them. Tool calls cost Claude tokens; the chat lists each connector tool Claude used.
-        </p>
+        <div className="space-y-1.5">
+          <p>
+            Connectors work in Claude chats (Smart, or Manual with a Claude model){claudeReady ? "" : " — add an Anthropic API key above first"}. Claude reaches them from Anthropic&apos;s servers, so each needs a
+            public https address. Chats on Ollama or the offline planner can&apos;t use them. Tool calls cost Claude tokens; the chat lists each connector tool Claude used.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Connector tools run without asking.</span> Claude calls them inside its reply, so approval cards (Ask first) and auto-run&apos;s cost cap don&apos;t
+            cover them; Claude is told to check with you in chat before changing anything. Limit a connector to the tools you trust with <span className="font-medium text-foreground">Allowed tools</span>.
+            Scheduled tasks use connectors only when the task says so.
+          </p>
+        </div>
       </div>
       {list.isLoading ? (
         <Skeleton className="h-16 rounded-xl" />
@@ -88,6 +95,15 @@ function Row({ c, onEdit }: { c: ConnectorView; onEdit: () => void }) {
           <KeyRound className="mr-1 inline size-3 align-[-2px]" aria-hidden />
           {c.hasToken ? <span className="font-mono">{c.token}</span> : "No token"} · Claude sees it as <span className="font-mono">{c.slug}</span>
         </p>
+        <p className="text-[11px] break-words text-muted-foreground">
+          {c.tools ? (
+            <>
+              Only: <span className="font-mono">{c.tools.join(", ")}</span>
+            </>
+          ) : (
+            "Every tool it lists"
+          )}
+        </p>
         {c.warning && (
           <p className="mt-1 flex items-start gap-1 text-[11px] text-amber-800 dark:text-amber-300">
             <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden /> {c.warning}
@@ -128,16 +144,19 @@ function Row({ c, onEdit }: { c: ConnectorView; onEdit: () => void }) {
 /** Add a connector, or edit one: an empty token field keeps the saved token. */
 function ConnectorForm({ connector, onDone }: { connector?: ConnectorView; onDone: () => void }) {
   const actions = useConnectorActions();
-  const ids = { name: useId(), url: useId(), token: useId(), hint: useId() };
+  const ids = { name: useId(), url: useId(), token: useId(), hint: useId(), tools: useId(), toolsHint: useId() };
   const [name, setName] = useState(connector?.name ?? "");
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
+  const [tools, setTools] = useState(connector?.tools?.join(", ") ?? "");
   const [dropToken, setDropToken] = useState(false);
   const [busy, setBusy] = useState(false);
   // The server enforces the http rule (it knows FUOBE_ALLOW_PRIVATE_URLS); here only the shape is checked.
   const check = url.trim() ? checkConnectorUrl(url, true) : null;
   const urlError = check && "error" in check ? check.error : null;
-  const canSave = !!name.trim() && (connector ? !urlError : !!url.trim() && !urlError);
+  const toolList = parseToolList(tools);
+  const toolsError = "error" in toolList ? toolList.error : null;
+  const canSave = !!name.trim() && !toolsError && (connector ? !urlError : !!url.trim() && !urlError);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,10 +168,11 @@ function ConnectorForm({ connector, onDone }: { connector?: ConnectorView; onDon
           name: name.trim(),
           ...(url.trim() && { url: url.trim() }),
           ...(dropToken ? { token: "" } : token.trim() ? { token: token.trim() } : {}),
+          tools: tools.trim() || null,
         });
         toast.success("Connector saved", { duration: 1500 });
       } else {
-        await actions.create({ name: name.trim(), url: url.trim(), ...(token.trim() && { token: token.trim() }) });
+        await actions.create({ name: name.trim(), url: url.trim(), ...(token.trim() && { token: token.trim() }), ...(tools.trim() && { tools: tools.trim() }) });
         toast.success(`${name.trim()} connected`, { description: "Claude chats can use its tools from the next message.", duration: 2500 });
       }
       onDone();
@@ -215,6 +235,26 @@ function ConnectorForm({ connector, onDone }: { connector?: ConnectorView; onDon
             <Checkbox checked={dropToken} onCheckedChange={(v) => setDropToken(v === true)} /> Remove the saved token
           </label>
         )}
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={ids.tools} className="text-[13px]">
+          Allowed tools <span className="font-normal text-muted-foreground">(optional)</span>
+        </Label>
+        <Input
+          id={ids.tools}
+          autoComplete="off"
+          spellCheck={false}
+          value={tools}
+          onChange={(e) => setTools(e.target.value)}
+          placeholder="Every tool — or only these, e.g. search_pages, get_page"
+          aria-invalid={!!toolsError}
+          aria-describedby={ids.toolsHint}
+          className="font-mono text-[13px]"
+        />
+        <p id={ids.toolsHint} className={toolsError ? "text-[12px] text-destructive" : "text-[12px] text-muted-foreground"}>
+          {toolsError ??
+            "Tool names as the server lists them (its docs, or the chat's “Notion · search_pages” lines), separated by commas. Leave it empty to allow every tool; prefer read-only ones for scheduled tasks."}
+        </p>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" size="sm" disabled={busy || !canSave}>

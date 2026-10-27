@@ -54,6 +54,8 @@ export const ScheduleBody = z.object({
   capUsd: z.number().min(0).max(MAX_SCHEDULE_CAP_USD).nullish(),
   engine: z.enum(["cloud", "open"]),
   mode: ModeChoice.nullish(),
+  /** Whether runs may use the connectors in Settings (Claude only; their tools run without asking). */
+  connectors: z.boolean().optional(),
   paused: z.boolean().optional(),
 });
 
@@ -61,5 +63,6 @@ export const ConnectorBody = z.object({
   name: z.string().max(200).optional(),
   url: z.string().max(4096).optional(),
   token: z.string().max(8192).optional(),
+  tools: z.union([z.string().max(8192), z.array(z.string().max(200)).max(200)]).nullish(),
   enabled: z.boolean().optional(),
 });

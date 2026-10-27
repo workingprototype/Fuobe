@@ -42,6 +42,8 @@ export interface ScheduleView {
   engine: "cloud" | "open";
   /** The mode choice runs start with (null: the default from Settings). */
   mode: { mode: "free" | "smart" | "manual"; agent?: "claude" | "ollama" | "offline"; model?: string | null; effort?: "low" | "medium" | "high" | "xhigh" | "max" | null } | null;
+  /** Whether runs may use the connectors in Settings (Claude runs only). Their tools run without asking, so it's off unless the task opts in. */
+  connectors: boolean;
   paused: boolean;
   /** When it runs next (null: paused, or a one-off that has run). */
   nextRunAt: number | null;

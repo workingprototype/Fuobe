@@ -330,6 +330,7 @@ export interface ScheduleForm {
   capUsd?: number | null;
   engine: Engine;
   mode?: AssistModeChoice | null;
+  connectors?: boolean;
   paused?: boolean;
 }
 
@@ -365,11 +366,13 @@ export function useScheduleActions() {
       await send(`/api/assist/schedules/${id}`, "DELETE");
       refresh();
     },
+    /** The new chat's id; null while the last run is still going; throws with the reason when the run couldn't start. */
     runNow: async (id: string) => {
       const r = await fetch(`/api/assist/schedules/${id}/run`, { method: "POST" });
       const body = (await r.json().catch(() => ({}))) as { threadId?: string | null; error?: string };
-      if (!r.ok && r.status !== 409) throw new Error(body.error ?? `Request failed (${r.status})`);
       refresh();
+      if (r.status === 409) return null;
+      if (!r.ok) throw new Error(body.error ?? `Request failed (${r.status})`);
       return body.threadId ?? null;
     },
   };
@@ -391,12 +394,12 @@ export function useConnectorActions() {
   const qc = useQueryClient();
   const refresh = () => void qc.invalidateQueries({ queryKey: ["assist-connectors"] });
   return {
-    create: async (f: { name: string; url: string; token?: string }) => {
+    create: async (f: { name: string; url: string; token?: string; tools?: string | null }) => {
       const c = await send<ConnectorView>("/api/assist/connectors", "POST", f);
       refresh();
       return c;
     },
-    update: async (id: string, f: { name?: string; url?: string; token?: string; enabled?: boolean }) => {
+    update: async (id: string, f: { name?: string; url?: string; token?: string; tools?: string | null; enabled?: boolean }) => {
       // Optimistic for the on / off switch.
       if (f.enabled !== undefined) qc.setQueryData<ConnectorView[]>(["assist-connectors"], (old) => old?.map((c) => (c.id === id ? { ...c, enabled: f.enabled! } : c)));
       try {

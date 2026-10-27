@@ -53,15 +53,38 @@ describe("connector URLs", () => {
     expect(check("https://10.0.0.5/mcp")).toMatchObject({ warning: expect.stringMatching(/public tunnel/) });
   });
 
-  it("masks the query (keys often live there), names connectors and cleans pasted tokens", () => {
-    expect(lib.maskConnectorUrl("https://mcp.zapier.com/api/mcp/s/abc?key=SECRET")).toBe("https://mcp.zapier.com/api/mcp/s/abc?••••");
+  it("masks the query and id-like path segments (keys often live there), names connectors and cleans pasted tokens", () => {
+    expect(lib.maskConnectorUrl("https://mcp.example.com/mcp?key=SECRET")).toBe("https://mcp.example.com/mcp?••••");
+    // Zapier's URL is itself the secret: /api/mcp/s/<secret>/mcp.
+    expect(lib.maskConnectorUrl("https://mcp.zapier.com/api/mcp/s/ODk1YjQ2NzQtSECRET0123456789/mcp")).toBe("https://mcp.zapier.com/api/mcp/s/…/mcp");
+    expect(lib.maskConnectorUrl("https://mcp.pipedream.net/6d1c3f2a-58e1-4b55-9e0a-0123456789ab/notion")).toBe("https://mcp.pipedream.net/…/notion");
+    expect(lib.maskConnectorUrl("https://server.example.com/u/Abc123/k/Def456/v1/sse")).toBe("https://server.example.com/u/…/k/…/v1/sse");
+    expect(lib.maskConnectorUrl("https://x.example.com/Secret_Token-xyz/another-one#frag")).toBe("https://x.example.com/…?••••");
     expect(lib.maskConnectorUrl("https://mcp.example.com/")).toBe("https://mcp.example.com");
+    expect(lib.maskConnectorUrl("not a url")).toBe("••••");
     expect(lib.connectorSlug("Notion (work)")).toBe("notion-work");
     expect(lib.connectorSlug("Ünïcode Tööls")).toBe("unicode-tools");
     expect(lib.connectorSlug("Notion", ["notion", "notion-2"])).toBe("notion-3");
     expect(lib.connectorSlug("!!!")).toBe("connector");
     expect(lib.cleanToken("Bearer abc.def")).toBe("abc.def");
     expect(lib.cleanToken("Authorization: Bearer abc")).toBe("abc");
+  });
+
+  it("masks short tokens harder than long API keys", () => {
+    expect(lib.maskToken(TOKEN)).toBe("sk-l••••cdef");
+    expect(lib.maskToken("abcd12wxyz")).toBe("••••yz");
+    expect(lib.maskToken("lin_api_SECRETSECRET")).toBe("••••ET");
+    expect(lib.maskToken("short")).toBe("••••");
+    expect(lib.maskToken("")).toBe("");
+  });
+
+  it("reads an allow-list of tool names", () => {
+    expect(lib.parseToolList("search_pages, get_page\nget_page  list-items")).toEqual({ tools: ["search_pages", "get_page", "list-items"] });
+    expect(lib.parseToolList(["a.b", "c"])).toEqual({ tools: ["a.b", "c"] });
+    expect(lib.parseToolList("  ")).toEqual({ tools: null });
+    expect(lib.parseToolList(null)).toEqual({ tools: null });
+    expect(lib.parseToolList("search pages!")).toMatchObject({ error: expect.stringMatching(/“pages!” isn't a tool name/) });
+    expect(lib.parseToolList(Array.from({ length: 65 }, (_, i) => `t${i}`))).toMatchObject({ error: expect.stringMatching(/at most 64/) });
   });
 });
 
@@ -79,7 +102,7 @@ describe("connectors in Settings", () => {
     expect(created.status).toBe(201);
     const text = await created.text();
     expect(text).not.toContain("lin_api_SECRETSECRET");
-    expect(JSON.parse(text)).toMatchObject({ slug: "linear", hasToken: true });
+    expect(JSON.parse(text)).toMatchObject({ slug: "linear", hasToken: true, token: "••••ET", tools: null });
     // The secret is only what the Claude request reads.
     expect(connectors.activeConnectors().map((x) => [x.slug, x.token])).toEqual([
       ["notion", TOKEN],
@@ -87,11 +110,24 @@ describe("connectors in Settings", () => {
     ]);
   });
 
+  it("never sends a secret kept in the URL's path to the browser", async () => {
+    const secret = "ODk1YjQ2NzQtZmFrZS1zZWNyZXQtMTIzNDU2";
+    const c = connectors.createConnector({ name: "Zapier", url: `https://mcp.zapier.com/api/mcp/s/${secret}/mcp` });
+    expect(c.url).toBe("https://mcp.zapier.com/api/mcp/s/…/mcp");
+    const body = await (await listRoute.GET()).text();
+    expect(body).not.toContain(secret);
+    // The full URL stays on the server: the duplicate check and the Claude request use it.
+    expect(() => connectors.createConnector({ name: "Zapier again", url: `https://mcp.zapier.com/api/mcp/s/${secret}/mcp` })).toThrow(/already/);
+    expect(connectors.activeConnectors().find((x) => x.slug === "zapier")?.url).toContain(secret);
+    connectors.deleteConnector(c.id);
+  });
+
   it("validates input, refuses duplicates and caps the list", async () => {
     expect(() => connectors.createConnector({ name: "", url: "https://a.example.com" })).toThrow(/name/);
     expect(() => connectors.createConnector({ name: "Plain", url: "http://a.example.com" })).toThrow(/https/);
     expect(() => connectors.createConnector({ name: "Again", url: "https://mcp.linear.app/mcp" })).toThrow(/already/);
     expect(() => connectors.createConnector({ name: "Spaces", url: "https://b.example.com", token: "two words" })).toThrow(/only the token/);
+    expect(() => connectors.createConnector({ name: "Tools", url: "https://c.example.com", tools: "rm -rf /" })).toThrow(/isn't a tool name/);
     const bad = await listRoute.POST(new Request("http://x", { method: "POST", body: JSON.stringify({ name: "x", url: "ftp://x" }) }));
     expect(bad.status).toBe(400);
     expect((await bad.json()).error).toBe("Connectors use https:// URLs");
@@ -107,6 +143,13 @@ describe("connectors in Settings", () => {
     expect(connectors.activeConnectors().find((x) => x.slug === "notion")?.token).toBeNull();
     await oneRoute.PATCH(new Request("http://x", { method: "PATCH", body: JSON.stringify({ token: TOKEN }) }), ctx);
     expect(connectors.activeConnectors().find((x) => x.slug === "notion")?.token).toBe(TOKEN);
+    // An allow-list: set, kept by other edits, cleared with "" (or null).
+    const limited = await oneRoute.PATCH(new Request("http://x", { method: "PATCH", body: JSON.stringify({ tools: "search_pages, get_page" }) }), ctx);
+    expect(await limited.json()).toMatchObject({ tools: ["search_pages", "get_page"] });
+    await oneRoute.PATCH(new Request("http://x", { method: "PATCH", body: JSON.stringify({ name: "Notion work" }) }), ctx);
+    expect(connectors.activeConnectors().find((x) => x.slug === "notion")?.tools).toEqual(["search_pages", "get_page"]);
+    const bad = await oneRoute.PATCH(new Request("http://x", { method: "PATCH", body: JSON.stringify({ tools: "search pages!" }) }), ctx);
+    expect(bad.status).toBe(400);
   });
 });
 
@@ -115,8 +158,8 @@ describe("the Claude request", () => {
     expect(connectors.mcpParams([])).toBeNull();
     expect(
       connectors.mcpParams([
-        { id: "a", name: "Notion", slug: "notion", url: "https://mcp.notion.com/mcp", token: TOKEN, enabled: true },
-        { id: "b", name: "Docs", slug: "docs", url: "https://docs.example.com/mcp", token: null, enabled: true },
+        { id: "a", name: "Notion", slug: "notion", url: "https://mcp.notion.com/mcp", token: TOKEN, tools: ["search_pages", "get_page"], enabled: true },
+        { id: "b", name: "Docs", slug: "docs", url: "https://docs.example.com/mcp", token: null, tools: null, enabled: true },
       ]),
     ).toEqual({
       mcp_servers: [
@@ -124,7 +167,8 @@ describe("the Claude request", () => {
         { type: "url", url: "https://docs.example.com/mcp", name: "docs" },
       ],
       toolsets: [
-        { type: "mcp_toolset", mcp_server_name: "notion" },
+        // An allow-list: every tool off by default, the listed ones on.
+        { type: "mcp_toolset", mcp_server_name: "notion", default_config: { enabled: false }, configs: { search_pages: { enabled: true }, get_page: { enabled: true } } },
         { type: "mcp_toolset", mcp_server_name: "docs" },
       ],
     });
@@ -167,9 +211,13 @@ describe("the Claude request", () => {
       ]);
       const tools = body.tools as { type?: string; name?: string; mcp_server_name?: string }[];
       expect(tools.filter((x) => x.type === "mcp_toolset")).toEqual([
-        { type: "mcp_toolset", mcp_server_name: "notion" },
+        { type: "mcp_toolset", mcp_server_name: "notion", default_config: { enabled: false }, configs: { search_pages: { enabled: true }, get_page: { enabled: true } } },
         { type: "mcp_toolset", mcp_server_name: "linear" },
       ]);
+      // Claude is told the connector tools run without asking, and to check first in an Ask-first chat.
+      const system = JSON.stringify(body.system);
+      expect(system).toContain("Connected apps (custom MCP connectors): Notion work, Linear.");
+      expect(system).toContain("say what you'll do and wait for the user's OK in chat");
       // Fuobe's own tools are still there, first.
       expect(tools[0].name).toBeTruthy();
       const items = agent.getThread(t.id)!.thread.items;
@@ -215,6 +263,30 @@ describe("the Claude request", () => {
       globalThis.fetch = realFetch;
       setSetting("anthropicKey", "");
       for (const c of connectors.listConnectors()) connectors.updateConnector(c.id, { enabled: true });
+    }
+  });
+
+  it("a chat started without connectors (a scheduled run that leaves them off) sends none", async () => {
+    setSetting("anthropicKey", "sk-ant-test");
+    const sent: Record<string, unknown>[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return claudeStream({ content: [{ type: "text", text: "Hi" }], stop_reason: "end_turn" });
+    }) as typeof fetch;
+    try {
+      expect(connectors.activeConnectors().length).toBeGreaterThan(0);
+      const t = agent.createThread({ engine: "cloud", agent: "claude", mode: "smart", connectors: false });
+      agent.addMessage(t.id, "Hi");
+      await agent.run(t.id);
+      expect(sent[0].mcp_servers).toBeUndefined();
+      expect(JSON.stringify(sent[0].system)).not.toContain("Connected apps");
+      // Nor does it get the "connectors need Claude" note on another agent.
+      const o = agent.createThread({ engine: "cloud", agent: "offline", mode: "free", connectors: false });
+      expect(agent.getThread(o.id)!.thread.items).toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      setSetting("anthropicKey", "");
     }
   });
 

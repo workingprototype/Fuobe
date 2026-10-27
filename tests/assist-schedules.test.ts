@@ -11,6 +11,13 @@ process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
 process.env.OLLAMA_URL = "http://127.0.0.1:9";
 
+// No real 30 s sweep in this process: the fixtures' times are due by the real clock too, and a sweep
+// with Date.now() would start extra runs. A runner that is already "running" (its timer cleared) keeps
+// ensureScheduleRunner from starting one; the first test checks that saving a task starts it.
+const stubTimer = setInterval(() => {}, 60_000);
+clearInterval(stubTimer);
+globalThis.__fuobeScheduleRunner = { tick: () => {}, timer: stubTimer };
+
 const { setSetting } = await import("@/server/settings");
 const agent = await import("@/server/assist/agent");
 const tools = await import("@/server/assist/tools");
@@ -18,8 +25,10 @@ const sched = await import("@/server/assist/schedules");
 const projects = await import("@/server/assist/projects");
 const { db } = await import("@/server/db");
 const { spendOf } = await import("@/lib/assist-schedule");
+const connectors = await import("@/server/assist/connectors");
 const listRoute = await import("@/app/api/assist/schedules/route");
 const oneRoute = await import("@/app/api/assist/schedules/[scheduleId]/route");
+const runRoute = await import("@/app/api/assist/schedules/[scheduleId]/run/route");
 
 type Block = Anthropic.Beta.BetaContentBlock;
 const text = (t: string) => ({ type: "text", text: t, citations: null }) as Block;
@@ -29,10 +38,10 @@ const job = (prompt: string) => ({ summary: prompt, jobs: [{ model_id: "nano-ban
 
 /** A model that makes one generate call per turn listed, then says it's done; it records what it saw. */
 function scripted(...prompts: string[]) {
-  const seen: { system: string }[] = [];
+  const seen: { system: string; messages: string; connectors?: string[] }[] = [];
   let n = 0;
-  const call: import("@/server/assist/agent").ModelCall = async ({ system }) => {
-    seen.push({ system: system.turn });
+  const call: import("@/server/assist/agent").ModelCall = async ({ system, messages, connectors }) => {
+    seen.push({ system: system.turn, messages: JSON.stringify(messages), connectors: connectors?.map((c) => c.slug) });
     const p = prompts[n++];
     return p ? reply([text("On it."), generateCall(`toolu_${n}`, job(p))], "tool_use") : reply([text("Done — your ad is rendering.")], "end_turn");
   };
@@ -56,10 +65,15 @@ describe("scheduled tasks", () => {
     expect(() => sched.createSchedule({ ...base, title: "x", tz: "Mars/Base", rule: { kind: "daily", time: "09:00" } }, now)).toThrow("Pick a time zone");
     expect(() => sched.createSchedule({ ...base, title: "x", rule: { kind: "once", at: "2026-10-26T09:00" } }, now)).toThrow(/passed/);
     expect(() => sched.createSchedule({ ...base, title: "x", projectId: "nope", rule: { kind: "daily", time: "09:00" } }, now)).toThrow(/project/);
-    const s = sched.createSchedule({ ...base, title: "Every 6h", rule: { kind: "hours", every: 6 } }, now);
-    expect(s.rule).toEqual({ kind: "hours", every: 6, from: now });
     // Saving a task makes sure the sweep is running (it also starts at boot).
+    const stub = globalThis.__fuobeScheduleRunner;
+    globalThis.__fuobeScheduleRunner = undefined;
+    const s = sched.createSchedule({ ...base, title: "Every 6h", rule: { kind: "hours", every: 6 } }, now);
     expect(globalThis.__fuobeScheduleRunner).toBeDefined();
+    clearInterval(globalThis.__fuobeScheduleRunner!.timer);
+    globalThis.__fuobeScheduleRunner = stub;
+    expect(s.rule).toEqual({ kind: "hours", every: 6, from: now });
+    expect(s.connectors).toBe(false);
     expect(s.nextRunAt).toBe(now + 6 * 3_600_000);
     // Ask first has no cap; auto gets the default unless one is given.
     expect(s.capUsd).toBeNull();
@@ -143,9 +157,91 @@ describe("the sweep (fake clock)", () => {
     // Runs inside the project.
     const [id] = await sched.sweepSchedules(T("2026-10-27T09:00:00Z"), { model: scripted().call });
     expect(threadOf(id).projectId).toBe(p.id);
+    expect(sched.getSchedule(s.id)!.last).toMatchObject({ threadId: id, status: "done" });
     projects.deleteProject(p.id);
-    expect(sched.getSchedule(s.id)).toMatchObject({ projectId: null, paused: true, nextRunAt: null });
+    // The reason shows, not the last run's chat (which finished fine).
+    expect(sched.getSchedule(s.id)).toMatchObject({ projectId: null, paused: true, nextRunAt: null, last: { threadId: null, status: "failed", text: "Paused: its project was deleted" } });
     expect(await sched.sweepSchedules(T("2026-10-28T09:00:00Z"), { model: scripted().call })).toEqual([]);
+  });
+
+  it("a project that vanished before a start: Run now says why, and so does the task", async () => {
+    const p = projects.createProject({ name: "Gone" });
+    const s = sched.createSchedule({ ...base, title: "Orphan", projectId: p.id, rule: { kind: "daily", time: "09:00" } }, T("2026-10-27T08:00:00Z"));
+    const [first] = await sched.sweepSchedules(T("2026-10-27T09:00:00Z"), { model: scripted().call });
+    expect(first).toBeTruthy();
+    // Removed behind deleteProject's back (another process, a restore): the start finds no project.
+    db().prepare("DELETE FROM assist_projects WHERE id = ?").run(p.id);
+    const res = await runRoute.POST(new Request("http://x", { method: "POST" }), { params: Promise.resolve({ scheduleId: s.id }) });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ threadId: null, reason: "paused", error: "Its project was deleted — edit the task to pick another" });
+    expect(sched.getSchedule(s.id)).toMatchObject({ paused: true, last: { threadId: null, status: "failed", text: "Its project was deleted — edit the task to pick another" } });
+  });
+
+  it("Run now: 202 with the new chat; 409 while the last run is still going", async () => {
+    const s = sched.createSchedule({ ...base, title: "Now", rule: { kind: "daily", time: "09:00" } }, T("2026-10-27T08:00:00Z"));
+    const ctx = { params: Promise.resolve({ scheduleId: s.id }) };
+    let release!: () => void;
+    const slow: import("@/server/assist/agent").ModelCall = () => new Promise((r) => (release = () => r(reply([text("Made it.")], "end_turn"))));
+    const begun = await sched.startSchedule(s.id, { model: slow });
+    expect(begun.threadId).toBeTruthy();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const busy = await runRoute.POST(new Request("http://x", { method: "POST" }), ctx);
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toMatchObject({ threadId: null, reason: "busy" });
+    // The click isn't recorded as a skipped run: the task still shows the run that's going.
+    expect(sched.getSchedule(s.id)!.last).toMatchObject({ threadId: begun.threadId, status: "running" });
+    release();
+    await begun.done;
+    expect(sched.getSchedule(s.id)!.last).toMatchObject({ threadId: begun.threadId, status: "done", text: "Made it." });
+    expect((await runRoute.POST(new Request("http://x", { method: "POST" }), { params: Promise.resolve({ scheduleId: "nope" }) })).status).toBe(404);
+  });
+
+  it("a run whose chat is deleted doesn't stay 'running'", async () => {
+    const s = sched.createSchedule({ ...base, title: "Deleted chat", rule: { kind: "daily", time: "09:00" } }, T("2026-10-27T08:00:00Z"));
+    // A run the server lost track of (it restarted mid-run): stored as running.
+    const t = agent.createThread({ engine: "cloud", agent: "offline", scheduleId: s.id });
+    db().prepare("UPDATE assist_schedules SET last_thread_id = ?, last_status = 'running', last_text = 'Working…', last_run_at = ? WHERE id = ?").run(t.id, T("2026-10-27T09:00:00Z"), s.id);
+    agent.deleteThread(t.id);
+    expect(sched.getSchedule(s.id)!.last).toEqual({ threadId: null, status: "failed", text: "Its chat was deleted" });
+    // A finished run whose chat is deleted keeps what it reported, without the link.
+    const begun = await sched.startSchedule(s.id, { model: scripted().call });
+    await begun.done;
+    agent.deleteThread(begun.threadId!);
+    expect(sched.getSchedule(s.id)!.last).toEqual({ threadId: null, status: "done", text: "Done — your ad is rendering." });
+  });
+
+  it("an edit that leaves the timing alone keeps a due run; a new time or zone doesn't", async () => {
+    const s = sched.createSchedule({ ...base, title: "Due", rule: { kind: "daily", time: "09:00" } }, T("2026-10-27T08:00:00Z"));
+    // Renamed at 09:00:10, before the sweep at 09:00:30: the 09:00 run still happens.
+    expect(sched.updateSchedule(s.id, { title: "Due (renamed)", prompt: "A new prompt" }, T("2026-10-27T09:00:10Z"))!.nextRunAt).toBe(T("2026-10-27T09:00:00Z"));
+    expect(await sched.sweepSchedules(T("2026-10-27T09:00:30Z"), { model: scripted().call })).toHaveLength(1);
+    expect(sched.getSchedule(s.id)!.nextRunAt).toBe(T("2026-10-28T09:00:00Z"));
+    // A new time is counted from now.
+    expect(sched.updateSchedule(s.id, { rule: { kind: "daily", time: "10:00" } }, T("2026-10-27T09:30:00Z"))!.nextRunAt).toBe(T("2026-10-27T10:00:00Z"));
+    expect(sched.updateSchedule(s.id, { tz: "Europe/Berlin" }, T("2026-10-27T09:30:00Z"))!.nextRunAt).toBe(T("2026-10-28T09:00:00Z"));
+  });
+
+  it("the runner started at boot sweeps a few seconds in, then every 30 s", () => {
+    vi.useFakeTimers();
+    const stub = globalThis.__fuobeScheduleRunner;
+    globalThis.__fuobeScheduleRunner = undefined;
+    try {
+      sched.ensureScheduleRunner({ soon: true });
+      const runner = globalThis.__fuobeScheduleRunner!;
+      const ticks = vi.fn();
+      runner.tick = ticks;
+      vi.advanceTimersByTime(5_000);
+      expect(ticks).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(25_000);
+      expect(ticks).toHaveBeenCalledTimes(2);
+      // A second call (a hot reload) keeps the one timer.
+      sched.ensureScheduleRunner({ soon: true });
+      expect(globalThis.__fuobeScheduleRunner).toBe(runner);
+      clearInterval(runner.timer);
+    } finally {
+      globalThis.__fuobeScheduleRunner = stub;
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -217,5 +313,49 @@ describe("approval and the cost cap", () => {
       globalThis.fetch = realFetch;
       db().prepare("UPDATE generations SET status = 'canceled' WHERE status IN ('queued', 'running')").run();
     }
+  });
+});
+
+describe("connectors in scheduled runs", () => {
+  afterEach(() => {
+    setSetting("anthropicKey", "");
+    for (const c of connectors.listConnectors()) connectors.deleteConnector(c.id);
+  });
+
+  it("are off unless the task allows them; when on, Claude is told they run without asking", async () => {
+    setSetting("anthropicKey", "sk-ant-test");
+    connectors.createConnector({ name: "Slack", url: "https://mcp.slack.example.com/mcp", token: "xoxb-0123456789abcdefghij" });
+    const off = sched.createSchedule({ ...base, title: "No connectors", mode: { mode: "smart" }, rule: { kind: "daily", time: "09:00" } }, T("2026-10-27T08:00:00Z"));
+    const m1 = scripted();
+    const [a] = await sched.sweepSchedules(T("2026-10-27T09:00:00Z"), { model: m1.call });
+    expect(threadOf(a).agent).toBe("claude");
+    expect(m1.seen[0].connectors).toBeUndefined();
+    expect(m1.seen[0].system).not.toMatch(/Connected apps/);
+    expect(threadOf(a).items[0]).toMatchObject({ text: expect.not.stringMatching(/connectors on/) });
+    sched.deleteSchedule(off.id);
+
+    const on = sched.createSchedule({ ...base, title: "With Slack", mode: { mode: "smart" }, connectors: true, rule: { kind: "daily", time: "09:00" } }, T("2026-10-27T08:00:00Z"));
+    expect(on.connectors).toBe(true);
+    const m2 = scripted();
+    const [b] = await sched.sweepSchedules(T("2026-10-27T09:00:00Z"), { model: m2.call });
+    expect(m2.seen[0].connectors).toEqual(["slack"]);
+    expect(m2.seen[0].system).toMatch(/Connected apps \(custom MCP connectors\): Slack\. Their tools run the moment you call them/);
+    // Ask first: nothing that depends on unapproved results goes out.
+    expect(m2.seen[0].system).toMatch(/plans here wait for the user's approval/);
+    expect(threadOf(b).items[0]).toMatchObject({ text: expect.stringMatching(/connectors on \(their tools run without asking\)/) });
+    // Turning it off again applies to the next run.
+    expect(sched.updateSchedule(on.id, { connectors: false })!.connectors).toBe(false);
+  });
+
+  it("an ordinary Claude chat in Ask first is told to check before a connector changes anything", async () => {
+    setSetting("anthropicKey", "sk-ant-test");
+    connectors.createConnector({ name: "Linear", url: "https://mcp.linear.example.com/mcp" });
+    const t = agent.createThread({ engine: "cloud", agent: "claude", mode: "smart" });
+    agent.addMessage(t.id, "What's on my board?");
+    const m = scripted();
+    await agent.run(t.id, m.call);
+    expect(m.seen[0].connectors).toEqual(["linear"]);
+    expect(m.seen[0].system).toMatch(/approval cards and the cost cap don't cover them/);
+    expect(m.seen[0].system).toMatch(/say what you'll do and wait for the user's OK in chat/);
   });
 });

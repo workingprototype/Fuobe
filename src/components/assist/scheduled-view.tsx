@@ -97,7 +97,7 @@ export function ScheduledView({ projectId }: { projectId?: string } = {}) {
                   <CalendarClock />
                 </EmptyMedia>
                 <EmptyTitle>No scheduled tasks yet</EmptyTitle>
-                <EmptyDescription>Schedule a prompt here, or from any chat&apos;s menu. You choose whether each run asks you first.</EmptyDescription>
+                <EmptyDescription>Schedule a prompt here, or with the Schedule button in any chat. You choose whether each run asks you first.</EmptyDescription>
               </EmptyHeader>
               <EmptyContent>
                 <Button size="sm" onClick={() => setCreating(true)}>
@@ -203,7 +203,10 @@ function TaskRow({ s, showProject }: { s: ScheduleView; showProject: boolean }) 
         <div className="min-w-0">
           <dt className="text-muted-foreground">Next run</dt>
           <dd className="font-medium">{s.paused ? "Paused" : s.nextRunAt ? `${formatWhen(s.nextRunAt, s.tz)} (${untilText(s.nextRunAt, now)})` : "None — it ran"}</dd>
-          <dd className="text-muted-foreground">{s.approval === "ask" ? "Asks before spending" : s.capUsd ? `Runs on its own up to ${formatCost(s.capUsd)} a run` : "Runs free plans on its own"}</dd>
+          <dd className="text-muted-foreground">
+            {s.approval === "ask" ? "Asks before generating" : s.capUsd ? `Runs on its own up to ${formatCost(s.capUsd)} a run` : "Runs free plans on its own"}
+            {s.connectors ? " · uses your connectors" : ""}
+          </dd>
         </div>
         <div className="min-w-0">
           <dt className="text-muted-foreground">

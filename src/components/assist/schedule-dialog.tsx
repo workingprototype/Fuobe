@@ -4,6 +4,7 @@ import { CalendarClock, Loader2, X } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,7 +33,7 @@ import {
 } from "@/lib/assist-schedule";
 import type { Engine } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
-import { useChats, useProjects, useScheduleActions, type ScheduleRuleInput } from "./hooks";
+import { useChats, useConnectors, useProjects, useScheduleActions, type ScheduleRuleInput } from "./hooks";
 import { ModePicker } from "./mode-picker";
 import { ProjectDot } from "./project-dot";
 
@@ -108,6 +109,9 @@ function Form({ schedule, seed, onDone }: { schedule?: ScheduleView; seed?: Sche
   const [cap, setCap] = useState(String(schedule?.capUsd ?? DEFAULT_SCHEDULE_CAP_USD));
   const [engine, setEngine] = useState<Engine>(schedule?.engine ?? seed?.engine ?? preferred);
   const [mode, setMode] = useState<AssistModeChoice | null>((schedule?.mode as AssistModeChoice | null) ?? seed?.mode ?? null);
+  // Off unless the task opts in: connector tools run inside Claude's reply, where no approval reaches them.
+  const [connectors, setConnectors] = useState(schedule?.connectors ?? false);
+  const connectorNames = (useConnectors().data ?? []).filter((c) => c.enabled).map((c) => c.name);
   const [busy, setBusy] = useState(false);
   const zones = useMemo(() => {
     const list = allZones();
@@ -142,6 +146,7 @@ function Form({ schedule, seed, onDone }: { schedule?: ScheduleView; seed?: Sche
         capUsd: approval === "auto" ? capUsd : null,
         engine,
         mode,
+        connectors,
       };
       const s = schedule ? await actions.update(schedule.id, body) : await actions.create(body);
       toast.success(schedule ? "Schedule saved" : "Scheduled", { description: s.nextRunAt ? `Next run ${formatWhen(s.nextRunAt, s.tz)}` : undefined, duration: 2500 });
@@ -340,7 +345,11 @@ function Form({ schedule, seed, onDone }: { schedule?: ScheduleView; seed?: Sche
           <div role="radiogroup" aria-label="Approval" onKeyDown={radioKeys} className="grid gap-2">
             {(
               [
-                { id: "ask", title: "Ask me first", body: "Each run plans the job, then waits in its chat for your OK. Nothing is spent until you approve." },
+                {
+                  id: "ask",
+                  title: "Ask me first",
+                  body: "Each run plans the job, then waits in its chat for your OK — nothing is generated until you approve. A run on Claude uses your Anthropic key to plan.",
+                },
                 { id: "auto", title: "Run on its own, within a cap", body: "Plans start without asking while they fit the cap. A plan that would pass it, or has no known price, waits for you." },
               ] as const
             ).map((o) => (
@@ -371,6 +380,22 @@ function Form({ schedule, seed, onDone }: { schedule?: ScheduleView; seed?: Sche
             </div>
           )}
         </fieldset>
+
+        {(connectorNames.length > 0 || connectors) && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Connectors</legend>
+            <label className="flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5">
+              <Checkbox checked={connectors} onCheckedChange={(v) => setConnectors(v === true)} className="mt-0.5" />
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium">Let runs use my connectors{connectorNames.length ? ` (${connectorNames.join(", ")})` : ""}</span>
+                <span className="block text-[12px] text-muted-foreground">
+                  Claude runs only. Their tools run without asking — even with Ask me first — and nobody is watching, so turn this on only for connectors you trust unattended. Settings → Assist · connectors can
+                  limit each one to some tools.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+        )}
       </div>
       <DialogFooter className="mx-0 mb-0 border-t px-5 py-3">
         <Button type="button" variant="ghost" onClick={onDone}>

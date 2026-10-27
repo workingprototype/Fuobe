@@ -324,6 +324,7 @@ export const ASSET_FREE: Record<string, string> = {
   "assist_schedules.rule_json": "when a scheduled task runs",
   "assist_schedules.mode_json": "the Assist mode a scheduled run starts in",
   "assist_connectors.url": "a remote MCP server Claude connects to, never one of ours",
+  "assist_connectors.tools_json": "the tool names a connector is limited to",
 };
 
 /** The query that finds the rows of one ASSET_REFS table naming a file (@id), except the purged generation's own (@g). */

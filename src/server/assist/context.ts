@@ -32,6 +32,8 @@ export interface ChatInfo {
   capUsd?: number | null;
   /** The scheduled task that started the chat. */
   scheduleId?: string | null;
+  /** The custom MCP connectors Claude has in this chat (their names). */
+  connectors?: string[];
 }
 
 export function engineLine(engine: Engine): string {
@@ -58,6 +60,24 @@ function scheduleLine(id: string): string | null {
   if (!r) return null;
   const when = `${describeRule(JSON.parse(r.rule_json) as ScheduleRule)}, ${zoneLabel(r.tz)}`;
   return `This chat is a scheduled run of the task “${r.title}” (${when}). Nobody is watching it live: don't ask questions — make sensible choices, do the whole job, and end with a short summary of what you made.`;
+}
+
+/**
+ * What the model must know about custom MCP connectors: their tools run the moment it calls them,
+ * inside its reply, so approval cards (Ask first) and auto-run's cap don't cover them. It reads with
+ * them freely; a change outside Fuobe (posting, sending, creating, editing, deleting) needs the user's
+ * word — asked in chat, or already in a scheduled task's prompt.
+ */
+export function connectorsLine(names: string[], o: { autoApprove: boolean; scheduled: boolean }): string {
+  const list = names.join(", ");
+  const how = "Their tools run the moment you call them, inside your reply — approval cards and the cost cap don't cover them.";
+  const writes = o.scheduled
+    ? "Use them to look things up. Only post, send, create, edit or delete something with them when the task's prompt asks for exactly that" +
+      (o.autoApprove ? "." : ", and not before the results it depends on exist: plans here wait for the user's approval, so say in your summary what's left to do once they approve.")
+    : o.autoApprove
+      ? "Use them to look things up; only change things with them (post, send, create, edit, delete) when the user asked for that."
+      : "Use them to look things up; before one that changes something (posts, sends, creates, edits or deletes), say what you'll do and wait for the user's OK in chat.";
+  return `Connected apps (custom MCP connectors): ${list}. ${how} ${writes}`;
 }
 
 /** A project's own skills that still exist (a deleted or renamed one drops out). */
@@ -87,6 +107,7 @@ export function chatFacts(c: ChatInfo, now = new Date()): ContextFact[] {
   ];
   const scheduled = c.scheduleId ? scheduleLine(c.scheduleId) : null;
   if (scheduled) facts.push({ section: "now", key: "scheduled", text: scheduled });
+  if (c.connectors?.length) facts.push({ section: "now", key: "connectors", text: connectorsLine(c.connectors, { autoApprove: c.autoApprove, scheduled: !!c.scheduleId }) });
   const project = c.projectId ? getProject(c.projectId) : null;
   if (project) {
     facts.push({
