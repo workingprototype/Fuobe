@@ -117,7 +117,7 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `soul` | Fuobe Soul, the 139 looks | 139 looks × 3 subjects, pinned seeds | `recipe`, `prompt-only`, `half-strength`, `plain`, `original` | clip, aesthetic, style |
 | `soul-cinema` | Soul Cinema's one film look | 6 scenes, pinned seeds | `recipe`, `prompt-only`, `plain`, `original` | clip, aesthetic, style |
 | `soul-hex` | Soul HEX palettes | 3 Fuobe palettes × 2 subjects | `words`, `lock` (open), `base`, `palette-model` (open), `plain` | palette, clip, aesthetic |
-| `soul-id` | character training | your photos → train → 8 scenes | `trained`, `original` | identity, clip, aesthetic |
+| `soul-id` | character and look training | your photos → train per family (Fuobe Soul, Soul Cinema, Soul HD, FLUX.1 [dev]) → scenes; a moodboard → a look | `trained`, `half-strength`, `references` | identity (style for the look), clip, aesthetic |
 | `dop` | Fuobe DoP motions and effects | the 69 the research gives a LoRA, and the 20 camera moves it gives a Fun Camera pose or an LTX camera LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
 | `dop-mix` | Fuobe DoP's Mix | 5 move + effect pairs | `mix` (the candidate), `first` (the move alone) | temporal, clip |
 | `genjutsu` | Genjutsu move / swap / restyle | 3 (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
@@ -194,7 +194,8 @@ small synthetic files in `fixtures/` instead.
 scripts/eval/local/
   references/soul/<look-slug>/*.jpg   # style references per look (your own or licensed images; never Higgsfield previews)
   references/mixed-media/<look>/*     # what each Mixed Media look should look like
-  characters/default/*.jpg            # 10–30 photos of ONE consenting person (soul-id)
+  characters/default/*.jpg            # 20+ photos (80 at most) of ONE consenting person (soul-id)
+  styles/default/*.jpg                # 20+ images in one style, a moodboard (soul-id/look)
   dop/start.png, dop/end.png          # a start frame (a person on a bridge fits the prompts), an end frame for transitions
   genjutsu/dance.mp4, character.png, style.png
   genjutsu/street.mp4, object.png     # street.mp4 at least 720 px on each side (Kling O3's edit, the cloud partner)
@@ -203,10 +204,14 @@ scripts/eval/local/
   speak/portrait.png, speak/voice.wav
 ```
 
-**Training needs consent.** `soul-id.json` ships with `"consent": false`, so training refuses to
-start. Copy the file to `local/soul-id.json`. In your copy, set `"consent": true` only when the
-person in the photos agreed. Then run it with `--suite scripts/eval/local/soul-id.json`. To reuse a
-character you already trained, put its element id in `"element"` instead of training again.
+**Training needs consent.** `soul-id.json` ships with `"consent": false`, so a character's training
+refuses to start. Copy the file to `local/soul-id.json`. In your copy, set `"consent": true` only
+when the person in the photos agreed: the runner then sends Fuobe the consent line with the training,
+as the Train dialog does. A look (`"kind": "style"`) needs no consent. Then run it with
+`--suite scripts/eval/local/soul-id.json`. To reuse a character you already trained, put its element
+id in `"element"` instead of training again. Each case trains its own family (a Soul ID runs on the
+models of the base it was trained on), so a full cloud run trains four times: about $1.70 + $1.70 +
+$1.50 + $6.00 for the characters and $3.39 for the look, priced before anything starts.
 
 ## The case format
 
@@ -257,7 +262,7 @@ Other case fields:
 - `variantModels`: a variant's models for this case (`{"partner": {"cloud": ["kling-o3"]}}`), over
   the variant's own. Each Genjutsu mode names its own partner this way.
 - `shots`: a film's shots. Continuity is measured across them.
-- `train`: photos, a target per engine, `consent`, and `minPhotos`.
+- `train`: photos, a target per engine, `kind` (`character` or `style`), `consent`, and `minPhotos`.
 - `submit`: a studio route and its body, with `{{inputs.video}}`, `{{source:inputs.video}}`,
   `{{prompt}}`, `{{seed}}`, `{{engine}}` and `{{requestId}}` filled in.
 - `engines`: the engines the case runs on.

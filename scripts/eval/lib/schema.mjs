@@ -156,8 +156,10 @@ const Train = z
     /** Training target ids per engine (GET /api/elements/<id>/trainings lists them). */
     targets: PerEngine(z.string().min(1)),
     name: z.string().min(1).max(60).optional(),
+    /** A person (a Soul ID, trained as a subject, consent first) or a look (a moodboard's style, trained as a style). */
+    kind: z.enum(["character", "style"]).default("character"),
     minPhotos: z.number().int().min(1).default(5),
-    /** The people in the photos agreed to being trained on. Training refuses to start without it. */
+    /** The people in the photos agreed to being trained on. A character's training refuses to start without it. */
     consent: z.boolean().default(false),
     /** An element that is already trained (its id): the run uses it instead of training again. */
     element: z.string().min(1).max(64).optional(),

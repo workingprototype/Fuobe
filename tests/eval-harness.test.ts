@@ -23,6 +23,7 @@ process.env.COMFYUI_URL = "http://127.0.0.1:9";
 process.env.OLLAMA_URL = "http://127.0.0.1:9";
 
 const { setSetting } = await import("@/server/settings");
+const { getElement } = await import("@/server/elements");
 const status = await import("@/app/api/status/route");
 const models = await import("@/app/api/models/route");
 const generations = await import("@/app/api/generations/route");
@@ -237,12 +238,19 @@ describe("the runner on the demo provider", () => {
   });
 
   it("a training case in a demo run makes an element from the fixtures and @mentions it (no training)", async () => {
-    const r = await cli(["run", "--suite", "soul-id", "--engine", "demo", "--prompts", "1", "--variants", "trained", "--no-metrics"]);
+    const r = await cli(["run", "--suite", "soul-id", "--engine", "demo", "--cases", "soul-id/character,soul-id/look", "--prompts", "1", "--variants", "trained", "--no-metrics"]);
     const runDir = path.join(results, runIdFrom(r.stderr));
-    const el = JSON.parse(fs.readFileSync(path.join(runDir, "elements.json"), "utf8"))["soul-id/character"];
+    const elements = JSON.parse(fs.readFileSync(path.join(runDir, "elements.json"), "utf8"));
+    const el = elements["soul-id/character"];
     expect(el).toMatchObject({ status: "demo", photos: 3 });
-    const [row] = store.latestJobs(runDir);
-    expect(String((row.request as { prompt: string }).prompt)).toContain(`@${el.handle} as a chef`);
+    const rows = store.latestJobs(runDir);
+    const prompt = (caseId: string) => String((rows.find((x) => x.caseId === caseId)!.request as { prompt: string }).prompt);
+    expect(prompt("soul-id/character")).toContain(`@${el.handle} as a chef`);
+    // The look case makes a style element (no consent line), @mentioned on Fuobe Soul.
+    expect(elements["soul-id/look"]).toMatchObject({ status: "demo", photos: 2 });
+    expect(prompt("soul-id/look")).toContain(`@${elements["soul-id/look"].handle} a lighthouse`);
+    const look = getElement(elements["soul-id/look"].id);
+    expect(look?.kind).toBe("style");
   });
 
   it("never runs a job through Higgsfield's API, and runs each Genjutsu mode's own partner model", async () => {
@@ -933,6 +941,56 @@ describe("the cloud spend cap", () => {
     await expect(runner.runEval({ suite, engine: "cloud", maxUsd: 0.5, root }, { client: stub.client })).rejects.toThrow(/about \$0\.86, over the spend cap/);
     expect(runner.trainingPrice({ price: "Free" })).toBe(0);
     expect(runner.trainingPrice({ price: "Higgsfield balance" })).toBeNull();
+  });
+  it("trains a character with the consent line the case confirms, and a look without one", async () => {
+    const suiteFile = path.join(dir, "train-consent.json");
+    const photos = path.join(process.cwd(), "scripts/eval/fixtures/character");
+    fs.writeFileSync(
+      suiteFile,
+      JSON.stringify({
+        suite: "train-consent",
+        title: "Consent",
+        description: "x",
+        original: "fuobe-soul-id",
+        kind: "image",
+        targets: { cloud: { models: ["fuobe-soul"] } },
+        cases: [
+          { id: "t/person", title: "person", train: { photos, targets: { cloud: "fal-z-image" }, minPhotos: 3, consent: true }, prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] },
+          { id: "t/look", title: "look", train: { photos, kind: "style", targets: { cloud: "fal-z-image-style" }, minPhotos: 3 }, prompts: [{ id: "p", text: "{character} a cafe", seed: 1 }] },
+          { id: "t/noconsent", title: "no consent", train: { photos, targets: { cloud: "fal-z-image" }, minPhotos: 3 }, prompts: [{ id: "p", text: "{character}", seed: 1 }] },
+        ],
+      }),
+    );
+    const stub = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["fuobe-soul"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $1.70 (2,000 steps)" }, { id: "fal-z-image-style", provider: "fal", price: "≈ $3.39 (1,500 steps)" }] });
+    const made: { kind: string }[] = [];
+    const trainings: Record<string, unknown>[] = [];
+    const base = stub.client.request.bind(stub.client);
+    const client = {
+      ...stub.client,
+      async request(method: string, p: string, opts: { json?: Record<string, unknown>; query?: Record<string, unknown> } = {}) {
+        if (p === "/api/elements" && method === "POST") {
+          made.push(opts.json as { kind: string });
+          return { id: `el${made.length}`, handle: `Eval_${made.length}` };
+        }
+        const t = /^\/api\/elements\/(el\d+)\/trainings$/.exec(p);
+        if (t && method === "POST") {
+          trainings.push(opts.json!);
+          return { id: `tr-${t[1]}` };
+        }
+        if (t) return { targets: [], items: [{ id: `tr-${t[1]}`, status: "succeeded", costUsd: 1.7 }] };
+        return base(method, p, opts);
+      },
+    };
+    const suite = cases.loadSuite(suiteFile);
+    const r = (await runner.runEval({ suite, engine: "cloud", maxUsd: 10, root }, { client, sleep: async () => {} })) as { run: { jobs?: unknown } };
+    expect(r).toBeDefined();
+    expect(made.map((m) => m.kind)).toEqual(["character", "style"]);
+    expect(trainings).toEqual([
+      { target: "fal-z-image", consent: true },
+      { target: "fal-z-image-style" },
+    ]);
+    const dry = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client })) as { jobs: { case: string; skip?: string }[] };
+    expect(dry.jobs.find((j) => j.case === "t/noconsent")?.skip).toMatch(/training a character needs "consent": true/);
   });
 });
 

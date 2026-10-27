@@ -432,7 +432,7 @@ function trainingProblem(job, engine) {
   const t = job.train;
   if (engine === "demo" || t.element) return null;
   if (!t.target) return `no training target for ${engine} in this case`;
-  if (!t.consent) return 'training needs "consent": true in the case (only when the person in the photos agreed)';
+  if (t.kind !== "style" && !t.consent) return 'training a character needs "consent": true in the case (only when the person in the photos agreed)';
   const photos = listMedia(t.photos).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
   if (photos.length < t.minPhotos) return `add at least ${t.minPhotos} photos to ${path.relative(REPO_DIR, t.photos)} (there ${photos.length === 1 ? "is" : "are"} ${photos.length})`;
   return null;
@@ -493,14 +493,16 @@ async function prepareElement(client, job, ctx) {
   const refs = [];
   for (const f of photos.slice(0, MAX_ELEMENT_PHOTOS)) refs.push(await ctx.up.url(f));
   const name = `${t.name ?? "Eval character"} ${ctx.runId.slice(-4)}`.slice(0, 60);
-  const el = await client.request("POST", "/api/elements", { json: { name, kind: "character", references: refs } });
+  const kind = t.kind ?? "character";
+  const el = await client.request("POST", "/api/elements", { json: { name, kind, references: refs } });
   const record = { id: el.id, handle: el.handle, photos: refs.length, ...(photos.length > MAX_ELEMENT_PHOTOS && { note: `the first ${MAX_ELEMENT_PHOTOS} of ${photos.length} photos (an element holds ${MAX_ELEMENT_PHOTOS})` }) };
   if (ctx.engine === "demo") {
     writeJson(file, { ...saved, [job.caseId]: { ...record, status: "demo" } });
     return record;
   }
   ctx.log(`Training ${name} on ${t.target} with ${refs.length} photos`);
-  const tr = await client.request("POST", `/api/elements/${encodeURIComponent(el.id)}/trainings`, { json: { target: t.target } });
+  // A character trains only with the person's consent (Soul ID's consent line): the case said so (trainingProblem checked).
+  const tr = await client.request("POST", `/api/elements/${encodeURIComponent(el.id)}/trainings`, { json: { target: t.target, ...(kind === "character" && { consent: t.consent === true }) } });
   // An earlier training of this case that failed was paid for too: its cost stays in the run's spend.
   const earlierUsd = prev?.training ? (prev.costUsd ?? prev.estimateUsd ?? 0) + (prev.earlierUsd ?? 0) : prev?.earlierUsd;
   const started = { ...record, training: tr.id, target: t.target, status: "training", startedAt: ctx.now(), estimateUsd: ctx.estimateUsd ?? null, ...(earlierUsd && { earlierUsd }) };
