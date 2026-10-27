@@ -2,15 +2,21 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { userTitle } from "@/lib/library";
 import type { ShareListItem } from "@/lib/share";
 import type { ShareRow } from "@/server/share-access";
 
-// Route handlers call connection() (no request scope in a test).
+// Route handlers call connection() and the page reads its address from headers() (no request scope in a test).
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
+vi.mock("next/headers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/headers")>()),
+  headers: async () => new Headers({ host: "studio.example:3000", "x-forwarded-proto": "https" }),
+}));
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-share-"));
 process.env.FUOBE_DATA_DIR = dir;
@@ -32,6 +38,8 @@ const fileRoute = await import("@/app/s/[token]/f/[...path]/route");
 const listRoute = await import("@/app/api/shares/route");
 const idRoute = await import("@/app/api/shares/[id]/route");
 const { SharePage } = await import("@/app/s/share-page");
+const sharePage = await import("@/app/s/[token]/page");
+const filesRoute = await import("@/app/api/files/[...path]/route");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 afterEach(() => {
@@ -39,12 +47,48 @@ afterEach(() => {
   globalThis.__fuobeShareGuard = undefined;
 });
 
-const PNG = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
+const CRC = (() => {
+  const t = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  return (b: Buffer) => {
+    let c = 0xffffffff;
+    for (const x of b) c = t[(c ^ x) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+})();
 
-/** A finished generation with a real output file; its input is an upload of its own. */
+function chunk(type: string, data: Buffer): Buffer {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(CRC(body));
+  return Buffer.concat([len, body, crc]);
+}
+
+/**
+ * A real 1×1 PNG that carries `marker` in a chunk of its own (so a test can tell files apart) and,
+ * like ComfyUI's, the run's prompt in a tEXt chunk when `embedded` is given.
+ */
+function png(marker: string, embedded?: string): Buffer {
+  const ihdr = Buffer.from("0000000100000001080600000000", "hex").subarray(0, 13);
+  return Buffer.concat([
+    Buffer.from("89504e470d0a1a0a", "hex"),
+    chunk("IHDR", ihdr),
+    chunk("tEST", Buffer.from(marker)),
+    ...(embedded ? [chunk("tEXt", Buffer.from(`prompt\0{"6": {"class_type": "CLIPTextEncode", "inputs": {"text": "${embedded}"}}}`, "latin1"))] : []),
+    chunk("IDAT", zlib.deflateSync(Buffer.from([0, 255, 0, 0, 255]))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** A finished generation with a real output file (its prompt saved inside it, as ComfyUI does); its input is an upload of its own. */
 function made(prompt: string, feature = "grade") {
-  const input = saveFile({ data: Buffer.concat([PNG, Buffer.from(`in ${prompt}`)]), contentType: "image/png", source: "upload" });
-  const asset = saveFile({ data: Buffer.concat([PNG, Buffer.from(prompt)]), contentType: "image/png", source: "generation" });
+  const input = saveFile({ data: png(`in ${prompt}`), contentType: "image/png", source: "upload" });
+  const asset = saveFile({ data: png(prompt, prompt), contentType: "image/png", source: "generation" });
   const g = gens.recordLocalGeneration({
     feature,
     modelId: "local-color-grade",
@@ -188,6 +232,47 @@ describe("what a token serves", () => {
     expect((await serve(A.share.id + "x".repeat(32), a.rel)).status).toBe(404);
   });
 
+  it("serves files without the generation data saved inside them (ComfyUI's prompt and workflow), byte ranges included", async () => {
+    const { g } = made("metadata host");
+    const stored = saveFile({ data: png("pixels-of-the-piece", "a secret violet tiger prompt"), contentType: "image/png", source: "generation" });
+    const rel = share.storedPath(stored.url)!;
+    db().prepare("UPDATE generations SET outputs_json = ? WHERE id = ?").run(JSON.stringify([{ url: stored.url, kind: "image", contentType: "image/png" }]), g.id);
+    const S = shares.createShare({ kind: "result", targetId: g.id });
+    const original = fs.readFileSync(path.join(dir, "files", rel));
+    expect(original.toString("latin1")).toContain("violet tiger");
+
+    const res = await fileRoute.GET(new Request(`http://localhost/s/${S.token}/f/${rel}`), { params: Promise.resolve({ token: S.token, path: rel.split("/") }) });
+    const body = Buffer.from(await res.arrayBuffer());
+    expect(res.status).toBe(200);
+    expect(body.length).toBe(original.length);
+    expect(body.toString("latin1")).toContain("pixels-of-the-piece");
+    expect(body.toString("latin1")).not.toMatch(/violet tiger|class_type|tEXt/);
+    // A range from the middle of the file is the same bytes as the cleaned whole.
+    const ranged = await fileRoute.GET(new Request(`http://localhost/s/${S.token}/f/${rel}`, { headers: { range: "bytes=20-90" } }), { params: Promise.resolve({ token: S.token, path: rel.split("/") }) });
+    expect(ranged.status).toBe(206);
+    expect(Buffer.from(await ranged.arrayBuffer()).equals(body.subarray(20, 91))).toBe(true);
+    // The owner's own copy keeps everything.
+    const own = await filesRoute.GET(new Request(`http://localhost/api/files/${rel}`), { params: Promise.resolve({ path: rel.split("/") }) });
+    expect(Buffer.from(await own.arrayBuffer()).equals(original)).toBe(true);
+  });
+
+  it("serves only what a folder page shows: its newest 200", async () => {
+    const big = lib.createFolder({ name: "Big folder" });
+    const list = Array.from({ length: shares.SCOPE_LIMIT + 1 }, (_, i) => made(`crowded ${i}`));
+    lib.moveToFolder(
+      list.map((x) => x.g.id),
+      big.id,
+    );
+    list.forEach((x, i) => db().prepare("UPDATE generations SET created_at = ? WHERE id = ?").run(1_000_000 + i, x.g.id));
+    const S = shares.createShare({ kind: "folder", targetId: big.id });
+    const page = shares.buildPublicShare(access.findShare(S.token)!, S.token)!.page;
+    expect(page.items).toHaveLength(shares.SCOPE_LIMIT);
+    expect(page.truncated).toBe(true);
+    expect((await serve(S.token, list.at(-1)!.rel)).status).toBe(200);
+    expect((await serve(S.token, list[1].rel)).status).toBe(200);
+    expect((await serve(S.token, list[0].rel)).status).toBe(404); // the oldest isn't on the page
+  });
+
   it("answers 404 once revoked, expired, or when the result went to the Trash", async () => {
     const r1 = made("revoked reef");
     const S1 = shares.createShare({ kind: "result", targetId: r1.g.id });
@@ -202,6 +287,8 @@ describe("what a token serves", () => {
 
     const r3 = made("trashed tundra");
     const S3 = shares.createShare({ kind: "result", targetId: r3.g.id });
+    // Served once (the share's file list is remembered between writes), then trashed: 404 at once.
+    expect((await serve(S3.token, r3.rel)).status).toBe(200);
     lib.trashGenerations([r3.g.id]);
     expect((await serve(S3.token, r3.rel)).status).toBe(404);
     expect(access.shareTargetExists(access.findShare(S3.token)!)).toBe(false);
@@ -275,12 +362,31 @@ describe("prompts", () => {
     expect(html2).toMatch(/Recreate in your Fuobe/);
   });
 
-  it("turns prompts off for an existing link", async () => {
-    const { g } = made("prompt that gets hidden later: amber koi");
-    const S = shares.createShare({ kind: "result", targetId: g.id, showPrompts: true });
+  it("turns prompts off for an existing link, title made from the prompt included", async () => {
+    const { g } = made("prompt that gets hidden later: amber koi in a moonlit pond");
+    // What the Share dialog sends while Show prompts is on and the title is left as it is.
+    const S = shares.createShare({ kind: "result", targetId: g.id, title: userTitle(g), showPrompts: true });
+    expect(S.share.title).toMatch(/amber koi/);
     const res = await idRoute.PATCH(new Request("http://localhost", { method: "PATCH", body: JSON.stringify({ showPrompts: false }) }), { params: Promise.resolve({ id: S.share.id }) });
     expect(res.status).toBe(200);
-    expect(JSON.stringify(shares.buildPublicShare(access.findShare(S.token)!, S.token)!.page)).not.toMatch(/amber koi/);
+    expect(((await res.json()) as { share: { title: string } }).share.title).toBe("Color grade · Color Grading");
+    const page = shares.buildPublicShare(access.findShare(S.token)!, S.token)!.page;
+    expect(JSON.stringify(page)).not.toMatch(/amber koi/);
+    expect(renderToStaticMarkup(createElement(SharePage, { share: page }))).not.toMatch(/amber koi/);
+    const meta = await sharePage.generateMetadata({ params: Promise.resolve({ token: S.token }) } as never);
+    expect(JSON.stringify(meta)).not.toMatch(/amber koi/);
+  });
+
+  it("never titles a prompts-hidden result page with its prompt, however the title got there", () => {
+    const { g } = made("a lantern festival over a frozen river at dusk");
+    const viaApi = shares.createShare({ kind: "result", targetId: g.id, title: "A lantern festival over a frozen river", showPrompts: false });
+    const page = shares.buildPublicShare(access.findShare(viaApi.token)!, viaApi.token)!.page;
+    expect(page.title).not.toMatch(/lantern/i);
+    // An owner's own title stays, and so does a published page's (typed in the wizard).
+    const own = shares.createShare({ kind: "result", targetId: g.id, title: "Winter festival", showPrompts: false });
+    expect(shares.buildPublicShare(access.findShare(own.token)!, own.token)!.page.title).toBe("Winter festival");
+    const pub = shares.createShare({ kind: "publish", items: [g.id], title: "A lantern festival", showPrompts: false });
+    expect(shares.buildPublicShare(access.findShare(pub.token)!, pub.token)!.page.title).toBe("A lantern festival");
   });
 });
 
@@ -307,6 +413,14 @@ describe("publish", () => {
     expect(() => shares.createShare({ kind: "publish", items: [] })).toThrow(/at least one/);
     expect(() => shares.createShare({ kind: "publish", items: [a.g.id, "nope"] })).toThrow(/One result isn't finished/);
     expect(() => shares.createShare({ kind: "publish", items: [a.g.id], cover: { generationId: b.g.id, index: 0 } })).toThrow(/cover/);
+    // The cover: Series shows it beside the title, Carousel opens on it, link previews show it.
+    const coverUrl = `/s/${P.token}/f/${b.rel}`;
+    const series = renderToStaticMarkup(createElement(SharePage, { share: page }));
+    expect(series).toMatch(new RegExp(`<figure[^>]*data-cover[^>]*>.*?${coverUrl.replace(/[/.]/g, "\\$&")}`));
+    const carousel = renderToStaticMarkup(createElement(SharePage, { share: { ...page, layout: "carousel" } }));
+    expect(carousel).toMatch(/, 3 of 3</);
+    expect(share.coverSlide(page.items, page.coverKey)).toBe(2);
+    expect(share.previewImage(page.cover)).toEqual({ url: coverUrl });
     // A result taken to the Trash drops off the page; the rest stay.
     lib.trashGenerations([a.g.id]);
     expect(shares.buildPublicShare(access.findShare(P.token)!, P.token)!.page.items).toHaveLength(2);
@@ -339,6 +453,34 @@ describe("the owner's API", () => {
     expect(del.status).toBe(204);
     expect(access.findShare(r.token)).toBeNull();
     expect((await idRoute.DELETE(new Request("http://localhost", { method: "DELETE" }), { params: Promise.resolve({ id: r.share.id }) })).status).toBe(404);
+  });
+});
+
+describe("link previews", () => {
+  it("show the cover at the address the page was opened on, and nothing for a dead link", async () => {
+    const a = made("preview one");
+    const P = shares.createShare({ kind: "publish", items: [a.g.id], title: "Preview page", layout: "feature" });
+    const meta = await sharePage.generateMetadata({ params: Promise.resolve({ token: P.token }) } as never);
+    expect(String(meta.metadataBase)).toBe("https://studio.example:3000/");
+    expect(meta.openGraph?.images).toEqual([{ url: `/s/${P.token}/f/${a.rel}` }]);
+    expect(meta.robots).toMatchObject({ index: false, follow: false });
+    const dead = await sharePage.generateMetadata({ params: Promise.resolve({ token: "Q".repeat(44) }) } as never);
+    expect(dead.openGraph).toBeUndefined();
+  });
+});
+
+describe("renewing", () => {
+  it("won't hand out a new link that is already expired; with a new expiry it works", async () => {
+    const { g } = made("expired renew reef");
+    const S = shares.createShare({ kind: "result", targetId: g.id, expiresInDays: 1 });
+    db().prepare("UPDATE shares SET expires_at = ? WHERE id = ?").run(Date.now() - 86_400_000, S.share.id);
+    expect(() => shares.updateShare(S.share.id, { newLink: true })).toThrow(/expired/);
+    const refused = await idRoute.PATCH(new Request("http://localhost", { method: "PATCH", body: JSON.stringify({ newLink: true }) }), { params: Promise.resolve({ id: S.share.id }) });
+    expect(refused.status).toBe(400);
+    const r = shares.updateShare(S.share.id, { newLink: true, expiresInDays: 7 })!;
+    expect(r.share.expiresAt).toBeGreaterThan(Date.now());
+    expect(access.findShare(r.token!)?.id).toBe(r.share.id);
+    expect(access.findShare(S.token)).toBeNull();
   });
 });
 
@@ -389,19 +531,100 @@ describe("the sign-in proxy", () => {
     expect(proxy(req(`http://localhost:3000/s/${S.token}`, { method: "POST", headers: { origin: "http://evil.example" } })).status).toBe(403);
   });
 
-  it("rate-limits wrong tokens, but never the signed-in owner", () => {
+  it("rate-limits wrong tokens without ever blocking a live link, and never the signed-in owner", () => {
     const { g } = made("guessed pier");
     const S = shares.createShare({ kind: "result", targetId: g.id });
     globalThis.__fuobeShareGuard = new access.ShareGuard({ perClient: 3, global: 5, windowMs: 60_000, lockMs: 60_000, maxClients: 100 });
     auth.setPassword("correct horse battery");
     try {
       for (let i = 0; i < 5; i++) expect(gone(proxy(req(`http://localhost:3000/s/${String(i).repeat(44)}`)))).toBe(true);
-      const blocked = proxy(req(`http://localhost:3000/s/${S.token}`));
+      // Past the global budget a wrong token answers 429…
+      const blocked = proxy(req(`http://localhost:3000/s/${"7".repeat(44)}`));
       expect(blocked.status).toBe(429);
       expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
-      expect(proxy(req(`http://localhost:3000/s/${"7".repeat(44)}`)).status).toBe(429);
+      // …but anyone else's misses never take a working link down.
+      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`)))).toBe(true);
       const cookie = `${auth.SESSION_COOKIE}=${auth.createSession().value}`;
       expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`, { headers: { cookie } })))).toBe(true);
+    } finally {
+      auth.setPassword(null);
+    }
+  });
+
+  it("counts one miss per dead token, so a revoked page full of files doesn't trip the limit", () => {
+    const { g, rel } = made("revoked gallery pier");
+    const S = shares.createShare({ kind: "result", targetId: g.id });
+    const other = shares.createShare({ kind: "result", targetId: made("other live pier").g.id });
+    globalThis.__fuobeShareGuard = new access.ShareGuard({ perClient: 3, global: 5, windowMs: 60_000, lockMs: 60_000, maxClients: 100 });
+    shares.revokeShare(S.share.id);
+    // A page left open after its link was revoked: the page and 120 lazy-loaded files.
+    for (let i = 0; i < 120; i++) expect(gone(proxy(req(`http://localhost:3000/s/${S.token}${i ? `/f/${rel}` : ""}`)))).toBe(true);
+    expect(globalThis.__fuobeShareGuard.saturated()).toBe(false);
+    expect(passed(proxy(req(`http://localhost:3000/s/${other.token}`)))).toBe(true);
+  });
+
+  it("locks out a client it can tell apart (behind a trusted proxy), working links included, and nobody else", () => {
+    const { g } = made("trusted proxy pier");
+    const S = shares.createShare({ kind: "result", targetId: g.id });
+    globalThis.__fuobeShareGuard = new access.ShareGuard({ perClient: 3, global: 50, windowMs: 60_000, lockMs: 60_000, maxClients: 100 });
+    vi.stubEnv("FUOBE_TRUST_PROXY", "1");
+    try {
+      const from = (ip: string) => ({ headers: { "x-forwarded-for": ip } });
+      for (let i = 0; i < 3; i++) expect(gone(proxy(req(`http://localhost:3000/s/${String(i).repeat(44)}`, from("203.0.113.9"))))).toBe(true);
+      // That client can't tell a hit from a miss for a minute…
+      expect(proxy(req(`http://localhost:3000/s/${S.token}`, from("203.0.113.9"))).status).toBe(429);
+      // …while everyone else opens the link.
+      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`, from("198.51.100.4"))))).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("views", () => {
+  const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+  const viewHeader = (r: Response) => r.headers.get(`x-middleware-request-${share.SHARE_VIEW_HEADER}`);
+
+  it("counts a browser opening the page, not a HEAD, a prefetch, a script or a link-preview bot", () => {
+    const h = (o: Record<string, string>) => new Headers(o);
+    expect(share.countsAsView("GET", h({ "user-agent": CHROME, "sec-fetch-dest": "document" }))).toBe(true);
+    expect(share.countsAsView("GET", h({ "user-agent": CHROME }))).toBe(true); // older browsers send no Sec-Fetch-*
+    expect(share.countsAsView("HEAD", h({ "user-agent": CHROME }))).toBe(false);
+    expect(share.countsAsView("GET", h({ "user-agent": CHROME, "sec-purpose": "prefetch;prerender" }))).toBe(false);
+    expect(share.countsAsView("GET", h({ "user-agent": CHROME, purpose: "prefetch" }))).toBe(false);
+    expect(share.countsAsView("GET", h({ "user-agent": CHROME, "sec-fetch-dest": "image" }))).toBe(false);
+    expect(share.countsAsView("GET", h({}))).toBe(false);
+    for (const bot of [
+      "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+      "facebookexternalhit/1.1 Facebot Twitterbot/1.0", // iMessage previews
+      "WhatsApp/2.23.20.0",
+      "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+      "TelegramBot (like TwitterBot)",
+      "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+      "curl/8.5.0",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36",
+    ]) {
+      expect(share.countsAsView("GET", h({ "user-agent": bot })), bot).toBe(false);
+    }
+  });
+
+  it("is told to the page by the proxy only, for a visitor's page request", () => {
+    const { g, rel } = made("viewed pier");
+    const S = shares.createShare({ kind: "result", targetId: g.id });
+    const page = `http://localhost:3000/s/${S.token}`;
+    expect(viewHeader(proxy(req(page, { headers: { "user-agent": CHROME } })))).toBe("1");
+    expect(viewHeader(proxy(req(page, { method: "HEAD", headers: { "user-agent": CHROME } })))).toBeNull();
+    expect(viewHeader(proxy(req(`${page}/f/${rel}`, { headers: { "user-agent": CHROME } })))).toBeNull();
+    // A visitor can't count views by sending the header themselves.
+    const forged = proxy(req(page, { headers: { "user-agent": "Slackbot 1.0", [share.SHARE_VIEW_HEADER]: "1" } }));
+    expect(viewHeader(forged)).toBeNull();
+    expect(forged.headers.get("x-middleware-override-headers") ?? "").not.toContain(share.SHARE_VIEW_HEADER);
+    // The signed-in owner checking their own link isn't a view.
+    auth.setPassword("correct horse battery");
+    try {
+      const cookie = `${auth.SESSION_COOKIE}=${auth.createSession().value}`;
+      expect(viewHeader(proxy(req(page, { headers: { "user-agent": CHROME, cookie } })))).toBeNull();
+      expect(viewHeader(proxy(req(page, { headers: { "user-agent": CHROME } })))).toBe("1");
     } finally {
       auth.setPassword(null);
     }
@@ -411,27 +634,49 @@ describe("the sign-in proxy", () => {
 describe("ShareGuard", () => {
   const o = { perClient: 3, global: 10, windowMs: 60_000, lockMs: 60_000, maxClients: 100 };
 
-  it("locks a trusted client after its misses, and everyone past the global budget", () => {
+  it("locks a client it can tell apart after its misses; past the global budget misses are only refused", () => {
     const g = new access.ShareGuard(o);
     const t = 5_000_000;
-    for (let i = 0; i < 2; i++) g.miss("1.2.3.4", false, t + i);
+    for (let i = 0; i < 2; i++) g.miss("1.2.3.4", `guess-${i}`, false, t + i);
     expect(g.blockedFor("1.2.3.4", t + 5)).toBe(0);
-    g.miss("1.2.3.4", false, t + 6);
+    g.miss("1.2.3.4", "guess-2", false, t + 6);
     expect(g.blockedFor("1.2.3.4", t + 7)).toBeGreaterThan(50_000);
     expect(g.blockedFor("5.6.7.8", t + 7)).toBe(0);
     expect(g.blockedFor("1.2.3.4", t + 6 + 60_001)).toBe(0);
-    // Rotating keys: the global budget still runs out, and then it's everyone.
-    for (let i = 0; i < 10; i++) g.miss(`spoof-${i}`, false, t + 100 + i);
-    expect(g.blockedFor("fresh", t + 200)).toBeGreaterThan(0);
-    expect(g.blockedFor("fresh", t + 200 + 60_000)).toBe(0);
+    // Rotating keys: the global budget runs out, misses answer 429, and still nobody is locked out.
+    for (let i = 0; i < 10; i++) g.miss(`spoof-${i}`, `rot-${i}`, false, t + 100 + i);
+    expect(g.saturated(t + 200)).toBe(true);
+    expect(g.blockedFor("fresh", t + 200)).toBe(0);
+    expect(g.saturated(t + 200 + 60_000)).toBe(false);
   });
 
-  it("gives the shared key (no trusted proxy) only the global budget", () => {
+  it("never locks the shared key (no trusted proxy): it only spends the global budget", () => {
     const g = new access.ShareGuard(o);
     const t = 9_000_000;
-    for (let i = 0; i < 9; i++) g.miss("direct", true, t + i);
-    expect(g.blockedFor("direct", t + 10)).toBe(0);
-    g.miss("direct", true, t + 11);
-    expect(g.blockedFor("direct", t + 12)).toBeGreaterThan(0);
+    for (let i = 0; i < 9; i++) g.miss("direct", `guess-${i}`, true, t + i);
+    expect(g.saturated(t + 10)).toBe(false);
+    g.miss("direct", "guess-9", true, t + 11);
+    expect(g.saturated(t + 12)).toBe(true);
+    expect(g.blockedFor("direct", t + 12)).toBe(0);
+  });
+
+  it("counts the same wrong token once per window", () => {
+    const g = new access.ShareGuard(o);
+    const t = 12_000_000;
+    for (let i = 0; i < 50; i++) g.miss("direct", "same-dead-token", true, t + i);
+    expect(g.saturated(t + 60)).toBe(false);
+    for (let i = 0; i < 5; i++) g.miss("1.2.3.4", "one-dead-token", false, t + i);
+    expect(g.blockedFor("1.2.3.4", t + 10)).toBe(0);
+  });
+
+  it("keeps a flood of misses in bounded memory, and lets the budget recover after the window", () => {
+    const g = new access.ShareGuard(o);
+    const t = 15_000_000;
+    for (let i = 0; i < 20_000; i++) g.miss("direct", `flood-${i}`, true, t + Math.floor(i / 1000));
+    expect(g.saturated(t + 30)).toBe(true);
+    const inner = g as unknown as { globalMisses: number[]; recent: Map<string, number> };
+    expect(inner.globalMisses.length).toBeLessThanOrEqual(o.global);
+    expect(inner.recent.size).toBeLessThanOrEqual(o.maxClients * 4 + 1);
+    expect(g.saturated(t + 20 + 60_000)).toBe(false);
   });
 });

@@ -20,17 +20,21 @@ export function RecreateButton({ prompt, model, className }: { prompt: string; m
   );
 }
 
-/** Slides in a scroll-snap track: swipe, scroll, the arrow buttons or the arrow keys; "3 / 8" says where you are. */
-export function Carousel({ count, labels, children }: { count: number; labels: string[]; children: React.ReactNode }) {
+/**
+ * Slides in a scroll-snap track: swipe, scroll, the arrow buttons or the arrow keys; "3 / 8" says
+ * where you are (and is read out when it changes). Opens on `start` (the cover's slide).
+ */
+export function Carousel({ count, labels, start = 0, children }: { count: number; labels: string[]; start?: number; children: React.ReactNode }) {
   const track = useRef<HTMLDivElement>(null);
-  const [at, setAt] = useState(0);
+  const [at, setAt] = useState(start);
   useEffect(() => {
     const el = track.current;
     if (!el) return;
+    if (start > 0) el.scrollLeft = start * el.clientWidth;
     const onScroll = () => setAt(Math.round(el.scrollLeft / Math.max(1, el.clientWidth)));
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [start]);
   const go = useCallback(
     (i: number) => {
       const el = track.current;
@@ -46,7 +50,7 @@ export function Carousel({ count, labels, children }: { count: number; labels: s
       <div
         ref={track}
         tabIndex={0}
-        aria-live="polite"
+        aria-label="Slides: use the arrow keys"
         onKeyDown={(e) => {
           if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
             e.preventDefault();
@@ -62,8 +66,14 @@ export function Carousel({ count, labels, children }: { count: number; labels: s
           <Button variant="outline" size="icon" className="rounded-full" onClick={() => go(at - 1)} disabled={at <= 0} aria-label="Previous">
             <ChevronLeft />
           </Button>
-          <p className="min-w-16 text-center font-mono text-[12px] text-muted-foreground tabular-nums" aria-label={`${labels[at] ?? ""}, ${at + 1} of ${count}`}>
-            {at + 1} / {count}
+          <p className="min-w-16 text-center font-mono text-[12px] text-muted-foreground tabular-nums" aria-live="polite" aria-atomic="true">
+            <span aria-hidden>
+              {at + 1} / {count}
+            </span>
+            <span className="sr-only">
+              {labels[at] ? `${labels[at]}, ` : ""}
+              {at + 1} of {count}
+            </span>
           </p>
           <Button variant="outline" size="icon" className="rounded-full" onClick={() => go(at + 1)} disabled={at >= count - 1} aria-label="Next">
             <ChevronRight />

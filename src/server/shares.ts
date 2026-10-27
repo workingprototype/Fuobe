@@ -9,11 +9,13 @@ import "server-only";
 import { getModel } from "@/lib/catalog";
 import { OPERATION_LABELS, type Generation, type OutputFile } from "@/lib/catalog/types";
 import { HELPER_FEATURES, HELPER_SUFFIX, extensionOf, userTitle } from "@/lib/library";
+import { unwrapScene } from "@/lib/storyboard-board";
 import { shownOutputs } from "@/lib/output-actions";
 import {
   expiryFrom,
   fileName,
   MAX_EXPIRY_DAYS,
+  MAX_PUBLISH_ITEMS,
   outputFiles,
   parseTags,
   SHARE_KINDS,
@@ -45,7 +47,7 @@ export class ShareError extends Error {
 
 /** A folder or project page shows its newest 200 results; a published page up to 100 picked ones. */
 export const SCOPE_LIMIT = 200;
-export const MAX_PUBLISH_ITEMS = 100;
+export { MAX_PUBLISH_ITEMS };
 const MAX_TITLE = 120;
 const MAX_DESCRIPTION = 1000;
 
@@ -57,42 +59,48 @@ type GenRow = Parameters<typeof toGeneration>[0];
 
 const marks = (n: number) => Array.from({ length: n }, () => "?").join(", ");
 
+/**
+ * The query for what a share shows, in page order: a folder or project its newest SCOPE_LIMIT + 1
+ * (one more tells the page there are more), a published page its picked results.
+ */
+function scopeQuery(s: Pick<ShareRow, "kind" | "target_id" | "items_json">): { sql: string; args: unknown[]; ids?: string[] } {
+  switch (s.kind) {
+    case "result":
+      return { sql: `SELECT ${COLUMNS} FROM generations g WHERE g.id = ? AND ${SHOWN}`, args: [s.target_id] };
+    case "folder":
+      return {
+        sql: `WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT f.id FROM folders f JOIN sub ON f.parent_id = sub.id)
+              SELECT ${COLUMNS} FROM generations g JOIN folder_items fi ON fi.generation_id = g.id
+              WHERE fi.folder_id IN (SELECT id FROM sub) AND ${SHOWN} AND NOT ${HELPER_SQL}
+              ORDER BY g.created_at DESC, g.id DESC LIMIT ?`,
+        args: [s.target_id, SCOPE_LIMIT + 1],
+      };
+    case "cinema":
+      return {
+        sql: `SELECT ${COLUMNS} FROM generations g JOIN cinema_items i ON i.generation_id = g.id
+              WHERE i.project_id = ? AND json_extract(i.meta_json, '$.removed') IS NULL AND ${SHOWN} AND NOT ${HELPER_SQL}
+              ORDER BY g.created_at DESC, g.id DESC LIMIT ?`,
+        args: [s.target_id, SCOPE_LIMIT + 1],
+      };
+    case "publish": {
+      const ids = parseIds(s.items_json);
+      return { sql: `SELECT ${COLUMNS} FROM generations g WHERE g.id IN (${marks(ids.length) || "NULL"}) AND ${SHOWN}`, args: ids, ids };
+    }
+  }
+}
+
+const rowsOf = (q: { sql: string; args: unknown[] }) => (db().prepare(q.sql).all(...q.args) as GenRow[]).map(toGeneration);
+
 /** The results a share shows, in page order (null: what it shares is gone), and whether there are more. */
 function scope(s: Pick<ShareRow, "kind" | "target_id" | "items_json">): { list: Generation[]; truncated: boolean } | null {
   if (!shareTargetExists(s)) return null;
-  const all = (sql: string, ...args: unknown[]) => (db().prepare(sql).all(...args) as GenRow[]).map(toGeneration);
-  const capped = (list: Generation[]) => ({ list: list.slice(0, SCOPE_LIMIT), truncated: list.length > SCOPE_LIMIT });
-  switch (s.kind) {
-    case "result":
-      return { list: all(`SELECT ${COLUMNS} FROM generations g WHERE g.id = ? AND ${SHOWN}`, s.target_id), truncated: false };
-    case "folder":
-      return capped(
-        all(
-          `WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT f.id FROM folders f JOIN sub ON f.parent_id = sub.id)
-           SELECT ${COLUMNS} FROM generations g JOIN folder_items fi ON fi.generation_id = g.id
-           WHERE fi.folder_id IN (SELECT id FROM sub) AND ${SHOWN} AND NOT ${HELPER_SQL}
-           ORDER BY g.created_at DESC, g.id DESC LIMIT ?`,
-          s.target_id,
-          SCOPE_LIMIT + 1,
-        ),
-      );
-    case "cinema":
-      return capped(
-        all(
-          `SELECT ${COLUMNS} FROM generations g JOIN cinema_items i ON i.generation_id = g.id
-           WHERE i.project_id = ? AND json_extract(i.meta_json, '$.removed') IS NULL AND ${SHOWN} AND NOT ${HELPER_SQL}
-           ORDER BY g.created_at DESC, g.id DESC LIMIT ?`,
-          s.target_id,
-          SCOPE_LIMIT + 1,
-        ),
-      );
-    case "publish": {
-      const ids = parseIds(s.items_json);
-      if (!ids.length) return { list: [], truncated: false };
-      const found = new Map(all(`SELECT ${COLUMNS} FROM generations g WHERE g.id IN (${marks(ids.length)}) AND ${SHOWN}`, ...ids).map((g) => [g.id, g]));
-      return { list: ids.map((id) => found.get(id)).filter((g): g is Generation => !!g), truncated: false };
-    }
+  const q = scopeQuery(s);
+  const list = rowsOf(q);
+  if (q.ids) {
+    const found = new Map(list.map((g) => [g.id, g]));
+    return { list: q.ids.map((id) => found.get(id)).filter((g): g is Generation => !!g), truncated: false };
   }
+  return { list: list.slice(0, SCOPE_LIMIT), truncated: list.length > SCOPE_LIMIT };
 }
 
 function parseIds(json: string): string[] {
@@ -104,10 +112,37 @@ function parseIds(json: string): string[] {
   }
 }
 
+/** The outputs a piece shows: a 3D result its turntable (a video output) with the model as a download, else what feeds show. */
+const shownIndices = (g: Generation) => (g.kind === "model3d" ? g.outputs.map((_, i) => i) : shownOutputs(g));
+
+/** The stored files a piece puts on a page: each shown output's file and its poster, thumbnail or preview. */
+function itemFiles(g: Generation): string[] {
+  return shownIndices(g).flatMap((i) => (g.outputs[i] && storedPath(g.outputs[i].url) ? outputFiles(g.outputs[i]) : []));
+}
+
 /** A user's own words, unless a chained step's prompt is data (a cue list). */
 function promptOf(g: Generation): string | undefined {
   const p = (g.request.prompt?.trim() || g.prompt?.trim() || "").slice(0, 4000);
   return p && !/^[[{]/.test(p) ? p : undefined;
+}
+
+const norm = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Everything a piece was asked with in words: its prompt and, for a storyboard frame, the scene. */
+function promptTexts(g: Generation): string[] {
+  const scene = g.request.frame?.scene;
+  return [g.request.prompt, g.prompt, scene, scene && unwrapScene(scene)].filter((t): t is string => !!t?.trim()).map(norm);
+}
+
+/**
+ * Whether a result's link title is (the start of) its prompt, or holds the whole prompt: what the
+ * Share dialog offers while Show prompts is on. A page that hides prompts doesn't show one. (A
+ * folder, project or published page is titled by its name or by the owner in the wizard.)
+ */
+function madeFromPrompt(title: string, list: Generation[]): boolean {
+  const t = norm(title);
+  if (t.length < 4) return false;
+  return list.some((g) => promptTexts(g).some((p) => p === t || (t.length >= 12 && p.startsWith(t)) || (p.length >= 12 && t.includes(p))));
 }
 
 /** What an item is called on the page: its title or prompt when prompts are shared, else what was made and with what. */
@@ -151,12 +186,15 @@ export function buildPublicShare(row: ShareRow, token: string): { page: PublicSh
     const named = itemTitle(g, share.showPrompts);
     // The prompt shows under the title, so a title that is only the prompt again says what was made instead.
     const title = prompt && prompt.startsWith(named) ? itemTitle(g, false) : named;
-    // A 3D result shows its turntable (a video output) with the model as a download.
-    const shown = g.kind === "model3d" ? g.outputs.map((_, i) => i) : shownOutputs(g);
-    const list = shown.map((i) => ({ i, m: media(g.outputs[i], i, named) })).filter((x): x is { i: number; m: PublicMedia } => !!x.m);
+    const list = shownIndices(g)
+      .map((i) => ({ i, m: media(g.outputs[i], i, named) }))
+      .filter((x): x is { i: number; m: PublicMedia } => !!x.m);
     if (!list.length) continue;
     if (share.cover?.generationId === g.id) {
-      cover = (list.find((x) => x.i === share.cover!.index) ?? list[0]).m;
+      // The picked output leads its piece (Feature's hero, Download).
+      const at = Math.max(0, list.findIndex((x) => x.i === share.cover!.index));
+      list.unshift(...list.splice(at, 1));
+      cover = list[0].m;
       coverKey = key;
     }
     items.push({
@@ -180,10 +218,13 @@ export function buildPublicShare(row: ShareRow, token: string): { page: PublicSh
       }
     }
   }
+  // A result's title made from its prompt (kept from when the page showed prompts, or sent through
+  // the API) isn't shown on a page that hides them: what was made, and with what, is.
+  const title = !share.showPrompts && share.kind === "result" && madeFromPrompt(share.title, sc.list) ? defaultTitle(share.kind, share.targetId, sc.list) : share.title;
   return {
     page: {
       kind: share.kind,
-      title: share.title,
+      title,
       description: share.description,
       tags: share.tags,
       layout: share.layout,
@@ -198,12 +239,35 @@ export function buildPublicShare(row: ShareRow, token: string): { page: PublicSh
   };
 }
 
+/** The stored files a share's page shows now (its pieces' shown outputs, posters and thumbnails). */
+function pageFiles(row: ShareRow): Set<string> {
+  return new Set((scope(row)?.list ?? []).flatMap(itemFiles));
+}
+
+/** Changes whenever anything is written to the database (by this process or another one). */
+function dbStamp(): string {
+  const d = db();
+  return `${d.prepare("SELECT total_changes()").pluck().get()}:${d.pragma("data_version", { simple: true })}`;
+}
+
+const served = new Map<string, { stamp: string; files: Set<string> }>();
+
 /**
- * Whether a share may serve this stored file: only one its page shows now. Worked out per request
- * (no cache), so a result taken to the Trash or out of a folder stops opening at once.
+ * Whether a share may serve this stored file: only one its page shows now. The page's file list is
+ * worked out again after any write to the database, so a result taken to the Trash or out of a
+ * folder stops opening at once; between writes (a visitor scrolling a 200-piece page, or someone
+ * looping wrong file names) each file is one lookup, not a rebuild of the page.
  */
-export function shareServesFile(row: ShareRow, token: string, rel: string): boolean {
-  return buildPublicShare(row, token)?.files.has(rel) ?? false;
+export function shareServesFile(row: ShareRow, rel: string): boolean {
+  const stamp = dbStamp();
+  let hit = served.get(row.id);
+  if (hit?.stamp !== stamp) {
+    hit = { stamp, files: pageFiles(row) };
+    served.delete(row.id);
+    if (served.size >= 200) served.delete(served.keys().next().value!);
+    served.set(row.id, hit);
+  }
+  return hit.files.has(rel);
 }
 
 /** A page view by someone other than the signed-in owner. */
@@ -218,14 +282,17 @@ export type CreateShareInput = ShareRequest;
 
 const clean = (s: string | undefined, max: number) => (s ?? "").replace(/\s+/g, (w) => (w.includes("\n") ? "\n" : " ")).trim().slice(0, max);
 
-/** What a link is called when the owner leaves the title empty: the result, folder or project's own name. */
-function defaultTitle(kind: ShareKind, targetId: string | null): string {
+/**
+ * What a link is called when the owner leaves the title empty, or when prompts are hidden and its
+ * title was made from one: the result's kind and model, the folder's or project's own name.
+ */
+function defaultTitle(kind: ShareKind, targetId: string | null, list?: Generation[]): string {
   const get = (sql: string) => (targetId ? (db().prepare(sql).get(targetId) as { name?: string } | undefined)?.name : undefined);
   if (kind === "folder") return get("SELECT name FROM folders WHERE id = ?") ?? "Shared folder";
   if (kind === "cinema") return get("SELECT name FROM cinema_projects WHERE id = ?") ?? "Shared project";
   if (kind === "result") {
-    const g = targetId ? scope({ kind, target_id: targetId, items_json: "[]" })?.list[0] : undefined;
-    return g ? itemTitle(g, false) : "Shared result";
+    const g = list?.[0] ?? (targetId ? scope({ kind, target_id: targetId, items_json: "[]" })?.list[0] : undefined);
+    return g ? `${itemTitle(g, false)} · ${getModel(g.modelId)?.name ?? g.modelName ?? g.modelId}` : "Shared result";
   }
   return "Untitled";
 }
@@ -317,7 +384,11 @@ function thumbOf(list: Generation[], cover: ShareInfo["cover"]): ShareListItem["
   return { url: out.url, kind: out.kind, ...(poster && { poster }) };
 }
 
-/** Change a link (its words, prompts on or off, a new expiry from now), or give it a new token. */
+/**
+ * Change a link (its words, prompts on or off, a new expiry from now), or give it a new token. A new
+ * token for a link that has expired needs a new expiry too (else the new link is dead on arrival).
+ * Turning prompts off swaps a title made from a prompt for the hide-safe one.
+ */
 export function updateShare(id: string, patch: SharePatch, now = Date.now()): { share: ShareInfo; token?: string; path?: string } | null {
   const r = rowOf(id);
   if (!r) return null;
@@ -327,9 +398,15 @@ export function updateShare(id: string, patch: SharePatch, now = Date.now()): { 
   if (patch.tags !== undefined) sets.tags_json = JSON.stringify(parseTags(patch.tags));
   if (patch.layout !== undefined && r.kind === "publish" && patch.layout !== "grid") sets.layout = patch.layout;
   if (patch.showPrompts !== undefined) sets.show_prompts = patch.showPrompts ? 1 : 0;
+  if (patch.showPrompts === false && patch.title === undefined && r.show_prompts && r.kind === "result") {
+    const list = scope(r)?.list ?? [];
+    if (madeFromPrompt(r.title, list)) sets.title = defaultTitle(r.kind, r.target_id, list);
+  }
   if (patch.expiresInDays !== undefined) {
     if (patch.expiresInDays !== null && !(patch.expiresInDays > 0 && patch.expiresInDays <= MAX_EXPIRY_DAYS)) throw new ShareError(`Pick 1 to ${MAX_EXPIRY_DAYS} days, or never`);
     sets.expires_at = expiryFrom(patch.expiresInDays, now);
+  } else if (patch.newLink && r.expires_at !== null && r.expires_at <= now) {
+    throw new ShareError("This link has expired: pick how long the new one works");
   }
   let fresh: ReturnType<typeof newToken> | undefined;
   // A new token keeps the row (and its views); its id is the token's start, so the row's key changes too.

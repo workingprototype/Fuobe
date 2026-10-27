@@ -22,13 +22,16 @@ export const KIND_LABELS: Record<ShareKind, string> = {
 };
 
 /** The Publish wizard's Assets step (Higgsfield's Feature / Series / Carousel). */
-export const PUBLISH_LAYOUTS: { id: Exclude<ShareLayout, "grid">; label: string; hint: string }[] = [
-  { id: "feature", label: "Feature", hint: "The first piece large on top, the rest under it." },
-  { id: "series", label: "Series", hint: "Numbered episodes, one after another, in your order." },
-  { id: "carousel", label: "Carousel", hint: "One piece at a time; viewers swipe or click through." },
+export const PUBLISH_LAYOUTS: { id: Exclude<ShareLayout, "grid">; label: string; hint: string; cover: string }[] = [
+  { id: "feature", label: "Feature", hint: "The first piece large on top, the rest under it.", cover: "Its piece goes large on top" },
+  { id: "series", label: "Series", hint: "Numbered episodes, one after another, in your order.", cover: "It sits beside the title, above the episodes" },
+  { id: "carousel", label: "Carousel", hint: "One piece at a time; viewers swipe or click through.", cover: "The carousel opens on it" },
 ];
 
 export const SHARE_LAYOUTS: readonly ShareLayout[] = ["grid", "feature", "series", "carousel"];
+
+/** A published page holds up to 100 picked results (a folder or project page shows its newest 200). */
+export const MAX_PUBLISH_ITEMS = 100;
 
 /** A link as the owner sees it (Library → Shared). The token itself is never stored, only its hash. */
 export interface ShareInfo {
@@ -129,6 +132,29 @@ export function shareRoute(pathname: string): { token: string; file?: string } |
 
 export const sharePath = (token: string) => `/s/${token}`;
 
+/** Set by the sign-in proxy on a share page request that counts as a view (the page records it). */
+export const SHARE_VIEW_HEADER = "x-fuobe-share-view";
+
+/** Link checkers, unfurlers (Slack, iMessage, WhatsApp, Discord…), crawlers and scripts. */
+const NOT_A_VISITOR =
+  /bot\b|bot\/|crawl|spider|slurp|facebookexternalhit|facebot|embedly|iframely|whatsapp|telegram|skypeuripreview|slack|discord|linkedin|pinterest|vkshare|mastodon|bluesky|headless|curl\/|wget\/|python-|go-http|okhttp|axios|node-fetch|undici|httpclient|java\//i;
+
+/**
+ * Whether a request for a share page is someone looking at it: a GET from a browser opening the
+ * page. Not a HEAD, a prefetch or prerender, a fetch from a script, or a link-preview bot (pasting
+ * a link into a chat fetches it before anyone opens it).
+ */
+export function countsAsView(method: string, headers: { get(name: string): string | null }): boolean {
+  if (method !== "GET") return false;
+  const purpose = [headers.get("sec-purpose"), headers.get("purpose"), headers.get("x-purpose"), headers.get("x-moz")].join(" ");
+  if (/prefetch|prerender|preview/i.test(purpose)) return false;
+  if (headers.get("rsc") || headers.get("next-router-prefetch")) return false;
+  const dest = headers.get("sec-fetch-dest");
+  if (dest && dest !== "document") return false;
+  const ua = headers.get("user-agent") ?? "";
+  return !!ua && !NOT_A_VISITOR.test(ua);
+}
+
 /** A stored file's path from its URL (/api/files/<path>), or null for anything else (data: URIs, provider links). */
 export function storedPath(url: string | undefined | null): string | null {
   if (!url || !url.startsWith("/api/files/")) return null;
@@ -198,6 +224,18 @@ export function parseTags(input: string | string[]): string[] {
     if (out.length >= MAX_TAGS) break;
   }
   return out;
+}
+
+/** Where a Carousel opens: on the cover's slide (the first when there's none). */
+export function coverSlide(items: { key: string }[], coverKey?: string | null): number {
+  return Math.max(0, items.findIndex((i) => i.key === coverKey));
+}
+
+/** The picture a link preview (og:image) shows: the cover if it's a picture, else a clip's poster. */
+export function previewImage(cover: PublicMedia | null): { url: string; width?: number; height?: number } | null {
+  if (!cover) return null;
+  if (cover.kind === "image") return { url: cover.url, ...(cover.width && { width: cover.width }), ...(cover.height && { height: cover.height }) };
+  return cover.poster ? { url: cover.poster } : null;
 }
 
 /** Items in the order a layout shows them (Feature puts the cover's piece first). */

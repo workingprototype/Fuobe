@@ -30,7 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useShareActions, useShares } from "@/lib/api";
 import { copyWithToast } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
-import { EXPIRY_CHOICES, expiryLabel, isExpired, KIND_LABELS, pieces, PUBLISH_LAYOUTS, type ShareListItem } from "@/lib/share";
+import { EXPIRY_CHOICES, expiryLabel, isExpired, KIND_LABELS, pieces, PUBLISH_LAYOUTS, type ShareListItem, type SharePatch } from "@/lib/share";
 import { cn } from "@/lib/utils";
 import { forgetLink, rememberLink, shareUrl, useRememberedLinks, useShare } from "./share-provider";
 
@@ -113,15 +113,19 @@ function Row({ s, token, now }: { s: ShareListItem; token?: string; now: number 
   const dead = s.gone || expired;
   const fail = (e: Error) => toast.error(e.message);
   const kind = s.kind === "publish" ? `${PUBLISH_LAYOUTS.find((l) => l.id === s.layout)?.label ?? "Published"} page` : KIND_LABELS[s.kind];
-  const renew = () =>
+  // A new token (and, for an expired link, a new expiry with it): the dialog shows the link to copy.
+  const renew = (patch: SharePatch = {}) =>
     void actions
-      .update(s.id, { newLink: true })
+      .update(s.id, { ...patch, newLink: true })
       .then((r) => {
         if (!r.token || !r.path) return;
         rememberLink(r.share.id, r.token, s.id);
         share?.showLink({ share: r.share, token: r.token, path: r.path });
       })
       .catch(fail);
+  // Turning an expired link back on: this browser has its token, so the old link works again; else a new one to copy.
+  const reopen = (days: number | null) =>
+    token ? void actions.update(s.id, { expiresInDays: days }).then((r) => toast(expiryLabel(r.share.expiresAt))).catch(fail) : renew({ expiresInDays: days });
   return (
     <li className={cn("flex min-w-0 items-center gap-3 rounded-xl border bg-card p-2.5", dead && "opacity-75")}>
       <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted">
@@ -170,13 +174,22 @@ function Row({ s, token, now }: { s: ShareListItem; token?: string; now: number 
                 <Copy /> Copy link
               </DropdownMenuItem>
             )}
-            {!s.gone && (
-              <DropdownMenuItem onSelect={renew}>
+            {/* An expired link comes back through "Turn back on for" (with a new expiry), not a dead new link. */}
+            {!dead && (
+              <DropdownMenuItem onSelect={() => renew()}>
                 <RefreshCw /> {token ? "New link (the old one stops)" : "New link to copy"}
               </DropdownMenuItem>
             )}
             {!s.gone && (
-              <DropdownMenuItem onSelect={() => void actions.update(s.id, { showPrompts: !s.showPrompts }).then(() => toast(s.showPrompts ? "Prompts hidden on the page" : "Prompts shown on the page")).catch(fail)}>
+              <DropdownMenuItem
+                onSelect={() =>
+                  void actions
+                    .update(s.id, { showPrompts: !s.showPrompts })
+                    // Hiding prompts also swaps a title made from the prompt (src/server/shares.ts updateShare).
+                    .then((r) => toast(s.showPrompts ? "Prompts hidden on the page" : "Prompts shown on the page", r.share.title !== s.title ? { description: `Its title was the prompt, so it's now “${r.share.title}”.` } : undefined))
+                    .catch(fail)
+                }
+              >
                 {s.showPrompts ? <EyeOff /> : <Eye />} {s.showPrompts ? "Hide prompts" : "Show prompts"}
               </DropdownMenuItem>
             )}
@@ -187,8 +200,11 @@ function Row({ s, token, now }: { s: ShareListItem; token?: string; now: number 
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   {EXPIRY_CHOICES.map((c) => (
-                    <DropdownMenuItem key={c.id} onSelect={() => void actions.update(s.id, { expiresInDays: c.days }).then((r) => toast(expiryLabel(r.share.expiresAt))).catch(fail)}>
-                      {c.days === null ? "Never" : `In ${c.label}`}
+                    <DropdownMenuItem
+                      key={c.id}
+                      onSelect={() => (expired ? reopen(c.days) : void actions.update(s.id, { expiresInDays: c.days }).then((r) => toast(expiryLabel(r.share.expiresAt))).catch(fail))}
+                    >
+                      {expired ? (c.days === null ? "Always" : c.label) : c.days === null ? "Never" : `In ${c.label}`}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuSubContent>

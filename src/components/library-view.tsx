@@ -1,6 +1,6 @@
 "use client";
 
-import { ArchiveRestore, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Globe, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Globe, Heart, Loader2, MoreHorizontal, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -27,11 +27,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useShares, useUploads, type Asset, type FeedFilter } from "@/lib/api";
-import type { Generation, MediaKind } from "@/lib/catalog/types";
+import type { Generation, MediaKind, ReviewStatus } from "@/lib/catalog/types";
 import { keyCombo, useModKey } from "@/lib/keys";
 import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, toggleAll, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
 import { isLayered, shownOutputs } from "@/lib/output-actions";
@@ -434,6 +442,10 @@ function Inner() {
   const allPinned = selectedGens.length > 0 && selectedGens.every((g) => g.pinnedAt);
   // The bulk bar's review menu checks a status only when every selected result has it.
   const sameReview = selectedGens.length && selectedGens.every((g) => (g.review ?? null) === (selectedGens[0].review ?? null)) ? (selectedGens[0].review ?? null) : undefined;
+  // The bar's Like, Pin and Review (as buttons, or in ⋯ on phones).
+  const like = () => void actions.favoriteMany(selectedGens, !allFav);
+  const pinAll = () => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`));
+  const review = (r: ReviewStatus | null) => void actions.review(selectedGens, r).then((n) => n && toast(r ? `Marked ${n} as ${reviewInfo(r)?.label}` : `Cleared the review status of ${n}`));
 
   const empty = () => {
     if (dq) {
@@ -759,21 +771,40 @@ function Inner() {
                     if (done.length > BULK_MAX) toast(`The zip has the first ${BULK_MAX} of ${done.length}`, { description: "Select the rest and download them as a second zip." });
                   }}
                 />
-                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selectedGens.length} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
-                <BarButton
-                  icon={allPinned ? PinOff : Pin}
-                  label={allPinned ? "Unpin" : "Pin"}
-                  disabled={!selectedGens.length}
-                  onClick={() => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`))}
-                />
+                {/* Like, Pin and Review fold into ⋯ on phones, so the bar fits 390 px with Publish. */}
+                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selectedGens.length} onClick={like} className="max-sm:hidden" />
+                <BarButton icon={allPinned ? PinOff : Pin} label={allPinned ? "Unpin" : "Pin"} disabled={!selectedGens.length} onClick={pinAll} className="max-sm:hidden" />
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
-                    <button className={BAR} disabled={!selectedGens.length} aria-label="Review status" title="Review status">
+                    <button className={cn(BAR, "max-sm:hidden")} disabled={!selectedGens.length} aria-label="Review status" title="Review status">
                       <CircleDot className="size-4" /> <span className="hidden sm:inline">Review</span>
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="top" align="center" collisionPadding={12} className="min-w-44">
-                    <ReviewMenuItems value={sameReview} onPick={(r) => void actions.review(selectedGens, r).then((n) => n && toast(r ? `Marked ${n} as ${reviewInfo(r)?.label}` : `Cleared the review status of ${n}`))} />
+                    <ReviewMenuItems value={sameReview} onPick={review} />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={cn(BAR, "sm:hidden")} disabled={!selectedGens.length} aria-label="Like, pin or review" title="Like, pin or review">
+                      <MoreHorizontal className="size-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="center" collisionPadding={12} className="min-w-44">
+                    <DropdownMenuItem onSelect={like}>
+                      <Heart /> {allFav ? "Unlike" : "Like"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={pinAll}>
+                      {allPinned ? <PinOff /> : <Pin />} {allPinned ? "Unpin" : "Pin to the top"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <CircleDot /> Review status
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="min-w-44">
+                        <ReviewMenuItems value={sameReview} onPick={review} />
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 {share && (
@@ -881,9 +912,9 @@ function SectionSelect({ label, ids, selected, quiet, onToggle }: { label: strin
 // Phones: a little narrower, so the bar keeps every action (and Select all) at 390 px.
 const BAR = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40 max-sm:px-2";
 
-function BarButton({ icon: Icon, label, onClick, disabled, destructive }: { icon: typeof Download; label: string; onClick: () => void; disabled?: boolean; destructive?: boolean }) {
+function BarButton({ icon: Icon, label, onClick, disabled, destructive, className }: { icon: typeof Download; label: string; onClick: () => void; disabled?: boolean; destructive?: boolean; className?: string }) {
   return (
-    <button onClick={onClick} disabled={disabled} aria-label={label} title={label} className={cn(BAR, destructive && "text-destructive")}>
+    <button onClick={onClick} disabled={disabled} aria-label={label} title={label} className={cn(BAR, destructive && "text-destructive", className)}>
       <Icon className="size-4" /> <span className="hidden sm:inline">{label}</span>
     </button>
   );

@@ -117,34 +117,48 @@ export function shareTargetExists(row: Pick<ShareRow, "kind" | "target_id">): bo
 // Guesses
 
 /**
- * Limits wrong share tokens. Each miss (an unknown, wrong or expired token) counts for the client
- * and for everyone; past either budget the client (or, past the global one, every visitor) gets
- * 429 for a minute before any lookup. The client is the last X-Forwarded-For hop only behind a
- * trusted reverse proxy (FUOBE_TRUST_PROXY=1, see LoginGuard.clientKey); otherwise every visitor
- * shares one key and only the global budget applies. A signed-in owner is never limited. Tokens
- * carry 192 random bits, so this is about load and noise more than about odds.
+ * Limits wrong share tokens without letting anyone switch working links off. A live link is looked
+ * up first and always opens: other people's misses never block it. A miss (an unknown, wrong or
+ * expired token) counts once per token per window, so a page left open after its link was revoked
+ * (one miss per lazy-loaded file) counts as one. Past the global budget, misses answer 429 instead
+ * of 404. A client the server can tell apart (the last X-Forwarded-For hop behind a trusted reverse
+ * proxy, FUOBE_TRUST_PROXY=1, see LoginGuard.clientKey) that misses too often is locked out of
+ * share links for a minute, its own working ones included, so it can't tell a hit from a miss
+ * meanwhile. Without a trusted proxy every visitor shares one key, which is never locked (a lock
+ * would let anyone take every link down). Tokens carry 192 random bits, so this is about load and
+ * noise more than about odds. A signed-in owner is never limited.
  */
 export class ShareGuard {
   private misses = new Map<string, { n: number; first: number; until: number }>();
-  private recent: number[] = [];
-  private globalUntil = 0;
+  private recent = new Map<string, number>(); // missed token → when it first missed in this window
+  private globalMisses: number[] = []; // the times of the last `global` misses, oldest first (a flood can't grow it)
 
   constructor(private readonly o = { perClient: 20, global: 100, windowMs: 60_000, lockMs: 60_000, maxClients: 5000 }) {}
 
-  /** Milliseconds until this client's share requests are looked up again (0 = now). */
+  /** Milliseconds until this client's share requests are looked up again (0 = now). Only a told-apart client is ever locked. */
   blockedFor(key: string, now = Date.now()): number {
     const own = this.misses.get(key);
-    return Math.max(0, own && own.until > now ? own.until - now : 0, this.globalUntil > now ? this.globalUntil - now : 0);
+    return own && own.until > now ? own.until - now : 0;
   }
 
-  miss(key: string, shared: boolean, now = Date.now()): void {
-    this.recent = this.recent.filter((t) => now - t < this.o.windowMs);
-    this.recent.push(now);
-    if (this.recent.length >= this.o.global) {
-      this.globalUntil = now + this.o.lockMs;
-      this.recent = [];
+  /** Whether misses are over the global budget (they then answer 429; working links still open). */
+  saturated(now = Date.now()): boolean {
+    return this.globalMisses.length >= this.o.global && now - this.globalMisses[0] < this.o.windowMs;
+  }
+
+  /** A wrong token. `shared`: the key is everyone's (no trusted proxy), so only the global budget counts. */
+  miss(key: string, token: string, shared: boolean, now = Date.now()): void {
+    for (const [t, at] of this.recent) {
+      if (now - at < this.o.windowMs && this.recent.size <= this.o.maxClients * 4) break;
+      this.recent.delete(t);
     }
-    if (shared) return; // one key for everyone: the global budget is its budget
+    // The same dead token again (a page's files, a reload) is one miss.
+    const seen = `${key}\0${token}`;
+    if (this.recent.has(seen)) return;
+    this.recent.set(seen, now);
+    this.globalMisses.push(now);
+    if (this.globalMisses.length > this.o.global) this.globalMisses.shift();
+    if (shared) return;
     const m = this.misses.get(key);
     const fresh = !m || now - m.first > this.o.windowMs;
     const n = fresh ? 1 : m.n + 1;

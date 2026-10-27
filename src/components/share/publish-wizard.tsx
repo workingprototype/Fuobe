@@ -14,7 +14,7 @@ import { useShareActions } from "@/lib/api";
 import type { Generation } from "@/lib/catalog/types";
 import { userTitle } from "@/lib/library";
 import { shownOutputs } from "@/lib/output-actions";
-import { MAX_TAGS, moveItem, parseTags, pieces, PUBLISH_LAYOUTS, type ShareCreated, type ShareLayout } from "@/lib/share";
+import { MAX_PUBLISH_ITEMS, MAX_TAGS, moveItem, parseTags, pieces, PUBLISH_LAYOUTS, type ShareCreated, type ShareLayout } from "@/lib/share";
 import { cn } from "@/lib/utils";
 import { ExpiryPicker } from "./share-dialog";
 
@@ -33,8 +33,10 @@ const firstShown = (g: Generation) => shownOutputs(g)[0] ?? 0;
  * Cover → Access (with prompts or prompts hidden, and when the link stops working).
  */
 export function PublishWizard({ items, onClose, onPublished }: { items: Generation[]; onClose: () => void; onPublished: (c: ShareCreated) => void }) {
-  const ready = useMemo(() => items.filter(publishable).slice(0, 100), [items]);
-  const skipped = items.length - ready.length;
+  const finished = useMemo(() => items.filter(publishable), [items]);
+  const ready = useMemo(() => finished.slice(0, MAX_PUBLISH_ITEMS), [finished]);
+  const unfinished = items.length - finished.length;
+  const over = finished.length - ready.length;
   const [step, setStep] = useState<Step>("Details");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -76,7 +78,8 @@ export function PublishWizard({ items, onClose, onPublished }: { items: Generati
           <DialogTitle>Publish {pieces(order.length)}</DialogTitle>
           <DialogDescription>
             A read-only page anyone with the link can open.
-            {skipped > 0 && ` ${skipped} of your selection ${skipped === 1 ? "isn't" : "aren't"} finished, so ${skipped === 1 ? "it stays" : "they stay"} out.`}
+            {unfinished > 0 && ` ${unfinished} of your selection ${unfinished === 1 ? "isn't" : "aren't"} finished, so ${unfinished === 1 ? "it stays" : "they stay"} out.`}
+            {over > 0 && ` A page holds up to ${MAX_PUBLISH_ITEMS}, so the last ${over === 1 ? "one stays" : `${over} stay`} out.`}
           </DialogDescription>
           <ol className="mt-1 grid grid-cols-4 gap-1" aria-label="Steps">
             {STEPS.map((s, i) => (
@@ -191,7 +194,9 @@ export function PublishWizard({ items, onClose, onPublished }: { items: Generati
 
           {step === "Cover" && (
             <div className="grid gap-2">
-              <p className="text-[12px] text-muted-foreground">The picture people see first{layout === "feature" ? ", and the piece on top" : ""}. Without one, it&apos;s the first piece.</p>
+              <p className="text-[12px] text-muted-foreground">
+                The picture link previews show. {PUBLISH_LAYOUTS.find((l) => l.id === layout)?.cover}. Without a pick, it&apos;s the first piece.
+              </p>
               <div role="radiogroup" aria-label="Cover" onKeyDown={radioKeys} className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {order.map((g, i) => {
                   const index = firstShown(g);

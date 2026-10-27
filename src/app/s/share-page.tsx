@@ -1,5 +1,5 @@
 import { Box, Download, EyeOff, FileText, Link2Off } from "lucide-react";
-import { orderForLayout, pieces, type PublicItem, type PublicMedia, type PublicShare } from "@/lib/share";
+import { coverSlide, orderForLayout, pieces, type PublicItem, type PublicMedia, type PublicShare } from "@/lib/share";
 import { cn } from "@/lib/utils";
 import { Carousel, RecreateButton } from "@/components/share/share-client";
 
@@ -13,6 +13,7 @@ import { Carousel, RecreateButton } from "@/components/share/share-client";
 export function SharePage({ share }: { share: PublicShare }) {
   const items = orderForLayout(share.items, share.layout, share.coverKey);
   const single = items.length === 1;
+  const keyArt = share.layout === "series" && !single ? share.cover : null;
   return (
     <div className="flex min-h-svh flex-col bg-background">
       <header className="mx-auto flex w-full max-w-[1200px] items-center justify-between gap-3 px-4 pt-5 sm:px-8">
@@ -20,26 +21,35 @@ export function SharePage({ share }: { share: PublicShare }) {
         <p className="text-[12px] text-muted-foreground">Shared with a read-only link</p>
       </header>
       <main className="mx-auto w-full max-w-[1200px] min-w-0 flex-1 px-4 pt-8 pb-16 sm:px-8 sm:pt-12">
-        <div className="max-w-3xl">
-          {share.tags.length > 0 && (
-            <ul className="mb-3 flex flex-wrap gap-1.5" aria-label="Tags">
-              {share.tags.map((t) => (
-                <li key={t} className="rounded-full bg-brand-faint px-2.5 py-0.5 text-[12px] font-medium text-brand-text">
-                  #{t}
-                </li>
-              ))}
-            </ul>
-          )}
-          <h1 className="font-heading text-[38px] leading-[1.08] text-balance break-words sm:text-[52px]">{share.title}</h1>
-          {share.description && <p className="mt-3 text-[16px] leading-relaxed whitespace-pre-line text-pretty text-muted-foreground">{share.description}</p>}
-          <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
-            <span>{pieces(items.length)}</span>
-            {!share.showPrompts && (
-              <span className="inline-flex items-center gap-1">
-                <EyeOff className="size-3.5" /> Prompts hidden by the owner
-              </span>
+        {/* A Series shows its cover as key art beside the title (under it on phones). */}
+        <div className={cn(keyArt ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)] lg:items-end lg:gap-10" : "max-w-3xl")}>
+          <div className="min-w-0 max-w-3xl">
+            {share.tags.length > 0 && (
+              <ul className="mb-3 flex flex-wrap gap-1.5" aria-label="Tags">
+                {share.tags.map((t) => (
+                  <li key={t} className="rounded-full bg-brand-faint px-2.5 py-0.5 text-[12px] font-medium text-brand-text">
+                    #{t}
+                  </li>
+                ))}
+              </ul>
             )}
-          </p>
+            <h1 className="font-heading text-[38px] leading-[1.08] text-balance break-words sm:text-[52px]">{share.title}</h1>
+            {share.description && <p className="mt-3 text-[16px] leading-relaxed whitespace-pre-line text-pretty text-muted-foreground">{share.description}</p>}
+            <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
+              <span>{pieces(items.length)}</span>
+              {!share.showPrompts && (
+                <span className="inline-flex items-center gap-1">
+                  <EyeOff className="size-3.5" /> Prompts hidden by the owner
+                </span>
+              )}
+            </p>
+          </div>
+          {keyArt && (
+            <figure className="min-w-0 overflow-hidden rounded-2xl border bg-muted/40" data-cover>
+              {/* A clip's poster as the still; the clip itself plays in its episode. */}
+              <Media media={keyArt.kind === "video" && keyArt.poster ? { ...keyArt, kind: "image", url: keyArt.poster } : keyArt} alt={`Cover of ${share.title}`} fit short />
+            </figure>
+          )}
         </div>
 
         <div className="mt-8 sm:mt-10">
@@ -62,7 +72,7 @@ export function SharePage({ share }: { share: PublicShare }) {
               ))}
             </ol>
           ) : share.layout === "carousel" ? (
-            <Carousel count={items.length} labels={items.map((it) => it.title)}>
+            <Carousel count={items.length} labels={items.map((it) => it.title)} start={coverSlide(items, share.coverKey)}>
               {items.map((it, i) => (
                 <div key={it.key} role="group" aria-roledescription="slide" aria-label={`${i + 1} of ${items.length}`} className="w-full shrink-0 snap-center px-px">
                   <Piece item={it} showPrompts={share.showPrompts} wide fit />
@@ -170,8 +180,8 @@ function MediaSet({ item, fit }: { item: PublicItem; fit?: boolean }) {
   );
 }
 
-function Media({ media: m, alt, fit }: { media: PublicMedia; alt: string; fit?: boolean }) {
-  const box = fit ? "mx-auto max-h-[78svh] w-auto max-w-full" : "w-full";
+function Media({ media: m, alt, fit, short }: { media: PublicMedia; alt: string; fit?: boolean; short?: boolean }) {
+  const box = fit ? cn("mx-auto w-auto max-w-full", short ? "max-h-[56svh]" : "max-h-[78svh]") : "w-full";
   switch (m.kind) {
     case "image":
       return (
