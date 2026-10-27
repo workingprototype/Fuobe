@@ -230,11 +230,24 @@ describe("the runner on the demo provider", () => {
     expect(row.status).toBe("succeeded");
     const body = (row.request as { route: string; body: Record<string, unknown> }).body;
     expect((row.request as { route: string }).route).toBe("/api/genjutsu");
-    expect(body).toMatchObject({ engine: "open", mode: "motion", modelId: "oss-wan22-animate", seed: 1001 });
+    expect(body).toMatchObject({ engine: "open", mode: "motion", modelId: "fuobe-genjutsu-motion", seed: 1001 });
     expect(String(body.requestId)).toMatch(/^eval-[0-9a-f]{24}$/);
     expect((body.source as { url: string }).url).toMatch(/^\/api\/files\//);
     if (fs.existsSync("/usr/bin/ffprobe")) expect(body.source).toMatchObject({ fps: 24, width: 432, height: 768, duration: 4 });
     expect(row.outputs?.[0]?.kind).toBe("video");
+  });
+
+  it("runs Genjutsu's Character swap on the 6 s fixture clip: the part, the character, who to swap", async () => {
+    const r = await cli(["run", "--suite", "genjutsu", "--engine", "demo", "--cases", "genjutsu/character,genjutsu/character-plain", "--no-metrics"]);
+    expect(r.code, r.stderr).toBe(0);
+    const rows = store.latestJobs(path.join(results, runIdFrom(r.stderr)));
+    expect(rows.map((x) => [x.caseId, x.status]).sort()).toEqual([
+      ["genjutsu/character", "succeeded"],
+      ["genjutsu/character-plain", "succeeded"],
+    ]);
+    const body = (rows.find((x) => x.caseId === "genjutsu/character")!.request as { body: Record<string, unknown> }).body;
+    expect(body).toMatchObject({ mode: "character", modelId: "fuobe-character-swap", range: { start: 0, end: 5 }, character: { who: "largest" } });
+    if (fs.existsSync("/usr/bin/ffprobe")) expect(body.source).toMatchObject({ duration: 6, width: 432, height: 768 });
   });
 
   it("a training case in a demo run makes an element from the fixtures and @mentions it (no training)", async () => {
@@ -265,20 +278,37 @@ describe("the runner on the demo provider", () => {
       setSetting("cloudProvider", "higgsfield");
       const soul = await dry(["--suite", "soul", "--engine", "cloud", "--looks", "v1-general", "--variants", "plain", "--prompts", "1"]);
       expect(soul.jobs.map((j) => j.skip)).toEqual([expect.stringMatching(/would run on Higgsfield's API/)]);
-      // Genjutsu's studio route lists its steps' providers: Motion Control and O3 edit go to Higgsfield, the 4K edit is fal-only.
+      // Genjutsu's studio route lists its steps' providers: Motion Control goes to Higgsfield, the 4K edit is fal-only.
       const gh = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "partner", "--allow-fixtures"]);
       const by = (p: Plan) => Object.fromEntries(p.jobs.map((j) => [j.case, j]));
       expect(by(gh)["genjutsu/move"].skip).toMatch(/Higgsfield's API/);
       expect(by(gh)["genjutsu/restyle"]).toMatchObject({ model: "kling-o3-4k-edit" });
       expect(by(gh)["genjutsu/restyle"].skip).toBeUndefined();
-      // On Auto with fal connected, each mode runs its own partner on fal, even with a Higgsfield key set (no Genjutsu Lite).
+      // On Auto with fal connected, each mode runs its own partner on fal, even with a Higgsfield key set.
       setSetting("cloudProvider", "auto");
       const g = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "partner", "--allow-fixtures"]);
       expect(g.jobs.map((j) => [j.case, j.model, j.skip ?? null])).toEqual([
         ["genjutsu/move", "kling-motion-control", null],
+        // A case with no partner of its own runs its own models (the -lite tiers, the Original without its first frame).
+        ["genjutsu/move-lite", "fuobe-genjutsu-motion-lite", null],
+        // Character swap's partner: MiniMax's own Recast on fal.
+        ["genjutsu/character", "h3-max-recast", null],
+        ["genjutsu/character-plain", "fuobe-character-swap", null],
         // The fixture clip is 768×432: Kling O3's edit wants 720 px on each side (your street.mp4 must be that big).
         ["genjutsu/swap", "kling-o3", expect.stringMatching(/at least 720 px on each side/)],
+        ["genjutsu/swap-lite", "fuobe-genjutsu-swap-lite", null],
         ["genjutsu/restyle", "kling-o3-4k-edit", null],
+      ]);
+      // The Originals on the cloud: their hosted open halves on fal.
+      const o = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "original", "--allow-fixtures"]);
+      expect(o.jobs.map((j) => [j.case, j.model, j.skip ?? null])).toEqual([
+        ["genjutsu/move", "fuobe-genjutsu-motion", null],
+        ["genjutsu/move-lite", "fuobe-genjutsu-motion-lite", null],
+        ["genjutsu/character", "fuobe-character-swap", null],
+        ["genjutsu/character-plain", "fuobe-character-swap", null],
+        ["genjutsu/swap", "fuobe-genjutsu-swap", null],
+        ["genjutsu/swap-lite", "fuobe-genjutsu-swap-lite", null],
+        ["genjutsu/restyle", "fuobe-genjutsu-restyle", null],
       ]);
       // Mixed Media names its hosted open model, so the studio runs that one (and says so).
       const mm = await dry(["--suite", "mixed-media", "--engine", "cloud", "--cases", "mixed-media/toxic", "--allow-fixtures"]);

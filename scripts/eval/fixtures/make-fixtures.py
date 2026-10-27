@@ -4,6 +4,8 @@ python3 -I scripts/eval/fixtures/make-fixtures.py   (needs numpy and Pillow)
 """
 import math
 import pathlib
+import shutil
+import subprocess
 import wave
 
 import numpy as np
@@ -61,6 +63,27 @@ def voice(path, seconds=2.0, rate=16000):
         w.writeframes(pcm.tobytes())
 
 
+def walk(path, seconds=6, fps=24, w=432, h=768):
+    """A drawn figure (blocks, no person) walking across a two-tone scene with a hum: Character swap needs 5 s or more."""
+    if not shutil.which("ffmpeg"):
+        print("ffmpeg not found: skipping", path.name)
+        return
+    x = f"60+(t/{seconds})*({w}-180)"
+    graph = (
+        f"color=c=0x8fb4dc:s={w}x{h}:r={fps}:d={seconds},drawbox=x=0:y={h * 2 // 3}:w={w}:h={h // 3}:color=0xc89a6e:t=fill[bg];"
+        f"color=c=0xaa1e28:s=60x200:r={fps}:d={seconds}[coat];"
+        f"color=c=0xe1bea0:s=36x40:r={fps}:d={seconds}[head];"
+        f"[bg][coat]overlay=x='{x}':y={h // 2 - 40}[a];"
+        f"[a][head]overlay=x='{x}+12':y={h // 2 - 84},format=yuv420p[v]"
+    )
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-filter_complex", graph, "-f", "lavfi", "-i", f"sine=frequency=180:duration={seconds}",
+         "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-crf", "30", "-preset", "veryslow", "-c:a", "aac", "-b:a", "32k",
+         "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-flags:a", "+bitexact", str(path)],
+        check=True,
+    )
+
+
 if __name__ == "__main__":
     scene(HERE / "start-frame.png", (120, 160, 220), (230, 170, 110), (380, 120))
     scene(HERE / "end-frame.png", (40, 50, 90), (90, 70, 120), (120, 110))
@@ -72,4 +95,5 @@ if __name__ == "__main__":
     scene(HERE / "references" / "warm-2.png", (240, 170, 110), (190, 110, 70), (330, 150))
     palette(HERE / "palette.png")
     voice(HERE / "voice.wav")
+    walk(HERE / "walk-6s.mp4")
     print("fixtures written to", HERE)

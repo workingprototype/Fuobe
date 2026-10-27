@@ -2,7 +2,7 @@ import "server-only";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { PlannedJob } from "@/lib/assist";
-import { finalKey, KATANA_FEATURE, KATANA_LIMITS, katanaSteps, katanaStage, motionModel, MOTION_MODELS, planSegments, stepsToRedo, type KatanaInput, type KatanaJob, type KatanaJobView, type Segment } from "@/lib/av/katana";
+import { finalKey, KATANA_FEATURE, KATANA_LIMITS, katanaSteps, katanaStage, motionModel, MOTION_MODELS, planSegments, RETIRED_MOTION_MODELS, stepsToRedo, type KatanaInput, type KatanaJob, type KatanaJobView, type Segment } from "@/lib/av/katana";
 import { getModel } from "@/lib/catalog";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { probeMedia } from "@/lib/media-probe";
@@ -176,7 +176,7 @@ export function planKatana(body: KatanaRequest): { input: KatanaInput; engine: E
   const duration = Math.min(referenceLength(body.reference, body.duration), KATANA_LIMITS.maxReference);
   if (duration < KATANA_LIMITS.minReference) throw new Error("The reference is too short");
   const m = motionModel(engine, body.motionModel);
-  if (body.motionModel && m.id !== body.motionModel) throw new Error(`${getModel(body.motionModel)?.name ?? body.motionModel} isn't a ${engine === "open" ? "open-source" : "cloud"} motion model for Katana`);
+  if (body.motionModel && m.id !== (RETIRED_MOTION_MODELS[body.motionModel] ?? body.motionModel)) throw new Error(`${getModel(body.motionModel)?.name ?? body.motionModel} isn't a ${engine === "open" ? "open-source" : "cloud"} motion model for Katana`);
   const segments = body.segments?.length ? validSegments(body.segments, duration) : planSegments({ duration, mode: "fixed", length: body.length ?? m.max, min: m.min, max: m.max });
   const title = body.title?.trim().slice(0, 120) || "Katana edit";
   return {

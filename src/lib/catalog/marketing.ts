@@ -998,7 +998,7 @@ export const MULTIPLIER_MODELS: Record<Engine, ModelChoice[]> = {
     { id: "kling-o3", note: "Kling O3 edit, up to 4 @images" },
     { id: "gemini-omni-flash", note: "Gemini Omni Flash edit, prompt only" },
   ],
-  open: [{ id: "oss-wan22-animate", note: "Wan Animate: your @image_1 takes over the performance" }],
+  open: [{ id: "fuobe-genjutsu-motion", note: "Fuobe Genjutsu · Motion (Wan Animate 2): your @image_1 takes over the performance" }],
 };
 
 /** Ad Multiplier quality → the resolution sent; open models top out at 720p. */

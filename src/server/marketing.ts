@@ -838,6 +838,8 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
         label: "Recreating",
         request: {
           feature: trimmed ? "ad-multiplier" : step,
+          // Fuobe Genjutsu's Original runs on both engines: this is its open half.
+          engine: "open",
           modelId: model.id,
           op: "motion-transfer",
           prompt: lead.prompt,

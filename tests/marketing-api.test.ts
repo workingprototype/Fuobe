@@ -383,7 +383,7 @@ describe("Ad Multiplier", () => {
     expect(cloud.steps).toHaveLength(1);
     expect(cloud.steps[0].request).toMatchObject({ modelId: "kling-o3", op: "v2v", prompt: "Swap the bottle for @Image1", inputs: { images: [imgs[1], imgs[0]] }, params: { extra: { keep_audio: true } } });
     const open = mk.planMultiplier({ engine: "open", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "", quality: "1080p" }, { higgsfield: false });
-    expect(open.steps.map((s) => [s.key, s.request.modelId])).toEqual([["edit", "oss-wan22-animate"], ["sound", "oss-mux"]]);
+    expect(open.steps.map((s) => [s.key, s.request.modelId])).toEqual([["edit", "fuobe-genjutsu-motion"], ["sound", "oss-mux"]]);
     expect(() => mk.planMultiplier({ engine: "open", video: video(), duration: 12, mode: "prompt", quality: "720p" }, { higgsfield: false })).toThrow(/Add an image/);
   });
 
