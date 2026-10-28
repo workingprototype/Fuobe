@@ -45,6 +45,11 @@ const VIDEO_UPSCALE_TIERS = ["720p", "1080p", "1440p", "2160p"];
 // ---------------------------------------------------------------------------
 // Open source · ComfyUI
 
+/** Fuobe Try-On's LoRA (research adapterLoras): xocialize's try-on LoRA for FLUX.2 [klein] 4B, Apache-2.0. */
+const TRYON_LORA = loraEntry("tryon-klein-4b");
+/** The try-on LoRA card's own instruction, for a run with no words. */
+export const TRYON_PROMPT = "a full-body photo of a person. Replace the outfit with the top and bottom as shown in the reference images. The final image is a full body shot.";
+
 type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badges"] };
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
 
@@ -1378,7 +1383,8 @@ const open: ModelDef[] = [
     tagline: "Dresses the person in image 1 in the garment in image 2 (a top, dress or outfit) and an optional bottom in image 3 · 10 GB GPU · Apache-2.0",
     badges: ["new", "fast"],
     routes: [comfy("edit", "tryon-flux2-klein-4b", "try-on LoRA; old outfit masked out first")],
-    options: { maxImages: 3, seed: true, requires: { images: 2, msg: "Add a photo of the person, then the garment" } },
+    // The graph loads the try-on LoRA itself; carrying it here lets Settings → Models & licences switch it off (as Fuobe Try-On's).
+    options: { maxImages: 3, seed: true, requires: { images: 2, msg: "Add a photo of the person, then the garment" }, ...(TRYON_LORA && { loras: [loraRef(TRYON_LORA)] }) },
   }),
   // Product shot (the open route of the Product shot app): cut out, on white, relit into the scene you describe.
   o({
@@ -1565,11 +1571,6 @@ const DOP_OPTIONS: ModelOptions = {
 
 /** Soul's options on both engines (research §4.3): 7 shapes, a 720p (about 1 MP) and a 1080p (about 2 MP) tier, 1–4 images. */
 const SOUL_OPTIONS: ModelOptions = { aspectRatios: SOUL_ASPECTS, resolutions: SOUL_TIERS, seed: true, maxOutputs: 4 };
-
-/** Fuobe Try-On's LoRA (research adapterLoras): xocialize's try-on LoRA for FLUX.2 [klein] 4B, Apache-2.0. */
-const TRYON_LORA = loraEntry("tryon-klein-4b");
-/** The try-on LoRA card's own instruction, for a run with no words. */
-export const TRYON_PROMPT = "a full-body photo of a person. Replace the outfit with the top and bottom as shown in the reference images. The final image is a full body shot.";
 
 /** Fuobe Soul, Soul HD and Soul Cinema (src/lib/catalog/soul.ts applies the look). */
 const originals: ModelDef[] = [
