@@ -13,7 +13,7 @@ import { useEngine, useGenerations } from "@/lib/api";
 import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
 import { positionsFrom } from "@/lib/catalog/keyframes";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
-import { migrateRequest, replacedBy } from "@/lib/catalog/replaced";
+import { currentModelId, migrateRequest } from "@/lib/catalog/replaced";
 import { matchSpokenLanguage } from "@/lib/speech-languages";
 import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
 import type { StudioCatalog } from "@/lib/studio-catalog";
@@ -42,7 +42,8 @@ function initialDraft(
   lookup: { getModel: (id: string) => ModelDef | undefined; getPreset: (id: string) => Preset | undefined },
 ): Draft {
   const preset = sp.get("preset") ? lookup.getPreset(sp.get("preset")!) : config.preset;
-  const requested = sp.get("model");
+  // A link or Assist hand-off that names a model Fuobe retired opens on the one that replaced it (replaced.ts).
+  const requested = sp.get("model") && currentModelId(sp.get("model")!);
   // An app opened on one of its own models (?model=, from ⌘K) takes that model's route and params.
   const presetRoute = preset
     ? ([preset.cloud, preset.open].find((r) => !!requested && r?.modelId === requested) ?? (engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open)
@@ -265,8 +266,9 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
   const reuse = useCallback(
     (g: Generation) => {
       setDraft(draftFromGeneration(g, config, catalog.getModel));
-      const moved = replacedBy(g.request.modelId);
-      if (moved) toast(moved.note);
+      // A run on a model (or an operation) Fuobe retired comes back on what replaced it: say what changed.
+      const moved = migrateRequest(g.request).note;
+      if (moved) toast(moved);
       if (g.engine !== engine) setEngine(g.engine);
       requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
     },

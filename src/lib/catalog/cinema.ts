@@ -1066,6 +1066,28 @@ export function compileDirector(input: CompileInput): CompiledDirector {
   return { prompt: text ? `${text}.` : "", extra };
 }
 
+/**
+ * Cinema Studio 4.0's own Director fields, as a request stored before Fuobe stopped calling its API carried them
+ * (params.extra: compileDirector's native target), in words for any other model: what compileDirector's prompt target
+ * writes for the same picks. A slug Fuobe doesn't know is left out. The server reads it when it moves such a request to
+ * the model that replaced it (src/lib/catalog/replaced.ts).
+ */
+export function directorFieldWords(fields: Record<string, string>): string {
+  const preset = (slug: string) => ({ kind: "preset" as const, slug });
+  const settings: DirectorSettings = {
+    genre: fields.genre,
+    era: fields.era,
+    tempo: fields.pacing,
+    camera: fields.camera_model,
+    lens: fields.camera_lens,
+    aperture: fields.camera_aperture,
+    lighting: fields.light ? preset(fields.light) : null,
+    palette: fields.color_palette ? preset(fields.color_palette) : null,
+  };
+  const moves = fields.camera_movement ? [fields.camera_movement] : [];
+  return compileDirector({ prompt: "", settings, moves, mode: "video", target: "prompt" }).prompt;
+}
+
 /** "Noir · 80s · Calm" — the Director chips' summary. */
 export function directorSummary(s: DirectorSettings): string[] {
   return [

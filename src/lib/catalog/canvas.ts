@@ -12,7 +12,7 @@ import { getModel, getPreset, MODELS, supportsOp } from "./index";
 import { dualEngine, onEngine, runsOn } from "./engines";
 import { chainedWaitMessage, keyframeChain } from "./keyframes";
 import { estimateCost, inferOperation, planGeneration, routesFor, type Plan } from "./plan";
-import { replacedBy } from "./replaced";
+import { replacedBy, replacementOf } from "./replaced";
 import {
   OPERATION_LABELS,
   OPERATION_OUTPUT,
@@ -1642,26 +1642,42 @@ export function withCurrentElements(graph: CanvasGraph, elements: readonly Eleme
 const NODE_TYPES = new Set(Object.keys(NODE_SPECS));
 
 /**
- * A node saved on a model Fuobe retired (src/lib/catalog/replaced.ts) moves to the one that replaced it, keeping the
- * settings it offers; an Original runs in the cloud, where the retired model ran.
+ * The operation a node on a retired model ran: its own, else what the retired model read connected images or elements
+ * as (Cinema Studio took them as references, Replacement.withReferences).
  */
-function currentNode(n: CanvasNode): CanvasNode {
-  const to = replacedBy(n.data.modelId);
+function storedOp(graph: CanvasGraph, n: CanvasNode): Operation | undefined {
+  if (n.data.op) return n.data.op;
+  const by = replacedBy(n.data.modelId)?.withReferences;
+  return by && graph.edges.some((e) => e.target === n.id && (e.targetHandle === "images" || e.targetHandle === "elements")) ? by : undefined;
+}
+
+/**
+ * A node saved on a model (or a model's operation) Fuobe retired when it stopped calling Higgsfield (replaced.ts)
+ * moves to the one that does it now, keeping the settings it offers. A board picks a node's engine itself (nodeEngine
+ * follows the install's engine mode first), so an Original keeps the cloud, where the retired model ran with your key.
+ */
+function currentNode(graph: CanvasGraph, n: CanvasNode): CanvasNode {
+  const op = storedOp(graph, n);
+  const to = n.data.modelId ? replacementOf(n.data.modelId, op) : undefined;
   const m = to && getModel(to.id);
   if (!m) return n;
-  return { ...n, data: { ...n.data, modelId: m.id, params: sanitizeParams(m, n.data.params), engine: dualEngine(m) ? (n.data.engine ?? "cloud") : undefined } };
+  const runs = to.op ?? op;
+  return {
+    ...n,
+    data: { ...n.data, modelId: m.id, ...(runs && { op: runs }), params: sanitizeParams(m, n.data.params), engine: dualEngine(m) ? (n.data.engine ?? "cloud") : undefined },
+  };
 }
 
 /** A stored board with its nodes on retired models moved to the ones that replaced them (read before any save). */
 export const withCurrentModels = (graph: CanvasGraph): CanvasGraph =>
-  graph.nodes.some((n) => replacedBy(n.data.modelId)) ? { ...graph, nodes: graph.nodes.map(currentNode) } : graph;
+  graph.nodes.some((n) => !!n.data.modelId && !!replacementOf(n.data.modelId, storedOp(graph, n))) ? { ...graph, nodes: graph.nodes.map((n) => currentNode(graph, n)) } : graph;
 
 /**
  * Drop unknown node types, dangling edges and edges into handles that don't exist (after a model or op change), and
  * move nodes on a retired model to the one that replaced it.
  */
 export function cleanGraph(graph: CanvasGraph): CanvasGraph {
-  const nodes = graph.nodes.filter((n) => NODE_TYPES.has(n.type)).map(currentNode);
+  const nodes = graph.nodes.filter((n) => NODE_TYPES.has(n.type)).map((n) => currentNode(graph, n));
   const g: CanvasGraph = { ...graph, nodes, edges: [] };
   const ids = new Set(nodes.map((n) => n.id));
   const seen = new Set<string>();

@@ -4,7 +4,8 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
-import { replacedBy } from "@/lib/catalog/replaced";
+import { migrateRequest, replacedBy } from "@/lib/catalog/replaced";
+import { directorFieldWords } from "@/lib/catalog/cinema";
 import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
@@ -42,7 +43,7 @@ import { pollTrainings } from "./training";
 import { createExtendChain, createKeyframeFilm, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
-import { provider } from "./providers";
+import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
 import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
@@ -443,6 +444,15 @@ setResolver((ids) =>
 // Create
 
 /**
+ * A request as it runs now: one that names a model (or an operation) Fuobe retired when it stopped calling Higgsfield moves
+ * to what replaced it (src/lib/catalog/replaced.ts), with Cinema Studio's Director fields in words. Every way in goes
+ * through it (the API, a retry, a waiting step, a saved project's run); `note` says what changed.
+ */
+export function currentRequest(req: GenerationRequest): { request: GenerationRequest; note?: string } {
+  return migrateRequest(req, { directorWords: directorFieldWords });
+}
+
+/**
  * The engine a model runs a request on: a Fuobe Original runs on the engine asked for (the composer's switch), else
  * the engine mode, else the first one connected; any other model on its own.
  */
@@ -548,9 +558,12 @@ const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "ext
 
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
-export function previewGeneration(req: GenerationRequest) {
-  const { plan, route, demo, providerId, cost, notes, asked, unreachable, switchedOff } = prepare(req);
-  const fitted = routeLoras(route, asked.filter((l) => !unreachable.includes(l)));
+export function previewGeneration(asked: GenerationRequest) {
+  const moved = currentRequest(asked);
+  const prepared = prepare(moved.request);
+  const { plan, route, demo, providerId, cost, asked: askedLoras, unreachable, switchedOff } = prepared;
+  const notes = moved.note ? [moved.note, ...prepared.notes] : prepared.notes;
+  const fitted = routeLoras(route, askedLoras.filter((l) => !unreachable.includes(l)));
   const loras = {
     ...fitted,
     dropped: [...switchedOff, ...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped],
@@ -596,7 +609,10 @@ export interface CreateOptions {
 
 const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
 
-export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+export function createGenerations(asked: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+  // A retired model or operation (a retry, an old script, a saved project) runs on what replaced it, and says so.
+  const moved = currentRequest(asked);
+  const original = moved.request;
   // Open models make multi-shot films shot by shot, then join the clips. A Fuobe Original is taken on the engine it runs
   // on (Fuobe DoP's Frames mode is a GPU chain).
   // A model (or an Original's engine asked for) switched off in Settings → Models & licences is refused here, before a
@@ -624,7 +640,8 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
-  const { req, plan, route, demo, providerId, cost, notes } = p;
+  const { req, plan, route, demo, providerId, cost } = p;
+  const notes = moved.note ? [moved.note, ...p.notes] : p.notes;
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
   if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name, plan.op));
   const jobs = waits ? 1 : plan.jobs;
@@ -916,7 +933,9 @@ async function advanceDependents(): Promise<void> {
   const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
   for (const r of rows) {
     if (submitting().has(r.id)) continue;
-    const stored = JSON.parse(r.request_json) as GenerationRequest;
+    // A step queued before its model was retired runs on what replaced it (and its row says so).
+    const moved = currentRequest(JSON.parse(r.request_json) as GenerationRequest);
+    const stored = moved.request;
     const allIds = depIds(r.depends_on);
     const allSlots = slotsFor(stored, allIds.length);
     const allDeps = allIds.map(
@@ -971,6 +990,7 @@ async function advanceDependents(): Promise<void> {
       if (mode.error) throw new Error(mode.error);
       const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
       update(r.id, {
+        ...(moved.note && { model_id: p.plan.model.id, engine: p.plan.model.engine }),
         provider: p.providerId,
         op: p.plan.op,
         kind: outputKind(p.plan.op, p.plan.model),
@@ -1249,7 +1269,9 @@ function pollContext(r: Row, model: NonNullable<ReturnType<typeof getModel>>): P
 async function pollOne(r: Row): Promise<void> {
   const model = getModel(r.model_id);
   if (!model) {
-    update(r.id, { status: "failed", error: `Model ${r.model_id} no longer exists`, completed_at: Date.now() });
+    // A job on a model Fuobe retired with its provider (replaced.ts) can't be collected: Reuse runs it on the replacement.
+    const retired = !!replacedBy(r.model_id) || !Object.hasOwn(PROVIDERS, r.provider);
+    update(r.id, { status: "failed", error: retired ? RETIRED_PROVIDER_ERROR : `Model ${r.model_id} no longer exists`, completed_at: Date.now(), message: null });
     return;
   }
   // The clock runs from when the provider got the job (and from when it started it), not from creation:

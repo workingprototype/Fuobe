@@ -1,7 +1,7 @@
 # Fuobe
 
 **An open-source AI image, video and audio studio — a 1:1 alternative to Higgsfield.**
-Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, Gemini Omni, MiniMax, ElevenLabs…, and Higgsfield's own Soul and Cinema Studio) with your own fal.ai / Replicate / Higgsfield key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
+Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, Gemini Omni, MiniMax, ElevenLabs…) with your own fal.ai / Replicate key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch. Higgsfield's in-house models (Soul, Cinema Studio, Genjutsu…) are rebuilt as **Fuobe Originals** from open-weight models and LoRAs, on both engines, and Higgsfield is never called.
 
 - **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Free / Smart / Manual modes, 20 built-in **skills** (SKILL.md playbooks, or upload your own), **projects** with instructions and up to 20 sources (links, files and PDFs, elements, notes), and **memory**. Runs on Claude, a local Ollama model, or an offline planner
 - **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`, including whole studio jobs that open in their studio (a Layers project, a Shorts session, a dub to review, a Faceless episode, an Ads Studio batch, the Captions editor, a Katana edit; Genjutsu, Remove object, Content Factory, the AI Influencer builder and Layers' Inpaint, Enhancer and Save as element aren't tools yet) and the skills as prompts. `npx skills add workingprototype/Fuobe` installs the skills in other agents
@@ -23,7 +23,7 @@ Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5
 - **LoRAs:** small add-on files that give an open model a look, a camera move or an effect. **Settings → LoRAs** lists a library of 114 researched LoRAs (67 looks, 23 motions, 24 effects) with each one's licence and source, and downloads them. On the open engine, a LoRA ComfyUI doesn't have is downloaded into your LoRA folder before the run and checked against its SHA-256 fingerprint. On the cloud, seven hosted open-weight models take LoRAs: Z-Image Turbo (hosted, now on fal and Replicate) and six new ones (Qwen-Image 2512, Qwen-Image-Edit 2511, FLUX.2 [klein] 4B, Wan 2.2 A14B image and video, LTX-2.3 22B), and a LoRA a run can't carry is left out with a warning. No preset takes its LoRAs from the new library yet
 - **Catalog:** 200 cloud models + 85 open-source models (plus 45 hidden ones: chain steps and studio helpers, self-tests, browser tools, and Gemma 4 speech translate, which no studio uses yet), 124 apps, 108 camera motions (mix any two), 255 effects
 - **Open-source engine:** 139 API-format ComfyUI workflows (official templates, community packs and hand-built graphs) validated against real ComfyUI node definitions, plus 43 researched LoRAs (camera moves, VFX) that 55 motion, effect and app presets use today (a separate set from the Settings → LoRAs library)
-- **Evaluation harness (for developers):** `pnpm eval:run` (or `fuobe eval`) runs a suite of cases for each planned Fuobe Original (Fuobe's own open-weight versions of Higgsfield's in-house models, such as Soul and DoP) on the demo, open or cloud engine, scores the results with pinned open models, runs a blind A/B review and says whether a recipe may become a default. No Original is in the app yet: for now the suites measure their recipes on models already in the catalog (Z-Image Turbo for Soul, Wan 2.2 for DoP…), and cases that need the Original itself are skipped. Cloud runs are priced first and capped (default $5), and nothing goes through Higgsfield. Nothing has been measured on a GPU or the cloud yet; see [`scripts/eval/README.md`](scripts/eval/README.md)
+- **Evaluation harness (for developers):** `pnpm eval:run` (or `fuobe eval`) runs a suite of cases for each planned Fuobe Original (Fuobe's own open-weight versions of Higgsfield's in-house models, such as Soul and DoP) on the demo, open or cloud engine, scores the results with pinned open models, runs a blind A/B review and says whether a recipe may become a default. No Original is in the app yet: for now the suites measure their recipes on models already in the catalog (Z-Image Turbo for Soul, Wan 2.2 for DoP…), and cases that need the Original itself are skipped. Cloud runs are priced first and capped (default $5), and Higgsfield is never called. Nothing has been measured on a GPU or the cloud yet; see [`scripts/eval/README.md`](scripts/eval/README.md)
 - **No keys? No GPU?** Demo mode lets you click through everything with clearly-labelled placeholder outputs.
 
 > Project status, what works, what's verified and what's left: **[docs/STATUS.md](docs/STATUS.md)** (also in-app at `/status`).
@@ -50,8 +50,7 @@ The mode can also be set with `FUOBE_ENGINE_MODE=both|open|cloud`. Then connect 
 | You have | What to set | You get |
 |---|---|---|
 | A [fal.ai](https://fal.ai/dashboard/keys) key | `fal.ai API key` (or `FAL_KEY`) | Every cloud model and cloud app |
-| A Replicate token | `Replicate API token` (or `REPLICATE_API_TOKEN`) | Fallback route for models Replicate hosts; **Preferred provider** (or `FUOBE_CLOUD_PROVIDER`: `auto`, `fal`, `replicate` or `higgsfield`) picks which one goes first, unless only the other can carry the run's LoRAs or make the clip length asked |
-| A [Higgsfield API](https://console.higgsfield.ai) key | `Higgsfield API key` as `KEY_ID:KEY_SECRET` (or `HIGGSFIELD_API_KEY`, `HF_KEY`, or `HF_API_KEY` + `HF_API_SECRET`) | Soul 2.0 / Soul Cinema / Soul v1 with live presets, Soul ID training, Genjutsu and Genjutsu Lite, Cinema Studio 4.0, Marketing Studio, Ads Studio, plus extra routes for Seedance, Kling, Wan, MiniMax… |
+| A Replicate token | `Replicate API token` (or `REPLICATE_API_TOKEN`) | Fallback route for models Replicate hosts; **Preferred provider** (or `FUOBE_CLOUD_PROVIDER`: `auto`, `fal` or `replicate`) picks which one goes first, unless only the other can carry the run's LoRAs or make the clip length asked |
 | A GPU running ComfyUI | `ComfyUI server URL` (or `COMFYUI_URL`, default `http://127.0.0.1:8188`; `COMFYUI_TOKEN` if it sits behind a proxy) | Every open-source model, app, motion, effect and studio route |
 | An Anthropic key | `Anthropic API key` (or `ANTHROPIC_API_KEY`) | The full **Assist** agent (Smart and Manual modes), text steps (translate, write, scripts, ad copy, brand research), prompt **Enhance** and storyboard splitting with Claude |
 | Ollama | `Prompt enhancement` → Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`, default `qwen3:8b`; `FUOBE_ENHANCE_PROVIDER`) | The same text steps and the Assist agent on a local model (tool calling) |
@@ -123,7 +122,7 @@ node tests/e2e/comfyui-faceless-plus.mjs http://localhost:3000   # Ken Burns, th
 ```bash
 pnpm typecheck && pnpm lint && pnpm test   # TypeScript, ESLint, Vitest (133 files, 2084 tests; with uv, also the harness's Python metric tests)
 pnpm build                                  # production build
-pnpm gen:catalog                            # regenerate cloud models, Higgsfield models and presets, LoRA map, LoRA library, AI Influencer options and icon map from docs/research/*.json
+pnpm gen:catalog                            # regenerate cloud models, studio packs, LoRA map, LoRA library, AI Influencer options, Fuobe Soul's looks, trainers and icon map from docs/research/*.json
 pnpm dev:clean                              # clear the Turbopack cache if the dev server gets stuck reloading or serves stale CSS
 node scripts/gen-demo-3d.mjs                # regenerate the demo GLB and turntable (needs ffmpeg)
 ```
@@ -169,7 +168,7 @@ node tests/e2e/eval-review.mjs                 # the report and blind review pag
 
 ## Tech
 
-Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shadcn/ui (Radix) · TanStack Query · SQLite (better-sqlite3) · zod · fal.ai queue API · Replicate predictions API · Higgsfield API · ComfyUI HTTP + WebSocket API · Anthropic SDK (Claude) · Ollama · @xyflow/react (Canvas) · @google/model-viewer + three (3D) · unpdf (PDF text) · cmdk · WebGL · server-sent events · Vitest · Playwright · Python with uv (the evaluation harness's metrics).
+Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shadcn/ui (Radix) · TanStack Query · SQLite (better-sqlite3) · zod · fal.ai queue API · Replicate predictions API · ComfyUI HTTP + WebSocket API · Anthropic SDK (Claude) · Ollama · @xyflow/react (Canvas) · @google/model-viewer + three (3D) · unpdf (PDF text) · cmdk · WebGL · server-sent events · Vitest · Playwright · Python with uv (the evaluation harness's metrics).
 
 ## License notes
 

@@ -17,26 +17,59 @@ process.env.COMFYUI_URL = "http://127.0.0.1:9";
 
 const { MODELS, getModel } = await import("@/lib/catalog");
 const { enginesOf } = await import("@/lib/catalog/engines");
-const { REPLACED_BY, TRAINING_REPLACED_BY, currentModelId, migrateRequest, replacedBy } = await import("@/lib/catalog/replaced");
+const { DIRECTOR_FIELDS, OPS_REPLACED_BY, REPLACED_BY, TRAINING_REPLACED_BY, currentModelId, migrateRequest, replacedBy, replacementOf } = await import("@/lib/catalog/replaced");
+const { directorFieldWords } = await import("@/lib/catalog/cinema");
+const { routesFor } = await import("@/lib/catalog/plan");
+const { castSheetModel } = await import("@/lib/catalog/packs");
 const { TRAINING_TARGETS } = await import("@/lib/catalog/training");
 const { SOUL_LEGACY_IDS } = await import("@/lib/catalog/soul-looks.generated");
 const { PROVIDER_SETTINGS } = await import("@/lib/connections");
 const { PROVIDERS, provider, RETIRED_PROVIDER_ERROR } = await import("@/server/providers");
-const { SETTINGS, getSetting } = await import("@/server/settings");
+const { SETTINGS, getSetting, setSetting } = await import("@/server/settings");
 const { db } = await import("@/server/db");
 const { withCurrentModels } = await import("@/lib/catalog/canvas");
 const generationsRoute = await import("@/app/api/generations/route");
-const { getGeneration, listGenerations } = await import("@/server/generations");
+const { currentRequest, ensureRunner, getGeneration, listGenerations, previewGeneration } = await import("@/server/generations");
+const { planCaps, retryPhoto } = await import("@/server/photodump");
+const assistTools = await import("@/server/assist/tools");
+const { saveFile } = await import("@/server/storage");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+let rows = 0;
+/** A generation row as one stored before the switch reads (the retired model and provider, as it was left). */
+function storedRow(r: { feature: string; model: string; provider: string; op: string; kind?: string; status: string; request: object; externalId?: string; dependsOn?: string; outputs?: object[] }): string {
+  const id = `old-${++rows}`;
+  const now = Date.now();
+  db()
+    .prepare(
+      `INSERT INTO generations (id, feature, model_id, engine, provider, op, kind, status, request_json, outputs_json, external_id, depends_on, created_at, updated_at)
+       VALUES (?, ?, ?, 'cloud', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(id, r.feature, r.model, r.provider, r.op, r.kind ?? "image", r.status, JSON.stringify(r.request), JSON.stringify(r.outputs ?? []), r.externalId ?? null, r.dependsOn ?? null, now, now);
+  return id;
+}
+
+/** Run the background runner until `done` holds (its own timer may be mid-tick). */
+async function runUntil(done: () => boolean) {
+  ensureRunner();
+  for (let i = 0; i < 100 && !done(); i++) {
+    await globalThis.__fuobeRunner!.tick();
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
 
 const ROOT = path.resolve(__dirname, "..");
 
 // ---------------------------------------------------------------------------
 // The guard: no code path names the provider
 
-/** Where code and shipped content live (docs/ holds the research, which stays). */
-const SCANNED = ["src", "scripts", "bin", "skills", "workflows", "package.json"];
+/**
+ * Where code and shipped content live, and the README's setup steps (docs/ holds the research, which stays). The
+ * unmerged round-4 docs branches (claude/fuobe-r4-batch-4, claude/fuobe-r4-docs-3, origin/main) still add README lines
+ * offering a Higgsfield key and generating "Higgsfield models and presets": merging one fails here until they go.
+ */
+const SCANNED = ["src", "scripts", "bin", "skills", "workflows", "package.json", "README.md"];
 const TEXT = /\.(ts|tsx|mts|js|mjs|cjs|py|json|md|sh|bat|ps1|css|html|txt|yml|yaml)$/;
 
 /**
@@ -59,9 +92,20 @@ const RULES: [string, RegExp][] = [
   [
     "offers the provider in copy",
     // ("as on Higgsfield" and "Higgsfield's old style ids" are comparisons and history, not an offer.)
-    /higgsfield (api|key|account|balance|route|provider|credit|console)|(needs|with|connect|add|set) (a |an |your )?higgsfield(?!'s)\b|(?<!as )\b(on|via|through) higgsfield\b|higgsfield's (api|own models?|route|key)|higgsfield (soul|cinema studio|ads studio|marketing studio)/i,
+    /higgsfield (api|key|account|balance|route|provider|credit|console)|(needs|with|connect|add|set) (a |an |your )?higgsfield(?!'s)\b|(?<!as )\b(on|via|through) higgsfield\b|higgsfield's (api|own models?|route|key)|higgsfield (soul|cinema studio|ads studio|marketing studio)|higgsfield (models and )?presets\b/i,
   ],
+  // An identifier in any case: HiggsfieldProvider, viaHiggsfield, HIGGSFIELD_… (the env rule) — never history.
+  ["names the provider in an identifier", /[A-Za-z0-9_$]Higgsfield|Higgsfield[A-Z0-9_$]/],
+  // A choice, label or route named after it: { value: "Higgsfield" }, label: "Higgsfield first", provider: "Higgsfield".
+  ["offers the provider as a value or label", /\b(label|value|provider|vendor|name|title|placeholder|engine|route)\s*:\s*["'`][^"'`]*\bhiggsfield\b/i],
+  // Copy that says something runs on it: "Runs with Higgsfield's Soul", "rendered by Higgsfield", "Uses Higgsfield to render"
+  // ("uses Higgsfield's labels" is a comparison).
+  ["says something runs on the provider", /\b(runs? (with|on)|ran (with|on)|made (with|on|by)|rendered (with|on|by)|renders (with|on)|powered by|goes to|sent to|calls?)\s+higgsfield\b|\b(uses?|using)\s+higgsfield\b(?!'s)/i],
 ];
+
+/** A retired model or training id in code (a stored one resolves through replaced.ts; nothing else names it). */
+const RETIRED_IDS = new RegExp(`["'\`](${[...Object.keys(REPLACED_BY), ...Object.keys(TRAINING_REPLACED_BY)].join("|")})["'\`]`);
+const RETIRED_ID_ALLOWED = new Set(["src/lib/catalog/replaced.ts", "src/server/db.ts"]);
 
 function walk(p: string, out: string[]) {
   const full = path.join(ROOT, p);
@@ -97,6 +141,34 @@ describe("no code path names the Higgsfield provider", () => {
       });
     }
     expect(hits).toEqual([]);
+  });
+
+  it("catches what a later branch could bring back: identifiers, labels, copy and README key rows", () => {
+    const probes = [
+      "export const HiggsfieldProvider = createAdapter();",
+      "const viaHiggsfield = route.provider === x;",
+      'label: "Higgsfield",',
+      '{ value: "Higgsfield", label: "Higgsfield first" }',
+      `note: "Runs with Higgsfield's Soul model"`,
+      "toast('Uses Higgsfield to render the ad')",
+      "| A Higgsfield key | `HIGGSFIELD_API_KEY` | Soul 2.0 |",
+      "pnpm gen:catalog # regenerate cloud models, Higgsfield models and presets, LoRA map",
+    ];
+    for (const p of probes) expect(RULES.some(([, re]) => re.test(p.replace(RESEARCH_NAMES, ""))), p).toBe(true);
+    // History and comparisons stay allowed.
+    for (const ok of ["Higgsfield's pogo example names four things to remove", "the way Higgsfield names layer files", "a 1:1 alternative to Higgsfield", "Higgsfield is never called", "Progress uses Higgsfield's 14 labels"])
+      expect(RULES.some(([, re]) => re.test(ok)), ok).toBe(false);
+  });
+
+  it("names no retired model or training id in code: stored ones resolve through replaced.ts", () => {
+    const hits: string[] = [];
+    for (const f of files.filter((x) => /^(src|bin)\//.test(x) && !RETIRED_ID_ALLOWED.has(x))) {
+      fs.readFileSync(path.join(ROOT, f), "utf8")
+        .split("\n")
+        .forEach((line, i) => RETIRED_IDS.test(line) && hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 140)}`));
+    }
+    expect(hits).toEqual([]);
+    expect(RETIRED_IDS.test('if (draft.modelId !== "soul-2") return null;')).toBe(true);
   });
 
   it("has no file named after it", () => {
@@ -196,9 +268,10 @@ describe("REPLACED_BY", () => {
     const style = Object.entries(SOUL_LEGACY_IDS).find(([, look]) => look === "v2-general")![0];
     const old = { feature: "image", modelId: "soul-2", prompt: "a rooftop party", params: { aspectRatio: "3:4", extra: { style_id: style, custom_reference_id: "ref-1", custom_reference_strength: 0.8, seed: 7 } } };
     const { request, note } = migrateRequest(old);
-    expect(request).toEqual({ feature: "image", modelId: "fuobe-soul", engine: "cloud", presetId: "v2-general", prompt: "a rooftop party", params: { aspectRatio: "3:4", extra: { seed: 7 } } });
+    // No engine: the install runs the Original where its engine mode (else the first engine connected) says.
+    expect(request).toEqual({ feature: "image", modelId: "fuobe-soul", presetId: "v2-general", prompt: "a rooftop party", params: { aspectRatio: "3:4", extra: { seed: 7 } } });
     expect(note).toMatch(/Fuobe Soul/);
-    // An engine asked for stays; a partner replacement gets none.
+    // An engine asked for stays.
     expect(migrateRequest({ ...old, engine: "open" as const }).request.engine).toBe("open");
     expect(migrateRequest({ modelId: "marketing-studio-image", params: { extra: { template_id: "t" } } }).request).toEqual({ modelId: "gpt-image-2-5", params: {} });
     // A current model's request comes back as it was.
@@ -207,16 +280,158 @@ describe("REPLACED_BY", () => {
   });
 });
 
+describe("operations the replacements do elsewhere", () => {
+  /** What each retired model did (the deleted catalog's routes), and the partner ops only the retired provider ran. */
+  const RETIRED_OPS: Record<string, string[]> = {
+    "soul-1": ["t2i"],
+    "soul-2": ["t2i", "edit"],
+    "soul-cinema": ["t2i"],
+    "cinema-studio-4": ["t2v", "ref2v"],
+    "genjutsu-motion-transfer": ["motion-transfer"],
+    "genjutsu-lite-motion-transfer": ["motion-transfer"],
+    "genjutsu-object-swap": ["v2v", "video-swap"],
+    "genjutsu-lite-object-swap": ["video-swap"],
+    "genjutsu-restyle": ["v2v"],
+    "marketing-studio-image": ["t2i", "edit"],
+    "ads-studio": ["t2i", "edit"],
+    "ai-influencer": ["t2i", "edit"],
+    "seedance-2-5": ["v2v"],
+    "ltx-2-5": ["flf2v"],
+  };
+
+  it("sends every operation a retired model (or a partner's retired route) ran to a model that does it", () => {
+    for (const [id, ops] of Object.entries(RETIRED_OPS)) {
+      for (const op of ops) {
+        const to = replacementOf(id, op as never);
+        const target = to?.id ?? id;
+        const m = getModel(target);
+        expect(m, `${id} ${op} → ${target}`).toBeDefined();
+        expect(routesFor(m!, (to?.op ?? op) as never).length, `${id} ${op} → ${target} ${to?.op ?? op}`).toBeGreaterThan(0);
+      }
+    }
+    expect(Object.keys(OPS_REPLACED_BY).sort()).toEqual(["ltx-2-5", "seedance-2-5"]);
+  });
+
+  it("moves a stored request's operation with it, and reads Cinema Studio's references as references", () => {
+    expect(migrateRequest({ modelId: "genjutsu-object-swap", op: "v2v" as const }).request).toMatchObject({ modelId: "fuobe-genjutsu-swap", op: "video-swap" });
+    expect(migrateRequest({ modelId: "seedance-2-5", op: "v2v" as const }).request).toEqual({ modelId: "kling-o3", op: "v2v" });
+    expect(migrateRequest({ modelId: "ltx-2-5", op: "flf2v" as const }).request).toEqual({ modelId: "fuobe-cinema", op: "flf2v" });
+    // A partner model's own operations are untouched.
+    const seedance = { modelId: "seedance-2-5", op: "t2v" as const };
+    expect(migrateRequest(seedance).request).toBe(seedance);
+    // Cinema Studio had no start-frame route: its images were references, which Fuobe Cinema doesn't take yet.
+    const refs = migrateRequest({ modelId: "cinema-studio-4", prompt: "x", inputs: { images: ["/api/files/a.png"] } });
+    expect(refs.request).toMatchObject({ modelId: "seedance-2-5", op: "ref2v" });
+    expect(refs.note).toMatch(/Seedance 2\.5/);
+    expect(migrateRequest({ modelId: "cinema-studio-4", prompt: "x" }).request).toEqual({ modelId: "fuobe-cinema", prompt: "x" });
+  });
+
+  it("writes Cinema Studio's Director fields into the prompt on the server, and drops them in the browser", () => {
+    const extra = { genre: "noir", era: "1980s", camera_model: "35mm-film", camera_lens: "anamorphic", camera_aperture: "f14-wide-open", light: "silhouette", pacing: "calm", camera_movement: "dolly-in", color_palette: "neon-rain-at-midnight", seed: 3 };
+    expect(Object.keys(extra).filter((k) => k !== "seed").sort()).toEqual([...DIRECTOR_FIELDS].sort());
+    const old = { modelId: "cinema-studio-4", prompt: "A chase through the market.", params: { duration: 8, extra } };
+    const server = currentRequest(old as never).request;
+    expect(server.modelId).toBe("fuobe-cinema");
+    expect(server.params).toEqual({ duration: 8, extra: { seed: 3 } });
+    expect(server.prompt).toMatch(/^A chase through the market\. /);
+    for (const words of [/noir/i, /1980s/i, /35mm/i, /anamorphic/i, /silhouette/i, /calm/i, /dolly/i, /neon/i]) expect(server.prompt).toMatch(words);
+    expect(directorFieldWords({ genre: "not-a-genre" })).toBe("");
+    // The browser has no Director words to write: the fields go, the prompt stays the user's.
+    expect(migrateRequest(old).request).toEqual({ modelId: "fuobe-cinema", prompt: "A chase through the market.", params: { duration: 8, extra: { seed: 3 } } });
+    // And the cloud half's payload carries none of them.
+    const p = previewGeneration({ feature: "video", ...old } as never);
+    expect(p.model.id).toBe("fuobe-cinema");
+    expect(p.prompt).toMatch(/noir/i);
+  });
+});
+
 describe("stored ids resolve where they are read", () => {
+  it("runs a retired Original's request on the install's engine: open source only takes it to the GPU", async () => {
+    const preview = async (modelId: string) =>
+      (await (
+        await generationsRoute.POST(
+          new Request("http://x/api/generations?preview=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ feature: "image", modelId, prompt: "a fox" }) }),
+        )
+      ).json()) as { modelId: string; engine: string; notes?: string[]; error?: string };
+    setSetting("engineMode", "open");
+    try {
+      const old = await preview("soul-2");
+      expect(old.error).toBeUndefined();
+      expect(old).toMatchObject({ modelId: "fuobe-soul", engine: "open" });
+      expect(old.notes?.[0]).toMatch(/Fuobe Soul/);
+    } finally {
+      setSetting("engineMode", "cloud");
+    }
+    try {
+      expect(await preview("soul-2")).toMatchObject({ modelId: "fuobe-soul", engine: "cloud" });
+    } finally {
+      setSetting("engineMode", "both");
+    }
+    // Both on: the same engine the Original itself gets.
+    const [old, now] = [await preview("soul-2"), await preview("fuobe-soul")];
+    expect(old.engine).toBe(now.engine);
+  });
+
   it("runs a generation asked for on a retired model on its replacement, and says so (Reuse, CLI, MCP)", async () => {
     const res = await generationsRoute.POST(
       new Request("http://x/api/generations?preview=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ feature: "image", modelId: "soul-2", prompt: "a fox" }) }),
     );
     const body = (await res.json()) as { modelId: string; engine: string; notes?: string[]; error?: string };
     expect(body.error).toBeUndefined();
-    expect(body).toMatchObject({ modelId: "fuobe-soul", engine: "cloud" });
+    expect(body).toMatchObject({ modelId: "fuobe-soul" });
     expect(body.notes?.[0]).toMatch(/Fuobe Soul/);
+    // Made, the run is stored on its replacement and its notes say so.
+    const made = await generationsRoute.POST(
+      new Request("http://x/api/generations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ feature: "image", modelId: "cinema-studio-4", prompt: "a fox", params: { extra: { genre: "noir" } } }) }),
+    );
+    const created = (await made.json()) as { items: { id: string; modelId: string; request: { modelId: string; prompt: string } }[]; notes?: string[] };
+    expect(created.items[0]).toMatchObject({ modelId: "fuobe-cinema", request: { modelId: "fuobe-cinema" } });
+    expect(created.items[0].request.prompt).toMatch(/noir/i);
+    expect(created.notes?.[0]).toMatch(/Fuobe Cinema/);
   });
+
+  it("retries a Character Sheet or AI Influencer photo made on a retired model, on its replacement", () => {
+    const sheet = storedRow({
+      feature: "character-sheet",
+      model: "soul-2",
+      provider: "higgsfield",
+      op: "t2i",
+      status: "failed",
+      request: { feature: "character-sheet", modelId: "soul-2", op: "t2i", prompt: "a sheet", params: { aspectRatio: "16:9", extra: { style_id: "x" } } },
+    });
+    const [again] = retryPhoto(sheet);
+    expect(again).toMatchObject({ modelId: "fuobe-soul", feature: "character-sheet", request: { modelId: "fuobe-soul" } });
+    const app = storedRow({ feature: "app:app-ai-influencer", model: "ai-influencer", provider: "higgsfield", op: "t2i", status: "canceled", request: { feature: "app:app-ai-influencer", modelId: "ai-influencer", op: "t2i", prompt: "a character" } });
+    expect(retryPhoto(app)[0]).toMatchObject({ modelId: "nano-banana-pro" });
+  });
+
+  it("fails a job still running on a retired model with the way forward, not 'no longer exists'", async () => {
+    const running = { feature: "image", op: "t2i", status: "running", externalId: "job-1", request: { feature: "image", modelId: "x", prompt: "an old run" } };
+    const soul = storedRow({ ...running, model: "soul-2", provider: "higgsfield" });
+    const partner = storedRow({ ...running, model: "nano-banana-pro", provider: "higgsfield" });
+    const gone = storedRow({ ...running, model: "old-model", provider: "fal" });
+    await runUntil(() => [soul, partner, gone].every((id) => getGeneration(id)?.status === "failed"));
+    expect(getGeneration(soul)).toMatchObject({ status: "failed", error: RETIRED_PROVIDER_ERROR });
+    expect(getGeneration(partner)).toMatchObject({ status: "failed", error: RETIRED_PROVIDER_ERROR });
+    expect(getGeneration(gone)).toMatchObject({ status: "failed", error: "Model old-model no longer exists" });
+  });
+
+  it("starts a step that was waiting on a retired model on its replacement", async () => {
+    const still = saveFile({ data: Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(2_000, 7)]), contentType: "image/png", name: "still.png", source: "upload" }).url;
+    const first = storedRow({ feature: "image", model: "nano-banana-pro", provider: "mock", op: "t2i", status: "succeeded", externalId: "done", outputs: [{ url: still, kind: "image" }], request: { feature: "image", modelId: "nano-banana-pro", prompt: "a still" } });
+    const step = storedRow({ feature: "image", model: "soul-2", provider: "higgsfield", op: "edit", status: "queued", dependsOn: first, request: { feature: "image", modelId: "soul-2", op: "edit", prompt: "restyle it", chainFrom: "first" } });
+    await runUntil(() => getGeneration(step)?.status !== "queued");
+    const g = getGeneration(step)!;
+    expect(g.error ?? null).toBeNull();
+    expect(g).toMatchObject({ modelId: "fuobe-soul", request: { modelId: "fuobe-soul" } });
+  });
+
+  it("casts a Soul Cast sheet in the cloud only when Fuobe Soul's cloud half is on", () => {
+    expect(castSheetModel("cloud", planCaps())).toBe("fuobe-soul");
+    expect(castSheetModel("cloud", { has: (id, engine) => !(id === "fuobe-soul" && engine === "cloud") })).toBe("nano-banana-pro");
+    expect(castSheetModel("open", { has: (id, engine) => !(id === "fuobe-soul" && engine === "cloud") })).toBe("oss-zimage-soul-cast");
+  });
+
 
   it("keeps a past run on a retired model in the Library, named as it ran, with its outputs", async () => {
     const res = await generationsRoute.POST(
@@ -248,6 +463,43 @@ describe("stored ids resolve where they are read", () => {
     expect(moved.nodes[1]).toBe(graph.nodes[1]);
     // A board with nothing retired comes back as it was.
     expect(withCurrentModels(moved)).toBe(moved);
+  });
+
+  it("moves a saved Canvas node's operation too: Cinema Studio's connected images were references", () => {
+    const node = (id: string, modelId: string, op?: "v2v") => ({ id, type: "model" as const, position: { x: 0, y: 0 }, data: { modelId, mediaKind: "video" as const, ...(op && { op }) } });
+    const image = { id: "img", type: "image" as const, position: { x: 0, y: 0 }, data: { url: "/api/files/a.png" } };
+    const graph = {
+      nodes: [node("refs", "cinema-studio-4"), node("plain", "cinema-studio-4"), node("swap", "genjutsu-object-swap", "v2v"), node("edit", "seedance-2-5", "v2v"), node("own", "seedance-2-5"), image],
+      edges: [{ id: "e1", source: "img", target: "refs", targetHandle: "images" }],
+    } as Parameters<typeof withCurrentModels>[0];
+    const by = Object.fromEntries(withCurrentModels(graph).nodes.map((n) => [n.id, n.data]));
+    expect(by.refs).toMatchObject({ modelId: "seedance-2-5", op: "ref2v" });
+    expect(by.plain).toMatchObject({ modelId: "fuobe-cinema" });
+    expect(by.plain.op).toBeUndefined();
+    expect(by.swap).toMatchObject({ modelId: "fuobe-genjutsu-swap", op: "video-swap" });
+    expect(by.edit).toMatchObject({ modelId: "kling-o3", op: "v2v" });
+    expect(by.own).toEqual(graph.nodes[4].data);
+  });
+
+  it("plans an Assist or MCP job on a retired model or operation where it runs now", () => {
+    const video = "/api/files/ad.mp4";
+    const plan = assistTools.planFor(
+      "generate",
+      {
+        summary: "Old saved calls",
+        jobs: [
+          { model_id: "soul-2", prompt: "a fox" },
+          { model_id: "seedance-2-5", op: "v2v", prompt: "Make it snow", video },
+          { model_id: "genjutsu-object-swap", op: "v2v", prompt: "Swap the mug", video, images: ["/api/files/mug.png"] },
+        ],
+      },
+      { engine: "cloud" },
+    );
+    expect(plan.jobs.map((j) => [j.modelId, j.op, j.error])).toEqual([
+      ["fuobe-soul", "t2i", undefined],
+      ["kling-o3", "v2v", undefined],
+      ["fuobe-genjutsu-swap", "video-swap", undefined],
+    ]);
   });
 });
 

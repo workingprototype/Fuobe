@@ -21,7 +21,7 @@ import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types"
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { getElement } from "./elements";
-import { createGenerations, getGeneration, pickOutput, previewGeneration } from "./generations";
+import { createGenerations, currentRequest, getGeneration, pickOutput, previewGeneration } from "./generations";
 import { trashGenerations } from "./library";
 import { engineMode } from "./settings";
 import { isOffered } from "./model-access";
@@ -81,7 +81,7 @@ export function deleteUserPack(id: string): boolean {
 
 /** What this install can do, for the pure planners. */
 export function planCaps(): PlanCaps {
-  return { has: (id) => !!getModel(id) && isOffered(id) };
+  return { has: (id, engine) => !!getModel(id) && isOffered(id, engine) };
 }
 
 /** The engine a run uses: the one asked for, unless Settings locks the other. */
@@ -192,6 +192,9 @@ export function retryPhoto(id: string): Generation[] {
   if (!g) throw new Error("That photo is gone");
   if (!RETRY_FEATURES.has(g.feature)) throw new Error("This result isn't part of a photo run");
   if (g.status !== "failed" && g.status !== "canceled") throw new Error("Only a failed or canceled photo can be retried");
+  // A photo made on a model Fuobe retired (Soul 2.0 for a Cast sheet, the AI Influencer app's model) runs again on the
+  // one that replaced it (src/lib/catalog/replaced.ts), sized for that model.
+  const request = currentRequest(g.request).request;
   // A chained photo (the AI Influencer builder's face pass) whose earlier step failed never got that step's
   // image: both run again, chained as before.
   const deps = dependsOn(id);
@@ -201,8 +204,8 @@ export function retryPhoto(id: string): Generation[] {
     if (deps.length !== 1 || !step || dependsOn(step.id).length || (step.status !== "failed" && step.status !== "canceled")) throw new Error("The step before it didn't finish — press Generate to run both again");
     const { items } = createPipeline(
       [
-        { key: "before", request: step.request },
-        { key: "photo", request: g.request, after: "before" },
+        { key: "before", request: currentRequest(step.request).request },
+        { key: "photo", request, after: "before" },
       ],
       g.batchId ? { batchId: g.batchId } : {},
     );
@@ -212,11 +215,11 @@ export function retryPhoto(id: string): Generation[] {
   // Its earlier steps finished, but it never launched (it failed or was canceled while it waited): it waits
   // for them again, so the runner hands it their outputs (the sheet goes in as image 1) and launches it.
   if (deps.length && !gotChainInputs(g, before as Generation[])) {
-    const items = createGenerations(fitted(g.request), { ...(g.batchId && { batchId: g.batchId }), dependsOn: deps });
+    const items = createGenerations(fitted(request), { ...(g.batchId && { batchId: g.batchId }), dependsOn: deps });
     trashGenerations([id]);
     return items;
   }
-  const req = fitted(g.request);
+  const req = fitted(request);
   const p = previewGeneration(req);
   const per = p.jobs > 1 ? Math.max(1, Math.round(p.outputs / p.jobs)) : undefined;
   const items = createGenerations(per ? { ...req, params: { ...req.params, numOutputs: per } } : req, g.batchId ? { batchId: g.batchId } : {});

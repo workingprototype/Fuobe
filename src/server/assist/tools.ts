@@ -13,7 +13,7 @@ import { loraFamily, runsSomewhere, TRAINING_FAMILIES } from "@/lib/catalog/trai
 import type { ElementLora } from "@/lib/catalog/elements";
 import { createPipeline } from "../chains";
 import { listElements } from "../elements";
-import { createGenerations, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
+import { createGenerations, currentRequest, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
 import { provider } from "../providers";
 import { llmBackends } from "../providers/llm";
 import { engineMode } from "../settings";
@@ -306,10 +306,17 @@ const engineOf = (ctx: ToolContext): "cloud" | "open" => (engineMode() === "both
 
 /**
  * A job as a request; `engine` is the user's, which a Fuobe Original (both engines) runs on unless the job names one.
- * A retired model id (an older plan, an MCP client's saved call) runs on the model that replaced it (replaced.ts).
+ * A retired model id or operation (an older plan, an MCP client's saved call) runs where it went (replaced.ts), so the
+ * chain slots and checks below see the model and operation that run.
  */
 function toRequest(job: JobInput, engine?: "cloud" | "open"): GenerationRequest {
-  const j = { ...job, model_id: currentModelId(job.model_id) };
+  const req = currentRequest(asRequest(job)).request;
+  const original = engine && dualEngine(getModel(req.modelId));
+  return { ...req, ...((job.engine ?? (original ? engine : undefined)) && { engine: job.engine ?? engine }) };
+}
+
+/** A job as the request it names, before a retired model or operation is moved (toRequest). */
+function asRequest(j: JobInput): GenerationRequest {
   const inputs = {
     ...(j.images?.length && { images: j.images }),
     ...(j.end_image && { endImage: j.end_image }),
@@ -318,12 +325,11 @@ function toRequest(job: JobInput, engine?: "cloud" | "open"): GenerationRequest 
     ...(j.background_audio && { audio2: j.background_audio }),
     ...(j.voice_audio && { voiceAudio: j.voice_audio }),
   };
-  const shots = j.shots && j.shots > 1 ? shotList(getModel(j.model_id), j.shots) : undefined;
+  const shots = j.shots && j.shots > 1 ? shotList(getModel(currentModelId(j.model_id)), j.shots) : undefined;
   return {
     feature: "assist",
     modelId: j.model_id,
     ...(j.look && { presetId: j.look }),
-    ...((j.engine ?? (engine && dualEngine(getModel(j.model_id)) ? engine : undefined)) && { engine: j.engine ?? engine }),
     op: j.op as Operation | undefined,
     prompt: j.prompt,
     negativePrompt: j.negative_prompt,

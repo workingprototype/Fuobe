@@ -354,8 +354,11 @@ export type PhotoSubject =
 
 /** What the server knows about this install, for planning. */
 export interface PlanCaps {
-  /** Models this install has (open-source workflows can be missing). */
-  has?: (id: string) => boolean;
+  /**
+   * Models this install has (open-source workflows can be missing) and offers (Settings → Models & licences); with
+   * `engine`, a Fuobe Original's half on that engine.
+   */
+  has?: (id: string, engine?: Engine) => boolean;
 }
 
 /** Fuobe Soul: a character with a trained Soul ID makes its photos there, on either engine (build plan O3). */
@@ -759,7 +762,7 @@ export function sheetFromReference(images: string[], engine: Engine, details?: s
  */
 export function castSheetModel(engine: Engine, caps: PlanCaps): string {
   if (engine === "open") return !caps.has || caps.has("oss-zimage-soul-cast") ? "oss-zimage-soul-cast" : "oss-z-image-turbo";
-  return !caps.has || caps.has(SOUL_MODEL_IDS.soul) ? SOUL_MODEL_IDS.soul : "nano-banana-pro";
+  return !caps.has || caps.has(SOUL_MODEL_IDS.soul, "cloud") ? SOUL_MODEL_IDS.soul : "nano-banana-pro";
 }
 
 /** Soul Cast fields that only make sense for some answers (mirrors SOUL_CAST_FIELDS[].when in cinema.ts). */
