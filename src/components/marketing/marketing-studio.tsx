@@ -377,7 +377,7 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
         <div className="pt-6 pb-2 text-center sm:pt-10">
           <h2 className="font-heading text-display text-balance">Turn a product into ready-to-post content</h2>
           <p className="mx-auto mt-2 max-w-xl text-[15px] text-muted-foreground">
-            Product shots, motion, UGC presenters, ads, posters and listings — from Fuobe&apos;s templates, on {engine === "open" ? "your own GPU" : "cloud models"}.
+            Product shots, motion, UGC presenters, ads, posters and listings — from Fuobe&apos;s templates, on {engine === "open" ? "your own GPU, free" : "Fuobe Marketing Image or partner models in the cloud"}.
           </p>
         </div>
         <div role="tablist" aria-label="View" className="mx-auto mt-4 flex w-fit rounded-full bg-muted p-0.5">
