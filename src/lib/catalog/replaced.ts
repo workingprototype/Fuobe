@@ -42,7 +42,7 @@ export interface Replacement {
   ops?: Partial<Record<Operation, OpReplacement>>;
   /** The operation a stored request with images or clips and no op ran as (the retired model read them that way). */
   withReferences?: Operation;
-  /** Its request carried Cinema Studio's own Director fields (genre, era, lens…): they become prompt words. */
+  /** Its request carried Cinema Studio's own Director fields (genre, era, lens…): they become prompt words, and the note says what became of them. */
   director?: true;
 }
 
@@ -54,13 +54,13 @@ export const REPLACED_BY: Readonly<Record<string, Replacement>> = {
   "cinema-studio-4": {
     id: "fuobe-cinema",
     was: "Cinema Studio 4.0 (Higgsfield)",
-    note: "Cinema Studio's clips now run on Fuobe Cinema, with the Director settings written into the prompt",
+    note: "Cinema Studio's clips now run on Fuobe Cinema",
     original: true,
     director: true,
     // It had no start-frame route: images were references (cast, location). Fuobe Cinema takes none yet, so a reference
     // take runs where the Cinema studio sends one (cinema.ts clipModel): Seedance 2.5, a partner model on fal.
     withReferences: "ref2v",
-    ops: { ref2v: { id: "seedance-2-5", note: "Cinema Studio's reference takes now run on Seedance 2.5 (Fuobe Cinema takes no references yet), with the Director settings written into the prompt" } },
+    ops: { ref2v: { id: "seedance-2-5", note: "Cinema Studio's reference takes now run on Seedance 2.5 (Fuobe Cinema takes no references yet)" } },
   },
   "genjutsu-motion-transfer": { id: "fuobe-genjutsu-motion", was: "Genjutsu Motion Transfer (Higgsfield)", note: "Motion transfer now runs on Fuobe Genjutsu (Wan Animate)", original: true },
   "genjutsu-lite-motion-transfer": { id: "fuobe-genjutsu-motion-lite", was: "Genjutsu Lite Motion Transfer (Higgsfield)", note: "Motion transfer Lite now runs on Fuobe Genjutsu Lite", original: true },
@@ -161,6 +161,7 @@ export function migrateRequest<T extends StoredRequest>(req: T, opts: MigrateOpt
   const extra = { ...(req.params?.extra ?? {}) };
   const look = typeof extra.style_id === "string" ? lookCard(extra.style_id) : undefined;
   let prompt = req.prompt;
+  let note = to.note;
   if (r.director) {
     const fields: Record<string, string> = {};
     for (const k of DIRECTOR_FIELDS) {
@@ -169,6 +170,8 @@ export function migrateRequest<T extends StoredRequest>(req: T, opts: MigrateOpt
     }
     const words = Object.keys(fields).length && opts.directorWords ? opts.directorWords(fields).trim() : "";
     if (words) prompt = sentence(prompt, words);
+    // The browser has no words to write (Reuse): the settings are left out, and the toast says so.
+    if (Object.keys(fields).length) note += words ? ", with the Director settings written into the prompt" : "; its Director settings (genre, era, lens, light…) were left out: pick them again in Cinema Studio";
   }
   for (const k of RETIRED_EXTRA) delete extra[k];
   const params = req.params ? { ...req.params, ...(req.params.extra && { extra }) } : undefined;
@@ -181,5 +184,5 @@ export function migrateRequest<T extends StoredRequest>(req: T, opts: MigrateOpt
     ...(look && { presetId: look.id }),
     ...(prompt !== req.prompt && { prompt }),
   } as T;
-  return { request, note: to.note };
+  return { request, note };
 }

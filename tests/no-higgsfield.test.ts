@@ -358,8 +358,12 @@ describe("operations the replacements do elsewhere", () => {
     expect(server.prompt).toMatch(/^A chase through the market\. /);
     for (const words of [/noir/i, /1980s/i, /35mm/i, /anamorphic/i, /silhouette/i, /calm/i, /dolly/i, /neon/i]) expect(server.prompt).toMatch(words);
     expect(directorFieldWords({ genre: "not-a-genre" })).toBe("");
-    // The browser has no Director words to write: the fields go, the prompt stays the user's.
-    expect(migrateRequest(old).request).toEqual({ modelId: "fuobe-cinema", prompt: "A chase through the market.", params: { duration: 8, extra: { seed: 3 } } });
+    expect(currentRequest(old as never).note).toBe("Cinema Studio's clips now run on Fuobe Cinema, with the Director settings written into the prompt");
+    // The browser has no Director words to write: the fields go, the prompt stays the user's, and the note says so.
+    const browser = migrateRequest(old);
+    expect(browser.request).toEqual({ modelId: "fuobe-cinema", prompt: "A chase through the market.", params: { duration: 8, extra: { seed: 3 } } });
+    expect(browser.note).toMatch(/Director settings .* were left out/);
+    expect(migrateRequest({ modelId: "cinema-studio-4", prompt: "x" }).note).toBe("Cinema Studio's clips now run on Fuobe Cinema");
     // And the cloud half's payload carries none of them.
     const p = previewGeneration({ feature: "video", ...old } as never);
     expect(p.model.id).toBe("fuobe-cinema");
