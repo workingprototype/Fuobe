@@ -75,21 +75,6 @@ export function lorasMissing(jobs, installed) {
   return [...missing.values()];
 }
 
-/** Why a job is refused: it would run through Higgsfield's API (Fuobe measures its own Originals and partners on fal / Replicate). */
-export const HIGGSFIELD_SKIP =
-  "would run on Higgsfield's API: the evaluation never uses it (connect fal or Replicate on that Fuobe, and set Settings → Cloud provider to Auto, fal or Replicate)";
-
-/**
- * Whether a priced job would go through Higgsfield's API: a generation's route says so; a studio route's
- * estimate lists its steps' providers. A studio route that doesn't (an older Fuobe) counts as Higgsfield
- * when that Fuobe has a Higgsfield key, since its default makers may pick Higgsfield's own models.
- */
-export function viaHiggsfield(preview, facts) {
-  if (preview.providerId === "higgsfield" || preview.route?.provider === "higgsfield") return true;
-  if (Array.isArray(preview.providers)) return preview.providers.includes("higgsfield");
-  return preview.studio ? !!facts.providers?.higgsfield : false;
-}
-
 /** Run `fn` over `items` with at most `n` at a time, in order of start. */
 async function pool(items, n, fn) {
   let next = 0;
@@ -178,8 +163,8 @@ export async function runEval(opts, io) {
     const why = trainingProblem(j, engine);
     if (why) for (const x of jobs.filter((y) => y.caseId === j.caseId && !y.skip)) x.skip = why;
   }
-  // What each training would cost (cloud): the server's price for its target. A Higgsfield target never runs
-  // (Fuobe measures its own Originals), and one without a price can't sit under the spend cap. On either real engine,
+  // What each training would cost (cloud): the server's price for its target. One without a price can't sit under
+  // the spend cap. On either real engine,
   // a training the server would run as a demo (no trainer or key connected) or can't start is skipped: its "trained"
   // results would measure an element that was never trained.
   const trainingUsd = new Map();
@@ -192,8 +177,7 @@ export async function runEval(opts, io) {
       const t = targets.find((x) => x.id === j.train.target);
       const usd = trainingPrice(t);
       let why = null;
-      if (t?.provider === "higgsfield") why = `training target ${j.train.target} runs on Higgsfield's API: Fuobe's evaluation never uses it (train on fal or your GPU)`;
-      else if (t?.demo) why = `training on ${j.train.target} would run as a demo on that Fuobe (${facts.demoMode === "on" ? "Demo mode is On" : `no ${t.provider === "fal" ? "fal.ai key" : "AI-Toolkit"} connected`}), so nothing would be trained`;
+      if (t?.demo) why = `training on ${j.train.target} would run as a demo on that Fuobe (${facts.demoMode === "on" ? "Demo mode is On" : `no ${t.provider === "fal" ? "fal.ai key" : "AI-Toolkit"} connected`}), so nothing would be trained`;
       else if (t?.blocker) why = `training on ${j.train.target} can't start there: ${t.blocker}`;
       else if (engine === "cloud" && usd == null && !opts.allowUnpriced) why = `training on ${j.train.target} has no price${t ? ` (the server says “${t.price}”)` : ""}, so the spend cap can't cover it: --allow-unpriced runs it anyway`;
       if (why) for (const x of jobs.filter((y) => y.caseId === j.caseId && !y.skip)) x.skip = why;
@@ -218,7 +202,6 @@ export async function runEval(opts, io) {
             : `would run as a demo: ${p.modelName ?? job.model.id} has no ${engine === "open" ? "ComfyUI" : "cloud provider"} connected on that Fuobe`;
       }
       else if (engine !== "demo" && p.engine && p.engine !== engine) job.skip = `${p.modelName ?? job.model.id} is ${p.engine === "open" ? "an open-source" : "a cloud"} model, not ${engine}`;
-      else if (engine !== "demo" && viaHiggsfield(p, facts)) job.skip = HIGGSFIELD_SKIP;
       // The server picks another model when it can't run the one asked for (a studio's default maker): that wouldn't measure it.
       else if (p.modelId && p.modelId !== job.model.id) job.skip = `the server would run ${p.modelId} instead of ${job.model.id}, so this wouldn't measure ${job.model.id}`;
       else if (engine === "cloud" && p.costUsd == null && !opts.allowUnpriced) job.skip = "the server can't price it, so the spend cap can't cover it: --allow-unpriced runs it anyway (it counts once its cost is known)";

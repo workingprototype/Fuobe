@@ -55,7 +55,7 @@ describe("Models & licences in listings and picks", () => {
 
   it("tells the browser what is off through /api/status, and nothing while everything is on", async () => {
     expect(((await (await status()).json()) as { access?: unknown }).access).toBeUndefined();
-    changeAccess([{ kind: "provider", id: "higgsfield", on: false }, { kind: "class", id: "research", on: false }]);
+    changeAccess([{ kind: "provider", id: "replicate", on: false }, { kind: "class", id: "research", on: false }]);
     const body = (await (await status()).json()) as { access: { off: string[] } };
     expect(body.access.off).toContain("oss-reactor");
     expect(body.access.off.length).toBeGreaterThan(5);

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getModel, modelsFor } from "@/lib/catalog";
 import { offeredModels } from "../model-access";
 import { dualEngine, runsOn } from "@/lib/catalog/engines";
+import { currentModelId } from "@/lib/catalog/replaced";
 import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { type PlannedJob, totalCost } from "@/lib/assist";
 import { STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
@@ -12,7 +13,7 @@ import { loraFamily, runsSomewhere, TRAINING_FAMILIES } from "@/lib/catalog/trai
 import type { ElementLora } from "@/lib/catalog/elements";
 import { createPipeline } from "../chains";
 import { listElements } from "../elements";
-import { createGenerations, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
+import { createGenerations, currentRequest, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
 import { provider } from "../providers";
 import { llmBackends } from "../providers/llm";
 import { engineMode } from "../settings";
@@ -75,7 +76,6 @@ function summarize(m: ModelDef) {
     ...(o.voices?.length && { voices: o.voices.slice(0, 12).map((v) => v.id) }),
     ...(o.voiceClone && { voiceClone: true }),
     ...(o.languages?.length && { languages: o.languages.length > 12 ? `${o.languages.slice(0, 12).join(", ")}…` : o.languages.join(", ") }),
-    ...(o.presets && { needs: o.presets.required ? `a ${o.presets.label} (pick in the studio)` : undefined }),
     ...(o.looks && { looks: "139 Soul looks: pass a look id as presetId (v1-general, v2-y2k-studio…), presetStrength 0–1 scales its LoRAs" }),
   };
 }
@@ -141,7 +141,7 @@ const listElementsTool = defineTool({
           description: e.description,
           referencePhotos: e.references.length,
           // The models its trained LoRAs run on (every model of each family), from LoRAs a run can use: not a demo
-          // training's stand-in or an old Higgsfield Soul ID.
+          // training's stand-in or an older Soul ID.
           trainedFor: [...new Set(e.loras.filter(runsSomewhere).flatMap((l) => familyModels(l)))],
         })),
       ),
@@ -304,8 +304,19 @@ function shotList(model: ModelDef | undefined, n: number): { prompt: string; dur
 /** The engine the user works on (the install's only one when Settings → Engine mode allows one). */
 const engineOf = (ctx: ToolContext): "cloud" | "open" => (engineMode() === "both" ? ctx.engine : (engineMode() as "cloud" | "open"));
 
-/** A job as a request; `engine` is the user's, which a Fuobe Original (both engines) runs on unless the job names one. */
-function toRequest(j: JobInput, engine?: "cloud" | "open"): GenerationRequest {
+/**
+ * A job as a request; `engine` is the user's, which a Fuobe Original (both engines) runs on unless the job names one.
+ * A retired model id or operation (an older plan, an MCP client's saved call) runs where it went (replaced.ts), so the
+ * chain slots and checks below see the model and operation that run.
+ */
+function toRequest(job: JobInput, engine?: "cloud" | "open"): GenerationRequest {
+  const req = currentRequest(asRequest(job)).request;
+  const original = engine && dualEngine(getModel(req.modelId));
+  return { ...req, ...((job.engine ?? (original ? engine : undefined)) && { engine: job.engine ?? engine }) };
+}
+
+/** A job as the request it names, before a retired model or operation is moved (toRequest). */
+function asRequest(j: JobInput): GenerationRequest {
   const inputs = {
     ...(j.images?.length && { images: j.images }),
     ...(j.end_image && { endImage: j.end_image }),
@@ -314,12 +325,11 @@ function toRequest(j: JobInput, engine?: "cloud" | "open"): GenerationRequest {
     ...(j.background_audio && { audio2: j.background_audio }),
     ...(j.voice_audio && { voiceAudio: j.voice_audio }),
   };
-  const shots = j.shots && j.shots > 1 ? shotList(getModel(j.model_id), j.shots) : undefined;
+  const shots = j.shots && j.shots > 1 ? shotList(getModel(currentModelId(j.model_id)), j.shots) : undefined;
   return {
     feature: "assist",
     modelId: j.model_id,
     ...(j.look && { presetId: j.look }),
-    ...((j.engine ?? (engine && dualEngine(getModel(j.model_id)) ? engine : undefined)) && { engine: j.engine ?? engine }),
     op: j.op as Operation | undefined,
     prompt: j.prompt,
     negativePrompt: j.negative_prompt,

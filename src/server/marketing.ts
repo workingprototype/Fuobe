@@ -18,6 +18,7 @@ import {
   mentionsFor,
   MULTIPLIER,
   MULTIPLIER_MODELS,
+  MULTIPLIER_WINDOW,
   multiplierResolution,
   OPEN_SOUND_JOIN,
   overlayLayout,
@@ -52,7 +53,6 @@ import { llmText } from "./enhance";
 import { createGenerations, getGeneration, listGenerations, previewChained, recordLocalGeneration } from "./generations";
 import { isOffered } from "./model-access";
 import { keepOffered } from "@/lib/model-access";
-import { provider } from "./providers";
 import { engineMode } from "./settings";
 import { encodePng } from "./png";
 import { readRef, saveFile } from "./storage";
@@ -216,7 +216,6 @@ function textLine(f: FormatDef, open: boolean, headline?: string, cta?: string, 
 export interface PlanContext {
   product?: Product | null;
   brand?: BrandKit | null;
-  higgsfield: boolean;
   /** The words the presenter says (UGC). */
   script?: string;
 }
@@ -243,7 +242,7 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
     }
   }
   // Models switched off in Settings → Models & licences aren't picked while another choice is on.
-  const choices = keepOffered(formatModels(f, input.engine, { product: hasProduct, avatar: !!input.avatar, higgsfield: ctx.higgsfield }), (c) => isOffered(c.id, input.engine));
+  const choices = keepOffered(formatModels(f, input.engine, { product: hasProduct, avatar: !!input.avatar }), (c) => isOffered(c.id, input.engine));
   const name = tpl?.name ?? f.name;
   const title = [name, product?.name ?? brand?.name].filter(Boolean).join(" · ");
   const meta: MarketingRunMeta = { format: f.id, templateId: tpl?.id, productId: product?.id ?? null, brandId: brand?.id ?? null };
@@ -790,15 +789,16 @@ function planAd(input: ClickToAdInput, ctx: { product: Product; brand?: BrandKit
 // ---------------------------------------------------------------------------
 // Ad Multiplier: a reference ad (4–30 s) → new versions (whole ad, or a new hook / CTA around it)
 
-export function multiplierModel(input: Pick<MultiplierInput, "engine" | "modelId">, higgsfield: boolean): ModelDef {
+/** How each cloud edit model is asked to keep the reference's own soundtrack. */
+const KEEP_SOUND: Record<string, Record<string, unknown>> = { "kling-o3": { keep_audio: true }, "happy-horse-video-edit": { audio_setting: "origin" } };
+
+export function multiplierModel(input: Pick<MultiplierInput, "engine" | "modelId">): ModelDef {
   const choices = keepOffered(MULTIPLIER_MODELS[input.engine], (c) => isOffered(c.id, input.engine));
-  const fallback = input.engine === "cloud" && !higgsfield && choices.some((c) => c.id === "kling-o3") ? "kling-o3" : choices[0].id;
-  const id = input.modelId && choices.some((c) => c.id === input.modelId) ? input.modelId : fallback;
+  const id = input.modelId && choices.some((c) => c.id === input.modelId) ? input.modelId : choices[0].id;
   return need(id);
 }
 
 export interface MultiplierContext {
-  higgsfield: boolean;
   extractFrame?: boolean;
   /** The reference has a soundtrack (null or missing: its header couldn't be read). */
   referenceSound?: boolean | null;
@@ -809,10 +809,9 @@ export interface MultiplierContext {
 export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): RunPlan {
   const open = input.engine === "open";
   const start = Math.max(0, input.start ?? 0);
-  const end = Math.min(input.duration, input.end ?? input.duration);
-  const length = end - start;
+  const asked = Math.min(input.duration, input.end ?? input.duration);
+  const length = asked - start;
   if (length < MULTIPLIER.minSeconds - 0.05 || length > MULTIPLIER.maxSeconds + 0.05) throw new PlanError("Video duration: 4-30 seconds");
-  const trimmed = start > 0.05 || end < input.duration - 0.05;
   const images = input.images ?? [];
   const text = multiplierText({ mode: input.mode, prompt: input.prompt, hook: input.hook, cta: input.cta });
   if (input.mode === "sections" && input.hook == null && input.cta == null) throw new PlanError("Turn on Change hook or Change CTA");
@@ -822,14 +821,20 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
   const notes: string[] = [];
   const steps: Step[] = [];
   const resolution = multiplierResolution(input.quality, input.engine);
+  // A cloud edit model that recreates a shorter part than the one selected gets its first seconds (MULTIPLIER_WINDOW).
+  const editModel = input.mode === "prompt" ? multiplierModel(input) : undefined;
+  const window = !open && editModel ? MULTIPLIER_WINDOW[editModel.id] : undefined;
+  const end = window && length > window + 0.05 ? start + window : asked;
+  if (end < asked) notes.push(`${editModel!.name} recreates up to ${window} s: the first ${window} s of your selection are used (move the selection for another part)`);
+  const trimmed = start > 0.05 || end < input.duration - 0.05;
   if (trimmed) {
     steps.push({ key: "clip", label: "Trimming the reference", request: { feature: step, modelId: M.trim, op: "trim", inputs: { video: input.video }, params: { startTime: round(start), endTime: round(end) } } });
   }
   const source = (slot: "video"): { inputs?: GenerationRequest["inputs"]; after?: string[]; chain?: ChainSlot[] } =>
     trimmed ? { after: ["clip"], chain: [{ slot }] } : { inputs: { video: input.video } };
 
-  if (input.mode === "prompt") {
-    const model = multiplierModel(input, ctx.higgsfield);
+  if (editModel) {
+    const model = editModel;
     const title = `Recreated ad · ${model.name}`;
     if (open) {
       // Wan Animate: the first image takes over the reference's performance; the original sound is laid back on.
@@ -863,8 +868,9 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
       }
       if (images.length > 1) notes.push("Wan Animate uses one image (the first you mention)");
     } else {
-      const max = model.options.maxImages ?? 0;
-      const m = mentionsFor(text, images, model.id, model.routes.some((r) => r.op === "v2v" && r.map?.images) ? max : 0);
+      // A model whose edit route takes no images (Gemini Omni Flash) edits from the prompt alone.
+      const max = model.routes.some((r) => r.op === "v2v" && r.map?.images) ? (model.options.maxImages ?? 0) : 0;
+      const m = mentionsFor(text, images, model.id, max);
       if (m.dropped && images.length) notes.push(max ? `${model.name} takes ${max} images — the first ${max} you mention are used` : `${model.name} edits from the prompt alone; pick Kling O3 to use your images`);
       const src = source("video");
       steps.push({
@@ -876,14 +882,15 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
           op: "v2v",
           prompt: m.prompt,
           inputs: { ...src.inputs, ...(m.images.length && { images: m.images }) },
-          params: { resolution, ...(model.id === "kling-o3" && { extra: { keep_audio: true } }) },
+          // The clip's length prices the edit (a v2v route sends none); the reference's own sound is kept (Kling's
+          // keep_audio, Happy Horse's audio_setting "origin").
+          params: { resolution, duration: round(end - start), ...(KEEP_SOUND[model.id] && { extra: KEEP_SOUND[model.id] }) },
           chain: src.chain,
           title,
           batchTitle: title,
         },
         after: src.after,
       });
-      if (model.id === "seedance-2-5" && !ctx.higgsfield) notes.push("Seedance 2.5 edit runs on Higgsfield — connect a Higgsfield key in Settings");
     }
     return { feature: "ad-multiplier", engine: input.engine, title, steps, finals: [steps[steps.length - 1].key], meta, notes };
   }
@@ -1032,13 +1039,11 @@ export function deleteRun(id: string): boolean {
   return db().prepare("DELETE FROM marketing_runs WHERE id = ?").run(id).changes > 0;
 }
 
-const higgsfieldReady = () => provider("higgsfield").isConfigured();
-
 function context(input: { productId?: string; brandId?: string }) {
   const product = input.productId ? getProduct(input.productId) : null;
   if (input.productId && !product) throw new PlanError("This product is no longer available. Choose another one.");
   const brand = input.brandId ? getBrand(input.brandId) : product?.brandId ? getBrand(product.brandId) : null;
-  return { product, brand, higgsfield: higgsfieldReady() };
+  return { product, brand };
 }
 
 /** The shortest talking part a UGC film gets, however short the length asked for. */
@@ -1185,7 +1190,7 @@ export async function referenceFacts(ref: string): Promise<{ sound: boolean | nu
 
 async function multiplierContext(input: MultiplierInput): Promise<MultiplierContext> {
   const facts = await referenceFacts(input.video);
-  return { higgsfield: higgsfieldReady(), referenceSound: facts.sound, referenceAspect: facts.aspect };
+  return { referenceSound: facts.sound, referenceAspect: facts.aspect };
 }
 
 export async function estimateMultiplier(input: MultiplierInput): Promise<RunEstimate> {

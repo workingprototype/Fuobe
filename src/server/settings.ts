@@ -20,11 +20,9 @@ export const SETTINGS = {
   /** Which engines this install offers: open-source only, paid cloud APIs only, or both. */
   engineMode: { key: "engine.mode", env: "FUOBE_ENGINE_MODE", default: "both", options: ["both", "open", "cloud"] },
   /** Which aggregator to try first when a cloud model is on several. */
-  cloudProvider: { key: "cloud.provider", env: "FUOBE_CLOUD_PROVIDER", default: "auto", options: ["auto", "fal", "replicate", "higgsfield"] },
+  cloudProvider: { key: "cloud.provider", env: "FUOBE_CLOUD_PROVIDER", default: "auto", options: ["auto", "fal", "replicate"] },
   falKey: { key: "fal.key", env: "FAL_KEY", secret: true },
   replicateToken: { key: "replicate.token", env: "REPLICATE_API_TOKEN", secret: true },
-  /** "KEY_ID:KEY_SECRET" from console.higgsfield.ai (HF_KEY / HF_API_KEY + HF_API_SECRET also work). */
-  higgsfieldKey: { key: "higgsfield.key", env: "HIGGSFIELD_API_KEY", secret: true },
   openaiKey: { key: "openai.key", env: "OPENAI_API_KEY", secret: true },
   googleKey: { key: "google.key", env: "GEMINI_API_KEY", secret: true },
   anthropicKey: { key: "anthropic.key", env: "ANTHROPIC_API_KEY", secret: true },

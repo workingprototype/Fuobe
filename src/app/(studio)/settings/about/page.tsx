@@ -76,7 +76,7 @@ export default async function Page() {
           {about.workflowCount} ComfyUI workflows{about.comfyui ? `, built for ComfyUI ${about.comfyui}` : ""}
           {about.builtAt ? <span className="text-muted-foreground"> · {about.builtAt}</span> : null}
         </Fact>
-        <Fact label="Paid models">fal.ai, Replicate and Higgsfield with your key: their terms and prices apply</Fact>
+        <Fact label="Paid models">fal.ai and Replicate with your key: their terms and prices apply</Fact>
       </dl>
 
       {list.notices.length > 0 && (

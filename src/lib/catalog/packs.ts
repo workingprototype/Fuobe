@@ -1,36 +1,24 @@
 /**
  * Prompt packs for the image studios (docs/research/higgsfield-image-studios.md §2, §3, §6, §7):
- * the Soul preset fallback (and its open-source prompt template), Photodump / Instadump packs,
- * Fashion Factory templates, Character Sheet prompts, and the pure planning steps that turn them
- * into generation requests.
+ * Photodump / Instadump packs, Fashion Factory templates, Character Sheet prompts, the drawn covers' hues and
+ * tones, and the pure planning steps that turn them into generation requests.
  *
  * Catalog-free on purpose: the pages import it in the browser. What depends on the catalog or
- * the install (a Higgsfield key, trained identities, model options) comes in as `PlanCaps`; the
- * server (src/server/photodump.ts) fills those in and validates every request before creating it.
+ * the install (the models it has) comes in as `PlanCaps`; the server (src/server/photodump.ts)
+ * fills those in and validates every request before creating it.
  *
- * Pack names, photo counts and template shot counts come from the generated research file; the
- * per-photo prompts are Fuobe's (Higgsfield's are opaque style ids). tests/image-studios.test.ts
- * checks that every pack has exactly as many prompts as Higgsfield has photos.
+ * Pack names, photo counts and template shot counts come from the generated research file
+ * (studio-packs.generated.ts); the per-photo prompts are Fuobe's own. tests/image-studios.test.ts
+ * checks that every pack has exactly as many prompts as its photo count.
  */
 import type { ElementLora } from "./elements";
-import { styleWords } from "./palettes";
+import { SOUL_MODEL_IDS } from "./soul-cards";
 import { identityFor } from "./training";
-import { FASHION_TEMPLATES, PHOTODUMP_PACKS, SOUL_CATEGORIES, SOUL_PRESETS, type FashionTemplateMeta, type PackMeta, type SoulPreset, type SoulPresetModel } from "./higgsfield-presets.generated";
+import { FASHION_TEMPLATES, PHOTODUMP_PACKS, type FashionTemplateMeta, type PackMeta } from "./studio-packs.generated";
 import type { Engine, GenerationRequest } from "./types";
 
 // ---------------------------------------------------------------------------
-// Soul presets: the static fallback for the style picker, and the open-source prompt template
-
-export interface PresetItem {
-  id: string;
-  name: string;
-  /** First category (the live list's `group`). */
-  group?: string;
-  categories: string[];
-  description: string;
-  /** Hue for the drawn preview (no Higgsfield images are hot-linked). */
-  hue: number;
-}
+// Drawn covers
 
 /** A stable 0–359 hue from a string (FNV-1a). */
 export function hueOf(s: string): number {
@@ -65,48 +53,6 @@ const TONES: [RegExp, CoverTone][] = [
 export function coverTone(...words: (string | undefined)[]): CoverTone {
   const text = words.filter(Boolean).join(" ");
   return TONES.find(([re]) => re.test(text))?.[1] ?? "plain";
-}
-
-const isSoulSource = (s: string): s is SoulPresetModel => s === "soul-v1" || s === "soul-v2";
-
-/**
- * The preset list for a style picker source when Higgsfield can't be asked (no key, or the live
- * list failed): Higgsfield's own ids, so `style_id` still works once a key is added. Null for
- * sources that have no static list (Genjutsu, Marketing Studio).
- */
-export function presetFallback(source: string): { items: PresetItem[]; categories: string[] } | null {
-  if (!isSoulSource(source)) return null;
-  const items = SOUL_PRESETS.filter((p) => p.model === source).map((p) => ({
-    id: p.id,
-    name: p.name,
-    group: p.categories[0],
-    categories: p.categories,
-    description: p.description,
-    hue: hueOf(p.id),
-  }));
-  return { items, categories: SOUL_CATEGORIES[source] };
-}
-
-/** Category tabs: All first, then the model's categories that have presets. */
-export function presetTabs(items: Pick<PresetItem, "categories">[], categories: string[]): string[] {
-  return ["All", ...categories.filter((c) => items.some((i) => i.categories.includes(c)))];
-}
-
-export const inTab = (item: Pick<PresetItem, "categories">, tab: string) => tab === "All" || item.categories.includes(tab);
-
-export const getSoulPreset = (id: string): SoulPreset | undefined => SOUL_PRESETS.find((p) => p.id === id);
-
-/** Soul 2.0's curated moodboards (the 33 Soul 2.0 presets), in Higgsfield's order. */
-export const CURATED_MOODBOARDS: SoulPreset[] = SOUL_PRESETS.filter((p) => p.model === "soul-v2");
-
-/**
- * The open route of a Soul preset: its description as a prompt template on Z-Image Turbo
- * ("{prompt}. In the style of “Retro BW”: grainy black-and-white film portrait.").
- */
-export function presetPrompt(preset: Pick<SoulPreset, "name" | "description">, userPrompt: string): string {
-  const style = styleWords(preset);
-  const p = userPrompt.trim().replace(/[.\s]+$/, "");
-  return p ? `${p}. ${style}` : `A photo. ${style}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,10 +354,11 @@ export type PhotoSubject =
 
 /** What the server knows about this install, for planning. */
 export interface PlanCaps {
-  /** A Higgsfield key is set (the Character Sheet's Soul 2.0 builder can run for real until build plan O7). */
-  higgsfield: boolean;
-  /** Models this install has (open-source workflows can be missing). */
-  has?: (id: string) => boolean;
+  /**
+   * Models this install has (open-source workflows can be missing) and offers (Settings → Models & licences); with
+   * `engine`, a Fuobe Original's half on that engine.
+   */
+  has?: (id: string, engine?: Engine) => boolean;
 }
 
 /** Fuobe Soul: a character with a trained Soul ID makes its photos there, on either engine (build plan O3). */
@@ -809,10 +756,13 @@ export function sheetFromReference(images: string[], engine: Engine, details?: s
   };
 }
 
-/** Build from scratch: the Soul Cast form → its casting sheet model on each engine. */
+/**
+ * Build from scratch: the Soul Cast form → its casting sheet model on each engine: the Soul Cast sheet graph on your
+ * GPU, Fuobe Soul in the cloud (Nano Banana Pro when this install has switched Fuobe Soul off).
+ */
 export function castSheetModel(engine: Engine, caps: PlanCaps): string {
   if (engine === "open") return !caps.has || caps.has("oss-zimage-soul-cast") ? "oss-zimage-soul-cast" : "oss-z-image-turbo";
-  return caps.higgsfield ? "soul-2" : "nano-banana-pro";
+  return !caps.has || caps.has(SOUL_MODEL_IDS.soul, "cloud") ? SOUL_MODEL_IDS.soul : "nano-banana-pro";
 }
 
 /** Soul Cast fields that only make sense for some answers (mirrors SOUL_CAST_FIELDS[].when in cinema.ts). */

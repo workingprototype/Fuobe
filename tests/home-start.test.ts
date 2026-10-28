@@ -70,7 +70,7 @@ describe("the start token", () => {
 describe("the line under Home's composer", () => {
   const q = startQuotes();
   const state = (configured: string[], extra: Partial<ConnectionState> = {}): ConnectionState => ({
-    providers: Object.fromEntries(["fal", "replicate", "higgsfield", "comfyui", "llm"].map((p) => [p, { configured: configured.includes(p) }])),
+    providers: Object.fromEntries(["fal", "replicate", "comfyui", "llm"].map((p) => [p, { configured: configured.includes(p) }])),
     engineMode: "both",
     demoMode: "auto",
     ...extra,
@@ -83,12 +83,10 @@ describe("the line under Home's composer", () => {
   });
 
   it("says it's a demo when the key set is for a provider that doesn't host the model", () => {
-    // Only Replicate: Seedance 2.5 is on fal.ai and Higgsfield.
-    expect(startLine(state(["replicate"]), q.video, "cloud", "video")).toEqual({ text: "Seedance 2.5 needs a fal.ai or Higgsfield key, so Start runs a free demo" });
-    // Only Higgsfield: Nano Banana Pro is on fal.ai and Replicate.
-    expect(startLine(state(["higgsfield"]), q.image, "cloud", "image")?.text).toMatch(/^Nano Banana Pro needs a fal\.ai or Replicate key, so Start runs a free demo$/);
+    // Only Replicate: Seedance 2.5 is on fal.ai alone.
+    expect(startLine(state(["replicate"]), q.video, "cloud", "video")).toEqual({ text: "Seedance 2.5 needs a fal.ai key, so Start runs a free demo" });
     // Demo mode off: it won't run at all.
-    expect(startLine(state(["higgsfield"], { demoMode: "off" }), q.image, "cloud", "image")?.text).toMatch(/so Start can't run it yet$/);
+    expect(startLine(state(["replicate"], { demoMode: "off" }), q.video, "cloud", "video")?.text).toMatch(/so Start can't run it yet$/);
     expect(startLine(state(["fal"], { demoMode: "on" }), q.image, "cloud", "image")?.text).toMatch(/Demo mode is on/);
   });
 

@@ -4,8 +4,8 @@ Generate src/lib/catalog/cloud-models.generated.ts from docs/research/paid-model
 (merged with parts 2, 3 and 4: paid-model-apis-2.json, paid-model-apis-3.json, paid-model-apis-4.json).
 
 The research file holds verified fal/Replicate input schemas (field names, enums, defaults,
-prices). This script turns a curated list of models (MODELS below, mirroring Higgsfield's
-lineup) into ModelDef objects with correct FieldMaps, so no field name is typed by hand.
+prices). This script turns a curated list of models (MODELS below) into ModelDef objects with
+correct FieldMaps, so no field name is typed by hand.
 
 Run:  python3 scripts/gen-cloud-models.py
 """
@@ -32,7 +32,6 @@ for e in RESEARCH_3["endpoints"]:
     prev = EPS.get((e["provider"], e["endpoint"]))
     EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
 # Part 4 (video erase / swap, FPS / HDR / codecs, FFmpeg compose, OCR, 3D scenes, new models): same merge.
-# Its Higgsfield records (Genjutsu Light) are copied into higgsfield-api.json for gen-higgsfield-models.py.
 RESEARCH_4 = json.loads((ROOT / "docs/research/paid-model-apis-4.json").read_text())
 for e in RESEARCH_4["endpoints"]:
     prev = EPS.get((e["provider"], e["endpoint"]))
@@ -49,6 +48,10 @@ for e in ORIGINALS["hostedLoraEndpoints"]:
                                          "inputs": e["inputs"], "keyFields": e.get("keyFields") or {}, "output": e.get("output"), "price": e.get("price")}
 for e in ORIGINALS.get("hostedBaseEndpoints") or []:
     EPS[(e["provider"], e["endpoint"])] = e
+# Partner models' fal routes read for build plan O7 (scripts/fetch-hosted-schemas.py --partner): Happy Horse 1.1 had
+# no fal route before.
+for e in ORIGINALS.get("partnerEndpoints") or []:
+    EPS[(e["provider"], e["endpoint"])] = e
 
 IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"]
 IMAGE_SIZE_MAP = {
@@ -57,7 +60,7 @@ IMAGE_SIZE_MAP = {
     "5:4": "landscape_4_3", "4:5": "portrait_4_3",
 }
 RATIO = re.compile(r"^\d+(\.\d+)?:\d+(\.\d+)?$")
-# Duration picks for APIs that take any whole number of seconds in a range (the Higgsfield generator's list).
+# Duration picks for APIs that take any whole number of seconds in a range.
 NICE_DURATIONS = [3, 4, 5, 6, 8, 10, 12, 15, 20, 30]
 
 # ---------------------------------------------------------------------------
@@ -76,7 +79,7 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     formats: {canonical VideoFormat: the API's value} for its output-format field (params.format), checked against the enum.
     ranged_durations: a duration that takes any whole second in a range gets the usual picks inside it.
     fit_values: the model offers the union of its routes' aspect ratios and resolutions, so each route lists the
-    ones it takes (EnumField.accepts) and gets the closest of them (Grok Imagine on fal and Higgsfield).
+    ones it takes (EnumField.accepts) and gets the closest of them (Grok Imagine's text and reference routes).
     controls entries may carry a third item: labels for values that read badly ({0: "Precise", 1: "Creative"}).
     fps_targets: frame rates offered for the API's target_fps (params.targetFps; ModelOptions.fpsTargets).
     upscale_tiers: resolutions offered to an upscaler that takes a factor ("Original", "1080p", "4K"): FieldMap.upscaleFactor
@@ -336,7 +339,7 @@ model("seedance-2-5", "Seedance 2.5", "ByteDance", "seedance", "video",
        ("extend", "bytedance/seedance-2.5/reference-to-video", "fal", {"fixed": {"task": "extension"}, "videoArray": True}),
        ("finalize", "bytedance/seedance-2.5/draft/complete")],
       badges=["top", "audio", "new"], pricing=("second", 0.473, "720p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
-      # fal's schema gives no count for 2.5's reference clips; Higgsfield's and Replicate's 2.5 schemas say up to 10 (30 s in all).
+      # fal's schema gives no count for 2.5's reference clips; Replicate's 2.5 schema says up to 10 (30 s in all), as the research found.
       options={"multiShot": {"mode": "prompt", "maxShots": 6}, "maxVideos": 10, "maxAudios": 10})
 model("seedance-2-0", "Seedance 2.0", "ByteDance", "seedance", "video",
       "Smooth multi-shot motion with audio",
@@ -607,6 +610,13 @@ model("happy-horse-video-edit", "Happy Horse Video Edit", "Alibaba", "happy-hors
       [("v2v", "alibaba/happy-horse/video-edit")], badges=["new", "audio"], defaults={"resolution": "720p"},
       pricing=("second", 0.28, "720p, input + output seconds; 1080p $0.56", {"byResolution": {"720p": 0.28, "1080p": 0.56}, "inputSeconds": True}),
       controls=[("audio_setting", "Audio")])
+# Happy Horse 1.1 (build plan O7): fal hosts Alibaba's three endpoints (partnerEndpoints, read
+# 2026-10-27): $0.14/s at 720p, $0.18/s at 1080p; 3-15 s; up to 9 reference images.
+model("happy-horse-1-1", "Happy Horse 1.1", "Alibaba", "happy-horse", "video", "Alibaba's expressive character-animation video model",
+      [("t2v", "alibaba/happy-horse/v1.1/text-to-video"), ("i2v", "alibaba/happy-horse/v1.1/image-to-video"),
+       ("ref2v", "alibaba/happy-horse/v1.1/reference-to-video", "fal", {"max_images": 9})],
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
+      pricing=("second", 0.14, "720p; 1080p $0.18/s", {"byResolution": {"720p": 0.14, "1080p": 0.18}}), options={"maxImages": 9})
 model("lucy-edit-pro", "Lucy Edit Pro", "Decart", "lucy", "video",
       "Text-guided video edits that keep motion and identity — outfits, props, styles",
       [("v2v", "decart/lucy-edit/pro")], defaults={"resolution": "720p"}, fixed={"sync_mode": False}, pricing=("second", 0.15, "720p"))
@@ -719,7 +729,7 @@ model("heygen-translate-fast", "HeyGen Translate Speed", "HeyGen", "heygen", "vi
 model("elevenlabs-dubbing", "ElevenLabs Dubbing", "ElevenLabs", "elevenlabs", "video", "Dub video or audio while keeping each speaker's voice",
       [("dub", "fal-ai/elevenlabs/dubbing")], pricing=("minute", 0.6))
 # Sound effects and music (research part 3): Mirelo and Sonilo are the jobs Higgsfield's Audio runs.
-model("mirelo-sfx-2", "Mirelo SFX 2.0", "Mirelo", "mirelo", "audio", "Higgsfield's sound-effects model — layered, cinematic SFX up to 10 minutes",
+model("mirelo-sfx-2", "Mirelo SFX 2.0", "Mirelo", "mirelo", "audio", "Layered, cinematic sound effects for a clip or a prompt, up to 10 minutes",
       [("sfx", "mirelo-ai/sfx2.0/text-to-audio")], badges=["top", "new"], defaults={"duration": 5}, options={"durations": [2, 5, 10, 30, 60]},
       pricing=("second", 0.01, "intro price until 2026-12-13, then $0.015"))
 # Sonilo answers in AAC unless asked: MP3 plays and downloads everywhere.
@@ -730,9 +740,9 @@ model("stable-audio-3-sfx", "Stable Audio 3 SFX", "Stability AI", "stable-audio"
       [("sfx", "fal-ai/stable-audio-3/small/sfx/text-to-audio")], defaults={"duration": 10}, options={"durations": [5, 10, 30, 60]})
 model("cassette-sfx", "CassetteAI Sound Effects", "CassetteAI", "cassette", "audio", "One-cent sound effects up to 30 s",
       [("sfx", "cassetteai/sound-effects-generator")], badges=["fast"], defaults={"duration": 5}, options={"durations": [2, 5, 10, 30]})
-model("seed-audio", "Seed Audio 1.0", "ByteDance", "seed-audio", "audio", "Higgsfield's Seed Audio: speech, ambience, music and Foley from one prompt",
+model("seed-audio", "Seed Audio 1.0", "ByteDance", "seed-audio", "audio", "Speech, ambience, music and Foley from one prompt",
       [("sfx", "bytedance/seed-audio-1.0"), ("tts", "bytedance/seed-audio-1.0")], badges=["new"])
-model("sonilo-music", "Sonilo Music 1.1", "Sonilo", "sonilo", "audio", "Higgsfield's music model — full tracks up to 10 minutes",
+model("sonilo-music", "Sonilo Music 1.1", "Sonilo", "sonilo", "audio", "Full music tracks up to 10 minutes",
       [("music", "sonilo/v1.1/text-to-music")], badges=["top", "new"], defaults={"duration": 30}, options={"durations": [15, 30, 60, 120, 240]})
 model("lyria-3", "Lyria 3", "Google", "lyria", "audio", "Google DeepMind's music model, from a prompt or an image",
       [("music", "fal-ai/lyria3"), ("music", "google/lyria-3", "replicate")])
@@ -780,7 +790,7 @@ model("mirelo-sfx-2-video", "Mirelo SFX 2.0 for video", "Mirelo", "mirelo", "vid
 
 # ----- Image tools: layers, text layers, cut-outs, vectors (research part 3; Higgsfield Layers)
 model("seedream-5-layers", "Seedream 5.0 Layers", "ByteDance", "seedream", "image",
-      "The model Higgsfield Layers runs on: background + up to 16 named, positioned layers",
+      "Splits a picture into a background and up to 16 named, positioned layers",
       [("layers", "bytedance/seedream/v5/pro/layerize")], badges=["top", "new"], defaults={"resolution": "auto"},
       pricing=("request", 0.17, "$0.034 per layer, ≈5 layers; double above 1536²"))
 model("seedream-5-flash-layers", "Seedream 5.0 Flash Layers", "ByteDance", "seedream", "image", "Faster, cheaper Seedream layer split",
@@ -1026,7 +1036,6 @@ model("heygen-video", "HeyGen Video", "HeyGen", "heygen", "video",
       badges=["new", "fast"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "768p"}, ranged_durations=True,
       pricing=("second", 0.02, "480p and 768p; 1080p and 2K $0.06", {"byResolution": {"480p": 0.02, "768p": 0.02, "1080p": 0.06, "2k": 0.06}}),
       controls=[("prompt_enhancement", "Prompt boost")])
-# Higgsfield offers Grok Imagine Video 1.5 too (its Higgsfield route is added by gen-higgsfield-models.py).
 # Its routes take different values (fal's reference-to-video stops at 720p), so each lists its own (fit_values).
 model("grok-imagine-video-1-5", "Grok Imagine Video 1.5", "xAI", "grok", "video", "xAI's video model with references and audio",
       [("t2v", "xai/grok-imagine-video/v1.5/text-to-video"), ("i2v", "xai/grok-imagine-video/v1.5/image-to-video"),
@@ -1076,15 +1085,14 @@ model("krea-3", "Krea 3", "Krea", "krea", "image", "Krea's new image model — g
       badges=["new"], defaults={"aspectRatio": "1:1"}, pricing=("megapixel", 0.025, "output + each reference; Replicate $0.03–0.08 per image"),
       # Both APIs take up to 8 images.
       options={"maxImages": 8})
-# Higgsfield offers Grok Imagine Image 2.0 too (its Higgsfield route is added by gen-higgsfield-models.py).
-# fal's text-to-image has no "auto" and Higgsfield no 20:9 / 19.5:9 / 9:19.5 / 9:20: each route lists what it takes (fit_values).
+# fal's text-to-image has no "auto": each route lists what it takes (fit_values).
 model("grok-imagine-image-2", "Grok Imagine Image 2.0", "xAI", "grok", "image", "xAI's image model — bold, fast, few refusals",
-      # fal's edit takes "a maximum of 5 images"; Higgsfield's route takes 10, so a run with more than 5 goes there.
+      # fal's edit takes "a maximum of 5 images".
       [("t2i", "xai/grok-imagine-image/v2.0/text-to-image"), ("edit", "xai/grok-imagine-image/v2.0/edit", "fal", {"max_images": 5})],
       defaults={"aspectRatio": "1:1", "resolution": "1k"}, fit_values=True,
-      pricing=("image", 0.06, "1K medium on fal; low $0.04; 2K $0.06–0.08; +$0.01 per input image; Higgsfield $0.04 (1K) / $0.08 (2K)",
+      pricing=("image", 0.06, "1K medium on fal; low $0.04; 2K $0.06–0.08; +$0.01 per input image",
                {"byResolution": {"1k": 0.06, "2k": 0.08}}),
-      controls=[("quality", "Quality")], options={"maxImages": 10})
+      controls=[("quality", "Quality")], options={"maxImages": 5})
 model("bria-fibo-2", "Bria FIBO 2", "Bria", "bria", "image", "Structured prompts; Bria says it is trained on licensed data only",
       [("t2i", "bria/fibo-2/generate"), ("edit", "bria/fibo-2/edit")], badges=["new"], defaults={"aspectRatio": "1:1"})
 model("ideogram-vector", "Ideogram Vector", "Ideogram", "ideogram", "image", "Editable SVGs from a prompt, or any image traced to SVG",
@@ -1165,7 +1173,7 @@ def palette_format(spec):
         if {"r", "g", "b"} <= set(item):
             return "rgb-object"  # Recraft on fal: [{r, g, b}]
         if "rgb" in (item.get("fields") or item):
-            return "rgb-array"  # Recraft on Higgsfield: [{rgb: [r, g, b]}]
+            return "rgb-array"  # [{rgb: [r, g, b]}]
         if spec.get("items") == "string":
             return "hex"
     return None

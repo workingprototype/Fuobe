@@ -1,5 +1,4 @@
 import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
-import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
 import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
@@ -1521,39 +1520,11 @@ function withLastFrameExtend(m: ModelDef): ModelDef {
   return { ...m, routes: [...m.routes, { op: "extend", provider: "fal", endpoint: LAST_FRAME_CHAIN, note: "last frame → Kling image-to-video → joined" }] };
 }
 
-/**
- * Higgsfield's AI Influencer character sheet. Not in Higgsfield's docs catalog (console docs and
- * the pricing API only — docs/research/higgsfield-api.json), so it's defined here, not generated.
- */
-const AI_INFLUENCER: ModelDef = {
-  id: "ai-influencer",
-  name: "AI Influencer",
-  vendor: "Higgsfield",
-  family: "soul",
-  engine: "cloud",
-  kind: "image",
-  tagline: "An original character sheet from a short brief — human or creature",
-  badges: ["new"],
-  routes: [{ op: "t2i", provider: "higgsfield", endpoint: "higgsfield/ai-influencer", map: { prompt: "brief", seed: "seed", seedRange: [1, 1000000] } }],
-  options: {
-    seed: true,
-    controls: [{ param: "tier", label: "Look", values: ["normal", "freak", "total", "insects", "frogs", "cats", "dogs", "capybaras", "birds"], default: "normal" }],
-  },
-  pricing: { unit: "image", usd: 0.05 },
-};
-
 /** A launch price while it lasts, the list price after (FLUX 3 Max); read once, when the catalog loads. */
 const withCurrentPrice = (m: ModelDef): ModelDef => (m.pricing?.promo ? { ...m, pricing: pricingAt(m.pricing) } : m);
 
-/** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
-const cloud: ModelDef[] = [
-  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m))
-    .map(withLastFrameExtend)
-    .map(withCurrentPrice),
-  ...HIGGSFIELD_MODELS,
-  AI_INFLUENCER,
-  ...cloudTools,
-];
+/** Cloud models (fal and Replicate) and the cloud tools. */
+const cloud: ModelDef[] = [...CLOUD_MODELS.map(withLastFrameExtend).map(withCurrentPrice), ...cloudTools];
 
 // ---------------------------------------------------------------------------
 // Fuobe Originals: one model on both engines

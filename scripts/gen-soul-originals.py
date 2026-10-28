@@ -43,7 +43,7 @@ OUT = ROOT / "src/lib/catalog/soul-originals.generated.ts"
 # The pickers' slim list (no LoRA detail, safe for the browser bundle): cards, tabs and the old-id map.
 CARDS_OUT = ROOT / "src/lib/catalog/soul-looks.generated.ts"
 
-# Soul's picker tabs, in Soul's order (generic words; scripts/gen-higgsfield-presets.py uses the same lists).
+# Soul's picker tabs, in Soul's order (generic words).
 V1_TABS = ["New", "TikTok Core", "Instagram Aesthetics", "Camera Presets", "Beauty", "Mood", "Surreal", "Graphic Art"]
 V2_TABS = ["Mood", "Styles", "Camera"]
 BASES = {"z-image-turbo": "z-image", "qwen-image-2512": "qwen-2512"}

@@ -335,7 +335,6 @@ export function providerPage(provider: string, endpoint: string): string | undef
 export const PROVIDER_NAME: Record<string, string> = {
   fal: "fal.ai",
   replicate: "Replicate",
-  higgsfield: "Higgsfield",
   comfyui: "ComfyUI (your GPU)",
   llm: "Claude or Ollama",
   local: "Your browser",

@@ -27,9 +27,9 @@ metadata:
 ## 2. The sheet
 One image, 16:9, plain light-grey background, four views side by side: full-body front, full-body
 back, full-body side profile, and a head-and-shoulders portrait. Same lighting in every view.
-- Cloud: `nano-banana-pro` (best consistency across views) or `seedream-5-pro`; Higgsfield's
-  `ai-influencer` for photoreal influencers. Open source: `oss-qwen-edit` from a portrait, or
-  `oss-qwen-image` from text.
+- Cloud: `nano-banana-pro` (best consistency across views) or `seedream-5-pro`; `fuobe-soul`
+  (Fuobe Soul, with a look as `presetId`) for photoreal influencers from text. Open source: `oss-qwen-edit`
+  from a portrait, or `oss-qwen-image` from text.
 - Prompt: "Character reference sheet of <description>. Four views on one sheet: front, back,
   side, close portrait. Identical face, hairstyle and outfit in every view. Neutral pose, arms
   slightly away from the body. Plain light-grey background, even studio light, no text."

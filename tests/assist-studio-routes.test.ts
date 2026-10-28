@@ -368,17 +368,12 @@ describe("Ads Studio", () => {
     expect(brand.listProducts(acme.id).filter((p) => p.name === "Running shoes")).toHaveLength(2);
   });
 
-  it("keeps a given headline on Fuobe's compositor, even with a Higgsfield key", async () => {
-    setSetting("higgsfieldKey", "id:secret");
-    try {
-      const own = await priced(() => plan("create_ads", { brief: "Sneakers for city runs", aspect_ratios: ["4:5"] }));
-      expect(own.jobs[0].modelName).toBe("Higgsfield Ads Studio");
-      const fixed = await priced(() => plan("create_ads", { brief: "Sneakers for city runs", aspect_ratios: ["4:5"], headline: "Run the city" }));
-      expect(fixed.jobs[0].modelName).not.toBe("Higgsfield Ads Studio");
-      expect(fixed.jobs[0].note).toMatch(/each in 1:1, 4:5 and 9:16/);
-    } finally {
-      setSetting("higgsfieldKey", "");
-    }
+  it("makes every ad on Fuobe's compositor, with or without a given headline", async () => {
+    const own = await priced(() => plan("create_ads", { brief: "Sneakers for city runs", aspect_ratios: ["4:5"] }));
+    expect(own.jobs[0].note).toMatch(/each in 1:1, 4:5 and 9:16/);
+    const fixed = await priced(() => plan("create_ads", { brief: "Sneakers for city runs", aspect_ratios: ["4:5"], headline: "Run the city" }));
+    expect(fixed.jobs[0].modelName).toBe(own.jobs[0].modelName);
+    expect(fixed.jobs[0].note).toMatch(/each in 1:1, 4:5 and 9:16/);
   });
 
   it("falls back for formats it doesn't make", () => {

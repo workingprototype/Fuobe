@@ -56,7 +56,6 @@ describe("key and address checks", () => {
   });
 
   it("knows the other keys' shapes and wants web addresses for servers", () => {
-    expect(settingProblem("higgsfieldKey", "KEY")).toMatch(/KEY_ID:KEY_SECRET/);
     expect(settingProblem("replicateToken", "abc")).toMatch(/r8_/);
     expect(settingProblem("replicateToken", "r8_abc")).toBeNull();
     expect(settingProblem("anthropicKey", "sk-ant-api03-x")).toBeNull();
@@ -80,7 +79,7 @@ describe("key and address checks", () => {
 
 describe("first-run guide and status strip", () => {
   const state = (configured: string[], engineMode: ConnectionState["engineMode"] = "both", onboarded = false): ConnectionState => ({
-    providers: Object.fromEntries(["fal", "replicate", "higgsfield", "comfyui", "llm", "mock"].map((p) => [p, { configured: configured.includes(p) || p === "mock" }])),
+    providers: Object.fromEntries(["fal", "replicate", "comfyui", "llm", "mock"].map((p) => [p, { configured: configured.includes(p) || p === "mock" }])),
     engineMode,
     onboarded,
   });
@@ -96,7 +95,7 @@ describe("first-run guide and status strip", () => {
     // A key doesn't help an open-source-only install, nor ComfyUI a paid-only one.
     expect(nothingConnected(state(["fal"], "open"))).toBe(true);
     expect(nothingConnected(state(["comfyui"], "cloud"))).toBe(true);
-    expect(nothingConnected(state(["higgsfield"], "cloud"))).toBe(false);
+    expect(nothingConnected(state(["replicate"], "cloud"))).toBe(false);
   });
 
   it("hides Home's shell guide before the first paint only where this browser put it away", () => {
@@ -125,11 +124,10 @@ describe("first-run guide and status strip", () => {
     expect(s.map((c) => [c.id, c.text, c.ok, c.unused])).toEqual([
       ["fal", "Not set", false, true],
       ["replicate", "Key set", true, true],
-      ["higgsfield", "Not set", false, true],
       ["comfyui", "Online", true, false],
       ["llm", "Off", false, false],
     ]);
-    expect(s.map((c) => c.href)).toEqual(["#fal", "#replicate", "#higgsfield", "#comfyui", "#text-ai"]);
+    expect(s.map((c) => c.href)).toEqual(["#fal", "#replicate", "#comfyui", "#text-ai"]);
   });
 
   it("quotes a first image and clip on the default paid models", () => {

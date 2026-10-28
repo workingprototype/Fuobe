@@ -1,10 +1,9 @@
 import { after } from "next/server";
 import { z } from "zod";
-import { AD_RATIOS } from "@/lib/catalog/marketing";
 import { confirmProposal } from "@/server/ads";
 import { failure, readBody } from "@/server/marketing";
 
-const Body = z.object({ messageId: z.string().min(1).max(20), engine: z.enum(["cloud", "open"]), route: z.enum(["fuobe", "higgsfield"]).optional(), ratio: z.enum(AD_RATIOS).optional() });
+const Body = z.object({ messageId: z.string().min(1).max(20), engine: z.enum(["cloud", "open"]) });
 
 /** The user said yes to a chat proposal: the ads start rendering. */
 export async function POST(request: Request, ctx: RouteContext<"/api/brands/[id]/chat/confirm">) {
@@ -12,7 +11,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/brands/[id]
   const body = await readBody(request, Body);
   if (body instanceof Response) return body;
   try {
-    const r = confirmProposal(id, body.messageId, body.engine, body.route, body.ratio);
+    const r = confirmProposal(id, body.messageId, body.engine);
     after(() => r.run);
     return Response.json({ batchId: r.batchId, messages: r.chat }, { status: 201 });
   } catch (e) {

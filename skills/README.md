@@ -2,7 +2,7 @@
 
 Each folder holds one skill: a `SKILL.md` with YAML frontmatter and Markdown instructions, in the
 [Agent Skills](https://agentskills.io/specification) format that Claude Code, Codex, Cursor and
-Higgsfield Supercomputer read. Assist lists them under **Assist → Skills → Built-in**, the agent
+other agents read. Assist lists them under **Assist → Skills → Built-in**, the agent
 loads one with its `load_skill` tool when a request matches, and typing `/name` at the start of a
 message loads it for that chat. MCP clients get them as prompts.
 

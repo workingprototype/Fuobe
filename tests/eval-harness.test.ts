@@ -268,24 +268,12 @@ describe("the runner on the demo provider", () => {
     expect(look?.kind).toBe("style");
   });
 
-  it("never runs a job through Higgsfield's API, and runs each Genjutsu mode's own partner model", async () => {
+  it("runs each Genjutsu mode's own partner model on fal", async () => {
     type Plan = { jobs: { case: string; variant: string; model: string; skip?: string }[] };
     const dry = async (args: string[]) => JSON.parse((await cli(["run", ...args, "--dry-run", "--json"])).stdout) as Plan;
     setSetting("falKey", "fal-test-key");
-    setSetting("higgsfieldKey", "hf-id:hf-secret");
     try {
-      // Cloud provider: Higgsfield. The hosted Z-Image route would go there, so the job is refused, not measured.
-      setSetting("cloudProvider", "higgsfield");
-      const soul = await dry(["--suite", "soul", "--engine", "cloud", "--looks", "v1-general", "--variants", "plain", "--prompts", "1"]);
-      expect(soul.jobs.map((j) => j.skip)).toEqual([expect.stringMatching(/would run on Higgsfield's API/)]);
-      // Genjutsu's studio route lists its steps' providers: Motion Control goes to Higgsfield, the 4K edit is fal-only.
-      const gh = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "partner", "--allow-fixtures"]);
-      const by = (p: Plan) => Object.fromEntries(p.jobs.map((j) => [j.case, j]));
-      expect(by(gh)["genjutsu/move"].skip).toMatch(/Higgsfield's API/);
-      expect(by(gh)["genjutsu/restyle"]).toMatchObject({ model: "kling-o3-4k-edit" });
-      expect(by(gh)["genjutsu/restyle"].skip).toBeUndefined();
-      // On Auto with fal connected, each mode runs its own partner on fal, even with a Higgsfield key set.
-      setSetting("cloudProvider", "auto");
+      // With fal connected, each mode runs its own partner on fal.
       const g = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "partner", "--allow-fixtures"]);
       expect(g.jobs.map((j) => [j.case, j.model, j.skip ?? null])).toEqual([
         ["genjutsu/move", "kling-motion-control", null],
@@ -317,8 +305,6 @@ describe("the runner on the demo provider", () => {
       const open = await dry(["--suite", "genjutsu", "--engine", "open", "--variants", "partner", "--allow-fixtures"]);
       expect(open.jobs.every((j) => j.skip === "the partner variant runs on cloud only")).toBe(true);
     } finally {
-      setSetting("cloudProvider", "auto");
-      setSetting("higgsfieldKey", "");
       setSetting("falKey", "");
     }
   });
@@ -961,7 +947,7 @@ describe("the cloud spend cap", () => {
     expect(r.run.spentUsd).toBeCloseTo(1.5, 6);
   });
 
-  it("prices cloud training before anything starts, and never trains on Higgsfield", async () => {
+  it("prices cloud training before anything starts, and skips a target the server no longer trains", async () => {
     const suiteFile = path.join(dir, "train-suite.json");
     const train = (target: string) => ({ photos: path.join(process.cwd(), "scripts/eval/fixtures/character"), targets: { cloud: target }, minPhotos: 3, consent: true });
     fs.writeFileSync(
@@ -975,19 +961,20 @@ describe("the cloud spend cap", () => {
         targets: { cloud: { models: ["z-image-turbo-cloud"] } },
         cases: [
           { id: "t/fal", title: "fal", train: train("fal-z-image"), prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] },
-          { id: "t/hf", title: "hf", train: train("soul-id-v2"), prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] },
+          { id: "t/old", title: "old", train: train("soul-id-v2"), prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] },
         ],
       }),
     );
-    const stub = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["z-image-turbo-cloud"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $0.85 (1,000 steps)" }, { id: "soul-id-v2", provider: "higgsfield", price: "Higgsfield balance" }] });
+    const stub = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["z-image-turbo-cloud"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $0.85 (1,000 steps)" }] });
     const suite = cases.loadSuite(suiteFile);
     const dry = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client: stub.client })) as { estimateUsd: number; trainingUsd: number; jobs: { case: string; skip?: string }[] };
     expect(dry.trainingUsd).toBe(0.85);
     expect(dry.estimateUsd).toBeCloseTo(0.86, 6);
-    expect(dry.jobs.find((j) => j.case === "t/hf")?.skip).toMatch(/Higgsfield's API/);
+    // An older Soul ID target isn't among the server's targets: it has no price, so it can't run under the cap.
+    expect(dry.jobs.find((j) => j.case === "t/old")?.skip).toMatch(/training on soul-id-v2 has no price/);
     await expect(runner.runEval({ suite, engine: "cloud", maxUsd: 0.5, root }, { client: stub.client })).rejects.toThrow(/about \$0\.86, over the spend cap/);
     expect(runner.trainingPrice({ price: "Free" })).toBe(0);
-    expect(runner.trainingPrice({ price: "Higgsfield balance" })).toBeNull();
+    expect(runner.trainingPrice({ price: "Pay as you go" })).toBeNull();
   });
   it("trains a character with the consent line the case confirms, and a look without one", async () => {
     const suiteFile = path.join(dir, "train-consent.json");
@@ -1099,17 +1086,16 @@ describe("what a job measures", () => {
     runner.runEval({ suite: cases.loadSuite("genjutsu"), engine: "cloud", variants: ["partner"], cases: ["genjutsu/move"], allowFixtures: true, dryRun: true, root: path.join(dir, "measure") }, { client }) as Promise<{ jobs: { skip?: string }[] }>;
 
   it("skips a job the server would run on another model than the one named", async () => {
-    const swapped = await plan(studioStub({ costUsd: 1, demo: false, modelId: "genjutsu-lite-motion-transfer", providers: ["higgsfield"] }, { fal: { configured: true } }));
-    expect(swapped.jobs[0].skip).toMatch(/Higgsfield's API/);
+    const swapped = await plan(studioStub({ costUsd: 1, demo: false, modelId: "fuobe-genjutsu-motion", providers: ["fal"] }, { fal: { configured: true } }));
+    expect(swapped.jobs[0].skip).toMatch(/would run fuobe-genjutsu-motion instead of kling-motion-control/);
     const other = await plan(studioStub({ costUsd: 1, demo: false, modelId: "kling-o3", providers: ["fal"] }, { fal: { configured: true } }));
     expect(other.jobs[0].skip).toBe("the server would run kling-o3 instead of kling-motion-control, so this wouldn't measure kling-motion-control");
     const same = await plan(studioStub({ costUsd: 1, demo: false, modelId: "kling-motion-control", providers: ["fal"] }, { fal: { configured: true } }));
     expect(same.jobs[0].skip).toBeUndefined();
   });
 
-  it("refuses a studio route that doesn't say where its steps run when that Fuobe has a Higgsfield key", async () => {
+  it("measures a studio route that doesn't say where its steps run (an older Fuobe)", async () => {
     const older = { costUsd: 1, demo: false, modelId: "kling-motion-control" };
-    expect((await plan(studioStub(older, { fal: { configured: true }, higgsfield: { configured: true } }))).jobs[0].skip).toMatch(/Higgsfield's API/);
-    expect((await plan(studioStub(older, { fal: { configured: true }, higgsfield: { configured: false } }))).jobs[0].skip).toBeUndefined();
+    expect((await plan(studioStub(older, { fal: { configured: true } }))).jobs[0].skip).toBeUndefined();
   });
 });
