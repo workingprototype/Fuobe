@@ -44,6 +44,7 @@ import {
   type RunFeature,
   type RunOverlay,
 } from "@/lib/catalog/marketing";
+import { dualEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
 import { probeMedia } from "@/lib/media-probe";
 import { themeFrom } from "@/components/ads/layout";
@@ -301,8 +302,9 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
     const scenePrompt = modelId === "bria-product-shot" ? join(scene || "A clean studio scene", prompt, brand?.aesthetics.slice(0, 2).join(", ")) : text;
     const palette = !open && brand?.colors.length && routesFor(model, op).some((r) => r.map?.palette) ? brand.colors.slice(0, 5) : undefined;
     const aspect = nearestAspect(input.aspectRatio ?? tpl?.aspect ?? f.defaultAspect, model.options.aspectRatios);
-    const batch = Math.min(input.batch ?? 1, f.batch);
     meta.overlay = onTop && f.text && (headline || cta) ? { headline: headline || undefined, cta: cta || undefined } : null;
+    // Words set in the browser go on one picture per run: a batch is that many runs (runsFor), each composed.
+    const batch = meta.overlay ? 1 : Math.min(input.batch ?? 1, f.batch);
     if (onTop && f.text) notes.push("Your headline is set over the picture in your brand fonts, so the words come out exact");
     // On the user's GPU a Standalone shot of one product photo is cut out and relit into the scene (White_to_Scene).
     const productShot = open && modelId === MARKETING_IMAGE_MODEL && f.id === "product-standalone" && op === "edit" && images.length === 1;
@@ -319,6 +321,8 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
           request: {
             feature,
             modelId,
+            // Fuobe Marketing Image runs on both engines: the studio's engine picks its half.
+            ...(dualEngine(model) && { engine: input.engine }),
             op,
             prompt: model.options.promptless ? undefined : scenePrompt.slice(0, MAX_PROMPT),
             inputs: images.length ? { images } : undefined,
@@ -982,8 +986,18 @@ const nearestRes = (want: string, m: ModelDef) => (m.options.resolutions?.includ
 // ---------------------------------------------------------------------------
 // Estimates and launching
 
+/**
+ * The plan with every step on the run's engine: a Fuobe Original runs on both, and a step that doesn't name one would
+ * run on the first engine connected (your GPU before the cloud) instead of the one picked in the studio.
+ */
+export function onPlanEngine(plan: RunPlan): RunPlan {
+  const pin = (s: Step): Step => (s.request.engine || !dualEngine(getModel(s.request.modelId)) ? s : { ...s, request: { ...s.request, engine: plan.engine } });
+  return plan.steps.some((s) => pin(s) !== s) ? { ...plan, steps: plan.steps.map(pin) } : plan;
+}
+
 /** Price and validate every step with placeholders for what earlier steps make (nothing is created). */
-export function estimatePlan(plan: RunPlan, runs = 1): RunEstimate {
+export function estimatePlan(input: RunPlan, runs = 1): RunEstimate {
+  const plan = onPlanEngine(input);
   let total: number | null = 0;
   let demo = false;
   const steps: PlannedStep[] = [];
@@ -1008,7 +1022,8 @@ interface RunRow {
 }
 
 /** Create the run's generations (one request, or a pipeline) and record the run. */
-export function launch(plan: RunPlan, input?: object): MarketingRun {
+export function launch(planned: RunPlan, input?: object): MarketingRun {
+  const plan = onPlanEngine(planned);
   const engine = engineMode();
   if (engine !== "both" && engine !== plan.engine) throw new PlanError(engine === "open" ? "This install is set to open source only (Settings → Engine mode)" : "This install is set to paid cloud APIs only (Settings → Engine mode)");
   const batchId = nanoid(10);
@@ -1073,13 +1088,23 @@ export function presenterSeconds(input: MarketingInput, ctx: { product?: Product
   return Math.max(MIN_TALK_SECONDS, want - (hook ? shot : 0) - (broll ? shot : 0));
 }
 
+/**
+ * How many runs a Marketing Studio batch is: one run of every picture for an image format, unless its words are set
+ * in the browser (Fuobe Marketing Image, open models), which composes one picture per run; one run per video.
+ */
+function runsFor(input: MarketingInput, plan: RunPlan): number {
+  const f = FORMATS[input.format];
+  const batch = Math.min(input.batch ?? 1, f.batch);
+  return f.pipeline === "image" && !plan.meta.overlay ? 1 : batch;
+}
+
 /** Marketing Studio: price a run (a stand-in script of the right length for UGC; no LLM call). */
 export function estimateMarketing(input: MarketingInput): RunEstimate {
   const ctx = context(input);
   const f = FORMATS[input.format];
   const script = f.pipeline === "ugc" ? input.script?.trim() || Array(wordBudget(presenterSeconds(input, ctx))).fill("word").join(" ") : undefined;
-  const runs = f.pipeline === "image" ? 1 : Math.min(input.batch ?? 1, f.batch);
-  return estimatePlan(planMarketing(input, { ...ctx, script }), runs);
+  const plan = planMarketing(input, { ...ctx, script });
+  return estimatePlan(plan, runsFor(input, plan));
 }
 
 export async function runMarketing(input: MarketingInput): Promise<{ runs: MarketingRun[]; script?: string }> {
@@ -1095,7 +1120,7 @@ export async function runMarketing(input: MarketingInput): Promise<{ runs: Marke
       : (await writeScript({ product: ctx.product, brand: ctx.brand, seconds, hook: hook?.prompt, angle: tpl?.prompt, instructions: input.prompt })).script;
   }
   const plan = planMarketing(input, { ...ctx, script });
-  const runs = f.pipeline === "image" ? 1 : Math.min(input.batch ?? 1, f.batch);
+  const runs = runsFor(input, plan);
   // Check the whole plan (prices, models, engine mode, demo/real) before creating anything.
   estimatePlan(plan);
   return { runs: Array.from({ length: runs }, () => launch(plan, { ...input, batch: 1 })), script };

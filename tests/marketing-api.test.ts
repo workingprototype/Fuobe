@@ -258,7 +258,7 @@ describe("brand kits", () => {
     // Fuobe Marketing Image (build plan O10) on both engines: the words are set over the picture in the browser.
     const cloudAd = mk.planMarketing({ engine: "cloud", format: "ads", templateId: "ad-hero-headline" }, ctx);
     const r = cloudAd.steps[0].request;
-    expect(r).toMatchObject({ modelId: "fuobe-marketing-image", op: "edit", feature: "marketing", params: { aspectRatio: "4:5", numOutputs: 1 } });
+    expect(r).toMatchObject({ modelId: "fuobe-marketing-image", engine: "cloud", op: "edit", feature: "marketing", params: { aspectRatio: "4:5", numOutputs: 1 } });
     expect(r.prompt).toMatch(/no text, letters/);
     expect(r.prompt).not.toContain("“Meet Maple Pecan Granola”");
     expect(r.inputs?.images).toEqual([product.images[0]]);
@@ -276,7 +276,7 @@ describe("brand kits", () => {
     expect(gptAd.meta.overlay).toBeNull();
 
     const openAd = mk.planMarketing({ engine: "open", format: "ads", templateId: "ad-hero-headline", headline: "Crunch, sorted" }, ctx);
-    expect(openAd.steps[0].request).toMatchObject({ modelId: "fuobe-marketing-image", op: "edit" });
+    expect(openAd.steps[0].request).toMatchObject({ modelId: "fuobe-marketing-image", engine: "open", op: "edit" });
     expect(openAd.steps[0].request.prompt).toMatch(/no text, letters/);
     expect(openAd.meta.overlay).toEqual({ headline: "Crunch, sorted", cta: "Shop now" });
     expect(openAd.notes).toContain("Qwen-Image-Edit keeps your first photo's shape on your GPU");
@@ -341,23 +341,34 @@ describe("brand kits", () => {
 
   it("runs a template in demo mode and lists the run with its generations", async () => {
     const product = brand.listProducts(brandId)[0];
+    // Fuobe Marketing Image's words are set in the browser, one picture per run: a batch of 2 is two runs, each composed.
     const est = await (await estimateRoute.POST(json("POST", { engine: "cloud", format: "ads", templateId: "ad-offer-burst", productId: product.id, brandId, batch: 2 }))).json();
-    expect(est).toMatchObject({ demo: true, runs: 1, steps: [{ key: "image", modelId: "fuobe-marketing-image" }] });
+    expect(est).toMatchObject({ demo: true, runs: 2, steps: [{ key: "image", modelId: "fuobe-marketing-image" }] });
     const blocked = await (await estimateRoute.POST(json("POST", { engine: "cloud", format: "ads" }))).json();
     expect(blocked.blocker).toBe("Attach a product to generate");
 
     const res = await runsRoute.POST(json("POST", { engine: "cloud", format: "ads", templateId: "ad-offer-burst", productId: product.id, brandId, batch: 2 }));
     expect(res.status).toBe(201);
     const { runs } = await res.json();
-    expect(runs).toHaveLength(1);
+    expect(runs).toHaveLength(2);
+    for (const run of runs) {
+      expect(run.meta.overlay).toBeTruthy();
+      expect(run.meta.input).toMatchObject({ batch: 1 });
+      const one = await settle(run.finalIds[0]);
+      expect(one).toMatchObject({ status: "succeeded", engine: "cloud" });
+      expect(one.outputs).toHaveLength(1);
+    }
     const g = await settle(runs[0].finalIds[0]);
-    expect(g.status).toBe("succeeded");
-    expect(g.outputs).toHaveLength(2);
     expect(g.request.title).toBe("Offer Burst · Maple Pecan Granola");
+    // A partner that draws the words itself makes the batch in one run.
+    const gpt = await (await runsRoute.POST(json("POST", { engine: "cloud", format: "ads", templateId: "ad-offer-burst", productId: product.id, brandId, batch: 2, modelId: "gpt-image-2-5" }))).json();
+    expect(gpt.runs).toHaveLength(1);
+    expect((await settle(gpt.runs[0].finalIds[0])).outputs).toHaveLength(2);
     const list = await (await runsRoute.GET(json("GET", undefined, "http://x/api/marketing/runs?feature=marketing"))).json();
-    expect(list.items[0]).toMatchObject({ id: runs[0].id, title: "Offer Burst · Maple Pecan Granola", meta: { templateId: "ad-offer-burst", format: "ads" } });
-    expect(list.items[0].generations[0].status).toBe("succeeded");
-  });
+    const listed = list.items.find((i: { id: string }) => i.id === runs[0].id);
+    expect(listed).toMatchObject({ id: runs[0].id, title: "Offer Burst · Maple Pecan Granola", meta: { templateId: "ad-offer-burst", format: "ads" } });
+    expect(listed.generations[0].status).toBe("succeeded");
+  }, 60_000);
 
   it("runs a whole UGC pipeline on the demo provider (open engine: voice clone → presenter → captions → join)", async () => {
     const product = brand.listProducts(brandId)[0];
