@@ -12,7 +12,7 @@ Full write-up (what is in the library, validation results, models, quirks for ap
 
 | file | purpose |
 |---|---|
-| `install-comfyui.sh` | reproducible CPU install of ComfyUI + 17 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3; ToSVG (VTracer) in round 4). Licences are information: the non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) is installed too, and `NC_PACKS=0` leaves it out (Settings → Models & licences has a switch per node pack). Round 4 part 4 adds Akatz Labs' GPL-3.0 `h3_character_swap` for Genjutsu's Character swap (`H3_PACK=0` leaves it out; it needs `ffmpeg` and `ffprobe`), and H3 Relay 2.0 with `H3_RELAY=1` |
+| `install-comfyui.sh` | reproducible CPU install of ComfyUI + 17 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3; ToSVG (VTracer) in round 4). Licences are information: the non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) is installed too, and `NC_PACKS=0` leaves it out (Settings → Models & licences has a switch per node pack). Round 4 part 4 adds Akatz Labs' GPL-3.0 `h3_character_swap` for Genjutsu's Character swap (`H3_PACK=0` leaves it out; it needs `ffmpeg` and `ffprobe`), and H3 Relay 2.0 with `H3_RELAY=1` (the Relay swap, H3 Person Removal and, since round 4 part 5, the Character Swap Studio's two graphs) |
 | `install-isolated-worker.sh` | a second ComfyUI with its own code copy, base directory, `HOME` and virtualenv for LatentSync 1.6 and ThinkSound (below) |
 | `start-comfyui.sh` / `stop-comfyui.sh` | run ComfyUI in the background on 127.0.0.1:8188 (log: `$COMFYUI_DIR/logs/comfyui.log`) |
 | `export-templates.mjs` | Playwright: opens the ComfyUI frontend, `app.loadGraphData(ui)` → `app.graphToPrompt().output`, writes `build/raw/<key>.api.json` + `.meta.json` (embedded model URLs, missing node types) |
@@ -322,6 +322,37 @@ node validate-workflows.mjs video-character-swap-h3 video-character-swap-h3-rela
 - **Comfy Developer Platform** (what Openjutsu deploys to): a deployment is not a plain ComfyUI server — it is driven by
   the v2 API (`@comfyorg/sdk`: upload, job, poll), not `/prompt` and `/history` — so Fuobe does not add a provider for it.
   Point `COMFYUI_URL` at a ComfyUI that has the packs installed instead.
+
+### Character Swap Studio (o/h3-studio, 2026-10-27)
+
+Two hand-built entries for the Character Swap Studio (`/character-swap`) on your GPU, on H3 Relay 2.0's nodes; the
+segment graph is built from `video-character-swap-h3-relay`. They follow Akatz Labs' app (docs/research/openjutsu-6.md
+§4.2):
+
+```bash
+npm run build -- video-character-swap-h3-segment video-mask-h3-relay
+node validate-workflows.mjs video-character-swap-h3-segment video-mask-h3-relay --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `video-character-swap-h3-segment` | video-character-swap | One segment: a single H3 Relay 2.0 pass (its "segment" schedule, at most 362 frames) over the clip's 24 fps copy. The approved mask (a whole-shot mask from `video-mask-h3-relay`) replaces SAM's own chain, the anchor goes in as Picture 2 (Picture 3 after a history boundary), and the previous take's lossless master (16-bit FFV1, output role `master`) gives the history frames (`historyVideo`, `historyStart`, `historyLength`). Outputs: the segment (H.264) and its master for the next segment. The provider rewrites the graph per job (`src/lib/swap-studio-graphs.ts`). Limits 30 s / 703 frames; 24 GB | no: `missing_node_type` (`H3RelayAppendWindow`) |
+| `video-mask-h3-relay` | person-mask | Who to swap in one shot, as a black-and-white mask video at H3's canvas size and 24 fps: SAM 3.1 detects on frame `keyFrame` from words or clicks, H3 Relay picks largest / leftmost / rightmost / #n, and SAM 3.1 tracks it for `spanFrames` (the rest of the shot for Track shot, 1 for Update frame). The new part is spliced into the version it corrects (`prevMask`, `tailStart`, `tailFrames`). Limits 150 s / 3,592 frames; 6 GB | no: `missing_node_type` (`H3RelayPrepareSource`) |
+
+- **Node packs**: no new one. Both use H3 Relay (GPL-3.0, opt-in with `H3_RELAY=1`, pinned at
+  `e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220`); the segment graph also uses ComfyUI-VideoHelperSuite and needs FFmpeg.
+  `build-library.mjs` gains eight binding keys for them: `historyVideo`, `historyStart`, `historyLength`, `keyFrame`,
+  `spanFrames`, `tailStart`, `tailFrames` and `prevMask`.
+- **Weights**: no new files. The segment graph uses the same pinned MiniMax H3 files, Turbo LoRA, SAM 3.1 and swap LoRA
+  as `video-character-swap-h3-relay`, and the provider downloads the LoRAs before a segment runs; the mask graph needs
+  only SAM 3.1 (1.75 GB).
+- **Uploads**: a continuation uploads the previous take's master, about 3 MB a frame at 1 MP. ComfyUI takes uploads up to
+  100 MB unless started with a higher `--max-upload-size`, so more than about 30 frames of history needs a higher one.
+  An upload ComfyUI refuses as too large now fails with a message that says this, for every feature.
+- **Memory**: the provider refuses a mask shot too long for the server's RAM before it runs. That limit is an estimate,
+  not a measurement, and may be too strict (on a 64 GB server, 1 MP corrections stop at shots of about 18 s).
+- **Not run**: neither graph has loaded in a ComfyUI with H3 Relay, and nothing has run on a GPU.
+  `tests/comfy-swap-studio.test.ts` checks the provider's rewrites on the library files.
 
 ## Adding a workflow
 
