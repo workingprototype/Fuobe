@@ -12,6 +12,7 @@ const { db } = await import("@/server/db");
 const gens = await import("@/server/generations");
 const { saveFile } = await import("@/server/storage");
 const route = await import("@/app/api/influencer/route");
+const estimateRoute = await import("@/app/api/influencer/estimate/route");
 const { compileCastPrompt } = await import("@/lib/influencer");
 const { soulRecipe } = await import("@/lib/catalog/soul");
 const { CAST_LOOK } = await import("@/lib/catalog/soul-cards");
@@ -49,6 +50,9 @@ describe("/api/influencer", () => {
     const face = await (await post({ engine: "cloud", state, start: "face", photo: upload() }, true)).json();
     expect(face).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", count: 1, steps: 2 });
     expect((await (await post({ engine: "cloud", state, start: "scratch", modelId: "nano-banana-pro" }, true)).json()).modelId).toBe("nano-banana-pro");
+    // The same price at /api/influencer/estimate (where the evaluation harness prices studio routes).
+    const estimate = await (await estimateRoute.POST(new Request("http://x/api/influencer/estimate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ engine: "cloud", state, start: "scratch" }) }))).json();
+    expect(estimate).toMatchObject({ modelId: "fuobe-soul", count: 1, steps: 1, demo: true });
     const seedream = await (await post({ engine: "cloud", state, start: "scratch", modelId: "seedream-5-pro" }, true)).json();
     expect(seedream.modelId).toBe("seedream-5-pro");
   });
