@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getModel, getPreset } from "@/lib/catalog";
 import { castName, randomizeCast, SOUL_CAST_FIELDS } from "@/lib/catalog/cinema";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
+import { onEngine } from "@/lib/catalog/engines";
 import { PHOTODUMP_PACKS, SOUL_DEFAULT, SOUL_PRESETS } from "@/lib/catalog/higgsfield-presets.generated";
 import {
   castFieldVisible,
@@ -484,15 +485,26 @@ describe("Photodump packs and planning", () => {
     expect(cloud.requests[2].step).toEqual({ label: "Photo 3 of 9", index: 2, of: 9 });
     expect(cloud.requests.every((r) => r.params?.numOutputs === 1 && r.params.aspectRatio === "3:4" && r.feature === "photodump")).toBe(true);
 
-    const soulMaya: PhotoSubject = { ...maya, loras: [{ engine: "cloud", modelId: "soul-2", file: "", trigger: "", referenceId: "ref-123" }] };
-    expect(planPhotodump({ pack, subject: soulMaya, engine: "cloud" }, { higgsfield: true }).modelId).toBe("soul-2");
-    const noKey = planPhotodump({ pack, subject: soulMaya, engine: "cloud", modelId: "soul-2" }, { higgsfield: false });
-    expect(noKey.modelId).toBe("nano-banana-pro");
-    expect(noKey.notes[0]).toMatch(/Higgsfield key/);
+    // A trained Soul ID (build plan O3): Fuobe Soul with the character's LoRA on either engine; Higgsfield's is gone.
+    const soulMaya: PhotoSubject = { ...maya, loras: [{ engine: "cloud", modelId: "fuobe-soul", family: "z-image-turbo", file: "fuobe/maya-a1.safetensors", url: "https://v3.fal.media/maya.safetensors", own: true, trigger: "mayfz" }] };
+    for (const engine of ["cloud", "open"] as const) {
+      const run = planPhotodump({ pack, subject: soulMaya, engine }, { higgsfield: true });
+      expect(run.modelId).toBe("fuobe-soul");
+      expect(run.requests.every((r) => r.engine === engine)).toBe(true);
+    }
+    const oldSoulId: PhotoSubject = { ...maya, loras: [{ engine: "cloud", modelId: "soul-2", file: "", trigger: "", referenceId: "ref-123" }] };
+    expect(planPhotodump({ pack, subject: oldSoulId, engine: "cloud" }, { higgsfield: true }).modelId).toBe("nano-banana-pro");
+    const untrained = planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "fuobe-soul" }, { higgsfield: false });
+    expect(untrained.modelId).toBe("nano-banana-pro");
+    expect(untrained.notes[0]).toMatch(/No Soul ID yet/);
+    expect(planPhotodump({ pack, subject: soulMaya, engine: "cloud", modelId: "seedream-5-pro" }, { higgsfield: false }).modelId).toBe("seedream-5-pro");
     expect(planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "seedream-5-pro" }, { higgsfield: false }).modelId).toBe("seedream-5-pro");
 
+    // A LoRA trained before O3 for plain Z-Image Turbo is the same family: it runs on Fuobe Soul too.
     const loraMaya: PhotoSubject = { ...maya, loras: [{ engine: "open", modelId: "oss-z-image-turbo", file: "maya.safetensors", trigger: "mayfz" }] };
-    expect(planPhotodump({ pack, subject: loraMaya, engine: "open" }, { higgsfield: false }).modelId).toBe("oss-z-image-turbo");
+    expect(planPhotodump({ pack, subject: loraMaya, engine: "open" }, { higgsfield: false }).modelId).toBe("fuobe-soul");
+    // A GPU-only LoRA (no copy Fuobe can send) stays off the cloud: reference photos there.
+    expect(planPhotodump({ pack, subject: loraMaya, engine: "cloud" }, { higgsfield: false }).modelId).toBe("nano-banana-pro");
     const qwen = planPhotodump({ pack, subject: selfie, engine: "open", aspectRatio: "auto" }, { higgsfield: false });
     expect(qwen.modelId).toBe("oss-qwen-edit");
     expect(qwen.requests[0].inputs?.images).toEqual([selfie.url]);
@@ -518,23 +530,33 @@ describe("Photodump packs and planning", () => {
     const refs = check(maya, "cloud", el([]));
     expect(refs.plan.op).toBe("edit");
     expect(refs.resolved.inputs?.images).toEqual(["/api/files/uploads/m1.png"]);
-    const soulLoras = [{ engine: "cloud" as const, modelId: "soul-2", file: "", trigger: "", referenceId: "ref-1" }];
-    const soul = check({ ...maya, loras: soulLoras }, "cloud", el(soulLoras));
-    expect(soul.resolved.params?.extra?.custom_reference_id).toBe("ref-1");
-    expect(soul.plan.model.id).toBe("soul-2");
-    const turbo = [{ engine: "open" as const, modelId: "oss-z-image-turbo", file: "maya.safetensors", trigger: "mayfz" }];
-    const lora = check({ ...maya, loras: turbo }, "open", el(turbo));
-    expect(lora.plan.loras[0].file).toBe("maya.safetensors");
-    expect(lora.plan.prompt).toMatch(/mayfz Maya/);
+    // The Soul ID's LoRA on Fuobe Soul, first in its slots, on the engine the run asked for.
+    const trained = [{ engine: "cloud" as const, modelId: "fuobe-soul", family: "z-image-turbo" as const, file: "fuobe/maya-a1.safetensors", url: "https://v3.fal.media/maya.safetensors", own: true as const, trigger: "mayfz" }];
+    for (const engine of ["cloud", "open"] as const) {
+      const p = planPhotodump({ pack: getPack("zen")!, subject: { ...maya, loras: trained }, engine, aspectRatio: "3:4" }, { higgsfield: false });
+      const r = p.requests[0];
+      const model = onEngine(getModel(r.modelId)!, r.engine!);
+      const resolved = applyMentions(r, model, [el(trained)]).request;
+      const planned = planGeneration(resolved, (id) => (id === model.id ? model : getModel(id)), getPreset);
+      expect(planned.model).toMatchObject({ id: "fuobe-soul", engine });
+      expect(planned.loras[0]).toMatchObject({ file: "fuobe/maya-a1.safetensors", own: true });
+      expect(planned.prompt).toMatch(/mayfz Maya/);
+      expect(resolved.inputs?.images).toBeUndefined();
+    }
   });
 });
 
 describe("Photodump: model choice and retries", () => {
   const selfie: PhotoSubject = { kind: "selfie", url: "/api/files/uploads/me.png" };
+
   it("says why a pick that can't run ends up on another model", () => {
-    expect(photodumpModel(selfie, "open", { higgsfield: false }, "oss-z-image-turbo")).toEqual({ modelId: "oss-qwen-edit", note: "Z-Image Turbo + LoRA needs a character with a trained LoRA — Qwen-Image-Edit works from your photo" });
-    expect(photodumpModel(selfie, "open", { higgsfield: false }, "oss-z-image-turbo", true).note).toMatch(/Your own packs recreate each reference photo/);
+    expect(photodumpModel(selfie, "open", { higgsfield: false }, "fuobe-soul")).toEqual({ modelId: "oss-qwen-edit", note: "Fuobe Soul needs a character with a trained Soul ID — Qwen-Image-Edit works from your photo" });
+    expect(photodumpModel(selfie, "cloud", { higgsfield: false }, "fuobe-soul").note).toMatch(/Nano Banana Pro works from your photo/);
+    expect(photodumpModel(selfie, "open", { higgsfield: false }, "fuobe-soul", true).note).toMatch(/Your own packs recreate each reference photo/);
     expect(photodumpModel(selfie, "open", { higgsfield: false }).note).toBeUndefined();
+    // A demo training's stand-in isn't a Soul ID.
+    const demo: PhotoSubject = { kind: "element", handle: "Maya", name: "Maya", references: ["/a.png"], loras: [{ engine: "cloud", modelId: "fuobe-soul", family: "z-image-turbo", file: "fuobe/x.safetensors", trigger: "t", demo: true }] };
+    expect(photodumpModel(demo, "open", { higgsfield: false }).modelId).toBe("oss-qwen-edit");
   });
 
   it("a retried base shot or outfit takes the failed one's place in the wizard", () => {

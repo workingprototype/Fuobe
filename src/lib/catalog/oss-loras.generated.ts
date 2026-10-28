@@ -684,6 +684,22 @@ export const OSS_LORAS: Record<string, OssLora[]> = {
       }
     }
   ],
+  "motion-bts": [
+    {
+      "file": "BTSMovieSet_LTX25_v1.safetensors",
+      "url": "https://huggingface.co/SOLRICKS/LTX-2.5-BTS-Movie-Set/resolve/main/BTSMovieSet_LTX25_v1.safetensors",
+      "strength": 0.8,
+      "target": "both",
+      "trigger": "btssetstyle",
+      "base": "ltx-2.5-22b",
+      "licence": {
+        "commercial": false,
+        "hostedOk": false,
+        "snapshotDate": "2026-10-23",
+        "name": "HF card: LTX-2.x Community; civitai 2941912 lists RentCivit only"
+      }
+    }
+  ],
   "motion-wiggle": [
     {
       "file": "civitai-2490836-wiggle-redmond.safetensors",

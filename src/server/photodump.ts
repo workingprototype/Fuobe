@@ -25,6 +25,7 @@ import { createGenerations, getGeneration, pickOutput, previewGeneration } from 
 import { trashGenerations } from "./library";
 import { higgsfieldKey } from "./providers/higgsfield";
 import { engineMode } from "./settings";
+import { isOffered } from "./model-access";
 
 /**
  * Photodump / Instadump, Fashion Factory and Character Sheet runs: plan with the pure pack logic
@@ -81,7 +82,7 @@ export function deleteUserPack(id: string): boolean {
 
 /** What this install can do, for the pure planners. */
 export function planCaps(): PlanCaps {
-  return { higgsfield: !!higgsfieldKey() && engineMode() !== "open", has: (id) => !!getModel(id) };
+  return { higgsfield: !!higgsfieldKey() && engineMode() !== "open", has: (id) => !!getModel(id) && isOffered(id) };
 }
 
 /** The engine a run uses: the one asked for, unless Settings locks the other. */

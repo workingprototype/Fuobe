@@ -20,6 +20,7 @@ import { createDubSession, previewDub, videoLength, type CreateDubInput } from "
 import { createChannel, createEpisode, estimateEpisode, listChannels } from "../faceless";
 import { chooseRoute } from "../generations";
 import { createProject, deleteProject, FileUrl, jobSteps, startJob } from "../layers";
+import { firstOn } from "../model-access";
 import { engineMode } from "../settings";
 import { createSession, estimateWith, sourceInfo, type ShortsBody, type SourceInfo } from "../shorts";
 import { absolutePath, getAsset } from "../storage";
@@ -111,7 +112,7 @@ function layersJob(i: LayersToolInput, ctx: ToolContext): Checked<{ input: Layer
   if (!size) return { problem: "Layers couldn't read that image's size (PNG, JPEG, WebP, GIF or SVG)" };
   const models = TOOL_MODELS.decompose[engine];
   if (i.model_id && !models.includes(i.model_id)) return { problem: `${getModel(i.model_id)?.name ?? i.model_id} isn't one of Layers' decomposition models on this engine` };
-  const modelId = i.model_id ?? models[0];
+  const modelId = i.model_id ?? firstOn(models, engine)!;
   const layers = clampLayers(modelId, i.layers ?? defaultLayers("decompose", modelId));
   return {
     width: size.width,
@@ -210,7 +211,7 @@ const shortsRoute: StudioRoute<RestyleToolInput> = {
   plan: (i, ctx) => {
     const { body, info, notes } = ok(shortsJob(i, ctx));
     const est = estimateWith(body, info);
-    const modelId = body.modelId ?? SHORTS_MODELS[body.engine][0];
+    const modelId = body.modelId ?? firstOn(SHORTS_MODELS[body.engine], body.engine)!;
     const job: PlannedJob = {
       tool: "restyle_footage",
       modelId,

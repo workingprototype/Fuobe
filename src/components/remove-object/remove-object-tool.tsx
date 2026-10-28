@@ -17,7 +17,7 @@ import { Feed } from "@/components/studio/feed";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { SketchEditor, type Stroke } from "@/components/studio/sketch-editor";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
-import { useEngine, useGenerations } from "@/lib/api";
+import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
 import {
   CLICK_OPEN_PROBLEM,
   chooseEraser,
@@ -31,6 +31,7 @@ import {
 import { chainState } from "@/lib/catalog/shorts";
 import type { Generation, PixelPoint } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { FrameStage, frameFromBlob, type Frame } from "./frame-stage";
 import { useRemovalActions, useRemovalEstimate, type RemovalBody } from "./hooks";
@@ -69,6 +70,7 @@ interface Run {
  */
 export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
   const [engine, setEngine, engineMode] = useEngine();
+  const access = useModelAccess();
   const source = useSourceClip(REMOVE.maxBytes);
   const clip = source.clip;
   const trimmer = useRef<VideoTrimmerHandle>(null);
@@ -94,9 +96,14 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
   const duration = clipDuration(clip);
   const size = clipSize(clip);
   const choiceKey = `${engine}:${mode}`;
-  const choice = chooseEraser({ engine, mode, effects: mode === "type" && effects, modelId: picked[choiceKey] });
+  // Erasers switched off in Settings → Models & licences leave the list, and the pick falls back to one that is on.
+  const isOn = (id: string) => offered(access, id, engine);
+  const choice = chooseEraser({ engine, mode, effects: mode === "type" && effects, modelId: picked[choiceKey], offered: isOn });
   const eraser: Eraser | null = "eraser" in choice ? choice.eraser : null;
-  const options = erasersFor(engine, mode).filter((e) => !e.effects);
+  const options = keepOffered(
+    erasersFor(engine, mode).filter((e) => !e.effects),
+    (e) => isOn(e.id),
+  );
   const everyone = !!eraser?.everyone;
 
   // The selection's first frame, grabbed by the browser: what points and paint are made on.

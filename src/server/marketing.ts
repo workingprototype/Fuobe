@@ -50,6 +50,8 @@ import { createPipeline, type PipelineStep } from "./chains";
 import { db } from "./db";
 import { llmText } from "./enhance";
 import { createGenerations, getGeneration, listGenerations, previewChained, recordLocalGeneration } from "./generations";
+import { isOffered } from "./model-access";
+import { keepOffered } from "@/lib/model-access";
 import { provider } from "./providers";
 import { engineMode } from "./settings";
 import { encodePng } from "./png";
@@ -240,7 +242,8 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
       throw new PlanError(f.id === "product-with-model" ? "Attach reference or product" : f.id === "poster" ? "Add a prompt or a product" : "Add a prompt, a product or a website");
     }
   }
-  const choices = formatModels(f, input.engine, { product: hasProduct, avatar: !!input.avatar, higgsfield: ctx.higgsfield });
+  // Models switched off in Settings → Models & licences aren't picked while another choice is on.
+  const choices = keepOffered(formatModels(f, input.engine, { product: hasProduct, avatar: !!input.avatar, higgsfield: ctx.higgsfield }), (c) => isOffered(c.id, input.engine));
   const name = tpl?.name ?? f.name;
   const title = [name, product?.name ?? brand?.name].filter(Boolean).join(" · ");
   const meta: MarketingRunMeta = { format: f.id, templateId: tpl?.id, productId: product?.id ?? null, brandId: brand?.id ?? null };
@@ -788,8 +791,8 @@ function planAd(input: ClickToAdInput, ctx: { product: Product; brand?: BrandKit
 // Ad Multiplier: a reference ad (4–30 s) → new versions (whole ad, or a new hook / CTA around it)
 
 export function multiplierModel(input: Pick<MultiplierInput, "engine" | "modelId">, higgsfield: boolean): ModelDef {
-  const choices = MULTIPLIER_MODELS[input.engine];
-  const fallback = input.engine === "cloud" && !higgsfield ? "kling-o3" : choices[0].id;
+  const choices = keepOffered(MULTIPLIER_MODELS[input.engine], (c) => isOffered(c.id, input.engine));
+  const fallback = input.engine === "cloud" && !higgsfield && choices.some((c) => c.id === "kling-o3") ? "kling-o3" : choices[0].id;
   const id = input.modelId && choices.some((c) => c.id === input.modelId) ? input.modelId : fallback;
   return need(id);
 }
@@ -838,6 +841,8 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
         label: "Recreating",
         request: {
           feature: trimmed ? "ad-multiplier" : step,
+          // Fuobe Genjutsu's Original runs on both engines: this is its open half.
+          engine: "open",
           modelId: model.id,
           op: "motion-transfer",
           prompt: lead.prompt,

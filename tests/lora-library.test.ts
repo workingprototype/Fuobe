@@ -114,12 +114,17 @@ describe("LoRA library (lora-library.generated.ts)", () => {
     expect(loraRef(loraEntry("awportrait")!).strength).toBe(0.6);
   });
 
-  it("is what the generator writes (no hand edits) and the generator refuses what breaks the licence and pin rules", () => {
+  it("is what the generator writes (no hand edits); the generator refuses broken pins and only notes licences", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-lora-gen-"));
     const research = () => JSON.parse(fs.readFileSync(path.join(ROOT, "docs/research/fuobe-originals-recipes-5.json"), "utf8"));
     const refuses = (data: unknown, why: RegExp) => {
       fs.writeFileSync(path.join(tmp, "docs/research/fuobe-originals-recipes-5.json"), JSON.stringify(data));
       expect(() => execFileSync("python3", [path.join(tmp, "scripts/gen-lora-library.py")], { stdio: "pipe" })).toThrow(why);
+    };
+    // Licences are information (Settings → Models & licences): the generator writes the library and prints a note.
+    const notes = (data: unknown, what: RegExp) => {
+      fs.writeFileSync(path.join(tmp, "docs/research/fuobe-originals-recipes-5.json"), JSON.stringify(data));
+      expect(execFileSync("python3", [path.join(tmp, "scripts/gen-lora-library.py")], { stdio: "pipe" }).toString()).toMatch(what);
     };
     try {
       // A copy of the repo layout the script reads, with one civitai URL unpinned.
@@ -135,14 +140,14 @@ describe("LoRA library (lora-library.generated.ts)", () => {
       let data = research();
       data.loraLibrary.find((l: Raw) => l.key === "y2k").url = "https://civitai.com/models/2979601";
       refuses(data, /pinned version/);
-      // A non-commercial LoRA made a default (BTS back to add-lora).
+      // A non-commercial LoRA made a default (BTS back to add-lora): a note, not a failure.
       data = research();
       data.motionsEffects.find((m: Raw) => m.presets?.includes("BTS")).status = "add-lora";
-      refuses(data, /BTS \(add-lora\).*commercial: false/);
-      // A GPU-only (RentCivit) LoRA in a row that would send it to the cloud.
+      notes(data, /licence notes \(information, shown in Settings → Models & licences\):[\s\S]*BTS \(add-lora\).*is non-commercial/);
+      // A GPU-only (RentCivit) LoRA in a row that sends it to the cloud: a note too.
       data = research();
       data.motionsEffects.find((m: Raw) => m.presets?.includes("Wiggle")).status = "add-lora";
-      refuses(data, /hostedOk: false.*local-only/);
+      notes(data, /Wiggle \(add-lora\).*licensed for the user's GPU only/);
       // A file without its SHA256 pin, and a Hugging Face file without its commit.
       data = research();
       delete data.loraLibrary.find((l: Raw) => l.key === "y2k").sha256;

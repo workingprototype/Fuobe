@@ -105,7 +105,10 @@ try {
   const rec = await until(async () => (await items()).find((g) => g.feature === "cinema-recompose"), "the recomposition");
   const [capture, ref] = rec.request.inputs.images;
   assert.match(capture, /^\/api\/files\/uploads\/.+\.png$/);
-  assert.equal(ref, still.outputs[0].url);
+  // The still as the feed shows it: Fuobe Soul Cinema's grade is applied in the browser, so its finished picture (the raw
+  // one stays as meta.original).
+  const shown = (await items()).find((g) => g.id === still.id).outputs[0];
+  assert.ok([shown.url, shown.meta?.original].includes(ref), `the reference is the still (${ref})`);
   assert.match(rec.request.prompt, /^Re-render this exact camera view of the scene/);
   const png = Buffer.from(await (await (await api).fetch(app + capture)).body());
   assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [864, 1536], "the capture is the 9:16 frame");

@@ -2,10 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { getModel } from "@/lib/catalog";
+import { onEngine } from "@/lib/catalog/engines";
 import {
   APERTURES,
   CAMERA_BODIES,
   CAMERA_MOVES,
+  CAST_MODELS,
+  CINEMA_CAMERA_LORA,
+  CINEMA_MAX_SECONDS,
+  CINEMA_MODELS,
+  LOCATION_MODELS,
   EMOTION_FAMILIES,
   ERAS,
   GENRES,
@@ -18,6 +24,7 @@ import {
   applyEmotions,
   castPrompt,
   checkReferences,
+  cinemaMoveRoute,
   compileDirector,
   gridPrompt,
   openCameraRoute,
@@ -192,81 +199,183 @@ const base = (over: Partial<CinemaGenerateInput>): CinemaGenerateInput => ({
   ...over,
 });
 
+const ctx = { cloudAllowed: true };
+/** fal bills LTX-2.3 per megapixel of video made (width × height × frames), rounded up. */
+const videoMp = (w: number, h: number, frames: number) => Math.ceil((w * h * frames) / 1e6);
+const route = (id: string, op: string, engine: "open" | "cloud" = "cloud") => onEngine(getModel(id)!, engine).routes.find((r) => r.op === op)!;
+
 describe("planCinema", () => {
-  it("runs Cinema Studio 4.0 natively with a Higgsfield key, fitted to what the API takes", () => {
-    const plan = planCinema(base({}), { higgsfield: true });
-    expect(plan.model.id).toBe("cinema-studio-4");
+  it("runs Fuobe Cinema on LTX-2.3 in the cloud: the Director in the prompt, the move as camera_lora, prompt expansion off", () => {
+    const plan = planCinema(base({}), ctx);
+    expect(plan.model).toMatchObject({ id: "fuobe-cinema", engine: "cloud" });
     expect(plan.blocker).toBeUndefined();
     const req = plan.steps[0].request;
-    expect(req.params).toMatchObject({ aspectRatio: "21:9", resolution: "720p", duration: 10, numOutputs: 2, generateAudio: true });
-    expect(req.params!.extra).toMatchObject({ genre: "noir", camera_movement: "dolly-in", color_palette: "neon-rain-at-midnight" });
-    expect(plan.notes.join(" ")).toMatch(/up to 720p/);
-    // 2 takes × 10 s × $0.4623.
-    expect(plan.costUsd).toBeCloseTo(9.246, 2);
-    // The payload Higgsfield receives.
-    const route = getModel("cinema-studio-4")!.routes.find((r) => r.op === "t2v")!;
-    const payload = buildPayload(route.map!, { ...req.params, prompt: req.prompt });
-    expect(payload).toMatchObject({ aspect_ratio: "21:9", resolution: "720p", duration: 10, genre: "noir", era: "1980s", pacing: "calm", light: "window", camera_movement: "dolly-in" });
+    expect(req).toMatchObject({ modelId: "fuobe-cinema", engine: "cloud" });
+    expect(req.params).toMatchObject({ aspectRatio: "21:9", resolution: "1080p", duration: 10, numOutputs: 2, generateAudio: true, extra: { camera_lora: "dolly_in" } });
+    expect(req.prompt).toContain("Noir film");
+    expect(req.prompt).toMatch(/Camera moves, in this order: first .*; finally /);
+    expect(plan.notes).toContain("Dolly In drives LTX-2.3's dolly in camera LoRA");
+    // 2 takes of 2240×960 (1080p at 21:9) × 241 frames, at $0.001605 per megapixel rounded up.
+    expect(plan.costUsd).toBeCloseTo(2 * videoMp(2240, 960, 241) * 0.001605, 3);
+    // What fal receives: the tier's exact size, 241 frames at 24 fps (8n+1), the camera LoRA, prompt expansion off.
+    const payload = buildPayload(route("fuobe-cinema", "t2v").map!, { ...req.params, prompt: req.prompt });
+    expect(payload).toMatchObject({ video_size: { width: 2240, height: 960 }, num_frames: 241, camera_lora: "dolly_in", enable_prompt_expansion: false, generate_audio: true });
+    // Sound off is sent as off.
+    const silent = planCinema(base({ audio: false }), ctx).steps[0].request;
+    expect(buildPayload(route("fuobe-cinema", "t2v").map!, { ...silent.params, prompt: silent.prompt })).toMatchObject({ generate_audio: false });
   });
 
-  it("falls back to Seedance 2.5 with the Director in the prompt without a Higgsfield key", () => {
-    const plan = planCinema(base({ modelId: "cinema-studio-4" }), { higgsfield: false });
+  it("a take longer than 20 s is one LTX-2.3 call plus one extend for the rest", () => {
+    const plan = planCinema(base({ duration: 30 }), ctx);
+    expect(plan.steps.map((s) => s.key)).toEqual(["main", "more"]);
+    expect(plan.steps[0].request.params!.duration).toBe(20);
+    expect(plan.steps[1]).toMatchObject({ after: ["main"], perJobOf: "main", request: { modelId: "fuobe-cinema", engine: "cloud", op: "extend", chain: [{ slot: "video" }], params: { duration: 10, extra: { camera_lora: "dolly_in" } } } });
+    expect(plan.steps[1].request.step).toMatchObject({ label: "Extended to 30s", index: 1, of: 2 });
+    expect(plan.notes.join(" ")).toMatch(/an extend adds the last 10s/);
+    // 20 s at 481 frames; the extend adds 241 frames; both takes are extended.
+    expect(buildPayload(route("fuobe-cinema", "t2v").map!, { ...plan.steps[0].request.params, prompt: "x" })).toMatchObject({ num_frames: 481 });
+    expect(buildPayload(route("fuobe-cinema", "extend").map!, { ...plan.steps[1].request.params, prompt: "x", video: "https://x/take.mp4" })).toMatchObject({ num_frames: 241, video_url: "https://x/take.mp4" });
+    // Each take: 481 frames, then the extend's 241, at the 21:9 1080p size.
+    expect(plan.costUsd).toBeCloseTo(2 * (videoMp(2240, 960, 481) + videoMp(2240, 960, 241)) * 0.001605, 3);
+    // Any whole second up to 20 in one call (no rounding to a preset length).
+    expect(planCinema(base({ duration: 7 }), ctx).steps[0].request.params!.duration).toBe(7);
+  });
+
+  it("partner models stay pickable with the Director in the prompt", () => {
+    const plan = planCinema(base({ modelId: "seedance-2-5" }), ctx);
     expect(plan.model.id).toBe("seedance-2-5");
-    expect(plan.notes[0]).toMatch(/needs a Higgsfield key/);
     const req = plan.steps[0].request;
     expect(req.params!.extra).toBeUndefined();
     expect(req.prompt).toContain("Noir film");
     expect(req.params!.duration).toBe(10);
-    // Kling 3.0 and Veo 3.1 fit the duration to what they make.
-    expect(planCinema(base({ modelId: "kling-3", duration: 30 }), { higgsfield: false }).steps[0].request.params!.duration).toBe(15);
-    expect(planCinema(base({ modelId: "veo-3-1", duration: 30 }), { higgsfield: false }).steps[0].request.params!.duration).toBe(8);
+    expect(planCinema(base({ modelId: "kling-3", duration: 30 }), ctx).steps[0].request.params!.duration).toBe(15);
+    expect(planCinema(base({ modelId: "veo-3-1", duration: 30 }), ctx).steps[0].request.params!.duration).toBe(8);
+    // An old pick (Cinema Studio 4.0 on Higgsfield) falls back to the Original.
+    expect(planCinema(base({ modelId: "cinema-studio-4" }), ctx).model.id).toBe("fuobe-cinema");
+    expect(CINEMA_MODELS.video.cloud).not.toContain("cinema-studio-4");
+    expect(CINEMA_MODELS.image.cloud).not.toContain("soul-cinema");
   });
 
-  it("open engine: Wan 2.2 Lightning, camera LoRA or Fun Camera, then a palette lock per take", () => {
-    const plan = planCinema(base({ engine: "open", moves: ["arc-left"], images: ["/api/files/a.png", "/api/files/b.png"] }), { higgsfield: false });
-    expect(plan.model.id).toBe("oss-wan22-14b-fast");
+  it("open engine: Fuobe Cinema on Wan 2.2 Lightning, camera LoRA or Fun Camera, then a palette lock per take", () => {
+    const plan = planCinema(base({ engine: "open", moves: ["arc-left"], images: ["/api/files/a.png", "/api/files/b.png"] }), ctx);
+    expect(plan.model).toMatchObject({ id: "fuobe-cinema", engine: "open" });
+    expect(plan.steps[0].request.engine).toBe("open");
     expect(plan.steps[0].request.loras?.length).toBeGreaterThan(0);
     expect(plan.steps[0].request.prompt).toMatch(/^orbit 360\. /);
     expect(plan.steps[0].request.inputs).toEqual({ images: ["/api/files/a.png"] });
+    expect(plan.notes.join(" ")).toMatch(/doesn't make 21:9/);
     // Without a start frame the move is camera language in the prompt.
-    const t2v = planCinema(base({ engine: "open", moves: ["arc-left"] }), { higgsfield: false });
+    const t2v = planCinema(base({ engine: "open", moves: ["arc-left"] }), ctx);
     expect(t2v.steps[0].request.loras).toBeUndefined();
     expect(t2v.notes.join(" ")).toMatch(/add a start frame/);
     expect(plan.steps[0].request.params!.duration).toBe(5);
+    expect(plan.steps[0].request.params!.generateAudio).toBeUndefined();
     expect(plan.steps[1]).toMatchObject({ key: "palette", perJobOf: "main", after: ["main"] });
     expect(plan.steps[1].request).toMatchObject({ modelId: "oss-palette-video", op: "color-match", chain: [{ slot: "video" }] });
     expect(plan.steps[1].swatch).toEqual(PALETTES.find((p) => p.slug === "neon-rain-at-midnight")!.hex);
     expect(plan.costUsd).toBe(0);
 
-    // A Fun Camera pose needs a start frame; without one the move goes into the prompt.
+    // A Fun Camera pose needs a start frame; it stays on Fuobe Cinema (its image-to-video graph runs the pose).
     expect(openCameraRoute("pan-left", true)).toMatchObject({ via: "fun-camera", pose: "Pan Left" });
-    const withFrame = planCinema(base({ engine: "open", moves: ["pan-left"], images: ["/api/files/a.png"], settings: {} }), { higgsfield: false });
-    expect(withFrame.model.id).toBe("oss-wan22-fun-camera");
+    const withFrame = planCinema(base({ engine: "open", moves: ["pan-left"], images: ["/api/files/a.png"], settings: {} }), ctx);
+    expect(withFrame.model.id).toBe("fuobe-cinema");
     expect(withFrame.steps[0].request.params!.extra).toMatchObject({ cameraMotion: "Pan Left" });
     expect(withFrame.steps).toHaveLength(1);
-    const noLock = planCinema(base({ engine: "open", settings: { ...NOIR, paletteLock: false } }), { higgsfield: false });
+    const noLock = planCinema(base({ engine: "open", settings: { ...NOIR, paletteLock: false } }), ctx);
     expect(noLock.steps).toHaveLength(1);
+    // LTX-2.5 is the open choice with sound; partner moves are words.
+    const ltx = planCinema(base({ engine: "open", modelId: "oss-ltx25", moves: ["arc-left"], images: ["/api/files/a.png"] }), ctx);
+    expect(ltx.model.id).toBe("oss-ltx25");
+    expect(ltx.steps[0].request.loras).toBeUndefined();
   });
 
-  it("multi-shot: Auto on Seedance, Manual into one prompt on Cinema Studio 4.0", () => {
-    const auto = planCinema(base({ multiShot: { mode: "auto" } }), { higgsfield: false });
+  it("every camera move has a route on both engines, and the camera LoRA map is the research's", () => {
+    const rec = JSON.parse(fs.readFileSync(path.join(__dirname, "../docs/research/fuobe-originals-recipes-5.json"), "utf8")).studios.find((s: { id: string }) => s.id === "cinema-studio").original;
+    expect(CINEMA_CAMERA_LORA).toEqual(rec.cameraLora.moves);
+    expect(Object.keys(CINEMA_CAMERA_LORA)).toEqual(CAMERA_MOVES.map((m) => m.slug));
+    expect(CINEMA_MAX_SECONDS).toBe(Math.floor(rec.cloud.maxFrames / rec.cloud.fps));
+    // Every camera_lora value is one the endpoint takes.
+    const enumValues = JSON.parse(fs.readFileSync(path.join(__dirname, "../docs/research/fuobe-originals-recipes-5.json"), "utf8"))
+      .hostedLoraEndpoints.find((e: { id: string }) => e.id === "fal-ai/ltx-2.3-22b/image-to-video/lora").inputs.camera_lora.values;
+    for (const v of Object.values(CINEMA_CAMERA_LORA)) if (v) expect(enumValues).toContain(v);
+
+    // Cloud, with a start frame: camera_lora (on Fuobe Cinema) or the move's Wan LoRA (on Fuobe DoP) or a hosted move; else words.
+    const words = new Set<string>();
+    for (const m of CAMERA_MOVES) {
+      const plan = planCinema(base({ moves: [m.slug], images: ["/api/files/a.png"], settings: {} }), ctx);
+      const req = plan.steps[0].request;
+      expect(plan.blocker, m.slug).toBeUndefined();
+      const r = cinemaMoveRoute(m.slug, "cloud", true);
+      if (r.via === "camera-lora") {
+        expect(req.modelId).toBe("fuobe-cinema");
+        expect(buildPayload(route("fuobe-cinema", "i2v").map!, { ...req.params, prompt: req.prompt, images: ["https://x/a.png"] }).camera_lora, m.slug).toBe(CINEMA_CAMERA_LORA[m.slug]);
+      } else if (r.via === "lora") {
+        expect(req.modelId, m.slug).toBe("fuobe-dop");
+        expect(req.loras!.length, m.slug).toBeGreaterThan(0);
+        expect(req.loras!.every((l) => l.licence?.hostedOk !== false), m.slug).toBe(true);
+      } else if (r.via === "hosted-move") {
+        expect(req.modelId).toBe("ltx-2-5-fast");
+        expect(req.params!.extra).toMatchObject({ camera_motion: "focus_shift" });
+      } else {
+        expect(req.modelId).toBe("fuobe-cinema");
+        words.add(m.slug);
+      }
+      // On the user's GPU every move is a Wan LoRA, a Fun Camera pose or words, always on Fuobe Cinema.
+      const open = planCinema(base({ engine: "open", moves: [m.slug], images: ["/api/files/a.png"], settings: {} }), ctx).steps[0].request;
+      expect(open.modelId).toBe("fuobe-cinema");
+      const o = cinemaMoveRoute(m.slug, "open", true);
+      if (o.via === "lora") expect(open.loras?.length).toBeGreaterThan(0);
+      if (o.via === "fun-camera") expect(open.params!.extra).toMatchObject({ cameraMotion: o.pose });
+    }
+    expect([...words].sort()).toEqual(["helicopter-shot", "pan-left", "pan-right", "tilt-down", "tilt-up", "whip-pan"]);
+    expect(Object.values(CINEMA_CAMERA_LORA).filter(Boolean)).toHaveLength(14);
+  });
+
+  it("a Wan-only move runs on Fuobe DoP in the cloud, Rack Focus on LTX-2.5's focus shift; both need a start frame", () => {
+    const arc = planCinema(base({ moves: ["arc-left"], images: ["/api/files/a.png"] }), ctx);
+    expect(arc.model).toMatchObject({ id: "fuobe-dop", engine: "cloud" });
+    expect(arc.steps[0].request.prompt).toMatch(/^orbit 360\. /);
+    expect(arc.notes.join(" ")).toMatch(/made for Wan 2.2, so this take runs on Fuobe DoP/);
+    expect(arc.steps[0].request.params!.duration).toBe(5);
+    // Wan 2.2 A14B with LoRAs: $0.10/s.
+    expect(arc.costUsd).toBeCloseTo(2 * 5 * 0.1, 3);
+    const t2v = planCinema(base({ moves: ["arc-left"] }), ctx);
+    expect(t2v.model.id).toBe("fuobe-cinema");
+    expect(t2v.notes.join(" ")).toMatch(/add a start frame to drive it with its camera LoRA$/);
+    const focus = planCinema(base({ moves: ["rack-focus"], images: ["/api/files/a.png"], aspectRatio: "16:9" }), ctx);
+    expect(focus.model.id).toBe("ltx-2-5-fast");
+    expect(focus.steps[0].request.params!.extra).toMatchObject({ camera_motion: "focus_shift" });
+  });
+
+  it("multi-shot: Auto on Seedance, Manual into one prompt on Fuobe Cinema in the cloud, one clip per shot on the GPU", () => {
+    const auto = planCinema(base({ modelId: "seedance-2-5", multiShot: { mode: "auto" } }), ctx);
     expect(auto.steps[0].request.params!.multiShot).toBe("auto");
-    const manual = planCinema(
-      base({ multiShot: { mode: "manual", shots: [{ prompt: "wide of the street", duration: 4 }, { prompt: "close on @maya", duration: 6 }] } }),
-      { higgsfield: true },
-    );
+    expect(planCinema(base({ multiShot: { mode: "auto" } }), ctx).notes.join(" ")).toMatch(/can't plan its own cuts/);
+    const shots = [{ prompt: "wide of the street", duration: 4 }, { prompt: "close on @maya", duration: 6 }];
+    const manual = planCinema(base({ multiShot: { mode: "manual", shots } }), ctx);
     expect(manual.steps[0].request.prompt).toMatch(/Shot 1 \[0-4s\]: wide of the street\. Shot 2 \[4-10s\]: close on @maya/);
     expect(manual.steps[0].request.params!.duration).toBe(10);
+    const open = planCinema(base({ engine: "open", multiShot: { mode: "manual", shots } }), ctx);
+    expect(open.steps[0].request.params!.shots).toEqual([{ prompt: "wide of the street", duration: 3 }, { prompt: "close on @maya", duration: 5 }]);
   });
 
-  it("image mode: stills need the camera; grids are one contact sheet", () => {
-    const blocked = planCinema(base({ mode: "image", settings: { genre: "noir" } }), { higgsfield: false });
+  it("image mode: stills on Fuobe Soul Cinema need the camera; grids are one contact sheet", () => {
+    const blocked = planCinema(base({ mode: "image", settings: { genre: "noir" } }), ctx);
     expect(blocked.blocker).toMatch(/Camera settings are required/);
-    const still = planCinema(base({ mode: "image", resolution: undefined }), { higgsfield: false });
+    const still = planCinema(base({ mode: "image", resolution: undefined }), ctx);
     expect(still.blocker).toBeUndefined();
-    expect(still.model.id).toBe("nano-banana-pro");
-    expect(still.steps[0].request).toMatchObject({ feature: "cinema-image", params: { aspectRatio: "21:9", resolution: "1K", numOutputs: 2 } });
-    const grid = planCinema(base({ mode: "image", action: "grid", grid: { size: "3x3", type: "zooms" } }), { higgsfield: false });
+    expect(still.model).toMatchObject({ id: "fuobe-soul-cinema", engine: "cloud" });
+    // Cinema's 1K is Soul's 720p tier (about 1 MP); 21:9 is Soul Cinema's crop.
+    expect(still.steps[0].request).toMatchObject({ feature: "cinema-image", engine: "cloud", params: { aspectRatio: "21:9", resolution: "720p", numOutputs: 2 } });
+    expect(planCinema(base({ mode: "image", resolution: "4K" }), ctx).notes.join(" ")).toMatch(/up to about 2 megapixels/);
+    const open = planCinema(base({ mode: "image", engine: "open", resolution: "2K" }), ctx);
+    expect(open.model).toMatchObject({ id: "fuobe-soul-cinema", engine: "open" });
+    expect(open.steps.map((s) => s.request.modelId)).toEqual(["fuobe-soul-cinema", "oss-palette-image"]);
+    expect(open.steps[0].request.params!.resolution).toBe("1080p");
+    expect(open.costUsd).toBe(0);
+    // A partner still stays pickable.
+    expect(planCinema(base({ mode: "image", modelId: "nano-banana-pro" }), ctx).model.id).toBe("nano-banana-pro");
+    const grid = planCinema(base({ mode: "image", action: "grid", grid: { size: "3x3", type: "zooms" } }), ctx);
     expect(grid.steps[0].request.params!.numOutputs).toBe(1);
     expect(grid.steps[0].request.prompt).toMatch(/3×3 grid of 9 equally sized film stills/);
     expect(grid.steps[0].request.prompt).toMatch(/extreme wide shot/);
@@ -275,25 +384,38 @@ describe("planCinema", () => {
 
   it("extend forward / backward and edit on a selected take", () => {
     const source = { url: "/api/files/take.mp4", kind: "video" as const };
-    const fwd = planCinema(base({ action: "extend-forward", source }), { higgsfield: true });
-    expect(fwd.model.id).toBe("seedance-2-5");
-    expect(fwd.steps[0].request).toMatchObject({ op: "extend", inputs: { video: source.url } });
-    expect(planCinema(base({ engine: "open", action: "extend-forward", source }), { higgsfield: false }).model.id).toBe("oss-wan22-vace-extend");
+    const fwd = planCinema(base({ action: "extend-forward", source }), ctx);
+    expect(fwd.model).toMatchObject({ id: "fuobe-cinema", engine: "cloud" });
+    expect(fwd.steps[0].request).toMatchObject({ op: "extend", engine: "cloud", inputs: { video: source.url }, params: { duration: 10, numOutputs: 1, extra: { camera_lora: "dolly_in" } } });
+    // A partner that extends on fal keeps the take; on the GPU it is Wan 2.2 Fun VACE.
+    expect(planCinema(base({ modelId: "seedance-2-5", action: "extend-forward", source }), ctx).model.id).toBe("seedance-2-5");
+    expect(planCinema(base({ engine: "open", action: "extend-forward", source }), ctx).model.id).toBe("oss-wan22-vace-extend");
 
-    const back = planCinema(base({ action: "extend-backward", source }), { higgsfield: false });
-    expect(back.steps.map((s) => s.key)).toEqual(["frame", "before", "main"]);
-    expect(back.steps[0].request).toMatchObject({ modelId: "extract-frame", params: { extra: { frame_type: "first" } } });
-    expect(back.steps[2]).toMatchObject({ after: ["before", "frame"], request: { op: "flf2v", chain: [{ slot: "images", position: "first" }, { slot: "endImage" }] } });
-    const backOpen = planCinema(base({ engine: "open", action: "extend-backward", source: { ...source, firstFrame: "/api/files/f.png" } }), { higgsfield: false });
-    expect(backOpen.steps.map((s) => s.request.modelId)).toEqual(["oss-qwen-edit", "oss-wan22-14b-fast"]);
-    expect(backOpen.steps[1].request.inputs).toEqual({ endImage: "/api/files/f.png" });
+    // Fuobe Cinema's prequel: LTX-2.3 extends the take backward in one call.
+    const back = planCinema(base({ action: "extend-backward", source }), ctx);
+    expect(back.steps).toHaveLength(1);
+    expect(back.steps[0].request).toMatchObject({ modelId: "fuobe-cinema", op: "extend", inputs: { video: source.url }, params: { extra: { extend_direction: "backward" } } });
+    expect(buildPayload(route("fuobe-cinema", "extend").map!, { ...back.steps[0].request.params, prompt: "x", video: "https://x/t.mp4" })).toMatchObject({ extend_direction: "backward", enable_prompt_expansion: false });
+    // A partner's prequel: the first frame, the moment before, then a start/end-frame clip.
+    const partner = planCinema(base({ modelId: "seedance-2-5", action: "extend-backward", source }), ctx);
+    expect(partner.steps.map((s) => s.key)).toEqual(["frame", "before", "main"]);
+    expect(partner.steps[0].request).toMatchObject({ modelId: "extract-frame", params: { extra: { frame_type: "first" } } });
+    expect(partner.steps[2]).toMatchObject({ after: ["before", "frame"], request: { op: "flf2v", chain: [{ slot: "images", position: "first" }, { slot: "endImage" }] } });
+    const backOpen = planCinema(base({ engine: "open", action: "extend-backward", source: { ...source, firstFrame: "/api/files/f.png" } }), ctx);
+    expect(backOpen.steps.map((s) => s.request.modelId)).toEqual(["oss-qwen-edit", "fuobe-cinema"]);
+    expect(backOpen.steps[1].request).toMatchObject({ engine: "open", op: "flf2v", inputs: { endImage: "/api/files/f.png" } });
 
-    expect(planCinema(base({ action: "edit", source, prompt: "make it snow" }), { higgsfield: false }).steps[0].request).toMatchObject({ modelId: "kling-o3", op: "v2v" });
-    expect(planCinema(base({ action: "edit", source, prompt: "make it snow" }), { higgsfield: true }).steps[0].request.modelId).toBe("seedance-2-5");
-    expect(planCinema(base({ action: "edit", source: undefined }), { higgsfield: false }).blocker).toBe("Select a video take to edit");
+    // Edit: LTX-2.3 video to video on Fuobe Cinema; a partner's take is edited with Kling O3.
+    const edit = planCinema(base({ action: "edit", source, prompt: "make it snow", images: ["/api/files/ref.png"] }), ctx);
+    expect(edit.steps[0].request).toMatchObject({ modelId: "fuobe-cinema", engine: "cloud", op: "v2v", inputs: { video: source.url } });
+    expect(edit.steps[0].request.inputs!.images).toBeUndefined();
+    const kling = planCinema(base({ modelId: "seedance-2-5", action: "edit", source, prompt: "make it snow" }), ctx);
+    expect(kling.steps[0].request).toMatchObject({ modelId: "kling-o3", op: "v2v" });
+    expect(kling.notes.join(" ")).toMatch(/edited with Kling O3/);
+    expect(planCinema(base({ action: "edit", source: undefined }), ctx).blocker).toBe("Select a video take to edit");
   });
 
-  it("Soul Cast and Soul Location prompts", () => {
+  it("Soul Cast and Soul Location on Fuobe Soul, other views with the Multiple-Angles LoRA", () => {
     const values = { genre: "Western", budget: 150, era: 1880, archetype: "Rebel", gender: "Female", race: "Latino", age: 35, facial_hair: "Beard", imperfections: ["Freckles", "Facial scar"], outfit: "Workwear" };
     expect(visibleCast(values).facial_hair).toBeUndefined();
     const p = castPrompt(values);
@@ -303,12 +425,44 @@ describe("planCinema", () => {
     expect(p).toMatch(/Full-body front view, three-quarter view, side profile and back view/);
     const r = randomizeCast({}, () => 0.5);
     expect(Object.keys(r).sort()).toEqual(["age", "archetype", "era", "gender", "genre", "race"]);
-    const cast = planCinema(base({ action: "cast", mode: "image", cast: values, prompt: "" }), { higgsfield: false });
+    const cast = planCinema(base({ action: "cast", mode: "image", cast: values, prompt: "" }), ctx);
     expect(cast.blocker).toBeUndefined();
-    expect(cast.steps[0].request).toMatchObject({ feature: "cinema-cast", modelId: "nano-banana-pro", params: { aspectRatio: "16:9" } });
-    expect(planCinema(base({ action: "cast", mode: "image", cast: values }), { higgsfield: true }).model.id).toBe("soul-2");
-    const loc = planCinema(base({ action: "location", mode: "image", prompt: "an abandoned diner on Route 66", brief: "" }), { higgsfield: false });
+    expect(cast.steps[0].request).toMatchObject({ feature: "cinema-cast", modelId: "fuobe-soul", engine: "cloud", presetId: "v1-realistic", params: { aspectRatio: "16:9", resolution: "1080p" } });
+    // On the GPU: the Soul Cast sheet graph with Fuobe Soul's Realistic look (its LoRAs and words), which also cuts the
+    // sheet's four views; Fuobe Soul alone when the graph is missing or picked.
+    const open = planCinema(base({ action: "cast", mode: "image", cast: values, engine: "open" }), ctx);
+    expect(open.model.id).toBe("oss-zimage-soul-cast");
+    const sheet = open.steps[0].request;
+    expect(sheet.presetId).toBeUndefined();
+    expect(sheet.loras?.map((l) => l.file).length).toBeGreaterThan(0);
+    expect(sheet.prompt).toMatch(/No filters, flawless clarity/);
+    expect(sheet.prompt).toMatch(/35-year-old latino woman, the rebel archetype/);
+    expect(open.notes.join(" ")).toMatch(/Realistic look on the Soul Cast sheet graph: the sheet, then its four views/);
+    expect(CAST_MODELS.open).toEqual(["oss-zimage-soul-cast", "fuobe-soul"]);
+    const noSheet = planCinema(base({ action: "cast", mode: "image", cast: values, engine: "open" }), { ...ctx, has: (id: string) => id !== "oss-zimage-soul-cast" });
+    expect(noSheet.model).toMatchObject({ id: "fuobe-soul", engine: "open" });
+    expect(noSheet.steps[0].request).toMatchObject({ presetId: "v1-realistic" });
+    expect(planCinema(base({ action: "cast", mode: "image", cast: values, engine: "open", modelId: "fuobe-soul" }), ctx).model.id).toBe("fuobe-soul");
+    expect(planCinema(base({ action: "cast", mode: "image", cast: values, modelId: "nano-banana-pro" }), ctx).model.id).toBe("nano-banana-pro");
+    expect(CAST_MODELS.cloud).not.toContain("soul-2");
+
+    const loc = planCinema(base({ action: "location", mode: "image", prompt: "an abandoned diner on Route 66", brief: "" }), ctx);
+    expect(loc.steps[0].request).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-movie", params: { aspectRatio: "16:9", resolution: "1080p" } });
     expect(loc.steps[0].request.prompt).toMatch(/^Establishing shot of a film location: an abandoned diner on Route 66\. An empty set with no people/);
+    expect(LOCATION_MODELS.cloud).not.toContain("soul-cinema");
+
+    const still = { url: "/api/files/diner.png", kind: "image" as const };
+    const reverse = planCinema(base({ action: "location-view", mode: "image", view: "reverse", source: still, prompt: "" }), ctx);
+    expect(reverse.steps[0].request).toMatchObject({ modelId: "qwen-multiple-angles", op: "edit", inputs: { images: [still.url] }, params: { extra: { horizontal_angle: 180, vertical_angle: 0, zoom: 5 } } });
+    const high = planCinema(base({ action: "location-view", mode: "image", view: "high", source: still, prompt: "", engine: "open" }), ctx);
+    expect(high.steps[0].request).toMatchObject({ modelId: "oss-qwen-edit", op: "edit" });
+    expect(high.steps[0].request.prompt).toMatch(/^<sks> front view high-angle shot medium shot\. Show the same location from a high angle/);
+    expect(high.steps[0].request.loras?.[0].file).toMatch(/multiple-angles/);
+    expect(planCinema(base({ action: "location-view", mode: "image", view: "wide", prompt: "" }), ctx).blocker).toBe("Pick the location image to re-angle");
+    // The project brief keeps the project's look in other views too, on both engines (after the LoRA's own words).
+    const briefed = (engine: "open" | "cloud") => planCinema(base({ action: "location-view", mode: "image", view: "high", source: still, prompt: "", engine, brief: "Muted 1970s Kodachrome" }), ctx).steps[0].request;
+    expect(briefed("cloud").prompt).toMatch(/Project brief: Muted 1970s Kodachrome/);
+    expect(briefed("open").prompt).toMatch(/^<sks> front view high-angle shot medium shot\. .*Project brief: Muted 1970s Kodachrome/s);
   });
 });
 

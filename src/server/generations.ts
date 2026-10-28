@@ -10,7 +10,7 @@ import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
-import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor } from "@/lib/catalog/plan";
+import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
@@ -43,7 +43,9 @@ import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
+import { offeredLoras, offeredRoutes, requireOffered } from "./model-access";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
@@ -291,6 +293,8 @@ export const ASSET_REFS: AssetRef[] = [
   { table: "katana_jobs", cols: ["data_json"], what: "Katana job", name: "json_extract(data_json, '$.title')" },
   // Content Factory: a series' reference clip and its thumbnail.
   { table: "content_series", cols: ["data_json"], what: "Content Factory series", name: "COALESCE(json_extract(data_json, '$.name'), json_extract(data_json, '$.reference.title'))" },
+  // Assist's scheduled tasks: the files the prompt runs with.
+  { table: "assist_schedules", cols: ["attachments_json"], what: "scheduled task", name: "title" },
 ];
 
 /**
@@ -315,7 +319,13 @@ export const ASSET_FREE: Record<string, string> = {
   "skills.files_json": "a skill's own text files, stored inline",
   "lora_mirrors.source_url": "where a LoRA file downloads from (civitai, Hugging Face), without the key",
   "lora_mirrors.hosted_url": "the provider's copy of a LoRA file (fal or Replicate storage), never ours",
+  "shares.tags_json": "words",
+  "shares.items_json": "generation ids: a share link shows what still exists and keeps no file alive",
   "lora_mirrors.licence_json": "the licence and civitai permissions a LoRA copy was made under",
+  "assist_schedules.rule_json": "when a scheduled task runs",
+  "assist_schedules.mode_json": "the Assist mode a scheduled run starts in",
+  "assist_connectors.url": "a remote MCP server Claude connects to, never one of ours",
+  "assist_connectors.tools_json": "the tool names a connector is limited to",
 };
 
 /** The query that finds the rows of one ASSET_REFS table naming a file (@id), except the purged generation's own (@g). */
@@ -448,14 +458,29 @@ export function relightStep(req: GenerationRequest, model: ModelDef): { engine: 
   return { engine, step: preset.prestep[engine] };
 }
 
+/**
+ * The model a request may run, as Settings → Models & licences offers it (only its routes that are on). Engine mode
+ * refuses an Original's engine it rules out first; then a model that is off is refused naming the switch, and so is
+ * an Original's engine that is off when it is the one asked for, or the one the install's engine mode runs it on.
+ * Every run and every chain (createGenerations, before any step is queued) goes through it.
+ */
+export function offeredFor(m: ModelDef, asked: Engine | undefined): ModelDef {
+  const mode = engineMode();
+  if (dualEngine(m)) pickEngine(m, asked, mode, () => true);
+  return requireOffered(m, asked ?? (mode === "both" ? undefined : mode));
+}
+
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
   // A style signature's sentences (palette, look) join the prompt here; the stored request keeps the user's words.
   const worded = withSignatureWords(original);
   const mode = engineMode();
+  // Settings → Models & licences: a model (or the engine of an Original asked for) that is switched off is refused,
+  // naming the switch; an Original otherwise runs on an engine that is still on, with the routes that are on.
   const found = getModel(worded.modelId);
-  const model = found && dualEngine(found) ? onEngine(found, engineFor(found, worded.engine)) : found;
+  const allowed = found && offeredFor(found, worded.engine);
+  const model = allowed && dualEngine(allowed) ? onEngine(allowed, engineFor(allowed, worded.engine)) : allowed;
   const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
   const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
   let plan = planGeneration(req, lookup, getPreset);
@@ -471,7 +496,13 @@ function prepare(original: GenerationRequest) {
   if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
   // The length asked of a clip that is made (not one that follows its input video's length).
   const seconds = MADE_LENGTH_OPS.has(plan.op) ? plan.params.duration : undefined;
-  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras, seconds);
+  // LoRAs switched off (by file or licence class) are left out, their trigger words with them; with "keep GPU-only
+  // LoRAs on your GPU" on, the rest are marked so a cloud route leaves those out (fitLoras).
+  const access = offeredLoras(plan.loras);
+  if (access.dropped.length) plan = { ...plan, loras: access.loras, prompt: withoutTriggers(plan.prompt, plan.loras.filter((l) => !access.loras.some((k) => k.file === l.file)), access.loras) };
+  else if (access.loras.some((l, i) => l !== plan.loras[i])) plan = { ...plan, loras: access.loras };
+  // A preset can route to another model than the one asked for: its routes that are on (or the switch that's off).
+  const { route, demo } = chooseRoute(offeredRoutes(plan.model, routesFor(plan.model, plan.op)), req.inputs?.images?.length ?? 0, plan.loras, seconds);
   // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
   // takes at most so many (the plan's notes say which were left out). Open runs carry them all. Without a
   // civitai key a Soul look's civitai LoRA the run can't get is left out (and said), rather than failing at the
@@ -483,7 +514,7 @@ function prepare(original: GenerationRequest) {
   // A Soul look's triggers lead the prompt: a LoRA left out takes its trigger with it.
   const prompt = plan.soul ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras) : plan.prompt;
   plan = { ...plan, prompt, loras: fitted.loras };
-  const notes = [...(plan.notes ?? []), ...reachable.notes, ...fitted.notes];
+  const notes = [...(plan.notes ?? []), ...access.notes, ...reachable.notes, ...fitted.notes];
   // A frame-count API that can't make the length asked (Replicate's Wan 2.2 fast: 81–121 frames) says what it makes.
   const made = demo ? undefined : framedLength(route.map?.numFrames, seconds, plan.params.fps);
   if (made !== undefined && route.map?.numFrames) {
@@ -505,7 +536,7 @@ function prepare(original: GenerationRequest) {
   const unreachable = asked.filter((l) => !reachable.loras.includes(l));
   // Priced for the clip the route makes: Replicate's Wan 2.2 fast makes 5 s when 3 s was asked.
   const priced = made !== undefined && plan.params.duration !== undefined ? { ...plan.params, duration: Math.round(made * 2) / 2 } : plan.params;
-  return { req, plan, route, demo, providerId, notes, asked, unreachable, cost: free ? 0 : estimateCost(plan.model, priced, 1, plan.op, withLoras) };
+  return { req, plan, route, demo, providerId, notes, asked, unreachable, switchedOff: access.dropped, cost: free ? 0 : estimateCost(plan.model, priced, 1, plan.op, withLoras) };
 }
 
 /** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */
@@ -514,9 +545,12 @@ const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "ext
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
-  const { plan, route, demo, providerId, cost, notes, asked, unreachable } = prepare(req);
+  const { plan, route, demo, providerId, cost, notes, asked, unreachable, switchedOff } = prepare(req);
   const fitted = routeLoras(route, asked.filter((l) => !unreachable.includes(l)));
-  const loras = { ...fitted, dropped: [...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped] };
+  const loras = {
+    ...fitted,
+    dropped: [...switchedOff, ...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped],
+  };
   return {
     model: plan.model,
     op: plan.op,
@@ -561,7 +595,10 @@ const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (J
 export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
   // Open models make multi-shot films shot by shot, then join the clips. A Fuobe Original is taken on the engine it runs
   // on (Fuobe DoP's Frames mode is a GPU chain).
-  const found = getModel(original.modelId);
+  // A model (or an Original's engine asked for) switched off in Settings → Models & licences is refused here, before a
+  // chain queues any step; an Original otherwise runs on an engine still on.
+  const catalogModel = getModel(original.modelId);
+  const found = catalogModel && offeredFor(catalogModel, original.engine);
   const shotModel = found && dualEngine(found) ? onEngine(found, engineFor(found, original.engine)) : found;
   if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
     return createShotFilm(original, shotModel);
@@ -754,9 +791,13 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
  * "prompt" slot can't be told from the prompt, so it stays.
  */
 export function unfilledRequest(req: GenerationRequest, deps: number): GenerationRequest {
-  const { chainFilled, ...rest } = req;
-  if (!chainFilled) return rest;
-  const slots = slotsFor(rest, deps);
+  const { chainFilled, chainSkipped, ...rest } = req;
+  // A fallback's notice belongs to the run that fell back, not to a retry.
+  delete rest.notice;
+  if (!chainFilled) return chainSkipped ? { ...rest, ...(chainSkipped.prompt !== undefined ? { prompt: chainSkipped.prompt } : {}) } : rest;
+  // Optional slots left out filled nothing; the fallback's prompt goes back to the one planned.
+  if (chainSkipped?.prompt !== undefined) rest.prompt = chainSkipped.prompt;
+  const slots = filledSlots({ ...rest, chainSkipped }, deps);
   const inputs = { ...rest.inputs };
   for (const k of ["images", "videos", "audios"] as const) {
     const count = (pos: "first" | "last") => slots.filter((s) => s.slot === k && (s.position ?? "last") === pos).length;
@@ -847,26 +888,57 @@ function dropUnused(ids: string[]): void {
   }
 }
 
+/**
+ * A step with optional inputs whose steps failed (ChainSlot.optional): its chain without those slots, the fallback's
+ * prompt and notice, and what was left out (so a retry can put the request back as it was: unfilledRequest).
+ */
+export function withoutSkipped(req: GenerationRequest, slots: ChainSlot[], skipped: number[]): GenerationRequest {
+  const left = skipped.map((i) => slots[i]);
+  const prompt = left.map((s) => s.optional?.prompt).find((p) => p !== undefined);
+  const notice = [req.notice, ...left.map((s) => s.optional?.notice)].filter(Boolean).join(" · ");
+  return {
+    ...req,
+    chainSkipped: { slots: skipped, ...(prompt !== undefined && req.prompt !== undefined ? { prompt: req.prompt } : {}) },
+    ...(prompt !== undefined ? { prompt } : {}),
+    ...(notice ? { notice } : {}),
+  };
+}
+
+/** The chain slots a step fills: its own, less the optional ones left out (chainSkipped). */
+const filledSlots = (req: GenerationRequest, n: number): ChainSlot[] => slotsFor(req, n).filter((_, i) => !req.chainSkipped?.slots.includes(i));
+
 /** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
 async function advanceDependents(): Promise<void> {
   const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
   for (const r of rows) {
     if (submitting().has(r.id)) continue;
-    const request = JSON.parse(r.request_json) as GenerationRequest;
-    const ids = depIds(r.depends_on);
-    const slots = slotsFor(request, ids.length);
-    const deps = ids.map((id) => db().prepare("SELECT status, provider, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json"> | undefined);
-    const earlier = request.frame ? "The previous frame" : "An earlier step";
+    const stored = JSON.parse(r.request_json) as GenerationRequest;
+    const allIds = depIds(r.depends_on);
+    const allSlots = slotsFor(stored, allIds.length);
+    const allDeps = allIds.map(
+      (id) => db().prepare("SELECT status, provider, outputs_json, request_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json" | "request_json"> | undefined,
+    );
+    const earlier = stored.frame ? "The previous frame" : "An earlier step";
     const fail = (error: string) => {
       update(r.id, { status: "failed", error, message: null, completed_at: Date.now() });
       // Steps waiting only to feed this one (the other lanes of a per-frame render) are dropped before they are paid for.
-      dropUnused(ids);
+      dropUnused(allIds);
     };
-    if (deps.some((d) => !d || d.status === "failed" || d.status === "canceled")) {
-      fail(waitedOnFailure(!!request.frame));
+    const broken = (d: (typeof allDeps)[number]) => !d || d.status === "failed" || d.status === "canceled";
+    // An optional input whose step failed is left out (Genjutsu's anchor frame): the step runs without it.
+    const skipped = allSlots.flatMap((s, i) => (s.optional && broken(allDeps[i]) ? [i] : []));
+    if (allDeps.some((d, i) => broken(d) && !skipped.includes(i))) {
+      fail(waitedOnFailure(!!stored.frame));
       continue;
     }
+    const keep = (_: unknown, i: number) => !skipped.includes(i);
+    const deps = allDeps.filter(keep);
+    const slots = allSlots.filter(keep);
     if (deps.some((d) => d!.status !== "succeeded")) continue;
+    const request = skipped.length ? withoutSkipped(stored, allSlots, skipped) : stored;
+    // What changed upstream (an earlier fallback) is said on this step too, down to the finished result.
+    const notices = [request.notice, ...deps.map((d) => (JSON.parse(d!.request_json) as GenerationRequest).notice)].filter((x): x is string => !!x);
+    if (notices.length) request.notice = [...new Set(notices)].join(" · ");
     const outputs = deps.map((d) => JSON.parse(d!.outputs_json) as OutputFile[]);
     const short = slots.map((s, i) => listShortfall(outputs[i], s)).find(Boolean);
     if (short) {
@@ -887,7 +959,9 @@ async function advanceDependents(): Promise<void> {
       const model = getModel(request.modelId);
       if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
       if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
-      const original: GenerationRequest = { ...withChainInputs(request, values as string[]), chainFilled: true };
+      // Filled with the slots that have an input; stored with its whole chain (and what was skipped) for a retry.
+      const filled = withChainInputs({ ...request, chain: slots }, values as string[]);
+      const original: GenerationRequest = { ...filled, chain: request.chain, chainFilled: true };
       const prepared = prepare(original);
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
       if (mode.error) throw new Error(mode.error);
@@ -1004,8 +1078,9 @@ async function submit(
     // file mirrored once to the provider's storage (the civitai key never leaves this server).
     if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
       input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
-    } else if (input.loras?.length && providerId === "comfyui") {
-      await ensureLorasOnComfy(input.loras, await comfyLoraFiles(route), (message) => update(id, { message }));
+    } else if (providerId === "comfyui" && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
+      // A graph that loads its own LoRAs (Genjutsu's Character swap: the Turbo and swap LoRAs) gets them downloaded too.
+      await ensureLorasOnComfy([...(input.loras ?? []), ...graphLoras(route.endpoint, input.extra)], await comfyLoraFiles(route), (message) => update(id, { message }));
     }
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
     const now = Date.now();

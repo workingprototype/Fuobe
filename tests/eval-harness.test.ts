@@ -23,6 +23,7 @@ process.env.COMFYUI_URL = "http://127.0.0.1:9";
 process.env.OLLAMA_URL = "http://127.0.0.1:9";
 
 const { setSetting } = await import("@/server/settings");
+const { getElement } = await import("@/server/elements");
 const status = await import("@/app/api/status/route");
 const models = await import("@/app/api/models/route");
 const generations = await import("@/app/api/generations/route");
@@ -229,20 +230,42 @@ describe("the runner on the demo provider", () => {
     expect(row.status).toBe("succeeded");
     const body = (row.request as { route: string; body: Record<string, unknown> }).body;
     expect((row.request as { route: string }).route).toBe("/api/genjutsu");
-    expect(body).toMatchObject({ engine: "open", mode: "motion", modelId: "oss-wan22-animate", seed: 1001 });
+    expect(body).toMatchObject({ engine: "open", mode: "motion", modelId: "fuobe-genjutsu-motion", seed: 1001 });
     expect(String(body.requestId)).toMatch(/^eval-[0-9a-f]{24}$/);
     expect((body.source as { url: string }).url).toMatch(/^\/api\/files\//);
     if (fs.existsSync("/usr/bin/ffprobe")) expect(body.source).toMatchObject({ fps: 24, width: 432, height: 768, duration: 4 });
     expect(row.outputs?.[0]?.kind).toBe("video");
   });
 
+  it("runs Genjutsu's Character swap on the 6 s fixture clip: the part, the character, who to swap", async () => {
+    const r = await cli(["run", "--suite", "genjutsu", "--engine", "demo", "--cases", "genjutsu/character,genjutsu/character-plain", "--no-metrics"]);
+    expect(r.code, r.stderr).toBe(0);
+    const rows = store.latestJobs(path.join(results, runIdFrom(r.stderr)));
+    expect(rows.map((x) => [x.caseId, x.status]).sort()).toEqual([
+      ["genjutsu/character", "succeeded"],
+      ["genjutsu/character-plain", "succeeded"],
+    ]);
+    const body = (rows.find((x) => x.caseId === "genjutsu/character")!.request as { body: Record<string, unknown> }).body;
+    expect(body).toMatchObject({ mode: "character", modelId: "fuobe-character-swap", range: { start: 0, end: 5 }, character: { who: "largest" } });
+    if (fs.existsSync("/usr/bin/ffprobe")) expect(body.source).toMatchObject({ duration: 6, width: 432, height: 768 });
+  });
+
   it("a training case in a demo run makes an element from the fixtures and @mentions it (no training)", async () => {
-    const r = await cli(["run", "--suite", "soul-id", "--engine", "demo", "--prompts", "1", "--variants", "trained", "--no-metrics"]);
+    const r = await cli(["run", "--suite", "soul-id", "--engine", "demo", "--cases", "soul-id/character,soul-id/look", "--prompts", "1", "--variants", "trained", "--no-metrics"]);
     const runDir = path.join(results, runIdFrom(r.stderr));
-    const el = JSON.parse(fs.readFileSync(path.join(runDir, "elements.json"), "utf8"))["soul-id/character"];
+    const elements = JSON.parse(fs.readFileSync(path.join(runDir, "elements.json"), "utf8"));
+    const el = elements["soul-id/character"];
     expect(el).toMatchObject({ status: "demo", photos: 3 });
-    const [row] = store.latestJobs(runDir);
-    expect(String((row.request as { prompt: string }).prompt)).toContain(`@${el.handle} as a chef`);
+    const rows = store.latestJobs(runDir);
+    const prompt = (caseId: string) => String((rows.find((x) => x.caseId === caseId)!.request as { prompt: string }).prompt);
+    expect(prompt("soul-id/character")).toContain(`@${el.handle} as a chef`);
+    // The look case makes a style element (no consent line), @mentioned on Fuobe Soul.
+    expect(elements["soul-id/look"]).toMatchObject({ status: "demo", photos: 2 });
+    expect(prompt("soul-id/look")).toContain(`@${elements["soul-id/look"].handle} a lighthouse`);
+    // The trained style is the look, as the app runs a trained moodboard: none of Soul's own look LoRAs under it.
+    expect((rows.find((x) => x.caseId === "soul-id/look")!.request as { presetId?: string }).presetId).toBe("own-style");
+    const look = getElement(elements["soul-id/look"].id);
+    expect(look?.kind).toBe("style");
   });
 
   it("never runs a job through Higgsfield's API, and runs each Genjutsu mode's own partner model", async () => {
@@ -255,20 +278,37 @@ describe("the runner on the demo provider", () => {
       setSetting("cloudProvider", "higgsfield");
       const soul = await dry(["--suite", "soul", "--engine", "cloud", "--looks", "v1-general", "--variants", "plain", "--prompts", "1"]);
       expect(soul.jobs.map((j) => j.skip)).toEqual([expect.stringMatching(/would run on Higgsfield's API/)]);
-      // Genjutsu's studio route lists its steps' providers: Motion Control and O3 edit go to Higgsfield, the 4K edit is fal-only.
+      // Genjutsu's studio route lists its steps' providers: Motion Control goes to Higgsfield, the 4K edit is fal-only.
       const gh = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "partner", "--allow-fixtures"]);
       const by = (p: Plan) => Object.fromEntries(p.jobs.map((j) => [j.case, j]));
       expect(by(gh)["genjutsu/move"].skip).toMatch(/Higgsfield's API/);
       expect(by(gh)["genjutsu/restyle"]).toMatchObject({ model: "kling-o3-4k-edit" });
       expect(by(gh)["genjutsu/restyle"].skip).toBeUndefined();
-      // On Auto with fal connected, each mode runs its own partner on fal, even with a Higgsfield key set (no Genjutsu Lite).
+      // On Auto with fal connected, each mode runs its own partner on fal, even with a Higgsfield key set.
       setSetting("cloudProvider", "auto");
       const g = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "partner", "--allow-fixtures"]);
       expect(g.jobs.map((j) => [j.case, j.model, j.skip ?? null])).toEqual([
         ["genjutsu/move", "kling-motion-control", null],
+        // A case with no partner of its own runs its own models (the -lite tiers, the Original without its first frame).
+        ["genjutsu/move-lite", "fuobe-genjutsu-motion-lite", null],
+        // Character swap's partner: MiniMax's own Recast on fal.
+        ["genjutsu/character", "h3-max-recast", null],
+        ["genjutsu/character-plain", "fuobe-character-swap", null],
         // The fixture clip is 768×432: Kling O3's edit wants 720 px on each side (your street.mp4 must be that big).
         ["genjutsu/swap", "kling-o3", expect.stringMatching(/at least 720 px on each side/)],
+        ["genjutsu/swap-lite", "fuobe-genjutsu-swap-lite", null],
         ["genjutsu/restyle", "kling-o3-4k-edit", null],
+      ]);
+      // The Originals on the cloud: their hosted open halves on fal.
+      const o = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "original", "--allow-fixtures"]);
+      expect(o.jobs.map((j) => [j.case, j.model, j.skip ?? null])).toEqual([
+        ["genjutsu/move", "fuobe-genjutsu-motion", null],
+        ["genjutsu/move-lite", "fuobe-genjutsu-motion-lite", null],
+        ["genjutsu/character", "fuobe-character-swap", null],
+        ["genjutsu/character-plain", "fuobe-character-swap", null],
+        ["genjutsu/swap", "fuobe-genjutsu-swap", null],
+        ["genjutsu/swap-lite", "fuobe-genjutsu-swap-lite", null],
+        ["genjutsu/restyle", "fuobe-genjutsu-restyle", null],
       ]);
       // Mixed Media names its hosted open model, so the studio runs that one (and says so).
       const mm = await dry(["--suite", "mixed-media", "--engine", "cloud", "--cases", "mixed-media/toxic", "--allow-fixtures"]);
@@ -279,6 +319,31 @@ describe("the runner on the demo provider", () => {
     } finally {
       setSetting("cloudProvider", "auto");
       setSetting("higgsfieldKey", "");
+      setSetting("falKey", "");
+    }
+  });
+
+  it("runs Fuobe Cinema's Director and camera-move cases, and plans its cloud variants", async () => {
+    const r = await cli(["run", "--suite", "cinema", "--engine", "demo", "--cases", "cinema/director-noir,cinema/move-dolly-in", "--no-metrics"]);
+    expect(r.code, r.stderr).toBe(0);
+    const rows = store.latestJobs(path.join(results, runIdFrom(r.stderr)));
+    expect(rows.map((x) => [x.caseId, x.status]).sort()).toEqual([
+      ["cinema/director-noir", "succeeded"],
+      ["cinema/move-dolly-in", "succeeded"],
+    ]);
+    expect(rows.every((x) => (x.request as { modelId: string }).modelId === "fuobe-cinema")).toBe(true);
+    type Plan = { jobs: { case: string; variant: string; model: string; skip?: string }[] };
+    setSetting("falKey", "fal-test-key");
+    try {
+      const plan = JSON.parse((await cli(["run", "--suite", "cinema", "--engine", "cloud", "--cases", "cinema/move-dolly-in", "--variants", "original,words,expansion,wan", "--dry-run", "--json"])).stdout) as Plan;
+      const by = Object.fromEntries(plan.jobs.map((j) => [j.variant, j]));
+      expect(by.original).toMatchObject({ model: "fuobe-cinema" });
+      expect([by.original.skip, by.words.skip, by.expansion.skip, by.wan.skip]).toEqual([undefined, undefined, undefined, undefined]);
+      expect(by.wan).toMatchObject({ model: "wan-2-2-a14b-cloud" });
+      // The camera-move cases run in the cloud only: on the GPU the move is a Wan LoRA or a pose (the dop suite measures those).
+      const open = JSON.parse((await cli(["run", "--suite", "cinema", "--engine", "open", "--cases", "cinema/move-dolly-in", "--dry-run", "--json"])).stdout) as Plan;
+      expect(open.jobs.every((j) => !!j.skip)).toBe(true);
+    } finally {
       setSetting("falKey", "");
     }
   });
@@ -496,7 +561,7 @@ describe("report, blind review, compare and promote", () => {
     expect(compare.promote(demo).results[0].reasons[0]).toBe("demo media, not model output");
   });
 
-  it("judges a clip on its words and guards its flicker; a licence problem holds whatever else won", () => {
+  it("judges a clip on its words and guards its flicker; a licence is a note, and a hold only with --licence-hold", () => {
     // A DoP motion: no style or aesthetic scores, so prompt adherence decides; the suite names its candidate.
     const clipScores = (warp: number) => ({
       ...Object.fromEntries(["s1001", "s2002", "s3003"].map((s) => [`motion-a--bridge--${s}--research`, { clip: 32, warp, drift: 0.02 }])),
@@ -513,13 +578,18 @@ describe("report, blind review, compare and promote", () => {
     review3(flicker);
     rateFor(flicker, "research");
     expect((compare.promote(flicker) as Verdicts).results[0].reasons).toEqual(["it gives up warp error (flicker) against catalog (0.0400 vs 0.0300, the rule allows 0.0020)"]);
-    // The recipe is the candidate even when it isn't the run's first variant; a non-commercial LoRA holds it even though half strength won.
+    // The recipe is the candidate even when it isn't the run's first variant. Its non-commercial LoRA is a note on the
+    // verdict (half strength won, so: lower strengths); with --licence-hold it holds the recipe.
     const nc = { recipe: { kind: "soul-look", commercialOk: false, loras: [{ file: "nc.safetensors", commercial: false, hostedOk: true }], applied: [{ file: "nc.safetensors", strength: 0.7 }], complete: true, sent: { complete: true, loras: [] } } };
     const lic = fakeRun("fake-open-nc", "open", { ...scored("half-strength", 0.9, 30), ...scored("recipe", 0.8, 30) }, nc);
     const d3 = compare.promote(lic) as Verdicts;
     expect(d3.candidate).toBe("recipe");
-    expect(d3.results[0].verdict).toBe("hold");
-    expect(d3.results[0].reasons[0]).toBe("non-commercial LoRA: nc.safetensors");
+    expect(d3.results[0].verdict).not.toBe("promote");
+    expect(d3.results[0].reasons).not.toContain("non-commercial LoRA: nc.safetensors");
+    expect(d3.results[0].notes).toContain("licence: non-commercial LoRA: nc.safetensors");
+    const held = compare.promote(lic, { rule: { licenceHold: true } }) as Verdicts;
+    expect(held.results[0].verdict).toBe("hold");
+    expect(held.results[0].reasons[0]).toBe("non-commercial LoRA: nc.safetensors");
   });
 
   it("promote --record writes each verdict into the research entry it measured, and nothing else", async () => {
@@ -723,6 +793,16 @@ describe("runEval as a library", () => {
     expect(cloud.recipe.notes.join(" ")).toMatch(/Movie Wide Angle Z-image left out on the cloud: its civitai link needs a token/);
   });
 
+  it("runs the soul-id look as the board's own look, but not on the references variant's edit models", () => {
+    type LookJob = { variant: string; request: { modelId: string; presetId?: string; params: { extra?: Record<string, unknown> } } };
+    const jobs = plan.expandJobs(cases.loadSuite("soul-id"), { engine: "cloud", cases: ["soul-id/look"], prompts: 1, variants: ["trained", "half-strength", "references"] }) as unknown as LookJob[];
+    const by = Object.fromEntries(jobs.map((j) => [j.variant, j.request]));
+    expect(by.trained).toMatchObject({ modelId: "fuobe-soul", presetId: "own-style" });
+    expect(by["half-strength"]).toMatchObject({ presetId: "own-style", params: { extra: { characterStrength: 0.5 } } });
+    expect(by.references.modelId).toBe("nano-banana-pro");
+    expect(by.references.presetId).toBeUndefined();
+  });
+
   it("writes a HEX palette as the Color signature does, and sends the lock variant through the palette-lock route", async () => {
     const { expandJobs } = plan;
     const { palettePrompt } = await import("@/lib/catalog/palettes");
@@ -908,6 +988,99 @@ describe("the cloud spend cap", () => {
     await expect(runner.runEval({ suite, engine: "cloud", maxUsd: 0.5, root }, { client: stub.client })).rejects.toThrow(/about \$0\.86, over the spend cap/);
     expect(runner.trainingPrice({ price: "Free" })).toBe(0);
     expect(runner.trainingPrice({ price: "Higgsfield balance" })).toBeNull();
+  });
+  it("trains a character with the consent line the case confirms, and a look without one", async () => {
+    const suiteFile = path.join(dir, "train-consent.json");
+    const photos = path.join(process.cwd(), "scripts/eval/fixtures/character");
+    fs.writeFileSync(
+      suiteFile,
+      JSON.stringify({
+        suite: "train-consent",
+        title: "Consent",
+        description: "x",
+        original: "fuobe-soul-id",
+        kind: "image",
+        targets: { cloud: { models: ["fuobe-soul"] } },
+        cases: [
+          { id: "t/person", title: "person", train: { photos, targets: { cloud: "fal-z-image" }, minPhotos: 3, consent: true }, prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] },
+          { id: "t/look", title: "look", train: { photos, kind: "style", targets: { cloud: "fal-z-image-style" }, minPhotos: 3 }, prompts: [{ id: "p", text: "{character} a cafe", seed: 1 }] },
+          { id: "t/noconsent", title: "no consent", train: { photos, targets: { cloud: "fal-z-image" }, minPhotos: 3 }, prompts: [{ id: "p", text: "{character}", seed: 1 }] },
+        ],
+      }),
+    );
+    const stub = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["fuobe-soul"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $1.70 (2,000 steps)" }, { id: "fal-z-image-style", provider: "fal", price: "≈ $3.39 (1,500 steps)" }] });
+    const made: { kind: string }[] = [];
+    const trainings: Record<string, unknown>[] = [];
+    const base = stub.client.request.bind(stub.client);
+    const client = {
+      ...stub.client,
+      async request(method: string, p: string, opts: { json?: Record<string, unknown>; query?: Record<string, unknown> } = {}) {
+        if (p === "/api/elements" && method === "POST") {
+          made.push(opts.json as { kind: string });
+          return { id: `el${made.length}`, handle: `Eval_${made.length}` };
+        }
+        const t = /^\/api\/elements\/(el\d+)\/trainings$/.exec(p);
+        if (t && method === "POST") {
+          trainings.push(opts.json!);
+          return { id: `tr-${t[1]}` };
+        }
+        if (t) return { targets: [], items: [{ id: `tr-${t[1]}`, status: "succeeded", costUsd: 1.7 }] };
+        return base(method, p, opts);
+      },
+    };
+    const suite = cases.loadSuite(suiteFile);
+    const r = (await runner.runEval({ suite, engine: "cloud", maxUsd: 10, root }, { client, sleep: async () => {} })) as { run: { jobs?: unknown } };
+    expect(r).toBeDefined();
+    expect(made.map((m) => m.kind)).toEqual(["character", "style"]);
+    expect(trainings).toEqual([
+      { target: "fal-z-image", consent: true },
+      { target: "fal-z-image-style" },
+    ]);
+    const dry = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client })) as { jobs: { case: string; skip?: string }[] };
+    expect(dry.jobs.find((j) => j.case === "t/noconsent")?.skip).toMatch(/training a character needs "consent": true/);
+  });
+
+  it("never measures a demo training as trained: skipped when the server says it would be one, stopped when it ran as one", async () => {
+    const suiteFile = path.join(dir, "train-demo.json");
+    const photos = path.join(process.cwd(), "scripts/eval/fixtures/character");
+    fs.writeFileSync(
+      suiteFile,
+      JSON.stringify({
+        suite: "train-demo",
+        title: "Demo trainings",
+        description: "x",
+        original: "fuobe-soul-id",
+        kind: "image",
+        targets: { cloud: { models: ["fuobe-soul"] } },
+        cases: [{ id: "t/person", title: "person", train: { photos, targets: { cloud: "fal-z-image" }, minPhotos: 3, consent: true }, prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] }],
+      }),
+    );
+    const suite = cases.loadSuite(suiteFile);
+    // The server lists the target as a demo (no fal.ai key there): nothing is planned for it.
+    const demoTarget = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["fuobe-soul"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $1.70 (2,000 steps)", demo: true, blocker: null }] });
+    const dry = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client: demoTarget.client })) as { trainingUsd?: number; jobs: { case: string; skip?: string }[] };
+    expect(dry.jobs[0].skip).toMatch(/would run as a demo on that Fuobe \(no fal\.ai key connected\), so nothing would be trained/);
+    expect(dry.trainingUsd).toBeUndefined();
+    // One that can't start at all says why.
+    const blocked = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["fuobe-soul"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $1.70 (2,000 steps)", demo: false, blocker: "Add a fal.ai key in Settings" }] });
+    const dry2 = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client: blocked.client })) as { jobs: { skip?: string }[] };
+    expect(dry2.jobs[0].skip).toMatch(/can't start there: Add a fal\.ai key/);
+    // The key went missing between the plan and the training: the server ran a demo, so the case stops before any render.
+    const stub = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["fuobe-soul"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $1.70 (2,000 steps)", demo: false, blocker: null }] });
+    const base = stub.client.request.bind(stub.client);
+    const client = {
+      ...stub.client,
+      async request(method: string, p: string, opts: { json?: Record<string, unknown>; query?: Record<string, unknown> } = {}) {
+        if (p === "/api/elements" && method === "POST") return { id: "el1", handle: "Eval_1" };
+        if (p === "/api/elements/el1/trainings" && method === "POST") return { id: "tr-demo", provider: "demo", status: "running" };
+        return base(method, p, opts);
+      },
+    };
+    const r = (await runner.runEval({ suite, engine: "cloud", maxUsd: 10, root }, { client, sleep: async () => {} })) as { dir: string; run: { spentUsd: number }; rows: Row[] };
+    expect(stub.started).toEqual([]);
+    expect(r.rows.every((x) => x.status === "skipped" && /training didn't finish: the server ran the training on fal-z-image as a demo/.test(String(x.skip)))).toBe(true);
+    expect(r.run.spentUsd).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(r.dir, "elements.json"), "utf8"))["t/person"]).toMatchObject({ status: "failed", demoTraining: "tr-demo" });
   });
 });
 

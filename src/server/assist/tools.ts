@@ -3,10 +3,13 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getModel, modelsFor } from "@/lib/catalog";
+import { offeredModels } from "../model-access";
 import { dualEngine, runsOn } from "@/lib/catalog/engines";
 import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { type PlannedJob, totalCost } from "@/lib/assist";
 import { STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
+import { loraFamily, runsSomewhere, TRAINING_FAMILIES } from "@/lib/catalog/training";
+import type { ElementLora } from "@/lib/catalog/elements";
 import { createPipeline } from "../chains";
 import { listElements } from "../elements";
 import { createGenerations, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
@@ -93,7 +96,8 @@ const searchModels = defineTool({
   }),
   async run({ kind, task, query }, ctx) {
     const mode = engineMode();
-    let list = modelsFor({ kind: kind as MediaKind, ops: task ? [task as Operation] : undefined, engine: mode === "both" ? "all" : mode });
+    // Only what Settings → Models & licences offers, each model with the routes that are on.
+    let list = offeredModels(modelsFor({ kind: kind as MediaKind, ops: task ? [task as Operation] : undefined, engine: mode === "both" ? "all" : mode }));
     if (query) {
       const words = query.toLowerCase().split(/\s+/).filter(Boolean);
       const scored = list.map((m) => {
@@ -115,6 +119,12 @@ const searchModels = defineTool({
 // ---------------------------------------------------------------------------
 // list_elements
 
+/** The models an element's trained LoRA runs on: its family's (a LoRA from before O3 names its one model). */
+const familyModels = (l: ElementLora): string[] => {
+  const f = loraFamily(l);
+  return f ? TRAINING_FAMILIES[f].models : [l.modelId];
+};
+
 const listElementsTool = defineTool({
   name: "list_elements",
   description:
@@ -130,7 +140,9 @@ const listElementsTool = defineTool({
           kind: e.kind,
           description: e.description,
           referencePhotos: e.references.length,
-          trainedFor: e.loras.map((l) => l.modelId),
+          // The models its trained LoRAs run on (every model of each family), from LoRAs a run can use: not a demo
+          // training's stand-in or an old Higgsfield Soul ID.
+          trainedFor: [...new Set(e.loras.filter(runsSomewhere).flatMap((l) => familyModels(l)))],
         })),
       ),
       items: [{ id: "", role: "tool", text: `Checked your elements (${els.length})` }],

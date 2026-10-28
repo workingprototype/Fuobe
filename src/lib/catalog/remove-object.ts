@@ -10,6 +10,7 @@
  * shared by the page, the server (src/server/remove-object.ts) and the tests.
  * Research: docs/research/higgsfield-delta-4.md §4.1, paid-model-apis-4.md §3 and §10, comfyui-oss-4.md §b.
  */
+import { h3Canvas } from "./character-swap";
 import { joinGroups, type PlanStep } from "./shorts";
 import type { ChainSlot, Engine, GenerationRequest, PixelPoint } from "./types";
 
@@ -82,6 +83,11 @@ export interface Eraser {
   everyone?: boolean;
   /** Each side of the picture must be within this many pixels (Kling O3 edit: 720–3840). */
   sides?: { min: number; max: number };
+  /**
+   * Removes a person you name, starting from a clean first frame (the person already gone, made by an image edit) on a
+   * clip fitted to 24 fps on the 32-pixel grid: H3 Relay's Person Removal (Akatz Labs' Person Remover LoRA).
+   */
+  cleanFrame?: boolean;
 }
 
 /**
@@ -182,6 +188,15 @@ export const ERASERS: Eraser[] = [
     keepsSound: true,
   },
   {
+    id: "oss-h3-person-remove",
+    engine: "open",
+    modes: ["type"],
+    label: "H3 Person Removal",
+    note: "People only: a clean first frame first, then MiniMax H3 with Akatz Labs' Person Remover LoRA rebuilds what was behind them · 24 GB GPU with offloading · MiniMax H3 Community License",
+    keepsSound: false,
+    cleanFrame: true,
+  },
+  {
     id: "oss-void-remove",
     engine: "open",
     modes: ["type"],
@@ -226,15 +241,22 @@ export function erasersFor(engine: Engine, mode: RemoveMode): Eraser[] {
   return ERASERS.filter((e) => e.engine === engine && e.modes.includes(mode));
 }
 
-/** The eraser a request runs on, or why there is none. */
-export function chooseEraser(o: { engine: Engine; mode: RemoveMode; effects?: boolean; modelId?: string }): { eraser: Eraser } | { problem: string } {
+/**
+ * The eraser a request runs on, or why there is none. `offered` (Settings → Models & licences) passes over an
+ * eraser switched off for the next one that does the job and is on; with none on, the default stays and its run
+ * names the switch.
+ */
+export function chooseEraser(o: { engine: Engine; mode: RemoveMode; effects?: boolean; modelId?: string; offered?: (id: string) => boolean }): { eraser: Eraser } | { problem: string } {
   if (o.engine === "open" && o.mode === "click") return { problem: CLICK_OPEN_PROBLEM };
   if (o.effects && o.mode !== "type") return { problem: "Shadows and reflections go too when you type what to remove — switch to Type it" };
+  const on = o.offered ?? (() => true);
+  const fits = (e: Eraser | undefined): e is Eraser => !!e && e.engine === o.engine && e.modes.includes(o.mode) && (!o.effects || !!e.effects);
   const picked = getEraser(o.modelId);
-  if (picked && picked.engine === o.engine && picked.modes.includes(o.mode) && (!o.effects || picked.effects)) return { eraser: picked };
+  if (fits(picked) && on(picked.id)) return { eraser: picked };
   const id = DEFAULT_ERASER[o.engine][o.effects ? "effects" : o.mode];
   const eraser = getEraser(id);
-  return eraser ? { eraser } : { problem: "Nothing on this engine removes objects that way yet" };
+  if (!eraser) return { problem: "Nothing on this engine removes objects that way yet" };
+  return { eraser: [eraser, ...erasersFor(o.engine, o.mode)].find((e) => fits(e) && on(e.id)) ?? eraser };
 }
 
 // ---------------------------------------------------------------------------
@@ -595,6 +617,7 @@ function eraseRequest(input: RemovalPlanInput, p: Piece): Partial<GenerationRequ
  * - then the pieces are joined (folded when the join takes fewer clips) and the clip's own sound put back.
  */
 export function planRemoval(input: RemovalPlanInput): RemovalPlan {
+  if (input.eraser.cleanFrame) return planPersonRemoval(input);
   const e = input.eraser;
   const t = REMOVE_TOOLS[input.engine];
   const pieces = planPieces(e, input.source, input.range);
@@ -706,6 +729,78 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
   const end = e.window && e.engine === "cloud" ? pieces[n - 1].end : input.range.end;
   const final = joinWithSound(steps, { engine: input.engine, title: input.title, base, helper, source: input.source, range: input.range, pieces: joined, sound, end });
   return { steps, final, pieces, sound, tracked };
+}
+
+/** The tools the H3 person removal prepares its inputs with (all on your GPU). */
+export const PERSON_REMOVAL_TOOLS = { fit: "oss-fit-clip", frame: "oss-extract-frame", clean: "oss-qwen-edit" } as const;
+
+/** H3 Relay's Person Removal works at 24 fps (its windows are counted in frames of the clip as it comes in). */
+export const PERSON_REMOVAL_FPS = 24;
+
+/** The clean first frame's edit: the person gone, the scene behind them continued, everything else as it was. */
+export function cleanFramePrompt(words: string | undefined): string {
+  const who = targetPhrase(words ?? "") || "the person";
+  return (
+    `Remove ${who} from the picture completely, with their shadow and anything they hold, and fill the space with what was behind them: ` +
+    "the background continues naturally, matching the light, texture and perspective. Keep everything else exactly as it is: the other people, the framing, the lighting and the size of the picture."
+  );
+}
+
+/**
+ * Remove a person on H3 (docs/research/openjutsu-6.md §4.4): the part fitted to 24 fps on the 32-pixel grid (the size
+ * H3's pixel budget gives the clip at "768"), its first frame, a clean copy of that frame with the person gone
+ * (Qwen-Image-Edit), then H3 Relay's Person Removal from the clean frame; its output is silent, so the clip's sound is
+ * put back.
+ */
+function planPersonRemoval(input: RemovalPlanInput): RemovalPlan {
+  const e = input.eraser;
+  const base = { feature: REMOVE.feature, batchTitle: input.title };
+  const helper = { feature: REMOVE.stepFeature, batchTitle: input.title };
+  const seed = input.seed !== undefined ? { seed: input.seed } : {};
+  const size = h3Canvas(input.source.width ?? 1280, input.source.height ?? 720, "768p");
+  const sound = !!input.source.hasAudio;
+  const label = (what: string, index: number) => ({ label: what, index, of: 4 });
+  const steps: PlanStep[] = [
+    {
+      key: "fit",
+      request: {
+        ...helper,
+        modelId: PERSON_REMOVAL_TOOLS.fit,
+        op: "trim",
+        inputs: { video: input.source.url },
+        params: { startTime: r3(input.range.start), endTime: r3(input.range.end), fps: PERSON_REMOVAL_FPS, extra: { width: size.width, height: size.height } },
+        step: label(`Fit the part (24 fps, ${size.width}×${size.height})`, 0),
+      },
+    },
+    {
+      key: "frame",
+      request: { ...helper, modelId: PERSON_REMOVAL_TOOLS.frame, op: "frame", params: { startTime: 0, endTime: 0.5, extra: { frameIndex: 0 } }, step: label("Its first frame", 1) },
+      after: ["fit"],
+      chain: [{ slot: "video" }],
+    },
+    {
+      key: "clean",
+      request: { ...helper, modelId: PERSON_REMOVAL_TOOLS.clean, op: "edit", prompt: cleanFramePrompt(input.prompt), ...(input.seed !== undefined ? { params: { ...seed } } : {}), step: label("A clean first frame (Qwen-Image-Edit)", 2) },
+      after: ["frame"],
+      chain: [{ slot: "images", position: "first" }],
+    },
+    {
+      key: "erase0",
+      request: {
+        ...(sound ? helper : { ...base, title: input.title }),
+        modelId: e.id,
+        op: "remove-object",
+        prompt: targetPhrase(input.prompt ?? "") || "person",
+        ...(input.seed !== undefined ? { params: { ...seed } } : {}),
+        step: label("Remove the person (MiniMax H3)", 3),
+      },
+      after: ["fit", "clean"],
+      chain: [{ slot: "video" }, { slot: "images", position: "first" }],
+    },
+  ];
+  const piece: Piece = { index: 0, start: input.range.start, end: input.range.end };
+  const final = joinWithSound(steps, { engine: "open", title: input.title, base, helper, source: input.source, range: input.range, pieces: ["erase0"], sound });
+  return { steps, final, pieces: [piece], sound, tracked: false };
 }
 
 export interface JoinInput {

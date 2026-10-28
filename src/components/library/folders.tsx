@@ -1,8 +1,9 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight, Download, Folder as FolderIcon, FolderInput, FolderOpen, FolderPlus, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Folder as FolderIcon, FolderInput, FolderOpen, FolderPlus, MoreHorizontal, Pencil, Pin, PinOff, Share2, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { useShare } from "@/components/share/share-provider";
 import { downloadUrl, useCanHover } from "@/components/studio/result-actions";
 import { MediaThumb } from "@/components/studio/result-media";
 import {
@@ -243,6 +244,7 @@ async function downloadFolder(f: Folder, steps?: boolean) {
 function FolderMenu({ folder, all, onOpen, onGone, steps, triggerClassName }: { folder: Folder; all: Folder[]; onOpen?: () => void; onGone?: () => void; steps?: boolean; triggerClassName: string }) {
   const actions = useFolderActions();
   const move = useMoveFolder(all);
+  const share = useShare();
   const [dialog, setDialog] = useState<null | "edit" | "new" | "delete">(null);
   const parent = folder.parentId ? all.find((f) => f.id === folder.parentId) : undefined;
   // Open dialogs once the menu has closed and handed focus back, so the dialog keeps it.
@@ -291,6 +293,11 @@ function FolderMenu({ folder, all, onOpen, onGone, steps, triggerClassName }: { 
           <DropdownMenuItem onSelect={() => void downloadFolder(folder, steps)}>
             <Download /> Download (.zip)
           </DropdownMenuItem>
+          {share && (
+            <DropdownMenuItem onSelect={() => share.share({ kind: "folder", id: folder.id, title: folder.name })}>
+              <Share2 /> Share link…
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={later("delete")}>
             <Trash2 /> Delete folder

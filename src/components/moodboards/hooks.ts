@@ -40,7 +40,8 @@ export function useMoodboardActions() {
   });
   const retry = useMutation({ mutationFn: (b: { id: string; engine?: Engine }) => post<Moodboard>(`/api/moodboards/${b.id}/retry`, { engine: b.engine }), onSuccess: done });
   const train = useMutation({
-    mutationFn: (id: string) => post<Moodboard>(`/api/moodboards/${id}/train`),
+    // target: a style training from GET /api/moodboards/<id>/train (your GPU or the cloud); none = the engine's own.
+    mutationFn: (b: { id: string; target?: string }) => post<Moodboard>(`/api/moodboards/${b.id}/train`, b.target ? { target: b.target } : undefined),
     onSuccess: () => {
       done();
       void qc.invalidateQueries({ queryKey: ["elements"] });

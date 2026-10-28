@@ -3,6 +3,7 @@
  * any prompt with `@handle` (Higgsfield's "Elements" / Soul ID). Resolution is pure so the
  * server (authoritative), the composer (live preview + cost) and the agent share it.
  */
+import { identityFor, type TrainingFamily } from "./training";
 import type { Engine, GenerationRequest, LoraRef, ModelDef, Operation } from "./types";
 
 export type ElementKind = "character" | "location" | "prop" | "style" | "voice";
@@ -17,17 +18,34 @@ export const ELEMENT_KINDS: { kind: ElementKind; label: string; plural: string; 
 
 export const elementKindInfo = (k: ElementKind) => ELEMENT_KINDS.find((x) => x.kind === k) ?? ELEMENT_KINDS[0];
 
-/** A trained identity LoRA for an element (Soul ID parity). */
+/** Photos an element keeps: a Soul ID trains on up to 80 (Higgsfield's web limit). */
+export const MAX_ELEMENT_PHOTOS = 80;
+
+/**
+ * A trained LoRA for an element (Fuobe Soul ID, src/lib/catalog/training.ts). Since O3 it belongs to a family (its
+ * base) and runs on every model of it, on both engines; before, to one model (`modelId`).
+ */
 export interface ElementLora {
+  /** The engine it was trained on (it runs on both when usableOn says so). */
   engine: Engine;
-  /** Model the LoRA was trained for; it's only applied when that model runs. */
+  /** The model it was trained for: the family's lead model since O3 (fuobe-soul, fuobe-soul-hd). */
   modelId: string;
-  /** ComfyUI models/loras file name (open) or a URL the cloud LoRA endpoint accepts. */
+  /** Its base: the LoRA runs on every model of this family. Unset on LoRAs from before O3 (read from modelId). */
+  family?: TrainingFamily;
+  /** The training target that made it. */
+  target?: string;
+  /** ComfyUI models/loras file name (unique per training: fuobe/<handle>-<id>.safetensors). */
   file: string;
+  /** A URL the cloud LoRA endpoints fetch (fal's copy of a cloud training). */
   url?: string;
+  /** Fuobe keeps its own copy of the file (src/server/loras.ts TRAINED_DIR): it can go to ComfyUI or the cloud. */
+  own?: true;
   trigger: string;
   strength?: number;
-  /** Higgsfield Soul ID: a trained character reference passed as `custom_reference_id` instead of a LoRA. */
+  trainedAt?: number;
+  /** A demo training's stand-in (no key, no GPU): nothing was trained, so no run uses it. */
+  demo?: true;
+  /** A Higgsfield Soul ID (before O3): a `custom_reference_id` only Higgsfield's Soul models take. Retrain for Fuobe Soul. */
   referenceId?: string;
 }
 
@@ -117,15 +135,17 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
   const viaLora = new Set<string>();
   let extra = req.params?.extra;
   for (const el of mentioned) {
-    const l = el.loras.find((x) => x.modelId === model.id && x.engine === model.engine);
-    if (!l) continue;
-    if (l.referenceId) {
-      // Soul ID takes one character per generation.
-      if (extra?.custom_reference_id) continue;
-      extra = { ...extra, custom_reference_id: l.referenceId, custom_reference_strength: l.strength ?? 1 };
-    } else {
-      loras.push({ file: l.file, url: l.url, strength: l.strength ?? 1, trigger: l.trigger });
+    // A Higgsfield Soul ID on Higgsfield's own Soul models (until build plan O7 removes them): one character per run.
+    const legacy = el.loras.find((x) => x.referenceId && x.modelId === model.id && x.engine === model.engine);
+    if (legacy?.referenceId && !extra?.custom_reference_id) {
+      extra = { ...extra, custom_reference_id: legacy.referenceId, custom_reference_strength: legacy.strength ?? 1 };
+      viaLora.add(el.id);
+      continue;
     }
+    // A trained LoRA of this model's family, on the engine it runs on (Fuobe Soul ID).
+    const l = identityFor(el.loras, model);
+    if (!l) continue;
+    loras.push({ file: l.file, ...(l.url && { url: l.url }), strength: l.strength ?? 1, trigger: l.trigger, ...(l.own && { own: true as const }) });
     viaLora.add(el.id);
   }
 

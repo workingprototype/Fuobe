@@ -16,13 +16,16 @@ import type { Generation, GenerationRequest } from "@/lib/catalog/types";
 import { CinemaError, folderExists, getProject, recordTakes, spentUsd } from "./cinema";
 import { createGenerations, previewGeneration } from "./generations";
 import { encodePng } from "./png";
-import { provider } from "./providers";
-import { engineMode } from "./settings";
+import { engineMode, getSetting } from "./settings";
 import { saveFile } from "./storage";
+import { isOffered } from "./model-access";
 
-/** What this install can run right now (decides Cinema Studio 4.0 vs Seedance, frame fallbacks). */
+/**
+ * What this install can run right now (cloud fallbacks such as reading a take's first frame, the workflows it has, a
+ * camera LoRA that downloads from civitai, which fal gets only with the user's civitai key).
+ */
 export function cinemaContext(): CinemaContext {
-  return { higgsfield: provider("higgsfield").isConfigured(), cloudAllowed: engineMode() !== "open", has: (id) => !!getModel(id) };
+  return { cloudAllowed: engineMode() !== "open", has: (id) => !!getModel(id) && isOffered(id), civitai: !!getSetting("civitaiKey") };
 }
 
 declare global {

@@ -171,14 +171,15 @@ await step("phone: the sidebar opens as a sheet; no sideways scroll", async () =
   const phone = await browser.newContext({ ...PHONE, colorScheme: scheme });
   const p = await phone.newPage();
   p.on("pageerror", (e) => errors.push(e.message));
-  for (const r of ["/assist", "/assist/skills", "/assist/memory"]) {
+  for (const r of ["/assist", "/assist/skills", "/assist/memory", "/assist/scheduled"]) {
     await openRoute(p, app + r);
     const wide = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (wide > 0) throw new Error(`${r} is ${wide}px too wide`);
   }
   await openRoute(p, `${app}/assist`);
-  await p.getByRole("button", { name: "Chats, projects, skills and memory" }).click();
+  await p.getByRole("button", { name: "Chats, projects, skills, memory and scheduled tasks" }).click();
   await p.getByRole("dialog").getByRole("link", { name: "Skills" }).waitFor();
+  await p.getByRole("dialog").getByRole("link", { name: "Scheduled" }).waitFor();
   await shot(p, "flow-phone-rail");
   await phone.close();
 });

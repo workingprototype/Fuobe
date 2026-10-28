@@ -12,8 +12,14 @@ docs/research/fuobe-originals-recipes-5.json in the same shape as paid-model-api
 keyFields (which input is the prompt, the image, the clip…) are this script's curation, as in the
 earlier research files. scripts/gen-cloud-models.py reads both lists.
 
+- trainers[<id>].loraOutput  for fal's LoRA trainers (--trainers): the response fields that hold the trained
+  LoRA files (diffusers_lora_file, lora_file, or Wan 2.2's pair with high_noise_lora), read from each
+  trainer's OpenAPI output schema, so src/server/training.ts knows where a finished training's LoRA is.
+
 Run:  python3 scripts/fetch-hosted-schemas.py
       python3 scripts/fetch-hosted-schemas.py --only fal-ai/z-image/turbo/image-to-image/lora   (one endpoint, the rest kept)
+      python3 scripts/fetch-hosted-schemas.py --trainers                                         (only the trainers' outputs)
+      python3 scripts/fetch-hosted-schemas.py --base-only [endpoint …]                           (Genjutsu's plain endpoints, the rest kept)
 """
 import datetime
 import json
@@ -51,6 +57,35 @@ LORA = {
     "fal-ai/z-image/turbo/image-to-image/lora": {**{k: v for k, v in T2I.items() if k not in ("negativePrompt", "aspectRatio")}, "image": "image_url"},
     "fal-ai/qwen-image-2512/lora": T2I,
     "prunaai/z-image-turbo-lora": {"prompt": "prompt", "width": "width", "height": "height", "seed": "seed"},
+    # Soul ID on every base fal trains (O3, o/soul-id): the models a LoRA trained on FLUX.1 [dev], FLUX.1 Krea [dev],
+    # FLUX.2 [dev], Krea 2 or FLUX.2 [klein] 9B runs on. Their licences are recorded as information, never a gate
+    # (the owner's decision of 2026-10-27: the admin turns models on or off in Settings).
+    "fal-ai/flux-lora": KLEIN,
+    "fal-ai/flux-krea-lora": KLEIN,
+    "fal-ai/flux-2/lora": KLEIN,
+    "fal-ai/krea-2/turbo/lora": KLEIN,
+    "fal-ai/flux-2/klein/9b/lora": KLEIN,
+    # Fuobe Genjutsu's Character swap (O5, docs/research/openjutsu-6.md §8): MiniMax H3 reference-to-video with Akatz
+    # Labs' Character Swap LoRA. The part of the clip goes as Video 1, the character (and the anchor frame) as Image 1, 2.
+    "minimax/h3/reference-to-video/lora": {"prompt": "prompt", "images": "reference_image_urls", "video": "reference_video_urls",
+                                           "duration": "duration", "resolution": "resolution", "seed": "seed", "loras": "loras"},
+}
+# LoRA endpoints that join hostedLoraEndpoints with this script (the record is made when it isn't there yet).
+NEW_LORA = {
+    "minimax/h3/reference-to-video/lora": {
+        "provider": "fal", "id": "minimax/h3/reference-to-video/lora", "family": "MiniMax H3", "op": "ref2v",
+        "roleForOriginals": "Fuobe Genjutsu Character swap, cloud half (Akatz Labs' Character Swap LoRA V1.5 or V1 by Hugging Face URL)",
+        "lora": {"field": "loras", "required": True, "itemFields": "path:string; weight_name:string; scale:number default=1 minimum=0 maximum=4", "maxCount": 3},
+        "keyFieldsRequired": ["prompt", "loras"],
+        "price": "Video costs $0.0625 per second at 480p, $0.075 per second at 768p, $0.1625 per second at 2K and $0.20 per second at 4K.",
+        "baseLicence": "MiniMax H3 Community License: territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax's written authorization; show \"MiniMax H3\" on the product's interface",
+        "commercialWeights": True,
+        "licenceNote": "Information for Settings → Models & licences, never a gate (the owner's decision of 2026-10-27). Hosted on fal under fal's terms and MiniMax's (docs/research/openjutsu-6.md §7)",
+        "status": "active",
+        "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/reference-to-video/lora",
+        "pageUrl": "https://fal.ai/models/minimax/h3/reference-to-video/lora",
+        "pathAccepts": "URL or HuggingFace repo id (owner/repo) of the LoRA weights.",
+    },
 }
 BASE = {
     "fal-ai/ltx-2.3-22b/image-to-video": ("i2v", {**{k: v for k, v in LTX.items() if k != "loras"}, "image": "image_url", "endImage": "end_image_url"}),
@@ -61,6 +96,20 @@ BASE = {
     "fal-ai/ltx-2.3-22b/video-to-video": ("v2v", {**{k: v for k, v in LTX.items() if k != "loras"}, "video": "video_url"}),
     "fal-ai/flux-2/klein/4b": ("t2i", {k: v for k, v in KLEIN.items() if k != "loras"}),
     "fal-ai/flux-2/klein/4b/edit": ("edit", {**{k: v for k, v in KLEIN.items() if k != "loras"}, "images": "image_urls"}),
+}
+# Fuobe Genjutsu's hosted open routes (O5, research §8 genjutsu) and MiniMax's own person swap (openjutsu-6.md §8).
+# Read with --base-only (they are added to hostedBaseEndpoints; the records above are kept as they are).
+ANIMATE = {"video": "video_url", "image": "image_url", "seed": "seed", "resolution": "resolution"}
+VACE14 = {"prompt": "prompt", "negativePrompt": "negative_prompt", "video": "video_url", "images": "ref_image_urls", "seed": "seed",
+          "resolution": "resolution", "aspectRatio": "aspect_ratio", "fps": "frames_per_second"}
+GENJUTSU = {
+    "fal-ai/wan/v2.2-14b/animate/move": ("motion-transfer", ANIMATE),
+    "fal-ai/wan/v2.2-14b/animate/replace": ("video-swap", ANIMATE),
+    "fal-ai/scail-2": ("motion-transfer", {"prompt": "prompt", **ANIMATE}),
+    "fal-ai/wan-motion": ("motion-transfer", {"prompt": "prompt", "video": "video_url", "image": "image_url", "seed": "seed"}),
+    "fal-ai/wan-vace-14b/inpainting": ("video-swap", {**VACE14, "mask": "mask_video_url"}),
+    "fal-ai/wan-22-vace-fun-a14b/depth": ("v2v", {**VACE14, "image": "first_frame_url"}),
+    "minimax/h3-max/recast": ("video-swap", {"prompt": "prompt", "video": "video_url", "images": "reference_image_urls", "resolution": "resolution", "seed": "seed"}),
 }
 
 
@@ -162,9 +211,68 @@ def fal_price(endpoint):
     return re.sub(r"^(Price:\s*)", "", m.group(0).replace("**", "").strip(" -*")) if m else None
 
 
+def fal_prices(endpoint):
+    """Every price line of an endpoint's llms.txt, joined (per-resolution tables list one line per tier)."""
+    text = get(f"https://fal.ai/models/{endpoint}/llms.txt")
+    lines = [re.sub(r"^(Price:\s*)", "", m.replace("**", "").strip(" -*")) for m in re.findall(r"(?im)^.*\$\d[^\n]*$", text)]
+    lines = [l for l in lines if "FAL_KEY" not in l and "curl" not in l]
+    return "; ".join(dict.fromkeys(lines[:6])) or None
+
+
+def base_record(ep, op, kf, price=None):
+    inputs = fal(ep)
+    missing = [f for f in kf.values() if f not in inputs]
+    if missing:
+        sys.exit(f"{ep}: keyFields {missing} are not inputs")
+    print(f"{ep}: {len(inputs)} inputs")
+    return {"provider": "fal", "endpoint": ep, "operation": op, "status": "active", "inputs": inputs, "keyFields": kf,
+            "output": "images[].url" if op in ("t2i", "edit") else "video.url", "price": price if price is not None else fal_price(ep), "verified": True,
+            "schemaUrl": f"https://fal.ai/api/openapi/queue/openapi.json?endpoint_id={ep}", "checked": TODAY}
+
+
+def trainer_outputs(data):
+    """Record which response fields of each fal trainer hold LoRA files (File fields named *lora*)."""
+    for t in data["trainers"]:
+        if t.get("provider") != "fal":
+            continue
+        ep = t["id"]
+        root = json.loads(get(f"https://fal.ai/api/openapi/queue/openapi.json?endpoint_id={ep}"))
+        result = root["paths"][f"/{ep}/requests/{{request_id}}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        props = resolve(result, root).get("properties") or {}
+        files = []
+        for name, p in props.items():
+            refs = [p] + list(p.get("anyOf") or p.get("allOf") or [])
+            if any(resolve(r, root).get("title") == "File" or str(r.get("$ref", "")).endswith("/File") for r in refs if isinstance(r, dict)):
+                # Configs, debug datasets and validation samples (LTX's video / audio) aren't LoRAs.
+                if "lora" in name:
+                    files.append(name)
+        t["loraOutput"] = files
+        t["outputChecked"] = TODAY
+        print(f"{ep}: {files}")
+
+
 def main():
     raw = FILE.read_text(encoding="utf-8")
     data = json.loads(raw)
+    if "--trainers" in sys.argv:
+        trainer_outputs(data)
+        FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        return
+    if "--base-only" in sys.argv:
+        # Add or refresh these plain endpoints (GENJUTSU, or BASE by id) and keep every other record as it is.
+        ids = sys.argv[sys.argv.index("--base-only") + 1:] or list(GENJUTSU)
+        records = {e["endpoint"]: e for e in data.get("hostedBaseEndpoints") or []}
+        for ep in ids:
+            op, kf = GENJUTSU.get(ep) or BASE.get(ep) or (None, None)
+            if not op:
+                sys.exit(f"{ep} is in neither GENJUTSU nor BASE")
+            records[ep] = base_record(ep, op, kf, fal_prices(ep) if ep in GENJUTSU else None)
+        data["hostedBaseEndpoints"] = list(records.values())
+        FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        return
+    for ep, rec in NEW_LORA.items():
+        if not any(e["id"] == ep for e in data["hostedLoraEndpoints"]):
+            data["hostedLoraEndpoints"].append({**rec, "checked": TODAY})
     by_id = {e["id"]: e for e in data["hostedLoraEndpoints"]}
     only = sys.argv[sys.argv.index("--only") + 1:] if "--only" in sys.argv else None
     for ep, kf in LORA.items():
@@ -186,16 +294,8 @@ def main():
     if only:
         FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         return
-    base = []
-    for ep, (op, kf) in BASE.items():
-        inputs = fal(ep)
-        missing = [f for f in kf.values() if f not in inputs]
-        if missing:
-            sys.exit(f"{ep}: keyFields {missing} are not inputs")
-        base.append({"provider": "fal", "endpoint": ep, "operation": op, "status": "active", "inputs": inputs, "keyFields": kf,
-                     "output": "images[].url" if op in ("t2i", "edit") else "video.url", "price": fal_price(ep), "verified": True,
-                     "schemaUrl": f"https://fal.ai/api/openapi/queue/openapi.json?endpoint_id={ep}", "checked": TODAY})
-        print(f"{ep}: {len(inputs)} inputs")
+    base = [base_record(ep, op, kf) for ep, (op, kf) in BASE.items()]
+    base += [base_record(ep, op, kf, fal_prices(ep)) for ep, (op, kf) in GENJUTSU.items()]
     data["hostedBaseEndpoints"] = base
     FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 

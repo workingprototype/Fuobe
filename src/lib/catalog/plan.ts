@@ -13,7 +13,8 @@ import type {
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
-import { CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
+import { numFramesValue, sizeValue } from "./payload";
+import { characterScale, CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -239,9 +240,15 @@ export function planGeneration(
   // The user's own LoRAs (an @character's trained identity) go first: on an API that takes so many, the first
   // ones win, so a look's or motion's LoRAs give way to them (fitLoras).
   let soulPlan: Plan["soul"];
+  // The character strength (Fuobe's setting, never the provider's) scales the user's own LoRAs on every model.
+  const extra = params.extra ?? {};
+  const charStrength = typeof extra.characterStrength === "number" ? extra.characterStrength : undefined;
+  if ("characterStrength" in extra) {
+    const rest = { ...extra };
+    delete rest.characterStrength;
+    params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
+  }
   if (soul) {
-    const extra = params.extra ?? {};
-    const charStrength = typeof extra.characterStrength === "number" ? extra.characterStrength : undefined;
     const r = soulRecipe(soul, prompt, { look: req.presetId, strength: req.presetStrength, userLoras: req.loras, characterStrength: charStrength });
     prompt = r.prompt;
     loras = r.loras;
@@ -254,23 +261,14 @@ export function planGeneration(
       ...(r.grade && { grade: r.grade }),
       ...(r.overlay && { overlay: r.overlay }),
     };
-    // characterStrength is Fuobe's setting, not the provider's.
-    if ("characterStrength" in extra) {
-      const rest = { ...extra };
-      delete rest.characterStrength;
-      params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
-    }
-  } else if (req.loras?.length) loras = [...req.loras, ...loras];
+  } else if (req.loras?.length) {
+    // An @character's trained LoRA on FLUX, klein, Krea or any other model: at the character strength's scale, as on Soul.
+    const own = charStrength === undefined ? req.loras : req.loras.map((l) => ({ ...l, strength: characterScale(charStrength) }));
+    loras = [...own, ...loras];
+  }
   // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
   const kept = loras.filter((l) => (l.strength ?? 1) !== 0);
-  // Its trigger word goes with it: an open motion's template starts with its LoRA's trigger ("e13c7r1c electricity
-  // effect. …", see withOssLoras), which means nothing to the model without the LoRA.
-  const keptTriggers = new Set(kept.map((l) => l.trigger).filter(Boolean));
-  for (const l of loras) {
-    if ((l.strength ?? 1) !== 0 || !l.trigger || keptTriggers.has(l.trigger)) continue;
-    const lead = [". ", ", ", " "].map((sep) => l.trigger + sep).find((t) => prompt.startsWith(t));
-    if (lead) prompt = prompt.slice(lead.length);
-  }
+  prompt = withoutTriggers(prompt, loras.filter((l) => !kept.includes(l)), kept);
   loras = kept;
 
   // Multi-shot: the clip is as long as its shots, and models without per-shot prompts get them written out.
@@ -571,6 +569,21 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
 const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
 
 /**
+ * A prompt without the trigger words of LoRAs a run leaves out: an open motion's template starts with its LoRA's
+ * trigger ("e13c7r1c electricity effect. …", see withOssLoras), which means nothing to the model without the LoRA.
+ * A trigger a kept LoRA shares stays.
+ */
+export function withoutTriggers(prompt: string, dropped: Pick<LoraRef, "trigger">[], kept: Pick<LoraRef, "trigger">[]): string {
+  const keptTriggers = new Set(kept.map((l) => l.trigger).filter(Boolean));
+  for (const l of dropped) {
+    if (!l.trigger || keptTriggers.has(l.trigger)) continue;
+    const lead = [". ", ", ", " "].map((sep) => l.trigger + sep).find((t) => prompt.startsWith(t));
+    if (lead) prompt = prompt.slice(lead.length);
+  }
+  return prompt;
+}
+
+/**
  * Which of a plan's LoRAs a route really applies, and why the others are left out: ComfyUI loads every file
  * (injectLoras); a cloud route carries the ones fitLoras keeps (the licence allows hosting, there is a URL to
  * send, the API takes LoRAs and so many). The preview reports it, so a caller (the evaluation harness) records
@@ -580,13 +593,28 @@ export function routeLoras(route: Pick<ModelRoute, "provider" | "map" | "loraEnd
   const applied = fitLoras(loras, route).loras;
   const field = routeLoraField(route);
   const why = (l: LoraRef) => {
-    if (localOnly(l)) return "its licence doesn't allow hosting, so it runs only on your GPU";
+    if (localOnly(l)) return "it is licensed for your GPU only, and Settings → Models & licences keeps such LoRAs off the cloud";
     if (gated(l) && !l.hostedUrl) return "it is in a gated Hugging Face repo, so it runs only on your GPU";
-    if (!cloudPath(l) && !needsToken(l.url)) return "no URL to send to the LoRA endpoint";
+    if (!cloudPath(l) && !needsToken(l.url) && !l.own) return "no URL to send to the LoRA endpoint";
     if (!field) return "this route takes no LoRAs";
     return field.shape === "experts" ? "this API takes one LoRA per expert" : `this API takes up to ${loraCapacity(field)} LoRAs`;
   };
   return { applied, dropped: loras.filter((l) => !applied.includes(l)).map((l) => ({ file: l.file, reason: why(l) })) };
+}
+
+/**
+ * The megapixels of video a frame-count model makes in `seconds` (Pricing.videoMegapixel: Fuobe Cinema's LTX-2.3): the
+ * size its size table gives the tier and shape (an extend or an edit keeps its take's, priced the same), times the frames
+ * its frame count renders. Undefined when no route has both.
+ */
+function videoMegapixels(model: ModelDef, params: GenParams, seconds: number): number | undefined {
+  const sized = model.routes.find((r) => r.map?.size?.table && r.map.numFrames);
+  const size = sized?.map?.size;
+  const f = sized?.map?.numFrames;
+  if (!size || !f) return undefined;
+  const { width, height } = sizeValue(size, params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution);
+  const frames = numFramesValue({ ...f, fromDuration: true }, { duration: seconds, fps: params.fps });
+  return frames === undefined ? undefined : (width * height * frames) / 1e6;
 }
 
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
@@ -596,7 +624,8 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   const n = params.numOutputs ?? 1;
   const res = params.resolution ?? model.defaults?.resolution;
   // A run with LoRAs goes to the LoRA endpoint, which has its own price.
-  const usd = withLoras && p.withLoras !== undefined ? p.withLoras : (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
+  const at = (table: Record<string, number> | undefined) => (res && table ? (table[res] ?? table[res.toLowerCase()]) : undefined);
+  const usd = withLoras && p.withLoras !== undefined ? (at(p.withLorasByResolution) ?? p.withLoras) : at(p.byResolution) || p.usd;
   let per = usd;
   const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;
@@ -605,7 +634,12 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
     const mp = soulKind(model) ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution) : 1;
     per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
   }
-  if (p.unit === "second") per = usd * (clip ?? params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
+  if (p.unit === "second") {
+    const seconds = clip ?? params.duration ?? model.defaults?.duration ?? 5;
+    const mp = p.videoMegapixel ? videoMegapixels(model, params, seconds) : undefined;
+    const rate = p.videoMegapixel && (withLoras && p.videoMegapixel.withLoras !== undefined ? p.videoMegapixel.withLoras : p.videoMegapixel.usd);
+    per = mp !== undefined && rate ? Math.ceil(mp - 1e-9) * rate : usd * seconds * (p.inputSeconds ? 2 : 1);
+  }
   if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
   // Settings that change the price (60 fps, a Pro tier, a cheaper model).
   for (const f of p.factors ?? []) {

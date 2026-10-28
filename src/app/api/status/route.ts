@@ -3,6 +3,7 @@ import { PROVIDERS } from "@/server/providers";
 import { comfyRam, probeComfy } from "@/server/providers/comfyui";
 import { nothingConnected, type EngineModeName } from "@/lib/connections";
 import { getSetting, setSetting } from "@/server/settings";
+import { offeredSummary } from "@/server/model-access";
 
 /** Which providers are usable right now — drives badges, the demo-mode notice and Home's first-run guide. */
 export async function GET() {
@@ -17,6 +18,7 @@ export async function GET() {
     ]),
   );
   const engineMode = getSetting("engineMode") as EngineModeName;
+  const access = offeredSummary();
   // The first time something this engine mode generates with is connected, the first-run guide has
   // done its job: remember it, so a ComfyUI that is offline one morning doesn't bring "Get started" back.
   let onboarded = getSetting("onboarded") === "1";
@@ -30,5 +32,7 @@ export async function GET() {
     engineMode,
     cloudProvider: getSetting("cloudProvider"),
     onboarded,
+    // Settings → Models & licences: the models switched off, so pickers leave them out (absent while everything is on).
+    ...(access && { access }),
   });
 }

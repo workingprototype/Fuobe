@@ -360,7 +360,7 @@ export const MOTION_CONTROL_STUDIO: StudioConfig = {
   ],
   defaultModels: { cloud: "kling-motion-control", open: "oss-wan22-animate" },
   promptOptional: true,
-  related: { href: "/genjutsu?mode=motion", label: "Up to 30 s and 8 character images with Genjutsu" },
+  related: { href: "/genjutsu?mode=character", label: "Swap the person in a clip for your character with Genjutsu" },
 };
 
 export const VIDEO_EDIT_STUDIO: StudioConfig = {

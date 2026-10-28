@@ -179,6 +179,8 @@ export function CameraChip({
   moves,
   onMovesChange,
   required,
+  badges,
+  civitai,
 }: {
   settings: DirectorSettings;
   onChange: Patch;
@@ -186,6 +188,9 @@ export function CameraChip({
   engine: Engine;
   moves: string[];
   onMovesChange: (m: string[]) => void;
+  /** Badge how Fuobe Cinema drives each move (off when the picked model gets the moves in words), as the prompt bar's picker does. */
+  badges?: boolean;
+  civitai?: boolean;
   /** Cinematic stills: camera, lens and focal length must be set. */
   required?: boolean;
 }) {
@@ -237,7 +242,7 @@ export function CameraChip({
             <div className="-mx-1">
               <PanelHeader title="Direct a camera move" subtitle="Adds to the prompt box, or type # there. Several per shot; order matters." />
               <MoveChips moves={moves} onChange={onMovesChange} />
-              <MoveList engine={engine} selected={moves} onPick={(slug) => onMovesChange([...moves, slug])} />
+              <MoveList engine={engine} badges={badges} civitai={civitai} selected={moves} onPick={(slug) => onMovesChange([...moves, slug])} />
             </div>
           )}
         </div>
@@ -358,6 +363,9 @@ export function PaletteChip({
               </span>
               <Switch checked={settings.paletteLock !== false} onCheckedChange={(v) => onChange({ paletteLock: v })} aria-label="Lock the grade to the palette" />
             </label>
+          )}
+          {engine === "cloud" && (
+            <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-[11.5px] text-muted-foreground">The palette&apos;s colours are written into the prompt. Locking the grade to them runs on your GPU (Open source).</p>
           )}
         </PopoverContent>
       </Popover>

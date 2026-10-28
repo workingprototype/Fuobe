@@ -28,7 +28,7 @@ afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const STILL = "/api/files/uploads/still.png";
 const CAPTURE = "/api/files/uploads/capture.png";
-const ctx = { higgsfield: false, cloudAllowed: true };
+const ctx = { cloudAllowed: true };
 const base = { mode: "image" as const, prompt: "", settings: {}, aspectRatio: "16:9" };
 const scene = (engine: "cloud" | "open"): CinemaGenerateInput => ({ ...base, engine, action: "scene", source: { url: STILL, kind: "image" } });
 const capture = { url: CAPTURE, lens: 85, aperture: 1.4, pose: { horizontal: 45, vertical: 30, zoom: 7 } };

@@ -11,6 +11,7 @@ import type { StudioConfig } from "@/components/studio/studio-context";
 import { TrainDialog } from "@/components/train-dialog";
 import { Button } from "@/components/ui/button";
 import { useElement } from "@/lib/api";
+import { loraFamily, TRAINING_FAMILIES } from "@/lib/catalog/training";
 
 /**
  * A studio for one element: the prompt starts with its @handle, references are resolved by the
@@ -23,6 +24,9 @@ export function ElementStudio({ id }: { id: string }) {
   const el = q.data;
   const config = useMemo<StudioConfig | null>(() => {
     if (!el) return null;
+    // A trained Soul ID runs on its family's lead model (Fuobe Soul, Soul HD, FLUX…): start there, on each engine it has.
+    const fam = el.loras.filter((l) => !l.demo).map(loraFamily).find(Boolean);
+    const lead = fam ? TRAINING_FAMILIES[fam].lead : null;
     return {
       feature: `element:${el.id}`,
       title: el.name,
@@ -34,14 +38,16 @@ export function ElementStudio({ id }: { id: string }) {
             : el.kind === "prop"
               ? `Where should ${el.name} show up?`
               : `What should look like ${el.name}?`,
-      subtitle: `Mention @${el.handle} in any studio to use ${el.kind === "character" ? "them" : "it"} there too.`,
+      subtitle: lead
+        ? `Trained: @${el.handle} uses its Soul ID on ${TRAINING_FAMILIES[fam!].name}. Mention it in any studio to use ${el.kind === "character" ? "them" : "it"} there too.`
+        : `Mention @${el.handle} in any studio to use ${el.kind === "character" ? "them" : "it"} there too.`,
       placeholder: `Describe a scene with @${el.handle}…`,
       kind: "image",
       ops: ["t2i", "edit"],
       feed: { features: [`element:${el.id}`, `character:${el.id}`] },
       slots: [],
       multiRef: { label: "Add ref", max: 8 },
-      defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
+      defaultModels: { cloud: lead?.cloud ?? "nano-banana-pro", open: lead?.open ?? "oss-qwen-edit" },
     };
   }, [el]);
 
@@ -69,6 +75,8 @@ export function ElementStudio({ id }: { id: string }) {
     );
   }
   if (!config || !el) return <StudioSkeleton />;
+  const trained = el.loras.filter((l) => !l.demo && !l.referenceId).length;
+  const trainLabel = el.status === "training" ? "Training…" : trained ? `Soul ID · ${trained}` : el.loras.some((l) => l.referenceId) ? "Retrain" : "Train";
   return (
     <>
       <StudioPage
@@ -78,14 +86,14 @@ export function ElementStudio({ id }: { id: string }) {
           <>
             {el.kind !== "voice" && (
               <Button
-                variant={el.loras.length ? "ghost" : "secondary"}
+                variant={trained ? "ghost" : "secondary"}
                 size="sm"
                 onClick={() => setTraining(true)}
                 // The label is hidden on phones.
-                aria-label={el.status === "training" ? "Training…" : el.loras.length ? `Trained · ${el.loras.length}` : "Train"}
+                aria-label={trainLabel}
               >
                 {el.status === "training" ? <Loader2 className="animate-spin" /> : <GraduationCap />}
-                <span className="hidden sm:inline">{el.status === "training" ? "Training…" : el.loras.length ? `Trained · ${el.loras.length}` : "Train"}</span>
+                <span className="hidden sm:inline">{trainLabel}</span>
               </Button>
             )}
             <Button variant="ghost" size="sm" onClick={() => setEditing(true)} aria-label={`Edit ${el.name}`}>

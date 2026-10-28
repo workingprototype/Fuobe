@@ -16,9 +16,12 @@ evaluation harness measures (scripts/eval/lib/recipes.mjs). Higgsfield's style i
 anywhere. No Higgsfield description, prompt or preview is copied: the look sentence is the research's own
 wording (the template), the categories are generic words.
 
-Fails (exit 1) when the research breaks the licence rules of the build plan or the Soul recipe:
-- a look's LoRA isn't in the LoRA library, or is non-commercial or may not run on a hosted service
-  (a default must be commercial-safe on both engines);
+Licences are information (the owner's decision of 2026-10-27; Settings → Models & licences has the switches): a
+look whose LoRA is non-commercial or licensed for the user's GPU only, or that the research marks not
+commercial-safe, is printed as a licence note, never a failure.
+
+Fails (exit 1) when the research breaks the Soul recipe:
+- a look's LoRA isn't in the LoRA library;
 - a look lists more than 3 LoRAs (fal's Z-Image endpoint takes 3), or a LoRA for another base;
 - a template that isn't "{prompt}. <look>. <tail>", or triggers that aren't its LoRAs' triggers;
 - a grade that isn't a src/lib/grade.ts preset, a size off the 16-pixel grid or above 2048;
@@ -49,6 +52,7 @@ BASE_LORAS = {"z-image": re.compile(r"^z-image"), "qwen-2512": re.compile(r"^qwe
 OVERLAYS = {"date-stamp", "cctv", "photo-booth"}
 MAX_LORAS = 3
 errors = []
+notes = []
 
 
 def slug(s):
@@ -84,9 +88,9 @@ def lora_list(raw, where, base):
             errors.append(f"{where}: LoRA {key!r} is not in loraLibrary")
             continue
         if not e.get("commercial"):
-            errors.append(f"{where}: {key} is non-commercial, so it can't be a default")
+            notes.append(f"{where}: {key} is non-commercial")
         if not e.get("hostedOk"):
-            errors.append(f"{where}: {key} may not run on a hosted service, so the cloud engine couldn't run this look")
+            notes.append(f"{where}: {key} is licensed for the user's GPU only")
         if not BASE_LORAS[base].match(e.get("base") or ""):
             errors.append(f"{where}: {key} is a {e.get('base')} LoRA, not one for {base}")
         s = l.get("strength", e.get("strength"))
@@ -196,7 +200,7 @@ for p in RECIPES["presets"]:
     if overlay and overlay not in OVERLAYS:
         errors.append(f"{where}: unknown overlay {overlay!r}")
     if p.get("commercialOk") is False or p.get("hostedOk") is False:
-        errors.append(f"{where}: the research marks it not commercial-safe on both engines")
+        notes.append(f"{where}: the research marks it not commercial-safe on both engines")
     entry = {
         "id": f"{family}-{slug(meta['name'])}",
         "name": clean(meta["name"]),
@@ -232,6 +236,8 @@ if errors:
     for e in errors:
         print(f"error: {e}", file=sys.stderr)
     sys.exit(1)
+for n in dict.fromkeys(notes):
+    print(f"licence note (information, shown in Settings → Models & licences): {n}")
 
 
 def ts(v):

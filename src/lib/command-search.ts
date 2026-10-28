@@ -2,6 +2,7 @@
  * The ⌘K palette's search (pure, so it's testable): a forgiving word match, and the matches grouped
  * by kind, best first. The palette (src/components/command-palette.tsx) renders what this returns.
  */
+import { offered, type AccessSummary } from "./model-access";
 
 export type PaletteKind = "page" | "setting" | "app" | "motion" | "effect" | "model" | "recent";
 
@@ -181,7 +182,7 @@ export interface PaletteModel {
  * The palette's entries from the index, for one engine mode: with one engine locked in Settings, a
  * preset needs a route on that engine and a model must be on it, as in the galleries and pickers.
  */
-export function indexEntries(index: PaletteIndex, mode: "both" | "cloud" | "open"): PaletteEntry[] {
+export function indexEntries(index: PaletteIndex, mode: "both" | "cloud" | "open", access?: AccessSummary): PaletteEntry[] {
   const runs = (p: PalettePreset) => mode === "both" || p[mode];
   const presets = (list: PalettePreset[], kind: "app" | "motion" | "effect", href: (id: string) => string) =>
     list.filter(runs).map((p): PaletteEntry => ({ key: `${kind}:${p.id}`, kind, label: p.name, hint: p.category, href: href(p.id) }));
@@ -190,7 +191,9 @@ export function indexEntries(index: PaletteIndex, mode: "both" | "cloud" | "open
     ...presets(index.motions, "motion", (id) => `/video?preset=${id}`),
     ...presets(index.effects, "effect", (id) => `/video?preset=${id}`),
     ...index.models
-      .filter((m) => mode === "both" || (m.engines ?? [m.engine]).includes(mode))
+      // Settings → Models & licences: a model switched off isn't offered here either (its switch is on that page,
+      // which has its own entry).
+      .filter((m) => (mode === "both" || (m.engines ?? [m.engine]).includes(mode)) && offered(access, m.id, mode === "both" ? undefined : mode))
       .map((m): PaletteEntry => {
         const both = (m.engines?.length ?? 0) > 1;
         return {

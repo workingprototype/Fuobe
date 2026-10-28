@@ -29,7 +29,7 @@ const num = (v, name) => {
 class Usage extends Error {}
 
 const COMMON = { url: { type: "string" }, token: { type: "string" }, out: { type: "string" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } };
-const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, device: { type: "string" }, "clip-model": { type: "string" }, "style-model": { type: "string" }, "identity-model": { type: "string" }, "face-detector": { type: "string" }, "accept-noncommercial": { type: "boolean" }, force: { type: "boolean" } };
+const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, device: { type: "string" }, "clip-model": { type: "string" }, "style-model": { type: "string" }, "identity-model": { type: "string" }, "face-detector": { type: "string" }, "accept-noncommercial": { type: "boolean" }, "commercial-only": { type: "boolean" }, force: { type: "boolean" } };
 
 const HELP = {
   run: `pnpm eval:run --suite <name> --engine demo|open|cloud [options]
@@ -55,12 +55,15 @@ const HELP = {
   report: "pnpm eval:report <runId|latest> [--no-metrics] [--metrics clip,style] [--device cpu|cuda|auto] [--style-model clip|dinov2] [--face-detector yunet|scrfd] [--force]",
   review: "pnpm eval:review <runId|latest> [--against variants|references|<otherRunId>] [--port 4173] [--no-serve] [--limit n]",
   compare: "pnpm eval:compare <runA[:variant]> <runB[:variant]> [--fail-on clip,aesthetic] [--threshold 1|5%] [--per-case]",
-  promote: `pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain] [--record [--apply-strengths] [--research file]]
+  promote: `pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain] [--record [--apply-strengths] [--research file]] [--licence-hold]
+
+  --licence-hold       a non-commercial LoRA (or one licensed for the GPU only, on a cloud run) holds the recipe;
+                       without it the licence is a note on the verdict
 
   --record             writes each case's verdict into the research JSON entry it measured
   --apply-strengths    with --record: where half strength won, lowers that entry's LoRA strengths to the ones it ran
                        (review the diff, then pnpm gen:catalog and run both engines again)`,
-  covers: `pnpm eval:covers <runId> [--variant <name>] [--dry-run] [--public-dir public] [--manifest src/lib/preset-previews.generated.ts]
+  covers: `pnpm eval:covers <runId> [--variant <name>] [--dry-run] [--public-dir public] [--manifest src/lib/preset-previews.generated.ts] [--commercial-only]
 
   The best render of each promoted case becomes its preset's cover: encoded small into public/previews/<suite>/
   and listed in src/lib/preset-previews.generated.ts, which the gallery cards show. --variant takes that
@@ -128,7 +131,7 @@ const root = (values, env) => resultsDir(env, values.out);
 async function score(dir, v, ctx) {
   if (v["no-metrics"]) return null;
   ctx.note("Scoring the outputs…");
-  const r = await scoreRun(dir, { metrics: v.metrics, device: v.device, clipModel: v["clip-model"], styleModel: v["style-model"], identityModel: v["identity-model"], faceDetector: v["face-detector"], acceptNoncommercial: v["accept-noncommercial"], force: v.force, log: ctx.note, env: ctx.env });
+  const r = await scoreRun(dir, { metrics: v.metrics, device: v.device, clipModel: v["clip-model"], styleModel: v["style-model"], identityModel: v["identity-model"], faceDetector: v["face-detector"], commercialOnly: v["commercial-only"], force: v.force, log: ctx.note, env: ctx.env });
   if (!r.ok) ctx.note(`Not scored: ${r.reason}. Timing and cost are in the report; pnpm eval:report ${path.basename(dir)} scores it later.`);
   return r;
 }
@@ -304,10 +307,10 @@ async function compare(args, ctx) {
 }
 
 async function promoteCmd(args, ctx) {
-  const { values: v, positionals } = parse(args, { candidate: { type: "string" }, against: { type: "string" }, record: { type: "boolean" }, "apply-strengths": { type: "boolean" }, research: { type: "string" } }, { positionals: true });
+  const { values: v, positionals } = parse(args, { candidate: { type: "string" }, against: { type: "string" }, record: { type: "boolean" }, "apply-strengths": { type: "boolean" }, research: { type: "string" }, "licence-hold": { type: "boolean" } }, { positionals: true });
   if (v.help) return ctx.print(HELP.promote), 0;
   const { dir } = resolveRun(root(v, ctx.env), positionals[0] ?? "latest");
-  const doc = promote(dir, { candidate: v.candidate, alternatives: list(v.against) });
+  const doc = promote(dir, { candidate: v.candidate, alternatives: list(v.against), ...(v["licence-hold"] && { rule: { licenceHold: true } }) });
   ctx.print(v.json ? JSON.stringify(doc, null, 2) : promoteText(doc));
   if (v["apply-strengths"] && !v.record) throw new Usage("--apply-strengths goes with --record");
   if (!v.record) return 0;
@@ -403,10 +406,10 @@ async function trash(args, ctx) {
 }
 
 async function covers(args, ctx) {
-  const { values: v, positionals } = parse(args, { variant: { type: "string" }, "dry-run": { type: "boolean" }, "public-dir": { type: "string" }, manifest: { type: "string" } }, { positionals: true });
+  const { values: v, positionals } = parse(args, { variant: { type: "string" }, "dry-run": { type: "boolean" }, "public-dir": { type: "string" }, manifest: { type: "string" }, "commercial-only": { type: "boolean" } }, { positionals: true });
   if (v.help) return ctx.print(HELP.covers), 0;
   const { dir } = resolveRun(root(v, ctx.env), positionals[0] ?? "latest");
-  const r = makeCovers(dir, { variant: v.variant, dryRun: v["dry-run"], publicDir: v["public-dir"] && path.resolve(v["public-dir"]), manifest: v.manifest && path.resolve(v.manifest) });
+  const r = makeCovers(dir, { variant: v.variant, dryRun: v["dry-run"], publicDir: v["public-dir"] && path.resolve(v["public-dir"]), manifest: v.manifest && path.resolve(v.manifest), commercialOnly: v["commercial-only"] });
   if (v.json) return ctx.print(JSON.stringify(r, null, 2)), 0;
   ctx.print(`${r.covers.length} cover${r.covers.length === 1 ? "" : "s"} from ${r.runId} (${r.engine}, ${r.variant})${v["dry-run"] ? " would be made" : ""}`);
   for (const c of r.covers) ctx.print(`  ${c.key} ← ${c.job}${c.metric ? ` (best ${c.metric}${c.score != null ? ` ${Number(c.score).toFixed(3)}` : ""})` : ""}`);

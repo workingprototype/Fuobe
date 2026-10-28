@@ -48,6 +48,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FailedTile, MediaThumb, PendingTile, downloadName, tileRatio } from "@/components/studio/feed";
+import { useSoulFinish } from "@/components/studio/soul-finish";
 import { Viewer } from "@/components/studio/viewer";
 import { getModel } from "@/lib/catalog";
 import type { CinemaFolder } from "@/lib/catalog/cinema";
@@ -73,6 +74,7 @@ interface Prefs {
   hideFailed: boolean;
 }
 
+const CINEMA_KEY = ["cinema"] as const;
 const DEFAULT_PREFS: Prefs = { layout: "square", split: true, fit: false, type: "all", date: "all", status: "all", hideFailed: false };
 const PREFS_KEY = "fuobe.cinema.feed";
 const prefListeners = new Set<() => void>();
@@ -556,6 +558,8 @@ export function CinemaFeed({
   const [prefs, setPrefs] = usePrefs();
   const actions = useItemActions(projectId);
   const qc = useQueryClient();
+  // Stills on Fuobe Soul Cinema and Soul Location's Movie look finish in the browser (the 21:9 crop, the grade).
+  useSoulFinish(items, CINEMA_KEY);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);

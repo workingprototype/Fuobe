@@ -576,10 +576,30 @@ export interface Pricing {
   factors?: { param: string; values: Record<string, number> }[];
   /** The price per unit when the run carries LoRAs and goes to the route's LoRA endpoint (fal's /lora variants cost more). */
   withLoras?: number;
+  /** withLoras at each resolution, when it differs (Fuobe Cinema's LTX-2.3 bills per megapixel of video). */
+  withLorasByResolution?: Record<string, number>;
+  /**
+   * Billed per megapixel of video made, width × height × frames rounded up (fal's LTX-2.3): a per-second model whose
+   * routes carry a size table and a frame count is priced on the clip's real size for its tier and shape and its frame
+   * count, rather than on `usd` / `byResolution` (one shape's per-second rate). `withLoras`: the LoRA endpoint's rate.
+   */
+  videoMegapixel?: { usd: number; withLoras?: number };
   /** Per-megapixel prices billed on whole megapixels (fal's Qwen-Image 2512). */
   roundUp?: true;
   /** What an animation preset adds to a run (params.animation: Meshy rigging +$0.12). */
   animationUsd?: number;
+}
+
+/** A model's weights licence, as read in the research: information, never a gate (the owner's decision of 2026-10-27). */
+export interface ModelLicence {
+  /** As written ("FLUX.1 [dev] Non-Commercial License"). */
+  licence: string;
+  /** The weights allow selling outputs: true, false (non-commercial) or null (a revenue tier decides). */
+  commercial: boolean | null;
+  /** What else the research noted (fal's own terms for its hosted outputs). */
+  note?: string;
+  /** When it was read (YYYY-MM-DD). */
+  checked?: string;
 }
 
 export interface ModelDef {
@@ -597,6 +617,11 @@ export interface ModelDef {
   pricing?: Pricing;
   /** Trained identities this model accepts by id (Higgsfield Soul ID). */
   identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
+  /**
+   * The licence of the open weights a hosted model runs (generated from the research), as information: nothing is
+   * hidden or refused for it; the admin turns models on or off in Settings.
+   */
+  licence?: ModelLicence;
   /**
    * A Fuobe Original that runs on both engines: its routes cover ComfyUI and the hosted open weights on fal /
    * Replicate. `engine` is the one it shows first; a request picks one with GenerationRequest.engine, and
@@ -733,6 +758,16 @@ export interface LoraRef {
    */
   version?: string;
   licence?: LoraLicence;
+  /**
+   * The user's own trained LoRA (Fuobe Soul ID): Fuobe keeps the file, so a run copies it into ComfyUI's folder or
+   * sends it to the cloud provider itself (src/server/loras.ts), whichever engine trained it.
+   */
+  own?: true;
+  /**
+   * Set by the server on a run's LoRAs while Settings → Models & licences keeps LoRAs licensed for your GPU only
+   * off the cloud: a cloud route then leaves such a LoRA out (localOnly). Without it they are sent like any other.
+   */
+  keepOnGpu?: true;
 }
 
 /** Scale limits of a LoRA field. */
@@ -806,6 +841,13 @@ export interface GenerationRequest {
   /** Server-set when the runner filled the chain slots from the earlier steps' outputs (a retry takes them out again: unfilledRequest). */
   chainFilled?: boolean;
   /**
+   * Server-set when the runner left out optional chain slots whose steps failed (ChainSlot.optional): their indexes, and
+   * the prompt the request had before the fallback replaced it (a retry puts it back).
+   */
+  chainSkipped?: { slots: number[]; prompt?: string };
+  /** Server-set: what changed while the job ran (an optional input left out), said on the result and carried down the chain. */
+  notice?: string;
+  /**
    * A step only worth making for the steps after it (a per-frame render's frame edits and clips): while it still
    * waits for its inputs (nothing spent yet), the runner cancels it once every step that would use it has failed
    * or been canceled, so one failed frame doesn't leave the other lanes running up the bill.
@@ -861,6 +903,12 @@ export interface ChainSlot {
    * frames is not).
    */
   of?: number;
+  /**
+   * An input the step can do without (Genjutsu's anchor first frame): when the step it comes from fails or is canceled,
+   * this step runs without it instead of failing. `prompt` then replaces the request's prompt (the words that named the
+   * missing input go), and `notice` is said on the result and on the steps after it.
+   */
+  optional?: { prompt?: string; notice: string };
 }
 
 /** How many outputs a planned list (ChainSlot.of) may be short of before the steps reading it fail. */

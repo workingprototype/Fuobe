@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { getModel } from "@/lib/catalog";
+import { characterLicenceLine, PERSON_REMOVER_LORA } from "@/lib/catalog/character-swap";
 import {
   chooseEraser,
   paintedPoints,
@@ -25,6 +26,8 @@ import type { PlanStep } from "@/lib/catalog/shorts";
 import type { Engine, GenParams, Generation, PixelPoint } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
+import { ACCESS_PLACE } from "@/lib/model-access";
+import { isOffered, offeredLoras } from "./model-access";
 import { decodePng } from "./png";
 import { engineMode } from "./settings";
 import { probeSource, ShortsError } from "./shorts";
@@ -145,7 +148,7 @@ interface Planned {
 
 async function planInput(body: RemovalBody, opts: { probe: boolean; preview?: boolean }): Promise<Planned> {
   mustMatchMode(body.engine);
-  const picked = chooseEraser({ engine: body.engine, mode: body.mode, effects: body.effects, modelId: body.modelId });
+  const picked = chooseEraser({ engine: body.engine, mode: body.mode, effects: body.effects, modelId: body.modelId, offered: (id) => isOffered(id, body.engine) });
   if ("problem" in picked) throw new ShortsError(picked.problem, 422);
   const eraser = picked.eraser;
   // The header's facts win over what the browser read (the estimate runs before the upload is read).
@@ -166,7 +169,9 @@ async function planInput(body: RemovalBody, opts: { probe: boolean; preview?: bo
   if (problem) throw new ShortsError(problem, 422);
 
   let points: PixelPoint[] | undefined;
-  if (body.mode === "type" && !eraser.everyone && !body.prompt?.trim()) throw new ShortsError("Say what to remove, e.g. “the coffee cup in her hand”");
+  if (body.mode === "type" && !eraser.everyone && !body.prompt?.trim()) throw new ShortsError(eraser.cleanFrame ? "Say who to remove, e.g. “the man in the grey shirt”" : "Say what to remove, e.g. “the coffee cup in her hand”");
+  // The Person Remover LoRA is what the H3 graph loads: switched off in Settings → Models & licences, it can't run.
+  if (eraser.cleanFrame && offeredLoras([PERSON_REMOVER_LORA]).dropped.length) throw new ShortsError(`The H3 Person Remover LoRA is switched off in ${ACCESS_PLACE} — turn it on, or pick Wan 2.1 VACE + SAM 3.1`, 422);
   // Kling O3 edit takes 2500 characters, its template included: refused here, not after the cuts have run.
   if ((body.prompt?.trim().length ?? 0) > REMOVE.maxPromptChars) throw new ShortsError(`Say what to remove in up to ${REMOVE.maxPromptChars} characters`, 422);
   if (body.mode === "click") {
@@ -199,7 +204,14 @@ async function planInput(body: RemovalBody, opts: { probe: boolean; preview?: bo
       notes.push(`${eraserName} works on ${eraser.window?.cap} frames at a time (${per.toFixed(1)} s of this clip): the clip runs as ${count} windows, joined with its own sound. Seams between windows aren't tested on a GPU yet`);
       if (eraser.modes.includes("paint")) notes.push("SAM 3.1 hands what you painted on from window to window (each starts on the last frame of the one before), so the windows run one after another");
     }
-    notes.push(eraser.effects ? "VOID needs a 24–40 GB GPU (unverified). Its CogVideoX base is licensed for commercial use only after registering, up to 1 million visits a month" : "Wan 2.1 VACE 14B needs a 24 GB GPU · Apache-2.0 (SAM 3.1: Meta's SAM License)");
+    if (eraser.cleanFrame) {
+      notes.push(
+        "Qwen-Image-Edit first makes a clean copy of the part's first frame with the person gone; MiniMax H3 with Akatz Labs' Person Remover LoRA then rebuilds what was behind them, 22 frames at a time from it, and the clip's sound goes back on",
+        "People only — for an object, pick Wan 2.1 VACE + SAM 3.1",
+        "Needs the H3 Relay nodes on your ComfyUI (scripts/comfy/install-comfyui.sh with H3_RELAY=1) and 24 GB of VRAM with offloading (64–128 GB of RAM); the part runs at 24 fps",
+        characterLicenceLine("open", "fuobe-character-swap").replace("nodes GPL-3.0", "H3 Relay nodes GPL-3.0"),
+      );
+    } else notes.push(eraser.effects ? "VOID needs a 24–40 GB GPU (unverified). Its CogVideoX base is licensed for commercial use only after registering, up to 1 million visits a month" : "Wan 2.1 VACE 14B needs a 24 GB GPU · Apache-2.0 (SAM 3.1: Meta's SAM License)");
   } else {
     const max = pieceSeconds(eraser, source.fps);
     const limit = eraser.window ? `up to ${eraser.window.cap} frames (${max.toFixed(1)} s of this clip)` : max < 5 ? "clips under 5 s" : `up to ${Math.floor(max)} s`;

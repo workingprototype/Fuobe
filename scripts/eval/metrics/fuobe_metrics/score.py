@@ -117,8 +117,9 @@ class Scorer:
     def faces(self):
         if self._faces is None:
             name = self.args.identity_model
-            if name == "buffalo_l" and not self.args.accept_noncommercial:
-                raise Missing("buffalo_l is licensed for non-commercial research only: add --accept-noncommercial to use it, or keep the default AuraFace (Apache-2.0)")
+            # Licences are information (recorded with every result); --commercial-only refuses a non-commercial metric model.
+            if name == "buffalo_l" and getattr(self.args, "commercial_only", False):
+                raise Missing("buffalo_l is licensed for non-commercial research only, and --commercial-only is set: keep the default AuraFace (Apache-2.0)")
             detector = getattr(self.args, "face_detector", "yunet")
             self._faces = Faces(name, self.device, detector)
             # The detector is recorded on its own: its licence isn't the recognition model's.
@@ -301,7 +302,8 @@ def main(argv=None) -> int:
     ap.add_argument("--clip-model", default="clip-b32", choices=["clip-b32", "clip-l14"])
     ap.add_argument("--style-model", default="clip", choices=["clip", "dinov2"], help="image embeddings for style similarity")
     ap.add_argument("--identity-model", default="auraface", choices=["auraface", "buffalo_l"])
-    ap.add_argument("--accept-noncommercial", action="store_true", help="allow buffalo_l (non-commercial research licence)")
+    ap.add_argument("--accept-noncommercial", action="store_true", help="kept for older scripts: non-commercial metric models run unless --commercial-only")
+    ap.add_argument("--commercial-only", action="store_true", help="refuse metric models whose licence is non-commercial (buffalo_l)")
     ap.add_argument("--face-detector", default="yunet", choices=["yunet", "scrfd"], help="finds faces for AuraFace: YuNet (MIT, default) or the SCRFD AuraFace ships (licence unclear)")
     ap.add_argument("--frames", type=int, default=24, help="frames sampled per clip for temporal metrics")
     ap.add_argument("--fps", type=float, default=8.0, help="sampling rate for temporal metrics")

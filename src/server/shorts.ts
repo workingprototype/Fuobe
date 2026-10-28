@@ -34,6 +34,7 @@ import { createPipeline } from "./chains";
 import { db } from "./db";
 import { getGeneration, previewChained } from "./generations";
 import { trashGenerations } from "./library";
+import { firstOn } from "./model-access";
 import { engineMode } from "./settings";
 import { readRef } from "./storage";
 import { mediaFacts, type SourceInfo } from "./media-facts";
@@ -235,7 +236,8 @@ async function planInput(body: ShortsBody, opts: { probe: boolean }): Promise<{ 
 /** planInput with the clip's header already read (`{}`: the browser's numbers only). */
 function planWith(body: ShortsBody, info: SourceInfo): { input: ShortsPlanInput; info: SourceInfo } {
   checkEngine(body.engine);
-  const modelId = body.modelId && SHORTS_MODELS[body.engine].includes(body.modelId) ? body.modelId : SHORTS_MODELS[body.engine][0];
+  // Without one asked for: the engine's first restyle model switched on in Settings → Models & licences.
+  const modelId = body.modelId && SHORTS_MODELS[body.engine].includes(body.modelId) ? body.modelId : firstOn(SHORTS_MODELS[body.engine], body.engine)!;
   const look = body.look ?? lookFor(body.presetId);
   const duration = info.duration ?? body.source.duration;
   const problem = rangeProblem(body.range, duration) ?? clipShapeProblem(info.width ?? body.source.width, info.height ?? body.source.height);

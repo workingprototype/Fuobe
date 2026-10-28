@@ -1611,7 +1611,139 @@
     "num_inference_steps": "integer default=4 minimum=4 maximum=8",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "A bright, surreal scene on a vast white salt flat under a clear blue sky, featuring two fluffy white alpacas standing in the foreground. Behind them sits a sleek white supercar with its scissor doors open, creating a dramatic futuristic silhouette. The sunlight is strong and crisp, casting sharp shadows on the ground and giving the image a clean, high-contrast cinematic look. Minimalist composition, playful luxury vibe, ultra sharp detail, wide-angle perspective, high resolution."
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "The seed to use for the generation. If not provided, a random seed will be used."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 4,
+     "minimum": 4,
+     "maximum": 8,
+     "desc": "The number of inference steps to perform."
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        },
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "landscape_4_3",
+     "desc": "The size of the image to generate."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI. Output is not stored when this is True."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the generated image."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Scale factor for LoRA application (0.0 to 4.0)."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "List of LoRA weights to apply (maximum 3)."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -1642,7 +1774,168 @@
     "acceleration": "string default=\"regular\" enum=[\"none\", \"regular\", \"high\"]",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "Close shot a pianist plays in a luxurious room with tall windows overlooking a rainy metropolis. Shot with a 50mm lens at a side profile angle, soft tungsten light highlighting hands moving over keys. Capture detailed reflections in polished black piano surfaces, raindrops sliding down glass, and atmospheric warm/cool lighting contrast."
+     ]
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 2.5,
+     "minimum": 0,
+     "maximum": 20,
+     "desc": "Guidance Scale is a measure of how close you want the model to stick to your prompt when looking for a related image to show you."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "The seed to use for the generation. If not provided, a random seed will be used."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 28,
+     "minimum": 4,
+     "maximum": 50,
+     "desc": "The number of inference steps to perform."
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        },
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "landscape_4_3",
+     "desc": "The size of the image to generate. The width and height must be between 512 and 2048 pixels."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular",
+      "high"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "The acceleration level to use for the image generation.",
+     "examples": [
+      "regular"
+     ]
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, the prompt will be expanded for better results."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the generated image."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Scale factor for LoRA application (0.0 to 4.0)."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "List of LoRA weights to apply (maximum 3). Each LoRA can be a URL, HuggingFace repo ID, or local path."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -1673,7 +1966,157 @@
     "acceleration": "string default=\"none\" enum=[\"none\", \"regular\"]",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL or the path to the LoRA weights."
+   "pathAccepts": "URL or the path to the LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "Extreme close-up of a single tiger eye, direct frontal view. Detailed iris and pupil. Sharp focus on eye texture and color. Natural lighting to capture authentic eye shine and depth. The word \"FLUX\" is painted over it in big, white brush strokes with visible texture."
+     ]
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        },
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "landscape_4_3",
+     "desc": "The size of the generated image."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 28,
+     "minimum": 1,
+     "maximum": 50,
+     "desc": "The number of inference steps to perform."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "\n            The scale of the LoRA weight. This is used to scale the LoRA weight\n            before merging it with the base model.\n        "
+      },
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL or the path to the LoRA weights."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "\n            The LoRAs to use for the image generation. You can use any number of LoRAs\n            and they will be merged together to generate the final image.\n        "
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 3.5,
+     "minimum": 0,
+     "maximum": 35,
+     "desc": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate. This is always set to 1 for streaming output."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "jpeg",
+     "desc": "The format of the generated image."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "none",
+     "desc": "Acceleration level for image generation. 'regular' balances speed and quality."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -1704,7 +2147,157 @@
     "acceleration": "string default=\"none\" enum=[\"none\", \"regular\"]",
     "image_size": "anyOf[object {width:integer default=512 maximum=14142; height:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL or the path to the LoRA weights."
+   "pathAccepts": "URL or the path to the LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "Extreme close-up of a single tiger eye, direct frontal view. Detailed iris and pupil. Sharp focus on eye texture and color. Natural lighting to capture authentic eye shine and depth. The word \"FLUX\" is painted over it in big, white brush strokes with visible texture."
+     ]
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        },
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "landscape_4_3",
+     "desc": "The size of the generated image."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 28,
+     "minimum": 1,
+     "maximum": 50,
+     "desc": "The number of inference steps to perform."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "\n            The scale of the LoRA weight. This is used to scale the LoRA weight\n            before merging it with the base model.\n        "
+      },
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL or the path to the LoRA weights."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "\n            The LoRAs to use for the image generation. You can use any number of LoRAs\n            and they will be merged together to generate the final image.\n        "
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 3.5,
+     "minimum": 0,
+     "maximum": 35,
+     "desc": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt when looking for a related image to show you.\n        "
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate. This is always set to 1 for streaming output."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "jpeg",
+     "desc": "The format of the generated image."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "none",
+     "desc": "Acceleration level for image generation. 'regular' balances speed and quality."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -1734,7 +2327,148 @@
     "acceleration": "string default=\"none\" enum=[\"none\", \"regular\"]",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+   "pathAccepts": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "Base text description of the image to generate.",
+     "examples": [
+      "a vintage travel poster for Mars"
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducible generation. Image *i* uses `seed + i`."
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        },
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "square_hd",
+     "desc": "The size of the generated image."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "none",
+     "desc": "The acceleration level to use for the image generation."
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the prompt is expanded with an LLM into a more detailed image-generation prompt for higher quality results. On failure, the original prompt is used unchanged."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If true, the output safety checker is enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the generated image. Default value: \"png\"."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL, HuggingFace repo ID (owner/repo), or local path to LoRA weights."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Scale factor for LoRA application (0.0 to 4.0)."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "maxItems": 3,
+     "required": false,
+     "default": [],
+     "desc": "List of LoRA weights to apply (maximum 3)."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "aspectRatio": "image_size",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "inputsChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -4702,7 +5436,7 @@
    "id": "minimax/h3/image-to-video/lora",
    "family": "MiniMax H3",
    "op": "i2v",
-   "roleForOriginals": "not for Originals (territory-restricted licence)",
+   "roleForOriginals": "not used by an Original yet (its reference-to-video sibling carries Genjutsu's Character swap)",
    "lora": {
     "field": "loras",
     "required": true,
@@ -4714,9 +5448,9 @@
     "loras"
    ],
    "price": "Video costs $0.0625 per second at 480p, $0.075 per second at 768p, $0.1625 per second at 2K and $0.20 per second at 4K.",
-   "baseLicence": "MiniMax H3 Community License (territory-restricted)",
-   "commercialWeights": false,
-   "licenceNote": "Round-1 research: excludes US/EU/UK/KR users. Not for Originals",
+   "baseLicence": "MiniMax H3 Community License: territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax's written authorization; show \"MiniMax H3\" on the product's interface",
+   "commercialWeights": true,
+   "licenceNote": "Corrected 2026-10-27 (o/genjutsu-original, from docs/research/openjutsu-6.md §7): the licence allows commercial use within its territory and revenue conditions; it was recorded as non-commercial. Information, never a gate",
    "falLicenseType": "commercial",
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/image-to-video/lora",
@@ -4997,6 +5731,179 @@
    "schemaUrl": "https://replicate.com/fofr/wan2.1-with-lora/api/schema",
    "pageUrl": "https://replicate.com/fofr/wan2.1-with-lora",
    "checked": "2026-10-23"
+  },
+  {
+   "provider": "fal",
+   "id": "minimax/h3/reference-to-video/lora",
+   "family": "MiniMax H3",
+   "op": "ref2v",
+   "roleForOriginals": "Fuobe Genjutsu Character swap, cloud half (Akatz Labs' Character Swap LoRA V1.5 or V1 by Hugging Face URL)",
+   "lora": {
+    "field": "loras",
+    "required": true,
+    "itemFields": "path:string; weight_name:string; scale:number default=1 minimum=0 maximum=4",
+    "maxCount": 3
+   },
+   "keyFieldsRequired": [
+    "prompt",
+    "loras"
+   ],
+   "price": "Video costs $0.0625 per second at 480p, $0.075 per second at 768p, $0.1625 per second at 2K and $0.20 per second at 4K.",
+   "baseLicence": "MiniMax H3 Community License: territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax's written authorization; show \"MiniMax H3\" on the product's interface",
+   "commercialWeights": true,
+   "licenceNote": "Information for Settings → Models & licences, never a gate (the owner's decision of 2026-10-27). Hosted on fal under fal's terms and MiniMax's (docs/research/openjutsu-6.md §7)",
+   "status": "active",
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/reference-to-video/lora",
+   "pageUrl": "https://fal.ai/models/minimax/h3/reference-to-video/lora",
+   "pathAccepts": "URL or HuggingFace repo id (owner/repo) of the LoRA weights.",
+   "checked": "2026-10-27",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "Text prompt for video generation. Refer to reference assets by their modality and order in the reference lists: Image 1, Image 2, Video 1, Audio 1, and so on.",
+     "examples": [
+      "Image 1 is the female protagonist. Image 2 is her small dog. Keep the woman and dog consistent with their respective reference images while they walk together through a sunlit garden."
+     ]
+    },
+    "duration": {
+     "type": "integer",
+     "required": false,
+     "default": 5,
+     "minimum": 5,
+     "maximum": 15,
+     "desc": "The duration of the video in seconds."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "480P",
+      "768P",
+      "2K",
+      "4K"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "2K",
+     "desc": "The resolution of the generated video. 480P and 768P are native generation modes; 2K and 4K upscale a 768P base result."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed. A random seed is selected when omitted."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Return the generated video as base64 instead of a CDN URL."
+    },
+    "prompt_expansion_mode": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "How much effort to spend rewriting the prompt before generation. 'disabled' skips prompt expansion. 'fast' returns in about a second. 'balanced' picks per request. 'quality' spends up to ~30s on a richer prompt.",
+     "examples": [
+      "disabled"
+     ]
+    },
+    "aspect_ratio": {
+     "type": "enum",
+     "values": [
+      "adaptive",
+      "21:9",
+      "16:9",
+      "4:3",
+      "1:1",
+      "3:4",
+      "9:16"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "adaptive",
+     "desc": "The aspect ratio of the generated video."
+    },
+    "reference_image_urls": {
+     "type": "array",
+     "items": "string",
+     "maxItems": 9,
+     "required": false,
+     "desc": "URLs of subject/style reference images, referenced in the prompt as Image 1, Image 2, and so on. Reference images, videos, and audio clips must add up to at most 12 files.",
+     "examples": [
+      [
+       "https://storage.googleapis.com/falserverless/example_inputs/hailuo23/pro_i2v_in.jpg"
+      ]
+     ]
+    },
+    "reference_video_urls": {
+     "type": "array",
+     "items": "string",
+     "maxItems": 3,
+     "required": false,
+     "desc": "URLs of motion/reference video clips (2-15 seconds each, combined duration at most 15 seconds), referenced in the prompt as Video 1, Video 2, and so on. Reference images, videos, and audio clips must add up to at most 12 files."
+    },
+    "reference_audio_urls": {
+     "type": "array",
+     "items": "string",
+     "maxItems": 3,
+     "required": false,
+     "desc": "URLs of reference audio clips (2-15 seconds each, combined duration at most 15 seconds), referenced in the prompt as Audio 1, Audio 2, and so on. Images, videos, and audio can be provided individually or together. Reference images, videos, and audio clips must add up to at most 12 files."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "weight_name": {
+       "nullable": true,
+       "type": "string",
+       "required": false,
+       "desc": "Name of the LoRA weight file. Only used when `path` is a HuggingFace repo and it holds more than one LoRA."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Strength of the LoRA (0.0 to 4.0)."
+      },
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL or HuggingFace repo id (owner/repo) of the LoRA weights.",
+       "examples": [
+        "https://huggingface.co/owner/repo/resolve/main/lora.safetensors"
+       ]
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "minItems": 1,
+     "maxItems": 3,
+     "required": true,
+     "desc": "List of LoRA adapters to apply to the transformer."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "images": "reference_image_urls",
+    "video": "reference_video_urls",
+    "duration": "duration",
+    "resolution": "resolution",
+    "seed": "seed",
+    "loras": "loras"
+   },
+   "output": "video.url",
+   "inputsChecked": "2026-10-27"
   }
  ],
  "noHostedLora": [
@@ -5026,7 +5933,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/z-image-turbo-trainer-v2",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5048,7 +5959,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/z-image-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5069,7 +5984,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-2512-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5090,7 +6009,11 @@
    "commercialWeights": true,
    "status": "unlisted (schema served, not in the catalog)",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5111,7 +6034,11 @@
    "commercialWeights": true,
    "status": "unlisted (schema served, not in the catalog)",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-edit-2511-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5132,13 +6059,17 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-edit-2509-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
    "id": "fal-ai/flux-2-klein-4b-base-trainer",
    "family": "FLUX.2 [klein] 4B base",
-   "role": "Apache image LoRAs",
+   "role": "Soul ID on FLUX.2 [klein] 4B (o/soul-id)",
    "required": [
     "image_data_url"
    ],
@@ -5154,13 +6085,18 @@
    "commercialWeights": true,
    "status": "unlisted (schema served, not in the catalog)",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2-klein-4b-base-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "Apache image LoRAs"
   },
   {
    "provider": "fal",
    "id": "fal-ai/flux-2-klein-9b-base-trainer",
    "family": "FLUX.2 [klein] 9B base",
-   "role": "not for Originals",
+   "role": "Soul ID on FLUX.2 [klein] 9B (o/soul-id; non-commercial weights, shown as information)",
    "required": [
     "image_data_url"
    ],
@@ -5176,13 +6112,18 @@
    "commercialWeights": false,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2-klein-9b-base-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "not for Originals"
   },
   {
    "provider": "fal",
    "id": "fal-ai/flux-2-trainer-v2",
    "family": "FLUX.2 [dev]",
-   "role": "not for Originals",
+   "role": "Soul ID on FLUX.2 [dev] (o/soul-id; non-commercial weights, shown as information)",
    "required": [
     "image_data_url"
    ],
@@ -5198,7 +6139,12 @@
    "commercialWeights": false,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2-trainer-v2",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "not for Originals"
   },
   {
    "provider": "fal",
@@ -5222,13 +6168,17 @@
    "commercialWeights": false,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-lora-fast-training",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
    "id": "fal-ai/flux-lora-portrait-trainer",
    "family": "FLUX.1 [dev]",
-   "role": "not for Originals",
+   "role": "Soul ID on FLUX.1 [dev] and Krea [dev] (o/soul-id; non-commercial weights, shown as information)",
    "required": [
     "images_data_url"
    ],
@@ -5248,13 +6198,18 @@
    "commercialWeights": false,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-lora-portrait-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "not for Originals"
   },
   {
    "provider": "fal",
    "id": "fal-ai/krea-2-trainer",
    "family": "Krea 2",
-   "role": "optional",
+   "role": "Soul ID on Krea 2 (o/soul-id; revenue-tier licence, shown as information)",
    "required": [
     "images_data_url"
    ],
@@ -5272,7 +6227,12 @@
    "commercialWeights": null,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/krea-2-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27",
+   "roleBefore": "optional"
   },
   {
    "provider": "fal",
@@ -5299,7 +6259,12 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-22-image-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "diffusers_lora_file",
+    "high_noise_lora"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5321,7 +6286,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-22-trainer/i2v-a14b",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5343,7 +6312,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-22-trainer/t2v-a14b",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5365,7 +6338,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-trainer/i2v-720p",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5406,7 +6383,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx23-trainer-v2/i2v",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5446,7 +6427,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx23-trainer-v2/t2v",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5486,7 +6471,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx23-trainer-v2/ic-lora/v2v",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "fal",
@@ -5528,7 +6517,11 @@
    "commercialWeights": true,
    "status": "active",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx23-video-trainer",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "loraOutput": [
+    "lora_file"
+   ],
+   "outputChecked": "2026-10-27"
   },
   {
    "provider": "replicate",
@@ -16797,7 +17790,111 @@
     "fal-ai/wan/v2.2-a14b/image-to-video/lora for camera LoRAs ($0.10/s)"
    ],
    "licence": "Wan Apache-2.0; LTX-2.x Community (free under US$10M revenue)",
-   "note": "Cinema Studio's 3D scene (Gaussian splat → recomposition) is covered by round-4 cinema-3d work."
+   "note": "Cinema Studio's 3D scene (Gaussian splat → recomposition) is covered by round-4 cinema-3d work.",
+   "original": {
+    "model": "fuobe-cinema",
+    "added": "2026-10-26 (build plan O6)",
+    "source": "Fuobe's own recipe for Cinema Studio 4.0's Original, from the hosted LTX-2.3 22B LoRA endpoints' schemas above (§3.1) and the official LTX-2 ComfyUI templates (sizes in multiples of 32; 1280x704 at 720p). Unmeasured until the evaluation harness (O8) runs the cinema suite on a GPU and on fal.",
+    "cloud": {
+     "endpoints": {
+      "t2v": "fal-ai/ltx-2.3-22b/text-to-video",
+      "i2v": "fal-ai/ltx-2.3-22b/image-to-video",
+      "flf2v": "fal-ai/ltx-2.3-22b/image-to-video (end_image_url)",
+      "extend": "fal-ai/ltx-2.3-22b/extend-video",
+      "v2v": "fal-ai/ltx-2.3-22b/video-to-video"
+     },
+     "loraEndpoints": "the /lora variant of each (fal-ai/ltx-2.3-22b/{text-to-video,image-to-video,extend-video,video-to-video}/lora) only when a LoRA rides along: $0.001805 per megapixel of video against the plain endpoints' $0.001605",
+     "price": "per megapixel of video made (width x height x frames, rounded up): Cinema prices a take on its tier and shape's size from the table below and its 24n+1 frames",
+     "fixed": {
+      "enable_prompt_expansion": false
+     },
+     "fps": 24,
+     "maxFrames": 481,
+     "longerThanMax": "one extend-video call adds the rest (a 30 s take is 20 s + 10 s)",
+     "audio": "generate_audio follows the Director's sound toggle",
+     "prequel": "extend-video with extend_direction backward (unverified: whether the result holds the source clip)",
+     "edit": "video-to-video with the take's own scene and the change in one prompt (the endpoint renders a scene, not an instruction), video_strength 0.5 (fal's default 0.01 all but re-renders the clip; Fuobe's guess, between build plan O13's low and medium change), audio_strength 1 (the take's sound stays); a take longer than 20 s is edited for its first 481 frames (match_video_length false); a take made on Seedance 2.5, Kling 3.0 or Veo 3.1 is edited with Kling O3 instead",
+     "civitai": "a move whose Wan 2.2 LoRA downloads from civitai runs on Fuobe DoP only with the user's civitai key; without one it runs on its words",
+     "sizes": {
+      "480p tier (~0.4 MP)": {
+       "21:9": "1120x480",
+       "16:9": "864x480",
+       "4:3": "640x480",
+       "1:1": "480x480",
+       "3:4": "480x640",
+       "9:16": "480x864"
+      },
+      "720p tier (~0.9 MP)": {
+       "21:9": "1504x640",
+       "16:9": "1280x704",
+       "4:3": "1024x768",
+       "1:1": "960x960",
+       "3:4": "768x1024",
+       "9:16": "704x1280"
+      },
+      "1080p tier (~2 MP)": {
+       "21:9": "2240x960",
+       "16:9": "1920x1088",
+       "4:3": "1440x1088",
+       "1:1": "1088x1088",
+       "3:4": "1088x1440",
+       "9:16": "1088x1920"
+      }
+     },
+     "referenceClips": "none yet: fal-ai/ltx-2.3-22b/reference-video-to-video/lora takes one clip, but its inputs are not read here, and it is an IC-LoRA control (depth, pose, canny from the clip) rather than a reference; a take with reference clips runs on Seedance 2.5 unless Fuobe Cinema is picked from the menu (then the clips are left out, with a note)"
+    },
+    "open": {
+     "video": "Wan 2.2 14B Lightning (wan22-t2v-14b-lightx2v / wan22-i2v-14b-lightx2v), wan22-flf2v-14b for start and end frame; 3 or 5 s at 16 fps",
+     "moves": "a Wan 2.2 camera LoRA from the motion map (§7), else a Wan 2.2 Fun Camera pose (wan22-fun-camera-14b), else the move's words; both need a start frame",
+     "sound": "LTX-2.5 (ltx25-t2v / ltx25-i2v, gated weights) is the open choice with sound",
+     "extend": "video-extend-wan22-fun-vace",
+     "edit": "first frame by Qwen-Image-Edit 2511, then video-restyle-wan22-fun-vace",
+     "palette": "oss-palette-video after the clip"
+    },
+    "cameraLora": {
+     "note": "Cinema Studio's 33 camera moves → LTX-2.3's built-in camera_lora where one of its 7 moves fits (none = no fit). A zoom is taken as a dolly (the subject grows the same way); pans and tilts have no fit. A move with no fit runs its Wan 2.2 LoRA (fal-ai/wan/v2.2-a14b/image-to-video/lora through Fuobe DoP) when it has one and a start frame is given, Rack Focus runs LTX-2.5's focus_shift (lightricks/ltx-2.5/image-to-video/fast), anything else runs on its words.",
+     "moves": {
+      "snorricam": null,
+      "robot-arm": null,
+      "tilt-up": null,
+      "rack-focus": null,
+      "tilt-down": null,
+      "pov": null,
+      "pan-left": null,
+      "crane-up": "jib_up",
+      "pan-right": null,
+      "crane-down": "jib_down",
+      "side-tracking": null,
+      "pedestal-up": "jib_up",
+      "pedestal-down": "jib_down",
+      "handheld": null,
+      "tracking": null,
+      "drone-orbit": null,
+      "dolly-zoom": null,
+      "aerial-pullback": "dolly_out",
+      "static-shot": "static",
+      "bullet-time": null,
+      "whip-pan": null,
+      "slow-zoom-in": "dolly_in",
+      "arc-left": null,
+      "slow-zoom-out": "dolly_out",
+      "arc-right": null,
+      "truck-right": "dolly_right",
+      "dolly-in": "dolly_in",
+      "truck-left": "dolly_left",
+      "dolly-out": "dolly_out",
+      "slider-right": "dolly_right",
+      "crush-zoom": null,
+      "slider-left": "dolly_left",
+      "helicopter-shot": null
+     }
+    },
+    "stills": "fuobe-soul-cinema (Fuobe Soul Cinema: filmstill 0.7 + moviewide 0.5, cine tail) with the Director's camera and lens words; Soul Cinema's 21:9 crop and grade, and Soul Location's Movie grade, are applied in the browser by Cinema's feed and builders",
+    "soulCast": "fuobe-soul with the Realistic look (v1-realistic) and the 17-field casting compiler in the cloud; on the GPU the Soul Cast sheet graph (soul-cast-sheet-zimage, the same Z-Image Turbo) with the Realistic look's LoRAs and words, which also cuts the sheet's four views (Fuobe Soul alone when the graph is missing)",
+    "soulLocation": "fuobe-soul with the Movie look (v1-movie), 16:9, no people; other views by the Multiple-Angles LoRA (open: Qwen-Image-Edit 2511 + the LoRA; cloud: fal-ai/qwen-image-edit-2511-multiple-angles)",
+    "partners": "Seedance 2.5, Kling 3.0 and Veo 3.1 stay pickable with the Director compiled into the prompt; Kling O3 edits takes made on a partner model",
+    "licences": "LTX-2.x Community (free under US$10M annual revenue; shown in About & licences), Wan 2.2 Apache-2.0, Z-Image Turbo Apache-2.0, Qwen-Image-Edit 2511 Apache-2.0"
+   }
   },
   {
    "id": "upscale",
@@ -19776,6 +20873,1296 @@
    "verified": true,
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2/klein/4b/edit",
    "checked": "2026-10-24"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan/v2.2-14b/animate/move",
+   "operation": "motion-transfer",
+   "status": "active",
+   "inputs": {
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input video.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/a6SvJg96V8eoglMlYFShU_5385885-hd_1080_1920_25fps.mp4"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input image. If the input image does not match the chosen aspect ratio, it is resized and center cropped.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/-oMlZo9Yyj_Nzoza_tgds_GmLF86r5bOt50eMMKCszy_eacc949b3933443c9915a83c98fbe85e.png"
+     ]
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality.",
+     "examples": [
+      1
+     ]
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "480p",
+     "desc": "Resolution of the generated video (480p, 580p, or 720p).",
+     "examples": [
+      "480p"
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 20,
+     "minimum": 2,
+     "maximum": 40,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer.",
+     "examples": [
+      6
+     ]
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, input data will be checked for safety before processing. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_output_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, output video will be checked for safety after generation.",
+     "examples": [
+      false
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Shift value for the video. Must be between 1.0 and 10.0.",
+     "examples": [
+      8
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the output video. Higher quality means better visual quality but larger file size.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the output video. Faster write mode means faster results but larger file size, balanced write mode is a good compromise between speed and quality, and small write mode is the slowest but produces the smallest file size.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "return_frames_zip": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, also return a ZIP archive containing per-frame images generated on GPU (lossless)."
+    },
+    "use_turbo": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, applies quality enhancement for faster generation with improved quality. When enabled, parameters are automatically optimized for best results.",
+     "examples": [
+      true
+     ]
+    }
+   },
+   "keyFields": {
+    "video": "video_url",
+    "image": "image_url",
+    "seed": "seed",
+    "resolution": "resolution"
+   },
+   "output": "video.url",
+   "price": "720p: $0.08 per video second; 580p: $0.06 per video second; 480p: $0.04 per video second; Cost = 18.75 × $0.08 = $1.50",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan/v2.2-14b/animate/move",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan/v2.2-14b/animate/replace",
+   "operation": "video-swap",
+   "status": "active",
+   "inputs": {
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input video.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/a6SvJg96V8eoglMlYFShU_5385885-hd_1080_1920_25fps.mp4"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input image. If the input image does not match the chosen aspect ratio, it is resized and center cropped.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/-oMlZo9Yyj_Nzoza_tgds_GmLF86r5bOt50eMMKCszy_eacc949b3933443c9915a83c98fbe85e.png"
+     ]
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality.",
+     "examples": [
+      1
+     ]
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "480p",
+     "desc": "Resolution of the generated video (480p, 580p, or 720p).",
+     "examples": [
+      "480p"
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 20,
+     "minimum": 2,
+     "maximum": 40,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer.",
+     "examples": [
+      6
+     ]
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, input data will be checked for safety before processing. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_output_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, output video will be checked for safety after generation.",
+     "examples": [
+      false
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Shift value for the video. Must be between 1.0 and 10.0.",
+     "examples": [
+      8
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the output video. Higher quality means better visual quality but larger file size.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the output video. Faster write mode means faster results but larger file size, balanced write mode is a good compromise between speed and quality, and small write mode is the slowest but produces the smallest file size.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "return_frames_zip": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, also return a ZIP archive containing per-frame images generated on GPU (lossless)."
+    },
+    "use_turbo": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, applies quality enhancement for faster generation with improved quality. When enabled, parameters are automatically optimized for best results.",
+     "examples": [
+      true
+     ]
+    }
+   },
+   "keyFields": {
+    "video": "video_url",
+    "image": "image_url",
+    "seed": "seed",
+    "resolution": "resolution"
+   },
+   "output": "video.url",
+   "price": "720p: $0.08 per video second; 580p: $0.06 per video second; 480p: $0.04 per video second; Cost = 18.75 × $0.08 = $1.50",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan/v2.2-14b/animate/replace",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/scail-2",
+   "operation": "motion-transfer",
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt describing the final video to generate.",
+     "examples": [
+      "A person dancing gracefully in a sunlit studio"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the reference character image. The character in this image is animated (or used to replace a subject) according to the driving video.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/-oMlZo9Yyj_Nzoza_tgds_GmLF86r5bOt50eMMKCszy_eacc949b3933443c9915a83c98fbe85e.png"
+     ]
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the driving (motion) video. The subject can be a human, multiple humans, or an animal.",
+     "examples": [
+      "https://v3b.fal.media/files/b/panda/a6SvJg96V8eoglMlYFShU_5385885-hd_1080_1920_25fps.mp4"
+     ]
+    },
+    "mode": {
+     "type": "enum",
+     "values": [
+      "animation",
+      "replacement"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "animation",
+     "desc": "`animation` animates the reference character with the driving motion. `replacement` replaces the driving subject with the reference character while keeping the original scene."
+    },
+    "driving_type": {
+     "type": "enum",
+     "values": [
+      "end_to_end",
+      "pose"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "end_to_end",
+     "desc": "Driving signal for animation mode. `end_to_end` (default) drives directly from the SAM3-masked driving video and is the recommended, most robust path. `pose` renders an explicit NLF/DWPose skeleton from the driving video (more control for challenging inputs)."
+    },
+    "subject_type": {
+     "type": "enum",
+     "values": [
+      "human",
+      "animal"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "human",
+     "desc": "Type of subject in the driving video. `animal` switches the SAM3 detection prompt to non-human subjects."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "512p",
+      "704p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "512p",
+     "desc": "Output resolution. 512p outputs 896x512 (landscape) or 512x896 (portrait); 704p outputs 1280x704 or 704x1280. Orientation is chosen automatically from the reference image aspect ratio."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 40,
+     "minimum": 2,
+     "maximum": 50,
+     "desc": "Number of diffusion sampling steps. Higher improves quality but is slower."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Classifier-free guidance scale. Controls prompt adherence versus creativity."
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 3,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Flow-matching noise schedule shift. 3.0 is recommended for the 512p tier."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed. Leave empty for a random seed. The seed used is returned in the response."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Authorized callers may set false to request relaxed screening."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "video": "video_url",
+    "image": "image_url",
+    "seed": "seed",
+    "resolution": "resolution"
+   },
+   "output": "video.url",
+   "price": "SCAIL-2 is billed per second of generated video at a flat rate of $0.20 per second, the same for both output resolutions (512p and 704p).; 2. Cost = billed seconds × $0.20; Example — 5-second output: 5 × $0.20 = $1.00; Each request is capped at 10 seconds of video (160 frames at 16 fps), so the maximum cost per request is $2.00.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/scail-2",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan-motion",
+   "operation": "motion-transfer",
+   "status": "active",
+   "inputs": {
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the driving video (provides the motion).",
+     "examples": [
+      "https://v3b.fal.media/files/b/0a8f0997/JuDW2xl0mr6sJ_Kjz3Vxe_vidoeook.mp4"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the reference image (provides the character appearance).",
+     "examples": [
+      "https://v3b.fal.media/files/b/0a8f0995/slF9l2eNL_YSD7SqU7tUz_i35fsR92.jpg"
+     ]
+    },
+    "prompt": {
+     "type": "string",
+     "required": false,
+     "default": "",
+     "desc": "Optional text prompt to guide the generation.",
+     "examples": [
+      "woman dancing"
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "Acceleration level to use. 'regular' enables caching for faster generation, 'none' disables it."
+    },
+    "adapt_motion": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Adapts the driving video's motion to match the reference image's body proportions. Recommended when the driving video subject and reference image have different body shapes or sizes."
+    },
+    "enhance_identity": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Enhances identity preservation by preprocessing the reference image with Flux Kontext Edit before animation. Produces more faithful face and appearance transfer at the cost of slightly longer processing time."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, input and output will be checked for safety. Disabling it requires account authorization; unauthorized requests are always checked."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "video": "video_url",
+    "image": "image_url",
+    "seed": "seed"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.06 per video second for 720p. Video seconds are calculated at 24 frames per second. When enhance_identity is enabled, an additional $0.08 is charged for Flux 2 Edit image preprocessing.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-motion",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan-vace-14b/inpainting",
+   "operation": "video-swap",
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The text prompt to guide video generation.",
+     "examples": [
+      "The video shows a man riding a horse on a vast grassland. He has long lavender hair and wears a traditional dress of a white top and black pants. The animation style makes him look like he is doing some kind of outdoor activity or performing. The background is a spectacular mountain range and cloud sky, giving a sense of tranquility and vastness. The entire video is shot from a fixed angle, focusing on the rider and his horse."
+     ]
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": "letterboxing, borders, black bars, bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards",
+     "desc": "Negative prompt for video generation.",
+     "examples": [
+      "letterboxing, borders, black bars, bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards"
+     ]
+    },
+    "match_input_num_frames": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the number of frames in the generated video will match the number of frames in the input video. If false, the number of frames will be determined by the num_frames parameter.",
+     "examples": [
+      false
+     ]
+    },
+    "num_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 81,
+     "minimum": 17,
+     "maximum": 241,
+     "desc": "Number of frames to generate. Must be between 81 to 241 (inclusive)."
+    },
+    "match_input_frames_per_second": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the frames per second of the generated video will match the input video. If false, the frames per second will be determined by the frames_per_second parameter.",
+     "examples": [
+      false
+     ]
+    },
+    "frames_per_second": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "default": 16,
+     "minimum": 5,
+     "maximum": 30,
+     "desc": "Frames per second of the generated video. Must be between 5 to 30. Ignored if match_input_frames_per_second is true."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "auto",
+      "240p",
+      "360p",
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "auto",
+     "desc": "Resolution of the generated video."
+    },
+    "aspect_ratio": {
+     "type": "enum",
+     "values": [
+      "auto",
+      "16:9",
+      "1:1",
+      "9:16"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "auto",
+     "desc": "Aspect ratio of the generated video."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 30,
+     "minimum": 2,
+     "maximum": 50,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Guidance scale for classifier-free guidance. Higher values encourage the model to generate images closely related to the text prompt.",
+     "examples": [
+      5
+     ]
+    },
+    "sampler": {
+     "type": "enum",
+     "values": [
+      "unipc",
+      "dpm++",
+      "euler"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "unipc",
+     "desc": "Sampler to use for video generation.",
+     "examples": [
+      "unipc"
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 15,
+     "desc": "Shift parameter for video generation."
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL to the source video file. Required for inpainting.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/vace/src_video.mp4"
+     ]
+    },
+    "mask_video_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the source mask file. Required for inpainting.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/vace/src_mask.mp4"
+     ]
+    },
+    "mask_image_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the guiding mask file. If provided, the model will use this mask as a reference to create masked video using salient mask tracking. Will be ignored if mask_video_url is provided."
+    },
+    "ref_image_urls": {
+     "type": "array",
+     "items": "string",
+     "required": false,
+     "desc": "Urls to source reference image. If provided, the model will use this image as reference.",
+     "examples": [
+      [
+       "https://storage.googleapis.com/falserverless/vace/src_ref_image_1.png"
+      ]
+     ]
+    },
+    "first_frame_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the first frame of the video. If provided, the model will use this frame as a reference."
+    },
+    "last_frame_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the last frame of the video. If provided, the model will use this frame as a reference."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to enable prompt expansion.",
+     "examples": [
+      false
+     ]
+    },
+    "preprocess": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to preprocess the input video.",
+     "examples": [
+      false
+     ]
+    },
+    "acceleration": {
+     "nullable": true,
+     "type": "enum",
+     "values": [
+      "none",
+      "low",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "Acceleration to use for inference. Options are 'none' or 'regular'. Accelerated inference will very slightly affect output, but will be significantly faster.",
+     "examples": [
+      "regular"
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the generated video.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the generated video.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "num_interpolated_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 5,
+     "desc": "Number of frames to interpolate between the original frames. A value of 0 means no interpolation.",
+     "examples": [
+      0
+     ]
+    },
+    "temporal_downsample_factor": {
+     "type": "integer",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 5,
+     "desc": "Temporal downsample factor for the video. This is an integer value that determines how many frames to skip in the video. A value of 0 means no downsampling. For each downsample factor, one upsample factor will automatically be applied.",
+     "examples": [
+      0
+     ]
+    },
+    "enable_auto_downsample": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the model will automatically temporally downsample the video to an appropriate frame length for the model, then will interpolate it back to the original frame length.",
+     "examples": [
+      false
+     ]
+    },
+    "auto_downsample_min_fps": {
+     "type": "number",
+     "required": false,
+     "default": 15,
+     "minimum": 1,
+     "maximum": 60,
+     "desc": "The minimum frames per second to downsample the video to. This is used to help determine the auto downsample factor to try and find the lowest detail-preserving downsample factor. The default value is appropriate for most videos, if you are using a video with very fast motion, you may need to increase this value. If your video has a very low amount of motion, you could decrease this value to allow for higher downsampling and thus longer sequences.",
+     "examples": [
+      15
+     ]
+    },
+    "interpolator_model": {
+     "type": "enum",
+     "values": [
+      "rife",
+      "film"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "film",
+     "desc": "The model to use for frame interpolation. Options are 'rife' or 'film'.",
+     "examples": [
+      "film"
+     ]
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history.",
+     "examples": [
+      false
+     ]
+    },
+    "transparency_mode": {
+     "type": "enum",
+     "values": [
+      "content_aware",
+      "white",
+      "black"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "content_aware",
+     "desc": "The transparency mode to apply to the first and last frames. This controls how the transparent areas of the first and last frames are filled.",
+     "examples": [
+      "content_aware"
+     ]
+    },
+    "return_frames_zip": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, also return a ZIP file containing all generated frames.",
+     "examples": [
+      false
+     ]
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "negativePrompt": "negative_prompt",
+    "video": "video_url",
+    "images": "ref_image_urls",
+    "seed": "seed",
+    "resolution": "resolution",
+    "aspectRatio": "aspect_ratio",
+    "fps": "frames_per_second",
+    "mask": "mask_video_url"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.08 per video second for 720p, $0.06 per video second for 580p, $0.04 per video second for 480p. Video seconds are calculated at 16 frames per second.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-vace-14b/inpainting",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
+   "operation": "v2v",
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The text prompt to guide video generation.",
+     "examples": [
+      "A confident woman strides toward the camera down a sun-drenched, empty street. Her vibrant summer dress, a flowing emerald green with delicate white floral embroidery, billows slightly in the gentle breeze.  She carries a stylish, woven straw bag, its natural tan contrasting beautifully with the dress. The dress's fabric shimmers subtly, catching the light. The white embroidery is intricate, each tiny flower meticulously detailed.  Her expression is focused, yet relaxed, radiating self-assuredness. Her auburn hair, partially pulled back in a loose braid, catches the sunlight, creating warm highlights. The street itself is paved with warm, grey cobblestones, reflecting the bright sun. The mood is optimistic and serene, emphasizing the woman's independence and carefree spirit. High resolution 4k"
+     ]
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": "letterboxing, borders, black bars, bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards",
+     "desc": "Negative prompt for video generation.",
+     "examples": [
+      "letterboxing, borders, black bars, bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture, cluttered background, three legs, many people in the background, walking backwards"
+     ]
+    },
+    "match_input_num_frames": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the number of frames in the generated video will match the number of frames in the input video. If false, the number of frames will be determined by the num_frames parameter.",
+     "examples": [
+      false
+     ]
+    },
+    "num_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 81,
+     "minimum": 17,
+     "maximum": 241,
+     "desc": "Number of frames to generate. Must be between 81 to 241 (inclusive)."
+    },
+    "match_input_frames_per_second": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the frames per second of the generated video will match the input video. If false, the frames per second will be determined by the frames_per_second parameter.",
+     "examples": [
+      false
+     ]
+    },
+    "frames_per_second": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "default": 16,
+     "minimum": 5,
+     "maximum": 30,
+     "desc": "Frames per second of the generated video. Must be between 5 to 30. Ignored if match_input_frames_per_second is true."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "auto",
+      "240p",
+      "360p",
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "auto",
+     "desc": "Resolution of the generated video."
+    },
+    "aspect_ratio": {
+     "type": "enum",
+     "values": [
+      "auto",
+      "16:9",
+      "1:1",
+      "9:16"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "auto",
+     "desc": "Aspect ratio of the generated video."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 30,
+     "minimum": 2,
+     "maximum": 50,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Guidance scale for classifier-free guidance. Higher values encourage the model to generate images closely related to the text prompt.",
+     "examples": [
+      5
+     ]
+    },
+    "sampler": {
+     "type": "enum",
+     "values": [
+      "unipc",
+      "dpm++",
+      "euler"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "unipc",
+     "desc": "Sampler to use for video generation.",
+     "examples": [
+      "unipc"
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 15,
+     "desc": "Shift parameter for video generation."
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL to the source video file. Required for depth task.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/example_inputs/wan-vace-depth-video.mp4"
+     ]
+    },
+    "ref_image_urls": {
+     "type": "array",
+     "items": "string",
+     "required": false,
+     "desc": "URLs to source reference image. If provided, the model will use this image as reference."
+    },
+    "first_frame_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the first frame of the video. If provided, the model will use this frame as a reference."
+    },
+    "last_frame_url": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "URL to the last frame of the video. If provided, the model will use this frame as a reference."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to enable prompt expansion.",
+     "examples": [
+      false
+     ]
+    },
+    "preprocess": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to preprocess the input video.",
+     "examples": [
+      false
+     ]
+    },
+    "acceleration": {
+     "nullable": true,
+     "type": "enum",
+     "values": [
+      "none",
+      "low",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "Acceleration to use for inference. Options are 'none' or 'regular'. Accelerated inference will very slightly affect output, but will be significantly faster.",
+     "examples": [
+      "regular"
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the generated video.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the generated video.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "num_interpolated_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 5,
+     "desc": "Number of frames to interpolate between the original frames. A value of 0 means no interpolation.",
+     "examples": [
+      0
+     ]
+    },
+    "temporal_downsample_factor": {
+     "type": "integer",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 5,
+     "desc": "Temporal downsample factor for the video. This is an integer value that determines how many frames to skip in the video. A value of 0 means no downsampling. For each downsample factor, one upsample factor will automatically be applied.",
+     "examples": [
+      0
+     ]
+    },
+    "enable_auto_downsample": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, the model will automatically temporally downsample the video to an appropriate frame length for the model, then will interpolate it back to the original frame length.",
+     "examples": [
+      false
+     ]
+    },
+    "auto_downsample_min_fps": {
+     "type": "number",
+     "required": false,
+     "default": 15,
+     "minimum": 1,
+     "maximum": 60,
+     "desc": "The minimum frames per second to downsample the video to. This is used to help determine the auto downsample factor to try and find the lowest detail-preserving downsample factor. The default value is appropriate for most videos, if you are using a video with very fast motion, you may need to increase this value. If your video has a very low amount of motion, you could decrease this value to allow for higher downsampling and thus longer sequences.",
+     "examples": [
+      15
+     ]
+    },
+    "interpolator_model": {
+     "type": "enum",
+     "values": [
+      "rife",
+      "film"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "film",
+     "desc": "The model to use for frame interpolation. Options are 'rife' or 'film'.",
+     "examples": [
+      "film"
+     ]
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history.",
+     "examples": [
+      false
+     ]
+    },
+    "transparency_mode": {
+     "type": "enum",
+     "values": [
+      "content_aware",
+      "white",
+      "black"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "content_aware",
+     "desc": "The transparency mode to apply to the first and last frames. This controls how the transparent areas of the first and last frames are filled.",
+     "examples": [
+      "content_aware"
+     ]
+    },
+    "return_frames_zip": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If true, also return a ZIP file containing all generated frames.",
+     "examples": [
+      false
+     ]
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "negativePrompt": "negative_prompt",
+    "video": "video_url",
+    "images": "ref_image_urls",
+    "seed": "seed",
+    "resolution": "resolution",
+    "aspectRatio": "aspect_ratio",
+    "fps": "frames_per_second",
+    "image": "first_frame_url"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.10 per video second for 720p, $0.075 per video second for 580p, $0.05 per video second for 480p. Video seconds are calculated at 16 frames per second.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan-22-vace-fun-a14b/depth",
+   "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "minimax/h3-max/recast",
+   "operation": "video-swap",
+   "status": "active",
+   "inputs": {
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "The source video, 5 to 30 seconds long, with no single shot longer than 15 seconds.",
+     "examples": [
+      "https://v3b.fal.media/files/b/0aac8cc6/lOHY4Mitfg5x1UDerR3RB_dw9Hs7ChHU-Fqwzz0W9cq_video.mp4"
+     ]
+    },
+    "reference_image_urls": {
+     "type": "array",
+     "items": "string",
+     "minItems": 1,
+     "maxItems": 4,
+     "required": true,
+     "desc": "One photo per new person. By default they replace the main people in the video from left to right, each in every shot they appear in.",
+     "examples": [
+      [
+       "https://v3b.fal.media/files/b/0aac8d26/HVno2j68vj7tkAwGo3Qii_Nolan%203.jpg"
+      ]
+     ]
+    },
+    "prompt": {
+     "nullable": true,
+     "type": "string",
+     "required": false,
+     "desc": "Optional: who becomes whom, or what else to keep or change."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "768P",
+      "1080P"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "1080P"
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "minimum": 0,
+     "desc": "Random seed. Leave empty for a random one."
+    },
+    "enhance_realism": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "More natural skin textures and better blending of the new people into the scene. Off unless set.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Authorized callers may set false to request relaxed screening."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "video": "video_url",
+    "images": "reference_image_urls",
+    "resolution": "resolution",
+    "seed": "seed"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.30 per second of output video at 768p or $0.45 per second at 1080p. Reference images are included at no additional charge.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max/recast",
+   "checked": "2026-10-27"
   }
  ]
 }

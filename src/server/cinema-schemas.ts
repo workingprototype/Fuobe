@@ -93,7 +93,19 @@ export const GenerateBody = z.object({
     batch: z.number().int().min(1).max(4).optional(),
     audio: z.boolean().optional(),
     multiShot: z.object({ mode: z.enum(["off", "auto", "manual"]), shots: z.array(Shot).max(12).optional() }).optional(),
-    source: z.object({ url: FileRef, kind: z.enum(["image", "video"]), firstFrame: FileRef.optional() }).optional(),
+    source: z
+      .object({
+        url: FileRef,
+        kind: z.enum(["image", "video"]),
+        firstFrame: FileRef.optional(),
+        // What the browser knows about the take (its model picks the editor; its scene, length and size shape an edit).
+        modelId: z.string().max(80).optional(),
+        prompt: z.string().max(4000).optional(),
+        seconds: z.number().positive().max(600).optional(),
+        resolution: z.string().max(10).optional(),
+        aspectRatio: z.string().max(10).optional(),
+      })
+      .optional(),
     grid: z.object({ size: z.enum(["2x2", "3x3", "4x4"]), type: z.enum(["freeform", "zooms", "shots", "next_shots", "prev_shots"]) }).optional(),
     cast: z.record(z.string().max(40), z.union([z.string().max(300), z.number(), z.array(z.string().max(60)).max(10)])).optional(),
     view: z.string().max(20).optional(),

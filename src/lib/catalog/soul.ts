@@ -18,7 +18,7 @@
  *   (`legacyStyleId`); they are never sent anywhere.
  */
 import { loraEntry, loraRef } from "./loras";
-import { DEFAULT_LOOK, SOUL_MODEL_IDS } from "./soul-cards";
+import { DEFAULT_LOOK, OWN_LOOK, SOUL_MODEL_IDS } from "./soul-cards";
 import { SOUL_CINEMA, SOUL_CORE_LORAS, SOUL_ORIGINALS, SOUL_SIZES, SOUL_TAILS } from "./soul-originals.generated";
 import type { LoraRef, ModelDef } from "./types";
 
@@ -67,7 +67,7 @@ export interface SoulCinemaRecipe {
 /** The Soul Originals' model ids. */
 export const SOUL_MODELS = SOUL_MODEL_IDS;
 export type SoulModelId = (typeof SOUL_MODELS)[keyof typeof SOUL_MODELS];
-export { DEFAULT_LOOK };
+export { DEFAULT_LOOK, OWN_LOOK };
 
 /** Which Soul a model is (none for other models). */
 export function soulKind(model: Pick<ModelDef, "id"> | string | undefined): "soul" | "hd" | "cinema" | undefined {
@@ -192,7 +192,11 @@ export function soulRecipe(
   let sentence = "";
   let grade: string | undefined;
   let overlay: SoulOverlay | undefined;
-  if (kind === "cinema") {
+  if (kind !== "cinema" && opts.look === OWN_LOOK) {
+    // The trained moodboard's LoRA (among the user's own) carries the look.
+    picked = [];
+    tail = "art";
+  } else if (kind === "cinema") {
     if (opts.look) notes.push("Soul Cinema has one film look, so the look you picked isn't used");
     picked = SOUL_CINEMA.loras;
     tail = SOUL_CINEMA.tail;

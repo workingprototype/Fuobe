@@ -26,6 +26,8 @@ import {
   type StreamEvent,
 } from "./generation-stream";
 import { cursorAfter, filterToSearch, type AssetUse, type FeedFilter, type Folder } from "./library";
+import type { ShareCreated, ShareInfo, ShareListItem, SharePatch, ShareRequest } from "./share";
+import type { AccessSummary } from "./model-access";
 
 export interface Asset {
   id: string;
@@ -679,6 +681,39 @@ export function useFolderActions() {
 }
 
 // ---------------------------------------------------------------------------
+// Share links (Library → Shared, the Share dialog, the Publish wizard)
+
+/** Every link, and whether sign-in is on (a link to a studio without a password opens more than the page). */
+export function useShares(opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ["shares"],
+    queryFn: async () => json<{ items: ShareListItem[]; signIn: boolean }>(await fetch("/api/shares")),
+    staleTime: 10_000,
+    enabled: opts.enabled ?? true,
+  });
+}
+
+export function useShareActions() {
+  const qc = useQueryClient();
+  return useMemo(() => {
+    const send = async <T,>(url: string, method: string, body?: unknown) => {
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const out = res.status === 204 ? (undefined as T) : await json<T>(res);
+      void qc.invalidateQueries({ queryKey: ["shares"] });
+      return out;
+    };
+    return {
+      /** A new link; the answer carries its token once. */
+      create: (body: ShareRequest) => send<ShareCreated>("/api/shares", "POST", body),
+      /** Change it; with newLink, a new token (in the answer) replaces the old one. */
+      update: (id: string, patch: SharePatch) => send<{ share: ShareInfo; token?: string; path?: string }>(`/api/shares/${id}`, "PATCH", patch),
+      /** Revoke: the link stops working at once. */
+      revoke: (id: string) => send<void>(`/api/shares/${id}`, "DELETE"),
+    };
+  }, [qc]);
+}
+
+// ---------------------------------------------------------------------------
 // Uploads & assets
 
 export async function uploadFile(file: File): Promise<Asset> {
@@ -778,6 +813,8 @@ export interface StatusInfo {
   cloudProvider: string;
   /** The first-run guide was put away, or something the engine mode generates with was connected once. */
   onboarded?: boolean;
+  /** Settings → Models & licences: what is switched off (absent while everything is on). */
+  access?: AccessSummary;
 }
 
 /** A connection test's answer (POST /api/providers/test). */
@@ -898,6 +935,16 @@ export function useEngineMode(): EngineMode {
   // Suspense subtrees can hydrate after the status query resolved; render the server's view until hydrated.
   if (!hydrated) return "both";
   return serverMode ?? cached;
+}
+
+/**
+ * What Settings → Models & licences switched off, for pickers to leave out (src/lib/model-access.ts offered()).
+ * Undefined until hydrated and while everything is on; the server refuses an off model either way.
+ */
+export function useModelAccess(): AccessSummary | undefined {
+  const hydrated = useHydrated();
+  const access = useStatus().data?.access;
+  return hydrated ? access : undefined;
 }
 
 export function useEngine(): [Engine, (e: Engine) => void, EngineMode] {

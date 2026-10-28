@@ -223,30 +223,55 @@ describe("Before a cloud run", () => {
     expect(up.sent).toHaveLength(1);
   });
 
-  it("won't mirror when civitai no longer allows hosting, or a local-only LoRA", async () => {
+  it("mirrors a civitai file whose hosting permission is gone, recording what civitai says (licences are information)", async () => {
     setSetting("civitaiKey", KEY);
     net = network(civitaiRoutes(Y2K_BODY, { permissions: ["Image", "RentCivit"] }));
     const up = upload();
-    await expect(prepareCloudLoras([y2k], "fal", up.fn)).rejects.toThrow(/no longer allows running it on a hosted service/);
+    const out = (await prepareCloudLoras([y2k], "fal", up.fn)) as LoraRef[];
+    expect(out[0].hostedUrl).toBe("https://v3.fal.media/files/civitai-3422541-y2k.safetensors");
+    const mirror = listLoraCopies().find((c) => c.target === "fal")!;
+    expect(mirror.licence).toMatchObject({ permissionsNow: ["Image", "RentCivit"], hosting: expect.stringMatching(/without civitai's “Rent” permission: Settings → Models & licences/) });
+  });
+
+  it("records an unconfirmed hosting right, not a missing one, when civitai doesn't answer", async () => {
+    setSetting("civitaiKey", KEY);
+    const routes = civitaiRoutes(Y2K_BODY);
+    net = network({ ...routes, "https://civitai.com/api/v1/models/2979601": () => new Response("down", { status: 503 }) });
+    const up = upload();
+    const out = (await prepareCloudLoras([y2k], "replicate", up.fn)) as LoraRef[];
+    expect(out[0].hostedUrl).toBe("https://v3.fal.media/files/civitai-3422541-y2k.safetensors");
+    const mirror = listLoraCopies().find((c) => c.target === "replicate")!;
+    expect(mirror.licence?.hosting).toMatch(/civitai didn't answer, so its hosting right wasn't confirmed/);
+    expect(mirror.licence?.hosting).not.toMatch(/without civitai's “Rent” permission/);
+  });
+
+  it("goes back to civitai's hosting permission while Settings → Models & licences keeps GPU-only LoRAs on the GPU", async () => {
+    setSetting("civitaiKey", KEY);
+    net = network(civitaiRoutes(Y2K_BODY, { permissions: ["Image", "RentCivit"] }));
+    const up = upload();
+    await expect(prepareCloudLoras([{ ...y2k, keepOnGpu: true }], "fal", up.fn)).rejects.toThrow(/no longer allows running it on a hosted service, and Settings → Models & licences keeps such LoRAs off the cloud/);
     const wiggle = loraRef(loraEntry("civitai-2490836-wiggle-redmond")!);
-    await expect(prepareCloudLoras([wiggle], "replicate", up.fn)).rejects.toThrow(/runs only on your GPU/);
+    await expect(prepareCloudLoras([{ ...wiggle, keepOnGpu: true }], "replicate", up.fn)).rejects.toThrow(/licensed for your GPU only, and Settings → Models & licences keeps such LoRAs off the cloud/);
     expect(up.sent).toEqual([]);
   });
 
-  it("keeps a GPU-only file off the cloud even when the ref carries no licence, and when civitai doesn't answer", async () => {
+  it("sends a GPU-only LoRA to the cloud and says so, unless the run keeps such LoRAs on the GPU", async () => {
     setSetting("civitaiKey", KEY);
     const entry = loraEntry("civitai-2490836-wiggle-redmond")!;
     // Built by hand (no loraRef, so no licence): the library's licence still counts.
     const bare: LoraRef = { file: entry.file, url: entry.url, strength: 1 };
-    const fitted = fitLoras([bare], { provider: "fal", loraEndpoint: "fal-ai/wan/v2.2-a14b/image-to-video/lora" });
-    expect(fitted.loras).toEqual([]);
-    expect(fitted.notes[0]).toMatch(/^Wiggle Redmond runs only on your GPU/);
-    // Even with civitai's API down (nothing to re-read), it is never downloaded or copied.
+    const route = { provider: "fal" as const, loraEndpoint: "fal-ai/wan/v2.2-a14b/image-to-video/lora" };
+    const sent = fitLoras([bare], route);
+    expect(sent.loras).toEqual([bare]);
+    expect(sent.notes[0]).toMatch(/^Wiggle Redmond: its licence allows your GPU only \(civitai lists no “Rent”\); it runs in the cloud because Settings → Models & licences lets such LoRAs go there/);
+    const kept = fitLoras([{ ...bare, keepOnGpu: true }], route);
+    expect(kept.loras).toEqual([]);
+    expect(kept.notes[0]).toMatch(/^Wiggle Redmond is licensed for your GPU only and Settings → Models & licences keeps such LoRAs off the cloud, so this run leaves it out/);
+    // With civitai's API down (nothing to re-read), a kept file is never downloaded or copied, nor is a hostable one.
     net = network({ "https://civitai.com/api/": () => new Response("down", { status: 503 }) });
     const up = upload();
-    await expect(prepareCloudLoras([bare], "fal", up.fn)).rejects.toThrow(/runs only on your GPU/);
-    // A hostable civitai file isn't copied either while civitai can't confirm its permissions: no answer, no copy.
-    await expect(prepareCloudLoras([y2k], "fal", up.fn)).rejects.toThrow(/Couldn't confirm on civitai/);
+    await expect(prepareCloudLoras([{ ...bare, keepOnGpu: true }], "fal", up.fn)).rejects.toThrow(/licensed for your GPU only/);
+    await expect(prepareCloudLoras([{ ...y2k, keepOnGpu: true }], "fal", up.fn)).rejects.toThrow(/Couldn't confirm on civitai/);
     expect(up.sent).toEqual([]);
     expect(net.calls.filter((c) => c.url.includes("/api/download/"))).toEqual([]);
   });

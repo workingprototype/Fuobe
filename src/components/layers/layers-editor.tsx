@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CompareSlider } from "@/components/studio/compare-slider";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useEngine, useStatus } from "@/lib/api";
+import { useEngine, useModelAccess, useStatus } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import {
   APPLIES_TO_DOC,
   decomposeCost,
@@ -574,6 +575,8 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     };
   }, [compare, doc]);
 
+  const access = useModelAccess();
+  const offeredIds = useCallback((ids: readonly string[]) => keepOffered(ids, (x) => offered(access, x, engine)), [access, engine]);
   const isDemo = useCallback(
     (m: LayerModelInfo | undefined) => {
       if (!m || !status) return false;
@@ -608,6 +611,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     select,
     engine,
     models,
+    offeredIds,
     isDemo,
     jobs: view.jobs,
     busyJob,
@@ -637,7 +641,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   };
 
   if (isMobile) {
-    const modelId = TOOL_MODELS.decompose[engine][0];
+    const modelId = offeredIds(TOOL_MODELS.decompose[engine])[0];
     const model = models[modelId];
     return (
       <MobileView

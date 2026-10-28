@@ -70,13 +70,14 @@ describe("Cinema retry", () => {
   it("retries a palette-locked take as a unit: the failed main step brings its palette step back", async () => {
     const p = cinema.createProject({ name: "Chain" });
     const { items } = generateInProject(p.id, { ...VIDEO, engine: "open", settings: CIRCUS });
-    expect(items.map((g) => g.modelId)).toEqual(["oss-wan22-14b-fast", "oss-palette-video"]);
+    expect(items.map((g) => g.modelId)).toEqual(["fuobe-cinema", "oss-palette-video"]);
     await gens.cancelGeneration(items[0].id);
     expect((await settle(items[1].id)).status).toBe("failed");
 
     // Retrying the dependent finds the broken step it waits for; retrying the main finds its dependent.
     const again = cinema.retryItem(p.id, items[1].id);
-    expect(again.map((g) => g.modelId)).toEqual(["oss-wan22-14b-fast", "oss-palette-video"]);
+    expect(again.map((g) => g.modelId)).toEqual(["fuobe-cinema", "oss-palette-video"]);
+    expect(again[0].request.engine).toBe("open");
     expect(dependsOn(again[1].id)).toEqual([again[0].id]);
     // Its request is the unfilled one: the swatch only, the clip arrives through the chain.
     expect(again[1].request.inputs?.images).toEqual([circusSwatch()]);
@@ -109,7 +110,8 @@ describe("Cinema retry", () => {
     const p = cinema.createProject({ name: "Prequel retry" });
     const src = gens.createGenerations({ feature: "cinema", modelId: "seedance-2-5", prompt: "source take", params: { duration: 5 } })[0];
     const take = await settle(src.id);
-    const { items } = generateInProject(p.id, { ...VIDEO, action: "extend-backward", prompt: "he walks up to the door", source: { url: take.outputs[0].url, kind: "video" } });
+    // A partner model's prequel (Fuobe Cinema's is one extend call).
+    const { items } = generateInProject(p.id, { ...VIDEO, modelId: "seedance-2-5", action: "extend-backward", prompt: "he walks up to the door", source: { url: take.outputs[0].url, kind: "video" } });
     expect(items.map((g) => g.op)).toEqual(["frame", "edit", "flf2v"]);
     await gens.cancelGeneration(items[0].id);
     await settle(items[2].id);

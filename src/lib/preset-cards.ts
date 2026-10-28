@@ -479,9 +479,10 @@ export function presetRouteLines(
   return (["cloud", "open"] as const).map((engine) => {
     const route = p[engine];
     const name = route ? (nameOf(route.modelId) ?? route.modelId) : null;
-    // A LoRA whose licence keeps it on the user's GPU (civitai "RentCivit"): the cloud route runs the preset's words.
+    // A LoRA licensed for the user's GPU only (civitai "RentCivit"): the cloud route keeps the preset's words until Fuobe
+    // DoP with the LoRA is evaluated there; the licence is said, not enforced.
     const gpuOnly = engine === "cloud" && !route?.loras?.length && !!p.open?.loras?.length && p.open.loras.every((l) => l.licence?.hostedOk === false);
-    return { engine, label: engine === "cloud" ? "Cloud" : "Open source", model: name && gpuOnly ? `${name} · words only, its LoRA is open engine only` : name };
+    return { engine, label: engine === "cloud" ? "Cloud" : "Open source", model: name && gpuOnly ? `${name} · words only (its LoRA is licensed for your GPU only)` : name };
   });
 }
 

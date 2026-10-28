@@ -12,7 +12,8 @@ import { LookCard } from "@/components/shorts/preset-card";
 import { useSubmitGuard } from "@/components/shorts/hooks";
 import { ClipBar, ClipDrop, costText, Field, Segmented, tabKeys } from "@/components/shorts/ui";
 import { clipDuration, useSourceClip } from "@/components/shorts/use-source-clip";
-import { uploadFile, useEngine } from "@/lib/api";
+import { uploadFile, useEngine, useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import {
   clampFps,
   defaultValues,
@@ -283,10 +284,12 @@ function Editor({
   const [mode, setMode] = useState<MixedMode>("frames");
   const cloud = engine === "cloud";
   const frameMode = cloud && mode === "frames";
-  const models = frameMode ? frameModels : restyleModels;
+  // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const access = useModelAccess();
+  const models = keepOffered(frameMode ? frameModels : restyleModels, (m) => offered(access, m.id, engine));
   const slot = frameMode ? "frames" : engine;
   const [pickedModel, setModel] = useState<Record<Engine | "frames", string>>({ cloud: "", open: "", frames: "" });
-  const modelId = pickedModel[slot] || models[0]?.id;
+  const modelId = (models.some((m) => m.id === pickedModel[slot]) && pickedModel[slot]) || models[0]?.id;
   const model = models.find((m) => m.id === modelId);
   const [previewId, setPreviewId] = useState<string | null>(null);
   // Every main step of the latest render (cut → frames or restyle → sound), so a failed step shows its own error.

@@ -14,6 +14,7 @@ process.env.FUOBE_DATA_DIR = dir;
 const { replicateProvider } = await import("@/server/providers/replicate");
 const { setSetting } = await import("@/server/settings");
 const { chooseRoute, createGenerations, getGeneration, previewGeneration } = await import("@/server/generations");
+const { changeAccess } = await import("@/server/model-access");
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 async function submit(route: ModelRoute, input: GenInput): Promise<{ url: string; body: Record<string, unknown> }> {
@@ -94,9 +95,11 @@ describe("Replicate LoRA payloads", () => {
     const mix = [...one, hf("effect_high.safetensors", { target: "high" })];
     expect(chooseRoute(routes, 1, one).route.provider).toBe("replicate");
     expect(chooseRoute(routes, 1, mix).route.provider).toBe("fal");
-    // Local-only LoRAs don't count: they never go to the cloud.
+    // A LoRA licensed for the GPU only goes to the cloud like any other (licences are information)...
     const wiggle = loraRef(loraEntry("civitai-2490836-wiggle-redmond")!);
-    expect(chooseRoute(routes, 1, [...one, wiggle]).route.provider).toBe("replicate");
+    expect(chooseRoute(routes, 1, [...one, wiggle]).route.provider).toBe("fal");
+    // ...and doesn't count while Settings → Models & licences keeps such LoRAs on the GPU (the run marks them).
+    expect(chooseRoute(routes, 1, [...one, { ...wiggle, keepOnGpu: true }]).route.provider).toBe("replicate");
   });
 
   it("wan-2.2 t2v fast: stays at 16 fps (interpolate_output off) and gets only values it takes", async () => {
@@ -154,8 +157,14 @@ describe("Replicate LoRA payloads", () => {
   it("returns what a run leaves out with the generations it creates", async () => {
     setSetting("demoMode", "on");
     const wiggle = loraRef(loraEntry("civitai-2490836-wiggle-redmond")!);
+    // Sent (the licence is information, said in the notes)...
+    const [sent] = createGenerations({ feature: "image", modelId: "z-image-turbo-cloud", prompt: "a cat", loras: [wiggle] });
+    expect(sent.notes).toEqual(["Wiggle Redmond: its licence allows your GPU only (civitai lists no “Rent”); it runs in the cloud because Settings → Models & licences lets such LoRAs go there"]);
+    // ...or left out while the admin keeps LoRAs licensed for the GPU only there.
+    changeAccess([{ kind: "keepGpuOnlyLoras", on: true }]);
     const [g] = createGenerations({ feature: "image", modelId: "z-image-turbo-cloud", prompt: "a cat", loras: [wiggle] });
-    expect(g.notes).toEqual(["Wiggle Redmond runs only on your GPU (the licence doesn't allow hosting it), so this cloud run leaves it out"]);
+    changeAccess([{ kind: "reset" }]);
+    expect(g.notes).toEqual(["Wiggle Redmond is licensed for your GPU only and Settings → Models & licences keeps such LoRAs off the cloud, so this run leaves it out"]);
     // Not stored: the run itself is an ordinary one.
     for (let i = 0; i < 200; i++) {
       const now = getGeneration(g.id) as Generation;

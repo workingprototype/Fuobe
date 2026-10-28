@@ -1,6 +1,6 @@
 "use client";
 
-import { Brain, FolderPlus, MessageSquarePlus, MessagesSquare, Search, Sparkles, X } from "lucide-react";
+import { Brain, CalendarClock, FolderPlus, MessageSquarePlus, MessagesSquare, Search, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useDeferredValue, useState } from "react";
@@ -17,7 +17,7 @@ import { ProjectDialog } from "./project-dialog";
 import { ProjectDot } from "./project-dot";
 
 /**
- * Assist's own sidebar (Supercomputer's): New chat, Search, Skills, Memory, Projects and Chats.
+ * Assist's own sidebar (Supercomputer's): New chat, Search, Skills, Memory, Scheduled, Projects and Chats.
  * A column from xl up; below that the same list opens as a sheet from the header button.
  */
 
@@ -41,16 +41,16 @@ export function RailButton({ className }: { className?: string }) {
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon-sm" className={cn("xl:hidden", className)} onClick={() => setOpen(true)} aria-label="Chats, projects, skills and memory">
+          <Button variant="ghost" size="icon-sm" className={cn("xl:hidden", className)} onClick={() => setOpen(true)} aria-label="Chats, projects, skills, memory and scheduled tasks">
             <MessagesSquare />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Chats, projects, skills and memory</TooltipContent>
+        <TooltipContent>Chats, projects, skills, memory and scheduled tasks</TooltipContent>
       </Tooltip>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="left" className="w-[min(86vw,320px)] gap-0 p-0" aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()}>
           <SheetTitle className="sr-only">Assist</SheetTitle>
-          <SheetDescription className="sr-only">Chats, projects, skills and memory</SheetDescription>
+          <SheetDescription className="sr-only">Chats, projects, skills, memory and scheduled tasks</SheetDescription>
           <Suspense fallback={<RailSkeleton />}>
             <Rail onNavigate={() => setOpen(false)} />
           </Suspense>
@@ -118,6 +118,7 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
         <nav className="space-y-0.5" aria-label="Assist pages">
           <RailLink href="/assist/skills" icon={Sparkles} label="Skills" active={pathname.startsWith("/assist/skills")} onNavigate={onNavigate} />
           <RailLink href="/assist/memory" icon={Brain} label="Memory" active={pathname.startsWith("/assist/memory")} onNavigate={onNavigate} />
+          <RailLink href="/assist/scheduled" icon={CalendarClock} label="Scheduled" active={pathname.startsWith("/assist/scheduled")} onNavigate={onNavigate} />
         </nav>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">

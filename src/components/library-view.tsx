@@ -1,6 +1,6 @@
 "use client";
 
-import { ArchiveRestore, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Globe, Heart, Loader2, MoreHorizontal, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -12,6 +12,8 @@ import { ReviewMenuItems } from "@/components/library/review";
 import { UploadDeleteProvider } from "@/components/library/upload-delete";
 import { useViewPrefs, ViewOptions, type ViewPrefs } from "@/components/library/view-options";
 import { PageShell } from "@/components/page-shell";
+import { useShare } from "@/components/share/share-provider";
+import { SharedLinks } from "@/components/share/shared-links";
 import { downloadUrl, ForeverConfirmProvider, useConfirmForever } from "@/components/studio/result-actions";
 import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { Viewer } from "@/components/studio/viewer";
@@ -25,17 +27,26 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useUploads, type Asset, type FeedFilter } from "@/lib/api";
-import type { Generation, MediaKind } from "@/lib/catalog/types";
+import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useShares, useUploads, type Asset, type FeedFilter } from "@/lib/api";
+import type { Generation, MediaKind, ReviewStatus } from "@/lib/catalog/types";
 import { keyCombo, useModKey } from "@/lib/keys";
 import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, toggleAll, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
 import { isLayered, shownOutputs } from "@/lib/output-actions";
+import { isExpired } from "@/lib/share";
 import { cn } from "@/lib/utils";
 
-type TabId = "all" | "images" | "videos" | "audio" | "text" | "3d" | "favorites" | "uploads" | "trash";
+type TabId = "all" | "images" | "videos" | "audio" | "text" | "3d" | "favorites" | "uploads" | "shared" | "trash";
 
 const TABS: { id: TabId; label: string; kinds?: MediaKind[] }[] = [
   { id: "all", label: "All" },
@@ -46,6 +57,7 @@ const TABS: { id: TabId; label: string; kinds?: MediaKind[] }[] = [
   { id: "3d", label: "3D", kinds: ["model3d"] },
   { id: "favorites", label: "Favorites" },
   { id: "uploads", label: "Uploads" },
+  { id: "shared", label: "Shared" },
   { id: "trash", label: "Trash" },
 ];
 
@@ -216,6 +228,8 @@ function Inner() {
   const folderId = sp.get("folder") ?? undefined;
   const trash = tab.id === "trash";
   const uploadsTab = tab.id === "uploads";
+  // Library → Shared: the share links, not results (no search, selection or filters there).
+  const sharedTab = tab.id === "shared";
   const [q, setQ] = useState("");
   const dq = useDebounced(q.trim(), 250);
   const [chosen, setFilters] = useState<Filters>(NO_FILTERS);
@@ -245,9 +259,11 @@ function Inner() {
     [tab, trash, folderId, subtree, dq, filters],
   );
   // Pinned results sit above the rest of the view (not in the Trash or Uploads); the Pinned filter shows only them.
-  const split = !trash && !uploadsTab && !filters.pinned;
+  const split = !trash && !uploadsTab && !sharedTab && !filters.pinned;
   const pinnedLib = useLibrary(useMemo(() => ({ ...filter, pinned: true, limit: 200 }), [filter]), { enabled: split });
-  const lib = useLibrary(useMemo(() => (trash || uploadsTab ? filter : { ...filter, pinned: filters.pinned }), [filter, trash, uploadsTab, filters.pinned]));
+  const lib = useLibrary(useMemo(() => (trash || uploadsTab ? filter : { ...filter, pinned: filters.pinned }), [filter, trash, uploadsTab, filters.pinned]), { enabled: !sharedTab });
+  const shares = useShares();
+  const share = useShare();
   const uploads = useUploads();
   const pinnedItems = useMemo(() => (split ? (pinnedLib.data?.pages.flat() ?? []) : []), [split, pinnedLib.data]);
   const mainItems = useMemo(() => {
@@ -416,6 +432,7 @@ function Inner() {
     const f = facets.data;
     if (!f) return undefined;
     if (t.id === "trash") return f.trash || undefined;
+    if (t.id === "shared") return shares.data?.items.filter((x) => !x.gone && !isExpired(x)).length || undefined;
     if (t.id === "favorites") return f.favorites || undefined;
     if (t.kinds) return f.kinds[t.kinds[0]] || undefined;
     return undefined;
@@ -425,6 +442,10 @@ function Inner() {
   const allPinned = selectedGens.length > 0 && selectedGens.every((g) => g.pinnedAt);
   // The bulk bar's review menu checks a status only when every selected result has it.
   const sameReview = selectedGens.length && selectedGens.every((g) => (g.review ?? null) === (selectedGens[0].review ?? null)) ? (selectedGens[0].review ?? null) : undefined;
+  // The bar's Like, Pin and Review (as buttons, or in ⋯ on phones).
+  const like = () => void actions.favoriteMany(selectedGens, !allFav);
+  const pinAll = () => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`));
+  const review = (r: ReviewStatus | null) => void actions.review(selectedGens, r).then((n) => n && toast(r ? `Marked ${n} as ${reviewInfo(r)?.label}` : `Cleared the review status of ${n}`));
 
   const empty = () => {
     if (dq) {
@@ -496,7 +517,7 @@ function Inner() {
             <p className="mt-1 max-w-2xl text-[15px] text-muted-foreground">Everything you make, across cloud and open-source runs.</p>
           </div>
         )}
-        <div className="flex w-full items-center gap-2 sm:w-auto">
+        <div className={cn("flex w-full items-center gap-2 sm:w-auto", sharedTab && "hidden")}>
           <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -594,7 +615,7 @@ function Inner() {
         </div>
       ) : null}
 
-      {!uploadsTab && !missingFolder && (
+      {!uploadsTab && !sharedTab && !missingFolder && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <FilterBar value={filters} onChange={setFilters} facets={facets.data} subfolders={!!folder?.folders} scoped={!!folderId || tab.id !== "all" || !!dq} trash={trash} />
           {trash && (
@@ -610,7 +631,9 @@ function Inner() {
         </div>
       )}
 
-      {missingFolder ? (
+      {sharedTab ? (
+        <SharedLinks />
+      ) : missingFolder ? (
         <Empty title="This folder no longer exists">
           It may have been deleted; what was in it is back in your Library.{" "}
           <button onClick={() => go({ folder: undefined })} className="text-brand-text underline underline-offset-2">
@@ -704,7 +727,7 @@ function Inner() {
         </div>
       )}
 
-      {(selecting || selected.size > 0) && !uploadsTab && (
+      {(selecting || selected.size > 0) && !uploadsTab && !sharedTab && (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pl-[var(--sidebar-width,0px)]">
           <div role="toolbar" aria-label="Selection" className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-full border bg-background p-1.5 shadow-strong">
             {/* Phones show just the count, so every action fits at 390 px. */}
@@ -748,23 +771,50 @@ function Inner() {
                     if (done.length > BULK_MAX) toast(`The zip has the first ${BULK_MAX} of ${done.length}`, { description: "Select the rest and download them as a second zip." });
                   }}
                 />
-                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selectedGens.length} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
-                <BarButton
-                  icon={allPinned ? PinOff : Pin}
-                  label={allPinned ? "Unpin" : "Pin"}
-                  disabled={!selectedGens.length}
-                  onClick={() => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`))}
-                />
+                {/* Like, Pin and Review fold into ⋯ on phones, so the bar fits 390 px with Publish. */}
+                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selectedGens.length} onClick={like} className="max-sm:hidden" />
+                <BarButton icon={allPinned ? PinOff : Pin} label={allPinned ? "Unpin" : "Pin"} disabled={!selectedGens.length} onClick={pinAll} className="max-sm:hidden" />
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
-                    <button className={BAR} disabled={!selectedGens.length} aria-label="Review status" title="Review status">
+                    <button className={cn(BAR, "max-sm:hidden")} disabled={!selectedGens.length} aria-label="Review status" title="Review status">
                       <CircleDot className="size-4" /> <span className="hidden sm:inline">Review</span>
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="top" align="center" collisionPadding={12} className="min-w-44">
-                    <ReviewMenuItems value={sameReview} onPick={(r) => void actions.review(selectedGens, r).then((n) => n && toast(r ? `Marked ${n} as ${reviewInfo(r)?.label}` : `Cleared the review status of ${n}`))} />
+                    <ReviewMenuItems value={sameReview} onPick={review} />
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={cn(BAR, "sm:hidden")} disabled={!selectedGens.length} aria-label="Like, pin or review" title="Like, pin or review">
+                      <MoreHorizontal className="size-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="center" collisionPadding={12} className="min-w-44">
+                    <DropdownMenuItem onSelect={like}>
+                      <Heart /> {allFav ? "Unlike" : "Like"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={pinAll}>
+                      {allPinned ? <PinOff /> : <Pin />} {allPinned ? "Unpin" : "Pin to the top"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <CircleDot /> Review status
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="min-w-44">
+                        <ReviewMenuItems value={sameReview} onPick={review} />
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {share && (
+                  <BarButton
+                    icon={Globe}
+                    label="Publish"
+                    disabled={!selectedGens.some((g) => g.status === "succeeded")}
+                    onClick={() => share.publish(selectedGens.filter((g) => g.status === "succeeded"))}
+                  />
+                )}
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
                     <button className={BAR} disabled={!selectedGens.length} aria-label="Move to">
@@ -862,9 +912,9 @@ function SectionSelect({ label, ids, selected, quiet, onToggle }: { label: strin
 // Phones: a little narrower, so the bar keeps every action (and Select all) at 390 px.
 const BAR = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40 max-sm:px-2";
 
-function BarButton({ icon: Icon, label, onClick, disabled, destructive }: { icon: typeof Download; label: string; onClick: () => void; disabled?: boolean; destructive?: boolean }) {
+function BarButton({ icon: Icon, label, onClick, disabled, destructive, className }: { icon: typeof Download; label: string; onClick: () => void; disabled?: boolean; destructive?: boolean; className?: string }) {
   return (
-    <button onClick={onClick} disabled={disabled} aria-label={label} title={label} className={cn(BAR, destructive && "text-destructive")}>
+    <button onClick={onClick} disabled={disabled} aria-label={label} title={label} className={cn(BAR, destructive && "text-destructive", className)}>
       <Icon className="size-4" /> <span className="hidden sm:inline">{label}</span>
     </button>
   );

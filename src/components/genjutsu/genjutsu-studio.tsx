@@ -1,12 +1,13 @@
 "use client";
 
-import { Brush, Download, Loader2, RotateCcw, Sparkles, Undo2, Wand2 } from "lucide-react";
+import { Brush, Download, Info, Loader2, RotateCcw, Sparkles, Undo2, Wand2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { nanoid } from "nanoid";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
@@ -21,7 +22,8 @@ import { fileToList, MediaSlot, type SlotValue } from "@/components/studio/media
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { SketchEditor, type Stroke } from "@/components/studio/sketch-editor";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
-import { useEngine, useGenerations, useStatus } from "@/lib/api";
+import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
+import { CHARACTER_SWAP, cutsInPart, cutWarning, partWords, seedProblem, type CharacterOptions, type CharacterQuality } from "@/lib/catalog/character-swap";
 import {
   chooseMaker,
   decodeSetup,
@@ -29,10 +31,13 @@ import {
   GENJUTSU_MODES,
   genjutsuProblem,
   getMode,
+  makerLicence,
+  makerOffered,
   makersFor,
   MODE_TARGETS,
   OPEN_TARGET_PROBLEM,
   resolutionWords,
+  SOURCE_LABELS,
   TARGET_LABELS,
   type GenjutsuLook,
   type GenjutsuMode,
@@ -43,12 +48,15 @@ import {
   type Maker,
 } from "@/lib/catalog/genjutsu";
 import { chainState } from "@/lib/catalog/shorts";
-import type { PixelPoint } from "@/lib/catalog/types";
+import type { Generation, PixelPoint } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
-import { useGenjutsuEstimate, useGenjutsuRun, type GenjutsuBody } from "./hooks";
+import { CharacterControls, CharacterFacts } from "./character-panel";
+import { useDescribeCharacter, useGenjutsuEstimate, useGenjutsuRun, useTranscribeClip, waitForGeneration, type GenjutsuBody } from "./hooks";
 import { LookPicker, type LookSource } from "./look-picker";
 import { SetupCode } from "./setup-code";
+import { useClipCuts } from "./use-cuts";
 
 const LIMITS = `MP4, MOV or WebM · ${GENJUTSU.minSeconds}–${GENJUTSU.maxSeconds} s are used · ${GENJUTSU.maxBytes / 1024 / 1024} MB`;
 
@@ -73,16 +81,19 @@ const isMode = (v: string | null): v is GenjutsuMode => !!v && GENJUTSU_MODES.so
 const asSlot = (ref: string): SlotValue => ({ id: nanoid(8), ref, preview: ref, kind: "image" });
 const ready = (xs: SlotValue[]) => xs.filter((x) => !x.uploading).map((x) => x.ref);
 
+/** A seed typed in the form (blank is random). */
+const seedOf = (s: string): number | undefined => (s.trim() === "" ? undefined : Number(s));
+
 /**
- * Genjutsu: keep a clip's motion, camera and framing and change what is in it — Motion transfer, Object swap, Restyle
- * or Insert. Pick the mode, add the clip (4–30 s, trimmed here) and your references, say what changes, see the price
- * (or "Free" on your ComfyUI), get the result with a before / after wipe. Setups copy and paste as a short code.
- * The plan: src/lib/catalog/genjutsu.ts; the server: src/server/genjutsu.ts.
+ * Genjutsu: keep a clip's motion, camera and framing and change what is in it — Motion transfer, Character swap,
+ * Object swap, Restyle or Insert. Pick the mode, add the clip (4–30 s, trimmed here; Character swap: a 5–15 s part)
+ * and your references, say what changes, see the price (or "Free" on your ComfyUI), get the result with a before /
+ * after wipe. Fuobe's Originals run by default on both engines; open weights and partners are labelled alternatives.
+ * Setups copy and paste as a short code. The plan: src/lib/catalog/genjutsu.ts; the server: src/server/genjutsu.ts.
  */
 export function GenjutsuStudio() {
   const [engine, setEngine, engineMode] = useEngine();
-  const status = useStatus().data;
-  const higgsfield = !!status?.providers.higgsfield?.configured;
+  const access = useModelAccess();
   const [mode, setModeState] = useState<GenjutsuMode>("motion");
   const source = useSourceClip(GENJUTSU.maxBytes);
   const clip = source.clip;
@@ -102,6 +113,11 @@ export function GenjutsuStudio() {
   const [points, setPoints] = useState<PixelPoint[]>([]);
   const [pointLabel, setPointLabel] = useState<"positive" | "negative">("positive");
   const [paint, setPaint] = useState<Paint | null>(null);
+  // Character swap: its quality (H3's 480p / 768p), its settings, the seed, and a part longer than 15 s.
+  const [charQuality, setCharQuality] = useState<CharacterQuality>(CHARACTER_SWAP.defaultQuality);
+  const [character, setCharacter] = useState<CharacterOptions>({});
+  const [seed, setSeed] = useState("");
+  const [longPart, setLongPart] = useState(false);
   const [painting, setPainting] = useState(false);
   const [frame, setFrame] = useState<Frame | null>(null);
   const [frameError, setFrameError] = useState(false);
@@ -118,11 +134,18 @@ export function GenjutsuStudio() {
   const duration = clipDuration(clip);
   const size = clipSize(clip);
 
-  // Higgsfield's looks run on the cloud engine only: the open engine shows the 44 looks (the tab stays where it was).
-  const lookSource: LookSource = engine === "open" && lookChoice === "higgsfield" ? "fuobe" : lookChoice;
+  const lookSource: LookSource = lookChoice;
+  const isCharacter = mode === "character";
+  const partMax = isCharacter ? (longPart ? CHARACTER_SWAP.maxContinued : CHARACTER_SWAP.maxSeconds) : GENJUTSU.maxSeconds;
+  const partMin = isCharacter ? CHARACTER_SWAP.minSeconds : GENJUTSU.minSeconds;
 
   const setMode = (m: GenjutsuMode) => {
     setModeState(m);
+    // Character swap takes a 5–15 s part: a longer selection is cut back to its first 15 s.
+    if (m === "character" && range && range.endTime - range.startTime > CHARACTER_SWAP.maxSeconds + 0.05) {
+      setLongPart(false);
+      setRange({ ...range, endTime: Math.round((range.startTime + CHARACTER_SWAP.maxSeconds) * 100) / 100 });
+    }
     const url = new URL(window.location.href);
     url.searchParams.set("mode", m);
     window.history.replaceState(null, "", url);
@@ -134,17 +157,70 @@ export function GenjutsuStudio() {
       ? undefined
       : lookSource === "custom"
         ? { kind: "custom", images: ready(custom), ...(words.trim() ? { words: words.trim() } : {}) }
-        : look && look.kind === (lookSource === "fuobe" ? "preset" : "higgsfield")
+        : look && look.kind === (lookSource === "fuobe" ? "preset" : "soul")
           ? look
           : undefined;
-  const lookKind = mode === "restyle" ? (lookSource === "higgsfield" ? "higgsfield" : "fuobe") : "";
+  const lookKind = mode === "restyle" ? lookSource : "";
   const choiceKey = `${engine}:${mode}:${target ?? ""}:${lookKind}`;
-  const choice = chooseMaker({ engine, mode, target, tier, look: effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined), modelId: picked[choiceKey], higgsfield });
+  // Models switched off in Settings → Models & licences leave the list, and the pick falls back to one that is on.
+  const isOn = (id: string) => offered(access, id, engine);
+  const choice = chooseMaker({ engine, mode, target, tier, look: effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined), modelId: picked[choiceKey], offered: isOn });
   const maker: Maker | null = "maker" in choice ? choice.maker : null;
-  const options = makersFor(engine, mode, target, effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined));
-  const references = mode === "restyle" && lookSource !== "higgsfield" ? [] : ready(refs);
-  const showRefs = mode !== "restyle" || lookSource === "higgsfield";
-  const needsFrame = (mode === "swap" && (target === "click" || target === "paint")) || (mode === "insert" && target === "paint");
+  const options = keepOffered(makersFor(engine, mode, target), (m) => makerOffered(m, isOn));
+  const references = mode === "restyle" ? [] : ready(refs);
+  const showRefs = mode !== "restyle";
+  const maxRefs = isCharacter ? Math.max(1, maker?.refs.max ?? 1) : GENJUTSU.maxReferences;
+  const needsFrame = ((mode === "swap" || isCharacter) && target === "click") || ((mode === "swap" || mode === "insert") && target === "paint");
+  // Character swap: the clip's hard cuts (found in the browser), for the "one continuous shot" warning.
+  const cuts = useClipCuts(clip?.preview, isCharacter && !!clip && !clip.error);
+  const partCuts = isCharacter && range ? cutsInPart(cuts ?? undefined, { start: range.startTime, end: range.endTime }) : [];
+  const cut = cutWarning(partCuts);
+  const seedNumber = seedOf(seed);
+  // Character swap's H3 makers take H3's two qualities; the other makers (Recast, P-Video…) Genjutsu's own.
+  const askedQuality = isCharacter && maker?.h3 ? charQuality : quality;
+
+  // "Describe my character" (the engine's text model) and "Use the clip's words" (one transcription of the clip; any
+  // part takes its own lines from it, so it is kept per clip).
+  const describeMutation = useDescribeCharacter();
+  const transcribeMutation = useTranscribeClip();
+  const [clipWords, setClipWords] = useState<{ url: string; g: Generation } | null>(null);
+  const [listening, setListening] = useState(false);
+  const alive = useRef<AbortController | null>(null);
+  useEffect(() => () => alive.current?.abort(), []);
+  const describeCharacter = () => {
+    const image = refs.find((r) => !r.uploading)?.ref;
+    if (!image) return;
+    describeMutation
+      .mutateAsync({ engine, image })
+      .then((r) => setCharacter((c) => ({ ...c, description: r.description })))
+      .catch((e: Error) => toast.error(friendly(e.message)));
+  };
+  const fillClipWords = async () => {
+    if (!clip?.url || !range) return;
+    const url = clip.url;
+    const part = { start: range.startTime, end: range.endTime };
+    setListening(true);
+    alive.current?.abort();
+    const ctl = new AbortController();
+    alive.current = ctl;
+    try {
+      let g = clipWords?.url === url ? clipWords.g : null;
+      if (!g) {
+        const { id } = await transcribeMutation.mutateAsync({ engine, source: { url, ...(duration ? { duration } : {}) } });
+        g = await waitForGeneration(id, { signal: ctl.signal });
+        setClipWords({ url, g });
+      }
+      const out = g.outputs.find((o) => o.kind === "text");
+      const cues = Array.isArray(out?.meta?.cues) ? (out.meta.cues as { start: number; end: number; text: string }[]) : undefined;
+      const text = cues ? partWords(cues, part) : (out?.text ?? "").trim().slice(0, 2000);
+      if (text) setCharacter((c) => ({ ...c, dialogue: text }));
+      else toast("Nobody speaks in this part of the clip", { description: "Pick “No dialogue”, or type the words." });
+    } catch (e) {
+      if (!ctl.signal.aborted) toast.error(friendly((e as Error).message));
+    } finally {
+      if (alive.current === ctl) setListening(false);
+    }
+  };
 
   // The selection's first frame, grabbed by the browser: what points and paint are made on.
   const startAt = range ? Math.round(range.startTime * 100) / 100 : null;
@@ -186,7 +262,11 @@ export function GenjutsuStudio() {
     const e = s.engine && engineMode === "both" ? s.engine : engine;
     if (s.engine && engineMode === "both") setEngine(s.engine);
     if (s.tier) setTier(s.tier);
-    if (s.quality) setQuality(s.quality);
+    if (s.mode === "character") {
+      if (s.quality === "480p" || s.quality === "768p") setCharQuality(s.quality);
+      if (s.quality && (GENJUTSU.qualities as string[]).includes(s.quality)) setQuality(s.quality);
+      setCharacter(s.character ?? {});
+    } else if (s.quality) setQuality(s.quality);
     const t = s.target ?? MODE_TARGETS[s.mode][0];
     if (s.target) setTargets((x) => ({ ...x, [s.mode]: s.target }));
     setSubject(s.subject ?? "");
@@ -196,10 +276,11 @@ export function GenjutsuStudio() {
       setCustom(s.look.images.map(asSlot));
       setWords(s.look.words ?? "");
     } else if (s.look) {
-      setLookSource(s.look.kind === "preset" ? "fuobe" : "higgsfield");
+      setLookSource(s.look.kind === "preset" ? "fuobe" : "soul");
       setLook(s.look);
     }
-    if (s.model) setPicked((x) => ({ ...x, [`${e}:${s.mode}:${t ?? ""}:${s.mode === "restyle" ? (s.look?.kind === "higgsfield" ? "higgsfield" : "fuobe") : ""}`]: s.model! }));
+    const kind = s.mode === "restyle" ? (s.look?.kind === "custom" ? "custom" : s.look?.kind === "soul" ? "soul" : "fuobe") : "";
+    if (s.model) setPicked((x) => ({ ...x, [`${e}:${s.mode}:${t ?? ""}:${kind}`]: s.model! }));
     if (s.references?.length) setRefs(s.references.map(asSlot));
     toast("Setup pasted", { description: clip ? "Check the references and press Generate." : "Add a clip to run it on." });
   };
@@ -252,12 +333,13 @@ export function GenjutsuStudio() {
     engine,
     ...(maker ? { model: maker.id } : {}),
     ...(maker?.tier ? { tier: maker.tier } : {}),
-    quality,
+    quality: askedQuality,
     ...(target ? { target } : {}),
     ...(mode === "swap" && subject.trim() ? { subject: subject.trim() } : {}),
     ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
     ...(effLook ? { look: effLook } : {}),
     ...(references.length ? { references } : {}),
+    ...(isCharacter && Object.keys(character).length ? { character } : {}),
   };
 
   function clearMarks() {
@@ -295,6 +377,7 @@ export function GenjutsuStudio() {
           points: clicks,
           mask: !!paint,
           look: effLook,
+          ...(isCharacter ? { seed: seedNumber, character } : {}),
         })
       : null;
   const body: GenjutsuBody | null =
@@ -304,7 +387,7 @@ export function GenjutsuStudio() {
           mode,
           modelId: maker.id,
           ...(maker.tier ? { tier: maker.tier } : {}),
-          quality,
+          quality: askedQuality,
           ...(target ? { target } : {}),
           ...(mode === "swap" && subject.trim() ? { subject: subject.trim() } : {}),
           ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
@@ -315,6 +398,7 @@ export function GenjutsuStudio() {
           ...(effLook ? { look: effLook } : {}),
           source: { url: clip.url!, name: clip.name, duration, fps: clip.info?.fps, width: size.width, height: size.height, hasAudio: clip.info?.hasAudio },
           range: { start: range.startTime, end: range.endTime },
+          ...(isCharacter ? { character, ...(seedNumber !== undefined ? { seed: seedNumber } : {}), ...(cuts?.length ? { cuts } : {}) } : {}),
         }
       : null;
   const estimate = useGenjutsuEstimate(body);
@@ -389,13 +473,34 @@ export function GenjutsuStudio() {
                     src={clip.preview}
                     value={range}
                     onChange={setRange}
-                    min={GENJUTSU.minSeconds}
-                    max={GENJUTSU.maxSeconds}
+                    min={partMin}
+                    max={partMax}
                     duration={clip.info?.duration}
-                    label="Part of the clip to use"
-                    hint={duration && duration > GENJUTSU.maxSeconds ? `Pick up to ${GENJUTSU.maxSeconds} s — only that part comes out` : `${GENJUTSU.minSeconds}–${GENJUTSU.maxSeconds} s; the whole clip, or just the part you need`}
+                    label={isCharacter ? "The part to swap" : "Part of the clip to use"}
+                    hint={
+                      isCharacter
+                        ? longPart
+                          ? `${CHARACTER_SWAP.minSeconds}–${CHARACTER_SWAP.maxContinued} s; past 15 s it continues window by window`
+                          : `${CHARACTER_SWAP.minSeconds}–${CHARACTER_SWAP.maxSeconds} s of one continuous shot, the person in its first frame`
+                        : duration && duration > GENJUTSU.maxSeconds
+                          ? `Pick up to ${GENJUTSU.maxSeconds} s — only that part comes out`
+                          : `${GENJUTSU.minSeconds}–${GENJUTSU.maxSeconds} s; the whole clip, or just the part you need`
+                    }
                     onMeta={source.setBrowserMeta}
                   />
+                  {isCharacter && duration !== undefined && duration > CHARACTER_SWAP.maxSeconds && (
+                    <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                      <Switch
+                        checked={longPart}
+                        onCheckedChange={(on) => {
+                          setLongPart(on);
+                          if (!on && range && range.endTime - range.startTime > CHARACTER_SWAP.maxSeconds) setRange({ ...range, endTime: Math.round((range.startTime + CHARACTER_SWAP.maxSeconds) * 100) / 100 });
+                        }}
+                        aria-label="A longer part, up to 30 seconds"
+                      />
+                      A longer part, up to {CHARACTER_SWAP.maxContinued} s (continued past 15 s; beyond H3&apos;s trained range)
+                    </label>
+                  )}
                 </div>
               </Panel>
 
@@ -463,28 +568,17 @@ export function GenjutsuStudio() {
 
               {mode === "restyle" && (
                 <Panel title="Look">
-                  <LookPicker
-                    look={look}
-                    onLook={setLook}
-                    source={lookSource}
-                    onSource={setLookSource}
-                    custom={custom}
-                    onCustom={setCustom}
-                    words={words}
-                    onWords={setWords}
-                    higgsfield={higgsfield}
-                    engine={engine}
-                  />
+                  <LookPicker look={look} onLook={setLook} source={lookSource} onSource={setLookSource} custom={custom} onCustom={setCustom} words={words} onWords={setWords} />
                 </Panel>
               )}
 
               {showRefs && (
-                <Panel title={modeInfo.refs} aside={<span className="text-[12px] text-muted-foreground tabular-nums">{refs.length}/{GENJUTSU.maxReferences}</span>}>
+                <Panel title={modeInfo.refs} aside={<span className="text-[12px] text-muted-foreground tabular-nums">{refs.length}/{maxRefs}</span>}>
                   <div className="flex flex-wrap gap-2">
                     {refs.map((r) => (
                       <MediaSlot key={r.id} label="Reference" kind="image" value={r} onChange={(v) => setRefs((xs) => (v ? xs.map((x) => (x.id === r.id ? { ...v, id: r.id } : x)) : xs.filter((x) => x.id !== r.id)))} size="lg" />
                     ))}
-                    {refs.length < GENJUTSU.maxReferences && (
+                    {refs.length < maxRefs && (
                       <MediaSlot
                         label={refs.length ? "Add another" : REF_CTA[mode]}
                         kind="image"
@@ -492,13 +586,13 @@ export function GenjutsuStudio() {
                         onChange={(v) => v && setRefs((xs) => [...xs, { ...v, id: v.id ?? nanoid(8) }])}
                         onFile={(f) => fileToList(f, setRefs, "image")}
                         size="lg"
-                        required={mode !== "restyle"}
+                        required
                       />
                     )}
                   </div>
                   <p className="mt-2 text-[12px] text-muted-foreground">
                     {REF_HINT[mode]}
-                    {maker && maker.refs.max > 0 && ` ${maker.label} uses ${maker.refs.max === 1 ? "the first one" : `up to ${maker.refs.max}`}.`}
+                    {maker && maker.refs.max > 0 && maker.refs.max < maxRefs && ` ${maker.label} uses ${maker.refs.max === 1 ? "the first one" : `up to ${maker.refs.max}`}.`}
                   </p>
                 </Panel>
               )}
@@ -508,19 +602,19 @@ export function GenjutsuStudio() {
               <p className="text-[13px] text-pretty text-muted-foreground">{modeInfo.hint}</p>
 
               {MODE_TARGETS[mode].length > 0 && (
-                <Field label={mode === "insert" ? "Where does it go?" : "What gets swapped?"}>
+                <Field label={TARGET_QUESTION[mode]}>
                   <Segmented
-                    label={mode === "insert" ? "Where does it go?" : "What gets swapped?"}
+                    label={TARGET_QUESTION[mode]}
                     value={target!}
                     onChange={(t) => setTargets((x) => ({ ...x, [mode]: t }))}
                     options={MODE_TARGETS[mode].map((t) => ({
                       value: t,
                       label: TARGET_LABELS[mode][t]!.label,
                       disabled: !supported.includes(t),
-                      title: supported.includes(t) ? TARGET_LABELS[mode][t]!.hint : "On the cloud engine",
+                      title: supported.includes(t) ? TARGET_LABELS[mode][t]!.hint : engine === "open" ? "On the cloud engine" : "On your GPU (the open engine)",
                     }))}
                   />
-                  {supported.length < MODE_TARGETS[mode].length && <p className="text-[12px] text-muted-foreground">{OPEN_TARGET_PROBLEM[mode]}.</p>}
+                  {supported.length < MODE_TARGETS[mode].length && <p className="text-[12px] text-muted-foreground">{engine === "open" ? OPEN_TARGET_PROBLEM[mode] : CLICK_ON_GPU}.</p>}
                 </Field>
               )}
 
@@ -537,14 +631,31 @@ export function GenjutsuStudio() {
                 </Field>
               )}
 
-              {/* Fuobe's looks are words of their own; extra words go with Higgsfield's looks. */}
-              {(mode !== "restyle" || lookSource === "higgsfield") && (
+              {isCharacter && (
+                <CharacterControls
+                  engine={engine}
+                  maker={maker}
+                  target={target}
+                  value={character}
+                  onChange={setCharacter}
+                  quality={charQuality}
+                  onQuality={setCharQuality}
+                  seed={seed}
+                  onSeed={setSeed}
+                  seedProblem={seedProblem(seedNumber)}
+                  describe={{ run: describeCharacter, busy: describeMutation.isPending, blocked: refs.some((r) => !r.uploading) ? null : "Add your character's picture to describe it" }}
+                  words={{ run: () => void fillClipWords(), busy: listening, blocked: clip?.url && !clip.uploading && range ? null : "Add the clip first" }}
+                />
+              )}
+
+              {/* The looks are words of their own: Restyle takes no prompt. */}
+              {mode !== "restyle" && (
                 <Field label={PROMPT_LABEL[mode](target)} htmlFor="gj-prompt">
                   <Textarea
                     id="gj-prompt"
                     value={prompt}
                     onChange={(e) => setPrompts((x) => ({ ...x, [mode]: e.target.value }))}
-                    maxLength={GENJUTSU.maxPromptChars}
+                    maxLength={isCharacter ? CHARACTER_SWAP.maxDirectionChars : GENJUTSU.maxPromptChars}
                     rows={2}
                     placeholder={PROMPT_PLACEHOLDER[mode]}
                     className="resize-none text-[13px]"
@@ -554,18 +665,17 @@ export function GenjutsuStudio() {
 
               {maker && options.length > 1 && (
                 <Field label="Model">
-                  <MakerList options={options} value={maker.pair && maker.tier === "high" ? maker.pair : maker.id} higgsfield={higgsfield} onChange={(id) => setPicked((p) => ({ ...p, [choiceKey]: id }))} />
+                  <MakerList options={options} value={maker.pair && maker.tier === "high" ? maker.pair : maker.id} onChange={(id) => setPicked((p) => ({ ...p, [choiceKey]: id }))} />
                 </Field>
               )}
               {maker && options.length <= 1 && (
                 <p className="text-[12px] text-muted-foreground">
-                  <span className="font-medium text-foreground">{maker.label}</span> · {maker.note}
-                  {maker.higgsfield && !higgsfield && " · needs a Higgsfield key (runs as a demo without one)"}
+                  <SourceBadge source={maker.source} /> <span className="font-medium text-foreground">{maker.label}</span> · {maker.note} · {makerLicence(maker)}
                 </p>
               )}
 
               {maker?.pair && (
-                <Field label="Quality" hint={tier === "standard" ? "Genjutsu Lite — about a sixth of the price" : "Genjutsu — the full model"}>
+                <Field label="Quality" hint={(maker.tier ?? tier) === "standard" ? "Lite — the cheaper, faster tier" : "The full Original"}>
                   <Segmented
                     label="Quality"
                     value={maker.tier ?? tier}
@@ -578,9 +688,11 @@ export function GenjutsuStudio() {
                 </Field>
               )}
 
-              <Field label="Resolution" hint={maker ? upFirst(resolutionWords(maker, quality)) : undefined}>
-                <Segmented label="Resolution" value={quality} onChange={setQuality} options={GENJUTSU.qualities.map((q) => ({ value: q, label: q }))} />
-              </Field>
+              {(!isCharacter || !maker?.h3) && (
+                <Field label="Resolution" hint={maker ? upFirst(resolutionWords(maker, quality)) : undefined}>
+                  <Segmented label="Resolution" value={quality} onChange={setQuality} options={GENJUTSU.qualities.map((q) => ({ value: q, label: q }))} />
+                </Field>
+              )}
 
               <div className="space-y-3 border-t pt-3">
                 <div className="flex items-center gap-2">
@@ -615,6 +727,7 @@ export function GenjutsuStudio() {
                     ))}
                   </ul>
                 )}
+                {isCharacter && <CharacterFacts engine={engine} maker={maker} cut={cut} />}
               </div>
             </Panel>
           </div>
@@ -675,13 +788,18 @@ const friendly = (msg: string) => (/failed to fetch|networkerror|load failed/i.t
 
 /** Restyle before a look is picked: the kind of look the tab stands for (so the model list matches it). */
 function lookPlaceholder(s: LookSource): GenjutsuLook {
-  return s === "higgsfield" ? { kind: "higgsfield", id: "" } : s === "custom" ? { kind: "custom", images: [] } : { kind: "preset", id: "" };
+  return s === "soul" ? { kind: "soul", id: "" } : s === "custom" ? { kind: "custom", images: [] } : { kind: "preset", id: "" };
 }
 
-const REF_CTA: Record<GenjutsuMode, string> = { motion: "Add your character", swap: "Add what goes in", insert: "Add what to add", restyle: "Add a character" };
+const CLICK_ON_GPU = "Clicking runs on your GPU (SAM 3.1 marks them) — on the cloud, pick who in words";
+
+const TARGET_QUESTION: Record<GenjutsuMode, string> = { motion: "", restyle: "", character: "Who gets swapped?", swap: "What gets swapped?", insert: "Where does it go?" };
+
+const REF_CTA: Record<GenjutsuMode, string> = { motion: "Add your character", character: "Add your character", swap: "Add what goes in", insert: "Add what to add", restyle: "Add a character" };
 
 const REF_HINT: Record<GenjutsuMode, string> = {
   motion: "A clear, full-body picture of the character who takes over the performance. More angles help Genjutsu.",
+  character: "One clear picture of your character, head to toe, facing the camera — PNG, JPEG or WebP. They take the person's place.",
   swap: "The thing, person or outfit that goes in — cut out on a plain background works best.",
   insert: "The object or character to add — cut out on a plain background works best.",
   restyle: "Optional: characters who should appear in the look.",
@@ -689,6 +807,7 @@ const REF_HINT: Record<GenjutsuMode, string> = {
 
 const PROMPT_LABEL: Record<GenjutsuMode, (t?: GenjutsuTarget) => string> = {
   motion: () => "Describe your character (optional)",
+  character: () => "Direction (optional)",
   swap: () => "Describe the result (optional)",
   insert: (t) => (t === "type" ? "Where it goes" : "What appears there (optional)"),
   restyle: () => "Anything to keep (optional)",
@@ -696,12 +815,14 @@ const PROMPT_LABEL: Record<GenjutsuMode, (t?: GenjutsuTarget) => string> = {
 
 const PROMPT_PLACEHOLDER: Record<GenjutsuMode, string> = {
   motion: "e.g. “a knight in silver armour, in a stone hall”",
+  character: "e.g. “keep the hand on the railing; she smiles at the end”",
   swap: "e.g. “a white horse trotting at the same pace”",
   insert: "e.g. “on the table, next to the cup”",
   restyle: "e.g. “keep her pink hair the same in every shot”",
 };
 
 function frameHint(mode: GenjutsuMode, target: GenjutsuTarget | undefined, points: number, painted: boolean): string {
+  if (target === "click" && mode === "character") return points ? "Add points on the same person, or mark someone to leave with Keep." : "Click the person to swap. Keyboard: arrows move the crosshair, Enter adds a point.";
   if (target === "click") return points ? "Add points on the same thing, or mark what stays with Keep." : "Click what to swap. Keyboard: arrows move the crosshair, Enter adds a point.";
   if (mode === "insert") return painted ? "Red is where it goes. It stays there for the whole shot." : "Paint where it should appear — it stays there for the whole shot, so a still camera works best.";
   return painted ? "Red is what gets swapped. Touch up the paint, or clear it." : "Paint over what to swap — it only needs to cover it on this frame.";
@@ -737,8 +858,22 @@ function ModeTabsRow({ mode, onMode }: { mode: GenjutsuMode; onMode: (m: Genjuts
   );
 }
 
-/** The models for this mode and engine, one line each (what it's good at, its limits). */
-function MakerList({ options, value, higgsfield, onChange }: { options: Maker[]; value: string; higgsfield: boolean; onChange: (id: string) => void }) {
+/** Where a model comes from, as a small badge: a Fuobe Original, open weights, or a partner's closed model. */
+function SourceBadge({ source }: { source: Maker["source"] }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-4 shrink-0 items-center rounded-[4px] px-1 align-[1px] text-[10px] font-medium",
+        source === "original" ? "bg-brand-faint text-brand-text" : source === "open" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground",
+      )}
+    >
+      {SOURCE_LABELS[source]}
+    </span>
+  );
+}
+
+/** The models for this mode and engine, one line each (where it comes from, what it's good at, its limits, its licence). */
+function MakerList({ options, value, onChange }: { options: Maker[]; value: string; onChange: (id: string) => void }) {
   return (
     <div role="radiogroup" aria-label="Model" onKeyDown={radioKeys} className="space-y-1.5">
       {options.map((m) => (
@@ -756,11 +891,11 @@ function MakerList({ options, value, higgsfield, onChange }: { options: Maker[];
         >
           <span className={cn("mt-1 size-3 shrink-0 rounded-full border-2", value === m.id ? "border-primary bg-primary" : "border-border-strong")} />
           <span className="min-w-0">
-            <span className="block text-[13px] font-medium">{m.label}</span>
-            <span className="block text-[12px] leading-snug text-muted-foreground">
-              {m.note}
-              {m.higgsfield && !higgsfield && " · needs a Higgsfield key (a demo without one)"}
+            <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-medium">
+              {m.label} <SourceBadge source={m.source} />
             </span>
+            <span className="block text-[12px] leading-snug text-muted-foreground">{m.note}</span>
+            <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground/90">{makerLicence(m)}</span>
           </span>
         </button>
       ))}
@@ -779,6 +914,8 @@ function RunPanel({ run, onAgain }: { run: Run; onAgain: () => void }) {
   });
   const state = chainState(rows.map((r) => ({ g: r.g, label: r.label })).sort((a, b) => (a.g?.id === run.final ? 1 : b.g?.id === run.final ? -1 : 0)));
   const out = final?.status === "succeeded" ? final.outputs.find((o) => o.kind === "video") : undefined;
+  // A step that fell back (the first frame couldn't be made) says so on the result.
+  const notices = [...new Set(rows.flatMap((r) => (r.g?.request.notice ? [r.g.request.notice] : [])))];
   return (
     <section className="mt-6" aria-labelledby="gj-run-title">
       <Panel
@@ -800,6 +937,12 @@ function RunPanel({ run, onAgain }: { run: Run; onAgain: () => void }) {
           </div>
         }
       >
+        {notices.length > 0 && (
+          <p role="status" className="mb-3 flex gap-1.5 rounded-lg bg-muted p-2 text-[12px] text-muted-foreground">
+            <Info className="mt-0.5 size-3.5 shrink-0" />
+            <span>{notices.join(" · ")}.</span>
+          </p>
+        )}
         {out ? (
           <VideoCompare before={run.before} after={out.url} start={run.start} ratio={run.ratio} />
         ) : (

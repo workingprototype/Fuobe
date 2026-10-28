@@ -32,9 +32,10 @@ declare -A NODES=(
   # round 4 (2026-10-22): VTracer image → SVG (the Vectorize app's open route)
   [ComfyUI-ToSVG]="https://github.com/Yanick112/ComfyUI-ToSVG 1022ba05318dccb4fe586ce5bbd09f1f0b3c7909"
 )
-# Non-commercial node code is opt-in: NC_PACKS=1 also installs ComfyUI-Whisper (CC-BY-NC-SA-4.0), used only by the
-# optional captions-whisper-burnin workflow. The default caption route (Qwen3-ASR + core burn-in) does not need it.
-if [ "${NC_PACKS:-0}" = "1" ]; then
+# Licences are information (Settings → Models & licences has the switches): every pack is installed, the
+# non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, used by the captions-whisper-burnin workflow) included.
+# NC_PACKS=0 leaves the non-commercial packs out of this install.
+if [ "${NC_PACKS:-1}" = "1" ]; then
   NODES[ComfyUI-Whisper]="https://github.com/yuvraj108c/ComfyUI-Whisper 006a709848259ed3d69e2f9fcfd7a75f6c860ddd"
 fi
 
@@ -59,6 +60,41 @@ for name in "${!NODES[@]}"; do
   fi
 done
 
+# Genjutsu's Character swap (docs/research/openjutsu-6.md §4): Akatz Labs' h3_character_swap pack (GPL-3.0) lives in a
+# subfolder of their H3 Character Swap tool, pinned at the commit Openjutsu uses (the last one with the pack). It is
+# used unpatched (the workflows send the resolution as "480" / "768") and needs FFmpeg and FFprobe on PATH; its own
+# requirements (numpy, scipy, Pillow, opencv-python-headless) are in the union below. H3_PACK=0 leaves it out.
+H3_TOOL_REF="${H3_TOOL_REF:-0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b}"
+if [ "${H3_PACK:-1}" = "1" ] && [ ! -d "$COMFYUI_DIR/custom_nodes/h3_character_swap" ]; then
+  h3tmp="$(mktemp -d)"
+  # Each step is guarded (set -e): a failed fetch warns and the rest of the install goes on.
+  if git clone -q --filter=blob:none --no-checkout https://github.com/akatz-labs/h3-character-swap-tool "$h3tmp/tool" \
+    && git -C "$h3tmp/tool" sparse-checkout set --no-cone /worker_nodes/h3_character_swap/ \
+    && git -C "$h3tmp/tool" checkout -q "$H3_TOOL_REF" \
+    && cp -r "$h3tmp/tool/worker_nodes/h3_character_swap" "$COMFYUI_DIR/custom_nodes/h3_character_swap"; then
+    :
+  else
+    echo "warn: could not fetch h3_character_swap at $H3_TOOL_REF"
+  fi
+  rm -rf "$h3tmp"
+fi
+if [ "${H3_PACK:-1}" = "1" ] && { ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; }; then
+  echo "warn: the h3_character_swap pack needs ffmpeg and ffprobe on PATH (Genjutsu's Character swap)"
+fi
+# H3 Relay 2.0 (Akatz Labs' newer nodes for the same swap, GPL-3.0; the video-character-swap-h3-relay workflow) registers
+# HTTP routes and an in-memory H3 layout compatibility layer when it loads, so it is opt-in: H3_RELAY=1 (or install it on
+# the isolated worker, scripts/comfy/install-isolated-worker.sh, the same way).
+H3_RELAY_REF="${H3_RELAY_REF:-e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220}"   # 2.0.1, 2026-10-21
+if [ "${H3_RELAY:-0}" = "1" ]; then
+  dest="$COMFYUI_DIR/custom_nodes/h3-relay"
+  if [ -d "$dest/.git" ] || git clone -q https://github.com/akatz-ai/h3-relay "$dest"; then
+    git -C "$dest" fetch -q --depth 1 origin "$H3_RELAY_REF" 2>/dev/null || true
+    git -C "$dest" checkout -q "$H3_RELAY_REF" 2>/dev/null || echo "warn: could not pin h3-relay to $H3_RELAY_REF"
+  else
+    echo "warn: could not fetch h3-relay"
+  fi
+fi
+
 # Union of the packs' requirements, minus GPU-only / unbuildable extras
 # (onnxruntime-gpu, cupy, groundingdino-py). triton + decord + pycocotools are needed only so
 # ComfyUI-RMBG's SAM3 module imports (otherwise the whole RMBG pack fails to load).
@@ -81,14 +117,14 @@ fi
 # Chatterbox's Perth watermarker (recommended in production for cloned voices; optional for validation):
 #   uv pip install --python "$PY" resemble-perth
 
-# ComfyUI-HunyuanVideo-Foley needs loguru; ComfyUI-Whisper (NC_PACKS=1) needs openai-whisper (built from sdist).
+# ComfyUI-HunyuanVideo-Foley needs loguru; ComfyUI-Whisper (unless NC_PACKS=0) needs openai-whisper (built from sdist).
 # ComfyUI-MelBandRoFormer needs rotary_embedding_torch + einops (installed above).
 # ComfyUI-QwenASR: do NOT install its requirements.txt (nagisa/DyNet38 have no cp313 wheels and are unused on the
 # Hugging Face path); transformers>=5.13 from ComfyUI's requirements is all it needs.
 uv pip install --python "$PY" loguru
 # ComfyUI-ToSVG imports vtracer (MIT), potracer and PyMuPDF (AGPL-3.0, used only by its SVG-to-image node) at load time.
 uv pip install --python "$PY" "vtracer==0.6.15" "potracer==0.0.4" "PyMuPDF==1.26.5"
-if [ "${NC_PACKS:-0}" = "1" ]; then uv pip install --python "$PY" "openai-whisper==20250625"; fi
+if [ "${NC_PACKS:-1}" = "1" ]; then uv pip install --python "$PY" "openai-whisper==20250625"; fi
 
 # Optional isolated worker (never in this install or its venv): LatentSync 1.6 lipsync and ThinkSound SFX change
 # process-wide state or pin old packages, so they run on a second ComfyUI with its own code copy, base directory,

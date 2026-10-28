@@ -35,7 +35,7 @@ export interface SceneViewerProps {
   engine: Engine;
   onEngine: (e: Engine) => void;
   settings: DirectorSettings;
-  context: { higgsfield: boolean; cloudAllowed: boolean };
+  context: { cloudAllowed: boolean; civitai?: boolean };
   brief: string;
   onClose: () => void;
 }

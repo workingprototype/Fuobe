@@ -1830,6 +1830,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "fast"
     ],
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Z-Image Turbo / base weights are Apache-2.0 (HF Tongyi-MAI/Z-Image-Turbo, Tongyi-MAI/Z-Image)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "1:1"
     },
@@ -1900,6 +1906,12 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4:5"
       ],
       "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
     },
     "defaults": {
       "aspectRatio": "1:1"
@@ -2003,6 +2015,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       "maxOutputs": 4,
       "maxImages": 10
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "1:1"
     },
@@ -2074,6 +2092,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       ],
       "maxOutputs": 4,
       "maxImages": 10
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
     },
     "pricing": {
       "unit": "megapixel",
@@ -2180,6 +2204,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "fast"
     ],
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "FLUX.2 [klein] 4B is Apache-2.0 (HF black-forest-labs/FLUX.2-klein-4B)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "1:1"
     },
@@ -2249,12 +2279,387 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4:5"
       ]
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.1 / 2.2 weights are Apache-2.0",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9"
     },
     "pricing": {
       "unit": "image",
       "usd": 0.05
+    }
+  },
+  {
+    "id": "flux-1-dev-lora-cloud",
+    "name": "FLUX.1 [dev] with LoRAs (hosted)",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "FLUX.1 [dev] with your trained characters and styles \u00b7 non-commercial weights, fal clears its outputs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "FLUX.1 [dev] Non-Commercial License",
+      "commercial": false,
+      "note": "Weights are non-commercial; the fal page says 'All generated images are cleared for commercial use' (fal's licence, not the weights')",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.035
+    }
+  },
+  {
+    "id": "flux-1-krea-lora-cloud",
+    "name": "FLUX.1 Krea [dev] with LoRAs (hosted)",
+    "vendor": "Black Forest Labs \u00d7 Krea",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Natural photoreal FLUX.1 Krea with FLUX.1 LoRAs \u00b7 non-commercial weights, fal clears its outputs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-krea-lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "FLUX.1 [dev] Non-Commercial License",
+      "commercial": false,
+      "note": "Weights are non-commercial; the fal page says 'All generated images are cleared for commercial use' (fal's licence, not the weights')",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.035
+    }
+  },
+  {
+    "id": "flux-2-dev-lora-cloud",
+    "name": "FLUX.2 [dev] with LoRAs (hosted)",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "FLUX.2 [dev] with your trained characters and styles \u00b7 non-commercial weights, fal clears its outputs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-2/lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "FLUX [dev] Non-Commercial License",
+      "commercial": false,
+      "note": "Weights are non-commercial; fal marks the hosted endpoint 'Commercial use'",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.021
+    }
+  },
+  {
+    "id": "flux-2-klein-9b-lora-cloud",
+    "name": "FLUX.2 [klein] 9B with LoRAs (hosted)",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "The 9B FLUX.2 [klein] with your LoRAs \u00b7 non-commercial weights, fal clears its outputs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-2/klein/9b/lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "badges": [
+      "fast"
+    ],
+    "licence": {
+      "licence": "FLUX Non-Commercial License",
+      "commercial": false,
+      "note": "FLUX.2 [klein] 9B weights are non-commercial; fal's page marks its own API output 'Commercial use'",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.015
+    }
+  },
+  {
+    "id": "krea-2-turbo-lora-cloud",
+    "name": "Krea 2 Turbo with LoRAs (hosted)",
+    "vendor": "Krea",
+    "family": "krea",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Krea 2's aesthetic with your trained characters and styles \u00b7 Krea 2 Community licence (revenue tiers)",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/krea-2/turbo/lora",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "badges": [
+      "fast"
+    ],
+    "licence": {
+      "licence": "Krea 2 Community License (gated, revenue tiers)",
+      "commercial": null,
+      "note": "Free for individuals and small teams; an enterprise tier above Krea's thresholds (round-1 research). Not a default for Originals",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.01
     }
   },
   {
@@ -3434,7 +3839,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "seedance",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Higgsfield's default \u2014 multi-shot cinema with native audio, up to 30s",
+    "tagline": "ByteDance's cinema model \u2014 multi-shot with native audio, up to 30s",
     "routes": [
       {
         "op": "t2v",
@@ -6340,6 +6745,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       "endFrame": true,
       "maxImages": 1
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.1 / 2.2 weights are Apache-2.0",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9",
       "duration": 5,
@@ -6579,6 +6990,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "audio"
     ],
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9",
       "duration": 5,
@@ -13859,6 +14276,225 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "wan-22-animate-replace",
+    "name": "Wan 2.2 Animate Replace (hosted)",
+    "vendor": "Alibaba Wan",
+    "family": "wan",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Swaps the person on camera for your character, lighting matched to the scene",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-14b/animate/replace",
+        "map": {
+          "prompt": false,
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1,
+      "promptless": true
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "720p; 580p $0.06, 480p $0.04 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length",
+      "byResolution": {
+        "720p": 0.08,
+        "580p": 0.06,
+        "480p": 0.04
+      }
+    }
+  },
+  {
+    "id": "scail-2",
+    "name": "SCAIL-2 (hosted)",
+    "vendor": "SCAIL",
+    "family": "scail",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Character animation without skeletons: humans, several people or animals; or replace the person",
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "fal",
+        "endpoint": "fal-ai/scail-2",
+        "map": {
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": "resolution",
+          "fixed": {
+            "mode": "animation"
+          },
+          "defaults": {
+            "prompt": "The reference character performs the motion of the video"
+          }
+        }
+      },
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "fal-ai/scail-2",
+        "map": {
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": "resolution",
+          "fixed": {
+            "mode": "replacement"
+          },
+          "defaults": {
+            "prompt": "The reference character performs the motion of the video"
+          }
+        }
+      }
+    ],
+    "options": {
+      "controls": [
+        {
+          "param": "subject_type",
+          "label": "Subject",
+          "values": [
+            "human",
+            "animal"
+          ],
+          "default": "human"
+        },
+        {
+          "param": "driving_type",
+          "label": "Driven by",
+          "values": [
+            "end_to_end",
+            "pose"
+          ],
+          "default": "end_to_end"
+        }
+      ],
+      "seed": true,
+      "resolutions": [
+        "512p",
+        "704p"
+      ],
+      "maxImages": 1,
+      "promptOptional": true
+    },
+    "defaults": {
+      "resolution": "512p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.2,
+      "note": "512p or 704p; output at 16 fps, up to 10 s a call"
+    }
+  },
+  {
+    "id": "wan-motion",
+    "name": "Wan Motion (hosted)",
+    "vendor": "Alibaba Wan",
+    "family": "wan",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Wan-Animate with pose retargeting: the motion fitted to your character's proportions",
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-motion",
+        "map": {
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "maxImages": 1
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.06,
+      "note": "720p; billed as frames \u00f7 24 (a 30 fps clip costs 1.25\u00d7 its length); +$0.08 with identity enhancement"
+    }
+  },
+  {
+    "id": "h3-max-recast",
+    "name": "MiniMax H3 Max Recast",
+    "vendor": "MiniMax",
+    "family": "hailuo",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "MiniMax's own person swap: 1\u20134 people from photos, across shots, sound kept",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "minimax/h3-max/recast",
+        "map": {
+          "omitEmptyPrompt": true,
+          "images": "reference_image_urls",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "768P",
+              "1080P"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "promptOptional": true,
+      "seed": true,
+      "resolutions": [
+        "768P",
+        "1080P"
+      ],
+      "maxImages": 4
+    },
+    "badges": [
+      "new",
+      "audio"
+    ],
+    "defaults": {
+      "resolution": "768P"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.3,
+      "note": "768p; 1080p $0.45/s; references free; 5\u201330 s, no shot over 15 s",
+      "byResolution": {
+        "768p": 0.3,
+        "1080p": 0.45
+      }
+    }
+  },
+  {
     "id": "topaz-fps-boost",
     "name": "Topaz FPS Boost",
     "vendor": "Topaz Labs",
@@ -16504,6 +17140,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "maxOutputs": 4,
       "maxImages": 1
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Z-Image Turbo / base weights are Apache-2.0 (HF Tongyi-MAI/Z-Image-Turbo, Tongyi-MAI/Z-Image)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "3:4",
       "resolution": "720p"
@@ -16630,6 +17272,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "negativePrompt": true,
       "seed": true,
       "maxOutputs": 4
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
     },
     "defaults": {
       "aspectRatio": "3:4",
@@ -16849,6 +17497,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "seed": true,
       "maxOutputs": 4
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Z-Image Turbo / base weights are Apache-2.0 (HF Tongyi-MAI/Z-Image-Turbo, Tongyi-MAI/Z-Image)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "16:9",
       "resolution": "720p"
@@ -17030,6 +17684,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       ],
       "maxImages": 1
     },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.1 / 2.2 weights are Apache-2.0",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "auto",
       "duration": 5,
@@ -17181,6 +17841,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       ],
       "maxImages": 1
     },
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1)",
+      "checked": "2026-10-23"
+    },
     "defaults": {
       "aspectRatio": "auto",
       "duration": 5,
@@ -17191,6 +17857,914 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "usd": 0.036,
       "note": "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)",
       "withLoras": 0.04
+    }
+  },
+  {
+    "id": "fuobe-cinema",
+    "name": "Fuobe Cinema",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-cinema",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Cinema Studio's Director on LTX-2.3 with its camera LoRAs and sound: up to 20 s at 24 fps",
+    "routes": [
+      {
+        "op": "t2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/text-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "size": {
+            "key": "video_size",
+            "multiple": 16,
+            "table": {
+              "480p": {
+                "21:9": [
+                  1120,
+                  480
+                ],
+                "16:9": [
+                  864,
+                  480
+                ],
+                "4:3": [
+                  640,
+                  480
+                ],
+                "1:1": [
+                  480,
+                  480
+                ],
+                "3:4": [
+                  480,
+                  640
+                ],
+                "9:16": [
+                  480,
+                  864
+                ]
+              },
+              "720p": {
+                "21:9": [
+                  1504,
+                  640
+                ],
+                "16:9": [
+                  1280,
+                  704
+                ],
+                "4:3": [
+                  1024,
+                  768
+                ],
+                "1:1": [
+                  960,
+                  960
+                ],
+                "3:4": [
+                  768,
+                  1024
+                ],
+                "9:16": [
+                  704,
+                  1280
+                ]
+              },
+              "1080p": {
+                "21:9": [
+                  2240,
+                  960
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ],
+                "4:3": [
+                  1440,
+                  1088
+                ],
+                "1:1": [
+                  1088,
+                  1088
+                ],
+                "3:4": [
+                  1088,
+                  1440
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/text-to-video/lora"
+      },
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "size": {
+            "key": "video_size",
+            "multiple": 16,
+            "table": {
+              "480p": {
+                "21:9": [
+                  1120,
+                  480
+                ],
+                "16:9": [
+                  864,
+                  480
+                ],
+                "4:3": [
+                  640,
+                  480
+                ],
+                "1:1": [
+                  480,
+                  480
+                ],
+                "3:4": [
+                  480,
+                  640
+                ],
+                "9:16": [
+                  480,
+                  864
+                ]
+              },
+              "720p": {
+                "21:9": [
+                  1504,
+                  640
+                ],
+                "16:9": [
+                  1280,
+                  704
+                ],
+                "4:3": [
+                  1024,
+                  768
+                ],
+                "1:1": [
+                  960,
+                  960
+                ],
+                "3:4": [
+                  768,
+                  1024
+                ],
+                "9:16": [
+                  704,
+                  1280
+                ]
+              },
+              "1080p": {
+                "21:9": [
+                  2240,
+                  960
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ],
+                "4:3": [
+                  1440,
+                  1088
+                ],
+                "1:1": [
+                  1088,
+                  1088
+                ],
+                "3:4": [
+                  1088,
+                  1440
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"
+      },
+      {
+        "op": "flf2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "size": {
+            "key": "video_size",
+            "multiple": 16,
+            "table": {
+              "480p": {
+                "21:9": [
+                  1120,
+                  480
+                ],
+                "16:9": [
+                  864,
+                  480
+                ],
+                "4:3": [
+                  640,
+                  480
+                ],
+                "1:1": [
+                  480,
+                  480
+                ],
+                "3:4": [
+                  480,
+                  640
+                ],
+                "9:16": [
+                  480,
+                  864
+                ]
+              },
+              "720p": {
+                "21:9": [
+                  1504,
+                  640
+                ],
+                "16:9": [
+                  1280,
+                  704
+                ],
+                "4:3": [
+                  1024,
+                  768
+                ],
+                "1:1": [
+                  960,
+                  960
+                ],
+                "3:4": [
+                  768,
+                  1024
+                ],
+                "9:16": [
+                  704,
+                  1280
+                ]
+              },
+              "1080p": {
+                "21:9": [
+                  2240,
+                  960
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ],
+                "4:3": [
+                  1440,
+                  1088
+                ],
+                "1:1": [
+                  1088,
+                  1088
+                ],
+                "3:4": [
+                  1088,
+                  1440
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/extend-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "endImage": "end_image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8,
+            "fromDuration": true
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/extend-video/lora"
+      },
+      {
+        "op": "v2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/video-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/video-to-video/lora"
+      }
+    ],
+    "options": {
+      "durations": [
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        12,
+        15,
+        20
+      ],
+      "aspectRatios": [
+        "21:9",
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16"
+      ],
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "audio": true,
+      "endFrame": true,
+      "maxImages": 1
+    },
+    "badges": [
+      "audio"
+    ],
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1)",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "16:9",
+      "duration": 5,
+      "resolution": "720p",
+      "generateAudio": true
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.0347,
+      "note": "$0.001605 per megapixel of video (width \u00d7 height \u00d7 frames): about $0.17 for 5 s at 720p; $0.001805 with LoRAs",
+      "byResolution": {
+        "480p": 0.016,
+        "720p": 0.0347,
+        "1080p": 0.0805
+      },
+      "withLoras": 0.039,
+      "withLorasByResolution": {
+        "480p": 0.018,
+        "720p": 0.039,
+        "1080p": 0.0905
+      },
+      "videoMegapixel": {
+        "usd": 0.001605,
+        "withLoras": 0.001805
+      }
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-motion",
+    "name": "Fuobe Genjutsu \u00b7 Motion",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Your character performs the clip's moves with its camera and framing: Wan 2.2 Animate",
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-14b/animate/move",
+        "map": {
+          "prompt": false,
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1,
+      "promptless": true
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "720p; 580p $0.06, 480p $0.04 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length",
+      "byResolution": {
+        "720p": 0.08,
+        "580p": 0.06,
+        "480p": 0.04
+      }
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-motion-lite",
+    "name": "Fuobe Genjutsu Lite \u00b7 Motion",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "The quick tier: Wan 2.2 Animate at 480p with fal's turbo pass",
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-14b/animate/move",
+        "map": {
+          "prompt": false,
+          "image": "image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "resolution": "resolution",
+          "fixed": {
+            "use_turbo": true,
+            "resolution": "480p"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p"
+      ],
+      "maxImages": 1,
+      "promptless": true
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.04,
+      "note": "480p \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length"
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-swap",
+    "name": "Fuobe Genjutsu \u00b7 Swap",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "A thing, a person or an outfit becomes your reference: SAM 3.1 follows it, Wan VACE paints it in",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-vace-14b/inpainting",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "images": "ref_image_urls",
+          "mask": "mask_video_url",
+          "video": "video_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "16:9",
+              "1:1",
+              "9:16"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "auto",
+              "240p",
+              "360p",
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "ranges": {
+            "frames_per_second": {
+              "min": 5,
+              "max": 30,
+              "integer": true
+            }
+          },
+          "defaults": {
+            "match_input_num_frames": true,
+            "match_input_frames_per_second": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "1:1",
+        "9:16"
+      ],
+      "resolutions": [
+        "auto",
+        "240p",
+        "360p",
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 4
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "720p; 580p $0.06, 480p $0.04 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length; SAM 3.1's mask $0.01 per 16 frames",
+      "byResolution": {
+        "720p": 0.08,
+        "580p": 0.06,
+        "480p": 0.04
+      }
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-swap-lite",
+    "name": "Fuobe Genjutsu Lite \u00b7 Swap",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "The quick tier: Wan VACE at 480p with fal's accelerated sampling",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-vace-14b/inpainting",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "images": "ref_image_urls",
+          "mask": "mask_video_url",
+          "video": "video_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "ranges": {
+            "frames_per_second": {
+              "min": 5,
+              "max": 30,
+              "integer": true
+            }
+          },
+          "fixed": {
+            "resolution": "480p",
+            "acceleration": "regular"
+          },
+          "defaults": {
+            "match_input_num_frames": true,
+            "match_input_frames_per_second": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "1:1",
+        "9:16"
+      ],
+      "resolutions": [
+        "480p"
+      ],
+      "maxImages": 4
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.04,
+      "note": "480p \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length"
+    }
+  },
+  {
+    "id": "fuobe-genjutsu-restyle",
+    "name": "Fuobe Genjutsu \u00b7 Restyle",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Every frame takes the look of a restyled first frame, motion kept by depth: Wan 2.2 Fun VACE",
+    "routes": [
+      {
+        "op": "v2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "first_frame_url",
+          "images": "ref_image_urls",
+          "video": "video_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "16:9",
+              "1:1",
+              "9:16"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "auto",
+              "240p",
+              "360p",
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "match_input_num_frames": true,
+            "match_input_frames_per_second": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "1:1",
+        "9:16"
+      ],
+      "resolutions": [
+        "auto",
+        "240p",
+        "360p",
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 4
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1,
+      "note": "720p; 580p $0.075, 480p $0.05 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length; the first frame's restyle is priced on its own",
+      "byResolution": {
+        "720p": 0.1,
+        "580p": 0.075,
+        "480p": 0.05
+      }
+    }
+  },
+  {
+    "id": "fuobe-character-swap",
+    "name": "Fuobe Character swap",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-character-swap",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "The person in your clip becomes your character, same performance, scene and sound: MiniMax H3 with Akatz Labs' swap LoRA",
+    "routes": [
+      {
+        "op": "video-swap",
+        "provider": "fal",
+        "endpoint": "minimax/h3/reference-to-video/lora",
+        "map": {
+          "images": "reference_image_urls",
+          "videoArray": "reference_video_urls",
+          "seed": "seed",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480P",
+              "768P",
+              "2K",
+              "4K"
+            ]
+          },
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          },
+          "ranges": {
+            "duration": {
+              "min": 5,
+              "max": 15,
+              "integer": true
+            }
+          },
+          "fixed": {
+            "prompt_expansion_mode": "disabled",
+            "aspect_ratio": "adaptive"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "768p"
+      ],
+      "maxImages": 9
+    },
+    "badges": [
+      "audio"
+    ],
+    "licence": {
+      "licence": "MiniMax H3 Community License: territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax's written authorization; show \"MiniMax H3\" on the product's interface",
+      "commercial": true,
+      "note": "Information for Settings \u2192 Models & licences, never a gate (the owner's decision of 2026-10-27). Hosted on fal under fal's terms and MiniMax's (docs/research/openjutsu-6.md \u00a77)",
+      "checked": "2026-10-27"
+    },
+    "defaults": {
+      "resolution": "768p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.075,
+      "note": "768p; 480p $0.0625/s; whole seconds, 5\u201315 per call",
+      "byResolution": {
+        "768p": 0.075,
+        "480p": 0.0625
+      }
     }
   }
 ];

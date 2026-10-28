@@ -117,14 +117,14 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `soul` | Fuobe Soul, the 139 looks | 139 looks × 3 subjects, pinned seeds | `recipe`, `prompt-only`, `half-strength`, `plain`, `original` | clip, aesthetic, style |
 | `soul-cinema` | Soul Cinema's one film look | 6 scenes, pinned seeds | `recipe`, `prompt-only`, `plain`, `original` | clip, aesthetic, style |
 | `soul-hex` | Soul HEX palettes | 3 Fuobe palettes × 2 subjects | `words`, `lock` (open), `base`, `palette-model` (open), `plain` | palette, clip, aesthetic |
-| `soul-id` | character training | your photos → train → 8 scenes | `trained`, `original` | identity, clip, aesthetic |
+| `soul-id` | character and look training | your photos → train per family (Fuobe Soul, Soul Cinema, Soul HD, FLUX.1 [dev]) → scenes; a moodboard → a look | `trained`, `half-strength`, `references` | identity (style for the look), clip, aesthetic |
 | `dop` | Fuobe DoP motions and effects | the 69 the research gives a LoRA, and the 20 camera moves it gives a Fun Camera pose or an LTX camera LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
 | `dop-mix` | Fuobe DoP's Mix | 5 move + effect pairs | `mix` (the candidate), `first` (the move alone) | temporal, clip |
-| `genjutsu` | Genjutsu move / swap / restyle | 3 (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
+| `genjutsu` | Genjutsu move / swap / restyle / Character swap | 7: Motion transfer and Object swap (each also on the Lite tier), Restyle, and Character swap with and without the first frame (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
 | `mixed-media` | Mixed Media | 5 looks on one clip (through `/api/mixed-media`) | `studio` | temporal, style |
 | `shorts` | Shorts restyle | 1 | `restyle` | temporal, style, clip |
 | `speak` | talking portraits | 1 portrait + voice | `infinitetalk`, `s2v` | lipsync, temporal, identity |
-| `cinema` | Cinema shot lists | 2 films of 3 shots | `original`, `partner` | clip, temporal, continuity |
+| `cinema` | Fuobe Cinema (O6) | 3 Director scenes (the prompt Cinema compiles), 4 camera moves as LTX-2.3's `camera_lora` (cloud), 2 films of 3 shots | `original`, `words` (no camera LoRA), `expansion` (fal's prompt expansion on), `wan` (Wan 2.2 A14B hosted), `partner` (Seedance 2.5); all but `original` cloud only | clip, temporal, continuity |
 
 `soul.json`, `soul-cinema.json`, `soul-hex.json`, `dop.json` and `dop-mix.json` are **generated** from the research. They come from
 `docs/research/higgsfield-image-studios.json` (the look ids) and
@@ -173,10 +173,12 @@ the catalog run.
 The recipe's licence flags go with every job, following the research's "Licence rules for
 Originals":
 
-- A LoRA whose licence forbids hosted use never goes to the cloud engine.
+- Licences are information (Settings → Models & licences): a LoRA licensed for the GPU only goes to the
+  cloud engine like any other, unless the install keeps such LoRAs on the GPU there.
 - A civitai link is left out on the cloud until a mirrored copy exists, because civitai answers 401
   without your token.
-- A non-commercial LoRA is noted, and a recipe that uses one can't be promoted.
+- A non-commercial LoRA is noted on the verdict; with `--licence-hold`, a recipe that uses one isn't
+  promoted.
 - A LoRA link (your own variant's included) must be on Hugging Face, civitai, fal or Replicate: the API
   refuses other hosts, since the server may download an unknown file from it before a ComfyUI run.
 
@@ -194,7 +196,8 @@ small synthetic files in `fixtures/` instead.
 scripts/eval/local/
   references/soul/<look-slug>/*.jpg   # style references per look (your own or licensed images; never Higgsfield previews)
   references/mixed-media/<look>/*     # what each Mixed Media look should look like
-  characters/default/*.jpg            # 10–30 photos of ONE consenting person (soul-id)
+  characters/default/*.jpg            # 20+ photos (80 at most) of ONE consenting person (soul-id)
+  styles/default/*.jpg                # 20+ images in one style, a moodboard (soul-id/look)
   dop/start.png, dop/end.png          # a start frame (a person on a bridge fits the prompts), an end frame for transitions
   genjutsu/dance.mp4, character.png, style.png
   genjutsu/street.mp4, object.png     # street.mp4 at least 720 px on each side (Kling O3's edit, the cloud partner)
@@ -203,10 +206,19 @@ scripts/eval/local/
   speak/portrait.png, speak/voice.wav
 ```
 
-**Training needs consent.** `soul-id.json` ships with `"consent": false`, so training refuses to
-start. Copy the file to `local/soul-id.json`. In your copy, set `"consent": true` only when the
-person in the photos agreed. Then run it with `--suite scripts/eval/local/soul-id.json`. To reuse a
-character you already trained, put its element id in `"element"` instead of training again.
+**Training needs consent.** `soul-id.json` ships with `"consent": false`, so a character's training
+refuses to start. Copy the file to `local/soul-id.json`. In your copy, set `"consent": true` only
+when the person in the photos agreed: the runner then sends Fuobe the consent line with the training,
+as the Train dialog does. A look (`"kind": "style"`) needs no consent. Then run it with
+`--suite scripts/eval/local/soul-id.json`. To reuse a character you already trained, put its element
+id in `"element"` instead of training again. Each case trains its own element (a Soul ID runs on the
+models of the base it was trained on), so a full cloud run trains five times: about $1.70 + $1.70 +
+$1.50 + $6.00 for the four character cases (Soul Cinema trains Fuobe Soul's family again unless its
+`"element"` names the character case's element) and $3.39 for the look, priced before anything
+starts. A training the server would run as a demo (no fal.ai key or AI-Toolkit connected, or Demo
+mode On) is skipped with its case, so a "trained" result is always a trained LoRA. The look case runs
+the trained style as the board's own look (`"presetId": "own-style"`), as a trained moodboard does in
+the app.
 
 ## The case format
 
@@ -257,7 +269,7 @@ Other case fields:
 - `variantModels`: a variant's models for this case (`{"partner": {"cloud": ["kling-o3"]}}`), over
   the variant's own. Each Genjutsu mode names its own partner this way.
 - `shots`: a film's shots. Continuity is measured across them.
-- `train`: photos, a target per engine, `consent`, and `minPhotos`.
+- `train`: photos, a target per engine, `kind` (`character` or `style`), `consent`, and `minPhotos`.
 - `submit`: a studio route and its body, with `{{inputs.video}}`, `{{source:inputs.video}}`,
   `{{prompt}}`, `{{seed}}`, `{{engine}}` and `{{requestId}}` filled in.
 - `engines`: the engines the case runs on.
@@ -322,7 +334,7 @@ still has its timing and cost, and the report says why the scores are missing.
 | Prompt adherence | `clip` | higher | CLIPScore (100·cos) between the output and the case's own words. Clips are sampled at 4 frames | open_clip ViT-B/32 laion2B, **MIT** (`--clip-model clip-l14`: OpenAI ViT-L/14, MIT) |
 | Aesthetic | `aesthetic` | higher | LAION improved aesthetic predictor v2 on CLIP ViT-L/14 embeddings, about 1–10 | head **Apache-2.0** (christophschuhmann/improved-aesthetic-predictor), CLIP MIT |
 | Style vs references | `style`, `styleNearest` | higher | cosine of the output's embedding to the centroid of the look's reference set, and to the nearest reference | CLIP (default), or `--style-model dinov2`: DINOv2 ViT-S/14 via timm, **Apache-2.0** |
-| Identity | `identity`, `faceRate` | higher | ArcFace-style face embeddings of the output against the person's photos; the share of frames with a face | **AuraFace v1**'s recognition model (fal, **Apache-2.0**, trained for commercial use), with faces found and aligned by **YuNet** (OpenCV Zoo, **MIT**). The SCRFD detector AuraFace's repo ships comes from insightface's model zoo (released for non-commercial research; the licence is unclear), so it runs only with `--face-detector scrfd`. insightface's `buffalo_l` is **non-commercial research only**: opt in with `--identity-model buffalo_l --accept-noncommercial` |
+| Identity | `identity`, `faceRate` | higher | ArcFace-style face embeddings of the output against the person's photos; the share of frames with a face | **AuraFace v1**'s recognition model (fal, **Apache-2.0**, trained for commercial use), with faces found and aligned by **YuNet** (OpenCV Zoo, **MIT**). The SCRFD detector AuraFace's repo ships comes from insightface's model zoo (released for non-commercial research; the licence is unclear), so it runs only with `--face-detector scrfd`. insightface's `buffalo_l` is **non-commercial research only** (recorded with the result): pick it with `--identity-model buffalo_l`; `--commercial-only` refuses it |
 | Temporal consistency | `drift`, `driftMax`, `warp` | lower | frame-to-frame CLIP embedding drift (mean and worst jump), and a warp error: Farneback optical flow with a forward-backward occlusion mask | CLIP, OpenCV (Apache-2.0) |
 | Lip-sync | `lipsync`, `lipsyncOffset` | higher | a proxy: mouth-region motion against the voice's loudness, with the best lag as the A/V offset | the identity metric's face detector for the face box when identity is installed, else a fixed lower-centre region |
 | SyncNet (optional) | `syncnet` | higher | runs only when `FUOBE_EVAL_SYNCNET_CMD` points at your own SyncNet. It isn't bundled because its weights' licence isn't stated | yours |
@@ -383,9 +395,9 @@ when the run has it, else the run's first variant; `--candidate` picks another. 
 become the default only when one run, on the same prompts and seeds, shows all of the following for
 the case:
 
-1. **Licence**: every LoRA it loaded is commercial, and is hostable when the run is on the cloud.
-   None of the recipe's LoRAs was left out on that engine. A licence problem holds the recipe whatever
-   else won.
+1. **Complete**: none of the recipe's LoRAs was left out on that engine. Its licences are information:
+   a non-commercial LoRA (or one licensed for the GPU only, on a cloud run) is a note on the verdict, and
+   holds the recipe only with `--licence-hold`.
 2. **Enough results**: at least 3 for the case.
 3. **Metrics**: against every alternative in the run (prompt only, half strength, the bare base,
    today's default), it scores at least as well on the case's main metric: the first of style (a look
@@ -433,8 +445,9 @@ instead of their procedural preview.
 
 - `--variant catalog` takes that variant's renders for every case instead, such as what ships today.
 - `--dry-run` lists what it would pick.
-- Only Fuobe's own renders become covers: a demo run never does, nor a render whose LoRAs aren't
-  commercial. No Higgsfield preview is used anywhere.
+- Only Fuobe's own renders become covers: a demo run never does. A render whose LoRAs aren't commercial
+  becomes one with its licence noted (`licence` in the result); `--commercial-only` leaves it out. No
+  Higgsfield preview is used anywhere.
 - It needs ffmpeg. Look at the media and the generated file's diff before committing them.
 
 ## Tests
