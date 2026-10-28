@@ -1,18 +1,24 @@
 /**
  * Mixed Media (Higgsfield's /mixed-media): turn a 1–10 s clip into mixed-media art (sketch, comic,
  * paper, neon…) with per-preset settings. Higgsfield samples frames at 4–24 fps and stylises each
- * one, priced per output frame; the open engine does the same (Z-Image per frame, oss-mixed-media).
- * The cloud engine does it too by default ("Per frame": cut → frames → an image edit per frame, each
- * looking at the frame styled before it → frames back to video → the cut's own sound); "Fast" runs a
- * video-to-video restyle model on the trimmed clip instead, anchored on the preview frame when the
- * model takes one (LTX 2.3 reference restyle).
+ * one, priced per output frame. Fuobe Mixed Media (build plan O9) does the same on both engines:
+ * every frame drawn again in the look by Z-Image Turbo under the frame's own outlines (its Fun
+ * ControlNet), with the look's LoRA and one fixed seed — one per-frame job on your GPU, or on fal
+ * cut → every Nth frame → one controlled frame each → frames back to video (clips of up to 200 frames,
+ * joined) → the cut's own sound. Its "Smooth" option draws only the first frame in the look and lets
+ * Wan 2.2 Fun VACE carry it through the clip by depth (Fuobe Shorts' pass). Partner choices stay: on
+ * the cloud, Per frame with Nano Banana 2 or Seedream 5.0 Flash (each frame looking at the frame styled
+ * before it), and "Fast", one video-to-video restyle model on the trimmed clip, anchored on the preview
+ * frame when the model takes one (LTX 2.3 reference restyle).
  *
  * Pure module, shared by the page, src/server/mixed-media.ts and the tests.
- * Research: docs/research/higgsfield-studios.md §3.
+ * Research: docs/research/higgsfield-studios.md §3, docs/research/fuobe-originals-recipes-5.md §8 mixed-media.
  */
 import { scenePoster, type PresetPreview, type PreviewFx, type PreviewScene } from "../preset-cards";
-import type { PlanStep } from "./shorts";
-import type { Engine } from "./types";
+import { MIXED_MEDIA_LOOK_LORAS } from "./lora-library.generated";
+import { loraEntry, loraRef, triggerOf } from "./loras";
+import { planShorts, SHORTS_ORIGINAL, type PlanStep, type ShortsLook } from "./shorts";
+import type { Engine, GenerationRequest, LoraRef } from "./types";
 
 export const MIXED = {
   minSeconds: 1,
@@ -36,20 +42,36 @@ export const MIXED_PREVIEW_FEATURE = "mixed-media-preview";
 /** Cloud Per frame: one edit per frame. A helper step too ("-step"), kept apart so History and the render view don't load hundreds of them. */
 export const MIXED_FRAME_FEATURE = "mixed-media-frame-step";
 
-/** Cloud restyle models (the first is the default) and the open per-frame model. */
+/** Mixed Media's Original (O9): every frame drawn again in the look on Z-Image Turbo + ControlNet, on both engines. */
+export const MIXED_ORIGINAL = "fuobe-mixed-media";
+/** Smooth's pass after the first frame: Fuobe Shorts' Wan 2.2 Fun VACE by depth (both engines). */
+export const MIXED_SMOOTH_MODEL = SHORTS_ORIGINAL;
+/** The per-frame model Mixed Media ran on the open engine before the Original (API callers that name it keep it). */
+export const MIXED_OPEN_LEGACY = "oss-mixed-media";
+
+/** Fast's video-to-video restyle models (cloud; the first is Fast's default) and the open per-frame model. */
 export const MIXED_MODELS: Record<Engine, string[]> = {
   cloud: ["ltx-2-3-restyle", "lucy-edit-pro", "gemini-omni-flash", "kling-o3-4k-edit", "happy-horse-video-edit", "wan-2-7", "runway-aleph-2"],
-  open: ["oss-mixed-media"],
+  open: [MIXED_ORIGINAL],
 };
 export const MIXED_TOOLS = {
   cloud: { cut: "trim-video", mux: "merge-audio-video", preview: "nano-banana-2", frames: "extract-frames", assemble: "images-to-video", join: "join-clips" },
-  open: { preview: "oss-mixed-media" },
+  open: { preview: MIXED_ORIGINAL },
 } as const;
 
-/** How the cloud engine restyles: frame by frame like Higgsfield (the default), or one video-to-video pass. */
-export type MixedMode = "frames" | "fast";
-/** Cloud image editors that redraw each frame (the first is the default): Nano Banana 2 takes a seed, Seedream 5.0 Flash is the cheapest. */
-export const MIXED_FRAME_MODELS = ["nano-banana-2", "seedream-5-flash"] as const;
+/**
+ * How a render restyles: frame by frame like Higgsfield (the default, both engines), Smooth (the Original's first frame,
+ * then Wan 2.2 Fun VACE by depth: no flicker), or Fast (cloud: one partner video-to-video pass).
+ */
+export type MixedMode = "frames" | "smooth" | "fast";
+/** The modes each engine offers. */
+export const MIXED_MODES: Record<Engine, MixedMode[]> = { cloud: ["frames", "smooth", "fast"], open: ["frames", "smooth"] };
+/**
+ * Cloud models that draw each frame (the first is the default): Fuobe Mixed Media (Z-Image Turbo + ControlNet with the
+ * look's LoRA, one seed, every frame on its own), then the partner image editors, Nano Banana 2 (it takes a seed) and
+ * Seedream 5.0 Flash, which redraw each frame looking at the one styled before it.
+ */
+export const MIXED_FRAME_MODELS = [MIXED_ORIGINAL, "nano-banana-2", "seedream-5-flash"] as const;
 
 /**
  * Cloud per-frame limits: fal's extract-nth-frame returns up to 500 frames a call and images-to-video
@@ -85,7 +107,7 @@ const select = (key: string, label: string, options: [label: string, prompt: str
 };
 const text = (key: string, label: string, def: string, placeholder: string): MixedSetting => ({ key, label, type: "text", default: def, placeholder, max: 40 });
 
-/** Every preset ends with how strongly the look takes over (also the open engine's denoise). */
+/** Every preset ends with how strongly the look takes over (the open engine's denoise, the Original's control scale in the cloud). */
 export const INTENSITY = {
   key: "intensity",
   label: "Intensity",
@@ -98,6 +120,8 @@ export const INTENSITY = {
   default: "balanced",
 } as const satisfies MixedSetting;
 const DENOISE: Record<string, number> = { subtle: 0.55, balanced: 0.7, bold: 0.82 };
+/** The Original in the cloud draws each frame anew under its outlines: a subtle look holds them tighter. */
+const CONTROL: Record<string, number> = { subtle: 0.85, balanced: 0.75, bold: 0.6 };
 
 export interface MixedPreset {
   id: string;
@@ -446,6 +470,25 @@ export function mixedPrompts(p: Pick<MixedPreset, "look" | "settings">, values: 
 }
 
 export const denoiseFor = (values: MixedValues) => DENOISE[values.intensity] ?? DENOISE.balanced;
+/** How closely the Original's cloud frames follow the source's outlines (fal's control_scale). */
+export const controlFor = (values: MixedValues) => CONTROL[values.intensity] ?? CONTROL.balanced;
+
+/**
+ * The look's LoRAs (research studios[mixed-media].original.looks, through the LoRA library: pinned downloads, licences).
+ * 14 of the 33 looks have one; the rest run on their words. Unverified until the evaluation harness measures each.
+ */
+export function mixedLoras(presetId: string): LoraRef[] {
+  return (MIXED_MEDIA_LOOK_LORAS[presetId] ?? []).flatMap((l) => {
+    const e = loraEntry(l.key);
+    return e ? [loraRef(e, l.strength)] : [];
+  });
+}
+
+/** A prompt led by its LoRAs' trigger words ("drkrm style, …"), as the Soul looks are. */
+export function withTrigger(prompt: string, loras: LoraRef[]): string {
+  const t = triggerOf(loras);
+  return t ? `${t}, ${prompt}` : prompt;
+}
 
 /** "#c1121f" from a typed "#C1121F", "c1121f" or "#c12" (shorthand), else null. */
 export function parseHex(raw: string): string | null {
@@ -553,6 +596,49 @@ export function frameResolution(frames: number, resolution: MixedResolution): Mi
   return frames > FRAME_LIMITS.perClip && resolution === "4K" ? "2K" : resolution;
 }
 
+/** The Original's frame tiers: about 1 (1K) or 4 (2K) megapixels; it draws up to 2K (Z-Image Turbo's range). */
+const ORIGINAL_TIER: Record<MixedResolution, number> = { "1K": 1024, "2K": 2048, "4K": 2048 };
+
+/**
+ * The size the Original draws a frame at in the cloud (fal's image_size): the clip's shape with the area of the tier's
+ * square, on the 16-pixel grid. Undefined without the clip's size (fal then keeps the frame's own size).
+ */
+export function originalFrameSize(source: { width?: number; height?: number } | undefined, resolution: MixedResolution): { width: number; height: number } | undefined {
+  const w = source?.width;
+  const h = source?.height;
+  if (!w || !h) return undefined;
+  const side = ORIGINAL_TIER[resolution];
+  const k = Math.sqrt((side * side) / (w * h));
+  const grid = (v: number) => Math.max(256, 16 * Math.round(v / 16));
+  return { width: grid(w * k), height: grid(h * k) };
+}
+
+/** What the Original's cloud frame route is asked for: one picture, the render's seed, the look's control scale and the frame size. */
+export function originalFrameParams(values: MixedValues, resolution: MixedResolution, seed: number, source?: { width?: number; height?: number }) {
+  const size = originalFrameSize(source, resolution);
+  return { seed, numOutputs: 1, extra: { control_scale: controlFor(values), ...(size && { image_size: size }) } };
+}
+
+/** One frame in the look by the Original on an engine: the preview, Smooth's first frame and DoP's Mixed Media effects. */
+export function originalFrameRequest(
+  input: Pick<MixedPlanInput, "engine" | "preset" | "values" | "resolution" | "sourceSize" | "seed" | "loras">,
+): Pick<GenerationRequest, "engine" | "modelId" | "op" | "prompt" | "loras" | "params"> {
+  const loras = input.loras ?? mixedLoras(input.preset.id);
+  const seed = input.seed ?? FRAME_SEED;
+  return {
+    engine: input.engine,
+    modelId: MIXED_ORIGINAL,
+    op: "edit",
+    prompt: withTrigger(mixedPrompts(input.preset, input.values).frame, loras),
+    ...(loras.length && { loras }),
+    // On your GPU: Z-Image img2img at about 1 megapixel, as strongly as the intensity asks.
+    params:
+      input.engine === "cloud"
+        ? originalFrameParams(input.values, input.resolution, seed, input.sourceSize)
+        : { seed, numOutputs: 1, extra: { strength: denoiseFor(input.values), megapixels: 1 } },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Pipelines
 
@@ -565,9 +651,9 @@ export interface MixedPlanInput {
   range: { start: number; end: number };
   fps: number;
   resolution: MixedResolution;
-  /** The restyle model (cloud Fast), the frame editor (cloud Per frame: MIXED_FRAME_MODELS) or oss-mixed-media (open). */
+  /** The frame model (Per frame: MIXED_FRAME_MODELS in the cloud, the Original on your GPU), Fast's restyle model, or the Original (Smooth). */
   modelId: string;
-  /** Cloud: frame by frame (default) or one video-to-video pass. */
+  /** Frame by frame (default), Smooth, or (cloud) Fast: one video-to-video pass. */
   mode?: MixedMode;
   /** Cloud Per frame: the clip's own frame rate (frames are every Nth one of it). */
   sourceFps?: number;
@@ -580,15 +666,25 @@ export interface MixedPlanInput {
   /** Cloud: the model's extra settings (LTX: follow the outlines). */
   extra?: Record<string, unknown>;
   seed?: number;
+  /** The Original: the look's LoRAs this run can reach (the server leaves out a civitai one without the key); else the look's own. */
+  loras?: LoraRef[];
 }
 
-/** The full render. Open: one per-frame job. Cloud: cut the selection, restyle it (frame by frame, or Fast), put its own sound back. */
+/**
+ * The full render. Open: one per-frame job (or Smooth). Cloud: cut the selection, restyle it (frame by frame, Smooth or
+ * Fast), put its own sound back.
+ */
 export function planMixed(input: MixedPlanInput): { steps: PlanStep[]; final: string } {
-  if (input.engine === "cloud" && (input.mode ?? "frames") === "frames") return planMixedFrames(input);
+  const mode = input.mode ?? "frames";
+  if (mode === "smooth") return planMixedSmooth(input);
+  if (input.engine === "cloud" && mode === "frames") return planMixedFrames(input);
   const prompts = mixedPrompts(input.preset, input.values);
   const base = { batchTitle: input.title };
-  const seed = input.seed !== undefined ? { seed: input.seed } : {};
+  const original = input.modelId === MIXED_ORIGINAL;
+  // The Original draws every frame at one seed (the same seed keeps frames alike).
+  const seed = input.seed !== undefined ? { seed: input.seed } : original ? { seed: FRAME_SEED } : {};
   if (input.engine === "open") {
+    const loras = original ? (input.loras ?? mixedLoras(input.preset.id)) : [];
     return {
       final: "render",
       steps: [
@@ -598,9 +694,11 @@ export function planMixed(input: MixedPlanInput): { steps: PlanStep[]; final: st
             ...base,
             feature: MIXED_FEATURE,
             title: input.title,
+            ...(original && { engine: "open" as const }),
             modelId: input.modelId,
             op: "v2v",
-            prompt: prompts.frame,
+            prompt: withTrigger(prompts.frame, loras),
+            ...(loras.length && { loras }),
             inputs: { video: input.source.url },
             // frames: exactly floor(seconds × fps), as the page counts them (the graph's own count would add one).
             params: {
@@ -712,9 +810,20 @@ export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; fin
     });
   });
   const lane = FRAME_LIMITS.lane;
+  // The Original draws every frame on its own (the frame's outlines, the look's LoRA, one seed): no lanes, no second picture.
+  const original = input.modelId === MIXED_ORIGINAL ? originalFrameRequest({ ...input, resolution: frameResolution(n, input.resolution), seed }) : null;
   for (let i = 0; i < n; i++) {
     const w = Math.floor(i / FRAME_LIMITS.perExtract);
     const frame = { slot: "images" as const, index: i - w * FRAME_LIMITS.perExtract, of: windows[w].count, position: "first" as const };
+    if (original) {
+      add(`Frame ${i + 1} of ${n}`, {
+        key: `f${i}`,
+        request: { ...base, ...feeds, feature: MIXED_FRAME_FEATURE, ...original },
+        after: [`frames${w + 1}`],
+        chain: [frame],
+      });
+      continue;
+    }
     // The styled picture it matches: the frame before it in its lane, else the approved preview, else the first styled frame.
     const ref = i % lane ? `f${i - 1}` : input.anchor ? null : i ? "f0" : null;
     add(`Frame ${i + 1} of ${n}`, {
@@ -777,21 +886,69 @@ export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; fin
   return { steps, final: "final" };
 }
 
+/**
+ * Smooth (both engines): the clip in pieces (on your GPU 81 frames at 16 fps, 480p; on fal up to 240 frames at the clip's
+ * own rate, 720p), each piece's first frame drawn in the look by the Original (the preview's route and seed), then Fuobe
+ * Shorts' Wan 2.2 Fun VACE carries that frame through every frame by depth; the pieces are joined and the cut's own
+ * sound put back. The Shorts chain, in the clip's own shape, with the first frame swapped for the Original's.
+ */
+export function planMixedSmooth(input: MixedPlanInput): { steps: PlanStep[]; final: string } {
+  const look: ShortsLook = { presetId: input.preset.id, name: input.preset.name, look: mixedLook(input.preset, input.values) };
+  const w = input.sourceSize?.width;
+  const h = input.sourceSize?.height;
+  const plan = planShorts({
+    engine: input.engine,
+    title: input.title,
+    source: { url: input.source.url, duration: input.source.duration, hasAudio: input.source.hasAudio, width: w, height: h, ...(input.sourceFps && { fps: input.sourceFps }) },
+    range: input.range,
+    look,
+    aspectRatio: (w ?? 16) >= (h ?? 9) ? "16:9" : "9:16",
+    keepShape: true,
+    language: "auto",
+    modelId: MIXED_SMOOTH_MODEL,
+    maxRefs: 0,
+    ...(input.engine === "cloud" && { resolution: "720p" }),
+    seed: input.seed ?? FRAME_SEED,
+  });
+  const final = plan.final ?? plan.takes[0].look;
+  const frame = originalFrameRequest({ ...input, resolution: input.resolution === "1K" ? "1K" : "2K" });
+  const frameKeys = new Set(plan.takes.map((t) => t.frame));
+  const steps = plan.steps.map((s) => {
+    let request: GenerationRequest = s.key === final ? { ...s.request, feature: MIXED_FEATURE, title: input.title } : { ...s.request, feature: MIXED_STEP_FEATURE };
+    if (frameKeys.has(s.key)) request = { ...request, ...frame, inputs: undefined };
+    return { ...s, request };
+  });
+  return { steps, final };
+}
+
 /** One frame with the current settings. Open: the per-frame model on one frame; cloud: an image edit of the frame the browser grabbed. */
 export function planMixedPreview(input: MixedPlanInput & { frameUrl?: string }): PlanStep {
   const prompts = mixedPrompts(input.preset, input.values);
   const title = `${input.preset.name} · preview`;
+  const original = input.modelId === MIXED_ORIGINAL && input.mode !== "fast";
+  // The Original in the cloud (Per frame and Smooth): its frame route on the grabbed frame, with the render's seed, look and size.
+  if (original && input.engine === "cloud") {
+    const count = input.sourceFps ? frameSampling(input.range.end - input.range.start, input.fps, input.sourceFps).frames : 0;
+    const frame = originalFrameRequest({ ...input, resolution: input.mode === "smooth" ? input.resolution : frameResolution(count, input.resolution) });
+    return { key: "preview", request: { feature: MIXED_PREVIEW_FEATURE, title, ...frame, inputs: { images: input.frameUrl ? [input.frameUrl] : [] } } };
+  }
   if (input.engine === "open") {
+    // The per-frame graph on the selection's first frame: on your GPU the Original's preview (and Smooth's first frame) is
+    // drawn with the render's look, LoRA and seed.
+    const loras = input.modelId === MIXED_OPEN_LEGACY ? [] : (input.loras ?? mixedLoras(input.preset.id));
+    const seed = input.seed ?? (input.modelId === MIXED_OPEN_LEGACY ? undefined : FRAME_SEED);
     return {
       key: "preview",
       request: {
         feature: MIXED_PREVIEW_FEATURE,
         title,
-        modelId: MIXED_TOOLS.open.preview,
+        ...(input.modelId !== MIXED_OPEN_LEGACY && { engine: "open" as const }),
+        modelId: input.modelId === MIXED_OPEN_LEGACY ? MIXED_OPEN_LEGACY : MIXED_TOOLS.open.preview,
         op: "v2v",
-        prompt: prompts.frame,
+        prompt: withTrigger(prompts.frame, loras),
+        ...(loras.length && { loras }),
         inputs: { video: input.source.url },
-        params: { startTime: input.range.start, fps: input.fps, aspectRatio: "auto", resolution: input.resolution, ...(input.seed !== undefined ? { seed: input.seed } : {}), extra: { denoise: denoiseFor(input.values), frames: 1 } },
+        params: { startTime: input.range.start, fps: input.fps, aspectRatio: "auto", resolution: input.resolution, ...(seed !== undefined ? { seed } : {}), extra: { denoise: denoiseFor(input.values), frames: 1 } },
       },
     };
   }

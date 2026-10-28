@@ -615,6 +615,14 @@ function videoMegapixels(model: ModelDef, params: GenParams, seconds: number): n
   return frames === undefined ? undefined : (width * height * frames) / 1e6;
 }
 
+/** The megapixels of a size sent as params.extra.image_size {width, height}, if one is. */
+function sentMegapixels(params: GenParams): number | undefined {
+  const size = params.extra?.image_size as { width?: unknown; height?: unknown } | undefined;
+  const w = Number(size?.width);
+  const h = Number(size?.height);
+  return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 ? (w * h) / (1024 * 1024) : undefined;
+}
+
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
 export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation, withLoras = false): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
@@ -627,9 +635,10 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   let per = usd;
   const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;
-  // Per megapixel of every image made: Soul's sizes are known (about 1 or 2 MP); other models are taken as 1 MP.
+  // Per megapixel of every image made: Soul's sizes are known (about 1 or 2 MP), so is a size sent as fal's image_size
+  // {width, height} (Fuobe Mixed Media's frames); other models are taken as 1 MP.
   if (p.unit === "megapixel") {
-    const mp = soulKind(model) ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution) : 1;
+    const mp = soulKind(model) ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution) : (sentMegapixels(params) ?? 1);
     per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
   }
   if (p.unit === "second") {

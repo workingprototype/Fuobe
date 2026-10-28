@@ -19,6 +19,8 @@ import {
   stitchCurrent,
   SHORTS,
   SHORTS_MODELS,
+  SHORTS_ORIGINAL,
+  vaceDownsample,
   type PlanStep,
   type ShortsCustomPreset,
   type ShortsLook,
@@ -28,6 +30,8 @@ import {
   type ShortsSession,
   type ShortsSessionSegment,
   type ShortsStitch,
+  type ShortsTake,
+  type TakeKeys,
 } from "@/lib/catalog/shorts";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
@@ -196,8 +200,8 @@ export function deleteCustomPreset(id: string): boolean {
 export interface ShortsBody {
   engine: Engine;
   presetId: string;
-  /** width / height: what the browser read, for estimates made before the server has the file. */
-  source: { url: string; name?: string; duration?: number; width?: number; height?: number };
+  /** width / height / fps: what the browser read, for estimates made before the server has the file. */
+  source: { url: string; name?: string; duration?: number; width?: number; height?: number; fps?: number };
   range: ShortsRange;
   aspectRatio: ShortsRatio;
   language: string;
@@ -240,17 +244,18 @@ function planWith(body: ShortsBody, info: SourceInfo): { input: ShortsPlanInput;
   const modelId = body.modelId && SHORTS_MODELS[body.engine].includes(body.modelId) ? body.modelId : firstOn(SHORTS_MODELS[body.engine], body.engine)!;
   const look = body.look ?? lookFor(body.presetId);
   const duration = info.duration ?? body.source.duration;
+  const fps = info.fps ?? body.source.fps;
   const problem = rangeProblem(body.range, duration) ?? clipShapeProblem(info.width ?? body.source.width, info.height ?? body.source.height);
   if (problem) throw new ShortsError(problem);
   // Every segment has to be a clip the restyle model takes (a cut outside its window is paid for, then refused).
   const limits = sourceSeconds(modelId);
-  const odd = planSegments(body.range, body.engine)
+  const odd = planSegments(body.range, body.engine, { modelId, fps })
     .map((s) => clipLengthProblem({ name: getModel(modelId)?.name ?? modelId, minSeconds: limits.min, maxSeconds: limits.max }, s.end - s.start))
     .find(Boolean);
   if (odd) throw new ShortsError(`${odd} per segment — pick another model`);
   // A custom preset without words on a words-only model would restyle from nothing but "the look of the reference images".
-  if (look.custom && !look.described && body.engine === "cloud" && !maxRefsFor(modelId)) {
-    const readers = SHORTS_MODELS.cloud.filter((id) => maxRefsFor(id) > 0).map((id) => getModel(id)?.name ?? id);
+  if (look.custom && !look.described && body.engine === "cloud" && !maxRefsFor(modelId, "cloud")) {
+    const readers = SHORTS_MODELS.cloud.filter((id) => maxRefsFor(id, "cloud") > 0).map((id) => getModel(id)?.name ?? id);
     throw new ShortsError(`${getModel(modelId)?.name ?? "This model"} restyles from words only — describe the look in your preset, or pick ${readers.join(" or ")}`, 422);
   }
   const name = fileTitle(body.source.name);
@@ -267,15 +272,16 @@ function planWith(body: ShortsBody, info: SourceInfo): { input: ShortsPlanInput;
         hasAudio: info.hasAudio ?? false,
         width: info.width ?? body.source.width,
         height: info.height ?? body.source.height,
+        ...(fps ? { fps } : {}),
       },
       range: body.range,
       look,
       aspectRatio: body.aspectRatio,
       language: body.language || "auto",
       modelId,
-      maxRefs: maxRefsFor(modelId),
-      resolution: resolutionFor(modelId),
-      reframes: body.engine === "open" || reframes(modelId),
+      maxRefs: maxRefsFor(modelId, body.engine),
+      resolution: resolutionFor(modelId, body.engine),
+      reframes: body.engine === "open" || reframes(modelId, body.engine),
     },
   };
 }
@@ -305,11 +311,20 @@ export interface ShortsEstimate {
   notes: string[];
 }
 
-function notesFor(input: ShortsPlanInput): string[] {
+function notesFor(input: ShortsPlanInput, segments: number): string[] {
   const notes: string[] = [];
   const refs = input.look.references?.length ?? 0;
+  const original = input.modelId === SHORTS_ORIGINAL;
   if (refs && input.engine === "cloud" && !input.maxRefs) notes.push(`${getModel(input.modelId)?.name ?? "This model"} restyles from words only — pick Kling O3 4K Edit or Happy Horse to use your reference images`);
-  if (refs > SHORTS.openReferences && input.engine === "open") notes.push(`The open engine uses your first ${SHORTS.openReferences} reference images`);
+  if (refs > SHORTS.openReferences && (input.engine === "open" || original)) notes.push(`${original ? "Fuobe Shorts" : "The open engine"} uses your first ${SHORTS.openReferences} reference images (on each segment's first frame)`);
+  if (original) {
+    const fps = input.source.fps;
+    if (input.engine === "cloud") {
+      notes.push(`Fuobe Shorts draws each segment's first frame in the look (Qwen-Image-Edit 2511), then Wan 2.2 Fun VACE carries it through every frame by depth${segments > 1 ? `: ${segments} segments, joined with the clip's own sound` : ""}`);
+      if (fps && fps > SHORTS.original.billFps + 0.5) notes.push(`fal bills this clip's ${Math.round(fps)} fps as ${(fps / SHORTS.original.billFps).toFixed(1)}× its length (video seconds at ${SHORTS.original.billFps} fps)`);
+      if (vaceDownsample(fps)) notes.push(`Wan 2.2 Fun VACE works this ${Math.round(fps!)} fps clip at ${Math.round(fps! / (vaceDownsample(fps) + 1))} fps and brings it back to its own rate`);
+    } else notes.push("Fuobe Shorts on your GPU renders 480p at 16 fps, 5 s a segment");
+  }
   if (input.engine === "cloud") {
     const { width: w, height: h } = input.source;
     if (!input.reframes && w && h && needsFit(input.source, input.aspectRatio)) notes.push(`Your ${w}×${h} clip is centre-cropped to ${input.aspectRatio} before the restyle`);
@@ -334,7 +349,7 @@ export function estimateWith(body: ShortsBody, info: SourceInfo): ShortsEstimate
     segments: plan.segments.length,
     seconds: Math.round((input.range.end - input.range.start) * 10) / 10,
     refsSent: input.engine === "open" ? Math.min(SHORTS.openReferences, input.look.references?.length ?? 0) : Math.min(input.maxRefs, input.look.references?.length ?? 0),
-    notes: notesFor(input),
+    notes: notesFor(input, plan.segments.length),
   };
 }
 
@@ -356,9 +371,9 @@ export async function createSession(body: ShortsBody, known?: SourceInfo): Promi
   const now = Date.now();
   const segments: ShortsSessionSegment[] = plan.segments.map((s, i) => {
     const t = plan.takes[i];
-    return { ...s, takes: [{ cut: id(t.cut), ...(t.fit ? { fit: id(t.fit) } : {}), ...(t.frame ? { frame: id(t.frame) } : {}), look: id(t.look), createdAt: now }], primary: id(t.look) };
+    return { ...s, takes: [takeOf(t, id, now)], primary: id(t.look) };
   });
-  const takeKeys = new Set(plan.takes.flatMap((t) => [t.cut, t.look, ...(t.fit ? [t.fit] : []), ...(t.frame ? [t.frame] : [])]));
+  const takeKeys = new Set(plan.takes.flatMap((t) => [t.cut, t.look, ...(t.fit ? [t.fit] : []), ...(t.still ? [t.still] : []), ...(t.frame ? [t.frame] : [])]));
   const stitch: ShortsStitch = {
     ids: plan.steps.filter((s) => !takeKeys.has(s.key)).map((s) => id(s.key)),
     final: id(plan.final!),
@@ -371,7 +386,15 @@ export async function createSession(body: ShortsBody, known?: SourceInfo): Promi
     engine: input.engine,
     batchId: pipeline.batchId,
     look: input.look,
-    source: { url: input.source.url, name: body.source.name, duration: input.source.duration, hasAudio: input.source.hasAudio, width: info.width, height: info.height },
+    source: {
+      url: input.source.url,
+      name: body.source.name,
+      duration: input.source.duration,
+      hasAudio: input.source.hasAudio,
+      width: info.width,
+      height: info.height,
+      ...(input.source.fps ? { fps: input.source.fps } : {}),
+    },
     range: input.range,
     settings: { aspectRatio: input.aspectRatio, language: input.language, modelId: input.modelId, resolution: input.resolution, maxRefs: input.maxRefs, reframes: input.reframes },
     segments,
@@ -401,9 +424,24 @@ export async function createSession(body: ShortsBody, known?: SourceInfo): Promi
   return session;
 }
 
+/** A take's generations by role, from its steps' keys. */
+function takeOf(t: TakeKeys, id: (key: string) => string, createdAt: number): ShortsTake {
+  return {
+    cut: id(t.cut),
+    ...(t.fit ? { fit: id(t.fit) } : {}),
+    ...(t.still ? { still: id(t.still) } : {}),
+    ...(t.frame ? { frame: id(t.frame) } : {}),
+    look: id(t.look),
+    createdAt,
+  };
+}
+
 /** Every generation a session made. */
 export function sessionIds(s: ShortsSession): string[] {
-  const ids = [...s.segments.flatMap((g) => g.takes.flatMap((t) => [t.cut, ...(t.fit ? [t.fit] : []), ...(t.frame ? [t.frame] : []), t.look])), ...s.stitches.flatMap((x) => [...x.ids, x.final])];
+  const ids = [
+    ...s.segments.flatMap((g) => g.takes.flatMap((t) => [t.cut, ...(t.fit ? [t.fit] : []), ...(t.still ? [t.still] : []), ...(t.frame ? [t.frame] : []), t.look])),
+    ...s.stitches.flatMap((x) => [...x.ids, x.final]),
+  ];
   return [...new Set(ids)];
 }
 
@@ -496,14 +534,7 @@ export function regenerateSegment(id: string, index: number): ShortsSessionView 
   } catch (e) {
     throw new ShortsError((e as Error).message, 422);
   }
-  const id_ = (k: string) => pipeline.byKey[k].id;
-  const next = {
-    cut: id_(take.keys.cut),
-    ...(take.keys.fit ? { fit: id_(take.keys.fit) } : {}),
-    ...(take.keys.frame ? { frame: id_(take.keys.frame) } : {}),
-    look: id_(take.keys.look),
-    createdAt: Date.now(),
-  };
+  const next = takeOf(take.keys, (k) => pipeline.byKey[k].id, Date.now());
   const segments = s.segments.map((g, i) => (i === index ? { ...g, takes: [...g.takes, next], primary: usable(g.primary) ? g.primary : next.look } : g));
   saveSession({ ...s, segments });
   return getSession(id);

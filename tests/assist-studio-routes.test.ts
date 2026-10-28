@@ -172,7 +172,8 @@ describe("Shorts Studio", () => {
         i,
       ),
     );
-    expect(p.jobs).toEqual([expect.objectContaining({ modelId: "gemini-omni-flash", op: "v2v", costUsd: est.costUsd, demo: false, atomic: true })]);
+    // Fuobe Shorts (O9) is Shorts Studio's default on both engines, priced as the studio prices it.
+    expect(p.jobs).toEqual([expect.objectContaining({ modelId: "fuobe-shorts", op: "v2v", costUsd: est.costUsd, demo: false, atomic: true })]);
     expect(est.costUsd).toBeGreaterThan(0);
     expect(p.jobs[0].note).toMatch(/^2 segments of 12 s, stitched under the original sound/);
   });
@@ -444,7 +445,7 @@ describe("MCP", () => {
   it("tool arguments name what each studio takes", async () => {
     const list = (await rpc("tools/list")) as { result: { tools: { name: string; inputSchema: { properties: Record<string, { description?: string; items?: unknown }> } }[] } };
     const arg = (tool: string, key: string) => list.result.tools.find((t) => t.name === tool)!.inputSchema.properties[key].description ?? "";
-    expect(arg("restyle_footage", "model_id")).toMatch(/gemini-omni-flash.*oss-wan22-vace-restyle.*outside Shorts Studio/);
+    expect(arg("restyle_footage", "model_id")).toMatch(/fuobe-shorts, gemini-omni-flash.*fuobe-shorts \(open source\).*outside Shorts Studio/);
     expect(arg("split_layers", "model_id")).toMatch(/seedream-5-layers.*oss-qwen-layered.*outside Layers/);
     expect(arg("create_ads", "aspect_ratios")).toMatch(/16:9 runs outside Ads Studio/);
   });
