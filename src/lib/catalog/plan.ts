@@ -182,10 +182,12 @@ export function planGeneration(
 ): Plan {
   const model = getModel(req.modelId);
   if (!model) throw new Error(`Unknown model ${req.modelId}`);
-  // Fuobe Soul takes a look (its presetId is a look id, not an app, motion or effect).
+  // Fuobe Soul takes a look (its presetId is a look id), or runs an app whose route names a look (the AI Influencer app).
   const soul = soulKind(model);
-  const preset = req.presetId && !soul ? getPreset(req.presetId) : undefined;
+  const found = req.presetId ? getPreset(req.presetId) : undefined;
+  const preset = !soul || found?.type === "app" ? found : undefined;
   if (req.presetId && !soul && !preset) throw new Error(`Unknown preset ${req.presetId}`);
+  const look = soul && preset ? presetRoute(preset, model.engine)?.look : req.presetId;
 
   let prompt = req.prompt?.trim() ?? "";
   let params: GenParams = { ...model.defaults, ...req.params };
@@ -249,7 +251,7 @@ export function planGeneration(
     params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
   }
   if (soul) {
-    const r = soulRecipe(soul, prompt, { look: req.presetId, strength: req.presetStrength, userLoras: req.loras, characterStrength: charStrength });
+    const r = soulRecipe(soul, prompt, { look, strength: req.presetStrength, userLoras: req.loras, characterStrength: charStrength });
     prompt = r.prompt;
     loras = r.loras;
     notes.push(...r.notes);
@@ -265,6 +267,15 @@ export function planGeneration(
     // An @character's trained LoRA on FLUX, klein, Krea or any other model: at the character strength's scale, as on Soul.
     const own = charStrength === undefined ? req.loras : req.loras.map((l) => ({ ...l, strength: characterScale(charStrength) }));
     loras = [...own, ...loras];
+  }
+  // The words a model takes when none are given (Fuobe Try-On: its LoRA's own instruction).
+  if (!prompt && model.options.defaultPrompt) prompt = model.options.defaultPrompt;
+  // A recipe's own LoRAs (Fuobe Try-On's try-on LoRA) go on every run after the others, their trigger words leading.
+  const recipe = (model.options.loras ?? []).filter((l) => !loras.some((x) => x.file === l.file));
+  if (recipe.length) {
+    loras = [...loras, ...recipe];
+    const lead = recipe.map((l) => l.trigger?.trim()).filter((t): t is string => !!t && !prompt.startsWith(t));
+    if (lead.length && prompt) prompt = `${lead.join(", ")} ${prompt}`;
   }
   // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
   const kept = loras.filter((l) => (l.strength ?? 1) !== 0);

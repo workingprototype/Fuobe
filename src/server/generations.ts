@@ -14,7 +14,7 @@ import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
 import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
-import { fitLoras, lorasFit } from "@/lib/catalog/loras";
+import { fitLoras, loraName, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
 import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
 import { isDop } from "@/lib/catalog/dop";
@@ -47,6 +47,7 @@ import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
 import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
+import { ACCESS_PLACE } from "@/lib/model-access";
 import { offeredLoras, offeredRoutes, requireOffered } from "./model-access";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
@@ -473,6 +474,17 @@ export function relightStep(req: GenerationRequest, model: ModelDef): { engine: 
 }
 
 /**
+ * The engine an app runs an Original on when only one of its routes names it (the AI Influencer app: Fuobe Soul in the
+ * cloud, the Soul Cast sheet graph on your GPU); undefined otherwise.
+ */
+export function appEngine(req: Pick<GenerationRequest, "presetId">, m: ModelDef): Engine | undefined {
+  const preset = req.presetId ? getPreset(req.presetId) : undefined;
+  if (preset?.type !== "app") return undefined;
+  const sides = (["cloud", "open"] as const).filter((e) => presetRoute(preset, e)?.modelId === m.id);
+  return sides.length === 1 ? sides[0] : undefined;
+}
+
+/**
  * The model a request may run, as Settings → Models & licences offers it (only its routes that are on). Engine mode
  * refuses an Original's engine it rules out first; then a model that is off is refused naming the switch, and so is
  * an Original's engine that is off when it is the one asked for, or the one the install's engine mode runs it on.
@@ -493,8 +505,9 @@ function prepare(original: GenerationRequest) {
   // Settings → Models & licences: a model (or the engine of an Original asked for) that is switched off is refused,
   // naming the switch; an Original otherwise runs on an engine that is still on, with the routes that are on.
   const found = getModel(worded.modelId);
-  const allowed = found && offeredFor(found, worded.engine);
-  const model = allowed && dualEngine(allowed) ? onEngine(allowed, engineFor(allowed, worded.engine)) : allowed;
+  const onSide = worded.engine ?? (found && appEngine(worded, found));
+  const allowed = found && offeredFor(found, onSide);
+  const model = allowed && dualEngine(allowed) ? onEngine(allowed, engineFor(allowed, onSide)) : allowed;
   const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
   const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
   let plan = planGeneration(req, lookup, getPreset);
@@ -513,6 +526,9 @@ function prepare(original: GenerationRequest) {
   // LoRAs switched off (by file or licence class) are left out, their trigger words with them; with "keep GPU-only
   // LoRAs on your GPU" on, the rest are marked so a cloud route leaves those out (fitLoras).
   const access = offeredLoras(plan.loras);
+  // A LoRA the model's recipe can't run without (Fuobe Try-On's try-on LoRA) switched off: the model can't run.
+  const needed = access.dropped.find((d) => plan.model.options.loras?.some((l) => l.file === d.file));
+  if (needed) throw new Error(`${plan.model.name} runs with the LoRA “${loraName(needed)}”, which is switched off in ${ACCESS_PLACE}. Turn it back on there, or pick another model`);
   if (access.dropped.length) plan = { ...plan, loras: access.loras, prompt: withoutTriggers(plan.prompt, plan.loras.filter((l) => !access.loras.some((k) => k.file === l.file)), access.loras) };
   else if (access.loras.some((l, i) => l !== plan.loras[i])) plan = { ...plan, loras: access.loras };
   // A preset can route to another model than the one asked for: its routes that are on (or the switch that's off).

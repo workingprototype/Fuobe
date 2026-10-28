@@ -526,6 +526,14 @@ export interface ModelOptions {
   promptless?: boolean;
   /** The prompt box shows, but the model also runs without words (P-Video Replace, Genjutsu Lite object swap). */
   promptOptional?: boolean;
+  /** The words a run takes when none are given (Fuobe Try-On: its try-on LoRA's own instruction). */
+  defaultPrompt?: string;
+  /**
+   * LoRAs the model's recipe always loads (Fuobe Try-On's try-on LoRA): every run carries them after the user's own,
+   * their trigger words leading the prompt. A ComfyUI graph that loads one itself isn't given it twice (injectLoras),
+   * and a run is refused while Settings → Models & licences has one switched off.
+   */
+  loras?: LoraRef[];
   /** Max reference videos / audio clips it accepts (reference-to-video: inputs.videos / inputs.audios). */
   maxVideos?: number;
   maxAudios?: number;
@@ -1034,6 +1042,8 @@ export interface PresetRoute {
   loras?: LoraRef[];
   /** Overrides the preset prompt template for this engine. */
   promptTemplate?: string;
+  /** An app on Fuobe Soul: the look its words run in (the AI Influencer app: the Realistic look). */
+  look?: string;
   /**
    * A partner model running the preset's words because its Original has nothing of its own here yet (a Fuobe DoP move
    * with no hostable LoRA, camera LoRA, hosted move or step in the cloud keeps Kling 2.5 Turbo until the evaluation

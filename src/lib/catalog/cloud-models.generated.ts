@@ -17611,6 +17611,223 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
     }
   },
   {
+    "id": "fuobe-marketing-image",
+    "name": "Fuobe Marketing Image",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-marketing",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Product shots, ads, posters and listings from your product photo: Qwen-Image-Edit 2511 with Fuobe's templates",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-edit-2511",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"
+      },
+      {
+        "op": "edit",
+        "provider": "replicate",
+        "endpoint": "qwen/qwen-image-edit-2511",
+        "map": {
+          "images": "image",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "1:1",
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4"
+            ]
+          },
+          "loras": {
+            "shape": "single",
+            "weights": "lora_weights",
+            "scale": "lora_scale",
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      },
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-2512",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/qwen-image-2512/lora"
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4,
+      "maxImages": 10
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.03,
+      "note": "an edit; $0.02 per MP for a picture made without a product photo",
+      "withLoras": 0.035
+    }
+  },
+  {
+    "id": "fuobe-tryon",
+    "name": "Fuobe Try-On",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-tryon",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Dresses the person in image 1 in the garment in image 2 (a bottom in image 3): FLUX.2 [klein] 4B with a try-on LoRA",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-2/klein/4b/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/flux-2/klein/4b/edit/lora"
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4,
+      "maxImages": 10
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "FLUX.2 [klein] 4B is Apache-2.0 (HF black-forest-labs/FLUX.2-klein-4B)",
+      "checked": "2026-10-23"
+    },
+    "pricing": {
+      "unit": "image",
+      "usd": 0.03,
+      "note": "about 3 MP at $0.01: the photos in (each about 1 MP) and the picture out"
+    }
+  },
+  {
     "id": "fuobe-dop",
     "name": "Fuobe DoP",
     "vendor": "Fuobe Original",

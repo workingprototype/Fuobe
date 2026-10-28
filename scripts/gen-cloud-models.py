@@ -254,6 +254,25 @@ model("fuobe-soul-cinema", "Fuobe Soul Cinema", "Fuobe Original", "fuobe-soul", 
       [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
        ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE})],
       original=True, sizes=SOUL_SIZES, defaults={"aspectRatio": "16:9", "resolution": "720p"})
+# ----- Originals (O10): Marketing Studio Image and Fashion Factory's try-on on hosted open weights
+# (docs/research/fuobe-originals-recipes-5.json studios[marketing]). models.ts joins each to its ComfyUI routes.
+# Fuobe Marketing Image: Qwen-Image-Edit 2511 with the product (and person, setting) as references, Qwen-Image 2512
+# without one; the format's template prompt is written by the Marketing plan, and the words of a headline are set
+# over the picture in the browser. The price is the edit's; a picture made without a product photo costs $0.02 per MP.
+model("fuobe-marketing-image", "Fuobe Marketing Image", "Fuobe Original", "fuobe-marketing", "image",
+      "Product shots, ads, posters and listings from your product photo: Qwen-Image-Edit 2511 with Fuobe's templates",
+      [("edit", "fal-ai/qwen-image-edit-2511", "fal", {"loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"}),
+       ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]}),
+       ("t2i", "fal-ai/qwen-image-2512", "fal", {"loraEndpoint": "fal-ai/qwen-image-2512/lora"})],
+      original=True, fit_values=True, defaults={"aspectRatio": "3:4"},
+      pricing=("megapixel", 0.03, "an edit; $0.02 per MP for a picture made without a product photo", {"withLoras": 0.035}))
+# Fuobe Try-On: FLUX.2 [klein] 4B edit with xocialize's try-on LoRA (adapterLoras tryon-klein-4b, Apache-2.0, so fal may
+# host it), the person image 1, the garment image 2, a bottom image 3. Every run carries the LoRA (ModelOptions.loras),
+# so it goes to the /lora endpoint: $0.01 per MP in and out, each photo resized to about 1 MP.
+model("fuobe-tryon", "Fuobe Try-On", "Fuobe Original", "fuobe-tryon", "image",
+      "Dresses the person in image 1 in the garment in image 2 (a bottom in image 3): FLUX.2 [klein] 4B with a try-on LoRA",
+      [("edit", "fal-ai/flux-2/klein/4b/edit", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/edit/lora"})],
+      original=True, pricing=("image", 0.03, "about 3 MP at $0.01: the photos in (each about 1 MP) and the picture out"))
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 

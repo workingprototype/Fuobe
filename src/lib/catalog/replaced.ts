@@ -68,12 +68,12 @@ export const REPLACED_BY: Readonly<Record<string, Replacement>> = {
   "genjutsu-object-swap": { id: "fuobe-genjutsu-swap", was: "Genjutsu Object Swap (Higgsfield)", note: "Object swap now runs on Fuobe Genjutsu (SAM 3.1 + Wan VACE)", original: true, ops: { v2v: { op: "video-swap" } } },
   "genjutsu-lite-object-swap": { id: "fuobe-genjutsu-swap-lite", was: "Genjutsu Lite Object Swap (Higgsfield)", note: "Object swap Lite now runs on Fuobe Genjutsu Lite", original: true },
   "genjutsu-restyle": { id: "fuobe-genjutsu-restyle", was: "Genjutsu Restyle (Higgsfield)", note: "Restyle now runs on Fuobe Genjutsu with a Fuobe look", original: true },
-  // O10 builds Fuobe's own Marketing image on Qwen-Image-Edit; until then the partner model Higgsfield ran underneath.
-  "marketing-studio-image": { id: "gpt-image-2-5", was: "Marketing Studio Image (Higgsfield)", note: "Marketing images now run on GPT Image 2.5 with Fuobe's format prompts" },
+  // Marketing Studio Image's Original (O10): Qwen-Image-Edit 2511 with Fuobe's format templates on both engines.
+  "marketing-studio-image": { id: "fuobe-marketing-image", was: "Marketing Studio Image (Higgsfield)", note: "Marketing images now run on Fuobe Marketing Image (Qwen-Image-Edit 2511) with Fuobe's format prompts", original: true },
   // Ads Studio's one-shot ad became Fuobe's Ads pipeline (copy, then a visual, composited in the browser); a single run reuses its visual model.
-  "ads-studio": { id: "nano-banana-pro", was: "Ads Studio (Higgsfield)", note: "Ads now come from Fuobe's Ads pipeline: written copy, a Nano Banana Pro visual and your fonts" },
-  // The AI Influencer app draws its sheet on Nano Banana Pro, as the builder does, until O10 moves it to Fuobe Soul.
-  "ai-influencer": { id: "nano-banana-pro", was: "AI Influencer (Higgsfield)", note: "The AI Influencer sheet now runs on Nano Banana Pro (the Soul Cast sheet on your GPU)" },
+  "ads-studio": { id: "fuobe-marketing-image", was: "Ads Studio (Higgsfield)", note: "Ads now come from Fuobe's Ads pipeline: written copy, a Fuobe Marketing Image visual and your fonts", original: true },
+  // The AI Influencer sheet runs on Fuobe Soul (O10), as the builder's does: the Realistic look, a wide sheet.
+  "ai-influencer": { id: "fuobe-soul", was: "AI Influencer (Higgsfield)", note: "The AI Influencer sheet now runs on Fuobe Soul (the Soul Cast sheet on your GPU)", original: true },
 };
 
 /** Retired training targets (Higgsfield Soul ID) → the trainer that makes a Fuobe Soul ID from the same photos. */

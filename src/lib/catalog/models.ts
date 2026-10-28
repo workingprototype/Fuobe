@@ -2,6 +2,7 @@ import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
 import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
+import { loraEntry, loraRef } from "./loras";
 import { CINEMA_CROP, SOUL_ASPECTS, SOUL_TIERS } from "./soul";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelOptions, type ModelRoute, type Operation } from "./types";
 
@@ -1565,6 +1566,11 @@ const DOP_OPTIONS: ModelOptions = {
 /** Soul's options on both engines (research §4.3): 7 shapes, a 720p (about 1 MP) and a 1080p (about 2 MP) tier, 1–4 images. */
 const SOUL_OPTIONS: ModelOptions = { aspectRatios: SOUL_ASPECTS, resolutions: SOUL_TIERS, seed: true, maxOutputs: 4 };
 
+/** Fuobe Try-On's LoRA (research adapterLoras): xocialize's try-on LoRA for FLUX.2 [klein] 4B, Apache-2.0. */
+const TRYON_LORA = loraEntry("tryon-klein-4b");
+/** The try-on LoRA card's own instruction, for a run with no words. */
+export const TRYON_PROMPT = "a full-body photo of a person. Replace the outfit with the top and bottom as shown in the reference images. The final image is a full body shot.";
+
 /** Fuobe Soul, Soul HD and Soul Cinema (src/lib/catalog/soul.ts applies the look). */
 const originals: ModelDef[] = [
   original({
@@ -1686,6 +1692,39 @@ const originals: ModelDef[] = [
     tagline: "The person in your clip becomes your character · MiniMax H3 free on your GPU (48 GB+ advised), or hosted on fal",
     options: { seed: true, resolutions: ["480p", "768p"], maxImages: 2 },
   }),
+  // Marketing Studio Image and Fashion Factory's try-on (O10): Higgsfield's GPT Image 2.5 templates and Nano Banana outfit
+  // steps rebuilt on Apache-2.0 open weights (docs/research/fuobe-originals-recipes-5.json studios[marketing]).
+  {
+    ...original({
+      id: "fuobe-marketing-image",
+      open: [
+        // A Standalone product shot (params.extra.productShot, one product photo) runs product-shot-qwen-edit-2509 instead:
+        // cut out with BiRefNet, put on white, relit into the scene by the White_to_Scene LoRA.
+        comfy("edit", "qwen-image-edit-2511-multi", "Qwen-Image-Edit 2511 with up to 3 references (product, person, setting) and the template's prompt"),
+        comfy("t2i", "qwen-image-2512-t2i", "Qwen-Image 2512 when there is no product photo"),
+      ],
+      tagline: "Product shots, ads, posters and listings from your product photo · Qwen-Image-Edit 2511 free on your GPU (24 GB), or hosted on fal",
+      options: { aspectRatios: IMG_AR, maxImages: 10, maxOutputs: 4, seed: true, negativePrompt: true },
+    }),
+    // TextEncodeQwenImageEditPlus takes three pictures, and the edit keeps the first one's shape.
+    engineOptions: { open: { maxImages: 3 } },
+  },
+  {
+    ...original({
+      id: "fuobe-tryon",
+      open: [comfy("edit", "tryon-flux2-klein-4b", "the try-on LoRA on FLUX.2 [klein] 4B; the old outfit greyed out first (ClothesSegment)")],
+      tagline: "Puts the garment in image 2 (a bottom in image 3) on the person in image 1 · FLUX.2 [klein] 4B + try-on LoRA, free on your GPU (10 GB), or hosted on fal",
+      options: {
+        maxImages: 3,
+        seed: true,
+        promptOptional: true,
+        defaultPrompt: TRYON_PROMPT,
+        imageLabels: ["person photo", "garment (a top, dress or whole outfit)", "bottom (optional)"],
+        requires: { images: 2, msg: "Add a photo of the person, then the garment" },
+        ...(TRYON_LORA && { loras: [loraRef(TRYON_LORA)] }),
+      },
+    }),
+  },
 ];
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */
