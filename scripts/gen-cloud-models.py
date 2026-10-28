@@ -577,6 +577,25 @@ model("fuobe-character-swap", "Fuobe Character swap", "Fuobe Original", "fuobe-c
       original=True, fit_values=True, badges=["audio"],
       pricing=("second", 0.075, "768p; 480p $0.0625/s; whole seconds, 5–15 per call", {"byResolution": {"768p": 0.075, "480p": 0.0625}}),
       options={"resolutions": ["480p", "768p"]}, defaults={"resolution": "768p"})
+# ----- Originals (O9): Fuobe Mixed Media and Fuobe Shorts on hosted open weights (research §8 mixed-media →
+# studios[mixed-media].original, studios[shorts].original). Mixed Media's cloud half draws one frame: Z-Image Turbo
+# with its Fun ControlNet on the frame's own outlines (preprocess canny) and the look's LoRAs, at the render's one
+# seed; src/lib/catalog/mixed-media.ts fans it out over every frame (and frame 0 of Smooth), sending the frame's
+# size (image_size {width, height}: about 1 or 4 megapixels in the clip's shape) and the look's control scale.
+# Shorts' cloud half is Wan 2.2 Fun VACE by depth from a restyled first frame; its aspect ratio isn't asked of the
+# model (the cut is cropped to 9:16 or 16:9 first, as for any restyle model that keeps its input's shape).
+MIXED_O = next(s for s in ORIGINALS["studios"] if s["id"] == "mixed-media")["original"]["cloud"]
+model("fuobe-mixed-media", "Fuobe Mixed Media", "Fuobe Original", "fuobe-mixed-media", "video",
+      "Every frame drawn again in the look under its own outlines, one seed: Z-Image Turbo + ControlNet with the look's LoRA",
+      [("edit", MIXED_O["frame"], "fal", {"fixed": MIXED_O["fixed"], "defaults": MIXED_O["defaults"]})],
+      original=True, pricing=("megapixel", per_megapixel(MIXED_O["frame"]), MIXED_O["price"]))
+SHORTS_O = next(s for s in ORIGINALS["studios"] if s["id"] == "shorts")["original"]["cloud"]
+model("fuobe-shorts", "Fuobe Shorts", "Fuobe Original", "fuobe-shorts", "video",
+      "Your footage in a new look, motion kept: a restyled first frame carried through every frame by depth (Wan 2.2 Fun VACE)",
+      [("v2v", SHORTS_O["restyle"], "fal", {"drop": ["aspectRatio"]})],
+      original=True, fit_values=True, pricing=("second", 0.1, f"720p; 580p $0.075, 480p $0.05 · {_FRAMES16}; the first frame's Qwen edit is priced on its own",
+                                               {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
+      api_defaults=SHORTS_O["defaults"], defaults={"resolution": "720p"})
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})

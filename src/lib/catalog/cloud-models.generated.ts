@@ -18863,5 +18863,124 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
         "480p": 0.0625
       }
     }
+  },
+  {
+    "id": "fuobe-mixed-media",
+    "name": "Fuobe Mixed Media",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-mixed-media",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Every frame drawn again in the look under its own outlines, one seed: Z-Image Turbo + ControlNet with the look's LoRA",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/z-image/turbo/controlnet/lora",
+        "map": {
+          "image": "image_url",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "fixed": {
+            "preprocess": "canny",
+            "output_format": "jpeg",
+            "enable_prompt_expansion": false
+          },
+          "defaults": {
+            "num_inference_steps": 8
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "maxOutputs": 4,
+      "maxImages": 1
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Z-Image Turbo / base weights are Apache-2.0 (HF Tongyi-MAI/Z-Image-Turbo, Tongyi-MAI/Z-Image)",
+      "checked": "2026-10-23"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.01,
+      "note": "$0.01 per megapixel of each frame: a 1K frame (about 1 MP in the clip's shape) costs about $0.01, so 240 frames about $2.40; 2K (about 4 MP) about $0.04 a frame"
+    }
+  },
+  {
+    "id": "fuobe-shorts",
+    "name": "Fuobe Shorts",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-shorts",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Your footage in a new look, motion kept: a restyled first frame carried through every frame by depth (Wan 2.2 Fun VACE)",
+    "routes": [
+      {
+        "op": "v2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "first_frame_url",
+          "images": "ref_image_urls",
+          "video": "video_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "auto",
+              "240p",
+              "360p",
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "match_input_num_frames": true,
+            "match_input_frames_per_second": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "resolutions": [
+        "auto",
+        "240p",
+        "360p",
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 4
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1,
+      "note": "720p; 580p $0.075, 480p $0.05 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length; the first frame's Qwen edit is priced on its own",
+      "byResolution": {
+        "720p": 0.1,
+        "580p": 0.075,
+        "480p": 0.05
+      }
+    }
   }
 ];

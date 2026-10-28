@@ -2,7 +2,8 @@
 """
 Generate src/lib/catalog/lora-library.generated.ts: every LoRA the Fuobe Originals use, with its pinned
 download, unique local file name and a licence snapshot, plus the motion / effect preset → LoRA map.
-Source: docs/research/fuobe-originals-recipes-5.json (loraLibrary, presets, motionsEffects).
+Source: docs/research/fuobe-originals-recipes-5.json (loraLibrary, presets, motionsEffects, and Mixed Media's looks:
+studios[mixed-media].original.looks).
 
 The LoRA files are never committed: src/server/loras.ts downloads them (pinned civitai versions,
 Hugging Face files) into ComfyUI's loras folder, or mirrors them for the cloud engine.
@@ -141,6 +142,9 @@ def entry(raw, key, group, checked=None, spare=False):
 
 used = {l["key"] for p in DATA["presets"] for l in (p.get("loras") or [])}
 used |= {l["key"] for l in DATA["soul"].get("loras") or [] if isinstance(l, dict) and l.get("key")}
+# Fuobe Mixed Media's looks (build plan O9): a preset id → the Z-Image LoRAs its frames are drawn with.
+MIXED = (next((s for s in DATA["studios"] if s["id"] == "mixed-media"), {}).get("original") or {}).get("looks") or {}
+used |= {l["key"] for ls in MIXED.values() for l in ls}
 
 library = []
 by_file = {}
@@ -187,6 +191,20 @@ for m in DATA["motionsEffects"]:
         row["notes"] = m["notes"]
     motions.append(row)
 
+mixed = {}
+for preset, ls in MIXED.items():
+    if not re.match(r"^mixed-[a-z0-9-]+$", preset):
+        errors.append(f"mixed-media look {preset!r} is not a Mixed Media preset id")
+    for l in ls:
+        e = next((x for x in library if x["key"] == l["key"]), None)
+        if not e:
+            errors.append(f"mixed-media look {preset}: no LoRA {l['key']!r} in loraLibrary")
+        elif e["base"] != "z-image-turbo":
+            errors.append(f"mixed-media look {preset}: {l['key']} is a {e['base']} LoRA, not Z-Image Turbo")
+        if not (isinstance(l.get("strength"), (int, float)) and 0 < l["strength"] <= 2):
+            errors.append(f"mixed-media look {preset}: strength {l.get('strength')!r} out of range")
+    mixed[preset] = [{"key": l["key"], "strength": l["strength"]} for l in ls]
+
 keys = [e["key"] for e in library]
 dup = sorted({k for k in keys if keys.count(k) > 1})
 if dup:
@@ -206,7 +224,9 @@ ts = (
     "/** Every LoRA the Originals use: Soul looks (group \"look\") and motion / effect LoRAs, one entry per local file. */\n"
     f"export const LORA_LIBRARY: LoraEntry[] = {json.dumps(library, indent=2, ensure_ascii=False)};\n\n"
     "/** Motion and effect presets (Higgsfield's generic names) → their LoRA keys in LORA_LIBRARY, with the research's status. */\n"
-    f"export const MOTION_EFFECT_LORAS: MotionEffectLoras[] = {json.dumps(motions, indent=2, ensure_ascii=False)};\n"
+    f"export const MOTION_EFFECT_LORAS: MotionEffectLoras[] = {json.dumps(motions, indent=2, ensure_ascii=False)};\n\n"
+    "/** Fuobe Mixed Media's looks (research studios[mixed-media].original.looks): preset id → the LORA_LIBRARY keys its frames are drawn with. */\n"
+    f"export const MIXED_MEDIA_LOOK_LORAS: Record<string, {{ key: string; strength: number }}[]> = {json.dumps(mixed, indent=2, ensure_ascii=False)};\n"
 )
 (ROOT / "src/lib/catalog/lora-library.generated.ts").write_text(ts, encoding="utf-8")
-print(f"wrote {len(library)} LoRAs ({sum(1 for e in library if e['group'] == 'look')} looks) and {len(motions)} motion / effect rows")
+print(f"wrote {len(library)} LoRAs ({sum(1 for e in library if e['group'] == 'look')} looks), {len(motions)} motion / effect rows and {len(mixed)} Mixed Media looks")

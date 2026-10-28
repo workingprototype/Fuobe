@@ -56,6 +56,9 @@ LORA = {
     "fal-ai/z-image/turbo/lora": {k: v for k, v in T2I.items() if k != "negativePrompt"},
     # Fuobe Soul's edit route (O2): image-to-image with the look's LoRAs; image_size "auto" keeps the picture's shape.
     "fal-ai/z-image/turbo/image-to-image/lora": {**{k: v for k, v in T2I.items() if k not in ("negativePrompt", "aspectRatio")}, "image": "image_url"},
+    # Fuobe Mixed Media's frames (O9): each frame drawn again under its own outlines (preprocess canny) with the look's
+    # LoRAs at a fixed seed; image_size is sent as {width, height} from the clip's shape and the tier.
+    "fal-ai/z-image/turbo/controlnet/lora": {**{k: v for k, v in T2I.items() if k not in ("negativePrompt", "aspectRatio")}, "image": "image_url"},
     "fal-ai/qwen-image-2512/lora": T2I,
     "prunaai/z-image-turbo-lora": {"prompt": "prompt", "width": "width", "height": "height", "seed": "seed"},
     # Soul ID on every base fal trains (O3, o/soul-id): the models a LoRA trained on FLUX.1 [dev], FLUX.1 Krea [dev],
@@ -303,7 +306,8 @@ def main():
         if missing:
             sys.exit(f"{ep}: keyFields {missing} are not inputs")
         rec["keyFields"] = kf
-        rec["output"] = "images[].url" if rec["op"] in ("t2i", "edit") else "video.url"
+        # Image-to-image, controlled and inpainting routes return pictures too (only the video ops return video.url).
+        rec["output"] = "images[].url" if rec["op"] in ("t2i", "edit", "i2i", "i2i-control", "inpaint") else "video.url"
         if rec["provider"] == "replicate":
             rec["output"] = "output[]"
         rec["inputsChecked"] = TODAY
