@@ -18,6 +18,7 @@ import {
   mentionsFor,
   MULTIPLIER,
   MULTIPLIER_MODELS,
+  MULTIPLIER_WINDOW,
   multiplierResolution,
   OPEN_SOUND_JOIN,
   overlayLayout,
@@ -788,6 +789,9 @@ function planAd(input: ClickToAdInput, ctx: { product: Product; brand?: BrandKit
 // ---------------------------------------------------------------------------
 // Ad Multiplier: a reference ad (4–30 s) → new versions (whole ad, or a new hook / CTA around it)
 
+/** How each cloud edit model is asked to keep the reference's own soundtrack. */
+const KEEP_SOUND: Record<string, Record<string, unknown>> = { "kling-o3": { keep_audio: true }, "happy-horse-video-edit": { audio_setting: "origin" } };
+
 export function multiplierModel(input: Pick<MultiplierInput, "engine" | "modelId">): ModelDef {
   const choices = keepOffered(MULTIPLIER_MODELS[input.engine], (c) => isOffered(c.id, input.engine));
   const id = input.modelId && choices.some((c) => c.id === input.modelId) ? input.modelId : choices[0].id;
@@ -805,10 +809,9 @@ export interface MultiplierContext {
 export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): RunPlan {
   const open = input.engine === "open";
   const start = Math.max(0, input.start ?? 0);
-  const end = Math.min(input.duration, input.end ?? input.duration);
-  const length = end - start;
+  const asked = Math.min(input.duration, input.end ?? input.duration);
+  const length = asked - start;
   if (length < MULTIPLIER.minSeconds - 0.05 || length > MULTIPLIER.maxSeconds + 0.05) throw new PlanError("Video duration: 4-30 seconds");
-  const trimmed = start > 0.05 || end < input.duration - 0.05;
   const images = input.images ?? [];
   const text = multiplierText({ mode: input.mode, prompt: input.prompt, hook: input.hook, cta: input.cta });
   if (input.mode === "sections" && input.hook == null && input.cta == null) throw new PlanError("Turn on Change hook or Change CTA");
@@ -818,14 +821,20 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
   const notes: string[] = [];
   const steps: Step[] = [];
   const resolution = multiplierResolution(input.quality, input.engine);
+  // A cloud edit model that recreates a shorter part than the one selected gets its first seconds (MULTIPLIER_WINDOW).
+  const editModel = input.mode === "prompt" ? multiplierModel(input) : undefined;
+  const window = !open && editModel ? MULTIPLIER_WINDOW[editModel.id] : undefined;
+  const end = window && length > window + 0.05 ? start + window : asked;
+  if (end < asked) notes.push(`${editModel!.name} recreates up to ${window} s: the first ${window} s of your selection are used (move the selection for another part)`);
+  const trimmed = start > 0.05 || end < input.duration - 0.05;
   if (trimmed) {
     steps.push({ key: "clip", label: "Trimming the reference", request: { feature: step, modelId: M.trim, op: "trim", inputs: { video: input.video }, params: { startTime: round(start), endTime: round(end) } } });
   }
   const source = (slot: "video"): { inputs?: GenerationRequest["inputs"]; after?: string[]; chain?: ChainSlot[] } =>
     trimmed ? { after: ["clip"], chain: [{ slot }] } : { inputs: { video: input.video } };
 
-  if (input.mode === "prompt") {
-    const model = multiplierModel(input);
+  if (editModel) {
+    const model = editModel;
     const title = `Recreated ad · ${model.name}`;
     if (open) {
       // Wan Animate: the first image takes over the reference's performance; the original sound is laid back on.
@@ -859,8 +868,9 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
       }
       if (images.length > 1) notes.push("Wan Animate uses one image (the first you mention)");
     } else {
-      const max = model.options.maxImages ?? 0;
-      const m = mentionsFor(text, images, model.id, model.routes.some((r) => r.op === "v2v" && r.map?.images) ? max : 0);
+      // A model whose edit route takes no images (Gemini Omni Flash) edits from the prompt alone.
+      const max = model.routes.some((r) => r.op === "v2v" && r.map?.images) ? (model.options.maxImages ?? 0) : 0;
+      const m = mentionsFor(text, images, model.id, max);
       if (m.dropped && images.length) notes.push(max ? `${model.name} takes ${max} images — the first ${max} you mention are used` : `${model.name} edits from the prompt alone; pick Kling O3 to use your images`);
       const src = source("video");
       steps.push({
@@ -872,7 +882,9 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
           op: "v2v",
           prompt: m.prompt,
           inputs: { ...src.inputs, ...(m.images.length && { images: m.images }) },
-          params: { resolution, ...(model.id === "kling-o3" && { extra: { keep_audio: true } }) },
+          // The clip's length prices the edit (a v2v route sends none); the reference's own sound is kept (Kling's
+          // keep_audio, Happy Horse's audio_setting "origin").
+          params: { resolution, duration: round(end - start), ...(KEEP_SOUND[model.id] && { extra: KEEP_SOUND[model.id] }) },
           chain: src.chain,
           title,
           batchTitle: title,

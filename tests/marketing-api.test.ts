@@ -387,6 +387,38 @@ describe("Ad Multiplier", () => {
     expect(() => mk.planMultiplier({ engine: "open", video: video(), duration: 12, mode: "prompt", quality: "720p" }, {})).toThrow(/Add an image/);
   });
 
+  it("binds Happy Horse's @images, keeps the sound, and recreates at most 15 s on Kling and Happy Horse, saying so", async () => {
+    const { buildPayload } = await import("@/lib/catalog/payload");
+    const { planGeneration, routesFor } = await import("@/lib/catalog/plan");
+    const imgs = [upload("a.png"), upload("b.png")];
+    const v = video();
+    const hh = mk.planMultiplier({ engine: "cloud", video: v, duration: 30, images: imgs, mode: "prompt", prompt: "Swap the bottle for @image_2", quality: "720p", modelId: "happy-horse-video-edit" }, {});
+    // The first 15 s are cut first (Happy Horse returns at most 15 s and bills the input seconds too).
+    expect(hh.steps.map((s) => s.key)).toEqual(["clip", "edit"]);
+    expect(hh.steps[0].request.params).toEqual({ startTime: 0, endTime: 15 });
+    expect(hh.notes.join(" ")).toMatch(/Happy Horse Video Edit recreates up to 15 s: the first 15 s of your selection are used/);
+    const edit = hh.steps[1].request;
+    expect(edit).toMatchObject({ modelId: "happy-horse-video-edit", op: "v2v", prompt: "Swap the bottle for @Image1", params: { resolution: "720p", duration: 15, extra: { audio_setting: "origin" } } });
+    const model = getModel("happy-horse-video-edit")!;
+    const plan = planGeneration({ ...edit, inputs: { video: v, images: edit.inputs!.images } }, getModel, () => undefined);
+    const payload = buildPayload(routesFor(model, "v2v")[0].map!, { ...plan.params, prompt: plan.prompt, video: v, images: edit.inputs!.images });
+    expect(payload).toMatchObject({ prompt: "Swap the bottle for @Image1", reference_image_urls: [imgs[1], imgs[0]], video_url: v, audio_setting: "origin" });
+    expect(payload).not.toHaveProperty("duration");
+    // Within the window nothing is cut; the selection's own start is kept.
+    const short = mk.planMultiplier({ engine: "cloud", video: v, duration: 40, start: 20, end: 32, images: imgs, mode: "prompt", prompt: "x", quality: "720p", modelId: "happy-horse-video-edit" }, {});
+    expect(short.steps[0].request.params).toEqual({ startTime: 20, endTime: 32 });
+    expect(short.notes).toEqual([]);
+    // Kling O3's edit takes 3–15 s clips: the same cut; Gemini Omni Flash takes the whole selection.
+    const kling = mk.planMultiplier({ engine: "cloud", video: v, duration: 30, images: imgs, mode: "prompt", prompt: "x", quality: "720p" }, {});
+    expect(kling.steps[0].request.params).toEqual({ startTime: 0, endTime: 15 });
+    expect(kling.steps[1].request.params).toMatchObject({ duration: 15, extra: { keep_audio: true } });
+    const gemini = mk.planMultiplier({ engine: "cloud", video: v, duration: 30, images: imgs, mode: "prompt", prompt: "x", quality: "720p", modelId: "gemini-omni-flash" }, {});
+    expect(gemini.steps.map((s) => s.key)).toEqual(["edit"]);
+    expect(gemini.steps[0].request).toMatchObject({ params: { resolution: "720p", duration: 30 }, inputs: { video: v } });
+    expect(gemini.steps[0].request.inputs).not.toHaveProperty("images");
+    expect(gemini.notes).toEqual(["Gemini Omni Flash 1.1 edits from the prompt alone; pick Kling O3 to use your images"]);
+  });
+
   it("adds a hook and a CTA around the original (trimmed first), from the frames the browser grabbed", () => {
     const v = video();
     const plain = mk.planMultiplier({ engine: "cloud", video: v, duration: 20, mode: "sections", hook: "Wait for it", cta: "Shop today", quality: "720p", firstFrame: upload("f.png"), lastFrame: upload("l.png") }, {});

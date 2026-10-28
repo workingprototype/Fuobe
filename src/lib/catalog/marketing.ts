@@ -826,12 +826,13 @@ export function mentionedImages(prompt: string): number[] {
 
 /**
  * The images a model gets, and the prompt rewritten for it: the mentioned images first (then the
- * rest) up to the model's limit, renumbered; Kling reads "@Image1", the others "image 1".
+ * rest) up to the model's limit, renumbered; Kling and Happy Horse bind "@Image1" (their prompt
+ * fields say so), the others read "image 1".
  */
 export function mentionsFor(prompt: string, images: string[], modelId: string, max: number): { prompt: string; images: string[]; dropped: number } {
   const order = [...mentionedImages(prompt).filter((n) => n <= images.length), ...images.map((_, i) => i + 1)].filter((n, i, a) => a.indexOf(n) === i);
   const used = order.slice(0, Math.max(0, max));
-  const kling = modelId.startsWith("kling");
+  const kling = modelId.startsWith("kling") || modelId.startsWith("happy-horse");
   const text = prompt.replace(/@image_(\d{1,2})\b/g, (all, d: string) => {
     const at = used.indexOf(Number(d));
     if (at < 0) return "the reference";
@@ -993,12 +994,19 @@ export const OPEN_SOUND_JOIN = { first: "oss-join-sound1", second: "oss-join-sou
 /** The models the Ad Multiplier can recreate with, per engine (the first that's usable is the default). */
 export const MULTIPLIER_MODELS: Record<Engine, ModelChoice[]> = {
   cloud: [
-    { id: "kling-o3", note: "Kling O3 edit, up to 4 @images" },
-    { id: "happy-horse-video-edit", note: "Happy Horse video edit, up to 4 @images" },
+    { id: "kling-o3", note: "Kling O3 edit, up to 4 @images, keeps the sound · 15 s at most" },
+    { id: "happy-horse-video-edit", note: "Happy Horse video edit, up to 4 @images, keeps the sound · 15 s at most" },
     { id: "gemini-omni-flash", note: "Gemini Omni Flash edit, prompt only" },
   ],
   open: [{ id: "fuobe-genjutsu-motion", note: "Fuobe Genjutsu · Motion (Wan Animate 2): your @image_1 takes over the performance" }],
 };
+
+/**
+ * The longest part of the reference a cloud edit model recreates (docs/research/paid-model-apis-3/4.json): Kling O3's
+ * edit takes 3–15 s clips; Happy Horse's takes up to 60 s but returns at most the first 15 s (and bills the input
+ * seconds too). A longer selection is cut to its first seconds, and the run says so.
+ */
+export const MULTIPLIER_WINDOW: Readonly<Record<string, number>> = { "kling-o3": 15, "happy-horse-video-edit": 15 };
 
 /** Ad Multiplier quality → the resolution sent; open models top out at 720p. */
 export const multiplierResolution = (q: string, engine: Engine) => (engine === "open" && q === "1080p" ? "720p" : q);
