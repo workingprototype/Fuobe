@@ -1954,7 +1954,19 @@ export const CLOUD_MODELS: ModelDef[] = [
               "21:9": "landscape_16_9",
               "5:4": "landscape_4_3",
               "4:5": "portrait_4_3"
-            }
+            },
+            "accepts": [
+              "1:1",
+              "4:3",
+              "3:4",
+              "16:9",
+              "9:16",
+              "3:2",
+              "2:3",
+              "21:9",
+              "5:4",
+              "4:5"
+            ]
           },
           "loras": {
             "shape": "items",
@@ -2010,7 +2022,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "2:3",
         "21:9",
         "5:4",
-        "4:5"
+        "4:5",
+        "auto"
       ],
       "maxOutputs": 4,
       "maxImages": 10

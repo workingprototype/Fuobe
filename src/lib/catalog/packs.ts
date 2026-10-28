@@ -588,13 +588,25 @@ export const getTemplate = (id: string) => FASHION.find((t) => t.id === id);
 
 /**
  * Fashion Factory's models per step (build plan O10): Fuobe Try-On (FLUX.2 [klein] 4B + the try-on LoRA) dresses the
- * base shot on both engines, FASHN and Nano Banana Pro stay as cloud choices; Qwen-Image-Edit 2511 makes the photoset.
+ * base shot on both engines, FASHN and Nano Banana Pro stay as cloud choices and Qwen-Image-Edit 2511 dresses it on your
+ * GPU when the try-on can't run; Qwen-Image-Edit 2511 makes the photoset, Nano Banana Pro a cloud choice.
  */
 export const TRYON_MODEL = "fuobe-tryon";
 export const FASHION_MODELS = {
-  outfit: { cloud: [TRYON_MODEL, "fashn-tryon", "nano-banana-pro"], open: [TRYON_MODEL] },
+  outfit: { cloud: [TRYON_MODEL, "fashn-tryon", "nano-banana-pro"], open: [TRYON_MODEL, PHOTO_EDIT.open] },
   photoset: { cloud: [PHOTO_EDIT.cloud, "nano-banana-pro"], open: [PHOTO_EDIT.open] },
 } as const;
+
+/**
+ * A Fashion step's model: the one picked when it is one of the step's on this engine, else the first of them this
+ * install offers (caps.has: its switch, and a recipe LoRA it can't run without), else the first (its run then
+ * refuses, naming the switch to turn back on).
+ */
+export function fashionModel(step: keyof typeof FASHION_MODELS, engine: Engine, pick?: string, caps?: Pick<PlanCaps, "has">): string {
+  const list: readonly string[] = FASHION_MODELS[step][engine];
+  if (pick && list.includes(pick)) return pick;
+  return list.find((id) => !caps?.has || caps.has(id, engine)) ?? list[0];
+}
 
 const element = (s: PhotoSubject) => (s.kind === "element" ? `@${s.handle}` : "the person in image 1");
 
@@ -613,9 +625,9 @@ export function fashionBaseRequest(t: FashionTemplate, subject: Extract<PhotoSub
 }
 
 /** Step 4: the base shot wearing the uploaded outfit (try-on, or an edit that dresses them). */
-export function fashionOutfitRequest(t: FashionTemplate, base: string, garment: string, engine: Engine, modelId?: string): GenerationRequest {
-  const id = engine === "cloud" && modelId && (FASHION_MODELS.outfit.cloud as readonly string[]).includes(modelId) ? modelId : TRYON_MODEL;
-  const tryon = id !== "nano-banana-pro";
+export function fashionOutfitRequest(t: FashionTemplate, base: string, garment: string, engine: Engine, modelId?: string, caps?: Pick<PlanCaps, "has">): GenerationRequest {
+  const id = fashionModel("outfit", engine, modelId, caps);
+  const tryon = id === TRYON_MODEL || id === "fashn-tryon";
   return {
     feature: "fashion",
     modelId: id,
@@ -632,8 +644,8 @@ export function fashionOutfitRequest(t: FashionTemplate, base: string, garment: 
 }
 
 /** Step 5: one photo per template shot, from the dressed image (Qwen-Image-Edit 2511, or Nano Banana Pro when picked). */
-export function fashionPhotosetRequests(t: FashionTemplate, dressed: string, engine: Engine, pick?: string): GenerationRequest[] {
-  const modelId = engine === "cloud" && pick && (FASHION_MODELS.photoset.cloud as readonly string[]).includes(pick) ? pick : PHOTO_EDIT[engine];
+export function fashionPhotosetRequests(t: FashionTemplate, dressed: string, engine: Engine, pick?: string, caps?: Pick<PlanCaps, "has">): GenerationRequest[] {
+  const modelId = fashionModel("photoset", engine, pick, caps);
   const n = t.photoset.length;
   return t.photoset.map((shot, i) => ({
     feature: "fashion",

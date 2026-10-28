@@ -1,8 +1,9 @@
 // Build plan O10, browser check in demo mode: the Originals are the first choice on both engines and partners stay
 // choices — Marketing Studio's model menu (Fuobe Marketing Image), Ads Studio's "Pictures by" (and its price line),
 // the AI Influencer builder (Fuobe Soul), Photodump's model chips (Qwen-Image-Edit 2511 hosted), Fashion Factory's
-// outfit step (Fuobe Try-On) and the try-on LoRA's row in Settings → Models & licences. Then each page at 1440 and
-// 390 px, light and dark, without sideways scroll.
+// outfit and photoset steps (Fuobe Try-On, Qwen-Image-Edit 2511; the next model when the try-on LoRA is switched off)
+// and the try-on LoRA's row in Settings → Models & licences. Then each page at 1440 and 390 px, light and dark, without
+// sideways scroll.
 // Usage: node tests/e2e/marketing-originals.mjs [appUrl] [--shots <dir>]   (app in demo mode, ComfyUI unreachable).
 // Exits 1 on a failed check.
 import fs from "node:fs";
@@ -27,8 +28,8 @@ async function upload(file, type, name) {
   if (!res.ok) throw new Error(`upload failed: ${res.status}`);
   return (await res.json()).url;
 }
-const post = async (url, body) => {
-  const res = await fetch(`${app}${url}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const post = async (url, body, method = "POST") => {
+  const res = await fetch(`${app}${url}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`${url}: ${res.status} ${await res.text()}`);
   return res.json();
 };
@@ -60,7 +61,8 @@ try {
   };
   const text = (page) => page.evaluate(() => document.body.innerText);
   const noSideways = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
-  const fashionAt = { step: "clothing", templateId: "red-room", elementId: character.id, baseIds: [], base: productImage, outfitIds: [] };
+  const fashionAt = { step: "clothing", templateId: "red-room", elementId: character.id, baseIds: [], base: productImage, outfitIds: [], outfit: productImage };
+  const radios = (page, name) => page.getByRole("radiogroup", { name }).getByRole("radio").allInnerTexts();
 
   // ---------------------------------------------------------------------------
   // The flows, once per engine (1440 light).
@@ -120,14 +122,40 @@ try {
     // Fashion Factory: the outfit step.
     await page.goto(`${app}/fashion-factory`, { waitUntil: "load" });
     await page.getByRole("heading", { name: "Upload outfit" }).waitFor();
+    await page.getByRole("radiogroup", { name: "Outfit model" }).waitFor();
+    const outfit = await radios(page, "Outfit model");
+    const on = await page.getByRole("radio", { name: "Fuobe Try-On" }).getAttribute("aria-checked");
     if (engine === "cloud") {
-      const outfit = await page.getByRole("radiogroup", { name: "Outfit model" }).getByRole("radio").allInnerTexts();
-      const on = await page.getByRole("radio", { name: "Fuobe Try-On" }).getAttribute("aria-checked");
       check("cloud: Fashion Factory's outfit runs on Fuobe Try-On, FASHN and Nano Banana Pro after it", outfit[0] === "Fuobe Try-On" && on === "true" && outfit.includes("FASHN Try-On"), outfit.join(" | "));
+      const set = await radios(page, "Photoset model");
+      check("cloud: the photoset runs on Qwen-Image-Edit 2511, Nano Banana Pro a choice", set[0] === "Qwen-Image-Edit 2511" && set.includes("Nano Banana Pro"), set.join(" | "));
     } else {
-      check("open: no outfit model menu on your GPU", !(await page.getByRole("radiogroup", { name: "Outfit model" }).count()));
+      check("open: the outfit runs on Fuobe Try-On, Qwen-Image-Edit 2511 after it", outfit[0] === "Fuobe Try-On" && on === "true" && outfit.includes("Qwen-Image-Edit 2511"), outfit.join(" | "));
+      check("open: one photoset model on your GPU, no menu", !(await page.getByRole("radiogroup", { name: "Photoset model" }).count()));
     }
     await context.close();
+  }
+
+  // The try-on LoRA switched off: Fuobe Try-On can't run, so the outfit step starts on the next model on each engine.
+  await post("/api/settings/models", { changes: [{ kind: "lora", id: "tryon-klein-4b.safetensors", on: false }] }, "PUT");
+  try {
+    for (const engine of engines) {
+      const { context, page } = await contextFor(engine, { width: 1440, height: 900 }, "light", fashionAt);
+      await page.goto(`${app}/fashion-factory`, { waitUntil: "load" });
+      await page.getByRole("heading", { name: "Upload outfit" }).waitFor();
+      await page.waitForFunction(() => !/Fuobe Try-On/.test(document.querySelector('[role="radiogroup"][aria-label="Outfit model"]')?.textContent ?? "Fuobe Try-On"), null, { timeout: 30_000 }).catch(() => {});
+      const outfit = (await page.getByRole("radiogroup", { name: "Outfit model" }).count()) ? await radios(page, "Outfit model") : [];
+      const want = engine === "cloud" ? "FASHN Try-On" : "Qwen-Image-Edit 2511";
+      const picked = outfit.length ? await page.getByRole("radio", { name: want }).getAttribute("aria-checked") : null;
+      // On your GPU Qwen-Image-Edit is then the only outfit model: no menu.
+      check(`${engine}: with the try-on LoRA off the outfit menu starts on ${want}`, engine === "cloud" ? !outfit.includes("Fuobe Try-On") && picked === "true" : !outfit.length, outfit.join(" | "));
+      // The server's default moves on the same way (a request that names no model).
+      const priced = await post("/api/photodump/fashion?preview=1", { step: "outfit", templateId: "red-room", base: productImage, garment: productImage, engine });
+      check(`${engine}: and the outfit step's default runs on ${want}`, priced.modelId === (engine === "cloud" ? "fashn-tryon" : "oss-qwen-edit"), priced.modelId ?? priced.error);
+      await context.close();
+    }
+  } finally {
+    await post("/api/settings/models", { changes: [{ kind: "lora", id: "tryon-klein-4b.safetensors", on: true }] }, "PUT").catch(() => {});
   }
 
   // Settings → Models & licences: the try-on LoRA, its licence and its switch.
@@ -143,6 +171,12 @@ try {
     const lora = await text(page);
     check("Settings lists the try-on LoRA with its Apache-2.0 licence", /Virtual Try-On for FLUX\.2 \[klein\] 4B \(xocialize\)/.test(lora) && /Apache-2\.0/.test(lora));
     check("the try-on LoRA has its switch", (await page.getByRole("switch").count()) > 0);
+    // Settings → LoRAs: the adapter's download and mirror status, under its own kind.
+    await page.goto(`${app}/settings#loras`, { waitUntil: "load" });
+    await page.getByRole("button", { name: /LoRA library/ }).click();
+    await page.getByRole("radio", { name: "Adapters" }).click();
+    await page.getByText("Virtual Try-On for FLUX.2 [klein] 4B (xocialize)").first().waitFor({ timeout: 30_000 }).catch(() => {});
+    check("Settings → LoRAs lists the try-on LoRA under Adapters", /Virtual Try-On for FLUX\.2 \[klein\] 4B \(xocialize\)/.test(await text(page)) && /FLUX\.2 \[klein\] 4B/.test(await text(page)));
     await context.close();
   }
 

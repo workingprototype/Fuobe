@@ -187,7 +187,8 @@ export function planGeneration(
   const found = req.presetId ? getPreset(req.presetId) : undefined;
   const preset = !soul || found?.type === "app" ? found : undefined;
   if (req.presetId && !soul && !preset) throw new Error(`Unknown preset ${req.presetId}`);
-  const look = soul && preset ? presetRoute(preset, model.engine)?.look : req.presetId;
+  const routeLook = preset?.type === "app" ? presetRoute(preset, model.engine)?.look : undefined;
+  const look = soul && preset ? routeLook : req.presetId;
 
   let prompt = req.prompt?.trim() ?? "";
   let params: GenParams = { ...model.defaults, ...req.params };
@@ -263,6 +264,13 @@ export function planGeneration(
       ...(r.grade && { grade: r.grade }),
       ...(r.overlay && { overlay: r.overlay }),
     };
+  } else if (routeLook) {
+    // An app whose graph is Fuobe Soul's own base (the AI Influencer app's Soul Cast sheet on your GPU) runs in its
+    // route's look too: the look's words and LoRAs, as the AI Influencer builder and Cinema's Soul Cast send them.
+    const r = soulRecipe("soul", prompt, { look: routeLook, userLoras: req.loras, characterStrength: charStrength });
+    prompt = r.prompt;
+    loras = r.loras;
+    notes.push(...r.notes);
   } else if (req.loras?.length) {
     // An @character's trained LoRA on FLUX, klein, Krea or any other model: at the character strength's scale, as on Soul.
     const own = charStrength === undefined ? req.loras : req.loras.map((l) => ({ ...l, strength: characterScale(charStrength) }));
@@ -270,10 +278,11 @@ export function planGeneration(
   }
   // The words a model takes when none are given (Fuobe Try-On: its LoRA's own instruction).
   if (!prompt && model.options.defaultPrompt) prompt = model.options.defaultPrompt;
-  // A recipe's own LoRAs (Fuobe Try-On's try-on LoRA) go on every run after the others, their trigger words leading.
+  // A recipe's own LoRAs (Fuobe Try-On's try-on LoRA) go on every run, first (an API's LoRA cap leaves out yours
+  // before them), their trigger words leading.
   const recipe = (model.options.loras ?? []).filter((l) => !loras.some((x) => x.file === l.file));
   if (recipe.length) {
-    loras = [...loras, ...recipe];
+    loras = [...recipe, ...loras];
     const lead = recipe.map((l) => l.trigger?.trim()).filter((t): t is string => !!t && !prompt.startsWith(t));
     if (lead.length && prompt) prompt = `${lead.join(", ")} ${prompt}`;
   }

@@ -148,7 +148,7 @@ describe("Fuobe Try-On and its LoRA", () => {
   });
 
   it("is Fashion Factory's outfit model on both engines, with Qwen-Image-Edit 2511 making the photoset", () => {
-    expect(FASHION_MODELS.outfit.open).toEqual([TRYON_MODEL]);
+    expect(FASHION_MODELS.outfit.open[0]).toBe(TRYON_MODEL);
     expect(FASHION_MODELS.outfit.cloud[0]).toBe(TRYON_MODEL);
     expect(FASHION_MODELS.photoset).toEqual({ cloud: ["qwen-image-edit-2511-cloud", "nano-banana-pro"], open: ["oss-qwen-edit"] });
     expect(PHOTODUMP_MODELS.cloud).toEqual(["fuobe-soul", "qwen-image-edit-2511-cloud", "nano-banana-pro", "seedream-5-pro"]);
@@ -176,5 +176,182 @@ describe("the AI Influencer app on Fuobe Soul", () => {
     expect(appEngine({ presetId: "v1-general" }, getModel("fuobe-soul")!)).toBeUndefined();
     const p = previewGeneration({ feature: "app:app-ai-influencer", presetId: app.id, modelId: "fuobe-soul", prompt: "a surfer" });
     expect(p).toMatchObject({ engine: "cloud", demo: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// After review (O10 fix): the studio's engine, the sheet's shape, the recipe LoRA, Fashion's fallbacks, the eval case.
+
+const { planMarketing, estimatePlan, onPlanEngine } = await import("@/server/marketing");
+const { planInfluencer, INFLUENCER_SOUL } = await import("@/lib/influencer");
+const { buildPayload } = await import("@/lib/catalog/payload");
+const { fashionModel, fashionOutfitRequest, fashionPhotosetRequests, getTemplate } = await import("@/lib/catalog/packs");
+const { isOffered, offeredSummary } = await import("@/server/model-access");
+const { previewFashion, previewSheet } = await import("@/server/photodump");
+
+const PRODUCT = { id: "p1", brandId: null, name: "Maple Granola", sellingPoints: [], images: ["/api/files/product.png"], createdAt: 0, updatedAt: 0 };
+/** fal connected and ComfyUI reachable or not: an Original that names no engine would run on whichever is ready first. */
+function connected(comfy: boolean) {
+  setSetting("falKey", "fal_test_key_123456");
+  globalThis.__fuobeComfyReach = { ok: comfy, at: Date.now(), url: "http://127.0.0.1:9" };
+  return () => {
+    setSetting("falKey", "");
+    globalThis.__fuobeComfyReach = undefined;
+  };
+}
+
+describe("Marketing Studio runs Fuobe Marketing Image on the studio's engine", () => {
+  it("names the engine on the image step, so the GPU run isn't billed on fal and the cloud run doesn't land on ComfyUI", () => {
+    const open = planMarketing({ engine: "open", format: "product-standalone", templateId: "ps-ice-bath" }, { product: PRODUCT });
+    const cloud = planMarketing({ engine: "cloud", format: "ads", templateId: "ad-hero-headline" }, { product: PRODUCT });
+    expect(open.steps[0].request).toMatchObject({ modelId: MARKETING_IMAGE_MODEL, engine: "open", params: { extra: { productShot: true } } });
+    expect(cloud.steps[0].request).toMatchObject({ modelId: MARKETING_IMAGE_MODEL, engine: "cloud" });
+    // A partner model runs on its own engine: no engine named.
+    expect(planMarketing({ engine: "cloud", format: "ads", templateId: "ad-hero-headline", modelId: "gpt-image-2-5" }, { product: PRODUCT }).steps[0].request.engine).toBeUndefined();
+
+    // ComfyUI down, fal connected: the open run stays on the GPU side (free, a demo here), never fal's $0.03.
+    let off = connected(false);
+    try {
+      const p = previewGeneration(open.steps[0].request);
+      expect(p).toMatchObject({ engine: "open", costUsd: 0 });
+      expect(estimatePlan(open).costUsd).toBe(0);
+    } finally {
+      off();
+    }
+    // ComfyUI up, fal connected: the cloud run goes to fal, without the GPU-only product-shot flag.
+    off = connected(true);
+    try {
+      const p = previewGeneration(cloud.steps[0].request);
+      expect(p).toMatchObject({ engine: "cloud", demo: false, route: { provider: "fal", endpoint: "fal-ai/qwen-image-edit-2511" } });
+      expect(p.costUsd).toBeGreaterThan(0);
+    } finally {
+      off();
+    }
+  });
+
+  it("pins every step of a plan that names no engine to the run's engine (estimates, launches, Run again, Assist)", () => {
+    const base = planMarketing({ engine: "open", format: "poster", prompt: "Autumn" }, { product: null });
+    const bare = { ...base.steps[0].request };
+    delete bare.engine;
+    const plan = { ...base, steps: [{ ...base.steps[0], request: bare }] };
+    expect(onPlanEngine(plan).steps[0].request.engine).toBe("open");
+    // A partner step, or one that already names its engine, is left as it is.
+    expect(onPlanEngine(base)).toBe(base);
+    const gpt = planMarketing({ engine: "cloud", format: "ads", templateId: "ad-hero-headline", modelId: "gpt-image-2-5" }, { product: PRODUCT });
+    expect(onPlanEngine(gpt).steps[0].request.engine).toBeUndefined();
+  });
+});
+
+describe("the AI Influencer sheet keeps its shape in the cloud", () => {
+  const state = { tier: "normal" as const, picks: {}, locked: [] };
+
+  it("asks hosted Qwen-Image-Edit for the input's shape, so fal and Replicate keep the 16:9 sheet's size", () => {
+    const p = planInfluencer({ engine: "cloud", state, start: "face", photo: "/api/files/me.png" }, { has: () => true });
+    const dress = p.steps.find((s) => s.key === "dress")!.request;
+    expect(dress).toMatchObject({ modelId: INFLUENCER_SOUL.edit, params: { aspectRatio: "auto" } });
+    const planned = plan({ ...dress, inputs: { images: ["/sheet.png", "/me.png"] } }, "cloud");
+    const [fal, replicate] = getModel(INFLUENCER_SOUL.edit)!.routes;
+    const input = { prompt: planned.prompt, images: ["/sheet.png", "/me.png"], ...planned.params };
+    expect(buildPayload(fal.map!, input)).not.toHaveProperty("image_size");
+    expect(buildPayload(replicate.map!, input)).not.toHaveProperty("aspect_ratio");
+    // A shape asked for is still sent, and the model's own default stays square.
+    expect(buildPayload(fal.map!, { ...input, aspectRatio: "16:9" })).toMatchObject({ image_size: "landscape_16_9" });
+    expect(getModel(INFLUENCER_SOUL.edit)!.defaults).toMatchObject({ aspectRatio: "1:1" });
+    expect(getModel(INFLUENCER_SOUL.edit)!.options.aspectRatios).toContain("auto");
+    // On the GPU the graph keeps image 1's shape itself.
+    expect(planInfluencer({ engine: "open", state, start: "face", photo: "/api/files/me.png" }, { has: () => true }).steps[1].request.params).toEqual({ numOutputs: 1 });
+  });
+
+  it("needs hosted Qwen-Image-Edit only when there is a face or clothing to put on the sheet", () => {
+    const noEdit = { has: (id: string) => id !== INFLUENCER_SOUL.edit };
+    const scratch = planInfluencer({ engine: "cloud", state, start: "scratch" }, noEdit);
+    expect(scratch).toMatchObject({ modelId: "fuobe-soul", notes: [] });
+    const face = planInfluencer({ engine: "cloud", state, start: "face", photo: "/api/files/me.png" }, noEdit);
+    expect(face.modelId).toBe("nano-banana-pro");
+    expect(face.notes[0]).toMatch(/Qwen-Image-Edit 2511 \(hosted\) is switched off/);
+  });
+});
+
+describe("Fuobe Try-On's LoRA is never left out of a run", () => {
+  const req = { feature: "image", modelId: TRYON_MODEL, engine: "cloud" as const, op: "edit" as const, inputs: { images: ["/api/files/me.png", "/api/files/dress.png"] } };
+  const mine = (n: number) => Array.from({ length: n }, (_, i) => ({ file: `mine-${i}.safetensors`, url: `https://huggingface.co/me/l/resolve/main/mine-${i}.safetensors`, strength: 1 }));
+
+  it("goes first, so fal's three-LoRA cap leaves out one of yours", () => {
+    const p = previewGeneration({ ...req, loras: mine(3) });
+    expect(p.loras.applied.map((l) => l.file)).toEqual([TRYON_FILE, "mine-0.safetensors", "mine-1.safetensors"]);
+    expect(p.loras.dropped.map((d) => d.file)).toEqual(["mine-2.safetensors"]);
+    expect(p.prompt).toMatch(/^TRYON /);
+  });
+
+  it("refuses a run whose route would leave it out (a copy named without a link can't reach fal)", () => {
+    const off = connected(false);
+    try {
+      expect(() => previewGeneration({ ...req, loras: [{ file: TRYON_FILE, strength: 1 }] })).toThrow(/Fuobe Try-On runs with the LoRA “.*”, which this run leaves out \(.*only on your ComfyUI/);
+      // With its link it goes, first.
+      expect(previewGeneration({ ...req, loras: mine(3) }).loras.applied[0].file).toBe(TRYON_FILE);
+    } finally {
+      off();
+    }
+    // On the GPU the graph has it.
+    expect(previewGeneration({ ...req, engine: "open", loras: [{ file: TRYON_FILE, strength: 1 }] }).engine).toBe("open");
+  });
+});
+
+describe("Fashion Factory moves on when a model can't run", () => {
+  const t = getTemplate("red-room")!;
+
+  it("offers Qwen-Image-Edit 2511 after Fuobe Try-On on your GPU and takes the photoset's pick", () => {
+    expect(FASHION_MODELS.outfit.open).toEqual([TRYON_MODEL, "oss-qwen-edit"]);
+    const qwen = fashionOutfitRequest(t, "/b.png", "/g.png", "open", "oss-qwen-edit");
+    expect(qwen).toMatchObject({ modelId: "oss-qwen-edit", params: { aspectRatio: "3:4" } });
+    expect(qwen.prompt).toMatch(/^Dress the person in image 1/);
+    expect(fashionPhotosetRequests(t, "/d.png", "cloud", "nano-banana-pro")[0].modelId).toBe("nano-banana-pro");
+    expect(fashionModel("photoset", "open", "nano-banana-pro")).toBe("oss-qwen-edit");
+    const set = previewFashion({ step: "photoset", templateId: t.id, dressed: "/api/files/d.png", engine: "cloud", modelId: "nano-banana-pro" });
+    expect(set).toMatchObject({ modelId: "nano-banana-pro" });
+  });
+
+  it("drops Fuobe Try-On from the pickers and the defaults while its try-on LoRA is switched off", () => {
+    expect(isOffered(TRYON_MODEL, "cloud")).toBe(true);
+    changeAccess([{ kind: "lora", id: TRYON_FILE, on: false }]);
+    expect(isOffered(TRYON_MODEL, "cloud")).toBe(false);
+    expect(isOffered(TRYON_MODEL, "open")).toBe(false);
+    expect(isOffered("oss-tryon-klein")).toBe(false);
+    expect(offeredSummary()?.off).toEqual(expect.arrayContaining([TRYON_MODEL, "oss-tryon-klein"]));
+    const base = { step: "outfit" as const, templateId: t.id, base: "/api/files/b.png", garment: "/api/files/g.png" };
+    expect(previewFashion({ ...base, engine: "cloud" })).toMatchObject({ modelId: "fashn-tryon" });
+    expect(previewFashion({ ...base, engine: "open" })).toMatchObject({ modelId: "oss-qwen-edit" });
+    // Picked anyway (the API): refused, naming the LoRA's switch.
+    expect(previewFashion({ ...base, engine: "cloud", modelId: TRYON_MODEL })).toMatchObject({ error: expect.stringMatching(/switched off in Settings → Models & licences/) });
+  });
+
+  it("makes the photoset on Nano Banana Pro when hosted Qwen-Image-Edit is switched off", () => {
+    changeAccess([{ kind: "model", id: "qwen-image-edit-2511-cloud", on: false }]);
+    expect(previewFashion({ step: "photoset", templateId: t.id, dressed: "/api/files/d.png", engine: "cloud" })).toMatchObject({ modelId: "nano-banana-pro" });
+  });
+});
+
+describe("the AI Influencer app and Character Sheet run the casting look on your GPU too", () => {
+  it("puts the Realistic look's words and LoRAs on the Soul Cast sheet graph", () => {
+    const app = getPreset("app-ai-influencer")!;
+    expect(app.open).toMatchObject({ modelId: "oss-zimage-soul-cast", look: CAST_LOOK });
+    const p = plan({ feature: "app:app-ai-influencer", presetId: app.id, modelId: "oss-zimage-soul-cast", prompt: "a surfer from Lisbon" }, "open");
+    expect(p.prompt).toMatch(/^Realism, An original character: a surfer from Lisbon/);
+    expect(p.loras.map((l) => l.file)).toEqual(["suayptalha-z-image-turbo-realism.safetensors", "AWPortrait-Z.safetensors"]);
+    expect(p.soul).toBeUndefined();
+    // Character Sheet's Soul Cast form on your GPU: priced on the sheet graph (its request is checked in image-studios-api).
+    expect(previewSheet({ mode: "cast", engine: "open", cast: { gender: "Female", age: 30 } })).toMatchObject({ modelId: "oss-zimage-soul-cast", costUsd: 0 });
+  });
+});
+
+describe("the marketing eval suite", () => {
+  it("sends the product-shot flag only where ComfyUI reads it", () => {
+    const suite = JSON.parse(fs.readFileSync(path.join(process.cwd(), "scripts/eval/cases/marketing.json"), "utf8"));
+    for (const c of suite.cases) {
+      if (!JSON.stringify(c.params ?? {}).includes("productShot")) continue;
+      expect(c.engines, c.id).toEqual(["open", "demo"]);
+    }
+    const cloud = suite.cases.find((c: { id: string }) => c.id === "marketing/product-plinth-cloud");
+    expect(cloud).toMatchObject({ engines: ["cloud"], params: { aspectRatio: "3:4" }, variantModels: { partner: { cloud: ["gpt-image-2-5"] } } });
   });
 });

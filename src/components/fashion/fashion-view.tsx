@@ -16,7 +16,7 @@ import { CharacterPicker } from "@/components/photodump/subject";
 import { UploadBox } from "@/components/photodump/upload-box";
 import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
 import { keepOffered, offered } from "@/lib/model-access";
-import { FASHION, FASHION_START, FASHION_STEPS, fashionBlocker, fashionReducer, getTemplate, type FashionState } from "@/lib/catalog/packs";
+import { FASHION, FASHION_MODELS, FASHION_START, FASHION_STEPS, fashionBlocker, fashionReducer, getTemplate, type FashionState } from "@/lib/catalog/packs";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 import { useStoredReducer } from "./stored";
@@ -24,12 +24,17 @@ import { TemplatePreview } from "./template-preview";
 
 const LABELS = ["Select presets", "Character", "Generation", "Clothing", "Photoset"];
 const BANNER_KEY = "fuobe.fashion.banner";
-/** The cloud's outfit models: Fuobe Try-On (the Original, FLUX.2 [klein] 4B + a try-on LoRA) first, partners after. */
-const OUTFIT_MODELS = [
-  ["fuobe-tryon", "Fuobe Try-On"],
-  ["fashn-tryon", "FASHN Try-On"],
-  ["nano-banana-pro", "Nano Banana Pro"],
-] as const;
+/**
+ * The outfit and photoset models' names (FASHION_MODELS has each step's per engine): Fuobe Try-On (the Original, FLUX.2
+ * [klein] 4B + a try-on LoRA) and Qwen-Image-Edit 2511 first, partners after.
+ */
+const MODEL_LABELS: Record<string, string> = {
+  "fuobe-tryon": "Fuobe Try-On",
+  "fashn-tryon": "FASHN Try-On",
+  "nano-banana-pro": "Nano Banana Pro",
+  "qwen-image-edit-2511-cloud": "Qwen-Image-Edit 2511",
+  "oss-qwen-edit": "Qwen-Image-Edit 2511",
+};
 
 const bannerListeners = new Set<() => void>();
 function readBanner(): boolean {
@@ -66,11 +71,16 @@ export function FashionView() {
   const [s, dispatch] = useStoredReducer<FashionState, Parameters<typeof fashionReducer>[1]>("fuobe.fashion", fashionReducer, FASHION_START);
   const [engine, setEngine] = useEngine();
   const [garment, setGarment] = useState<SlotValue | null>(null);
-  const [pickedOutfit, setOutfitModel] = useState<string>("fuobe-tryon");
-  // Outfit models switched off in Settings → Models & licences leave the choice; the pick falls back to one that is on.
+  const [pickedOutfit, setOutfitModel] = useState<string>();
+  const [pickedSet, setSetModel] = useState<string>();
+  // Models switched off in Settings → Models & licences (Fuobe Try-On with its try-on LoRA off too) leave the choice;
+  // the pick falls back to one that is on.
   const access = useModelAccess();
-  const outfitModels = keepOffered(OUTFIT_MODELS, ([id]) => offered(access, id, "cloud"));
-  const outfitModel = outfitModels.some(([id]) => id === pickedOutfit) ? pickedOutfit : outfitModels[0][0];
+  const choices = (ids: readonly string[]) => keepOffered(ids, (id) => offered(access, id, engine));
+  const outfitModels = choices(FASHION_MODELS.outfit[engine]);
+  const outfitModel = pickedOutfit && outfitModels.includes(pickedOutfit) ? pickedOutfit : outfitModels[0];
+  const setModels = choices(FASHION_MODELS.photoset[engine]);
+  const setModel = pickedSet && setModels.includes(pickedSet) ? pickedSet : setModels[0];
   const [bannerSeen, hideBanner] = useBannerSeen();
   const { data } = useGenerations({ features: ["fashion"], limit: 200 });
   const base = useRun<Record<string, unknown>>("/api/photodump/fashion");
@@ -94,7 +104,7 @@ export function FashionView() {
 
   const baseBody = t && s.elementId ? { step: "base", templateId: t.id, elementId: s.elementId, engine } : null;
   const outfitBody = t && s.base && s.garment && !s.garment.uploading ? { step: "outfit", templateId: t.id, base: s.base, garment: s.garment.url, engine, modelId: outfitModel } : null;
-  const setBody = t && s.outfit ? { step: "photoset", templateId: t.id, dressed: s.outfit, engine } : null;
+  const setBody = t && s.outfit ? { step: "photoset", templateId: t.id, dressed: s.outfit, engine, modelId: setModel } : null;
   const preview = useRunPreview("/api/photodump/fashion", s.step === "character" ? baseBody : s.step === "clothing" ? (s.outfit ? setBody : outfitBody) : null);
 
   const block = (msg: string | null) => {
@@ -243,15 +253,7 @@ export function FashionView() {
               </div>
               <UploadBox value={garmentValue} onChange={setGarmentValue} title="Upload outfit" hint="The product: a garment on a model or flat-lay" className="aspect-[3/4]" />
             </div>
-            {engine === "cloud" && (
-              <div role="radiogroup" aria-label="Outfit model" onKeyDown={radioKeys} className="flex flex-wrap gap-1">
-                {outfitModels.map(([id, label]) => (
-                  <button key={id} role="radio" aria-checked={outfitModel === id} tabIndex={radioTab(outfitModel === id)} onClick={() => setOutfitModel(id)} className={cn("h-8 rounded-full border px-2.5 text-[12.5px] font-medium transition-colors", outfitModel === id ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent")}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
+            <ModelChips label="Outfit model" ids={outfitModels} value={outfitModel} onChange={setOutfitModel} />
             <RunLine preview={outfitBody && !s.outfit ? preview.data : undefined} loading={!s.outfit && preview.isFetching} />
             <Button className="w-full" variant={s.outfitIds.length ? "outline" : "default"} onClick={startOutfit} disabled={outfit.isPending}>
               {outfit.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} {outfit.isPending ? "Generating..." : "Generate outfit"}
@@ -272,6 +274,7 @@ export function FashionView() {
             ) : (
               <div className="grid h-full min-h-48 place-items-center rounded-2xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">Upload the outfit, then Generate outfit to dress your base shot.</div>
             )}
+            {s.outfit && <ModelChips label="Photoset model" ids={setModels} value={setModel} onChange={setSetModel} />}
             <Footer onBack={() => dispatch({ type: "back" })} line={s.outfit ? <RunLine preview={preview.data} loading={preview.isFetching} /> : undefined}>
               <Button onClick={startSet} disabled={photoset.isPending}>
                 {photoset.isPending ? <Loader2 className="animate-spin" /> : null} {photoset.isPending ? "Generating..." : "Get your photoset"}
@@ -304,6 +307,20 @@ export function FashionView() {
         </section>
       )}
     </PageShell>
+  );
+}
+
+/** A step's model choice (shown when there is more than one): the Original first, partners after. */
+function ModelChips({ label, ids, value, onChange }: { label: string; ids: readonly string[]; value: string; onChange: (id: string) => void }) {
+  if (ids.length < 2) return null;
+  return (
+    <div role="radiogroup" aria-label={label} onKeyDown={radioKeys} className="flex flex-wrap gap-1">
+      {ids.map((id) => (
+        <button key={id} role="radio" aria-checked={value === id} tabIndex={radioTab(value === id)} onClick={() => onChange(id)} className={cn("h-8 rounded-full border px-2.5 text-[12.5px] font-medium transition-colors", value === id ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent")}>
+          {MODEL_LABELS[id] ?? id}
+        </button>
+      ))}
+    </div>
   );
 }
 

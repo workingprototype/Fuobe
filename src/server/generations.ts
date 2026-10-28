@@ -541,6 +541,13 @@ function prepare(original: GenerationRequest) {
   const reachable =
     demo || !plan.soul ? { loras: asked, notes: [] } : withoutUnreachableCivitai(asked, route.provider === "comfyui" ? "comfyui" : route.provider === "replicate" ? "replicate" : "fal");
   const fitted = fitLoras(reachable.loras, route);
+  // A LoRA the recipe can't run without that this route leaves out for any reason (its cap, a GPU-only licence, no
+  // cloud path): the model can't run here, rather than running without it.
+  const lost = demo ? undefined : plan.model.options.loras?.find((l) => asked.some((a) => a.file === l.file) && !fitted.loras.some((k) => k.file === l.file));
+  if (lost) {
+    const why = [...reachable.notes, ...fitted.notes].join("; ");
+    throw new Error(`${plan.model.name} runs with the LoRA “${loraName(lost)}”, which this run leaves out${why ? ` (${why})` : ""}. Pick another model or engine`);
+  }
   // A Soul look's triggers lead the prompt: a LoRA left out takes its trigger with it.
   const prompt = plan.soul ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras) : plan.prompt;
   plan = { ...plan, prompt, loras: fitted.loras };

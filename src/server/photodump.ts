@@ -1,7 +1,8 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
-import { CAST_LOOK, castPrompt, SOUL_BUILDER_MODEL, type CastValues } from "@/lib/catalog/cinema";
+import { CAST_LOOK, CAST_SHEET_MODEL, castPrompt, SOUL_BUILDER_MODEL, type CastValues } from "@/lib/catalog/cinema";
+import { soulRecipe } from "@/lib/catalog/soul";
 import {
   castSheetModel,
   customPack,
@@ -267,7 +268,7 @@ export function createPhotodump(input: PhotodumpRun) {
 export type FashionRun =
   | { step: "base"; templateId: string; elementId: string; engine: Engine }
   | { step: "outfit"; templateId: string; base: string; garment: string; engine: Engine; modelId?: string }
-  | { step: "photoset"; templateId: string; dressed: string; engine: Engine };
+  | { step: "photoset"; templateId: string; dressed: string; engine: Engine; modelId?: string };
 
 function fashionRequests(input: FashionRun): { requests: GenerationRequest[]; title: string } {
   const t = getTemplate(input.templateId);
@@ -278,8 +279,9 @@ function fashionRequests(input: FashionRun): { requests: GenerationRequest[]; ti
     if (subject.kind !== "element") throw new Error("Pick or create a character first");
     return { requests: [fashionBaseRequest(t, subject, engine, planCaps())], title: `${t.name} · ${subject.name}` };
   }
-  if (input.step === "outfit") return { requests: [fashionOutfitRequest(t, input.base, input.garment, engine, input.modelId)], title: `${t.name} · outfit` };
-  return { requests: fashionPhotosetRequests(t, input.dressed, engine), title: `${t.name} · photoset` };
+  // A model switched off in Settings → Models & licences (or Fuobe Try-On with its try-on LoRA off) moves on to the next.
+  if (input.step === "outfit") return { requests: [fashionOutfitRequest(t, input.base, input.garment, engine, input.modelId, planCaps())], title: `${t.name} · outfit` };
+  return { requests: fashionPhotosetRequests(t, input.dressed, engine, input.modelId, planCaps()), title: `${t.name} · photoset` };
 }
 
 export function previewFashion(input: FashionRun) {
@@ -318,14 +320,17 @@ function sheetRequest(input: SheetRun): { request: GenerationRequest; notes: str
     const m = getModel(modelId);
     const aspect = m?.options.aspectRatios?.includes("16:9") ? "16:9" : undefined;
     const resolution = m?.options.resolutions?.includes("2K") ? "2K" : m?.options.resolutions?.includes("1080p") ? "1080p" : undefined;
-    // Fuobe Soul runs on both engines (the run's engine picks its half) and draws the cast in Cinema's casting look.
+    // Fuobe Soul runs on both engines (the run's engine picks its half) and draws the cast in Cinema's casting look; the
+    // Soul Cast sheet graph is Soul's own base, so the look's words and LoRAs go on it too (as Cinema's Soul Cast does).
     const soul = modelId === SOUL_BUILDER_MODEL;
+    const sheet = modelId === CAST_SHEET_MODEL ? soulRecipe("soul", castPrompt(input.cast, input.details), { look: CAST_LOOK }) : undefined;
     return {
       request: {
         feature: "character-sheet",
         modelId,
         ...(soul && { engine, presetId: CAST_LOOK }),
-        prompt: castPrompt(input.cast, input.details),
+        prompt: sheet?.prompt ?? castPrompt(input.cast, input.details),
+        ...(sheet?.loras.length && { loras: sheet.loras }),
         params: { numOutputs: 1, ...(aspect && { aspectRatio: aspect }), ...(resolution && { resolution }) },
       },
       notes: modelId === "nano-banana-pro" ? ["Fuobe Soul is switched off in Settings → Models & licences — Nano Banana Pro draws the sheet"] : [],

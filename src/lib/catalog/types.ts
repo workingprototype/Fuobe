@@ -529,9 +529,10 @@ export interface ModelOptions {
   /** The words a run takes when none are given (Fuobe Try-On: its try-on LoRA's own instruction). */
   defaultPrompt?: string;
   /**
-   * LoRAs the model's recipe always loads (Fuobe Try-On's try-on LoRA): every run carries them after the user's own,
-   * their trigger words leading the prompt. A ComfyUI graph that loads one itself isn't given it twice (injectLoras),
-   * and a run is refused while Settings → Models & licences has one switched off.
+   * LoRAs the model's recipe always loads (Fuobe Try-On's try-on LoRA): every run carries them before the user's own
+   * (an API's LoRA cap leaves out the user's first), their trigger words leading the prompt. A ComfyUI graph that loads
+   * one itself isn't given it twice (injectLoras), and a run is refused while Settings → Models & licences has one
+   * switched off, or when the route leaves one out for any other reason.
    */
   loras?: LoraRef[];
   /** Max reference videos / audio clips it accepts (reference-to-video: inputs.videos / inputs.audios). */
@@ -1042,7 +1043,10 @@ export interface PresetRoute {
   loras?: LoraRef[];
   /** Overrides the preset prompt template for this engine. */
   promptTemplate?: string;
-  /** An app on Fuobe Soul: the look its words run in (the AI Influencer app: the Realistic look). */
+  /**
+   * An app on Fuobe Soul, or on a graph that is Soul's own base (the Soul Cast sheet on your GPU): the look its words
+   * run in, with the look's LoRAs (the AI Influencer app: the Realistic look).
+   */
   look?: string;
   /**
    * A partner model running the preset's words because its Original has nothing of its own here yet (a Fuobe DoP move

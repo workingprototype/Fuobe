@@ -348,6 +348,9 @@ describe("photodump, fashion factory and character sheet runs", () => {
     const cast = await (await characterRoute.POST(json("POST", { mode: "cast", engine: "open", cast: { genre: "Western", gender: "Female", age: 30, archetype: "Rebel" } }))).json();
     expect(cast.items[0].modelId).toBe("oss-zimage-soul-cast");
     expect(cast.items[0].prompt).toMatch(/30-year-old woman, the rebel archetype/);
+    // The Soul Cast sheet graph is Fuobe Soul's own base: the casting look's words and LoRAs go on it (as in Cinema).
+    expect(cast.items[0].prompt).toMatch(/^Realism, /);
+    expect(cast.items[0].request.loras.map((l: { file: string }) => l.file)).toEqual(["suayptalha-z-image-turbo-realism.safetensors", "AWPortrait-Z.safetensors"]);
     // In the cloud the cast sheet is Fuobe Soul's, in Cinema's casting look.
     const soul = await (await characterRoute.POST(json("POST", { mode: "cast", engine: "cloud", cast: { genre: "Drama" } }))).json();
     expect(soul.items[0]).toMatchObject({ modelId: "fuobe-soul", engine: "cloud", presetId: "v1-realistic" });
@@ -358,5 +361,7 @@ describe("photodump, fashion factory and character sheet runs", () => {
     expect(described.items[0]).toMatchObject({ presetId: "app-ai-influencer", modelId: "fuobe-soul", engine: "cloud", feature: "app:app-ai-influencer", status: "queued" });
     const app = await (await characterRoute.POST(json("POST", { mode: "describe", engine: "open", prompt: "a surfer from Lisbon" }))).json();
     expect(app.items[0]).toMatchObject({ presetId: "app-ai-influencer", modelId: "oss-zimage-soul-cast", feature: "app:app-ai-influencer" });
+    // …and on your GPU the app's sheet runs in the same look.
+    expect(app.items[0].prompt).toMatch(/^Realism, An original character: a surfer from Lisbon/);
   });
 });

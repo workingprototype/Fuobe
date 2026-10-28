@@ -20,6 +20,7 @@ import {
   type InfluencerTier,
 } from "@/lib/catalog/influencer-options.generated";
 import type { PlanCaps } from "@/lib/catalog/packs";
+import { CAST_LOOK } from "@/lib/catalog/soul-cards";
 import type { ChainSlot, Engine, GenerationRequest } from "@/lib/catalog/types";
 
 export { CONFLICT_MESSAGES, CREATURE_TYPES, INFLUENCER_CATEGORIES };
@@ -803,7 +804,7 @@ export const INFLUENCER_OPEN_MODELS = { sheet: "oss-zimage-soul-cast", edit: "os
 /** Fuobe Soul's steps in the cloud: the sheet on its hosted half, your face and clothing on hosted Qwen-Image-Edit 2511. */
 export const INFLUENCER_SOUL = { sheet: "fuobe-soul", edit: "qwen-image-edit-2511-cloud" } as const;
 /** The look the sheet is drawn in (Soul Cast's casting look: natural, unretouched skin and fabric). */
-export const INFLUENCER_LOOK = "v1-realistic";
+export const INFLUENCER_LOOK = CAST_LOOK;
 /** Qwen-Image-Edit 2511 takes three images on your GPU (the sheet, then the photo and clothing); fal takes more. */
 const OPEN_EDIT_IMAGES = 3;
 
@@ -865,8 +866,10 @@ export function planInfluencer(run: InfluencerRun, caps: Pick<PlanCaps, "has">):
   const notes: string[] = [];
   const has = (id: string, engine?: Engine) => !caps.has || caps.has(id, engine);
   const asked = run.modelId && (INFLUENCER_CLOUD_MODELS as readonly string[]).includes(run.modelId) ? run.modelId : undefined;
-  // Fuobe Soul in the cloud unless another model is asked for (or this install switched Fuobe Soul off there).
-  const cloudSoul = run.engine === "cloud" && (asked ?? INFLUENCER_SOUL.sheet) === INFLUENCER_SOUL.sheet && has(INFLUENCER_SOUL.sheet, "cloud") && has(INFLUENCER_SOUL.edit);
+  // Fuobe Soul in the cloud unless another model is asked for (or this install switched Fuobe Soul off there, or hosted
+  // Qwen-Image-Edit when your photo or clothing needs it).
+  const edits = !!photo || clothing.length > 0;
+  const cloudSoul = run.engine === "cloud" && (asked ?? INFLUENCER_SOUL.sheet) === INFLUENCER_SOUL.sheet && has(INFLUENCER_SOUL.sheet, "cloud") && (!edits || has(INFLUENCER_SOUL.edit));
 
   if (run.engine === "open" || cloudSoul) {
     const open = run.engine === "open";
@@ -887,7 +890,7 @@ export function planInfluencer(run: InfluencerRun, caps: Pick<PlanCaps, "has">):
             title,
           },
     };
-    if (!photo && !clothing.length) return { steps: [sheet], modelId: sheetModel, notes };
+    if (!edits) return { steps: [sheet], modelId: sheetModel, notes };
     const room = (open ? OPEN_EDIT_IMAGES : 1 + 1 + MAX_CLOTHING) - 1 - (photo ? 1 : 0);
     const used = clothing.slice(0, room);
     if (clothing.length > used.length) notes.push(`Qwen-Image-Edit takes 3 images (the sheet${photo ? ", your photo" : ""} and clothing) — the first ${used.length === 1 ? "clothing reference is" : `${used.length} clothing references are`} used`);
@@ -912,7 +915,8 @@ export function planInfluencer(run: InfluencerRun, caps: Pick<PlanCaps, "has">):
             op: "edit",
             prompt: compileDressPrompt({ state, start, clothing: used.length }),
             inputs: { images: [...(photo ? [photo] : []), ...used] },
-            params: { numOutputs: 1 },
+            // The graph keeps image 1's shape on your GPU; in the cloud "auto" leaves the size out, so the sheet stays 16:9.
+            params: { numOutputs: 1, ...(!open && { aspectRatio: "auto" }) },
             title,
             step: { label: start === "face" ? "With your face" : start === "reference" ? "Matched to your reference" : "Dressed", index: 1, of: 2 },
           },

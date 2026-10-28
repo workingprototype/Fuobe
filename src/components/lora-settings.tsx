@@ -17,7 +17,7 @@ interface LibraryLora {
   key: string;
   name: string;
   file: string;
-  group: "look" | "motion" | "effect";
+  group: "look" | "motion" | "effect" | "adapter";
   base: string;
   /** One half of a Wan 2.2 pair: the high- or low-noise expert's file. */
   target?: "high" | "low";
@@ -44,6 +44,8 @@ const GROUPS = [
   { value: "look", label: "Looks" },
   { value: "motion", label: "Motions" },
   { value: "effect", label: "Effects" },
+  // A recipe's own LoRA (Fuobe Try-On's try-on LoRA): the model loads it on every run.
+  { value: "adapter", label: "Adapters" },
 ] as const;
 
 /** The base a LoRA was trained for, in a few words ("wan2.2-i2v-a14b" → "Wan 2.2"). */
@@ -56,6 +58,8 @@ function baseName(base: string): string {
     [/^ltx-2\.5/, "LTX-2.5"],
     [/^ltx-2-/, "LTX-2"],
     [/^qwen-image-edit/, "Qwen-Image-Edit"],
+    [/^flux2-klein-4b/, "FLUX.2 [klein] 4B"],
+    [/^flux2-klein-9b/, "FLUX.2 [klein] 9B"],
   ];
   return known.find(([re]) => re.test(base))?.[1] ?? base;
 }

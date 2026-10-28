@@ -421,13 +421,15 @@ export const APPS: Preset[] = [
     },
     // The Soul Cast sheet workflow: Z-Image Turbo draws the turnaround (front, three-quarter, profile, back) and
     // cuts it into the four views, which make a better character element than one wide sheet.
+    // Fuobe Soul's own base: the casting look's words and LoRAs go on it too.
     open: {
       modelId: "oss-zimage-soul-cast",
       op: "t2i",
+      look: CAST_LOOK,
       promptTemplate: "An original character: {prompt}. The same face, hairstyle and outfit in every view, photorealistic, high detail.",
     },
     parity:
-      "Save the sheet as a character (tile menu) to use it in any prompt with @. From your own photos or a Soul Cast build, use Character Sheet. Fuobe Soul draws it in the Realistic look; the open version draws the turnaround on Z-Image Turbo and cuts it into the four views",
+      "Save the sheet as a character (tile menu) to use it in any prompt with @. From your own photos or a Soul Cast build, use Character Sheet. Fuobe Soul draws it in the Realistic look; the open version draws the turnaround in the same look on Z-Image Turbo and cuts it into the four views",
   }),
   app({
     name: "Match Lighting",
