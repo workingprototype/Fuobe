@@ -121,7 +121,7 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `shorts` | Shorts restyle | 1 | `restyle` | temporal, style, clip |
 | `speak` | talking portraits | 1 portrait + voice | `infinitetalk`, `s2v` | lipsync, temporal, identity |
 | `cinema` | Fuobe Cinema (O6) | 3 Director scenes (the prompt Cinema compiles), 4 camera moves as LTX-2.3's `camera_lora` (cloud), 2 films of 3 shots | `original`, `words` (no camera LoRA), `expansion` (fal's prompt expansion on), `wan` (Wan 2.2 A14B hosted), `partner` (Seedance 2.5); all but `original` cloud only | clip, temporal, continuity |
-| `marketing` | Fuobe Marketing Image, Fuobe Try-On, the AI Influencer sheet and Instadump (O10) | 6: a Standalone product shot (the product-shot graph on your GPU), an ad's picture, a poster without a product, a try-on, the builder's sheet (through `/api/influencer`), an Instadump photo from a selfie | `original`, `partner` (cloud: GPT Image 2.5, Nano Banana Pro, Ideogram 3.0, FASHN) | clip, aesthetic, style (the product), identity (try-on, Instadump) |
+| `marketing` | Fuobe Marketing Image, Fuobe Try-On, the AI Influencer sheet and Instadump (O10) | 7: a Standalone product shot (the product-shot graph on your GPU; hosted Qwen-Image-Edit in the cloud), an ad's picture, a poster without a product, a try-on, the builder's sheet (through `/api/influencer`), an Instadump photo from a selfie | `original`, `partner` (cloud: GPT Image 2.5, Nano Banana Pro, Ideogram 3.0, FASHN) | clip, aesthetic, style (the product), identity (try-on, Instadump) |
 
 `soul.json`, `soul-cinema.json`, `soul-hex.json`, `dop.json` and `dop-mix.json` are **generated** from the research. They come from
 `docs/research/higgsfield-image-studios.json` (the look ids) and

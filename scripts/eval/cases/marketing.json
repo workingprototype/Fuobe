@@ -18,12 +18,30 @@
   "cases": [
     {
       "id": "marketing/product-plinth",
-      "title": "Marketing Studio · Standalone product shot (Sunlit Plinth), the product kept",
+      "title": "Marketing Studio · Standalone product shot (Sunlit Plinth) on your GPU, the product kept",
       "op": "edit",
+      "engines": ["open", "demo"],
       "inputs": { "images": ["local/marketing/product.png"] },
       "demoInputs": { "images": ["fixtures/start-frame.png"] },
       "references": "local/marketing/product.png",
       "params": { "aspectRatio": "3:4", "extra": { "productShot": true } },
+      "prompts": [
+        {
+          "id": "plinth",
+          "text": "Commercial product photograph. The product stands on a travertine plinth against a warm plaster wall; low morning sun rakes across from the left and throws a long, crisp shadow; quiet, premium, lots of negative space. Keep the product exactly as in the reference photo: its shape, proportions, label, logo, text and colours."
+        }
+      ],
+      "metrics": ["clip", "aesthetic", "style"],
+      "note": "As Marketing Studio runs a Standalone shot of one product photo on your GPU: params.extra.productShot picks the product-shot graph (cut out, put on white, relit by the White_to_Scene LoRA). The flag is Fuobe's own, so the cloud case below runs without it."
+    },
+    {
+      "id": "marketing/product-plinth-cloud",
+      "title": "Marketing Studio · Standalone product shot (Sunlit Plinth) in the cloud, the product kept",
+      "op": "edit",
+      "engines": ["cloud"],
+      "inputs": { "images": ["local/marketing/product.png"] },
+      "references": "local/marketing/product.png",
+      "params": { "aspectRatio": "3:4" },
       "variantModels": { "partner": { "cloud": ["gpt-image-2-5"] } },
       "prompts": [
         {
@@ -32,7 +50,7 @@
         }
       ],
       "metrics": ["clip", "aesthetic", "style"],
-      "note": "On your GPU one product photo runs the product-shot graph (cut out, put on white, relit by the White_to_Scene LoRA); the cloud sends the same words to Qwen-Image-Edit 2511 (params.extra.productShot is only read on ComfyUI)."
+      "note": "The same words as on your GPU, to hosted Qwen-Image-Edit 2511 (and GPT Image 2.5 as the partner): the cloud has no product-shot graph."
     },
     {
       "id": "marketing/ad-visual",
