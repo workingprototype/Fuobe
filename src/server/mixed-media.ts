@@ -16,7 +16,6 @@ import {
   MIXED_ORIGINAL,
   MIXED_SMOOTH_MODEL,
   mixedFrames,
-  mixedLoras,
   mixedRangeProblem,
   nearestResolution,
   planMixed,
@@ -25,6 +24,7 @@ import {
   type MixedPlanInput,
   type MixedResolution,
 } from "@/lib/catalog/mixed-media";
+import { mixedLoras } from "@/lib/catalog/mixed-media-looks";
 import { clipLengthProblem, planSegments, type PlanStep } from "@/lib/catalog/shorts";
 import { sourceSeconds, takesImage } from "@/lib/catalog/shorts-models";
 import type { Engine, Generation, ProviderId } from "@/lib/catalog/types";

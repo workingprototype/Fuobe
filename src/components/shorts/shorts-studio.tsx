@@ -16,6 +16,7 @@ import {
   SHORTS_CATEGORIES,
   SHORTS_LANGUAGES,
   SHORTS_PRESETS,
+  SHORTS_ORIGINAL,
   SHORTS_RATIOS,
   shortsPreview,
   type ShortsCustomPreset,
@@ -333,7 +334,13 @@ function SetupPanel({
       ? {
           engine,
           presetId,
-          source: { url: clip?.url ?? "/api/files/placeholder.mp4", name: clip?.name, duration, ...(size.width && size.height ? { width: size.width, height: size.height } : {}) },
+          source: {
+            url: clip?.url ?? "/api/files/placeholder.mp4",
+            name: clip?.name,
+            duration,
+            ...(size.width && size.height ? { width: size.width, height: size.height } : {}),
+            ...(clip?.info?.fps ? { fps: clip.info.fps } : {}),
+          },
           range: shortsRange,
           aspectRatio: ratio,
           language,
@@ -486,7 +493,15 @@ function SetupPanel({
             <span className="font-medium">{model?.name ?? "—"}</span> <span className="text-muted-foreground">· {model?.price}</span>
           </div>
         )}
-        {model && <p className="text-[12px] leading-snug text-muted-foreground">{engine === "open" ? "Each ≤5 s segment: its first frame is restyled with Qwen-Image-Edit, then Wan 2.2 Fun VACE follows it and the clip's depth." : model.tagline}</p>}
+        {model && (
+          <p className="text-[12px] leading-snug text-muted-foreground">
+            {engine === "open"
+              ? "Each ≤5 s segment: its first frame is restyled with Qwen-Image-Edit, then Wan 2.2 Fun VACE follows it and the clip's depth."
+              : model.id === SHORTS_ORIGINAL
+                ? "Fuobe Original · each segment's first frame is drawn in the look (Qwen-Image-Edit 2511), then Wan 2.2 Fun VACE carries it through every frame by depth, on open weights hosted by fal."
+                : model.tagline}
+          </p>
+        )}
         {customRefs > 0 && engine === "cloud" && model && !model.refs && (
           <p className="flex gap-1.5 text-[12px] leading-snug text-warning">
             <Info className="mt-0.5 size-3.5 shrink-0" />

@@ -35,6 +35,8 @@ const element = await import("@/app/api/elements/[id]/route");
 const genjutsu = await import("@/app/api/genjutsu/route");
 const genjutsuEstimate = await import("@/app/api/genjutsu/estimate/route");
 const mixedEstimate = await import("@/app/api/mixed-media/estimate/route");
+const shortsEstimate = await import("@/app/api/shorts/estimate/route");
+const shortsSessions = await import("@/app/api/shorts/sessions/route");
 const paletteLock = await import("@/app/api/palettes/lock/route");
 
 // The harness is plain ESM JavaScript (it runs with node, no build step).
@@ -42,6 +44,7 @@ const evalCli = (await import("../scripts/eval/eval.mjs")) as { main: (argv: str
 const cases = (await import("../scripts/eval/lib/cases.mjs")) as { loadSuite: (n: string) => Record<string, unknown>; validateAll: () => { ok: boolean; file: string; lines: string[] }[] };
 const runner = (await import("../scripts/eval/lib/run.mjs")) as {
   runEval: (opts: object, io: object) => Promise<Record<string, unknown>>;
+  routeResult: (answer: unknown, how?: string) => { id: string }[];
   lorasMissing: (jobs: object[], installed: string[] | null) => { file: string; url?: string; jobs: number }[] | null;
   trainingPrice: (target: { price?: string } | null) => number | null;
 };
@@ -71,6 +74,8 @@ const ROUTES: [string, RegExp, (req: Request, m: RegExpExecArray) => Promise<Res
   ["POST", /^\/api\/genjutsu$/, (r) => genjutsu.POST(r)],
   ["POST", /^\/api\/genjutsu\/estimate$/, (r) => genjutsuEstimate.POST(r)],
   ["POST", /^\/api\/mixed-media\/estimate$/, (r) => mixedEstimate.POST(r)],
+  ["POST", /^\/api\/shorts\/estimate$/, (r) => shortsEstimate.POST(r)],
+  ["POST", /^\/api\/shorts\/sessions$/, (r) => shortsSessions.POST(r)],
   ["POST", /^\/api\/palettes\/lock$/, (r) => paletteLock.POST(r)],
 ];
 
@@ -237,6 +242,16 @@ describe("the runner on the demo provider", () => {
     expect(row.outputs?.[0]?.kind).toBe("video");
   });
 
+  it("runs a Shorts session through its route and measures the stitched clip", async () => {
+    const r = await cli(["run", "--suite", "shorts", "--engine", "demo", "--cases", "shorts/session", "--seeds", "1001", "--no-metrics"]);
+    expect(r.code, r.stderr).toBe(0);
+    const [row] = store.latestJobs(path.join(results, runIdFrom(r.stderr)));
+    expect(row.status, JSON.stringify(row)).toBe("succeeded");
+    expect((row.request as { route: string }).route).toBe("/api/shorts/sessions");
+    expect((row.request as { body: Record<string, unknown> }).body).toMatchObject({ engine: "open", modelId: "fuobe-shorts", presetId: "shorts-claymation", range: { start: 0, end: 6 } });
+    expect(row.outputs?.[0]?.kind).toBe("video");
+  });
+
   it("runs Genjutsu's Character swap on the 6 s fixture clip: the part, the character, who to swap", async () => {
     const r = await cli(["run", "--suite", "genjutsu", "--engine", "demo", "--cases", "genjutsu/character,genjutsu/character-plain", "--no-metrics"]);
     expect(r.code, r.stderr).toBe(0);
@@ -298,9 +313,22 @@ describe("the runner on the demo provider", () => {
         ["genjutsu/swap-lite", "fuobe-genjutsu-swap-lite", null],
         ["genjutsu/restyle", "fuobe-genjutsu-restyle", null],
       ]);
-      // Mixed Media names its hosted open model, so the studio runs that one (and says so).
+      // Mixed Media and Shorts run their Originals on fal (the cloud halves); the partner variant runs Gemini Omni Flash.
       const mm = await dry(["--suite", "mixed-media", "--engine", "cloud", "--cases", "mixed-media/toxic", "--allow-fixtures"]);
-      expect(mm.jobs.map((j) => [j.model, j.skip ?? null])).toEqual([["ltx-2-3-restyle", null]]);
+      expect(mm.jobs.map((j) => [j.model, j.skip ?? null])).toEqual([["fuobe-mixed-media", null]]);
+      // Two seeds a case: one segment from its first frame, and a whole session through the Shorts route.
+      const sh = await dry(["--suite", "shorts", "--engine", "cloud", "--allow-fixtures"]);
+      expect(sh.jobs.map((j) => [j.case, j.model, j.skip ?? null])).toEqual([
+        ["shorts/segment", "fuobe-shorts", null],
+        ["shorts/segment", "fuobe-shorts", null],
+        ["shorts/session", "fuobe-shorts", null],
+        ["shorts/session", "fuobe-shorts", null],
+      ]);
+      const shp = await dry(["--suite", "shorts", "--engine", "cloud", "--variants", "partner", "--seeds", "1001", "--allow-fixtures"]);
+      expect(shp.jobs.map((j) => [j.case, j.model, j.skip ?? null])).toEqual([
+        ["shorts/segment", "gemini-omni-flash", null],
+        ["shorts/session", "gemini-omni-flash", null],
+      ]);
       // A partner variant is a cloud model: on the open engine it would only repeat the Original's run.
       const open = await dry(["--suite", "genjutsu", "--engine", "open", "--variants", "partner", "--allow-fixtures"]);
       expect(open.jobs.every((j) => j.skip === "the partner variant runs on cloud only")).toBe(true);
@@ -735,6 +763,23 @@ describe("report, blind review, compare and promote", () => {
 });
 
 describe("runEval as a library", () => {
+  it("reads a Shorts session's answer: the last stitch is the result, each take's look the steps", () => {
+    const session = {
+      id: "s1",
+      segments: [
+        { index: 0, takes: [{ look: "g-look-0" }] },
+        { index: 1, takes: [{ look: "g-look-1" }, { look: "g-look-1b" }] },
+      ],
+      stitches: [{ final: "g-old" }, { final: "g-final" }],
+    };
+    expect(runner.routeResult(session)).toEqual([{ id: "g-final" }]);
+    expect(runner.routeResult(session, "all").map((g) => g.id)).toEqual(["g-look-0", "g-look-1", "g-look-1b"]);
+    expect(runner.routeResult(session, "last")).toEqual([{ id: "g-look-1b" }]);
+    // A studio route's {final, items} answer reads as before.
+    expect(runner.routeResult({ final: { id: "f" }, items: [{ id: "a" }, { id: "f" }] })).toEqual([{ id: "f" }]);
+    expect(runner.routeResult({ items: [{ id: "a" }, { id: "b" }] }, "all")).toEqual([{ id: "a" }, { id: "b" }]);
+  });
+
   it("names the LoRAs ComfyUI doesn't have yet, once each with how many jobs load them", () => {
     const job = (files: string[], applied = true) => (applied ? { preview: { loras: { applied: files.map((file) => ({ file, url: `https://x/${file}` })) } } } : { request: { loras: files.map((file) => ({ file })) } });
     const jobs = [job(["a.safetensors", "b.safetensors"]), job(["a.safetensors"]), job(["[ZImage.Turbo]c.safetensors"], false)];

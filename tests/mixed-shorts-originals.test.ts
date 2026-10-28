@@ -23,6 +23,7 @@ const { onEngine } = await import("@/lib/catalog/engines");
 const { estimateCost } = await import("@/lib/catalog/plan");
 const { prestepCost } = await import("@/lib/composer");
 const mm = await import("@/lib/catalog/mixed-media");
+const { mixedLoras } = await import("@/lib/catalog/mixed-media-looks");
 const sh = await import("@/lib/catalog/shorts");
 const { maxRefsFor, modelInfos, reframes, resolutionFor } = await import("@/lib/catalog/shorts-models");
 const { MIXED_MEDIA_LOOK_LORAS, LORA_LIBRARY } = await import("@/lib/catalog/lora-library.generated");
@@ -50,6 +51,8 @@ const input = (over: Partial<Parameters<typeof mm.planMixed>[0]> = {}): Paramete
   mode: "frames",
   sourceFps: 24,
   sourceSize: { width: 1920, height: 1080 },
+  // The server hands the planner the look's LoRAs a run can reach (src/server/mixed-media.ts).
+  loras: mixedLoras("mixed-noir"),
   ...over,
 });
 
@@ -113,10 +116,10 @@ describe("Fuobe Mixed Media and Fuobe Shorts in the catalog", () => {
       expect(mm.getMixedPreset(id), id).toBeDefined();
       for (const l of loras) expect(LORA_LIBRARY.find((e) => e.key === l.key)?.base, `${id} ${l.key}`).toBe("z-image-turbo");
     }
-    expect(mm.mixedLoras("mixed-noir").map((l) => [l.file, l.strength])).toEqual([["darkroom-noir.safetensors", 0.8]]);
-    expect(mm.mixedLoras("mixed-toxic")).toEqual([]);
+    expect(mixedLoras("mixed-noir").map((l) => [l.file, l.strength])).toEqual([["darkroom-noir.safetensors", 0.8]]);
+    expect(mixedLoras("mixed-toxic")).toEqual([]);
     // A look with a LoRA leads with its trigger words.
-    expect(mm.withTrigger("Noir.", mm.mixedLoras("mixed-noir"))).toBe("drkrm style, Noir.");
+    expect(mm.withTrigger("Noir.", mixedLoras("mixed-noir"))).toBe("drkrm style, Noir.");
   });
 });
 
@@ -228,6 +231,16 @@ describe("Smooth: the first frame in the look, then Wan 2.2 Fun VACE by depth", 
     expect(steps.some((s) => s.request.op === "reframe")).toBe(false);
   });
 
+  it("cloud: the preview is the render's first frame, drawn the same way (look, LoRA, seed and size), even after a 4K pick", () => {
+    for (const resolution of ["1K", "2K", "4K"] as const) {
+      const { steps } = mm.planMixed(input({ mode: "smooth", resolution }));
+      const frame0 = steps.find((s) => s.key === "frame0")!.request;
+      const preview = mm.planMixedPreview({ ...input({ mode: "smooth", resolution }), frameUrl: "/api/files/f.jpg" }).request;
+      expect(preview).toMatchObject({ engine: "cloud", modelId: "fuobe-mixed-media", op: "edit", inputs: { images: ["/api/files/f.jpg"] } });
+      expect([preview.prompt, preview.loras, preview.params]).toEqual([frame0.prompt, frame0.loras, frame0.params]);
+    }
+  });
+
   it("open: 81-frame segments at 16 fps, the first frame drawn by the Original on your GPU, Fun VACE, joined, the sound", () => {
     const { steps, final } = mm.planMixed(input({ engine: "open", mode: "smooth" }));
     const cuts = steps.filter((s) => s.request.modelId === "oss-segment");
@@ -307,7 +320,7 @@ describe("Fuobe Shorts: segment → Qwen edit of frame 0 → Wan Fun VACE depth 
         images: ["https://x/f0.jpg"],
         seed: 424242,
         numOutputs: 1,
-        loras: mm.mixedLoras("mixed-noir"),
+        loras: mixedLoras("mixed-noir"),
         extra: { control_scale: 0.75, image_size: { width: 1360, height: 768 } },
       });
       expect(sent.url).toContain("fal-ai/z-image/turbo/controlnet/lora");
@@ -356,7 +369,7 @@ describe("DoP's Mixed Media effects run on Fuobe Mixed Media", () => {
       const [clip, still] = createGenerations({ ...req, engine });
       expect(still).toMatchObject({ modelId: "fuobe-mixed-media", engine, op: "edit" });
       expect(still.request.step?.label).toBe("Start frame as Sketch");
-      expect(still.request.loras?.map((l) => l.file)).toEqual(mm.mixedLoras("mixed-sketch").map((l) => l.file));
+      expect(still.request.loras?.map((l) => l.file)).toEqual(mixedLoras("mixed-sketch").map((l) => l.file));
       expect(still.request.params?.seed).toBe(mm.FRAME_SEED);
       expect(clip).toMatchObject({ modelId: "fuobe-dop", engine });
       expect(clip.request.step?.label).toBe("Sketch clip");

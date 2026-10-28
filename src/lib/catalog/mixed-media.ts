@@ -15,8 +15,6 @@
  * Research: docs/research/higgsfield-studios.md §3, docs/research/fuobe-originals-recipes-5.md §8 mixed-media.
  */
 import { scenePoster, type PresetPreview, type PreviewFx, type PreviewScene } from "../preset-cards";
-import { MIXED_MEDIA_LOOK_LORAS } from "./lora-library.generated";
-import { loraEntry, loraRef, triggerOf } from "./loras";
 import { planShorts, SHORTS_ORIGINAL, type PlanStep, type ShortsLook } from "./shorts";
 import type { Engine, GenerationRequest, LoraRef } from "./types";
 
@@ -473,20 +471,11 @@ export const denoiseFor = (values: MixedValues) => DENOISE[values.intensity] ?? 
 /** How closely the Original's cloud frames follow the source's outlines (fal's control_scale). */
 export const controlFor = (values: MixedValues) => CONTROL[values.intensity] ?? CONTROL.balanced;
 
-/**
- * The look's LoRAs (research studios[mixed-media].original.looks, through the LoRA library: pinned downloads, licences).
- * 14 of the 33 looks have one; the rest run on their words. Unverified until the evaluation harness measures each.
- */
-export function mixedLoras(presetId: string): LoraRef[] {
-  return (MIXED_MEDIA_LOOK_LORAS[presetId] ?? []).flatMap((l) => {
-    const e = loraEntry(l.key);
-    return e ? [loraRef(e, l.strength)] : [];
-  });
-}
-
-/** A prompt led by its LoRAs' trigger words ("drkrm style, …"), as the Soul looks are. */
-export function withTrigger(prompt: string, loras: LoraRef[]): string {
-  const t = triggerOf(loras);
+/** A prompt led by its LoRAs' trigger words ("drkrm style, …"), as the Soul looks are (the first LoRA with a trigger). */
+export function withTrigger(prompt: string, loras: Pick<LoraRef, "trigger">[]): string {
+  const t = loras
+    .map((l) => l.trigger?.trim().replace(/[\s.,;:]+$/, ""))
+    .find(Boolean);
   return t ? `${t}, ${prompt}` : prompt;
 }
 
@@ -623,7 +612,7 @@ export function originalFrameParams(values: MixedValues, resolution: MixedResolu
 export function originalFrameRequest(
   input: Pick<MixedPlanInput, "engine" | "preset" | "values" | "resolution" | "sourceSize" | "seed" | "loras">,
 ): Pick<GenerationRequest, "engine" | "modelId" | "op" | "prompt" | "loras" | "params"> {
-  const loras = input.loras ?? mixedLoras(input.preset.id);
+  const loras = input.loras ?? [];
   const seed = input.seed ?? FRAME_SEED;
   return {
     engine: input.engine,
@@ -666,7 +655,10 @@ export interface MixedPlanInput {
   /** Cloud: the model's extra settings (LTX: follow the outlines). */
   extra?: Record<string, unknown>;
   seed?: number;
-  /** The Original: the look's LoRAs this run can reach (the server leaves out a civitai one without the key); else the look's own. */
+  /**
+   * The Original: the look's LoRAs this run can reach (src/lib/catalog/mixed-media-looks.ts; the server leaves out a civitai
+   * one without the key). None: the look runs on its words.
+   */
   loras?: LoraRef[];
 }
 
@@ -684,7 +676,7 @@ export function planMixed(input: MixedPlanInput): { steps: PlanStep[]; final: st
   // The Original draws every frame at one seed (the same seed keeps frames alike).
   const seed = input.seed !== undefined ? { seed: input.seed } : original ? { seed: FRAME_SEED } : {};
   if (input.engine === "open") {
-    const loras = original ? (input.loras ?? mixedLoras(input.preset.id)) : [];
+    const loras = original ? (input.loras ?? []) : [];
     return {
       final: "render",
       steps: [
@@ -886,6 +878,9 @@ export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; fin
   return { steps, final: "final" };
 }
 
+/** Smooth's first frame: 1K, else 2K (the Original's frame route draws up to 2K; Wan 2.2 Fun VACE renders at 720p after it). */
+const smoothFrameResolution = (r: MixedResolution): MixedResolution => (r === "1K" ? "1K" : "2K");
+
 /**
  * Smooth (both engines): the clip in pieces (on your GPU 81 frames at 16 fps, 480p; on fal up to 240 frames at the clip's
  * own rate, 720p), each piece's first frame drawn in the look by the Original (the preview's route and seed), then Fuobe
@@ -911,7 +906,7 @@ export function planMixedSmooth(input: MixedPlanInput): { steps: PlanStep[]; fin
     seed: input.seed ?? FRAME_SEED,
   });
   const final = plan.final ?? plan.takes[0].look;
-  const frame = originalFrameRequest({ ...input, resolution: input.resolution === "1K" ? "1K" : "2K" });
+  const frame = originalFrameRequest({ ...input, resolution: smoothFrameResolution(input.resolution) });
   const frameKeys = new Set(plan.takes.map((t) => t.frame));
   const steps = plan.steps.map((s) => {
     let request: GenerationRequest = s.key === final ? { ...s.request, feature: MIXED_FEATURE, title: input.title } : { ...s.request, feature: MIXED_STEP_FEATURE };
@@ -929,13 +924,14 @@ export function planMixedPreview(input: MixedPlanInput & { frameUrl?: string }):
   // The Original in the cloud (Per frame and Smooth): its frame route on the grabbed frame, with the render's seed, look and size.
   if (original && input.engine === "cloud") {
     const count = input.sourceFps ? frameSampling(input.range.end - input.range.start, input.fps, input.sourceFps).frames : 0;
-    const frame = originalFrameRequest({ ...input, resolution: input.mode === "smooth" ? input.resolution : frameResolution(count, input.resolution) });
+    // Smooth's first frame is drawn at 1K or 2K (planMixedSmooth); Per frame at the size its frame count allows.
+    const frame = originalFrameRequest({ ...input, resolution: input.mode === "smooth" ? smoothFrameResolution(input.resolution) : frameResolution(count, input.resolution) });
     return { key: "preview", request: { feature: MIXED_PREVIEW_FEATURE, title, ...frame, inputs: { images: input.frameUrl ? [input.frameUrl] : [] } } };
   }
   if (input.engine === "open") {
     // The per-frame graph on the selection's first frame: on your GPU the Original's preview (and Smooth's first frame) is
     // drawn with the render's look, LoRA and seed.
-    const loras = input.modelId === MIXED_OPEN_LEGACY ? [] : (input.loras ?? mixedLoras(input.preset.id));
+    const loras = input.modelId === MIXED_OPEN_LEGACY ? [] : (input.loras ?? []);
     const seed = input.seed ?? (input.modelId === MIXED_OPEN_LEGACY ? undefined : FRAME_SEED);
     return {
       key: "preview",

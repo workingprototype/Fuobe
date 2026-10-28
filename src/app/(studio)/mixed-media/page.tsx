@@ -5,10 +5,13 @@ import { modelInfos } from "@/lib/catalog/shorts-models";
 
 export const metadata: Metadata = { title: "Mixed Media" };
 
-/** The restyle models per engine (cloud: Fast), slimmed on the server so the page ships no catalog. */
-const MODELS = { cloud: modelInfos(MIXED_MODELS.cloud), open: modelInfos(MIXED_MODELS.open) };
-/** The cloud image editors that redraw each frame (Per frame). */
-const FRAME_MODELS = modelInfos([...MIXED_FRAME_MODELS]);
+/**
+ * The models per engine as each runs there, slimmed on the server so the page ships no catalog: Fast's video-to-video
+ * models (cloud), and the models that draw each frame (Fuobe Mixed Media first on both engines, then the cloud's partner
+ * image editors). Smooth is Fuobe Mixed Media's own.
+ */
+const MODELS = { cloud: modelInfos(MIXED_MODELS.cloud, "cloud"), open: modelInfos(MIXED_MODELS.open, "open") };
+const FRAME_MODELS = { cloud: modelInfos([...MIXED_FRAME_MODELS], "cloud"), open: modelInfos(MIXED_MODELS.open, "open") };
 
 export default function Page() {
   return <MixedStudio models={MODELS} frameModels={FRAME_MODELS} />;

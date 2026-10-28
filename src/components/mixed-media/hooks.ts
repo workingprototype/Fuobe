@@ -13,12 +13,12 @@ export interface MixedBody {
   engine: Engine;
   presetId: string;
   values: MixedValues;
-  source: { url: string; name?: string; duration?: number; fps?: number };
+  source: { url: string; name?: string; duration?: number; fps?: number; width?: number; height?: number };
   range: { start: number; end: number };
   fps: number;
   resolution: MixedResolution;
   modelId?: string;
-  /** Cloud: frame by frame (default) or Fast. */
+  /** Frame by frame (default), Smooth or (cloud) Fast. */
   mode?: MixedMode;
   anchor?: string;
   frameUrl?: string;
@@ -118,6 +118,11 @@ function stepLabel(g: Generation): string {
       return g.status === "queued" && !g.progress ? "Redrawing the frames" : "Putting the frames together";
     case "concat":
       return "Joining the clips";
+    // Smooth: each piece's first frame, drawn in the look, then carried through by Wan 2.2 Fun VACE.
+    case "frame":
+      return "Taking the first frame";
+    case "edit":
+      return "Drawing the first frame in the look";
     default:
       return "Restyling";
   }

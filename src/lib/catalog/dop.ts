@@ -23,6 +23,7 @@
  */
 import { gpuOnlyLicence, libraryEntry, loraName, loraRef, triggerOf } from "./loras";
 import { defaultValues, getMixedPreset, originalFrameRequest } from "./mixed-media";
+import { mixedLoras } from "./mixed-media-looks";
 import { DOP_RECIPES, OSS_LORAS, type DopRecipe, type OssLora } from "./oss-loras.generated";
 import type { LoraRef, Operation, Preset, PresetRoute } from "./types";
 
@@ -124,7 +125,7 @@ function mixedPrestep(presetId: string): Preset["prestep"] {
   const values = defaultValues(look);
   const labels = { step: `Start frame as ${look.name}`, clip: `${look.name} clip` };
   const step = (engine: "open" | "cloud") => {
-    const { modelId, prompt, loras, params } = originalFrameRequest({ engine, preset: look, values, resolution: "1K" });
+    const { modelId, prompt, loras, params } = originalFrameRequest({ engine, preset: look, values, resolution: "1K", loras: mixedLoras(look.id) });
     return { modelId, op: "edit" as const, prompt: prompt ?? "", ...(loras?.length && { loras }), ...(params && { params }), labels };
   };
   return { open: step("open"), cloud: step("cloud") };

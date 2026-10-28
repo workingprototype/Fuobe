@@ -2,56 +2,191 @@
   "$schema": "./case.schema.json",
   "suite": "mixed-media",
   "title": "Fuobe Mixed Media · per-frame looks",
-  "description": "Runs the Mixed Media studio route (POST /api/mixed-media) on your clip (local/mixed-media/clip.mp4, 4–10 s), the first three seconds at 8 fps, for five presets. Measures flicker (temporal drift and warp error) and how close each preset stays to its look (style references in local/references/mixed-media/<preset>/, optional). On the cloud it runs the studio's hosted open model (LTX-2.3 restyle on fal); O9 moves it to per-frame hosted open models.",
+  "description": "Runs the Mixed Media studio route (POST /api/mixed-media) on your clip (local/mixed-media/clip.mp4, 4–10 s), the first three seconds at 8 fps, for seven looks: three drawn with a look LoRA (Sketch, Noir, Origami) and four on their words. Measures flicker (temporal drift and warp error) and how close each look stays to its references (local/references/mixed-media/<preset>/, optional; your own or licensed images, never Higgsfield previews). The default variant is Fuobe Mixed Media frame by frame (build plan O9: Z-Image Turbo + its Fun ControlNet with the look's LoRA and one seed, free on your GPU, about a cent a frame on fal); smooth is its first-frame-then-Wan-2.2-Fun-VACE option; words is the open engine's per-frame model before O9 (no LoRA, no fixed seed), to see what the LoRA and the seed earn; partner-frames (Nano Banana 2 frame by frame) and fast (LTX-2.3 Reference Restyle in one pass) are the cloud routes the Original replaces as the default.",
   "original": "fuobe-mixed-media",
   "kind": "video",
   "targets": {
-    "open": { "models": ["oss-mixed-media"] },
-    "cloud": { "models": ["ltx-2-3-restyle"] },
-    "demo": { "models": ["oss-mixed-media"] }
+    "open": {"models": ["fuobe-mixed-media"]},
+    "cloud": {"models": ["fuobe-mixed-media"]},
+    "demo": {"models": ["fuobe-mixed-media"]}
   },
-  "defaults": { "seeds": [1001], "metrics": ["temporal", "style"], "timeoutSeconds": 3600 },
-  "variants": { "studio": { "description": "The Mixed Media studio's own pipeline" } },
+  "defaults": {
+    "seeds": [1001],
+    "metrics": ["temporal", "style"],
+    "timeoutSeconds": 3600,
+    "params": {"mode": "frames"},
+    "variant": "studio"
+  },
+  "variants": {
+    "studio": {"description": "Fuobe Mixed Media frame by frame: the studio's default on both engines"},
+    "smooth": {
+      "description": "Fuobe Mixed Media's Smooth: the first frame in the look, then Wan 2.2 Fun VACE carries it through by depth",
+      "params": {"mode": "smooth"}
+    },
+    "words": {
+      "description": "The open per-frame model before O9 (oss-mixed-media): the look's words, no LoRA, no fixed seed",
+      "engines": ["demo", "open"],
+      "models": {"open": ["oss-mixed-media"], "demo": ["oss-mixed-media"]}
+    },
+    "partner-frames": {
+      "description": "Nano Banana 2 frame by frame, in lanes from the preview (the cloud default before O9)",
+      "engines": ["cloud"],
+      "models": {"cloud": ["nano-banana-2"]}
+    },
+    "fast": {
+      "description": "LTX-2.3 Reference Restyle in one video-to-video pass (Fast)",
+      "engines": ["cloud"],
+      "models": {"cloud": ["ltx-2-3-restyle"]},
+      "params": {"mode": "fast"}
+    }
+  },
   "cases": [
     {
-      "id": "mixed-media/toxic",
-      "title": "Mixed Media · Toxic",
-      "inputs": { "video": "local/mixed-media/clip.mp4" },
-      "demoInputs": { "video": "samples/demo-portrait.mp4" },
-      "references": "local/references/mixed-media/toxic",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-toxic", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
+      "id": "mixed-media/sketch",
+      "title": "Mixed Media · Sketch (the look's LoRA: pencil)",
+      "inputs": {"video": "local/mixed-media/clip.mp4"},
+      "demoInputs": {"video": "samples/demo-portrait.mp4"},
+      "references": "local/references/mixed-media/sketch",
+      "submit": {
+        "route": "/api/mixed-media",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "mode": "{{request.params.mode}}",
+          "presetId": "mixed-sketch",
+          "source": "{{source:inputs.video}}",
+          "range": {"start": 0, "end": 3},
+          "fps": 8,
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
     },
     {
-      "id": "mixed-media/two-color",
-      "title": "Mixed Media · Two color",
-      "inputs": { "video": "local/mixed-media/clip.mp4" },
-      "demoInputs": { "video": "samples/demo-portrait.mp4" },
-      "references": "local/references/mixed-media/two-color",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-two-color", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
-    },
-    {
-      "id": "mixed-media/ultraviolet",
-      "title": "Mixed Media · Ultraviolet",
-      "inputs": { "video": "local/mixed-media/clip.mp4" },
-      "demoInputs": { "video": "samples/demo-portrait.mp4" },
-      "references": "local/references/mixed-media/ultraviolet",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-ultraviolet", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
-    },
-    {
-      "id": "mixed-media/lava",
-      "title": "Mixed Media · Lava",
-      "inputs": { "video": "local/mixed-media/clip.mp4" },
-      "demoInputs": { "video": "samples/demo-portrait.mp4" },
-      "references": "local/references/mixed-media/lava",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-lava", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
+      "id": "mixed-media/noir",
+      "title": "Mixed Media · Noir (the look's LoRA: DARKROOM Noir)",
+      "inputs": {"video": "local/mixed-media/clip.mp4"},
+      "demoInputs": {"video": "samples/demo-portrait.mp4"},
+      "references": "local/references/mixed-media/noir",
+      "submit": {
+        "route": "/api/mixed-media",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "mode": "{{request.params.mode}}",
+          "presetId": "mixed-noir",
+          "source": "{{source:inputs.video}}",
+          "range": {"start": 0, "end": 3},
+          "fps": 8,
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
     },
     {
       "id": "mixed-media/origami",
-      "title": "Mixed Media · Origami",
-      "inputs": { "video": "local/mixed-media/clip.mp4" },
-      "demoInputs": { "video": "samples/demo-portrait.mp4" },
+      "title": "Mixed Media · Origami (the look's LoRA: paper diorama (civitai: needs your key))",
+      "inputs": {"video": "local/mixed-media/clip.mp4"},
+      "demoInputs": {"video": "samples/demo-portrait.mp4"},
       "references": "local/references/mixed-media/origami",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-origami", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
+      "submit": {
+        "route": "/api/mixed-media",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "mode": "{{request.params.mode}}",
+          "presetId": "mixed-origami",
+          "source": "{{source:inputs.video}}",
+          "range": {"start": 0, "end": 3},
+          "fps": 8,
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "mixed-media/toxic",
+      "title": "Mixed Media · Toxic (on its words)",
+      "inputs": {"video": "local/mixed-media/clip.mp4"},
+      "demoInputs": {"video": "samples/demo-portrait.mp4"},
+      "references": "local/references/mixed-media/toxic",
+      "submit": {
+        "route": "/api/mixed-media",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "mode": "{{request.params.mode}}",
+          "presetId": "mixed-toxic",
+          "source": "{{source:inputs.video}}",
+          "range": {"start": 0, "end": 3},
+          "fps": 8,
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "mixed-media/two-color",
+      "title": "Mixed Media · Two color (on its words)",
+      "inputs": {"video": "local/mixed-media/clip.mp4"},
+      "demoInputs": {"video": "samples/demo-portrait.mp4"},
+      "references": "local/references/mixed-media/two-color",
+      "submit": {
+        "route": "/api/mixed-media",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "mode": "{{request.params.mode}}",
+          "presetId": "mixed-two-color",
+          "source": "{{source:inputs.video}}",
+          "range": {"start": 0, "end": 3},
+          "fps": 8,
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "mixed-media/ultraviolet",
+      "title": "Mixed Media · Ultraviolet (on its words)",
+      "inputs": {"video": "local/mixed-media/clip.mp4"},
+      "demoInputs": {"video": "samples/demo-portrait.mp4"},
+      "references": "local/references/mixed-media/ultraviolet",
+      "submit": {
+        "route": "/api/mixed-media",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "mode": "{{request.params.mode}}",
+          "presetId": "mixed-ultraviolet",
+          "source": "{{source:inputs.video}}",
+          "range": {"start": 0, "end": 3},
+          "fps": 8,
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "mixed-media/lava",
+      "title": "Mixed Media · Lava (on its words)",
+      "inputs": {"video": "local/mixed-media/clip.mp4"},
+      "demoInputs": {"video": "samples/demo-portrait.mp4"},
+      "references": "local/references/mixed-media/lava",
+      "submit": {
+        "route": "/api/mixed-media",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "mode": "{{request.params.mode}}",
+          "presetId": "mixed-lava",
+          "source": "{{source:inputs.video}}",
+          "range": {"start": 0, "end": 3},
+          "fps": 8,
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
     }
   ]
 }

@@ -2,25 +2,63 @@
   "$schema": "./case.schema.json",
   "suite": "shorts",
   "title": "Fuobe Shorts · segment restyle",
-  "description": "One segment of a Shorts restyle on your clip (local/shorts/clip.mp4, ≤5 s) with a restyled first frame you made or own (local/shorts/frame0.png): the Wan 2.2 Fun VACE restyle the open Shorts pipeline runs per segment, against LTX 2.3 Reference Restyle on the cloud. Flicker and style are measured; O9 adds the hosted open route.",
+  "description": "Fuobe Shorts (build plan O9) on your clip (local/shorts/clip.mp4). shorts/segment is one segment's Wan 2.2 Fun VACE pass from a first frame you made or own (local/shorts/frame0.png), straight through /api/generations; shorts/session is the whole studio chain through POST /api/shorts/sessions (each segment's first frame drawn in the look by Qwen-Image-Edit 2511, Fun VACE by depth, the segments stitched under the clip's sound), on the first 6 s (local/shorts/clip.mp4 must be at least that long). Flicker, style and prompt match are measured. The partner variant runs Gemini Omni Flash, Higgsfield's Shorts engine and still a choice in the studio, for comparison.",
   "original": "fuobe-shorts",
   "kind": "video",
   "targets": {
-    "open": { "models": ["fuobe-shorts", "oss-wan22-vace-restyle"] },
-    "cloud": { "models": ["fuobe-shorts", "ltx-2-3-restyle"] },
-    "demo": { "models": ["oss-wan22-vace-restyle"] }
+    "open": {"models": ["fuobe-shorts"]},
+    "cloud": {"models": ["fuobe-shorts"]},
+    "demo": {"models": ["fuobe-shorts"]}
   },
-  "defaults": { "seeds": [1001, 2002], "metrics": ["temporal", "style", "clip"], "timeoutSeconds": 3600 },
-  "variants": { "restyle": { "description": "The segment restyle as the Shorts pipeline runs it" } },
+  "defaults": {
+    "seeds": [1001, 2002],
+    "metrics": ["temporal", "style", "clip"],
+    "timeoutSeconds": 3600,
+    "variant": "restyle"
+  },
+  "variants": {
+    "restyle": {
+      "description": "Fuobe Shorts: the restyle as the Shorts pipeline runs it, on the engine asked for"
+    },
+    "partner": {
+      "description": "Gemini Omni Flash (a partner model, Higgsfield's Shorts engine) on the same clip",
+      "engines": ["cloud"],
+      "models": {"cloud": ["gemini-omni-flash"]}
+    }
+  },
   "cases": [
     {
       "id": "shorts/segment",
       "title": "Restyle one segment from its first frame",
       "op": "v2v",
-      "inputs": { "video": "local/shorts/clip.mp4", "images": ["local/shorts/frame0.png"] },
-      "demoInputs": { "video": "samples/demo-portrait.mp4", "images": ["fixtures/references/warm-1.png"] },
-      "prompts": [{ "id": "anime", "text": "the same shot as a soft anime illustration with clean line art" }],
+      "inputs": {"video": "local/shorts/clip.mp4", "images": ["local/shorts/frame0.png"]},
+      "demoInputs": {"video": "samples/demo-portrait.mp4", "images": ["fixtures/references/warm-1.png"]},
+      "prompts": [
+        {"id": "anime", "text": "the same shot as a soft anime illustration with clean line art"}
+      ],
       "references": "local/shorts/frame0.png"
+    },
+    {
+      "id": "shorts/session",
+      "title": "A Shorts session: segments, first frames in the look, Fun VACE, stitched under the sound",
+      "inputs": {"video": "local/shorts/clip.mp4"},
+      "demoInputs": {"video": "fixtures/walk-6s.mp4"},
+      "references": "local/references/shorts/claymation",
+      "metrics": ["temporal", "style"],
+      "submit": {
+        "route": "/api/shorts/sessions",
+        "estimate": "/api/shorts/estimate",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "presetId": "shorts-claymation",
+          "source": "{{source:inputs.video}}",
+          "range": {"start": 0, "end": 6},
+          "aspectRatio": "9:16",
+          "language": "auto",
+          "requestId": "{{requestId}}"
+        }
+      }
     }
   ]
 }
