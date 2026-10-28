@@ -470,7 +470,10 @@ describe("Photodump packs and planning", () => {
   it("plans one single-image request per photo, on the identity's own model when it has one", () => {
     const pack = getPack("winter-special")!;
     const cloud = planPhotodump({ pack, subject: maya, engine: "cloud", aspectRatio: "3:4" }, {});
-    expect(cloud.modelId).toBe("nano-banana-pro");
+    // Before a Soul ID: Instadump's Original, Qwen-Image-Edit 2511 hosted, with the character's photos (build plan O10).
+    expect(cloud.modelId).toBe("qwen-image-edit-2511-cloud");
+    expect(planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "nano-banana-pro" }, {}).modelId).toBe("nano-banana-pro");
+    expect(planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "seedream-5-pro" }, {}).modelId).toBe("seedream-5-pro");
     expect(cloud.requests).toHaveLength(9);
     expect(cloud.requests[2].step).toEqual({ label: "Photo 3 of 9", index: 2, of: 9 });
     expect(cloud.requests.every((r) => r.params?.numOutputs === 1 && r.params.aspectRatio === "3:4" && r.feature === "photodump")).toBe(true);
@@ -483,9 +486,9 @@ describe("Photodump packs and planning", () => {
       expect(run.requests.every((r) => r.engine === engine)).toBe(true);
     }
     const oldSoulId: PhotoSubject = { ...maya, loras: [{ engine: "cloud", modelId: "soul-2", file: "", trigger: "", referenceId: "ref-123" }] };
-    expect(planPhotodump({ pack, subject: oldSoulId, engine: "cloud" }, {}).modelId).toBe("nano-banana-pro");
+    expect(planPhotodump({ pack, subject: oldSoulId, engine: "cloud" }, {}).modelId).toBe("qwen-image-edit-2511-cloud");
     const untrained = planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "fuobe-soul" }, {});
-    expect(untrained.modelId).toBe("nano-banana-pro");
+    expect(untrained.modelId).toBe("qwen-image-edit-2511-cloud");
     expect(untrained.notes[0]).toMatch(/No Soul ID yet/);
     expect(planPhotodump({ pack, subject: soulMaya, engine: "cloud", modelId: "seedream-5-pro" }, {}).modelId).toBe("seedream-5-pro");
     expect(planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "seedream-5-pro" }, {}).modelId).toBe("seedream-5-pro");
@@ -494,7 +497,7 @@ describe("Photodump packs and planning", () => {
     const loraMaya: PhotoSubject = { ...maya, loras: [{ engine: "open", modelId: "oss-z-image-turbo", file: "maya.safetensors", trigger: "mayfz" }] };
     expect(planPhotodump({ pack, subject: loraMaya, engine: "open" }, {}).modelId).toBe("fuobe-soul");
     // A GPU-only LoRA (no copy Fuobe can send) stays off the cloud: reference photos there.
-    expect(planPhotodump({ pack, subject: loraMaya, engine: "cloud" }, {}).modelId).toBe("nano-banana-pro");
+    expect(planPhotodump({ pack, subject: loraMaya, engine: "cloud" }, {}).modelId).toBe("qwen-image-edit-2511-cloud");
     const qwen = planPhotodump({ pack, subject: selfie, engine: "open", aspectRatio: "auto" }, {});
     expect(qwen.modelId).toBe("oss-qwen-edit");
     expect(qwen.requests[0].inputs?.images).toEqual([selfie.url]);
@@ -540,8 +543,10 @@ describe("Photodump: model choice and retries", () => {
   const selfie: PhotoSubject = { kind: "selfie", url: "/api/files/uploads/me.png" };
 
   it("says why a pick that can't run ends up on another model", () => {
-    expect(photodumpModel(selfie, "open", {}, "fuobe-soul")).toEqual({ modelId: "oss-qwen-edit", note: "Fuobe Soul needs a character with a trained Soul ID — Qwen-Image-Edit works from your photo" });
-    expect(photodumpModel(selfie, "cloud", {}, "fuobe-soul").note).toMatch(/Nano Banana Pro works from your photo/);
+    expect(photodumpModel(selfie, "open", {}, "fuobe-soul")).toEqual({ modelId: "oss-qwen-edit", note: "Fuobe Soul needs a character with a trained Soul ID — Qwen-Image-Edit 2511 works from your photo" });
+    expect(photodumpModel(selfie, "cloud", {}, "fuobe-soul")).toEqual({ modelId: "qwen-image-edit-2511-cloud", note: "Fuobe Soul needs a character with a trained Soul ID — Qwen-Image-Edit 2511 works from your photo" });
+    expect(photodumpModel(selfie, "cloud", {}, "nano-banana-pro").modelId).toBe("nano-banana-pro");
+    expect(photodumpModel(selfie, "cloud", {}).modelId).toBe("qwen-image-edit-2511-cloud");
     expect(photodumpModel(selfie, "open", {}, "fuobe-soul", true).note).toMatch(/Your own packs recreate each reference photo/);
     expect(photodumpModel(selfie, "open", {}).note).toBeUndefined();
     // A demo training's stand-in isn't a Soul ID.
@@ -570,21 +575,32 @@ describe("Fashion Factory", () => {
   it("plans the three generating steps on both engines", () => {
     const t = FASHION[0];
     const base = fashionBaseRequest(t, maya, "cloud", {});
-    expect(base).toMatchObject({ modelId: "nano-banana-pro", params: { aspectRatio: "3:4", numOutputs: 4 } });
+    // No Soul ID yet: Qwen-Image-Edit 2511 from the character's photos (with one, Fuobe Soul and the LoRA).
+    expect(base).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", params: { aspectRatio: "3:4", numOutputs: 4 } });
     expect(base.prompt).toMatch(/@Maya in a bold, saturated colour-blocked studio set/);
     expect(fashionBaseRequest(t, maya, "open", {}).modelId).toBe("oss-qwen-edit");
 
+    // Fuobe Try-On on both engines (FLUX.2 [klein] 4B + the try-on LoRA); FASHN and Nano Banana Pro stay cloud choices.
     const outfit = fashionOutfitRequest(t, "/api/files/base.png", "/api/files/shirt.png", "cloud");
-    expect(outfit).toMatchObject({ modelId: "fashn-tryon", op: "edit", inputs: { images: ["/api/files/base.png", "/api/files/shirt.png"] } });
-    expect(plan(outfit).op).toBe("edit");
+    expect(outfit).toMatchObject({ modelId: "fuobe-tryon", engine: "cloud", op: "edit", inputs: { images: ["/api/files/base.png", "/api/files/shirt.png"] } });
+    const cloudPlan = planGeneration(outfit, (id) => (id === "fuobe-tryon" ? onEngine(getModel(id)!, "cloud") : getModel(id)), getPreset);
+    expect(cloudPlan.op).toBe("edit");
+    expect(cloudPlan.prompt).toMatch(/^TRYON a full-body photo of a person\. Replace the outfit/);
+    expect(cloudPlan.loras).toEqual([expect.objectContaining({ file: "tryon-klein-4b.safetensors", strength: 1, licence: expect.objectContaining({ commercial: true, hostedOk: true }) })]);
+    expect(cloudPlan.loras[0].url).toMatch(/^https:\/\/huggingface\.co\/xocialize\/tryon-FLUX\.2-klein-4B-lora\/resolve\/[0-9a-f]{40}\/tryon-klein-4b\.safetensors$/);
+    expect(fashionOutfitRequest(t, "b", "g", "cloud", "fashn-tryon").modelId).toBe("fashn-tryon");
     expect(fashionOutfitRequest(t, "b", "g", "cloud", "nano-banana-pro").prompt).toMatch(/Dress the person in image 1/);
     const openOutfit = fashionOutfitRequest(t, "/api/files/base.png", "/api/files/shirt.png", "open");
-    expect(openOutfit.modelId).toBe("oss-tryon-klein");
-    expect(() => plan(openOutfit)).not.toThrow();
+    expect(openOutfit).toMatchObject({ modelId: "fuobe-tryon", engine: "open" });
+    // A partner pick means nothing on the user's GPU.
+    expect(fashionOutfitRequest(t, "b", "g", "open", "fashn-tryon").modelId).toBe("fuobe-tryon");
+    const openPlan = planGeneration(openOutfit, (id) => (id === "fuobe-tryon" ? onEngine(getModel(id)!, "open") : getModel(id)), getPreset);
+    expect(openPlan.model.routes).toEqual([expect.objectContaining({ provider: "comfyui", endpoint: "tryon-flux2-klein-4b" })]);
 
     const set = fashionPhotosetRequests(t, "/api/files/dressed.png", "cloud");
     expect(set).toHaveLength(t.shots);
-    expect(set[0]).toMatchObject({ modelId: "nano-banana-pro", inputs: { images: ["/api/files/dressed.png"] }, step: { label: `Photoset 1 of ${t.shots}` } });
+    expect(set[0]).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", inputs: { images: ["/api/files/dressed.png"] }, step: { label: `Photoset 1 of ${t.shots}` } });
+    expect(fashionPhotosetRequests(t, "/api/files/dressed.png", "cloud", "nano-banana-pro")[0].modelId).toBe("nano-banana-pro");
     expect(fashionPhotosetRequests(t, "/api/files/dressed.png", "open")[0].modelId).toBe("oss-qwen-edit");
   });
 

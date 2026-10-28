@@ -14,6 +14,7 @@ import {
   FORMATS,
   formatModels,
   hookById,
+  MARKETING_IMAGE_MODEL,
   MAX_PROMPT,
   mentionsFor,
   MULTIPLIER,
@@ -30,6 +31,7 @@ import {
   TEMPLATE_INDEX,
   UGC_MODELS,
   wordBudget,
+  wordsOnTop,
   type BrandKit,
   type FormatDef,
   type FormatId,
@@ -201,11 +203,14 @@ function productLine(p?: Product | null): string {
 
 const KEEP_PRODUCT = "Keep the product exactly as in the reference photo: its shape, proportions, label, logo, text and colours";
 
-/** The exact headline/CTA in a prompt (cloud models render text), or room left for the browser to set it (open). */
-function textLine(f: FormatDef, open: boolean, headline?: string, cta?: string, brand?: BrandKit | null): string {
+/**
+ * The exact headline/CTA in a prompt (cloud partner models render text), or room left for the browser to set it (open
+ * models and Fuobe Marketing Image on either engine: wordsOnTop).
+ */
+function textLine(f: FormatDef, onTop: boolean, headline?: string, cta?: string, brand?: BrandKit | null): string {
   if (!f.text) return "";
-  // Open results get the words set in the browser, in the layout overlayLayout() picks: the picture leaves room for it.
-  if (open)
+  // The words are set in the browser, in the layout overlayLayout() picks: the picture leaves room for them.
+  if (onTop)
     return overlayLayout(f.id) === "frame"
       ? "No text, letters, words or logos anywhere in the image; the subject well composed with a little breathing room at the edges"
       : "Leave calm, uncluttered space in the lower third for a headline; no text, letters, words or logos anywhere in the image";
@@ -253,12 +258,13 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
   if (f.pipeline === "image") {
     const modelId = input.modelId && choices.some((c) => c.id === input.modelId) ? input.modelId : choices[0].id;
     const model = need(modelId);
+    const onTop = wordsOnTop(input.engine, modelId);
     const refs = [
       ...(f.product !== "none" ? productImages.slice(0, 1) : []),
       ...(input.avatar && f.avatar !== "none" ? [input.avatar] : []),
       ...(input.reference ? [input.reference] : []),
-      // The logo as a reference lets cloud models draw it; open results get it set on top in the browser.
-      ...(!open && f.text && brand?.logo && !isSvg(brand.logo) ? [brand.logo] : []),
+      // The logo as a reference lets a partner model draw it; otherwise it is set on top in the browser.
+      ...(!onTop && f.text && brand?.logo && !isSvg(brand.logo) ? [brand.logo] : []),
     ];
     const max = model.options.maxImages ?? (supportsOp(model, "edit") ? 1 : 0);
     let images = refs.slice(0, Math.max(0, max));
@@ -288,7 +294,7 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
       hasProduct && op === "edit" && KEEP_PRODUCT,
       input.reference && "Use the last reference photo for the setting and light",
       prompt,
-      textLine(f, open, headline, cta, brand),
+      textLine(f, onTop, headline, cta, brand),
       brandText,
     );
     // bria-product-shot and Product Photography take the scene alone.
@@ -296,8 +302,12 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
     const palette = !open && brand?.colors.length && routesFor(model, op).some((r) => r.map?.palette) ? brand.colors.slice(0, 5) : undefined;
     const aspect = nearestAspect(input.aspectRatio ?? tpl?.aspect ?? f.defaultAspect, model.options.aspectRatios);
     const batch = Math.min(input.batch ?? 1, f.batch);
-    meta.overlay = open && f.text && (headline || cta) ? { headline: headline || undefined, cta: cta || undefined } : null;
-    if (open && f.text) notes.push("Your headline is set over the picture in your brand fonts, so the words come out exact");
+    meta.overlay = onTop && f.text && (headline || cta) ? { headline: headline || undefined, cta: cta || undefined } : null;
+    if (onTop && f.text) notes.push("Your headline is set over the picture in your brand fonts, so the words come out exact");
+    // On the user's GPU a Standalone shot of one product photo is cut out and relit into the scene (White_to_Scene).
+    const productShot = open && modelId === MARKETING_IMAGE_MODEL && f.id === "product-standalone" && op === "edit" && images.length === 1;
+    if (productShot) notes.push("Your product is cut out and relit into the scene, so it stays as it is");
+    else if (open && op === "edit") notes.push("Qwen-Image-Edit keeps your first photo's shape on your GPU");
     return {
       feature,
       engine: input.engine,
@@ -312,7 +322,7 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
             op,
             prompt: model.options.promptless ? undefined : scenePrompt.slice(0, MAX_PROMPT),
             inputs: images.length ? { images } : undefined,
-            params: { aspectRatio: aspect, numOutputs: batch, ...(palette && { palette }) },
+            params: { aspectRatio: aspect, numOutputs: batch, ...(palette && { palette }), ...(productShot && { extra: { productShot: true } }) },
             title,
             batchTitle: title,
           },
@@ -1216,7 +1226,7 @@ export async function rerun(id: string): Promise<MarketingRun[]> {
 }
 
 /**
- * An open-engine poster/ad with its words set in the browser (an uploaded PNG), recorded in the Library
+ * A poster/ad with its words set in the browser (an uploaded PNG: open models, Fuobe Marketing Image), recorded in the Library
  * and on the run (the card shows it). `auto`: the first composite the browser makes on its own once the
  * picture is ready; a run that has one already keeps it (no duplicate from a second tab).
  */

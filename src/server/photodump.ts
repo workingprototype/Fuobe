@@ -331,12 +331,13 @@ function sheetRequest(input: SheetRun): { request: GenerationRequest; notes: str
       notes: modelId === "nano-banana-pro" ? ["Fuobe Soul is switched off in Settings → Models & licences — Nano Banana Pro draws the sheet"] : [],
     };
   }
-  // A description: the AI Influencer app (Nano Banana Pro in the cloud, the Soul Cast sheet graph on your GPU).
+  // A description: the AI Influencer app (Fuobe Soul in the cloud, the Soul Cast sheet graph on your GPU).
   if (!input.prompt.trim()) throw new Error("Describe your character first");
   const route = engine === "open" ? getPreset(AI_INFLUENCER)?.open : getPreset(AI_INFLUENCER)?.cloud;
-  const modelId = route?.modelId ?? (engine === "open" ? "oss-zimage-soul-cast" : "nano-banana-pro");
+  const modelId = route?.modelId ?? (engine === "open" ? "oss-zimage-soul-cast" : SOUL_BUILDER_MODEL);
   return {
-    request: { feature: "app:app-ai-influencer", presetId: AI_INFLUENCER, modelId, prompt: input.prompt.trim() },
+    // Fuobe Soul runs on both engines: the app's cloud route names it, so the run says which.
+    request: { feature: "app:app-ai-influencer", presetId: AI_INFLUENCER, modelId, ...(modelId === SOUL_BUILDER_MODEL && { engine }), prompt: input.prompt.trim() },
     notes: [],
   };
 }

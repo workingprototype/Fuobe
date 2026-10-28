@@ -179,7 +179,7 @@ function TextPanel({ draft, set, template }: { draft: Draft; set: (p: Partial<Dr
       open={open}
       onOpenChange={setOpen}
       title="Words on the image"
-      description="Set exactly, letter for letter: cloud models draw them; open-source results get them set on top in your brand fonts."
+      description="Set exactly, letter for letter: Fuobe Marketing Image and open-source results get them set on top in your brand fonts; GPT Image, Ideogram and Recraft draw them."
       trigger={
         <button type="button" className={cn(chipBase, has ? chipOn : chipIdle, "max-w-44")} aria-label="Headline and button text">
           <Type className="size-3.5" />

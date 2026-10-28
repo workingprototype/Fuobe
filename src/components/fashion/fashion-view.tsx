@@ -24,7 +24,9 @@ import { TemplatePreview } from "./template-preview";
 
 const LABELS = ["Select presets", "Character", "Generation", "Clothing", "Photoset"];
 const BANNER_KEY = "fuobe.fashion.banner";
+/** The cloud's outfit models: Fuobe Try-On (the Original, FLUX.2 [klein] 4B + a try-on LoRA) first, partners after. */
 const OUTFIT_MODELS = [
+  ["fuobe-tryon", "Fuobe Try-On"],
   ["fashn-tryon", "FASHN Try-On"],
   ["nano-banana-pro", "Nano Banana Pro"],
 ] as const;
@@ -64,7 +66,7 @@ export function FashionView() {
   const [s, dispatch] = useStoredReducer<FashionState, Parameters<typeof fashionReducer>[1]>("fuobe.fashion", fashionReducer, FASHION_START);
   const [engine, setEngine] = useEngine();
   const [garment, setGarment] = useState<SlotValue | null>(null);
-  const [pickedOutfit, setOutfitModel] = useState<string>("fashn-tryon");
+  const [pickedOutfit, setOutfitModel] = useState<string>("fuobe-tryon");
   // Outfit models switched off in Settings → Models & licences leave the choice; the pick falls back to one that is on.
   const access = useModelAccess();
   const outfitModels = keepOffered(OUTFIT_MODELS, ([id]) => offered(access, id, "cloud"));

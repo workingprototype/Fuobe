@@ -259,7 +259,8 @@ describe("photodump, fashion factory and character sheet runs", () => {
   it("prices and makes an Instadump from one selfie as one batch", async () => {
     const selfie = upload();
     const preview = await (await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "cloud", selfie, aspectRatio: "3:4" }, "http://x/api/photodump?preview=1"))).json();
-    expect(preview).toMatchObject({ modelId: "nano-banana-pro", count: 9, demo: true });
+    // Instadump's Original: Qwen-Image-Edit 2511 (hosted) with the selfie as reference.
+    expect(preview).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", count: 9, demo: true });
     const res = await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "cloud", selfie, aspectRatio: "3:4" }));
     expect(res.status).toBe(201);
     const { batchId, items } = await res.json();
@@ -319,10 +320,15 @@ describe("photodump, fashion factory and character sheet runs", () => {
   it("runs the Fashion Factory steps", async () => {
     const el = createElement({ name: "Ines", kind: "character", references: [upload()] });
     const base = await (await fashionRoute.POST(json("POST", { step: "base", templateId: "red-room", elementId: el.id, engine: "cloud" }))).json();
-    expect(base.items[0]).toMatchObject({ modelId: "nano-banana-pro", feature: "fashion" });
+    expect(base.items[0]).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", feature: "fashion" });
     expect(base.items[0].request.params).toMatchObject({ aspectRatio: "3:4", numOutputs: 4 });
     const outfit = await (await fashionRoute.POST(json("POST", { step: "outfit", templateId: "red-room", base: upload(), garment: upload(), engine: "cloud" }))).json();
-    expect(outfit.items[0].modelId).toBe("fashn-tryon");
+    // Fuobe Try-On in the cloud: FLUX.2 [klein] 4B with the try-on LoRA, its trigger leading the words.
+    expect(outfit.items[0]).toMatchObject({ modelId: "fuobe-tryon", engine: "cloud" });
+    const outfitPreview = await (await fashionRoute.POST(json("POST", { step: "outfit", templateId: "red-room", base: upload(), garment: upload(), engine: "cloud" }, "http://x/api/fashion?preview=1"))).json();
+    expect(outfitPreview).toMatchObject({ modelId: "fuobe-tryon", demo: true });
+    const partner = await (await fashionRoute.POST(json("POST", { step: "outfit", templateId: "red-room", base: upload(), garment: upload(), engine: "cloud", modelId: "fashn-tryon" }))).json();
+    expect(partner.items[0].modelId).toBe("fashn-tryon");
     const set = await (await fashionRoute.POST(json("POST", { step: "photoset", templateId: "red-room", dressed: upload(), engine: "open" }))).json();
     expect(set.items).toHaveLength(9);
     expect(set.items.every((g: { modelId: string; batchId: string }) => g.modelId === "oss-qwen-edit" && g.batchId === set.batchId)).toBe(true);
@@ -348,7 +354,8 @@ describe("photodump, fashion factory and character sheet runs", () => {
     expect(soul.notes ?? []).toEqual([]);
     const described = await (await characterRoute.POST(json("POST", { mode: "describe", engine: "cloud", prompt: "a surfer from Lisbon" }))).json();
     expect(described.error).toBeUndefined();
-    expect(described.items[0]).toMatchObject({ presetId: "app-ai-influencer", modelId: "nano-banana-pro", feature: "app:app-ai-influencer" });
+    // The AI Influencer app's sheet is Fuobe Soul's in the cloud (build plan O10), in the casting look.
+    expect(described.items[0]).toMatchObject({ presetId: "app-ai-influencer", modelId: "fuobe-soul", engine: "cloud", feature: "app:app-ai-influencer", status: "queued" });
     const app = await (await characterRoute.POST(json("POST", { mode: "describe", engine: "open", prompt: "a surfer from Lisbon" }))).json();
     expect(app.items[0]).toMatchObject({ presetId: "app-ai-influencer", modelId: "oss-zimage-soul-cast", feature: "app:app-ai-influencer" });
   });

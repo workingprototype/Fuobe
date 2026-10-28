@@ -1,15 +1,16 @@
 import "server-only";
 import { getModel } from "@/lib/catalog";
 import type { Engine } from "@/lib/catalog/types";
-import { cleanState, planInfluencer, type InfluencerRun, type InfluencerStart } from "@/lib/influencer";
+import { soulRecipe } from "@/lib/catalog/soul";
+import { cleanState, INFLUENCER_LOOK, INFLUENCER_OPEN_MODELS, planInfluencer, type InfluencerRun, type InfluencerStart } from "@/lib/influencer";
 import { createPipeline } from "./chains";
 import { createGenerations } from "./generations";
 import { planCaps, previewRun, runEngine } from "./photodump";
 
 /**
  * AI Influencer builder runs (/influencer): the pure plan (src/lib/influencer.ts) for the engine the
- * install allows, priced or created as one batch. On the open engine with a photo or clothing it is
- * two chained jobs: the Soul Cast sheet (a helper step) and the Qwen-Image-Edit pass you see.
+ * install allows, priced or created as one batch. With a photo or clothing it is two chained jobs: the sheet (Fuobe
+ * Soul in the cloud, the Soul Cast sheet graph on your GPU: a helper step) and the Qwen-Image-Edit pass you see.
  */
 
 export interface InfluencerBody {
@@ -26,7 +27,14 @@ export interface InfluencerBody {
 function plan(body: InfluencerBody) {
   const { state } = cleanState(body.state);
   const run: InfluencerRun = { ...body, engine: runEngine(body.engine), state };
-  return planInfluencer(run, planCaps());
+  const p = planInfluencer(run, planCaps());
+  // The Soul Cast sheet graph is Fuobe Soul's own base: the casting look's LoRAs and words go on it, as in Cinema's Soul Cast.
+  const steps = p.steps.map((s) => {
+    if (s.request.modelId !== INFLUENCER_OPEN_MODELS.sheet) return s;
+    const recipe = soulRecipe("soul", s.request.prompt ?? "", { look: INFLUENCER_LOOK });
+    return { ...s, request: { ...s.request, prompt: recipe.prompt, ...(recipe.loras.length && { loras: recipe.loras }) } };
+  });
+  return { ...p, steps };
 }
 
 /** What a run would make and cost, without starting it (errors come back as `error`). */

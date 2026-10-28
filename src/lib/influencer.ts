@@ -794,10 +794,17 @@ export function cleanState(raw: unknown): { state: InfluencerState; problem: str
 // ---------------------------------------------------------------------------
 // The plan per engine
 
-/** The cloud models that draw the sheet from the compiled prompt: Nano Banana Pro (the default), Seedream 5.0 Pro. */
-export const INFLUENCER_CLOUD_MODELS = ["nano-banana-pro", "seedream-5-pro"] as const;
+/**
+ * The cloud models that draw the sheet: Fuobe Soul (the default, build plan O10: the sheet in Soul's casting look, then
+ * Qwen-Image-Edit 2511 puts your face and clothing on it), or Nano Banana Pro / Seedream 5.0 Pro in one pass with them.
+ */
+export const INFLUENCER_CLOUD_MODELS = ["fuobe-soul", "nano-banana-pro", "seedream-5-pro"] as const;
 export const INFLUENCER_OPEN_MODELS = { sheet: "oss-zimage-soul-cast", edit: "oss-qwen-edit" } as const;
-/** Qwen-Image-Edit 2511 takes three images: the sheet, then the photo and clothing. */
+/** Fuobe Soul's steps in the cloud: the sheet on its hosted half, your face and clothing on hosted Qwen-Image-Edit 2511. */
+export const INFLUENCER_SOUL = { sheet: "fuobe-soul", edit: "qwen-image-edit-2511-cloud" } as const;
+/** The look the sheet is drawn in (Soul Cast's casting look: natural, unretouched skin and fabric). */
+export const INFLUENCER_LOOK = "v1-realistic";
+/** Qwen-Image-Edit 2511 takes three images on your GPU (the sheet, then the photo and clothing); fal takes more. */
 const OPEN_EDIT_IMAGES = 3;
 
 export interface InfluencerRun {
@@ -842,10 +849,10 @@ export function influencerBlocker(run: Pick<InfluencerRun, "state" | "direction"
 }
 
 /**
- * The jobs for a run. Cloud: Nano Banana Pro (or Seedream 5.0 Pro when asked) draws the sheet from the
- * compiled prompt, with the photo and clothing as references.
- * Open: the Soul Cast sheet workflow (Z-Image Turbo) draws the character; with a photo or clothing,
- * Qwen-Image-Edit 2511 then puts your face and clothes on that sheet, so the sheet keeps its wide shape.
+ * The jobs for a run. Open: the Soul Cast sheet workflow (Z-Image Turbo, with the casting look's LoRAs the server adds)
+ * draws the character; with a photo or clothing, Qwen-Image-Edit 2511 then puts your face and clothes on that sheet, so
+ * the sheet keeps its wide shape. Cloud: the same two steps on Fuobe Soul and hosted Qwen-Image-Edit 2511 by default, or
+ * Nano Banana Pro (Seedream 5.0 Pro when asked) drawing the sheet from the compiled prompt with the photos as references.
  */
 export function planInfluencer(run: InfluencerRun, caps: Pick<PlanCaps, "has">): InfluencerPlan {
   const blocker = influencerBlocker(run);
@@ -856,17 +863,42 @@ export function planInfluencer(run: InfluencerRun, caps: Pick<PlanCaps, "has">):
   const clothing = run.clothing ?? [];
   const title = influencerName(state);
   const notes: string[] = [];
+  const has = (id: string, engine?: Engine) => !caps.has || caps.has(id, engine);
+  const asked = run.modelId && (INFLUENCER_CLOUD_MODELS as readonly string[]).includes(run.modelId) ? run.modelId : undefined;
+  // Fuobe Soul in the cloud unless another model is asked for (or this install switched Fuobe Soul off there).
+  const cloudSoul = run.engine === "cloud" && (asked ?? INFLUENCER_SOUL.sheet) === INFLUENCER_SOUL.sheet && has(INFLUENCER_SOUL.sheet, "cloud") && has(INFLUENCER_SOUL.edit);
 
-  if (run.engine === "open") {
+  if (run.engine === "open" || cloudSoul) {
+    const open = run.engine === "open";
+    const sheetModel = open ? INFLUENCER_OPEN_MODELS.sheet : INFLUENCER_SOUL.sheet;
+    const editModel = open ? INFLUENCER_OPEN_MODELS.edit : INFLUENCER_SOUL.edit;
     const sheet: InfluencerStep = {
       key: "sheet",
-      request: { feature: FEATURE, modelId: INFLUENCER_OPEN_MODELS.sheet, op: "t2i", prompt: compileCastPrompt({ state, direction }), params: { numOutputs: 1 }, title },
+      request: open
+        ? { feature: FEATURE, modelId: sheetModel, op: "t2i", prompt: compileCastPrompt({ state, direction }), params: { numOutputs: 1 }, title }
+        : {
+            feature: FEATURE,
+            modelId: sheetModel,
+            engine: "cloud",
+            presetId: INFLUENCER_LOOK,
+            op: "t2i",
+            prompt: compileSheetPrompt({ state, direction }),
+            params: { numOutputs: 1, aspectRatio: "16:9", resolution: "1080p" },
+            title,
+          },
     };
-    if (!photo && !clothing.length) return { steps: [sheet], modelId: INFLUENCER_OPEN_MODELS.sheet, notes };
-    const room = OPEN_EDIT_IMAGES - 1 - (photo ? 1 : 0);
+    if (!photo && !clothing.length) return { steps: [sheet], modelId: sheetModel, notes };
+    const room = (open ? OPEN_EDIT_IMAGES : 1 + 1 + MAX_CLOTHING) - 1 - (photo ? 1 : 0);
     const used = clothing.slice(0, room);
     if (clothing.length > used.length) notes.push(`Qwen-Image-Edit takes 3 images (the sheet${photo ? ", your photo" : ""} and clothing) — the first ${used.length === 1 ? "clothing reference is" : `${used.length} clothing references are`} used`);
-    notes.push(photo ? (start === "face" ? "Two steps: Z-Image Turbo draws the sheet, then Qwen-Image-Edit 2511 puts your face on it" : "Two steps: Z-Image Turbo draws the sheet, then Qwen-Image-Edit 2511 matches it to your reference") : "Two steps: Z-Image Turbo draws the sheet, then Qwen-Image-Edit 2511 dresses it in your clothing");
+    const drawer = open ? "Z-Image Turbo" : "Fuobe Soul";
+    notes.push(
+      photo
+        ? start === "face"
+          ? `Two steps: ${drawer} draws the sheet, then Qwen-Image-Edit 2511 puts your face on it`
+          : `Two steps: ${drawer} draws the sheet, then Qwen-Image-Edit 2511 matches it to your reference`
+        : `Two steps: ${drawer} draws the sheet, then Qwen-Image-Edit 2511 dresses it in your clothing`,
+    );
     return {
       steps: [
         { ...sheet, request: { ...sheet.request, feature: `${FEATURE}-step`, title: `${title} · sheet`, step: { label: "Drawing the sheet", index: 0, of: 2 } } },
@@ -876,7 +908,7 @@ export function planInfluencer(run: InfluencerRun, caps: Pick<PlanCaps, "has">):
           chain: [{ slot: "images", position: "first" }],
           request: {
             feature: FEATURE,
-            modelId: INFLUENCER_OPEN_MODELS.edit,
+            modelId: editModel,
             op: "edit",
             prompt: compileDressPrompt({ state, start, clothing: used.length }),
             inputs: { images: [...(photo ? [photo] : []), ...used] },
@@ -886,15 +918,18 @@ export function planInfluencer(run: InfluencerRun, caps: Pick<PlanCaps, "has">):
           },
         },
       ],
-      modelId: INFLUENCER_OPEN_MODELS.edit,
+      modelId: editModel,
       notes,
     };
   }
 
-  const has = (id: string) => !caps.has || caps.has(id);
-  const asked = run.modelId && (INFLUENCER_CLOUD_MODELS as readonly string[]).includes(run.modelId) ? run.modelId : undefined;
   const images = [...(photo ? [photo] : []), ...clothing];
-  const modelId = asked && has(asked) ? asked : INFLUENCER_CLOUD_MODELS[0];
+  // Nano Banana Pro unless Seedream 5.0 Pro is asked for (Fuobe Soul switched off falls back here too).
+  const modelId = asked && asked !== INFLUENCER_SOUL.sheet && has(asked) ? asked : "nano-banana-pro";
+  if (run.engine === "cloud" && (asked ?? INFLUENCER_SOUL.sheet) === INFLUENCER_SOUL.sheet) {
+    const off = !has(INFLUENCER_SOUL.sheet, "cloud") ? "Fuobe Soul is" : "Qwen-Image-Edit 2511 (hosted) is";
+    notes.push(`${off} switched off in Settings → Models & licences — Nano Banana Pro draws the sheet`);
+  }
   return {
     steps: [
       {

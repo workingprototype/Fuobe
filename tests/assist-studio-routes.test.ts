@@ -323,7 +323,8 @@ describe("Ads Studio", () => {
     const p = await priced(() => plan("create_ads", { brief: "Spring race season", brand_id: kit.id, product_id: product.id, count: 3 }));
     const est = await priced(async () => (await adsEstimateRoute.POST(json("POST", { brandId: kit.id, engine: "cloud", items: [{ productId: product.id, count: 3 }], direction: "Spring race season", ratio: "4:5" }))).json());
     expect(p).toMatchObject({ studio: "Ads Studio", href: "/ads" });
-    expect(p.jobs).toEqual([expect.objectContaining({ modelId: "nano-banana-pro", op: "edit", count: 3, costUsd: est.costUsd, demo: false })]);
+    // The picture is Fuobe Marketing Image's (build plan O10), priced as the studio prices it.
+    expect(p.jobs).toEqual([expect.objectContaining({ modelId: "fuobe-marketing-image", op: "edit", count: 3, costUsd: est.costUsd, demo: false })]);
     expect(est.costUsd).toBeGreaterThan(0);
     // A product from another brand isn't taken.
     expect(plan("create_ads", { brief: "x", brand_id: "nope" }).fallback).toMatch(/brand kit isn't in Ads Studio/);
