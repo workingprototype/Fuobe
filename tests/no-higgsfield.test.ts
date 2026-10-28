@@ -81,6 +81,24 @@ const ALLOWED: Record<string, string> = {
   "src/lib/catalog/replaced.ts": "what each retired model was called, for history",
 };
 
+/**
+ * The README's upgrade notes are dated history ("Soul ID no longer trains on Higgsfield (PR #12)"): only that section
+ * may name it. Everything else in the README (setup, keys, env vars, the stack) is scanned like code.
+ */
+const HISTORY_SECTIONS: Record<string, string> = { "README.md": "### Upgrading from an earlier version" };
+
+/** A file's lines, with a history section blanked (HISTORY_SECTIONS): it ends at the next heading of its level or above. */
+function scannedLines(f: string, text: string): string[] {
+  const lines = text.split("\n");
+  const heading = HISTORY_SECTIONS[f];
+  const at = heading ? lines.indexOf(heading) : -1;
+  if (at < 0) return lines;
+  const level = heading.indexOf(" ");
+  const next = lines.findIndex((l, i) => i > at && /^#{1,6} /.test(l) && l.indexOf(" ") <= level);
+  const end = next < 0 ? lines.length : next;
+  return lines.map((l, i) => (i > at && i < end ? "" : l));
+}
+
 /** Research files and research record fields keep their names: reading research is not calling the provider. */
 const RESEARCH_NAMES = /higgsfield-[a-z0-9-]+\.(md|json)|higgsfieldEquivalent/g;
 
@@ -134,7 +152,7 @@ describe("no code path names the Higgsfield provider", () => {
     const hits: string[] = [];
     for (const f of files) {
       if (ALLOWED[f]) continue;
-      const lines = fs.readFileSync(path.join(ROOT, f), "utf8").split("\n");
+      const lines = scannedLines(f, fs.readFileSync(path.join(ROOT, f), "utf8"));
       lines.forEach((line, i) => {
         const text = line.replace(RESEARCH_NAMES, "");
         for (const [why, re] of RULES) if (re.test(text)) hits.push(`${f}:${i + 1} ${why}: ${line.trim().slice(0, 140)}`);
@@ -155,6 +173,10 @@ describe("no code path names the Higgsfield provider", () => {
       "pnpm gen:catalog # regenerate cloud models, Higgsfield models and presets, LoRA map",
     ];
     for (const p of probes) expect(RULES.some(([, re]) => re.test(p.replace(RESEARCH_NAMES, ""))), p).toBe(true);
+    // The README's upgrade notes are history; the rest of it is scanned (a key row there is caught).
+    const readme = ["## Quick start", "| A Higgsfield key | `HIGGSFIELD_API_KEY` |", "### Upgrading from an earlier version", "- Soul ID no longer trains on Higgsfield (PR #12).", "### Setting up", "Runs on Higgsfield"].join("\n");
+    expect(scannedLines("README.md", readme)).toEqual(["## Quick start", "| A Higgsfield key | `HIGGSFIELD_API_KEY` |", "### Upgrading from an earlier version", "", "### Setting up", "Runs on Higgsfield"]);
+    expect(fs.readFileSync(path.join(ROOT, "README.md"), "utf8").split("\n")).toContain(HISTORY_SECTIONS["README.md"]);
     // History and comparisons stay allowed.
     for (const ok of ["Higgsfield's pogo example names four things to remove", "the way Higgsfield names layer files", "a 1:1 alternative to Higgsfield", "Higgsfield is never called", "Progress uses Higgsfield's 14 labels"])
       expect(RULES.some(([, re]) => re.test(ok)), ok).toBe(false);

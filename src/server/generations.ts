@@ -928,9 +928,19 @@ export function withoutSkipped(req: GenerationRequest, slots: ChainSlot[], skipp
 /** The chain slots a step fills: its own, less the optional ones left out (chainSkipped). */
 const filledSlots = (req: GenerationRequest, n: number): ChainSlot[] => slotsFor(req, n).filter((_, i) => !req.chainSkipped?.slots.includes(i));
 
+/** When a step after real ComfyUI steps first found ComfyUI not answering, by step id (shared across hot reloads). */
+declare global {
+  var __fuobeComfyWaits: Map<string, number> | undefined;
+}
+const comfyWaits = (): Map<string, number> => (globalThis.__fuobeComfyWaits ??= new Map<string, number>());
+/** How long such a step waits for ComfyUI to answer again before chainMode fails it. */
+export const COMFY_WAIT = { ms: 60_000 };
+
 /** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
 async function advanceDependents(): Promise<void> {
   const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
+  // A forced look at ComfyUI, at most one a sweep, for the steps that found it not answering.
+  let lookedAgain: Promise<boolean> | undefined;
   for (const r of rows) {
     if (submitting().has(r.id)) continue;
     // A step queued before its model was retired runs on what replaced it (and its row says so).
@@ -978,9 +988,24 @@ async function advanceDependents(): Promise<void> {
         fail(`${earlier} has no ${slotNoun(slots[missing])} to use`);
         continue;
       }
-      // Routing reads cached reachability: make sure it's fresh for local engines.
+      // Routing reads cached reachability: make sure it's fresh for local engines. An Original counts with the routes of
+      // the engine it runs on, ComfyUI taken as answering: one on the cloud doesn't use it, so doesn't wait for it.
       const model = getModel(request.modelId);
-      if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
+      const runs = model && dualEngine(model) ? onEngine(model, pickEngine(model, request.engine, engineMode(), () => true)) : model;
+      if (runs?.routes.some((x) => x.provider === "comfyui") && !(await probeComfy()) && deps.some((d) => d!.provider === "comfyui")) {
+        // The earlier steps ran for real on ComfyUI: one missed check (a server busy finishing them, or restarting)
+        // mustn't make this one a demo, which chainMode fails. Look again at once (one forced look a sweep), then wait
+        // for the next sweeps (COMFY_WAIT from the first miss) before chainMode has its say.
+        const first = comfyWaits().get(r.id);
+        const back = first === undefined && (await (lookedAgain ??= probeComfy(true)));
+        if (!back && first === undefined) {
+          comfyWaits().set(r.id, Date.now());
+          update(r.id, { message: "Waits for ComfyUI to answer" });
+          continue;
+        }
+        if (!back && Date.now() - first! < COMFY_WAIT.ms) continue;
+      }
+      comfyWaits().delete(r.id);
       if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
       // Filled with the slots that have an input; stored with its whole chain (and what was skipped) for a retry.
       const filled = withChainInputs({ ...request, chain: slots }, values as string[]);

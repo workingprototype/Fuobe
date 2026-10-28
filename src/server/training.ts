@@ -577,7 +577,7 @@ export async function attachLora(elementId: string, input: { file: string; trigg
     } catch {
       src = "";
     }
-    if (src && fs.existsSync(src)) {
+    if (src && fs.existsSync(/*turbopackIgnore: true*/ src)) {
       await keepTrainedLora(file, { path: src });
       own = true;
     }
