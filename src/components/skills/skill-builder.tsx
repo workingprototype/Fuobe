@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, ArrowRight, AudioLines, Box, Check, ChevronDown, Cloud, Cpu, FileText, Info, Loader2, ShieldCheck, Sparkles, Undo2, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { RunSkillDialog } from "@/components/assist/run-skill-dialog";
 import { useDraftActions, useSkillDraft, type DraftCheckResult } from "@/components/assist/hooks";
@@ -176,7 +176,8 @@ function Review({ draft, refusals, ids, onClose, onSaved, header }: { draft: Ski
     }
   };
 
-  const varying = draft.candidates.filter((c) => varies[c.id]).length + new Set(slots.map((s) => s.id)).size;
+  // What the Run form will ask for (an element whose words vary as a whole, or words no prompt has, asks for nothing).
+  const varying = recipe.params.length;
   const status = statusLine(current, busy, own);
 
   return (
@@ -367,6 +368,9 @@ function priceOf(e: DraftCheckResult["engines"][number]): string {
 
 function CheckBadges({ check }: { check: CheckState }) {
   const demo = check.demo;
+  // Every engine's dry run skipped (a studio tool step): say so, rather than "passed".
+  const ran = demo && demo !== "running" ? demo.engines.filter((e) => e.dryRun) : [];
+  const skipped = demo && demo !== "running" && demo.ok && ran.length > 0 && ran.every((e) => e.dryRun?.skipped) ? ran[0].dryRun!.skipped : undefined;
   return (
     <div className="flex flex-wrap gap-1.5">
       {check.plan!.engines.map((e) => (
@@ -380,7 +384,13 @@ function CheckBadges({ check }: { check: CheckState }) {
           <Loader2 className="size-3 animate-spin" /> Dry run…
         </span>
       )}
-      {demo && demo !== "running" && (
+      {demo && demo !== "running" && skipped && (
+        // A studio step's dry run would make a record you'd see (a demo dub): its plan is its check, and nothing ran.
+        <span className="inline-flex h-6 items-center gap-1 rounded-full bg-muted px-2 text-[12px] text-muted-foreground" title={skipped}>
+          <Info className="size-3" /> No dry run: a studio step is checked by its plan
+        </span>
+      )}
+      {demo && demo !== "running" && !skipped && (
         <span className={cn("inline-flex h-6 items-center gap-1 rounded-full px-2 text-[12px] font-medium", demo.ok ? "bg-brand-faint text-brand-text" : "bg-destructive/10 text-destructive")} title={demo.ok ? undefined : demo.engines.flatMap((e) => e.dryRun?.problems ?? []).join("; ")}>
           {demo.ok ? <Check className="size-3" /> : <X className="size-3" />} Dry run {demo.ok ? "passed" : "failed"}
         </span>
@@ -579,33 +589,51 @@ function FixedVaries({ value, onChange, disabled, label }: { value: boolean; onC
 function Words({ c, varies, slots, setSlots, takenIds }: { c: DraftCandidate; varies: boolean; slots: Slot[]; setSlots: React.Dispatch<React.SetStateAction<Slot[]>>; takenIds: string[] }) {
   const text = String(c.example);
   const step = c.at[0]?.step;
+  // The words to make an input: selected in the text (a mouse, a finger dragging the handles) or typed (a keyboard).
   const [picked, setPicked] = useState("");
+  const [typing, setTyping] = useState(false);
   const [slotLabel, setSlotLabel] = useState("");
   const box = useRef<HTMLParagraphElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const mine = slots.filter((s) => text.includes(s.text));
-  const readSelection = () => {
-    const sel = window.getSelection();
-    if (!sel || !box.current || !sel.anchorNode || !box.current.contains(sel.anchorNode)) return;
-    const words = sel.toString().replace(/\s+/g, " ").trim();
-    if (words.length >= 2 && words.length <= 200 && text.includes(words)) {
-      setPicked(words);
-      setSlotLabel((l) => l || (words.split(" ").length <= 3 ? words.replace(/^./, (x) => x.toUpperCase()) : ""));
-    }
-  };
+  const words = picked.replace(/\s+/g, " ").trim();
+  const fits = words.length >= 2 && words.length <= 200 && text.includes(words);
+  useEffect(() => {
+    if (varies) return;
+    // Every change of the selection, so dragging a phone's handles counts (no touchend reaches the text then).
+    const read = () => {
+      const sel = window.getSelection();
+      if (!sel || !box.current || !sel.anchorNode || !box.current.contains(sel.anchorNode)) return;
+      const chosen = sel.toString().replace(/\s+/g, " ").trim();
+      if (chosen.length >= 2 && chosen.length <= 200 && text.includes(chosen)) {
+        setPicked(chosen);
+        setSlotLabel((l) => l || (chosen.split(" ").length <= 3 ? chosen.replace(/^./, (x) => x.toUpperCase()) : ""));
+      }
+    };
+    document.addEventListener("selectionchange", read);
+    return () => document.removeEventListener("selectionchange", read);
+  }, [text, varies]);
   const add = () => {
+    if (!fits) return;
     const label = slotLabel.trim() || "Words";
     const id = paramIdFrom(label, takenIds);
-    setSlots((x) => [...x, { step: step ?? "", text: picked, id, label: label.slice(0, 60) }]);
+    setSlots((x) => [...x, { step: step ?? "", text: words, id, label: label.slice(0, 60) }]);
     setPicked("");
     setSlotLabel("");
+    setTyping(false);
     window.getSelection()?.removeAllRanges();
+  };
+  const cancel = () => {
+    setPicked("");
+    setSlotLabel("");
+    setTyping(false);
   };
   if (varies) {
     return <p className="mt-2 line-clamp-3 rounded-lg bg-muted/60 px-3 py-2 text-[12px] break-words text-muted-foreground">The whole prompt is an input. Was: “{text}”</p>;
   }
   return (
     <div className="mt-2 space-y-2">
-      <p ref={box} onMouseUp={readSelection} onKeyUp={readSelection} onTouchEnd={() => setTimeout(readSelection, 0)} className="rounded-lg bg-muted/60 px-3 py-2 text-[13px] leading-relaxed break-words select-text">
+      <p ref={box} className="rounded-lg bg-muted/60 px-3 py-2 text-[13px] leading-relaxed break-words select-text">
         <Highlighted text={text} slots={mine} />
       </p>
       {mine.length > 0 && (
@@ -622,21 +650,44 @@ function Words({ c, varies, slots, setSlots, takenIds }: { c: DraftCandidate; va
           ))}
         </div>
       )}
-      {picked ? (
+      {picked || typing ? (
         <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
-          <span className="min-w-0 truncate">
-            Make “<span className="font-medium">{picked}</span>” an input:
-          </span>
-          <Input aria-label="Its label" placeholder="Label, e.g. Product" value={slotLabel} maxLength={60} onChange={(e) => setSlotLabel(e.target.value)} className="h-8 w-40 text-[13px]" />
-          <Button size="sm" variant="outline" onClick={add}>
+          <Input
+            ref={field}
+            aria-label="Words from the prompt to make an input"
+            placeholder="Words from the prompt"
+            value={picked}
+            maxLength={200}
+            onChange={(e) => setPicked(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            aria-invalid={!!words && !fits}
+            className="h-8 w-56 max-w-full text-[13px]"
+          />
+          <Input aria-label="Its label" placeholder="Label, e.g. Product" value={slotLabel} maxLength={60} onChange={(e) => setSlotLabel(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} className="h-8 w-40 max-w-full text-[13px]" />
+          <Button size="sm" variant="outline" onClick={add} disabled={!fits}>
             Make it an input
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setPicked("")}>
+          <Button size="sm" variant="ghost" onClick={cancel}>
             Cancel
           </Button>
+          {words && !fits && <p className="w-full text-muted-foreground">Type the words as they are in the prompt.</p>}
         </div>
       ) : (
-        <p className="text-[12px] text-muted-foreground">To change only some words next time (a product, a name), select them above.</p>
+        <p className="text-[12px] text-muted-foreground">
+          To change only some words next time (a product, a name), select them above, or{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setTyping(true);
+              // The field appears on the next render: focus it then, for the keyboard.
+              setTimeout(() => field.current?.focus(), 0);
+            }}
+            className="font-medium text-foreground underline underline-offset-2"
+          >
+            type them
+          </button>
+          .
+        </p>
       )}
     </div>
   );

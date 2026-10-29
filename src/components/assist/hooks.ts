@@ -248,7 +248,10 @@ export function useSkillDraft(ids: string[]) {
     queryKey: ["skill-draft", ids.join(",")],
     enabled: ids.length > 0,
     retry: false,
+    // Read once while the review is open, and dropped when it closes: opened again, it is drafted again (a name saved
+    // since is taken, a result trashed since is gone).
     staleTime: Infinity,
+    gcTime: 0,
     queryFn: () => recipeCall<{ draft: SkillDraft | null; refusals: DraftRefusal[] }>("/api/assist/skills/draft", { generations: ids }),
   });
 }
@@ -263,6 +266,7 @@ export function useDraftActions() {
     save: async (body: { name: string; title: string; description: string; whenToUse?: string; body: string; recipe: unknown }) => {
       const view = await recipeCall<RecipeView>("/api/assist/skills/draft/save", body);
       qc.setQueryData(["assist-recipe", view.name], view);
+      qc.removeQueries({ queryKey: ["skill-draft"] });
       void qc.invalidateQueries({ queryKey: ["assist-skills"] });
       return view;
     },

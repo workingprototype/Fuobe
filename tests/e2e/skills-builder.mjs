@@ -3,9 +3,11 @@
 // in the Library and turned into a skill with the bulk bar's "Make a skill": the review screen shows the 3 steps,
 // waiting for each other; one input is switched to Varies and words selected in a prompt become an input of their own;
 // Check it prices it and dry-runs it for free; Save opens the
-// Run form ("Try it with new inputs"), which runs it with new words. The result ⋯ menu offers "Make a skill from
-// this…" too. At 1440 and 390 px, light and dark: nothing scrolls sideways, on a phone the review fills the screen and
-// the bulk bar keeps Make a skill. The skill is deleted at the end.
+// Run form ("Try it with new inputs"), which runs it with new words. That whole flow runs at 1440 px light (words picked
+// with the mouse) and at 390 px dark (on a phone, the words typed: the keyboard's way). The result ⋯ menu offers "Make a
+// skill from this…" too, and so does a creation opened from ⌘K (a viewer outside the page). At 1440 and 390 px, light
+// and dark: nothing scrolls sideways, on a phone the review fills the screen and the bulk bar keeps Make a skill. The
+// skills are deleted at the end.
 // Usage: node tests/e2e/skills-builder.mjs [appUrl] [--shots <dir>]   (app running in demo mode). Exits 1 on a failed check.
 import fs from "node:fs";
 import path from "node:path";
@@ -68,7 +70,7 @@ async function compose(page, route, words) {
 }
 
 const words = { still: `${tag} brass desk lamp, studio light`, edit: `${tag} brass desk lamp on a travertine plinth`, clip: `${tag} slow turntable of the brass desk lamp` };
-let skillName = null;
+const skillNames = [];
 const browser = await launch();
 try {
   // ---------------------------------------------------------------------------
@@ -99,7 +101,7 @@ try {
       await page.waitForTimeout(1500);
       const dialog = page.getByRole("dialog");
 
-      if (width === 1440 && scheme === "light") {
+      if ((width === 1440 && scheme === "light") || (phone && scheme === "dark")) {
         // 2. Select the three results, then Make a skill from the bulk bar.
         await page.getByRole("button", { name: "Select", exact: true }).click();
         for (const w of Object.values(words)) await page.getByRole("button", { name: new RegExp(`^Select “${w.slice(0, 24)}`) }).first().click({ force: true });
@@ -115,19 +117,32 @@ try {
         const words1 = dialog.getByRole("radiogroup", { name: /Words for “Text to image”/ });
         await words1.getByRole("radio", { name: "Varies" }).click();
         check(`${tagLine}: one input switched to Varies`, (await dialog.getByText("1 input for the Run form").count()) === 1);
-        const editWords = dialog.locator("li", { has: page.getByRole("radiogroup", { name: /Words for “Image edit”/ }) }).locator("p.select-text");
-        await editWords.evaluate((el) => {
-          const node = [...el.childNodes].map((n) => (n.nodeType === 3 ? n : n.firstChild)).find((n) => n?.textContent?.includes("brass desk lamp"));
-          const at = node.textContent.indexOf("brass desk lamp");
-          const range = document.createRange();
-          range.setStart(node, at);
-          range.setEnd(node, at + "brass desk lamp".length);
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-          el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-        });
-        await dialog.getByRole("button", { name: "Make it an input" }).click();
+        const editRow = dialog.locator("li", { has: page.getByRole("radiogroup", { name: /Words for “Image edit”/ }) });
+        if (!phone) {
+          // Selected in the text (the selection is read as it changes).
+          await editRow.locator("p.select-text").evaluate((el) => {
+            const node = [...el.childNodes].map((n) => (n.nodeType === 3 ? n : n.firstChild)).find((n) => n?.textContent?.includes("brass desk lamp"));
+            const at = node.textContent.indexOf("brass desk lamp");
+            const range = document.createRange();
+            range.setStart(node, at);
+            range.setEnd(node, at + "brass desk lamp".length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          });
+        } else {
+          // Typed: "type them" focuses the field, and words not in the prompt can't become an input.
+          await editRow.getByRole("button", { name: "type them" }).click();
+          const field = editRow.getByRole("textbox", { name: "Words from the prompt to make an input" });
+          await field.waitFor();
+          await page.waitForTimeout(150);
+          check(`${tagLine}: "type them" puts the keyboard in the words field`, await field.evaluate((el) => el === document.activeElement));
+          await page.keyboard.type("brass desk lamps");
+          check(`${tagLine}: words that aren't in the prompt can't become an input`, await editRow.getByRole("button", { name: "Make it an input" }).isDisabled());
+          await page.keyboard.press("Backspace");
+          await editRow.getByRole("textbox", { name: "Its label" }).fill("Brass desk lamp");
+        }
+        await editRow.getByRole("button", { name: "Make it an input" }).click();
         check(`${tagLine}: selected words become an input, marked in the text`, (await dialog.locator("mark", { hasText: "brass desk lamp" }).count()) >= 1 && (await dialog.getByText("2 inputs for the Run form").count()) === 1);
         await shot(page, `builder-${width}-${scheme}`);
         // 4. Check it: priced on each engine, then a free dry run in the background.
@@ -136,7 +151,8 @@ try {
         check(`${tagLine}: the dry run passes (free, on the demo provider)`, await seen(dialog.getByText("Dry run passed"), 120_000));
         // 5. Save: the Run form opens with the inputs it was made from.
         const title = await dialog.getByLabel("Title").inputValue();
-        skillName = await page.locator("#sb-name").inputValue();
+        const skillName = await page.locator("#sb-name").inputValue();
+        skillNames.push(skillName);
         await api("DELETE", `/api/assist/skills/${skillName}`);
         await dialog.getByRole("button", { name: "Save skill" }).click();
         check(`${tagLine}: Save opens "Try it with new inputs"`, await seen(page.getByRole("dialog").getByText(/Try it with new inputs/), 30_000));
@@ -153,6 +169,12 @@ try {
         const r = await api("GET", "/api/generations?limit=50&steps=1");
         const mine = (r?.items ?? []).filter((g) => g.request?.skill?.name === skillName);
         check(`${tagLine}: one run of 3 steps with the new words`, mine.length === 3 && mine.some((g) => g.request.prompt === `${tag} green ceramic vase, studio light`) && mine.some((g) => g.request.prompt === `${tag} slow turntable of the brass desk lamp`), `${mine.length} rows`);
+        // The run's rows share the chain's words: once done, to the Trash, out of the next flow's selection.
+        for (const until = Date.now() + 60_000; Date.now() < until; await new Promise((r) => setTimeout(r, 500))) {
+          const rows = ((await api("GET", "/api/generations?limit=50&steps=1"))?.items ?? []).filter((g) => g.request?.skill?.name === skillName);
+          if (rows.every((g) => ["succeeded", "failed", "canceled"].includes(g.status))) break;
+        }
+        if (mine.length) await api("POST", "/api/generations/bulk", { action: "trash", ids: mine.map((g) => g.id) });
         await page.keyboard.press("Escape");
       }
 
@@ -177,6 +199,20 @@ try {
       await shot(page, `builder-menu-${width}-${scheme}`);
       await page.keyboard.press("Escape");
 
+      if (!phone && scheme === "light") {
+        // A viewer outside the page (a creation opened from ⌘K) makes a skill too.
+        await openRoute(page, `${app}/settings`, { settleMs: 1200 });
+        await page.keyboard.press("Control+k");
+        const palette = page.getByRole("dialog", { name: "Search Fuobe" });
+        await palette.waitFor();
+        await page.keyboard.type(words.still);
+        await page.waitForTimeout(1500);
+        await palette.getByRole("option").filter({ hasText: words.still }).first().click();
+        await page.getByRole("button", { name: "Make a skill from this…" }).last().click();
+        check(`${tagLine}: from a creation opened with ⌘K, Make a skill opens the review`, await seen(page.getByRole("dialog").getByText("What changes next time"), 30_000));
+        await page.keyboard.press("Escape");
+      }
+
       if (phone) {
         // The bulk bar keeps Make a skill on a phone (its label hides, the button stays), and still fits.
         await openRoute(page, `${app}/library`, { settleMs: 1200 });
@@ -195,7 +231,7 @@ try {
   console.log(`FAIL the script stopped: ${e.stack ?? e}`);
 } finally {
   await browser.close().catch(() => {});
-  if (skillName) await api("DELETE", `/api/assist/skills/${skillName}`).catch(() => {});
+  for (const n of skillNames) await api("DELETE", `/api/assist/skills/${n}`).catch(() => {});
 }
 if (errors.length) console.log(`page errors:\n${errors.join("\n")}`);
 console.log(failures.length || errors.length ? `${failures.length} check(s) failed` : "All skill builder checks passed");
