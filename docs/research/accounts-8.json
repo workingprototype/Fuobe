@@ -1,0 +1,1925 @@
+{
+ "meta": {
+  "asOf": "2026-10-29",
+  "fuobe": "claude/fuobe-parity-4 @ 545ebb5",
+  "doc": "accounts-8.md",
+  "screens": "accounts-8-screens.md",
+  "routeCount": 192,
+  "tableCount": 43,
+  "migrationsToday": 23,
+  "newMigrations": "23 identity, 24 Better Auth frozen SQL, 25 scoping columns, 26 key rebuilds, 27 meter; later packages append"
+ },
+ "modes": [
+  {
+   "mode": "personal",
+   "subModes": [
+    "Just me on this computer (sign-in off)",
+    "Personal with sign-in"
+   ],
+   "whoFor": "One person on their own machine, home server or rented GPU",
+   "turnsOn": [
+    "local actor on allowed hosts (Just me)",
+    "one-field password login, passkeys, optional two-step, devices, alerts (with sign-in)",
+    "API tokens with scopes",
+    "footer spend line and personal cap",
+    "weekly backups, full archives, fuobe backup/restore",
+    "browser-approved fuobe login",
+    "fuobe recover"
+   ],
+   "turnsOff": [
+    "other accounts",
+    "teams",
+    "/admin",
+    "member limits",
+    "own and team keys",
+    "credits"
+   ],
+   "switching": "Just me <-> sign-in in Settings → Access; to Studio or Platform with a snapshot, a checked owner email and a non-loopback address"
+  },
+  {
+   "mode": "studio",
+   "whoFor": "A studio or company of 5-500 people on its own server",
+   "turnsOn": [
+    "accounts (open limited to the owner's work domain by default; approval, invite, closed)",
+    "private library each",
+    "teams with directory, roles, policies, keys and limits",
+    "/admin",
+    "fair GPU queue and GPU server pool",
+    "approvals",
+    "usage reports and alerts",
+    "E1 two-step enforcement and session policies",
+    "E4 verified domains and auto-join",
+    "E2 company sign-in (OIDC, SAML)",
+    "E3 SCIM",
+    "E5a audit viewer",
+    "E5b export, deletion, retention, legal hold, view-as",
+    "E6 seats"
+   ],
+   "turnsOff": [
+    "Just me",
+    "plans, credits and payments"
+   ],
+   "switching": "to Platform asks about plans; to Personal makes others dormant"
+  },
+  {
+   "mode": "platform",
+   "whoFor": "An operator selling the service to the public",
+   "turnsOn": [
+    "open sign-up with verification, captcha, breached-password check, farming guards",
+    "credits ledger, plans, packs, codes",
+    "Stripe or Managed Payments, or none",
+    "public site, legal templates, Preview and launch checklist",
+    "admin panel with staff roles",
+    "trust and safety that withholds on failure, C2PA, badge",
+    "worker roles, object storage, observability"
+   ],
+   "turnsOff": [
+    "Just me",
+    "own keys unless the plan allows",
+    "Studio-only features (SSO, SCIM, seats, approvals)"
+   ],
+   "switching": "to Studio asks about public accounts and staff roles; refused while subscriptions are active; disabled until acc-57 except FUOBE_DEV_PLATFORM=1"
+  }
+ ],
+ "tables": [
+  {
+   "table": "generations",
+   "scope": "workspace",
+   "rule": "Visible to members and grantees; created_by and paid_by are the acting person; chain steps take the root's workspace only with Editor there; favorite and pinned_at move to item_marks",
+   "columns": "+workspace_id, created_by, paid_by, hold_id; dispatch_state/dispatch_since/dispatch_priority/lane/gpu_server (acc-9, acc-26); moderation_state (acc-50); last_polled_at (acc-54)",
+   "package": "acc-3"
+  },
+  {
+   "table": "assets",
+   "scope": "workspace",
+   "rule": "Uploads and derived renders belong to the uploader's workspace; outputs follow their generation; /api/files authorizes by rel_path",
+   "columns": "+workspace_id, created_by; index rel_path; moderation_state (acc-49)",
+   "package": "acc-3"
+  },
+  {
+   "table": "folders",
+   "scope": "workspace",
+   "rule": "A folder, its subfolders and their results share one workspace",
+   "columns": "+workspace_id, created_by",
+   "package": "acc-3"
+  },
+  {
+   "table": "folder_items",
+   "scope": "derived",
+   "rule": "Keyed by generation_id; filing into another workspace's folder opens Move; grantees duplicate",
+   "columns": "—",
+   "package": "acc-3"
+  },
+  {
+   "table": "generation_trash",
+   "scope": "derived",
+   "rule": "Trash per workspace; emptying per workspace",
+   "columns": "+trashed_by",
+   "package": "acc-3"
+  },
+  {
+   "table": "generation_runs",
+   "scope": "derived",
+   "rule": "Internal; deleted with its generation",
+   "columns": "+claimed_by, claimed_at, heartbeat_at (acc-54)",
+   "package": "acc-3"
+  },
+  {
+   "table": "characters",
+   "scope": "workspace",
+   "rule": "@handles unique per workspace; mentions resolve per the sharing rules; consent travels with face elements",
+   "columns": "+workspace_id, created_by; UNIQUE(workspace_id, handle)",
+   "package": "acc-4"
+  },
+  {
+   "table": "trainings",
+   "scope": "derived (element)",
+   "rule": "Follow the element; charged to started_by",
+   "columns": "+started_by, paid_by",
+   "package": "acc-4"
+  },
+  {
+   "table": "cinema_projects / cinema_folders / cinema_items",
+   "scope": "workspace / derived",
+   "rule": "Co-edited by Editors; takes land in the project's workspace; My Generations lists only visible projects",
+   "columns": "+workspace_id, created_by on projects",
+   "package": "acc-4"
+  },
+  {
+   "table": "canvases",
+   "scope": "workspace",
+   "rule": "Co-edited; Duplicate into a chosen workspace",
+   "columns": "+workspace_id, created_by, edited_by",
+   "package": "acc-4"
+  },
+  {
+   "table": "layer_projects / layer_versions",
+   "scope": "workspace / derived",
+   "rule": "",
+   "columns": "+workspace_id, created_by; versions +created_by",
+   "package": "acc-4"
+  },
+  {
+   "table": "shorts_sessions / shorts_presets",
+   "scope": "workspace",
+   "rule": "Presets can be a team's house looks",
+   "columns": "+workspace_id, created_by",
+   "package": "acc-4"
+  },
+  {
+   "table": "brand_kits / products / ad_batches / ad_creatives / marketing_runs",
+   "scope": "workspace / derived",
+   "rule": "Products follow their brand kit; loose products and runs own themselves; team policy decides who edits brand kits",
+   "columns": "+workspace_id, created_by",
+   "package": "acc-4"
+  },
+  {
+   "table": "palettes",
+   "scope": "workspace; built-ins in w_install",
+   "rule": "Built-ins read by all, written by none",
+   "columns": "+workspace_id, created_by",
+   "package": "acc-4"
+  },
+  {
+   "table": "moodboards / photodump_packs",
+   "scope": "workspace",
+   "rule": "Recraft style ids tied to the key that made them",
+   "columns": "+workspace_id, created_by, style_key_ref",
+   "package": "acc-4"
+  },
+  {
+   "table": "faceless_channels / faceless_episodes / content_series",
+   "scope": "workspace / derived",
+   "rule": "Episodes follow their channel; Explainers and draft series own themselves; voices need consent to move",
+   "columns": "+workspace_id, created_by",
+   "package": "acc-4"
+  },
+  {
+   "table": "dub_sessions / katana_jobs / swap_projects",
+   "scope": "workspace",
+   "rule": "",
+   "columns": "+workspace_id, created_by",
+   "package": "acc-4"
+  },
+  {
+   "table": "skills",
+   "scope": "workspace",
+   "rule": "PK (workspace_id, name); resolution personal, active team, built-in; routes take ?workspace=",
+   "columns": "rebuilt",
+   "package": "acc-3, acc-5"
+  },
+  {
+   "table": "skill_toggles",
+   "scope": "user",
+   "rule": "PK (user_id, name)",
+   "columns": "rebuilt",
+   "package": "acc-3, acc-5"
+  },
+  {
+   "table": "assist_threads / assist_thread_state",
+   "scope": "user / derived",
+   "rule": "Only the author sees a chat, also inside team projects",
+   "columns": "+user_id, workspace_id",
+   "package": "acc-5"
+  },
+  {
+   "table": "assist_projects / assist_project_sources",
+   "scope": "workspace / derived",
+   "rule": "Team projects share instructions and sources; use_personal_memory is each author's own",
+   "columns": "+workspace_id, created_by",
+   "package": "acc-5"
+  },
+  {
+   "table": "assist_memory",
+   "scope": "user (personal) / project",
+   "rule": "Personal rows only the owner's; project rows follow the project",
+   "columns": "+user_id",
+   "package": "acc-5"
+  },
+  {
+   "table": "assist_schedules",
+   "scope": "user",
+   "rule": "Run as owner, narrowed to a team project's workspace; paused when the owner is off",
+   "columns": "+user_id, workspace_id",
+   "package": "acc-5"
+  },
+  {
+   "table": "assist_connectors",
+   "scope": "user or team",
+   "rule": "UNIQUE(owner_id, slug); a chat gets its author's connectors and, in a team chat, the team's",
+   "columns": "rebuilt; +workspace_id (acc-25)",
+   "package": "acc-3, acc-5, acc-25"
+  },
+  {
+   "table": "shares",
+   "scope": "user on workspace content",
+   "rule": "Creation needs Editor and policy; re-checked at every serve",
+   "columns": "+created_by, workspace_id",
+   "package": "acc-6"
+  },
+  {
+   "table": "lora_mirrors",
+   "scope": "install cache",
+   "rule": "Trained-LoRA rows carry the key that hosted them",
+   "columns": "+key_ref",
+   "package": "acc-8"
+  },
+  {
+   "table": "settings",
+   "scope": "install",
+   "rule": "Install defaults and admin policy",
+   "columns": "—",
+   "package": "—"
+  },
+  {
+   "table": "_migrations",
+   "scope": "install",
+   "rule": "",
+   "columns": "—",
+   "package": "—"
+  },
+  {
+   "table": "users / workspaces / workspace_members / invites / grants / item_marks / api_tokens / audit_log / user_settings / workspace_settings / session_step_up",
+   "scope": "identity",
+   "rule": "Person sees their own; admins see people; team admins manage their team; audit append-only with a hash chain",
+   "columns": "new (migration 23)",
+   "package": "acc-1, acc-2"
+  },
+  {
+   "table": "auth_user / auth_account / auth_session / auth_verification / auth_rate_limit",
+   "scope": "identity (Better Auth)",
+   "rule": "Read only through principal.ts, people lists and admin-ops.ts",
+   "columns": "frozen SQL (migration 24)",
+   "package": "acc-1"
+  },
+  {
+   "table": "auth_two_factor / auth_passkey / totp_seen / session_mfa",
+   "scope": "identity",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-19"
+  },
+  {
+   "table": "notifications / consents / mail_outbox",
+   "scope": "identity",
+   "rule": "Inbox per person; consents append-only",
+   "columns": "new",
+   "package": "acc-11"
+  },
+  {
+   "table": "request_keys",
+   "scope": "user",
+   "rule": "Pending, replay, 422; 24 h",
+   "columns": "new",
+   "package": "acc-10"
+  },
+  {
+   "table": "provider_keys / spend_limits / meter_holds / meter_entries / limit_requests",
+   "scope": "money",
+   "rule": "Own: the user; team: team admins; all: usage.view_all; secrets never returned",
+   "columns": "new (migration 27)",
+   "package": "acc-8"
+  },
+  {
+   "table": "cli_connect_requests",
+   "scope": "user",
+   "rule": "10 minutes; token wiped on delivery",
+   "columns": "new",
+   "package": "acc-22"
+  },
+  {
+   "table": "team_join_requests / notice_sends",
+   "scope": "team",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-24, acc-29"
+  },
+  {
+   "table": "comfy_servers",
+   "scope": "install",
+   "rule": "Admin only; encrypted token",
+   "columns": "new",
+   "package": "acc-27"
+  },
+  {
+   "table": "approval_requests",
+   "scope": "team / install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-28"
+  },
+  {
+   "table": "session_activity",
+   "scope": "identity",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-30"
+  },
+  {
+   "table": "domains / team_auto_join",
+   "scope": "install / team",
+   "rule": "Checked addresses only; one connection per domain",
+   "columns": "new",
+   "package": "acc-31"
+  },
+  {
+   "table": "sso_connections / auth_sso_provider",
+   "scope": "install",
+   "rule": "Owner-only changes",
+   "columns": "new / frozen",
+   "package": "acc-32"
+  },
+  {
+   "table": "scim_tokens / scim_groups / scim_group_members",
+   "scope": "install",
+   "rule": "Scope: SCIM-provisioned people only",
+   "columns": "new",
+   "package": "acc-33"
+  },
+  {
+   "table": "export_jobs / access_grants / privacy_holds",
+   "scope": "user / install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-35"
+  },
+  {
+   "table": "seat_requests (+users.seat)",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-36"
+  },
+  {
+   "table": "credit_accounts / credit_buckets / credit_ledger / credit_holds",
+   "scope": "money (Platform)",
+   "rule": "Append-only ledger; buckets never negative; debt on the account",
+   "columns": "new",
+   "package": "acc-37"
+  },
+  {
+   "table": "price_rules / gpu_run_stats",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-38"
+  },
+  {
+   "table": "plans / plan_versions / account_plans / entitlement_overrides / credit_limits",
+   "scope": "install / account",
+   "rule": "Versioned and grandfathered",
+   "columns": "new",
+   "package": "acc-39"
+  },
+  {
+   "table": "credit_codes / credit_code_redemptions / plan_requests / user_bans",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-42"
+  },
+  {
+   "table": "customers / subscriptions / payments / payment_events / checkout_sessions / credit_packs",
+   "scope": "billing",
+   "rule": "Events deduplicated by id and by object id plus type",
+   "columns": "new",
+   "package": "acc-43"
+  },
+  {
+   "table": "auto_recharge / promo_codes",
+   "scope": "billing",
+   "rule": "One pending recharge per account",
+   "columns": "new",
+   "package": "acc-46"
+  },
+  {
+   "table": "legal_docs / sales_leads",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-47"
+  },
+  {
+   "table": "account_signals / rate_limits",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-48"
+  },
+  {
+   "table": "moderation_checks",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-49"
+  },
+  {
+   "table": "quarantine / csam_reports",
+   "scope": "install (restricted)",
+   "rule": "Owner only; held 1 year",
+   "columns": "new",
+   "package": "acc-50"
+  },
+  {
+   "table": "moderation_items / moderation_actions / strikes / content_hash_blocks",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-51"
+  },
+  {
+   "table": "leases / worker_heartbeats / live_events",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-54"
+  },
+  {
+   "table": "platform_daily / provider_costs",
+   "scope": "install",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-56"
+  },
+  {
+   "table": "announcements / announcement_dismissals",
+   "scope": "install / user",
+   "rule": "",
+   "columns": "new",
+   "package": "acc-57"
+  }
+ ],
+ "fileAreas": [
+  {
+   "area": "data/files/**",
+   "scope": "workspace through assets",
+   "rule": "/api/files ACL by rel_path; Move re-homes outputs; refcounted deletes"
+  },
+  {
+   "area": "data/loras/fuobe/**, copies in each GPU server's LoRA folder",
+   "scope": "follows the element",
+   "rule": "attachLora and loras[] accept only visible elements' files; deleted with the element"
+  },
+  {
+   "area": "data/datasets/**, aitk.datasetDir",
+   "scope": "follows the element",
+   "rule": "deleted with the element"
+  },
+  {
+   "area": "ComfyUI /history, input and output",
+   "scope": "per job",
+   "rule": "random prefix in Studio and Platform; history deleted after saving; files deleted where folders are configured"
+  },
+  {
+   "area": "data/fuobe.db, auth.json, secret.key, setup-code, recovery.json, backups/",
+   "scope": "install",
+   "rule": "never served; snapshots carry secret.key and never sessions"
+  }
+ ],
+ "routes": [
+  {
+   "group": "Identity (Better Auth)",
+   "routes": [
+    "/api/identity/[...all]"
+   ],
+   "access": "public, router-only allowlist",
+   "checks": "sign-up routes only from acc-11 with the policy; always-blocked list; /update-user without image",
+   "package": "acc-1, acc-11"
+  },
+  {
+   "group": "Auth shims",
+   "routes": [
+    "POST /api/auth/login",
+    "POST /api/auth/logout",
+    "GET,POST /api/auth/password",
+    "GET,POST,DELETE /api/auth/tokens"
+   ],
+   "access": "public (login) / session",
+   "checks": "tokens listed and revoked per user; admins revoke any; created only from a browser session or the local actor",
+   "package": "acc-1, acc-13"
+  },
+  {
+   "group": "Install config",
+   "routes": [
+    "GET,PUT /api/settings",
+    "GET,PUT /api/settings/models",
+    "POST /api/providers/test",
+    "GET,POST /api/loras",
+    "GET /api/status"
+   ],
+   "access": "perm:install.settings for writes",
+   "checks": "members see connected flags only; GET /api/status writes nothing",
+   "package": "acc-2, acc-8"
+  },
+  {
+   "group": "Files and assets",
+   "routes": [
+    "GET /api/files/[...path]",
+    "POST /api/uploads",
+    "GET /api/assets",
+    "GET,DELETE /api/assets/[id]",
+    "POST /api/media/probe"
+   ],
+   "access": "session or token",
+   "checks": "asset visible by rel_path; uploads stamped; scoped uses in 409; probe url checked",
+   "package": "acc-3, acc-6"
+  },
+  {
+   "group": "Library",
+   "routes": [
+    "/api/generations/**",
+    "/api/folders/**"
+   ],
+   "access": "session or token",
+   "checks": "every id (path, query, body: ids[], folderId, inputs.*, dependsOn, existing) declared and checked; created_by/paid_by = actor; cross-space 409; final-payload price; Idempotency-Key",
+   "package": "acc-3, acc-6, acc-7, acc-10"
+  },
+  {
+   "group": "Live stream",
+   "routes": [
+    "GET /api/generations/stream?workspace="
+   ],
+   "access": "session or token",
+   "checks": "per-event visibility with version counter; 60 s re-validation; close on revoke",
+   "package": "acc-6"
+  },
+  {
+   "group": "Shares",
+   "routes": [
+    "GET,POST /api/shares",
+    "GET,PATCH,DELETE /api/shares/[id]",
+    "GET /s/[token]",
+    "GET /s/[token]/f/[...path]"
+   ],
+   "access": "session (manage) / public or signed-in per policy (view)",
+   "checks": "Editor on every item plus policy at creation; serve-time re-check; owner = creator or target admin",
+   "package": "acc-6"
+  },
+  {
+   "group": "Sharing and teams",
+   "routes": [
+    "POST /api/move",
+    "POST /api/grants",
+    "POST /api/duplicate",
+    "/api/workspaces/**",
+    "/api/teams/**"
+   ],
+   "access": "session or token",
+   "checks": "Editor on items; level cap; move out needs team admin; last-owner guard",
+   "package": "acc-17, acc-24"
+  },
+  {
+   "group": "Assist and MCP",
+   "routes": [
+    "/api/assist/**",
+    "POST /api/mcp"
+   ],
+   "access": "session or token (scopes)",
+   "checks": "threads/memory/schedules/connectors per user; projects/skills per workspace; skills ?workspace=; tools narrowed in team threads; MCP tools/list by scope and pin",
+   "package": "acc-5"
+  },
+  {
+   "group": "Studios",
+   "routes": [
+    "/api/cinema/**",
+    "/api/canvases/**",
+    "/api/layers/**",
+    "/api/shorts/**",
+    "/api/swap-studio/**",
+    "/api/brands/**",
+    "/api/products/**",
+    "/api/ads/**",
+    "/api/marketing/**",
+    "/api/faceless/**",
+    "/api/explainer/**",
+    "/api/content-factory/**",
+    "/api/dub/**",
+    "/api/katana/**",
+    "/api/elements/**",
+    "/api/palettes/**",
+    "/api/moodboards/**",
+    "/api/photodump/**",
+    "/api/influencer/**",
+    "/api/genjutsu/**",
+    "/api/evolution/**",
+    "/api/remove-object/**",
+    "/api/mixed-media/**",
+    "/api/storyboards/**",
+    "/api/audio-tools",
+    "/api/enhance"
+   ],
+   "access": "session or token",
+   "checks": "every id declared and checked; retries and Run again stamp the actor; spend points reserve",
+   "package": "acc-4, acc-6, acc-8"
+  },
+  {
+   "group": "Me",
+   "routes": [
+    "/api/me",
+    "/api/me/sessions",
+    "/api/me/usage",
+    "/api/me/entitlements",
+    "/api/me/keys",
+    "/api/me/keys/test",
+    "/api/me/limit-requests",
+    "/api/me/inbox",
+    "/api/me/email",
+    "/api/me/two-step/verify",
+    "/api/users/[id]/avatar"
+   ],
+   "access": "session (local actor in Just me)",
+   "checks": "own data only; avatar to people sharing a workspace",
+   "package": "acc-8, acc-11, acc-13, acc-19"
+  },
+  {
+   "group": "Public",
+   "routes": [
+    "/api/public/sign-in-options",
+    "/api/public/price-book",
+    "/api/public/sso-route",
+    "/api/public/device",
+    "/api/auth/forgot*",
+    "/api/recover/*",
+    "/api/cli/connect",
+    "/api/cli/connect/poll"
+   ],
+   "access": "public, rate-limited",
+   "checks": "uniform answers; per-client limits",
+   "package": "acc-11, acc-13, acc-22, acc-32, acc-38, acc-48"
+  },
+  {
+   "group": "Setup",
+   "routes": [
+    "/api/setup/code",
+    "/api/setup/account",
+    "/api/setup/draft",
+    "/api/setup/finish"
+   ],
+   "access": "public while setup is pending; fuobe_setup cookie",
+   "checks": "setup code throttled, never rotated by failures",
+   "package": "acc-14"
+  },
+  {
+   "group": "Access and mode",
+   "routes": [
+    "/api/access/*"
+   ],
+   "access": "owner and admins",
+   "checks": "fresh session for mode changes",
+   "package": "acc-15, acc-18"
+  },
+  {
+   "group": "Admin",
+   "routes": [
+    "/api/admin/**"
+   ],
+   "access": "per permission registry",
+   "checks": "target-role matrix for actions on people",
+   "package": "acc-12, acc-16 and later"
+  },
+  {
+   "group": "Approvals",
+   "routes": [
+    "/api/approvals/**"
+   ],
+   "access": "approvers",
+   "checks": "second decision 409",
+   "package": "acc-28"
+  },
+  {
+   "group": "SCIM",
+   "routes": [
+    "/api/scim/v2/*"
+   ],
+   "access": "fuobe_scim_ bearer",
+   "checks": "only SCIM-provisioned people; never install roles; brake",
+   "package": "acc-33"
+  },
+  {
+   "group": "Company sign-in",
+   "routes": [
+    "/api/identity/sso/*",
+    "POST /api/identity/sso/saml2/sp/acs/[id] (cross-site exempt)"
+   ],
+   "access": "public",
+   "checks": "bound domains; RelayState cookie; issuer+subject",
+   "package": "acc-32"
+  },
+  {
+   "group": "Billing",
+   "routes": [
+    "/api/billing/checkout",
+    "/api/billing/[provider]/webhook"
+   ],
+   "access": "session / public signed webhook",
+   "checks": "webhook exempt from setup gate, Preview, dormancy, captcha and IP limits; raw body signature; dedupe",
+   "package": "acc-43, acc-44"
+  }
+ ],
+ "settingsSplit": [
+  {
+   "key": "install.mode, install.signin, setup.state, setup.draft",
+   "scope": "install",
+   "who": "owner; env locks",
+   "why": ""
+  },
+  {
+   "key": "install.name, install.site_url, install.timezone, install.contact",
+   "scope": "install",
+   "who": "owner, admins",
+   "why": "links, cookies, passkeys, spend month, public contact"
+  },
+  {
+   "key": "signup.*, signin.*, email.*",
+   "scope": "install",
+   "who": "admins",
+   "why": "who joins and how"
+  },
+  {
+   "key": "teams.create, keys.mode, limits.member_default_usd, limits.unknown_price",
+   "scope": "install",
+   "who": "admins",
+   "why": "money policy"
+  },
+  {
+   "key": "spend_limits workspace/member",
+   "scope": "team",
+   "who": "team admins",
+   "why": ""
+  },
+  {
+   "key": "spend_limits user_self",
+   "scope": "user",
+   "who": "the person",
+   "why": "personal cap"
+  },
+  {
+   "key": "fal/replicate/anthropic keys",
+   "scope": "install + team + user",
+   "who": "admins / team admins / the person",
+   "why": "resolved by keys.mode; encrypted except Personal install keys"
+  },
+  {
+   "key": "civitai.key",
+   "scope": "install",
+   "who": "admins",
+   "why": "downloads land in shared LoRA folders"
+  },
+  {
+   "key": "comfyui.*, aitk.*, ollama.url, demo.mode, models.access, engine.mode, access.*, backup.*",
+   "scope": "install",
+   "who": "admins (backup: owner)",
+   "why": "fetch targets and server paths"
+  },
+  {
+   "key": "ollama.model, enhance.provider, cloud.provider, theme, notify.email",
+   "scope": "install default + user",
+   "who": "admins / the person",
+   "why": "preferences"
+  },
+  {
+   "key": "shares.public",
+   "scope": "install; team may narrow",
+   "who": "admins / team admins",
+   "why": "anyone, signed-in only, nobody"
+  },
+  {
+   "key": "guide.dismissed",
+   "scope": "user",
+   "who": "the person",
+   "why": "replaces the install-wide onboarding write"
+  },
+  {
+   "key": "openai.key, google.key",
+   "scope": "removed",
+   "who": "—",
+   "why": "nothing reads them"
+  },
+  {
+   "key": "browser keys",
+   "scope": "user per browser",
+   "who": "—",
+   "why": "prefixed fuobe:u:<id>: and cleared on sign-out"
+  }
+ ],
+ "plans": {
+  "creditValueUsd": 0.01,
+  "markupPct": 50,
+  "gpuUsdPerHour": 2.16,
+  "yearlyDiscountPct": 20,
+  "plans": [
+   {
+    "id": "free",
+    "price": 0,
+    "credits": 50,
+    "concurrency": {
+     "cloud": 1,
+     "gpu": 1
+    },
+    "queue": "free pool",
+    "notes": "after verification; badge; cheaper models; no Unlimited"
+   },
+   {
+    "id": "starter",
+    "price": 10,
+    "credits": 1000,
+    "concurrency": {
+     "cloud": 2,
+     "gpu": 1
+    },
+    "queueWeight": 2
+   },
+   {
+    "id": "pro",
+    "price": 30,
+    "credits": 3300,
+    "concurrency": {
+     "cloud": 4,
+     "gpu": 2
+    },
+    "queueWeight": 4,
+    "notes": "Unlimited relaxed on selected models"
+   },
+   {
+    "id": "ultra",
+    "price": 100,
+    "credits": 12000,
+    "concurrency": {
+     "cloud": 8,
+     "gpu": 4
+    },
+    "queueWeight": 8
+   },
+   {
+    "id": "team",
+    "pricePerSeat": 25,
+    "creditsPerSeat": 3000,
+    "pooled": true,
+    "concurrency": "4 a seat up to 32",
+    "queueWeight": "4 x seats, capped at 32"
+   },
+   {
+    "id": "enterprise",
+    "price": "contact",
+    "credits": "custom"
+   }
+  ],
+  "packs": [
+   {
+    "credits": 500,
+    "price": 5
+   },
+   {
+    "credits": 1200,
+    "price": 10
+   },
+   {
+    "credits": 3000,
+    "price": 24
+   }
+  ],
+  "packExpiry": "none by default (or >= 12 months, operator setting)",
+  "rollover": [
+   "none (default)",
+   "one month"
+  ],
+  "entitlementFields": [
+   "models allow/deny by id, family, kind, engine, provider; price multiplier",
+   "features: studios, custom LoRAs, own keys, training (incl. training.open), API, MCP, CLI, public links",
+   "concurrency cloud and GPU",
+   "queue weight",
+   "caps: resolution tier, seconds, outputs and batch, upscale target, training photos and steps, prompt length",
+   "storage quota",
+   "retention for Free (optional)",
+   "badge",
+   "API tokens and requests a minute",
+   "monthly credits, rollover, top-ups",
+   "seats"
+  ],
+  "queue": {
+   "freePool": "all Free accounts form one group (weight 1), per-person fairness inside",
+   "unlimitedPool": "low-weight shared pool",
+   "freePoolMaxSlotsPct": 25,
+   "weights": {
+    "starter": 2,
+    "pro": 4,
+    "ultra": 8,
+    "team": "plan weight x active seats, cap 32"
+   }
+  },
+  "changes": {
+   "upgrade": "new period now; pay new price minus value of unused plan credits (credits left x old price / old credits, capped at old price); old bucket expires; full new allowance from the paid invoice",
+   "downgrade": "at period end",
+   "cancel": "at period end",
+   "seatsAdd": "prorated charge and prorated seat credits",
+   "seatsRemove": "period end, no credit refund",
+   "unpaid": "changes refused",
+   "managedPayments": "changes at period end only"
+  },
+  "unlimited": "paid plans only, preferably open engine, one at a time, daily cap, per-plan operator-cost ceiling"
+ },
+ "ledger": {
+  "units": "integer milli-credits (1 credit = 1000)",
+  "tables": [
+   "credit_accounts (person or team, plan, frozen, debt_mc)",
+   "credit_buckets (source plan|topup|promo|admin|refund|trial, granted, remaining >= 0, expires_at, ref, status active|refund_pending|expired)",
+   "credit_ledger (append-only; kind grant|hold|capture|release|expire|clawback|adjust|debt; signed amount; bucket_id, hold_id, generation_id, price_version, provider_cost_usd, actor_id, reason, idem_key UNIQUE)",
+   "credit_holds (by meter hold)"
+  ],
+  "order": "credits that expire soonest first, then oldest",
+  "reserve": "debit buckets inside the core BEGIN IMMEDIATE admission; 402 NOT_ENOUGH_CREDITS when short",
+  "capture": "min(hold, final); rest back to the same buckets or a 7-day refund bucket; overage becomes debt (one step at most); new paid runs refused while debt > 0",
+  "release": "every core release path; settle exactly once per hold (settle:<hold>)",
+  "idempotencyKeys": [
+   "grant:sub:<subscription>:<period_start>",
+   "topup:cs:<checkout_session>",
+   "capture:<hold>",
+   "release:<hold>",
+   "clawback:<refund_id>",
+   "expire:<bucket>:<date>",
+   "admin:<uuid>",
+   "code:<redemption>"
+  ],
+  "sweeps": [
+   "expiry every 10 minutes",
+   "nightly invariants (buckets = ledger; no hold without a row)"
+  ],
+  "staffRecordMode": "$50 a day cap per staff account, audited",
+  "payer": "team plan pool in a team with a Team plan; otherwise the runner's own credits"
+ },
+ "libraries": [
+  {
+   "name": "better-auth (+ @better-auth/passkey, @better-auth/sso)",
+   "newest": "1.7.14 (2026-10-26)",
+   "ruleToday": "1.7.8 (2026-10-14)",
+   "licence": "MIT",
+   "use": "authentication only",
+   "packages": [
+    "acc-1",
+    "acc-19",
+    "acc-32"
+   ],
+   "notes": "every OSV advisory fixed at or below 1.7.7; files read at 1.7.14; from 2026-11-09 the rule gives 1.7.14"
+  },
+  {
+   "name": "nodemailer",
+   "newest": "10.3.1 (2026-10-29)",
+   "ruleToday": "10.1.4 (2026-10-18)",
+   "licence": "MIT-0",
+   "use": "SMTP",
+   "packages": [
+    "acc-11"
+   ],
+   "notes": "releases >= 14 days old are affected by advisories fixed in 10.1.4"
+  },
+  {
+   "name": "stripe",
+   "newest": "23.0.1 (2026-10-22)",
+   "ruleToday": "23.0.0 (2026-10-01)",
+   "licence": "MIT",
+   "use": "payments",
+   "packages": [
+    "acc-46"
+   ],
+   "notes": "no OSV entries"
+  },
+  {
+   "name": "@simplewebauthn/browser",
+   "newest": "14.0.0",
+   "ruleToday": "13.3.0",
+   "licence": "MIT",
+   "use": "passkeys in the browser",
+   "packages": [
+    "acc-19"
+   ],
+   "notes": "passkey plugin requires ^13.3.0"
+  },
+  {
+   "name": "uqr",
+   "newest": "0.1.3",
+   "ruleToday": "0.1.3",
+   "licence": "MIT",
+   "use": "QR codes",
+   "packages": [
+    "acc-18",
+    "acc-19"
+   ]
+  },
+  {
+   "name": "sharp",
+   "newest": "0.35.5",
+   "ruleToday": "0.35.5",
+   "licence": "Apache-2.0",
+   "use": "badge",
+   "packages": [
+    "acc-52"
+   ],
+   "notes": "already installed transitively"
+  },
+  {
+   "name": "@contentauth/c2pa-node",
+   "newest": "0.9.11 (2026-10-27)",
+   "ruleToday": "0.9.9 (2026-09-30)",
+   "licence": "MIT",
+   "use": "C2PA signing",
+   "packages": [
+    "acc-52"
+   ],
+   "notes": "Node >= 22, native binary download"
+  },
+  {
+   "name": "@aws-sdk/client-s3, s3-request-presigner",
+   "newest": "3.1159.0",
+   "ruleToday": "3.1152.0 (2026-10-14)",
+   "licence": "Apache-2.0",
+   "use": "object storage",
+   "packages": [
+    "acc-55"
+   ]
+  },
+  {
+   "name": "@vercel/otel",
+   "newest": "2.1.4 (2026-10-29)",
+   "ruleToday": "2.1.3 (2026-06-11)",
+   "licence": "MIT",
+   "use": "OpenTelemetry",
+   "packages": [
+    "acc-56"
+   ]
+  },
+  {
+   "name": "rejected",
+   "items": [
+    "extending auth.ts",
+    "Auth.js v5 (beta)",
+    "Lucia (deprecated)",
+    "Arctic and most of Oslo (deprecated)",
+    "embedding Ory Polis (optional sidecar only)",
+    "iron-session",
+    "Better Auth organization/admin/api-key/magic-link/oauth-proxy/one-tap/anonymous/device-authorization/jwt/bearer/multi-session/username plugins",
+    "Better Auth SCIM plugin",
+    "Better Auth Stripe plugin"
+   ]
+  }
+ ],
+ "decisions": [
+  {
+   "decision": "Deployment modes",
+   "choice": "Personal, In-house studio, Platform; one core; reversible switches with a snapshot first",
+   "fromOwner": true,
+   "section": "§2, §7.9"
+  },
+  {
+   "decision": "Sign-up",
+   "choice": "Open by default (Platform; Studio limited to the owner's work domain), with checks; approval, invite and closed as settings",
+   "fromOwner": true,
+   "section": "§6.1, §9.1, §10.1"
+  },
+  {
+   "decision": "Libraries",
+   "choice": "A private library each plus teams; sharing on purpose or by creating in the team space",
+   "fromOwner": true,
+   "section": "§7.4, §7.5"
+  },
+  {
+   "decision": "Local use",
+   "choice": "First screen: Just me on this computer or Create your account; switchable",
+   "fromOwner": true,
+   "section": "§7.9"
+  },
+  {
+   "decision": "Paid keys",
+   "choice": "install keys with a limit, own keys, or both, chosen in setup",
+   "fromOwner": true,
+   "section": "§7.12"
+  },
+  {
+   "decision": "Enterprise",
+   "choice": "All listed features, after the core",
+   "fromOwner": true,
+   "section": "§9.5, §16"
+  },
+  {
+   "decision": "Setup questions",
+   "choice": "Wizard after Create your account with defaults; Just me skips it",
+   "fromOwner": true,
+   "section": "§7.9"
+  },
+  {
+   "decision": "No Higgsfield models or API; licences are information",
+   "choice": "Kept",
+   "fromOwner": true,
+   "section": "§4, §10.3"
+  },
+  {
+   "decision": "Identity library",
+   "choice": "better-auth for authentication only",
+   "fromOwner": false,
+   "section": "§5.2"
+  },
+  {
+   "decision": "Teams owned by Fuobe; several per person; Editor label",
+   "choice": "Fuobe workspaces and members",
+   "fromOwner": false,
+   "section": "§7.3"
+  },
+  {
+   "decision": "Studio join default",
+   "choice": "Open limited to the owner's work domain; approval fallback without checked addresses",
+   "fromOwner": false,
+   "section": "§9.1"
+  },
+  {
+   "decision": "Member limit",
+   "choice": "$25 a month",
+   "fromOwner": false,
+   "section": "§7.12"
+  },
+  {
+   "decision": "Sessions and passwords",
+   "choice": "30 days rolling; 8-128 characters; blocklist; scrypt N=2^15 r=8 p=3",
+   "fromOwner": false,
+   "section": "§7.2"
+  },
+  {
+   "decision": "Two-step",
+   "choice": "For every account; required for owner, admins, auditors and staff with 7 days of grace",
+   "fromOwner": false,
+   "section": "§8, §9.5"
+  },
+  {
+   "decision": "Recovery",
+   "choice": "One mechanism: fuobe recover / FUOBE_RECOVER",
+   "fromOwner": false,
+   "section": "§7.15"
+  },
+  {
+   "decision": "Setup protection",
+   "choice": "Setup code at commit, in the fragment, throttled",
+   "fromOwner": false,
+   "section": "§7.9"
+  },
+  {
+   "decision": "Platform credit value and markup",
+   "choice": "$0.01, 50%",
+   "fromOwner": false,
+   "section": "§10.5"
+  },
+  {
+   "decision": "Platform plans",
+   "choice": "Free 50; Starter $10/1,000; Pro $30/3,300; Ultra $100/12,000; Team $25/seat/3,000; Enterprise contact",
+   "fromOwner": false,
+   "section": "§10.2"
+  },
+  {
+   "decision": "Platform teams without a Team plan",
+   "choice": "Sharing only; runner's credits pay",
+   "fromOwner": false,
+   "section": "§10.2"
+  },
+  {
+   "decision": "Payments",
+   "choice": "Stripe direct, Managed Payments, none; fake for tests only",
+   "fromOwner": false,
+   "section": "§10.4"
+  },
+  {
+   "decision": "Safety",
+   "choice": "Blocks by default; withhold on failure; 18+ default (16 allowed, likeness 18+); C2PA everywhere",
+   "fromOwner": false,
+   "section": "§10.8"
+  },
+  {
+   "decision": "Database",
+   "choice": "SQLite on one host; Postgres deferred",
+   "fromOwner": false,
+   "section": "§10.10"
+  },
+  {
+   "decision": "Community feed",
+   "choice": "Not in this plan",
+   "fromOwner": false,
+   "section": "§15"
+  },
+  {
+   "decision": "Version rule",
+   "choice": "Newest release >= 14 days old and OSV-clean, else oldest fixing all advisories; applied when each package starts",
+   "fromOwner": false,
+   "section": "§5.2"
+  }
+ ],
+ "reviews": {
+  "security": {
+   "mustFix": 11,
+   "applied": 11,
+   "shouldFix": 23,
+   "partlyRejected": [
+    "private fetch targets for GPU/Ollama/AI-Toolkit stay admin-settable",
+    "log streaming is one HTTPS JSONL sink",
+    "Personal install keys stay as today"
+   ]
+  },
+  "engineering": {
+   "mustFix": 12,
+   "applied": 12,
+   "shouldFix": 26,
+   "partlyRejected": []
+  },
+  "moneyOps": {
+   "mustFix": 10,
+   "applied": 10,
+   "shouldFix": 13,
+   "partlyRejected": [
+    "Managed Payments plan changes at period end only (limitation)"
+   ]
+  },
+  "ux": {
+   "mustFix": 16,
+   "applied": 16,
+   "shouldFix": 20,
+   "partlyRejected": [
+    "setup-code skip on loopback rejected",
+    "Inbox kept in the account menu as a second entry"
+   ]
+  },
+  "details": "accounts-8.md §14"
+ },
+ "packages": [
+  {
+   "key": "acc-1",
+   "title": "Core: identity base (Better Auth behind Fuobe, identity tables, bootstrap, principal, proxy registries, snapshots, security headers)",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [],
+   "brief": "Sections: §7.1, §7.2 (password format), §7.9 (fresh installs), §7.15 (secret fingerprint), §7.16, §5.2 (version rule).\nFiles: package.json (better-auth exact, per §5.2 rule); new src/server/identity/{auth.ts, password.ts, principal.ts, bootstrap.ts, admin-ops.ts, refusals.ts}; src/server/mode.ts (features registry); src/server/backup/snapshot.ts; scripts/auth-schema.mjs; src/server/db.ts (migration 23 identity tables, 24 frozen Better Auth SQL); src/app/api/identity/[...all]/route.ts; shims src/app/api/auth/{login,logout,password,tokens}/route.ts; src/proxy.ts; src/instrumentation.ts (awaited bootstrap); next.config.ts headers().\nBehaviour: Better Auth configured exactly as §7.1: own better-sqlite3 connection, auth_* table names, HKDF secret from FUOBE_SECRET or data/secret.key, __Host- cookies on https via useSecureCookies:false plus per-cookie names, ipAddressHeaders x-fuobe-client-ip written by the proxy only when a trusted proxy is configured, disableIpTracking otherwise, cookieCache off, telemetry off. The router-only endpoint allowlist excludes /sign-up/*, /sign-in/social and /sign-in/oauth2/*; user.create.before refuses any create other than claim-owner and the bootstrap import unless accounts.multi_user=1 (not set by this package). Bootstrap: wal_checkpoint and a pre-accounts snapshot with session rows stripped; root secret and identity.secret_check (refuse to start on mismatch unless FUOBE_ACCEPT_NEW_SECRET=1); import the auth.json password as u_owner's (legacy salt:hash verifies, upgraded to scrypt$v2 N=2^15 r=8 p=3 on sign-in) and tokens as legacy Full tokens; sync FUOBE_PASSWORD every boot. A fresh data dir boots as personal, sign-in off, setup.state=done; a password install becomes Personal with sign-in. The proxy resolves bearer tokens from api_tokens and the Better Auth cookie, keeps DNS-rebinding, crossSite and share logic, and gains OPEN and CROSS_SITE_EXEMPT registries. The login shim signs u_owner in with one password field and answers with a full reload. Security headers: X-Frame-Options DENY and frame-ancestors 'none' except /s/:path*, no-store on auth pages.\nTests: identity-bootstrap matrix (no password, password, FUOBE_PASSWORD, tokens, fresh dir); schema guard (getMigrations finds nothing to create or add); allowlist (router-only; auth.api passes; POST /api/identity/sign-up/email answers 403 and creates no auth_user row); password formats and upgrade; proxy matrix (Just me, password install, bearer, cookie, share link); security headers; snapshot has no auth_session rows; fingerprint mismatch refuses start; admin-ops reachability pin; Better Auth behaviour pins (cookie names and attributes on http and https, disableIpTracking skips IP rules, request scope inside hooks, returnHeaders); 50 sign-ins during runner writes with busy waits under 1 s.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; every existing Vitest suite (FUOBE_MODE=personal default); the eval harness; the only visible change is one re-sign-in on password installs."
+  },
+  {
+   "key": "acc-2",
+   "title": "Core: actor context on every route, role and permission registries, audit writer, runners carry an actor",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-1"
+   ],
+   "brief": "Sections: §7.1 (principal, restricted kinds), §7.3, §7.11, §7.14 (audit chain), §13 (test harness).\nFiles: new src/server/access/{actor.ts (ALS RequestScope, currentActor throws, runAs, asSystem), route.ts (handler({access, scopes}) with the restricted-kind registry and the substituteActor seam), permissions.ts (role and permission registries, effectiveTeamRole), gates.ts (no-op), audit.ts (append-only, prev_hash chain)}; every src/app/**/route.ts (192 at 545ebb5, including the skills recipe run, verify, estimate and recipe routes); src/server/mcp.ts (handleMcp(body, actor)); runner entry points in generations.ts, training.ts, faceless.ts, swap-studio.ts, content-factory.ts, assist/schedules.ts, assist/agent.ts, brand.ts, ads.ts; vitest.config.ts setupFiles += tests/setup/actor.ts; new tests/helpers/actors.ts.\nBehaviour: Every handler resolves an actor through handler(); install-config routes (PUT /api/settings, PUT /api/settings/models, POST /api/providers/test, POST /api/loras) need install.settings (the Personal owner and the local actor pass); typed errors map to 404, 403, 401, 402 and 403 REAUTH; every 403 is audited; runners and after() continuations run inside runAs(row owner) or asSystem. No scoping change yet. tests/setup/actor.ts wraps each test in runAs(local u_owner) unless the test calls asNobody(), so the 101 suites that call server modules directly keep working.\nTests: route-sweep (every route.ts goes through handler(); fails on a new unwrapped route); settings-roles; audit append-only triggers and chain verification; runners carry an actor; mcp receives the actor.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the MCP route's Origin check; every existing suite unchanged in behaviour."
+  },
+  {
+   "key": "acc-3",
+   "title": "Core: scoping columns and the data-access layer for the library, files and records",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-2"
+   ],
+   "brief": "Sections: §7.4 (rule, migration 25 and 26, library rows), §7.5 (create rule, created_by and paid_by = actor), §7.6 (recordVisible, denied.hidden).\nFiles: src/server/db.ts (migration 25: workspace_id, created_by, paid_by on every top-level table, backfill to w_owner/u_owner, triggers refusing NULL workspace_id, indexes, w_install rows for built-in palettes, the demo voice and voice previews; migration 26: rebuild skills, skill_toggles, assist_connectors; item_marks with favorites and pins copied); new src/server/access/scope.ts (list({space}), get(kind, id, need), stamp, assertReadable); src/server/generations.ts (createGenerations L691 and recordLocalGeneration L1700 stamp; listGenerations scoped; root-workspace rule), src/server/library.ts (Trash, restore, empty Trash, folders, facets and zips per workspace), src/server/storage.ts, src/server/records.ts (recordVisible), src/proxy.ts; routes under src/app/api/generations/**, folders/**, assets/**.\nBehaviour: Rows are visible per the §7.4 rule and otherwise answer 404 with a rate-limited denied.hidden audit entry; created_by and paid_by are the acting person for any row a request starts; a request that starts rows from a root uses the root's workspace only with Editor or more there; favorites and pins come from item_marks; Trash is per workspace; a token pinned to a workspace sees only that workspace plus grants to it, and an X-Fuobe-Workspace header that differs from the pin answers 403. Personal sees no difference (one workspace).\nTests: table-classification (every table and file area in §7.4, fails on a new one); idor.test.ts ROUTE_FIXTURES for the library, folder, asset and generation routes; favorites per viewer; Trash per workspace; pinned token cannot read or write outside its pin; retry and Run again stamp the actor; ASSET_REFS/ASSET_FREE entries for new columns.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Library, folders and Trash e2e (library-flows); the SSE feed for the owner."
+  },
+  {
+   "key": "acc-4",
+   "title": "Core: scoping in every studio module (Cinema, Canvas, Layers, Shorts, brands and ads, Faceless, Content Factory, Dub, Katana, Swap, elements and training)",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-3"
+   ],
+   "brief": "Sections: §7.4 (studio rows, characters, trainings), §7.5 (mentions, cross-workspace inputs are added in acc-6), §3.2.\nFiles: src/server/{cinema.ts, cinema-generate.ts, cinema-director.ts, canvas.ts, layers.ts, shorts.ts, brand.ts, ads.ts, marketing.ts, palettes.ts, moodboards.ts, photodump.ts, faceless.ts, content-factory.ts, dub.ts, katana.ts, swap-studio.ts, elements.ts, training.ts, storyboard.ts, mixed-media.ts, chains.ts, influencer.ts, genjutsu.ts, evolution.ts, remove-object.ts, audio-tools.ts} and their routes under src/app/api/**; src/server/records.ts.\nBehaviour: Every list and get goes through scope.list/get; children follow parents; @handles are unique per workspace and mentions resolve per §7.5; trainings record started_by and paid_by; attachLora accepts only visible elements' files and catalog LoRAs; Cinema My Generations lists only visible projects; storyboard films and retries use the actor; sweeps and runners act as each row's owner.\nTests: IDOR fixtures for every studio dynamic route; handles per workspace; mention resolution order and ambiguity refusal; retries stamp the actor; existing studio suites green.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; every studio e2e (cinema-*, canvas-*, layers, character-swap-studio, mixed-shorts-original)."
+  },
+  {
+   "key": "acc-5",
+   "title": "Core: scoping in Assist, skills, recipes and MCP; agents narrowed in shared spaces",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-3"
+   ],
+   "brief": "Sections: §7.4 (Assist rows, skills resolution, assist_memory), §7.10 (MCP, agents in shared spaces), §7.11.\nFiles: src/server/assist/{agent.ts, tools.ts, studio-tools.ts, studio-routes.ts, context.ts, context-tools.ts, memory.ts, projects.ts, schedules.ts, connectors.ts}, src/server/skills.ts, src/server/recipes.ts, src/server/mcp.ts; routes under src/app/api/assist/** and src/app/api/mcp.\nBehaviour: Threads, memory, schedules and connectors belong to their user; projects and skills to workspaces; skills resolve personal, then active team, then built-in, and the skills routes accept ?workspace=; taken() and renameSkillRefs work per workspace; listMemories returns only the actor's personal rows; use_personal_memory means the chat author's memory; activeConnectors returns only the author's connectors; ToolContext carries the actor and, in a team thread, narrows reads and writes to that workspace; schedules run as their owner; recipes run under runAs; MCP tools/list is filtered by token scope.\nTests: memory isolation, connector isolation, skill resolution with ?workspace=, MCP tools/list per scope, schedule runs as owner, agent narrowing in a team thread, IDOR fixtures for every Assist route including skills run/verify/estimate/recipe.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; assist-* suites, the CLI skills commands, the Work2Skill recipe routes."
+  },
+  {
+   "key": "acc-6",
+   "title": "Core: leak closures (files ACL, checked reads, declared ids, live-stream isolation, share rules, browser state)",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-4",
+    "acc-5"
+   ],
+   "brief": "Sections: §7.6, §7.5 (cross-workspace inputs, move, share and duplicate server rules), §7.13 (creation and serve-time checks), §3.3, §3.8.\nFiles: src/app/api/files/[...path]/route.ts and src/server/file-response.ts (ACL by assets.rel_path, cache headers per mode); src/server/storage.ts (readChecked, assertReadable) and the eight absolutePath call sites (audio-tools.ts, katana.ts, canvas.ts, dub.ts, assist/studio-routes.ts, recipes.ts, library.ts); src/server/request-schema.ts and every route zod schema (ref(kind) annotations); src/server/live.ts and src/app/api/generations/stream/route.ts; src/lib/generation-stream.ts (FeedFilter space), the job notifications component; src/server/shorts-schemas.ts (once by user); brand.ts lock; faceless.ts voice previews in w_install; src/app/api/assets/[id]/route.ts; src/server/shares.ts, share-access.ts, src/proxy.ts (owner rule, signed-in-only policy); new src/lib/local-store.ts; src/app/providers.tsx and src/lib/api.ts (workspace in query keys); src/components/security-settings.tsx (sign-out full reload); new /api/users/[id]/avatar.\nBehaviour: Every file read is checked; every id field in path, query and body is declared and checked; cross-workspace inputs answer 409 CROSS_SPACE_INPUT until confirmed (never for continuations, schedules, approvals, Assist or MCP); the live stream checks each event against current memberships and grants (version counter), re-validates the session every 60 s and closes on revoke; payloads carry per-viewer marks; ?workspace= on the stream and GET downloads; share links need Editor and the policy at creation and are re-checked at every serve; once() and locks per user; storage keys prefixed and cleared on sign-out.\nTests: files-acl; ref-annotation sweep (fails on an undeclared id-like field); IDOR matrix over every declared path, query and body field; absolutePath grep test; live-stream isolation and revocation (removed member gets nothing new and the stream closes within 60 s); leaks (once, brand lock, voice preview, assetUses copy); shares-policy (viewer can't share; serve-time re-check after move, leave and policy change).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; live updates for the owner's own feed; downloads and zips; the share page and share files route."
+  },
+  {
+   "key": "acc-7",
+   "title": "Core: provider payload guard (params.extra allowlist, LoRA rule, final-payload pricing, ComfyUI prefixes and cleanup)",
+   "mode": "core",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-6"
+   ],
+   "brief": "Sections: §7.7, §3.9.\nFiles: src/lib/catalog/types.ts (route extra allowlist), scripts/gen-cloud-models.py (emit allowlists from the research field lists) and the open ModelDefs in src/lib/catalog/models.ts; src/server/request-schema.ts L100 and L109-133; src/server/canvas.ts L121; src/app/api/generations/local/route.ts; src/lib/catalog/payload.ts L418-426 (extra before priced and safety fields); src/server/providers/comfyui.ts L807-811 and L1171; src/server/generations.ts prepare() (final-payload estimate); comfy history delete and per-job prefix.\nBehaviour: Unknown extra keys answer 400 'This setting isn't available for {model}.'; keys naming media, file, LoRA, model or checkpoint bindings and strings with [output], [input], [temp], / or backslash are refused; loras[] accepts catalog LoRAs and visible elements' trained files; the final payload is priced again and a higher price refuses the request ('This would cost more than shown. Refresh the price and try again.'); safety and pricing fields are written after extra; in Studio and Platform each ComfyUI job gets a random filename_prefix and its /history entry is deleted after outputs are saved (files too when the server record has local folders).\nTests: extra.image naming an [output] file refused; unknown extra key refused; another person's trained LoRA refused; extra.num_images above the priced count refused; payload snapshots show safety fields after extra; history delete called; random prefix in Studio; an enumeration test that every extra key used by presets, studios, Canvas and eval cases is on its model's allowlist.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; every payload snapshot test, the eval cases that pass params.extra, the Canvas Table node."
+  },
+  {
+   "key": "acc-8",
+   "title": "Core: paid keys, the one meter and the entitlements module, with the usage page",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-7"
+   ],
+   "brief": "Sections: §7.12 (who pays, payer-aware readiness, meter tables, Budget, spend points, hold sizes, entitlements), §7.8 (keys, member key test), screens §S4.3 and §S4.7.\nFiles: src/server/db.ts migration 27 (provider_keys, spend_limits, meter_holds, meter_entries, limit_requests, lora_mirrors.key_ref, moodboards.style_key_ref; sets accounts.multi_user=1); new src/server/keys.ts (payerFor, readyFor, withKey, AES-256-GCM); src/server/providers/{fal.ts, replicate.ts, llm.ts, types.ts (PollResult.gpuMs), comfyui.ts (execution timestamps)}; src/server/enhance.ts; src/server/assist/agent.ts; src/server/faceless.ts askLlm; src/server/training.ts (cloud and AI-Toolkit holds); src/server/loras.ts; src/server/cinema-generate.ts; src/server/generations.ts (chooseRoute and routeReady per payer; reserve at L691, L1700 and dependents); new src/server/meter/{meter.ts, usd-budget.ts}; new src/server/entitlements.ts; routes /api/me/usage, /api/me/entitlements, /api/me/keys, /api/me/keys/test, /api/me/limit-requests; page /settings/usage; composer payer hint and refusal lines.\nBehaviour: keys.mode install, own or both resolves the payer, written to paid_by and used for every poll, cancel and download; readiness and demo auto are decided per payer; every spend point reserves inside BEGIN IMMEDIATE (cloud, open engine with gpuMs capture, AI-Toolkit trainings, Claude calls via meter.llm); UsdBudget with limits for install, team, member and personal cap; offered(), admit(), gate() and summary() in one module; GET /api/me/usage works for the local actor. Settlement stays as today until acc-9.\nTests: meter (every spend point reserves; 20 concurrent creates against a $1 limit give the right refusals; open-engine gpuMs capture; AI-Toolkit hold; FUOBE_DEMO_PRICED demo holds; record mode); keys binding (poll uses paid_by's key); payer-aware readiness (own mode, no install key, member key: real run, not demo); entitlements offered/admit/gate; member key test endpoint accepts only key values.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Personal runs with install keys exactly as today; demo holds are 0 unless FUOBE_DEMO_PRICED=1."
+  },
+  {
+   "key": "acc-9",
+   "title": "Core: exact settlement (compare-and-set terminal writes, cancel from the provider's answer, stopped steps, debt-free capture)",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-8"
+   ],
+   "brief": "Sections: §7.12 (settlement, holds over time, re-pricing, provider out of funds, orphans), screens §S4.9.\nFiles: src/server/generations.ts (update() L149 CAS for terminal transitions; cancelGeneration L1641; overdue and timeout branches; submit cancel-on-arrival; launchStored re-reserve; 'canceling' status; 'stopped' dispatch state; orphan entries); src/server/providers/{fal.ts, replicate.ts, comfyui.ts} (cancel returns removed, requested, completed or aborted; insufficient-funds detection); src/server/meter/meter.ts (hold state machine, settle:<hold> key, LLM hold expiry); src/lib/types (status canceling); generation card and chain card components (Stop copy, stopped state with Add credits or Ask for more and Continue); Assist stop message; schedules pause.\nBehaviour: Exactly one settlement per hold; release only when the job provably never ran; otherwise keep polling and capture what ran; Fuobe-side failures after provider success capture; fal or Replicate out of funds pauses that provider and alerts admins; holds on live rows never expire by age; a higher re-price at launch reserves the difference or stops the step (never fails it); Continue re-runs admission for stopped steps only; stopped steps cancel after 7 days.\nTests: per-provider cancel states (queued, in progress, already completed, aborted, interrupted); cancel against success with injected delays in persist and postProcess gives exactly one settle entry and a matching status; re-price above budget stops the step and Continue resumes it; LLM hold expiry captures the maximum; insufficient funds pauses the route; Stop copy on running jobs.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; cancel and retry flows in library-flows and cinema e2e; Personal USD caps."
+  },
+  {
+   "key": "acc-10",
+   "title": "Core: runner seams (launch collector, postProcess, live source, idempotency, one price formatter, housekeeping)",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-9"
+   ],
+   "brief": "Sections: §7.18, §7.12 (request idempotency, display), §7.11 (housekeeping registry).\nFiles: src/server/generations.ts (launch() replacing void submit at L777 and L1117; launchStored; postProcess before L1481), src/server/training.ts L221; src/server/access/route.ts (per-request launch collector); src/server/live.ts (pluggable source, typed events); db migration for request_keys; src/lib/api.ts and bin/lib/client.mjs (Idempotency-Key per click); src/server/mcp.ts (key from session and tool-call id); new src/lib/price-display.ts replacing costLabel (composer.ts L971), formatCost (format.ts), formatUsd (cinema/money.ts), the Faceless usd() and the 51 inline sites, plus server strings (assist-schedule.ts L275, assist/context.ts L54, assist/tools.ts L59-65, cinema-generate.ts L130); src/instrumentation.ts housekeeping registry.\nBehaviour: With no gate claiming launches the order and timing are identical to today; postProcess is a no-op by default; request_keys inserted pending in the reserve transaction (409 IN_PROGRESS while pending, replay after, 422 for a different body, 24 h); one formatter for every price label; housekeeping deletes per §7.11.\nTests: collector parity; launchStored equals advanceDependents; postProcess no-op timing; idempotency replay, 409 and 422; price-display sweep with byte-identical USD labels in Personal and Studio; housekeeping retention.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; composer-flows e2e price labels; Assist and MCP price text."
+  },
+  {
+   "key": "acc-11",
+   "title": "Core: sign-in pages, sign-up policy, mailer, consents and the notifications store",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-10"
+   ],
+   "brief": "Sections: §7.1 (allowlist adds sign-up with the policy), §7.2 (throttles, 423 rules), §9.1 (policy, domain trust only for checked addresses), §7.14 (notices), screens §S2 and §S12.\nFiles: package.json (nodemailer per §5.2 rule); new src/server/identity/policy.ts, src/lib/webmail-domains.ts, vendored disposable list and password blocklist; new src/server/mail/{mailer.ts, outbox.ts, templates/*}; db migration for consents, notifications, mail_outbox; src/server/identity/auth.ts (emailOTP, socialProviders, genericOAuth from settings); pages src/app/login, /register, /verify, /reset, /reset/[token]; new src/components/auth/*; /api/public/sign-in-options; /api/auth/forgot*; src/proxy.ts OPEN additions; new src/server/inbox.ts (notify(), no UI yet).\nBehaviour: open, approval, invite and closed policies with domain lists; open needs email checks or Google/OIDC only; domain auto-approve only for checked addresses; uniform answers for existing emails; per-account throttle keyed by email hash; password-only 423 with the 24 h and passkey/second-factor/reset lifts; global soft throttle; SMTP, log or none transports with an outbox and retries at 1, 5 and 30 minutes; consents append-only through recordConsent; inbox.notify() writes notifications and email copies for requests, decisions, exports, deadlines and alerts.\nTests: signup-policy matrix; open-without-email refusal; unverified domain address stays pending; uniform sign-up answer; throttle by email hash and 423 lifts; OTP stored hashed; consents append-only; outbox retries; e2e sign-in pages at 390 and 1440 px, light and dark, keyboard and role=alert.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the Personal one-field login; /login redirects to / in Just me."
+  },
+  {
+   "key": "acc-12",
+   "title": "Core: install invites, approval queue and admin actions on people (with the target-role matrix and notices)",
+   "mode": "core",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-11"
+   ],
+   "brief": "Sections: §7.3 (who may act on whom), §9.1 (invites, approval, no-email reset links), §7.14 (notices to the person), screens §S2.5 and §S6.3.\nFiles: invites table usage and /api/invites/*; page /invite/[token]; approval queue API; /api/admin/people/[id]/* (approve, disable, enable, reset email or link, sign out everywhere, role, transfer ownership); src/server/identity/admin-ops.ts (target matrix enforced in one place).\nBehaviour: Invites by email or copyable link, 72 h, single use, resend invalidates, 5-minute resend guard, daily limits, roles limited to what the inviter may assign, admin-role invites need a checked email; approvals; admin actions follow the matrix (nothing targets the owner; admins and staff need the owner); reset emails and links never clear two-step or passkeys; Platform staff never get links; the target always gets an Inbox notice and an email when mail works.\nTests: invite lifecycle (expiry, resend, wrong account, used, revoked, unknown); role x action matrix; reset keeps two-step; notices written; audit entries.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the owner's own sign-in; FUOBE_PASSWORD break-glass."
+  },
+  {
+   "key": "acc-13",
+   "title": "Core: recovery, Inbox, account menu, Confirm it's you, the account page and the member welcome",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-12"
+   ],
+   "brief": "Sections: §7.15 (recovery), §7.2 (step-up), §7.10 (tokens), screens §S2.6, §S3 and §S4.1.\nFiles: bin/fuobe.mjs and bin/lib (local recover mode reading FUOBE_DATA_DIR), FUOBE_RECOVER at boot; /api/recover/{verify,finish}; page /recover; Inbox bell in the sidebar header and PhoneBar (src/components/app-sidebar.tsx, phone-bar.tsx), /api/me/inbox and /api/me/inbox/read; account menu in the sidebar footer (L386-428) and the phone avatar sheet; new src/components/ui/responsive-dialog.tsx; Confirm it's you dialog with session_step_up; /settings/account (profile, avatar upload, email change, sign-in, devices via /api/me/sessions, tokens with name, scope, expiry and pin, your keys, notifications, appearance) including the Just me variant; Home member welcome card replacing GetStarted for non-admins.\nBehaviour: Recovery file 0600 with a 60-bit code, 30 minutes, 5 tries, printed path; redeem at /recover#CODE with a Strict cookie; the Inbox is reachable from a bell with an unread badge; devices never expose session tokens; tokens are created only from a browser session or the local actor; the welcome card per §S3.6.\nTests: recovery (file mode, tries, expiry, no server call from the CLI); inbox read and mark all; devices list contains no tokens; token scopes and pin; ResponsiveDialog layout at 390 px; keyboard and screen-reader checks.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Settings → Security token list and MCP snippet (reused); fuobe login with a pasted token."
+  },
+  {
+   "key": "acc-14",
+   "title": "Core: first-run setup (owner's first screen, setup code at commit, wizard registry) and headless setup",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-13"
+   ],
+   "brief": "Sections: §7.9 (first screen, setup code, steps, headless, Platform availability), §6.3, screens §S1.\nFiles: src/app/setup/** pages; /api/setup/{code,account,draft,finish}; setup code writer and terminal lines in src/instrumentation.ts; step registry; headless env in bootstrap; src/proxy.ts setup gate activated for fresh installs; tests/e2e/_server.mjs, tests/e2e/_routes.mjs (AUTH_ROUTES), README browser-checks section (FUOBE_MODE=personal FUOBE_DEMO_MODE=on).\nBehaviour: Fresh installs open on Just me or Create your account; the code travels in the fragment, is asked only at commit, is throttled after 5 misses and never rotated on failures; the Platform card is disabled until acc-57 (FUOBE_DEV_PLATFORM for development); Studio recommended settings preselect open with the owner's work domain, falling back to approval without mail or Google; Finish deletes the code file and does a full load.\nTests: setup-code throttle and no rotation; fragment carried and removed; Just me finishes in one click from the link; Create account for Personal and Studio; Platform card disabled; recommended settings with and without mail; headless matrix and its one-line errors; e2e setup-wizard at 390 and 1440 px light and dark.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; existing installs (setup.state=done); the e2e harness on a fresh data dir."
+  },
+  {
+   "key": "acc-15",
+   "title": "Core: mode switch, Settings → Access and the settings visibility matrix",
+   "mode": "core",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-14"
+   ],
+   "brief": "Sections: §7.9 (switching), §7.8, screens §S0.3 and §S4.4.\nFiles: new src/server/mode-switch.ts (canLeave and onEnter registries, dormancy, snapshot first); /api/access/*; /settings/access core sections (mode card, Require sign-in, who can join, sign-in methods, email, site address, time zone, share links); the settings sub-nav registry driven by the visibility matrix; src/components/settings-form.tsx (StatusStrip only on General for admins; members see Managed by your admin).\nBehaviour: Owner-only switching with a fresh session and a snapshot; Personal to Studio or Platform needs a checked owner email and a non-loopback address; Studio or Platform to Personal makes others dormant and keeps the owner's access to every team space; Require sign-in on and off in Personal with honest copy; env locks show Set by the server.\nTests: mode-switch round trip with snapshots and dormancy; Require sign-in on and off; visibility matrix per mode and role; e2e access page at 390 px.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Just me after turning sign-in off again; the owner's library after a round trip."
+  },
+  {
+   "key": "acc-16",
+   "title": "Core: admin console core (/admin shell, Overview, People and the person page, Usage & limits)",
+   "mode": "core",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-15"
+   ],
+   "brief": "Sections: §7.3, §9.1, screens §S6.\nFiles: src/app/admin/** (layout with the nav registry and Select under 768 px, Overview registry, People list with tabs Active, Waiting, Invited, Turned off, /admin/people/[id] with Overview, Usage, Devices and Tokens tabs, Teams read-only list, Usage & limits with CSV, default limit, unknown-price switch and limit requests); ⌘K entries in src/components/command-palette.tsx.\nBehaviour: Admins see people, spend and requests; members get 404; every action uses acc-12's actions; CSV has a byte-order mark and a formula-injection guard.\nTests: admin permissions (404 for members and auditors where not allowed); CSV injection guard; limit request approve and decline; e2e admin pages at 390 and 1440 px.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Settings pages for the Personal owner."
+  },
+  {
+   "key": "acc-17",
+   "title": "Core: teams and sharing (team workspaces, switcher, Saving-to chip, Move, Share, Duplicate, Library spaces, team keys and limits)",
+   "mode": "core",
+   "effort": "large",
+   "dependsOn": [
+    "acc-16"
+   ],
+   "brief": "Sections: §7.5 (all rules), §9.3, §7.13 (link re-checks on move and leave), screens §S5.\nFiles: /api/workspaces/* (create, members, invites with the beforeJoin seam, leave, transfer, delete or archive); Create team dialog; /teams/[slug]/settings (Members, Keys & limits, General); full /admin/teams; the switcher in the account menu and ⌘K; the Saving-to chip in src/components/studio composers; /api/move, /api/grants, /api/duplicate; the share dialog section; src/components/library-view.tsx (space control above the tab strip; Shared renamed Links); team keys and limits in the meter; team policies for links, brand kits and copying out; the Editor label.\nBehaviour: Several teams per person; roles with the last-owner guard; Move out of a team needs a team admin; grants need Editor and can't exceed the granter's level; Studio people picker limited to people who share a team; deleting a team moves or archives and returns likeness and voice elements; links re-checked on move and leave; new tabs start in the last-used space.\nTests: teams.test.ts (semantics, last owner, transfer, leave, delete); IDOR with roles; cross-space 409; move-out rule; grant level cap; e2e accounts (invite, isolation, share, team move, limit line, sign-out cache, new tab keeps the space).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the Library tabs for a person with no team (no space control shown)."
+  },
+  {
+   "key": "acc-18",
+   "title": "Personal: access and remote use (address checks, other addresses, trusted proxy, remote guide, Just me honesty)",
+   "mode": "personal",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-15"
+   ],
+   "brief": "Sections: §8 (Just me rules, Access and remote use), §7.2 (trusted proxies), screens §S4.4.\nFiles: new src/server/access.ts (allowedHosts, trustProxy) read by src/server/auth.ts crossSite and hostAllowed, trustedOrigins, the throttles and the client IP; new src/server/net-info.ts; /api/access, /api/access/diagnostics, /api/access/sign-in; src/lib/site-address.ts; /settings/access Personal sections and the remote guide; the other-device banner; uqr 0.1.3; docs/remote-access.md.\nBehaviour: Other addresses refuse *, wildcards, ranges and public suffixes; Just me refuses forwarded requests from non-private addresses unless a trusted proxy is set; /api/identity/* unmounted in Just me except sign-in-options; the detected client IP shown; quick tunnels refused in Just me; Cloudflare Tunnel and Caddy recipes only with sign-in on.\nTests: access-settings; runtime-auth extension (tunnel refusal, private ranges incl. 100.64.0.0/10); e2e personal-access.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; hosts that pass today's hostAllowed; FUOBE_ALLOWED_ORIGINS wins; /s/ framing."
+  },
+  {
+   "key": "acc-19",
+   "title": "Personal: two-step sign-in and passkeys for every account in every signed-in mode",
+   "mode": "personal",
+   "effort": "large",
+   "dependsOn": [
+    "acc-13",
+    "acc-18"
+   ],
+   "brief": "Sections: §8 (two-step and passkeys), §7.2 (step-up), §7.15 (recovery checkboxes), screens §S2.2, §S2.6 and §S4.2.\nFiles: package.json (@better-auth/passkey matching better-auth, @simplewebauthn/browser 13.3.0); src/server/identity/auth.ts (twoFactor and passkey plugins, allowlist entries, freshness hooks, 10-passkey limit); db (frozen auth_two_factor, auth_passkey; totp_seen; session_mfa); verify-2fa restricted kind; the login shim forwards twoStep; admin-ops resetTwoFactor and removePasskeys; /login code step and passkey button; /two-step?mode=session; Account sections Passkeys and Two-step with the setup dialog; passkey option in Confirm it's you; /recover checkboxes.\nBehaviour: TOTP with replay guard, backup codes, trusted devices 30 days; passkeys with rpID and origin from the site address and user verification required; restricted verify-2fa after OAuth or SSO; recovery may turn off two-step and remove passkeys.\nTests: passkeys-two-step (CDP virtual authenticator); replay guard; verify-2fa after OAuth; recovery checkboxes; e2e personal-signin.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; password-only sign-in for people without two-step."
+  },
+  {
+   "key": "acc-20",
+   "title": "Personal: new-sign-in alerts",
+   "mode": "personal",
+   "effort": "small",
+   "dependsOn": [
+    "acc-13"
+   ],
+   "brief": "Sections: §8 (alerts), screens §S3.4.\nFiles: session.create.after alert rule (90-day label memory, security.sign_in_alerts); new-sign-in mail template; banner component in the studio layout; Devices switch and IP display.\nBehaviour: Banner when another session is newer than this browser saw; email only for a label unseen in 90 days and only with a checked email and mail.\nTests: alert decisions; e2e second browser context sees the banner.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; sign-in speed (the rule runs after the session is created)."
+  },
+  {
+   "key": "acc-21",
+   "title": "Personal: backup and move (snapshots, full archives, fuobe backup and restore)",
+   "mode": "personal",
+   "effort": "large",
+   "dependsOn": [
+    "acc-15"
+   ],
+   "brief": "Sections: §8 (backup and move), §7.16 (no live credentials in copies), screens §S4.5.\nFiles: new src/server/backup/{schedule.ts, tar.ts, archive.ts}; /api/backups and /api/backup/* (owner); data/server.pid written in register(); /settings/backup and the General summary; /setup/restore; bin/lib/tar.mjs; fuobe backup and fuobe restore commands; docs/moving.md.\nBehaviour: Weekly snapshots keep 4 (Platform daily keep 7, set by acc-55); full archives on demand with single-use 60-second download tickets; in Studio and Platform a full archive needs a reason, is audited and notifies admins; restore only with the server stopped, into .restoring-<UTC>, checksum verified; session and verification rows never included.\nTests: backup schedule and pruning; tar safety (no absolute paths, no links, allowlisted prefixes); checksum; fingerprint carried; restore signs everyone out; e2e personal-backup (TOTP survives the move).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the core snapshot names; zip downloads."
+  },
+  {
+   "key": "acc-22",
+   "title": "Personal: browser-approved fuobe login and token expiry warnings",
+   "mode": "personal",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-13"
+   ],
+   "brief": "Sections: §8 (CLI login), §7.10, screens §S4.6.\nFiles: db cli_connect_requests; /api/cli/connect, /api/cli/connect/poll (public, rate-limited), /api/cli/connect/[code], approve and deny (session only); /settings/account/connect-cli; bin/fuobe.mjs login (--no-browser, --paste); X-Fuobe-Token-Expires header.\nBehaviour: The page shows the code, the requesting IP and user agent and the time; default scope Generate only; approval needs a fresh session; 10-minute requests; tokens delivered once and wiped.\nTests: cli-connect (expiry, single delivery, rate limits, session-only approval); cli login; e2e personal-cli.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; fuobe login with --token and FUOBE_TOKEN."
+  },
+  {
+   "key": "acc-23",
+   "title": "Personal: the first minute and everyday spend",
+   "mode": "personal",
+   "effort": "small",
+   "dependsOn": [
+    "acc-15"
+   ],
+   "brief": "Sections: §8 (first minute and spend), §7.12 (display), screens §S1.1 and §S4.3.\nFiles: terminal setup lines; Personal copy on /setup steps; src/components/get-started.tsx autofocus and toast; the footer spend row in app-sidebar.tsx; Personal usage labels and usage.csv; the 402 copy for the personal cap; tests/e2e/_server.mjs timing helper.\nBehaviour: A first demo result in under 60 s from a fresh install; 'Spent ≈ $12.40 this month' in the footer when paid engines are on; the personal cap line with Change limit.\nTests: personal-first-run; e2e personal-setup with the 60 s budget.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the Get started guide for admins."
+  },
+  {
+   "key": "acc-24",
+   "title": "Studio: team directory, team home, visibility and join requests",
+   "mode": "studio",
+   "effort": "large",
+   "dependsOn": [
+    "acc-17"
+   ],
+   "brief": "Sections: §9.3 (directory, visibility), screens §S7.1 and §S7.2.\nFiles: db team_join_requests, notice_sends; new src/server/teams/directory.ts; /api/teams/directory, join, join-requests, summary; ?space on list routes; /teams and /teams/[slug]; team settings join and visibility; /admin/teams Team rules; Studio Inbox kinds.\nBehaviour: Private teams answer 404 to non-members; Listed teams take requests that expire after 30 days; Open teams join at once with the join role; the team home shows sections with empty-state copy for a new team.\nTests: teams-directory; space filter; e2e studio-teams.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Personal (inert); core teams."
+  },
+  {
+   "key": "acc-25",
+   "title": "Studio: narrow-only team policies and team Assist connectors",
+   "mode": "studio",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-24"
+   ],
+   "brief": "Sections: §9.4 (team policies), §7.10 (team connectors only in team chats).\nFiles: new src/server/teams/policies.ts (resolvePolicy); the team narrower registered in src/server/entitlements.ts; assist_connectors.workspace_id; team policies route; the Policies tab.\nBehaviour: Models, engines, public links, brand-kit editors, connectors, two-step and retention per team, always the narrower of install and team; prepare(), MCP and Assist read offered().\nTests: team-policies (narrowing never widens); connectors offered only in team chats.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; install model switches."
+  },
+  {
+   "key": "acc-26",
+   "title": "Studio: one fair queue for Studio and Platform",
+   "mode": "studio",
+   "effort": "large",
+   "dependsOn": [
+    "acc-17",
+    "acc-10"
+   ],
+   "brief": "Sections: §9.4 (fair queue), §10.3 (Platform pools, added by acc-39), §7.12 (holds never expire on waiting rows), screens §S7.8 and §S4.9.\nFiles: generations dispatch columns; new src/lib/gpu-fair.ts (pure pick and positions); src/server/gpu/service.ts; src/server/queue/dispatcher.ts as a launch gate; policy hooks for weight and concurrency; /admin/gpu Waiting, Shares and Settings; card lines and Run on cloud instead.\nBehaviour: Weighted fair share over GPU-seconds in 60 minutes by group then person then age; slot rule; 50 waiting per person; max wait; cancel of held rows makes no provider call; AI-Toolkit trainings counted; Personal submits directly.\nTests: gpu-fair (pure); gpu-dispatcher; one open training per person per pool.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Personal submit timing; ComfyUI binding tests."
+  },
+  {
+   "key": "acc-27",
+   "title": "Studio: GPU server registry (pools, team pins, probes, sticky routing, drain)",
+   "mode": "studio",
+   "effort": "large",
+   "dependsOn": [
+    "acc-26"
+   ],
+   "brief": "Sections: §9.4 (GPU pool), §7.7 (prefix and cleanup per server), screens §S7.8.\nFiles: db comfy_servers; src/server/providers/comfyui.ts takes the server id for upload, poll, history and cancel; LoRA folders per server; probes and capability matching; /admin/gpu Servers section; team Policies read-only row.\nBehaviour: An empty table means today's comfyui.url and isolatedUrl; least-loaded and warm routing; pins; drain; token warning; removed server fails its rows with a run-again message.\nTests: gpu-pool; existing comfyui binding tests unchanged.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the isolated worker routing."
+  },
+  {
+   "key": "acc-28",
+   "title": "Studio: approvals for runs over a threshold",
+   "mode": "studio",
+   "effort": "large",
+   "dependsOn": [
+    "acc-25",
+    "acc-26"
+   ],
+   "brief": "Sections: §9.4 (approvals), §7.12 (re-price re-runs approval), screens §S7.3.\nFiles: db approval_requests; src/server/approvals.ts as a launch gate using collector hold ids; /api/approvals and the admin settings route; /approvals; requester toast and card states; menu row; mail templates.\nBehaviour: Off by default; thresholds per team and for personal spaces on studio keys; admins and own-key payers exempt; 72 h expiry; second decision 409; private runs hide the prompt.\nTests: approvals (FUOBE_DEMO_PRICED); e2e studio-approvals.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; runs below the threshold launch exactly as before."
+  },
+  {
+   "key": "acc-29",
+   "title": "Studio: usage reports, budget alerts, monthly report, pause paid runs",
+   "mode": "studio",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-24",
+    "acc-26"
+   ],
+   "brief": "Sections: §9.4 (reports and alerts), screens §S6.5.\nFiles: new src/server/meter/{reports.ts, alerts.ts, monthly-report.ts}; report routes with CSV streaming; pause-spend route; /admin/usage tabs; /teams/[slug]/usage; SVG day chart with Show as table.\nBehaviour: Reports by person, team, model, feature, engine, day and payer; alerts at 50, 80 and 100% deduplicated; monthly email on the 1st at 09:00; pausing keeps the previous limit in the audit entry.\nTests: usage-reports; budget-alerts; CSV injection guard.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; core /settings/usage."
+  },
+  {
+   "key": "acc-30",
+   "title": "Studio: two-step enforcement and session, device, network and token policies (E1)",
+   "mode": "studio",
+   "effort": "large",
+   "dependsOn": [
+    "acc-19",
+    "acc-25"
+   ],
+   "brief": "Sections: §9.5 E1, §7.15 (Revoke everything), screens §S7.4.\nFiles: new src/server/identity/two-step.ts (required, deadline) with the enroll-2fa kind; /two-step/setup; session_activity; absolute and idle checks; device cap; networks through trustProxy(); tokens.max_days; Sign out everyone and Revoke everything; admin reset two-step (owner); /admin/security; /setup/security; the team two-step row; the idle warning dialog and draft restore.\nBehaviour: Required for owner, admins and auditors by default with 7 days of grace; tokens refused with TWO_STEP_REQUIRED after the deadline; Platform staff registered under the same rule; networks refuse a list without your own address.\nTests: two-step enforcement; session-policies (absolute, idle, device cap, networks); Revoke everything; e2e studio-security.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; people without a policy requirement."
+  },
+  {
+   "key": "acc-31",
+   "title": "Studio: verified domains, domain capture and team auto-join (E4)",
+   "mode": "studio",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-24"
+   ],
+   "brief": "Sections: §9.5 E4, §9.1 (checked addresses only).\nFiles: db domains, team_auto_join; src/server/identity/domains.ts with an injected resolver and the daily recheck; autoJoin on every activation path; /admin/domains; Auto-join card; capture switch.\nBehaviour: TXT verification, lapse after 3 misses, owner manual verification with a reason; capture and auto-join only for checked addresses; each domain bound to at most one connection.\nTests: domains; auto-join (unverified address never joins).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; invites and approval."
+  },
+  {
+   "key": "acc-32",
+   "title": "Studio: company sign-in with OIDC and SAML (E2)",
+   "mode": "studio",
+   "effort": "large",
+   "dependsOn": [
+    "acc-30",
+    "acc-31"
+   ],
+   "brief": "Sections: §9.5 E2, §7.1 (cross-site exemption, no issuer origins), screens §S7.5.\nFiles: package.json @better-auth/sso (same version as better-auth); db sso_connections and frozen auth_sso_provider; src/server/identity/sso.ts (defaultSSO, resolveUser, after-hooks, group sync, enforcement, RelayState cookie); CROSS_SITE_EXEMPT registration; /admin/sso and the editor; /login/sso; /api/public/sso-route; /setup/sso; env connection.\nBehaviour: Owner-only connection changes with a test; bound domains; auto-link only to credential-less accounts and never to privileged ones; issuer and subject keys; SAML only with a matching RelayState cookie; require-company-sign-in with break-glass.\nTests: sso-oidc (mock IdP); sso-saml (samlify test IdP, signature wrapping cases); login CSRF refused; proxy cross-site exemption exact; e2e studio-sso.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; password sign-in for break-glass people."
+  },
+  {
+   "key": "acc-33",
+   "title": "Studio: SCIM 2.0 provisioning owned by Fuobe (E3)",
+   "mode": "studio",
+   "effort": "large",
+   "dependsOn": [
+    "acc-32"
+   ],
+   "brief": "Sections: §9.5 E3.\nFiles: db scim_tokens, scim_groups, scim_group_members; new src/server/scim/*; /api/scim/v2/{ServiceProviderConfig,ResourceTypes,Schemas,Users,Groups} with access 'scim'; proxy OPEN and bearer skip for fuobe_scim_ tokens; admin routes; /admin/provisioning; Okta and Entra fixtures.\nBehaviour: SCIM touches only people it provisioned and never install roles or the owner; SCIM-managed accounts use company sign-in only; groups map to teams and roles; delete turns off; the safety brake.\nTests: scim-users, scim-groups (filters, PATCH quirks, error format); scope refusals; brake; e2e studio-scim.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; people created by invite or sign-up."
+  },
+  {
+   "key": "acc-34",
+   "title": "Studio: audit viewer, export, retention and the Auditor role (E5a, shared by Platform)",
+   "mode": "studio",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-24"
+   ],
+   "brief": "Sections: §9.5 E5a, §7.14 (chain), screens §S7.7.\nFiles: audit indexes; the auditor role registered; src/server/audit-query.ts; audit labels with a group registry; streamed CSV and JSONL export; retention sweep; optional HTTPS sink; /admin/audit; team Activity; person Activity tab.\nBehaviour: Plain sentences, chips, details sheet, chain verification banner, retention 90 days to 7 years, team Activity without IP addresses.\nTests: audit-viewer (filters, export, chain, retention entry).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; core audit writes."
+  },
+  {
+   "key": "acc-35",
+   "title": "Studio: data lifecycle (export, deletion and restore, purge manifest, retention, legal hold, privacy holds, view-as) (E5b)",
+   "mode": "studio",
+   "effort": "large",
+   "dependsOn": [
+    "acc-34",
+    "acc-25"
+   ],
+   "brief": "Sections: §9.5 E5b (purge manifest table), §7.3 (view-as rules), screens §S4.8 and §S7.7.\nFiles: db export_jobs, access_grants, privacy_holds; src/server/data/{exports.ts, deletion.ts, retention.ts, legal-hold.ts, view-as.ts}; restore-account and view-as kinds; files read under an active grant; /settings/privacy; /account/restore; /admin/data; person Delete and Open library.\nBehaviour: Exports in parts with a manifest; deletion with 30-day grace and restore; the purge manifest including LoRA files, datasets, GPU server copies, provider copies and ComfyUI history; retention previewed with a 7-day first run; legal hold 423; privacy holds override purges; view-as read-only, reasoned, notified, 30 minutes.\nTests: exports; deletion and restore; purge-manifest coverage (fails on an unclassified table or file area); retention; view-as.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Trash purge timing in Personal."
+  },
+  {
+   "key": "acc-36",
+   "title": "Studio: full seats and free view-only accounts (E6)",
+   "mode": "studio",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-33"
+   ],
+   "brief": "Sections: §9.5 E6, screens §S7.6.\nFiles: users.seat, seat_requests; seats.assign in BEGIN IMMEDIATE on every activation path; the view clamp in effectiveTeamRole; /admin/seats; view-only states; FUOBE_SEATS.\nBehaviour: No limit by default; overflow becomes view-only; requests; 'Editor · view-only seat'.\nTests: seats including a 10-way activation race.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; people when no seat limit is set."
+  },
+  {
+   "key": "acc-37",
+   "title": "Platform: credit ledger and CreditBudget",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-17"
+   ],
+   "brief": "Sections: §10.2 (units, tables, lifecycle, keys, sweeps, payer, staff record cap), §7.12 (Budget, debt), screens §S8.4.\nFiles: db credit_accounts, credit_buckets, credit_ledger (append-only triggers), credit_holds; src/server/credits/{accounts.ts, buckets.ts, ledger.ts, budget.ts, sweeps.ts}; features().credits; interim credits.free_monthly; /api/me/credits; admin adjust; the credits live event; /setup/credits (value and markup); the credits pill.\nBehaviour: Reserve by debit in spending order; capture min(hold, final) and debt for overage; release on every core path; idempotency keys; expiry sweep; nightly invariants; staff record mode capped at $50 a day.\nTests: credits-ledger (including two-process concurrency); credit-budget-paths across every release path; debt clears on top-up.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Studio and Personal UsdBudget."
+  },
+  {
+   "key": "acc-38",
+   "title": "Platform: credit price book (per-model rules, GPU-second and AI-Toolkit pricing, credit display)",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-37"
+   ],
+   "brief": "Sections: §10.5, §7.12 (hold sizes, display).\nFiles: db price_rules, gpu_run_stats; src/lib/credits.ts creditsFor; /api/public/price-book (versioned); the Platform branch of formatPrice; credits in previews; /admin/credits; enhance and Assist credit lines; AI-Toolkit target prices.\nBehaviour: Fixed rules or usd x (1 + markup) / value with minimum and rounding; open-engine holds per §7.12; unknown prices refused unless fixed; below-cost flags.\nTests: credits-price (examples in §10.5); credit labels; unknown price refused.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; USD labels in Personal and Studio."
+  },
+  {
+   "key": "acc-39",
+   "title": "Platform: plans and entitlements engine (versions, narrower, admit checks, pools, concurrency, team pools)",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-38",
+    "acc-26"
+   ],
+   "brief": "Sections: §10.2 (plans), §10.3 (fields, queue pools), §7.12 (entitlements module).\nFiles: db plans, plan_versions, account_plans, entitlement_overrides, credit_limits; the plan narrower and admit checks registered in src/server/entitlements.ts; dispatcher weight and concurrency policies (Free pool, Unlimited pool, team weight x seats capped at 32, Free pool at most 25% of slots); staff plan in record mode; team pools and member caps; unlimited relaxed rules with the operator-cost ceiling; teams without a Team plan pay from the runner's credits.\nBehaviour: Plans versioned and grandfathered; every spend entry point checks entitlements after planning; queue weights per §10.3.\nTests: entitlement sweep across every spend entry point; 1,000 Free accounts against one Ultra; unlimited ceiling.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Studio team weights (same algorithm)."
+  },
+  {
+   "key": "acc-40",
+   "title": "Platform: plan editor, model matrix, user locks and /setup/plans",
+   "mode": "platform",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-39",
+    "acc-16"
+   ],
+   "brief": "Sections: §10.3, screens §S9.2 and §S9.4.\nFiles: /admin/plans (list and versioned editor with the publish dialog), /admin/models (plan matrix with licence chips), lock badges in pickers and studios, /setup/plans.\nBehaviour: Publishing a version keeps existing subscribers unless moved; margin check before publish; locked items show the plan they need.\nTests: plan editor validation; publish keeps subscribers; e2e admin plans at 390 px.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; model-access switches."
+  },
+  {
+   "key": "acc-41",
+   "title": "Platform: admin people with credits, staff roles and the Platform overview",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-40",
+    "acc-34"
+   ],
+   "brief": "Sections: §10.7 (staff roles and caps), screens §S9.1 and §S9.3.\nFiles: billing, moderator and support roles registered; Platform nav groups and Overview tiles; person Credits tab and Adjust credits with role caps; audit groups added to E5a; SVG charts.\nBehaviour: Caps per role (support 500, billing 10,000 credits per action); every adjustment audited with a reason and notified to the customer.\nTests: permissions matrix per staff role; adjustment caps.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Studio admin console."
+  },
+  {
+   "key": "acc-42",
+   "title": "Platform: credit codes and redeem, plan requests, bans, consent-based support access",
+   "mode": "platform",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-41",
+    "acc-35"
+   ],
+   "brief": "Sections: §10.1 (code limits), §10.7, §7.3 (view-as by consent), screens §S8.5, §S9.5 and §S9.8.\nFiles: db credit_codes, credit_code_redemptions, plan_requests, user_bans; /redeem; /admin/codes credit tab; /admin/bans; ban refusal codes; support access as an access_grants consent mode with an owner emergency path.\nBehaviour: Codes shown once; first-time and per-card limits; ban effects (sessions, links, subscription and credits per setting); support view-as only after the customer allows.\nTests: codes; ban effects; view-as consent and emergency audit.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Studio view-as policy."
+  },
+  {
+   "key": "acc-43",
+   "title": "Platform: payment core (PaymentProvider, fake provider, webhook route, event store, reconciliation, grants)",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-41"
+   ],
+   "brief": "Sections: §10.4 (webhooks, grant rules, keys), §10.2 (idempotency keys).\nFiles: db customers, subscriptions, payments, payment_events, checkout_sessions, credit_packs; src/server/billing/{provider.ts, fake.ts, fulfill.ts, grants.ts, webhook.ts, reconcile.ts}; /api/billing/[provider]/webhook registered in the proxy's OPEN and cross-site-exempt registries and exempt from setup gate, Preview, dormancy, captcha and IP limits; Health event-gap alert.\nBehaviour: Raw body, signature, store then 2xx, process from the table, dedupe on event id and on object id plus type, re-fetch the canonical object; grants only for the listed billing reasons keyed by period start; reconciliation every 15 minutes and at boot; fake only with test hooks and demo mode.\nTests: billing-fake; webhook-route (raw body, duplicate events, out-of-order, missing for 4 days then reconciled); grant keys.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; no payments mode (codes and admin grants)."
+  },
+  {
+   "key": "acc-44",
+   "title": "Platform: checkout and billing pages (Checkout, success and cancel, /settings/billing, top-ups, redeem, plan requests)",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-43"
+   ],
+   "brief": "Sections: §10.6, screens §S8.\nFiles: /api/billing/checkout, /billing/success, /pricing?checkout=cancelled, /settings/billing, top-up sheet, post-verification redirect to Checkout, the Request this plan flow, /setup/payments (none and fake).\nBehaviour: Success polls every 2 s for 60 s then the delayed copy; cancel returns to pricing with the note; no-payments installs show Redeem a code and Request this plan.\nTests: billing pages states; e2e platform-billing at 390 px light and dark.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; core /settings/usage."
+  },
+  {
+   "key": "acc-45",
+   "title": "Platform: plan changes, seats, dunning, refunds and disputes",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-44"
+   ],
+   "brief": "Sections: §10.4 (plan changes, seats, unpaid invoice, refunds, disputes).\nFiles: src/server/billing/{changes.ts, seats.ts, refunds.ts, disputes.ts}; the change-plan sheet; team billing tab; freeze state; transactional emails; move subscribers.\nBehaviour: Upgrades start a new period and credit unused plan credits; downgrades and cancels at period end; seat adds prorated with prorated seat credits, removals at period end with no credit refund; changes refused while unpaid; refunds freeze the bucket first; disputes freeze and claw back.\nTests: upgrade on the last day; 10 seats added then removed; change while past due; partial refunds; dispute won and lost; refund racing a spend.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; plan grants from acc-43."
+  },
+  {
+   "key": "acc-46",
+   "title": "Platform: Stripe adapter (direct and Managed Payments), tax, portal, promotion codes, auto-recharge",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-45"
+   ],
+   "brief": "Sections: §10.4 (Stripe direct, Managed Payments, portal, tax display, auto-recharge), §10.1 (card testing).\nFiles: package.json stripe (per §5.2 rule); src/server/billing/stripe.ts (catalog sync by lookup key with AIaaS tax codes, webhook endpoint creation, portal configuration per option, tax inclusive for consumer plans, invoices, promotion codes with first-time and card limits, auto-recharge single-flight); setup and settings UI.\nBehaviour: Every PaymentProvider method; Managed Payments changes at period end only; auto-recharge at most 3 a day and off after a failure.\nTests: billing-stripe against an HTTP double (all event types, idempotency keys, portal changes, $0 invoices).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the fake provider for e2e."
+  },
+  {
+   "key": "acc-47",
+   "title": "Platform: public site, legal documents, re-acceptance, Coming soon and Preview access",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-44"
+   ],
+   "brief": "Sections: §10 (launch states), §10.9, screens §S8.1 and §S8.2.\nFiles: cached public pages (/welcome as '/' when signed out, /pricing, /coming-soon, /legal/[slug]); registry rewrites; robots and sitemap; db legal_docs, sales_leads; templates with placeholders; the legal editor and operator checklist; accept-terms kind; OAuth consent step; waitlist; Preview access list.\nBehaviour: Pages use 'use cache' with tags and no user data; revalidateTag from route handlers; re-acceptance on new versions.\nTests: public-route matrix; legal versioning; no-horizontal-scroll for public pages.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the signed-in app shell."
+  },
+  {
+   "key": "acc-48",
+   "title": "Platform: abuse controls (captcha, breached passwords, signals, free-grant guards, throttles, rate limits)",
+   "mode": "platform",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-44"
+   ],
+   "brief": "Sections: §10.1.\nFiles: captcha and haveibeenpwned plugins in Platform (fake captcha for tests); db account_signals, rate_limits; /api/public/device (consent-gated); free-grant guards with email normalisation and IPv4 /24 or IPv6 /64 networks; checkout throttles; new-account velocity cap; limits on public endpoints; Abuse settings.\nBehaviour: Per-IP rules only with a trusted proxy; server-side signals by default; trials and $0 invoices never grant full allowances.\nTests: abuse (farming, IPv6 networks, normalisation, trusted-proxy off).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; sign-in for Studio and Personal (plugins load only in Platform)."
+  },
+  {
+   "key": "acc-49",
+   "title": "Platform: input safety (word list, prompt classifier, image inputs, provider flags, likeness consent)",
+   "mode": "platform",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-37"
+   ],
+   "brief": "Sections: §10.8 (inputs, provider flags, consent), §7.7 (flags after extra).\nFiles: src/server/safety/{words.ts, prompt-check.ts, image-input-check.ts}; db moderation_checks; the admit word list; the pre-submit classifier as a launch gate; upload checks; generator safety map; payload flags; consent dialog and CONSENT_REQUIRED; /setup/safety prompt row.\nBehaviour: A check that times out or errors blocks; sexual content always blocked; likeness consent recorded in consents.\nTests: safety inputs; payload snapshot (flags after extra); classifier timeout blocks.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Studio and Personal payloads (flags only in Platform)."
+  },
+  {
+   "key": "acc-50",
+   "title": "Platform: output safety via postProcess, withheld results, quarantine, refunds and the CSAM workflow",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-49",
+    "acc-35"
+   ],
+   "brief": "Sections: §10.8 (outputs, withheld, CSAM, refund rule).\nFiles: output checkers (fal x-ailab/nsfw, local HTTP classifier) and frame sampling; db quarantine, csam_reports; holds via privacy_holds; partial re-pricing; re-check sweep; auto pause after 5 blocked in 24 h; generation card states held and blocked.\nBehaviour: Required for every engine that is on; failed or missing checks withhold; blocked results refunded until the pause rule.\nTests: safety outputs; withheld on checker error; csam-flow (quarantine, suspend, hold for 1 year).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; postProcess no-op in other modes."
+  },
+  {
+   "key": "acc-51",
+   "title": "Platform: moderation queue, reports, NCII takedowns, DMCA, strikes, statements of reasons and appeals",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-50",
+    "acc-42"
+   ],
+   "brief": "Sections: §10.8 (reports and takedowns), screens §S9.6 and §S8.6.\nFiles: db moderation_items, moderation_actions, strikes, content_hash_blocks; pHash blocks; /admin/moderation queue; /report; /takedown; notices and appeals in /settings/privacy; banned and suspended sign-in copy.\nBehaviour: 48-hour NCII timers; repeat-infringer rule; statements of reasons; appeals for 6 months; keyboard shortcuts scoped to the queue.\nTests: moderation; e2e platform-safety.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; share pages for unaffected content."
+  },
+  {
+   "key": "acc-52",
+   "title": "Platform: provenance (C2PA signing, certificate, C2PA-safe share cleaning in all modes, badge, AI labels)",
+   "mode": "platform",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-50"
+   ],
+   "brief": "Sections: §10.8 (provenance).\nFiles: package.json @contentauth/c2pa-node and sharp (per §5.2 rule); src/server/provenance/{sign.ts, cert.ts, badge.ts} in postProcess; keepC2pa in media-clean (all modes); AI-generated chip on share pages; settings rows; ffmpeg gate.\nBehaviour: Sign last; self-signed until a certificate is uploaded; badge only on Free.\nTests: provenance (manifest present, survives share cleaning).\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; share-file cleaning in Personal and Studio."
+  },
+  {
+   "key": "acc-53",
+   "title": "Platform: privacy defaults on the E5b engine",
+   "mode": "platform",
+   "effort": "small",
+   "dependsOn": [
+    "acc-45",
+    "acc-51"
+   ],
+   "brief": "Sections: §9.5 E5b, §10.2 (accounting kept), screens §S4.8.\nFiles: Platform defaults: self-delete on, one export a day, subscription cancelled on delete; export extras (credits.csv, consents, notices); consent purge.\nBehaviour: Deleting cancels the subscription per the operator's refund rule; the ledger and invoices are kept pseudonymised.\nTests: privacy-platform.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Studio defaults."
+  },
+  {
+   "key": "acc-54",
+   "title": "Platform: worker roles, leader lease, SQLite claims, partitioned polling and cross-process live events",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-39",
+    "acc-27"
+   ],
+   "brief": "Sections: §10.10 (worker roles, claims, polling).\nFiles: db leases, worker_heartbeats, live_events; generation_runs.claimed_by/claimed_at/heartbeat_at; generations.last_polled_at; FUOBE_ROLE in src/instrumentation.ts; once() and request_keys in SQLite; the live_events source; Health Queues and Workers; docs/PLATFORM.md; scripts/capacity.mjs.\nBehaviour: CAS claims before any upload; sweepInterrupted only on stale heartbeats; polling partitioned by hash(id) mod COUNT and ordered by last_polled_at.\nTests: 2 workers x 50 ready dependents give exactly 50 submissions; a web upload longer than 2 minutes is not swept; crash mid-submit and mid-persist; capacity targets.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; single-process installs (FUOBE_ROLE=all default)."
+  },
+  {
+   "key": "acc-55",
+   "title": "Platform: object storage with presigned reads, daily snapshots and the Litestream guide",
+   "mode": "platform",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-21"
+   ],
+   "brief": "Sections: §10.10 (storage, backups, restore runbook), §7.16.\nFiles: package.json @aws-sdk/client-s3 and s3-request-presigner (per §5.2 rule); src/server/storage-driver.ts (local, s3); ensureLocal conversions; presigned 300 s redirects after the ACL; /setup/storage; backup defaults daily keep 7; archive note for bucket files; restore runbook in docs.\nBehaviour: Private reads always pass the ACL first; share files streamed through Fuobe.\nTests: storage-s3 against a local double; presigned expiry.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; the local driver everywhere else."
+  },
+  {
+   "key": "acc-56",
+   "title": "Platform: analytics, price sync, reconciliation, spend guard and observability",
+   "mode": "platform",
+   "effort": "large",
+   "dependsOn": [
+    "acc-46",
+    "acc-54",
+    "acc-29"
+   ],
+   "brief": "Sections: §10.5 (price sync, reconciliation, spend guard), §10.10 (observability), screens §S9.7 and §S9.9.\nFiles: package.json @vercel/otel and peers (per §5.2 rule); rollups on acc-29 reports; fal price sync with admin approval; provider cost capture; monthly invoice reconciliation; max provider spend per hour and day; /admin/analytics; /admin/health; /api/admin/metrics; alerts.\nBehaviour: Margin per model including unlimited and blocked runs; drift alert above 5%; spend guard pauses paid cloud routes.\nTests: rollups; price sync; spend guard pause; Prometheus format.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Studio reports."
+  },
+  {
+   "key": "acc-57",
+   "title": "Platform: launch checklist, announcements, Studio and Platform switch hooks, headless Platform and full E2E",
+   "mode": "platform",
+   "effort": "medium",
+   "dependsOn": [
+    "acc-30",
+    "acc-46",
+    "acc-47",
+    "acc-48",
+    "acc-51",
+    "acc-52",
+    "acc-53",
+    "acc-55",
+    "acc-56"
+   ],
+   "brief": "Sections: §10.7 (launch checklist), §7.9 (Platform availability, switching), §13 (e2e matrix).\nFiles: launch checklist and Open to the public; db announcements, announcement_dismissals; banner and RFC 8058 email; onEnter hooks Studio to Platform and Platform to Studio; headless env (FUOBE_PAYMENTS, STRIPE_*, FUOBE_TURNSTILE_*, FUOBE_CREDIT_VALUE_USD, FUOBE_MARKUP_PCT, FUOBE_PLANS_TEMPLATE, FUOBE_LAUNCH); Email & DNS checks; platformAvailable flag on (the setup card and FUOBE_MODE=platform enabled); e2e suites and docs.\nBehaviour: Open to the public only when the 12 required items pass; Platform to Studio asks about public accounts and staff roles and is refused while subscriptions are active.\nTests: launch gating; mode-switch Platform cases; e2e platform-signup, platform-billing, platform-admin, platform-safety; the full per-role layout matrix.\nMust not break: demo-mode e2e (FUOBE_MODE=personal FUOBE_DEMO_MODE=on), API tokens (legacy and new), MCP, share links (/s/<token> and its files), FUOBE_PASSWORD, and Just me on this computer; Studio and Personal setup; FUOBE_DEV_PLATFORM still works for development."
+  }
+ ],
+ "risks": [
+  "Better Auth advisory cadence and behaviours read but not yet run",
+  "SQLite single writer with two connections",
+  "converting ~40 modules and 192 routes",
+  "estimates drive limits in Personal and Studio",
+  "guessed money defaults",
+  "SAML history; defaultSSO documented for testing",
+  "unencrypted archives; Personal install keys in plain text",
+  "operator legal exposure in Platform",
+  "classifier error rates; processor eligibility",
+  "c2pa-node native binary",
+  "same-day npm releases"
+ ],
+ "unknowns": [
+  "ComfyUI core route to delete input/output files (none found)",
+  "Managed Payments immediate plan changes; Stripe mechanism for crediting unused plan credits",
+  "Litestream v0.5 replica encryption",
+  "route handler seeing the bound address",
+  "fal and Replicate billing on every failure kind",
+  "cross-account use of lora_mirrors copies"
+ ],
+ "openQuestions": [
+  "Default member limit $25, markup 50%, plan prices?",
+  "Studio open limited to the owner's domain, or open to anyone?",
+  "Admins see own-key spend totals per person?",
+  "Encrypt full backup archives?",
+  "Free tier: 50 monthly credits, daily credits, or none?",
+  "View-only seats free?",
+  "Community feed in Platform?"
+ ],
+ "sources": [
+  "claude/fuobe-parity-4 @ 545ebb5 (files and lines in accounts-8.md Sources)",
+  "node_modules/next/dist/docs/01-app (authentication, cache components, proxy, cookies, route, revalidateTag, cli)",
+  "/home/user/ext/npm-better-auth-1.7.14, npm-better-auth-sso-1.7.14, npm-better-auth-stripe-1.7.14, npm-saml-jackson-26.2.0, comfyui-v0.43.1, owasp-asvs, owasp-cheatsheets",
+  "https://registry.npmjs.org and https://api.osv.dev (2026-10-29)",
+  "Higgsfield help centre, pages, Clerk environment and client bundle (parity only)",
+  "Krea, Runway, Magnific, Leonardo, Kling, Midjourney, Canva, Figma, Liner pages",
+  "Open WebUI, Immich, n8n, Gitea/Forgejo, Jellyfin, Nextcloud docs",
+  "Stripe, Paddle, Polar, fal, Replicate docs; LibreChat, Dify, new-api source",
+  "NIST SP 800-63B-4, W3C WebAuthn L3, C2PA 2.3, 18 U.S.C. 2258A, TAKE IT DOWN Act summaries, EU AI Act Art. 50 summaries, DSA, GDPR Art. 12, UCPD Art. 7, ePrivacy Art. 5(3), Ofcom letter",
+  "/home/user/ext/owner-decisions.json"
+ ]
+}
