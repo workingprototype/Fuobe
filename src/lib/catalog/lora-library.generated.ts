@@ -3124,6 +3124,52 @@ export const LORA_LIBRARY: LoraEntry[] = [
     "released": "2026-07-15",
     "hostedEndpoint": "fal-ai/flux-2/klein/4b/edit/lora",
     "notes": "Rank-32 edit LoRA trained by xocialize with ai-toolkit on FLUX.2-klein-base-4B (Apache-2.0); card licence apache-2.0, so fal may host it (build plan O10's check). Three ordered inputs: person, top (or a dress / whole outfit), bottom; trigger TRYON. Trained on clothing-agnostic people: the open graph greys the old outfit out first (ClothesSegment), the hosted route sends the photo as it is (quality unmeasured until the eval harness runs the fashion suite)."
+  },
+  {
+    "key": "qwen-edit-2509-multiple-angles",
+    "name": "Multiple-angles for Qwen-Image-Edit 2509 (dx8152)",
+    "file": "qwen-edit-2509-multiple-angles-dx8152.safetensors",
+    "url": "https://huggingface.co/dx8152/Qwen-Edit-2509-Multiple-angles/resolve/c342b0e746c3a3275af1a4a0c6ae78e0e4802531/%E9%95%9C%E5%A4%B4%E8%BD%AC%E6%8D%A2.safetensors",
+    "page": "https://huggingface.co/dx8152/Qwen-Edit-2509-Multiple-angles",
+    "strength": 1.25,
+    "base": "qwen-image-edit-2509",
+    "download": "direct",
+    "group": "adapter",
+    "version": "c342b0e746c3a3275af1a4a0c6ae78e0e4802531",
+    "sha256": "e0cea9508025a39e41f50da0e7d10fbd9db182d057c745136a42ef8829914c8f",
+    "sizeBytes": 236117032,
+    "licence": {
+      "commercial": true,
+      "hostedOk": true,
+      "snapshotDate": "2026-10-29",
+      "name": "Apache-2.0"
+    },
+    "released": "2025-10-31",
+    "hostedEndpoint": "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles",
+    "notes": "The camera-move LoRA behind Higgsfield Angles (higgsfield-originals-5.md §3.22). Its file is named 镜头转换.safetensors upstream; Fuobe keeps it under an ASCII name. It takes camera instructions in Chinese with English (rotate left / right by degrees, move forward or a close-up, bird's-eye or worm's-eye view, a wide-angle lens), which Fuobe Angles writes from its controls on the GPU. fal hosts the same LoRA (its LoRA gallery's multiple-angles route, lora_scale 1.25 and 6 steps by default) and builds the words itself. Strength 1.25, as fal and the public HF Space (linoyts/Qwen-Image-Edit-Angles) fuse it."
+  },
+  {
+    "key": "fusionix-i2v-14b",
+    "name": "FusioniX for Wan 2.1 I2V 14B (vrgamedevgirl84)",
+    "file": "Wan2.1_I2V_14B_FusionX_LoRA.safetensors",
+    "url": "https://huggingface.co/vrgamedevgirl84/Wan14BT2VFusioniX/resolve/b9793a1f84727f2f69bdffecc2f50f0abfa746a6/FusionX_LoRa/Wan2.1_I2V_14B_FusionX_LoRA.safetensors",
+    "page": "https://huggingface.co/vrgamedevgirl84/Wan14BT2VFusioniX",
+    "strength": 1.0,
+    "base": "wan2.1-i2v-14b-480p",
+    "download": "direct",
+    "group": "adapter",
+    "target": "both",
+    "version": "b9793a1f84727f2f69bdffecc2f50f0abfa746a6",
+    "sha256": "0eb5df85d5bc5fba32966de8b357c7643413219479605cc933412b60305c01f8",
+    "sizeBytes": 371128616,
+    "licence": {
+      "commercial": true,
+      "hostedOk": true,
+      "snapshotDate": "2026-10-29",
+      "name": "Apache-2.0 (the repository's card); FusioniX merges other LoRAs (CausVid, AccVideo, MoviiGen, MPS reward…) whose own licences were not checked"
+    },
+    "released": "2025-06-10",
+    "notes": "The LoRA Higgsfield's 'Infinite Talk' engine loads ('fusex', scale 1, rank 32; higgsfield-originals-5.md §3.13) and InfiniteTalk's README recommends. Fuobe Speak loads it on InfiniteTalk (kijai's WanVideoWrapper) on the GPU in place of the lightx2v distill LoRA. fal's InfiniteTalk takes no LoRA, so the cloud half runs without it. Check on the first live run: the licences of the LoRAs merged into it."
   }
 ];
 

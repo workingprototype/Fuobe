@@ -76,6 +76,14 @@ export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pic
     while (f.min !== undefined && n < f.min) n += step;
     return n;
   }
+  // A multiple of n (Wan 2.2 S2V's 4n), inside the limits.
+  if (f.multiple) {
+    const m = f.multiple;
+    let n = Math.max(m, Math.round((seconds * fps) / m) * m);
+    while (f.max !== undefined && n > f.max) n -= m;
+    while (f.min !== undefined && n < f.min) n += m;
+    return n;
+  }
   return inRange(seconds * fps, { min: f.min, max: f.max, integer: true });
 }
 
@@ -848,6 +856,19 @@ function matteOutputs(response: unknown): ExtractedOutput[] {
   ];
 }
 
+/**
+ * Pixelate faces on the cloud (fal's SAM 3.1 image): the answer is masks, not the picture. The first mask is the
+ * result and every mask rides along (meta.masks, white = a face), so the browser pixelates under all of them
+ * (src/lib/soul-post.ts). No mask: nothing was found, which is no result.
+ */
+function faceMaskOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  const masks = isObj(r) && Array.isArray(r.masks) ? r.masks.map(fileOf).filter((f): f is NonNullable<ReturnType<typeof fileOf>> => !!f) : [];
+  const all = masks.length ? masks : isObj(r) && fileOf(r.image) ? [fileOf(r.image)!] : [];
+  if (!all.length) return [];
+  return [{ url: all[0].url, kind: "image", contentType: all[0].contentType, meta: { role: "mask", masks: all.map((m) => m.url) } }];
+}
+
 /** The results of a Remove background job: only the asked-for file when the answer tagged both (else all of them). */
 export function keepMatte<T extends { meta?: Record<string, unknown> }>(outputs: T[], want: MatteOutput | undefined): T[] {
   if (!want) return outputs;
@@ -900,6 +921,9 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       break;
     case "bg-remove-video":
       out = matteOutputs(response);
+      break;
+    case "face-mosaic":
+      out = faceMaskOutputs(response);
       break;
     default:
       out = extractMedia(response);

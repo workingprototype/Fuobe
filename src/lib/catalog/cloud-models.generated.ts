@@ -7022,6 +7022,42 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "sam-3-1-face-mask",
+    "name": "SAM 3.1 face mask",
+    "vendor": "Meta",
+    "family": "sam",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Finds the faces (or what you name) in a picture; the browser pixelates them",
+    "routes": [
+      {
+        "op": "face-mosaic",
+        "provider": "fal",
+        "endpoint": "fal-ai/sam-3-1/image",
+        "map": {
+          "image": "image_url",
+          "fixed": {
+            "apply_mask": false,
+            "return_multiple_masks": true,
+            "max_masks": 16,
+            "output_format": "png"
+          },
+          "defaults": {
+            "prompt": "face"
+          }
+        }
+      }
+    ],
+    "options": {
+      "maxImages": 1
+    },
+    "pricing": {
+      "unit": "request",
+      "usd": 0.01
+    },
+    "hidden": true
+  },
+  {
     "id": "ltx-2-5",
     "name": "LTX 2.5 Pro",
     "vendor": "Lightricks",
@@ -8062,11 +8098,13 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "audio": "audio_url",
           "seed": "seed",
-          "resolution": "resolution",
-          "duration": {
+          "numFrames": {
             "key": "num_frames",
-            "type": "number"
-          }
+            "fps": 25,
+            "min": 41,
+            "max": 721
+          },
+          "resolution": "resolution"
         }
       }
     ],
@@ -14795,8 +14833,20 @@ export const CLOUD_MODELS: ModelDef[] = [
           },
           "defaults": {
             "prompt": "The same shot in high dynamic range: deeper shadows and brighter highlights, every detail and movement unchanged"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 2
+            },
+            "transformer": "both"
           }
-        }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-quality/hdr/lora"
       }
     ],
     "options": {
@@ -14807,6 +14857,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       "formats": [
         "exr"
       ]
+    },
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1). Information, never a gate",
+      "checked": "2026-10-29"
     },
     "defaults": {
       "generateAudio": true
@@ -19225,6 +19281,176 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
         "720p": 0.1,
         "580p": 0.075,
         "480p": 0.05
+      }
+    }
+  },
+  {
+    "id": "fuobe-angles",
+    "name": "Fuobe Angles",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-angles",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "The same shot from another camera: rotate, tilt, move closer, go wide \u00b7 Qwen-Image-Edit 2509 + Multiple-angles LoRA",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles",
+        "map": {
+          "prompt": false,
+          "negativePrompt": "negative_prompt",
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "defaults": {
+            "lora_scale": 1.25,
+            "num_inference_steps": 6
+          }
+        }
+      }
+    ],
+    "options": {
+      "sliders": [
+        {
+          "param": "rotate_right_left",
+          "label": "Rotate (\u00b0, + = left)",
+          "min": -90,
+          "max": 90,
+          "step": 1,
+          "default": 0
+        },
+        {
+          "param": "vertical_angle",
+          "label": "Tilt (\u22121 above, 1 below)",
+          "min": -1,
+          "max": 1,
+          "step": 0.05,
+          "default": 0
+        },
+        {
+          "param": "move_forward",
+          "label": "Move forward",
+          "min": 0,
+          "max": 10,
+          "step": 1,
+          "default": 0
+        }
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "maxOutputs": 4,
+      "maxImages": 10,
+      "promptless": true
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.035,
+      "note": "per megapixel of the picture made (the input's size)"
+    }
+  },
+  {
+    "id": "fuobe-speak",
+    "name": "Fuobe Speak",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-speak",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "A portrait speaks your voice track, lips, face and head in sync, long takes: InfiniteTalk",
+    "routes": [
+      {
+        "op": "avatar",
+        "provider": "fal",
+        "endpoint": "fal-ai/infinitalk",
+        "map": {
+          "image": "image_url",
+          "audio": "audio_url",
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 25,
+            "min": 41,
+            "max": 721
+          },
+          "resolution": "resolution"
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "720p"
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.2,
+      "note": "480p or 720p, as long as the voice"
+    }
+  },
+  {
+    "id": "fuobe-speak-motion",
+    "name": "Fuobe Speak \u00b7 Motion",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-speak",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Speech with the body and the scene moving: Wan 2.2 S2V",
+    "routes": [
+      {
+        "op": "avatar",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-14b/speech-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "audio": "audio_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 40,
+            "max": 120,
+            "multiple": 4
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1,
+      "note": "480p; 580p $0.15, 720p $0.20 a video second (frames \u00f7 16), up to 7.5 s a call",
+      "byResolution": {
+        "480p": 0.1,
+        "580p": 0.15,
+        "720p": 0.2
       }
     }
   }
