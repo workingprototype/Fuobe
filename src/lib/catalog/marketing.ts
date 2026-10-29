@@ -1036,8 +1036,8 @@ export const MULTIPLIER_MODELS: Record<Engine, ModelChoice[]> = {
 
 /**
  * The longest part of the reference a cloud edit model recreates (docs/research/paid-model-apis-3/4.json): Kling O3's
- * edit takes 3–15 s clips; Happy Horse's takes up to 60 s but returns at most the first 15 s (and bills the input
- * seconds too). A longer selection is cut to its first seconds, and the run says so.
+ * edit takes 3–15 s clips; Happy Horse's takes up to 60 s but returns at most the first 15 s. A longer selection is
+ * cut to its first seconds (so no second is sent that doesn't come back), and the run says so.
  */
 export const MULTIPLIER_WINDOW: Readonly<Record<string, number>> = { "kling-o3": 15, "happy-horse-video-edit": 15 };
 

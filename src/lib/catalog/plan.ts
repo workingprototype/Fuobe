@@ -696,7 +696,7 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
     const seconds = clip ?? voice ?? params.duration ?? model.defaults?.duration ?? 5;
     const mp = p.videoMegapixel ? videoMegapixels(model, params, seconds) : undefined;
     const rate = p.videoMegapixel && (withLoras && p.videoMegapixel.withLoras !== undefined ? p.videoMegapixel.withLoras : p.videoMegapixel.usd);
-    per = mp !== undefined && rate ? Math.ceil(mp - 1e-9) * rate : usd * seconds * (p.inputSeconds ? 2 : 1);
+    per = mp !== undefined && rate ? Math.ceil(mp - 1e-9) * rate : usd * seconds;
   }
   if (p.unit === "minute") per = (usd * (voice ?? params.duration ?? 60)) / 60;
   // Settings that change the price (60 fps, a Pro tier, a cheaper model).

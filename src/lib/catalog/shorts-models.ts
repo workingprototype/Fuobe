@@ -50,7 +50,8 @@ export function reframes(modelId: string, engine?: Engine): boolean {
  */
 const SOURCE_SECONDS: Record<string, { min?: number; max?: number }> = {
   "kling-o3-4k-edit": { min: 3, max: 15 },
-  "happy-horse-video-edit": { min: 3, max: 60 },
+  // It reads 3–60 s but returns at most the first 15 s.
+  "happy-horse-video-edit": { min: 3, max: 15 },
   "runway-aleph-2": { min: 2, max: 30 },
   "wan-2-7": { min: 2, max: 10 },
   // Higgsfield feeds Gemini Omni Flash ≤10 s segments.
@@ -87,8 +88,8 @@ export interface RestyleModelInfo {
 }
 
 /**
- * What one unit costs at the resolution the studios ask for, counting input seconds when the model bills them. Fuobe
- * Shorts in the cloud bills frames ÷ 16 as seconds: a second of a 30 fps clip, the common case, is shown.
+ * What one unit costs at the resolution the studios ask for. Fuobe Shorts in the cloud bills frames ÷ 16 as seconds:
+ * a second of a 30 fps clip, the common case, is shown.
  */
 export function unitPrice(m: ModelDef): number | null {
   const p = m.pricing;
@@ -96,7 +97,7 @@ export function unitPrice(m: ModelDef): number | null {
   const res = resolutionFor(m.id, m.engine) ?? m.defaults?.resolution;
   const usd = (res && p.byResolution?.[res]) || p.usd;
   if (m.id === SHORTS_ORIGINAL && p.unit === "second") return (usd * SHORTS.original.maxFps) / SHORTS.original.billFps;
-  return p.unit === "second" && p.inputSeconds ? usd * 2 : usd;
+  return usd;
 }
 
 const UNIT: Record<string, string> = { second: "s", megapixel: "MP" };

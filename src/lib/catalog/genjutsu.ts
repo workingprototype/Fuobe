@@ -535,7 +535,7 @@ export const MAKERS: Maker[] = [
     engine: "cloud",
     modes: ["restyle"],
     label: "Happy Horse Video Edit",
-    note: "Closed model · reads up to 4 of the look's images · billed on the clip's seconds too",
+    note: "Closed model · reads up to 4 of the look's images · pieces of up to 10 s",
     source: "partner",
     refs: { min: 0, max: 0 },
     keepsSound: false,

@@ -7582,7 +7582,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "happy-horse",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Restyle or swap things in 3\u201360 s clips, with up to 5 reference images",
+    "tagline": "Restyle or swap things in 3\u201315 s clips, with up to 5 reference images",
     "routes": [
       {
         "op": "v2v",
@@ -7623,12 +7623,11 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "second",
       "usd": 0.28,
-      "note": "720p, input + output seconds; 1080p $0.56",
+      "note": "720p, input and output seconds together; 1080p $0.56",
       "byResolution": {
         "720p": 0.28,
         "1080p": 0.56
-      },
-      "inputSeconds": true
+      }
     }
   },
   {

@@ -589,8 +589,6 @@ export interface Pricing {
   note?: string;
   /** The price per unit at each resolution (params.resolution), when it differs (Gemini Omni Flash: 360p $0.03/s … 4K $0.30/s); `usd` is the default resolution's. */
   byResolution?: Record<string, number>;
-  /** Billed on the input clip's seconds as well as the output's (Happy Horse video edit): a restyle costs about twice the clip's length. */
-  inputSeconds?: boolean;
   /**
    * A launch price that runs to the end of `until` (UTC, YYYY-MM-DD); `usd` / `byResolution` are the list
    * prices after it. The catalog applies whichever holds when it loads (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s).
