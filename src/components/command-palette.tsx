@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clapperboard, Cpu, Film, KeyRound, Layers, LayoutGrid, Loader2, Play, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
+import { Bell, Clapperboard, Cpu, Film, GraduationCap, KeyRound, Layers, LayoutGrid, Loader2, Play, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSkills } from "@/components/assist/hooks";
@@ -52,6 +52,7 @@ const SETTINGS: { id: string; label: string; icon: LucideIcon; keywords: string;
   { id: "comfyui", label: "ComfyUI server", icon: Server, keywords: "open source gpu url connect local" },
   { id: "engine", label: "Engine mode", icon: Cpu, keywords: "open source cloud both" },
   { id: "loras", label: "LoRAs", icon: Layers, keywords: "lora folder civitai key looks motions effects download licence" },
+  { id: "training", label: "Training (AI-Toolkit)", icon: GraduationCap, keywords: "ai-toolkit aitk train lora soul id gpu url token" },
   {
     id: "models",
     label: "Models & licences",

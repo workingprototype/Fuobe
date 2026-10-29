@@ -81,7 +81,7 @@ export function TrainBoardDialog({ board, open, onOpenChange }: { board: Moodboa
               {(t.blocker || t.demo) && (
                 <p className="mt-2 text-[12px] text-muted-foreground">
                   {t.blocker ?? (t.provider === "fal" ? "No fal.ai key yet: this runs as a demo and trains nothing." : "No AI-Toolkit set up yet: this runs as a demo and trains nothing.")}{" "}
-                  <Link href="/settings#training" className="text-brand-text underline underline-offset-2">
+                  <Link href={t.provider === "fal" ? "/settings#fal" : "/settings#training"} className="text-brand-text underline underline-offset-2">
                     Open Settings
                   </Link>
                 </p>

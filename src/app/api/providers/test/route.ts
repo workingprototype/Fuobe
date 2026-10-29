@@ -1,5 +1,6 @@
 import { candidateValues, isTestProvider, PROVIDER_SETTINGS, settingProblem } from "@/lib/connections";
 import { testCivitaiKey } from "@/server/loras";
+import { testAiToolkit } from "@/server/training";
 import { PROVIDERS } from "@/server/providers";
 import { validateSetting, withCandidates, type SettingName } from "@/server/settings";
 
@@ -13,8 +14,9 @@ import { validateSetting, withCandidates, type SettingName } from "@/server/sett
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { provider?: unknown; value?: unknown; values?: unknown; field?: unknown };
   const provider = body.provider;
-  // The civitai key isn't a model provider's: it downloads LoRAs.
-  const adapter = provider === "civitai" ? { test: testCivitaiKey } : isTestProvider(provider) ? PROVIDERS[provider as Exclude<typeof provider, "civitai">] : undefined;
+  // The civitai key isn't a model provider's (it downloads LoRAs), nor is AI-Toolkit (it trains them).
+  const adapter =
+    provider === "civitai" ? { test: testCivitaiKey } : provider === "ai-toolkit" ? { test: testAiToolkit } : isTestProvider(provider) ? PROVIDERS[provider as Exclude<typeof provider, "civitai" | "ai-toolkit">] : undefined;
   if (!isTestProvider(provider) || !adapter?.test) return Response.json({ ok: false, detail: "Unknown provider" }, { status: 400 });
   const values = candidateValues(provider, body.values, body.value) as Partial<Record<SettingName, string>>;
   try {

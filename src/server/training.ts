@@ -26,12 +26,13 @@ import {
   type TrainingTarget,
 } from "@/lib/catalog/training";
 import { TRAINING_REPLACED_BY } from "@/lib/catalog/replaced";
+import { DEFAULT_AI_TOOLKIT_URL } from "@/lib/connections";
 import { DATA_DIR, db } from "./db";
 import { getElement, updateElement } from "./elements";
 import { keepTrainedLora, lorasPath, ownCopy, recordTrainedMirror } from "./loras";
 import { falFetch, falProvider } from "./providers/fal";
 import { ProviderError } from "./providers/types";
-import { engineMode, getSetting } from "./settings";
+import { engineMode, getSetting, isCandidate, savedSetting } from "./settings";
 import { readRef } from "./storage";
 import { zip } from "./zip";
 
@@ -147,7 +148,7 @@ export function trainingBlocker(t: TrainingTarget): string | null {
     return `${fam.name} runs only ${mode === "open" ? "in the cloud" : "on your GPU"}, which this install turned off (Settings → ${ENGINE_MODE})`;
   }
   if (t.provider === "fal" && !getSetting("falKey")) return "Add a fal.ai key in Settings";
-  if (t.provider === "ai-toolkit" && !getSetting("aiToolkitUrl")) return "Set your AI-Toolkit URL in Settings (or download the training kit)";
+  if (t.provider === "ai-toolkit" && !getSetting("aiToolkitUrl")) return "Set your AI-Toolkit URL in Settings → Training (or download the training kit)";
   return null;
 }
 
@@ -282,16 +283,76 @@ async function dataset(el: StudioElement, trigger: string, images: string[]) {
   return { files, caption };
 }
 
+const aitkBase = () => getSetting("aiToolkitUrl").replace(/\/+$/, "");
+
+/**
+ * Save & test of an AI-Toolkit address that isn't the saved one: the saved auth token stays with the trainer it was
+ * saved for (as ComfyUI's does). Only a token typed for the test goes to the new address.
+ */
+const aitkTokenWithheld = () => isCandidate("aiToolkitUrl") && !isCandidate("aiToolkitToken") && aitkBase() !== savedSetting("aiToolkitUrl").replace(/\/+$/, "");
+
+function aitkAuth(): Record<string, string> {
+  const token = aitkTokenWithheld() ? "" : getSetting("aiToolkitToken");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function aitk(pathname: string, init: RequestInit = {}) {
-  const base = getSetting("aiToolkitUrl").replace(/\/$/, "");
-  const token = getSetting("aiToolkitToken");
-  const res = await fetch(`${base}${pathname}`, {
+  const res = await fetch(`${aitkBase()}${pathname}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.headers ?? {}) },
+    headers: { "Content-Type": "application/json", ...aitkAuth(), ...(init.headers ?? {}) },
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new ProviderError(`AI-Toolkit ${res.status}: ${JSON.stringify(body).slice(0, 300)}`, res.status);
   return body as Record<string, unknown>;
+}
+
+/** Where Fuobe writes the training photos for AI-Toolkit: Settings' folder, else its own data folder (same machine). */
+const datasetRoot = () => getSetting("aiToolkitDatasetDir") || path.join(DATA_DIR, "datasets");
+
+/**
+ * Settings → Training → Save & test. The address: AI-Toolkit's UI answers its job list (GET /api/jobs, with the auth
+ * token when the trainer sets AI_TOOLKIT_AUTH). The photos folder: Fuobe can write there (checked without making it).
+ */
+export async function testAiToolkit(opts?: { focus?: string }): Promise<{ ok: boolean; detail: string }> {
+  if (opts?.focus === "aiToolkitDatasetDir") return testDatasetDir();
+  const base = aitkBase();
+  if (!base) return { ok: false, detail: `No AI-Toolkit URL set — its UI listens on ${DEFAULT_AI_TOOLKIT_URL}` };
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/jobs?only_active=true`, { headers: aitkAuth(), signal: AbortSignal.timeout(10_000) });
+  } catch (e) {
+    const why = (e as Error).name === "TimeoutError" ? "no answer in 10 s" : (e as Error).message;
+    return { ok: false, detail: `Can't reach AI-Toolkit at ${base} (${why}). Is its UI running? (in ai-toolkit/ui: npm run build_and_start)` };
+  }
+  if (res.status === 401) {
+    if (aitkTokenWithheld() && getSetting("aiToolkitToken")) {
+      return { ok: false, detail: `AI-Toolkit wants its auth token: type it with the new address (the saved one stays with ${savedSetting("aiToolkitUrl").replace(/\/+$/, "")})` };
+    }
+    return { ok: false, detail: getSetting("aiToolkitToken") ? "AI-Toolkit rejected the auth token (401)" : "AI-Toolkit wants its auth token (AI_TOOLKIT_AUTH on the trainer): add it under Auth token" };
+  }
+  if (!res.ok) return { ok: false, detail: `AI-Toolkit answered HTTP ${res.status}` };
+  const jobs = ((await res.json().catch(() => null)) as { jobs?: unknown } | null)?.jobs;
+  if (!Array.isArray(jobs)) return { ok: false, detail: `Something answers at ${base}, but it isn't AI-Toolkit's UI (port 8675 by default)` };
+  return { ok: true, detail: jobs.length ? `AI-Toolkit · ${jobs.length} training${jobs.length > 1 ? "s" : ""} running` : "AI-Toolkit · ready, no training running" };
+}
+
+/** Whether Fuobe can write the training photos to the folder (its nearest existing folder, when it isn't made yet). */
+function testDatasetDir(): { ok: boolean; detail: string } {
+  const set = getSetting("aiToolkitDatasetDir");
+  const root = datasetRoot();
+  if (!path.isAbsolute(root)) return { ok: false, detail: "Use a full path, like /mnt/shared/datasets" };
+  let at = root;
+  while (!fs.existsSync(at) && path.dirname(at) !== at) at = path.dirname(at);
+  try {
+    if (!fs.statSync(at).isDirectory()) throw new Error(`${at} is a file`);
+    fs.accessSync(at, fs.constants.W_OK);
+  } catch (e) {
+    return { ok: false, detail: `Fuobe can't write to ${root} (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})` };
+  }
+  return {
+    ok: true,
+    detail: set ? `Fuobe writes the training photos to ${root}: AI-Toolkit has to read the same folder` : `Fuobe writes the training photos to ${root} (its data folder), for an AI-Toolkit on this machine`,
+  };
 }
 
 /** The fal queue URL of a trainer endpoint. */
@@ -319,7 +380,7 @@ async function submit(id: string, el: StudioElement, t: TrainingTarget, trigger:
   }
 
   // AI-Toolkit: write the dataset where the trainer can read it, then create and start a job.
-  const root = getSetting("aiToolkitDatasetDir") || path.join(DATA_DIR, "datasets");
+  const root = datasetRoot();
   const folder = path.join(root, `fuobe-${el.id}-${id}`);
   const { files } = await dataset(el, trigger, images);
   fs.mkdirSync(folder, { recursive: true });
@@ -449,8 +510,8 @@ async function pollOne(r: Row) {
     return done(
       r,
       added
-        ? "Demo: no LoRA was trained. Add a fal.ai key or your AI-Toolkit in Settings, then train again"
-        : `Demo: no LoRA was trained, so the ${fam} Soul ID you trained before stays. Add a fal.ai key or your AI-Toolkit in Settings to retrain`,
+        ? "Demo: no LoRA was trained. Add a fal.ai key, or your AI-Toolkit in Settings → Training, then train again"
+        : `Demo: no LoRA was trained, so the ${fam} Soul ID you trained before stays. Add a fal.ai key, or your AI-Toolkit in Settings → Training, to retrain`,
     );
   }
 

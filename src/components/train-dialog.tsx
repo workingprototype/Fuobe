@@ -201,7 +201,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                   <p className="mt-2 text-[12px] text-muted-foreground">
                     {t.blocker ??
                       `${t.provider === "fal" ? "No fal.ai key yet" : "No AI-Toolkit set up yet"}: this runs as a demo and trains nothing${hasFamily(f) ? ", and the Soul ID you trained stays" : ""}.`}{" "}
-                    <Link href="/settings" className="text-brand-text underline underline-offset-2">
+                    <Link href={t.provider === "fal" ? "/settings#fal" : "/settings#training"} className="text-brand-text underline underline-offset-2">
                       Open Settings
                     </Link>
                   </p>

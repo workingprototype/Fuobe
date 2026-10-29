@@ -65,6 +65,10 @@ describe("key and address checks", () => {
     expect(settingProblem("ollamaUrl", "ftp://box")).toMatch(/http:\/\//);
     expect(settingProblem("comfyUrl", "not a url")).toMatch(/isn't a web address/);
     expect(settingProblem("ollamaModel", "anything")).toBeNull();
+    expect(settingProblem("aiToolkitUrl", "127.0.0.1:8675")).toBe("Add http:// in front: http://127.0.0.1:8675");
+    expect(settingProblem("aiToolkitUrl", "http://gpu-box:8675")).toBeNull();
+    expect(settingProblem("aiToolkitDatasetDir", "datasets")).toMatch(/full path/);
+    expect(settingProblem("aiToolkitDatasetDir", "/mnt/shared/datasets")).toBeNull();
   });
 
   it("keeps a test's unsaved values to the settings that provider reads", () => {
@@ -74,6 +78,9 @@ describe("key and address checks", () => {
     expect(candidateValues("fal", undefined, " a:b ")).toEqual({ falKey: "a:b" });
     expect(candidateValues("comfyui", { comfyUrl: "http://x:8188", falKey: "no", comfyToken: 5 })).toEqual({ comfyUrl: "http://x:8188" });
     expect(candidateValues("llm", { ollamaModel: "llama3" })).toEqual({ ollamaModel: "llama3" });
+    expect(isTestProvider("ai-toolkit")).toBe(true);
+    expect(candidateValues("ai-toolkit", undefined, " http://gpu:8675 ")).toEqual({ aiToolkitUrl: "http://gpu:8675" });
+    expect(candidateValues("ai-toolkit", { aiToolkitToken: "t", comfyUrl: "x" })).toEqual({ aiToolkitToken: "t" });
   });
 });
 
@@ -234,6 +241,64 @@ describe("POST /api/providers/test with unsaved values", () => {
     );
     expect(accepted.result.body).toEqual({ ok: true, detail: "Claude key accepted" });
     expect(getSetting("anthropicKey")).toBe("");
+  });
+
+  it("tests an AI-Toolkit address (Soul ID's GPU trainer) before it's saved: its UI's job list, with the auth token it wants", async () => {
+    const jobs = (n: number) => ({ jobs: Array.from({ length: n }, (_, i) => ({ id: `j${i}`, status: "running" })) });
+    const ready = await withFetch({ "http://10.0.0.7:8675/api/jobs": [200, jobs(0)] }, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675/" }));
+    expect(ready.result.body).toEqual({ ok: true, detail: "AI-Toolkit · ready, no training running" });
+    expect(ready.seen).toEqual([{ url: "http://10.0.0.7:8675/api/jobs?only_active=true", auth: undefined }]);
+    expect(getSetting("aiToolkitUrl")).toBe("");
+    const busy = await withFetch({ "http://10.0.0.7:8675/api/jobs": [200, jobs(2)] }, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675" }));
+    expect(busy.result.body).toEqual({ ok: true, detail: "AI-Toolkit · 2 trainings running" });
+    // AI_TOOLKIT_AUTH set on the trainer: it wants the token.
+    const locked = await withFetch({ "http://10.0.0.7:8675/api/jobs": [401, { error: "Unauthorized" }] }, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675" }));
+    expect(locked.result.body).toEqual({ ok: false, detail: "AI-Toolkit wants its auth token (AI_TOOLKIT_AUTH on the trainer): add it under Auth token" });
+    const typed = await withFetch({ "http://10.0.0.7:8675/api/jobs": [401, { error: "Unauthorized" }] }, () =>
+      post({ provider: "ai-toolkit", values: { aiToolkitUrl: "http://10.0.0.7:8675", aiToolkitToken: "wrong" } }),
+    );
+    expect(typed.result.body).toEqual({ ok: false, detail: "AI-Toolkit rejected the auth token (401)" });
+    expect(typed.seen[0].auth).toBe("Bearer wrong");
+    // Something else on that port, or nothing at all.
+    const other = await withFetch({ "http://10.0.0.7:8675/api/jobs": [200, { hello: "world" }] }, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675" }));
+    expect(other.result.body).toEqual({ ok: false, detail: "Something answers at http://10.0.0.7:8675, but it isn't AI-Toolkit's UI (port 8675 by default)" });
+    const down = await withFetch({}, () => post({ provider: "ai-toolkit", value: "http://10.0.0.8:8675" }));
+    expect(down.result.body).toMatchObject({ ok: false, detail: expect.stringMatching(/^Can't reach AI-Toolkit at http:\/\/10\.0\.0\.8:8675 .*Is its UI running\?/) });
+    const none = await withFetch({}, () => post({ provider: "ai-toolkit" }));
+    expect(none.result.body).toEqual({ ok: false, detail: "No AI-Toolkit URL set — its UI listens on http://127.0.0.1:8675" });
+  });
+
+  it("keeps the saved AI-Toolkit token with the trainer it was saved for", async () => {
+    setSetting("aiToolkitUrl", "http://10.0.0.7:8675");
+    setSetting("aiToolkitToken", "saved-aitk-token");
+    const answers = { "http://10.0.0.7:8675/api/jobs": [200, { jobs: [] }], "http://10.0.0.9:8675/api/jobs": [401, { error: "Unauthorized" }] } as Record<string, [number, unknown]>;
+    const saved = await withFetch(answers, () => post({ provider: "ai-toolkit" }));
+    expect(saved.seen.map((r) => r.auth)).toEqual(["Bearer saved-aitk-token"]);
+    // A new address gets no token unless one is typed with it, and says so when the trainer wants one.
+    const other = await withFetch(answers, () => post({ provider: "ai-toolkit", value: "http://10.0.0.9:8675" }));
+    expect(other.seen.map((r) => r.auth)).toEqual([undefined]);
+    expect(other.result.body.detail).toBe("AI-Toolkit wants its auth token: type it with the new address (the saved one stays with http://10.0.0.7:8675)");
+    const same = await withFetch(answers, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675/" }));
+    expect(same.seen.map((r) => r.auth)).toEqual(["Bearer saved-aitk-token"]);
+    setSetting("aiToolkitUrl", "");
+    setSetting("aiToolkitToken", "");
+  });
+
+  it("checks the training photos folder can be written, without making it", async () => {
+    const fresh = path.join(dir, "shared", "datasets");
+    const ok = await post({ provider: "ai-toolkit", values: { aiToolkitDatasetDir: fresh }, field: "aiToolkitDatasetDir" });
+    expect(ok.body).toEqual({ ok: true, detail: `Fuobe writes the training photos to ${fresh}: AI-Toolkit has to read the same folder` });
+    expect(fs.existsSync(fresh)).toBe(false);
+    const file = path.join(dir, "a-file");
+    fs.writeFileSync(file, "");
+    const blocked = await post({ provider: "ai-toolkit", values: { aiToolkitDatasetDir: path.join(file, "datasets") }, field: "aiToolkitDatasetDir" });
+    expect(blocked.body).toMatchObject({ ok: false, detail: expect.stringMatching(/^Fuobe can't write to .*a-file/) });
+    const relative = await post({ provider: "ai-toolkit", values: { aiToolkitDatasetDir: "datasets" }, field: "aiToolkitDatasetDir" });
+    expect(relative.body.ok).toBe(false);
+    expect(relative.body.detail).toMatch(/full path/);
+    // Nothing typed and nothing saved: Fuobe's own data folder, for an AI-Toolkit on this machine.
+    const own = await post({ provider: "ai-toolkit", field: "aiToolkitDatasetDir" });
+    expect(own.body).toEqual({ ok: true, detail: `Fuobe writes the training photos to ${path.join(dir, "datasets")} (its data folder), for an AI-Toolkit on this machine` });
   });
 
   it("refuses unknown providers and values a setting doesn't allow", async () => {
