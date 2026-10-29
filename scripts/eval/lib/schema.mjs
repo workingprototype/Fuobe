@@ -248,12 +248,31 @@ export const SuiteSchema = z
       for (const v of Object.keys(c.variantModels ?? {})) {
         if (!s.variants?.[v]) ctx.addIssue({ code: "custom", path: ["cases", i, "variantModels", v], message: `no variant ${v} in this suite` });
       }
+      // Every input a route body names is in the case's inputs and its demo inputs (fillTemplate refuses a missing one).
+      for (const t of bodyTokens(c.submit?.body)) {
+        const m = /^(?:source:)?inputs\.(\w+)(?:\.(\d+))?$/.exec(t);
+        if (!m) continue;
+        for (const key of ["inputs", "demoInputs"]) {
+          if (!c[key]) continue;
+          const v = c[key][m[1]];
+          const has = m[2] === undefined ? v !== undefined : Array.isArray(v) && v.length > Number(m[2]);
+          if (!has) ctx.addIssue({ code: "custom", path: ["cases", i, key], message: `the route body names {{${t}}}, which ${key} doesn't have` });
+        }
+      }
     });
     const variants = Object.keys(s.variants ?? { default: {} });
     for (const k of ["variant", "candidate"]) {
       if (s.defaults[k] && !variants.includes(s.defaults[k])) ctx.addIssue({ code: "custom", path: ["defaults", k], message: `no variant ${s.defaults[k]} (have ${variants.join(", ")})` });
     }
   });
+
+/** The {{tokens}} a route body template names (scripts/eval/lib/media.mjs fillTemplate). */
+function bodyTokens(v, out = []) {
+  if (typeof v === "string") for (const m of v.matchAll(/\{\{\s*([\w.:-]+)\s*\}\}/g)) out.push(m[1]);
+  else if (Array.isArray(v)) for (const x of v) bodyTokens(x, out);
+  else if (v && typeof v === "object") for (const x of Object.values(v)) bodyTokens(x, out);
+  return out;
+}
 
 /** Readable lines for a failed parse: `cases[3].prompts[0].seed: expected an integer`. */
 export function issues(error) {

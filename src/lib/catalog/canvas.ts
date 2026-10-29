@@ -1719,6 +1719,8 @@ export interface CanvasTemplate {
   /** lucide icon name. */
   icon: string;
   hue: number;
+  /** The picker's section ("Effects 2.0 chains"); none: the workflows. */
+  group?: string;
   build: (engine: Engine) => CanvasGraph;
 }
 
@@ -1955,6 +1957,77 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
     ),
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Effects 2.0 chains (build plan O13): Higgsfield's "Prompt based" effect chains as Fuobe templates. A photo goes
+// through an image edit that sets the scene, then Fuobe DoP animates it with the effect's words (research
+// higgsfield-originals-5.md §3.8: an image edit, then image to video). Both steps are open weights on both engines:
+// Qwen-Image-Edit 2511 (on your GPU, or hosted on fal) and Fuobe DoP (Wan 2.2 14B on your GPU, or hosted on fal).
+// The edit prompts are Fuobe's own words; the motion is the effect's own prompt from the effects catalog.
+
+export const EFFECT_CHAIN_GROUP = "Effects 2.0 chains";
+
+/** Image edit, then image to video: the models per engine (Fuobe DoP is an Original, run on the template's engine). */
+export const EFFECT_CHAIN_MODELS = { edit: { cloud: "qwen-image-edit-2511-cloud", open: "oss-qwen-edit" }, video: "fuobe-dop" } as const;
+
+/** The researched Effects 2.0 chains with a scene to set first: the effect (its name in the effects catalog) and the edit. */
+export const EFFECT_CHAINS: { effect: string; edit: string; icon: string; hue: number }[] = [
+  { effect: "Agamemnon", icon: "Swords", hue: 35, edit: "Dress the person as an ancient Greek warrior king in polished bronze armour and a red cape, a sword in hand, a vast army on a dusty battlefield behind them at golden hour. Keep their face and pose." },
+  { effect: "Fallen Angel", icon: "Feather", hue: 270, edit: "Give the person large dark ragged wings and put them on a storm-lit rooftop at night, black feathers drifting in the air. Keep their face, clothes and pose." },
+  { effect: "Pearl Earring", icon: "Gem", hue: 220, edit: "Repaint the picture as a Dutch Golden Age oil portrait: a blue and gold head wrap, a pearl earring, a dark background and soft window light. Keep the person's face." },
+  { effect: "Monet Muse", icon: "Palette", hue: 150, edit: "Repaint the scene as an impressionist oil painting of a garden pond with water lilies, soft dabs of light and colour. Keep the person and their pose." },
+  { effect: "Fairytale Castle", icon: "Castle", hue: 300, edit: "Put a magical fairytale castle on a hill far behind the person under a twilight sky with the first fireworks. Keep the person exactly as they are." },
+  { effect: "Blue Depth", icon: "Waves", hue: 210, edit: "Place the person underwater in deep blue ocean light, rays shimmering down from the surface, hair and clothes floating. Keep their face." },
+  { effect: "Superstar", icon: "Star", hue: 50, edit: "Put the person on a glittering concert stage under bright spotlights, a cheering crowd in silhouette and confetti in the air. Keep their face and outfit." },
+  { effect: "Street Colossus", icon: "Building2", hue: 15, edit: "Make the person a giant standing in the middle of a city street, as tall as the buildings, with tiny cars and people around their feet. Keep their face and clothes." },
+  { effect: "Dolphin Ride", icon: "Fish", hue: 190, edit: "Put the person on the back of a dolphin leaping over sparkling ocean waves in bright sunshine. Keep their face." },
+  { effect: "Skatedog", icon: "Dog", hue: 95, edit: "Add a happy dog riding a skateboard next to the person on a sunny street. Keep the person exactly as they are." },
+];
+
+const slugOf = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/** An effect's own motion words (its catalog prompt without the user's part). */
+export function effectWords(name: string): string | undefined {
+  return getPreset(`effect-${slugOf(name)}`)?.promptTemplate?.replace(/^\{prompt\}\.\s*/, "").trim() || undefined;
+}
+
+function effectChainTemplate(c: (typeof EFFECT_CHAINS)[number]): CanvasTemplate {
+  const words = effectWords(c.effect);
+  if (!words) throw new Error(`Effects 2.0 chain ${c.effect}: no such effect in the catalog`);
+  return {
+    id: `effect-chain-${slugOf(c.effect)}`,
+    name: c.effect,
+    // What the effect does, in the catalog's words (the section's note says how the chain works).
+    description: getPreset(`effect-${slugOf(c.effect)}`)?.description ?? "A photo, its scene set by an image edit, then animated with the effect",
+    icon: c.icon,
+    hue: c.hue,
+    group: EFFECT_CHAIN_GROUP,
+    build: (engine) => {
+      const graph = tpl(
+        [
+          { id: "photo", type: "image-input", x: 0, y: 60, data: { label: "Your photo" } },
+          { id: "scene", type: "model", x: COL, y: 0, data: { mediaKind: "image", label: "Set the scene", op: "edit", prompt: c.edit, params: { aspectRatio: "auto" } }, models: EFFECT_CHAIN_MODELS.edit },
+          {
+            id: "effect",
+            type: "model",
+            x: COL * 2,
+            y: 0,
+            data: { mediaKind: "video", label: c.effect, op: "i2v", modelId: EFFECT_CHAIN_MODELS.video, engine, prompt: words, params: { aspectRatio: "auto", duration: 5 } },
+          },
+          { id: "out", type: "output", x: COL * 3, y: 40, data: { label: c.effect } },
+        ],
+        [
+          ["photo", "scene", "images"],
+          ["scene", "effect", "images"],
+          ["effect", "out"],
+        ],
+      )(engine);
+      return graph;
+    },
+  };
+}
+
+CANVAS_TEMPLATES.push(...EFFECT_CHAINS.map(effectChainTemplate));
 
 export function getTemplate(id: string): CanvasTemplate | undefined {
   return CANVAS_TEMPLATES.find((t) => t.id === id);

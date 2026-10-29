@@ -13,13 +13,13 @@ import { loraFamily, runsSomewhere, TRAINING_FAMILIES } from "@/lib/catalog/trai
 import type { ElementLora } from "@/lib/catalog/elements";
 import { createPipeline } from "../chains";
 import { listElements } from "../elements";
-import { createGenerations, currentRequest, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
+import { createGenerations, currentRequest, getGeneration, listGenerations, outputKind, previewChained } from "../generations";
 import { provider } from "../providers";
 import { llmBackends } from "../providers/llm";
 import { engineMode } from "../settings";
 import { readRef } from "../storage";
 import { katanaTool } from "../katana";
-import { createStoryboard } from "../storyboard";
+import { createStoryboard, estimateStoryboard } from "../storyboard";
 import { CONTEXT_TOOLS } from "./context-tools";
 import { defineTool, type JobPlace, type ResultContent, type ToolContext, type ToolDef, type ToolOutcome } from "./define";
 // Fills STUDIO_ROUTES with the studio modules (Layers, Shorts, dub, Faceless, Ads, Captions).
@@ -500,10 +500,11 @@ const storyboard = defineTool({
     const engine = engineMode() === "both" ? ctx.engine : (engineMode() as "cloud" | "open");
     const m = STORYBOARD_MODELS[engine];
     const n = Math.max(1, Math.min(8, s.scenes?.length || s.frames || 4));
-    let one: ReturnType<typeof previewGeneration> | null = null;
+    // Every frame priced on its own model (frame 1, then the next-frame model), as the Storyboard prices a board.
+    let est: ReturnType<typeof estimateStoryboard> | null = null;
     let error: string | undefined;
     try {
-      one = previewGeneration({ feature: "storyboard", modelId: m.first, prompt: s.story || s.scenes?.[0] || "frame", params: { aspectRatio: s.aspect_ratio } });
+      est = estimateStoryboard({ engine, story: s.story, scenes: s.scenes, frames: s.frames, references: s.references, style: s.style, aspectRatio: s.aspect_ratio });
     } catch (e) {
       error = (e as Error).message;
     }
@@ -512,13 +513,13 @@ const storyboard = defineTool({
       {
         tool: "create_storyboard",
         modelId: m.first,
-        modelName: one?.model.name ?? m.first,
+        modelName: est?.models.join(" + ") || m.first,
         kind: "image",
         op: "storyboard",
         prompt: s.story || (s.scenes ?? []).join(" / "),
         count: n,
-        costUsd: one?.costUsd === null || !one ? null : one.costUsd * n,
-        demo: one?.demo ?? false,
+        costUsd: est ? est.costUsd : null,
+        demo: est?.demo ?? false,
         error,
       },
     ];

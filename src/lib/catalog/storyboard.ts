@@ -2,17 +2,60 @@
  * Storyboards (Higgsfield Popcorn): up to 8 consistent frames. Frame 1 is made from the
  * references (or text alone); every later frame is an edit of the previous frame, so faces,
  * wardrobe, location and grade carry through.
+ *
+ * Since build plan O13 a board can take one of Fuobe Soul's looks (research §8 popcorn): frame 1
+ * is made on Fuobe Soul with the look on either engine (with references it stays on the reference
+ * model, with the look's words), the next frames carry the look's words, and every frame gets the
+ * look's grade and overlay after it is made (each next frame is made from the previous one as it
+ * came out, so the grade is applied once).
+ *
+ * The board is Fuobe's open recipe on both engines: Qwen-Image-Edit 2509 + the next-scene LoRA makes each next frame
+ * on your GPU (a graph that loads it) and on fal's hosted Qwen-Image-Edit 2509 (the LoRA sent as a URL). Nano Banana
+ * Pro stays a separate choice in the cloud (`partner`), every frame on it as boards ran before.
  */
-import type { Engine } from "./types";
+import { loraEntry, loraRef } from "./loras";
+import type { ChainSlot, Engine, GenerationRequest, LoraRef } from "./types";
 
 export const MAX_FRAMES = 8;
 
-/** Which models make the first frame and the follow-ups on each engine. */
-export const STORYBOARD_MODELS: Record<Engine, { first: string; firstWithRefs: string; next: string; chainFrom: "first" | "last" }> = {
-  cloud: { first: "nano-banana-pro", firstWithRefs: "nano-banana-pro", next: "nano-banana-pro", chainFrom: "last" },
+export interface StoryboardModels {
+  first: string;
+  firstWithRefs: string;
+  next: string;
+  chainFrom: "first" | "last";
+  /** LoRAs each next frame carries (the cloud's next-scene LoRA; the GPU graph loads its own). */
+  nextLoras?: LoraRef[];
+}
+
+/** The next-scene LoRA (research adapterLoras): the one the GPU graph loads, at its strength. */
+const NEXT_SCENE = loraEntry("next-scene-qwen-edit-2509");
+
+/** Which models make the first frame and the follow-ups on each engine (Fuobe's recipe). */
+export const STORYBOARD_MODELS: Record<Engine, StoryboardModels> = {
+  // Hosted open weights: Z-Image Turbo, Qwen-Image-Edit 2511 with references, then Qwen-Image-Edit 2509 + next-scene.
+  cloud: { first: "z-image-turbo-cloud", firstWithRefs: "qwen-image-edit-2511-cloud", next: "qwen-image-edit-2509-cloud", chainFrom: "first", ...(NEXT_SCENE && { nextLoras: [loraRef(NEXT_SCENE)] }) },
   // Qwen-Image-Edit + the next-scene LoRA takes the previous panel as image 1 and the character as image 2.
   open: { first: "oss-z-image-turbo", firstWithRefs: "oss-qwen-edit", next: "oss-qwen-next-scene", chainFrom: "first" },
 };
+
+/** Partner models a cloud board can run on instead (a separate choice): every frame on it, each from the last one. */
+export const STORYBOARD_PARTNERS = {
+  "nano-banana-pro": { first: "nano-banana-pro", firstWithRefs: "nano-banana-pro", next: "nano-banana-pro", chainFrom: "last" },
+} as const satisfies Record<string, StoryboardModels>;
+export type StoryboardPartner = keyof typeof STORYBOARD_PARTNERS;
+export const STORYBOARD_PARTNER_IDS = Object.keys(STORYBOARD_PARTNERS) as [StoryboardPartner, ...StoryboardPartner[]];
+
+/** The models a board runs on: the partner when one is picked in the cloud, else Fuobe's recipe for the engine. */
+export function storyboardModels(engine: Engine, partner?: StoryboardPartner): StoryboardModels {
+  return engine === "cloud" && partner ? STORYBOARD_PARTNERS[partner] : STORYBOARD_MODELS[engine];
+}
+
+/** The model a board with a Soul look makes its first frame on (no references): the look's LoRAs, words and grade. */
+export const STORYBOARD_LOOK_MODEL = "fuobe-soul";
+
+/** Shapes a board offers; Fuobe Soul has no 21:9, so a look board makes 16:9 frames and crops them to 21:9 after. */
+export const STORYBOARD_ASPECTS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
+export const LOOK_CROPPED = "21:9";
 
 const SHOTS = [
   "establishing wide shot",
@@ -62,4 +105,65 @@ export function framePrompt(scene: string, index: number, opts: { refs: number; 
   if (opts.chainFrom === "first") return `Next Scene: ${s}.${style}`;
   const prev = opts.refs + 1;
   return `Next frame of the same storyboard: ${s}. Image ${prev} is the previous frame — continue from it with the same characters, faces, wardrobe, props, location style, lighting and color grade, like consecutive shots of one film.${style}`;
+}
+
+// ---------------------------------------------------------------------------
+// The board's frames (the server creates them, one waiting on the one before)
+
+export interface StoryboardLook {
+  id: string;
+  /** The look in words (soulLook(id).look), carried into every next frame's prompt. */
+  words: string;
+  /** The look's strength (scales its LoRAs on frame 1). */
+  strength?: number;
+}
+
+export interface StoryboardPlanInput {
+  engine: Engine;
+  /** A partner model for the whole board (cloud only). */
+  partner?: StoryboardPartner;
+  scenes: string[];
+  references?: string[];
+  style?: string;
+  look?: StoryboardLook;
+  aspectRatio?: string;
+  resolution?: string;
+  batchTitle?: string;
+}
+
+export type FrameRequest = GenerationRequest & { batchTitle?: string };
+
+/**
+ * Each frame's request, in order (frame 1 first). A frame after the first waits on the one before and takes its
+ * picture as it came out (`raw`: before a look's grade, which every frame gets on its own).
+ */
+export function planStoryboard(input: StoryboardPlanInput): FrameRequest[] {
+  const m = storyboardModels(input.engine, input.partner);
+  const refs = (input.references ?? []).slice(0, 4);
+  const look = input.look;
+  const cropped = !!look && input.aspectRatio === LOOK_CROPPED;
+  const params = { aspectRatio: cropped ? "16:9" : input.aspectRatio, resolution: input.resolution, numOutputs: 1 };
+  const lookWords = look?.words.trim().replace(/[.\s]+$/, "");
+  // The next frames keep the look in words; frame 1 on Fuobe Soul gets them from its recipe.
+  const style = [input.style?.trim().replace(/[.\s]+$/, ""), lookWords].filter(Boolean).join(". ") || undefined;
+  return input.scenes.map((scene, i) => {
+    const first = i === 0;
+    // The open next-scene workflow takes the previous panel plus one character reference.
+    const frameRefs = first ? refs : m.chainFrom === "first" ? refs.slice(0, 1) : refs;
+    const onSoul = first && !!look && !refs.length;
+    // A look board's next frame takes the previous picture as it came out (raw); otherwise the single-image chainFrom.
+    const chain: ChainSlot[] | undefined = first || !look ? undefined : [{ slot: "images", position: m.chainFrom, raw: true }];
+    return {
+      feature: "storyboard",
+      modelId: onSoul ? STORYBOARD_LOOK_MODEL : first ? (refs.length ? m.firstWithRefs : m.first) : m.next,
+      ...(onSoul && { engine: input.engine, presetId: look.id, ...(look.strength !== undefined && { presetStrength: look.strength }) }),
+      prompt: framePrompt(scene, i, { refs: frameRefs.length, chainFrom: m.chainFrom, style: onSoul ? input.style : style }),
+      inputs: frameRefs.length ? { images: frameRefs } : undefined,
+      params,
+      ...(!first && m.nextLoras?.length && { loras: m.nextLoras }),
+      ...(chain ? { chain } : !first && { chainFrom: m.chainFrom }),
+      frame: { scene, index: i, of: input.scenes.length, ...(look && { look: look.id }), ...(cropped && { crop: LOOK_CROPPED }) },
+      ...(input.batchTitle && { batchTitle: input.batchTitle }),
+    };
+  });
 }

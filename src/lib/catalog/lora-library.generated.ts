@@ -3124,6 +3124,30 @@ export const LORA_LIBRARY: LoraEntry[] = [
     "released": "2026-07-15",
     "hostedEndpoint": "fal-ai/flux-2/klein/4b/edit/lora",
     "notes": "Rank-32 edit LoRA trained by xocialize with ai-toolkit on FLUX.2-klein-base-4B (Apache-2.0); card licence apache-2.0, so fal may host it (build plan O10's check). Three ordered inputs: person, top (or a dress / whole outfit), bottom; trigger TRYON. Trained on clothing-agnostic people: the open graph greys the old outfit out first (ClothesSegment), the hosted route sends the photo as it is (quality unmeasured until the eval harness runs the fashion suite)."
+  },
+  {
+    "key": "next-scene-qwen-edit-2509",
+    "name": "Next Scene for Qwen-Image-Edit 2509 (lovis93)",
+    "file": "next-scene_lora-v2-3000.safetensors",
+    "url": "https://huggingface.co/lovis93/next-scene-qwen-image-lora-2509/resolve/9b9da698b8a5370efd875f18b1727cc1119f3863/next-scene_lora-v2-3000.safetensors",
+    "page": "https://huggingface.co/lovis93/next-scene-qwen-image-lora-2509",
+    "strength": 0.75,
+    "base": "qwen-image-edit-2509",
+    "download": "direct",
+    "group": "adapter",
+    "trigger": "Next Scene:",
+    "version": "9b9da698b8a5370efd875f18b1727cc1119f3863",
+    "sha256": "8abf2306649a62282f89968515097650acaf7b040687c9b6c56e37558e6df9e1",
+    "sizeBytes": 295146176,
+    "licence": {
+      "commercial": true,
+      "hostedOk": true,
+      "snapshotDate": "2026-10-29",
+      "name": "MIT"
+    },
+    "released": "2025-10-21",
+    "hostedEndpoint": "fal-ai/qwen-image-edit-plus-lora",
+    "notes": "The v2 next-scene LoRA the GPU's storyboard-qwen-edit-2509-next-scene graph loads (at 0.75), so a cloud board's next frames run the same recipe on fal's hosted Qwen-Image-Edit 2509 (loras: [{path, scale}], up to 3; $0.035 per megapixel). Card licence MIT, base Qwen/Qwen-Image-Edit-2509 (Apache-2.0); a prompt starting \"Next Scene:\" continues the previous panel (image 1) with a new shot. Pinned 2026-10-29 from the Hugging Face API (repo head, the file's LFS SHA256 and size)."
   }
 ];
 

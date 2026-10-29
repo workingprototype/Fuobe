@@ -21,6 +21,7 @@ function templateCards(): TemplateCardData[] {
     description: t.description,
     icon: t.icon,
     hue: t.hue,
+    ...(t.group && { group: t.group }),
     byEngine: { cloud: forEngine(t, "cloud"), open: forEngine(t, "open") },
   }));
 }

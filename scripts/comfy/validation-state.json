@@ -671,6 +671,12 @@
     "error": null,
     "at": "2026-10-23T04:45:42.666Z"
   },
+  "video-evolution-wan22-fun-vace": {
+    "sha256": "76e8fc309eb111c08658fd04fa99e36d61608ec62d1ab535e80cba57db1e08ae",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-29T02:04:05.351Z"
+  },
   "video-export-exr": {
     "sha256": "76efcb75b5995707dc326254ae73cdc806f12714c7543f70511f74f62fd8ca49",
     "validated": true,

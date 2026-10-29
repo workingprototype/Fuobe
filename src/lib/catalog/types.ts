@@ -861,7 +861,11 @@ export interface GenerationRequest {
    */
   dropWhenUnused?: boolean;
   /** Storyboard frame this request makes (shown under the frame). */
-  frame?: { scene: string; index: number; of: number };
+  /**
+   * A storyboard frame. `look`: the board's Fuobe Soul look, whose grade and overlay every frame gets after it is made
+   * (as meta, like a Soul picture); `crop`: a look board asked for 21:9 is made at 16:9 and cropped after.
+   */
+  frame?: { scene: string; index: number; of: number; look?: string; crop?: "21:9" };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
   step?: { label: string; index: number; of: number };
   /** Server-set: what the user calls this result, shown instead of the prompt (Library, feeds). */
@@ -916,6 +920,11 @@ export interface ChainSlot {
    * missing input go), and `notice` is said on the result and on the steps after it.
    */
   optional?: { prompt?: string; notice: string };
+  /**
+   * Take the picture as the model made it, before Fuobe Soul's finish in the browser (`meta.original`): a storyboard
+   * with a look makes each next frame from the previous one, and every frame gets the look's grade on its own.
+   */
+  raw?: boolean;
 }
 
 /** How many outputs a planned list (ChainSlot.of) may be short of before the steps reading it fail. */

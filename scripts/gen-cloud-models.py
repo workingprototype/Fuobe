@@ -628,6 +628,25 @@ model("fuobe-shorts", "Fuobe Shorts", "Fuobe Original", "fuobe-shorts", "video",
       original=True, fit_values=True, pricing=("second", 0.1, f"720p; 580p $0.075, 480p $0.05 · {_FRAMES16}; the first frame's Qwen edit is priced on its own",
                                                {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
       api_defaults=SHORTS_O["cloud"]["defaults"], defaults={"resolution": "720p"}, licence=SHORTS_O["licence"])
+# ----- Originals (O13): Fuobe Evolution's cloud half (research §8 evolution → studios[evolution].original): Higgsfield
+# Evolution's change intensity as LTX-2.3 22B video-to-video's video_strength (1 − the denoise the open graph uses; set by
+# src/lib/catalog/evolution.ts through params.extra), the LLM-written direction as the prompt, prompt expansion off. Silent
+# (the clip's own sound goes back on), 24 fps, at most 481 frames a call (Evolution cuts longer clips into pieces); the
+# tier's size for the clip's shape from Fuobe Cinema's table. Priced per megapixel of video like Fuobe Cinema.
+EVOLUTION = next(s for s in ORIGINALS["studios"] if s["id"] == "evolution")["original"]["cloud"]
+EVOLUTION_MP = per_megapixel(EVOLUTION["endpoint"])
+EVOLUTION_MP_LORA = per_megapixel(EVOLUTION["loraEndpoint"])
+EVOLUTION_PER_SECOND = {t: round(s["16:9"][0] * s["16:9"][1] * EVOLUTION["fps"] / 1e6 * EVOLUTION_MP, 4) for t, s in CINEMA_SIZES.items()}
+EVOLUTION_PER_SECOND_LORA = {t: round(s["16:9"][0] * s["16:9"][1] * EVOLUTION["fps"] / 1e6 * EVOLUTION_MP_LORA, 4) for t, s in CINEMA_SIZES.items()}
+model("fuobe-evolution", "Fuobe Evolution", "Fuobe Original", "fuobe-evolution", "video",
+      "Takes your clip further in a direction an LLM writes from your references: LTX-2.3 video to video at a change intensity",
+      [("v2v", EVOLUTION["endpoint"], "fal", {"loraEndpoint": EVOLUTION["loraEndpoint"], "fixed": EVOLUTION["fixed"]})],
+      original=True, sizes=CINEMA_SIZES,
+      pricing=("second", EVOLUTION_PER_SECOND["720p"],
+               f"${EVOLUTION_MP} per megapixel of video (width × height × frames): about ${round(EVOLUTION_PER_SECOND['720p'] * 5, 2)} for 5 s at 720p; ${EVOLUTION_MP_LORA} with LoRAs",
+               {"byResolution": EVOLUTION_PER_SECOND, "withLoras": EVOLUTION_PER_SECOND_LORA["720p"], "withLorasByResolution": EVOLUTION_PER_SECOND_LORA,
+                "videoMegapixel": {"usd": EVOLUTION_MP, "withLoras": EVOLUTION_MP_LORA}}),
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=8)
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
