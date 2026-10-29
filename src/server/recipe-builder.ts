@@ -152,6 +152,8 @@ class Walk {
 
   /** One step from the request a run of rows was asked as. */
   fromAsked(head: Generation): Node {
+    const known = this.covered.get(head.id);
+    if (known) return known;
     const moved = currentRequest(head.request.asked!);
     const rows = [head.id, ...this.batchAncestors(head)];
     const node = this.add(head, rows, { request: moved.request }, this.moved(moved.note));
@@ -456,8 +458,10 @@ function candidates(nodes: Node[], leaves: Set<string>): DraftCandidate[] {
       }
       continue;
     }
-    const words = (n.step as Extract<RecipeStep, { kind: "generate" }>).request.prompt;
-    if (typeof words !== "string" || !words.trim()) continue;
+    const step = n.step as Extract<RecipeStep, { kind: "generate" }>;
+    const words = step.request.prompt;
+    // Words an earlier step writes (a "prompt" chain slot) come from that step on every run.
+    if (typeof words !== "string" || !words.trim() || step.chain?.some((c) => c.slot === "prompt")) continue;
     add({
       id: several ? `prompt_${n.key}` : "prompt",
       label: several ? `Words for “${n.label}”` : "Prompt",
