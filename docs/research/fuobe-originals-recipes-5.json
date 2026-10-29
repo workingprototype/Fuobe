@@ -12065,7 +12065,7 @@
    "notes": "Do the pixelation in post: SAM 3.1 face mask, then a mosaic filter on the masked area.",
    "checked": "2026-10-23",
    "post": "face-mosaic",
-   "postNote": "Added 2026-10-29 (o/o11-open-tools): the pixelation is a step after the picture: SAM 3.1 finds the faces, a mosaic covers them (open: image-face-mosaic-sam3; cloud: fal-ai/sam-3-1/image's mask, pixelated in the browser)."
+   "postNote": "Added 2026-10-29 (o/o11-open-tools): the pixelation is a step after the picture: SAM 3.1 finds the faces, a mosaic covers them (open: image-face-mosaic-sam3; cloud: fal-ai/sam-3-1/image's masks, pixelated by the server, or the browser for a picture it can't decode)."
   },
   {
    "id": "255f4045-d68b-42b1-9e4c-f49d3263a9d7",
@@ -18663,7 +18663,7 @@
   {
    "id": "angles",
    "higgsfield": "Higgsfield Angles (job QWEN_CAMERA_CONTROL: rotate_degree, move_forward_level, vertical_angle, sample_steps, loras lightx + camera_angle)",
-   "open": "Qwen-Image-Edit 2509 + dx8152 Multiple-angles LoRA (1.25) + Qwen-Image-Lightning (Fuobe qwen-image-edit-2509-angles); Qwen-Image-Edit 2511 + fal's Multiple-Angles LoRA stays for Cinema's recomposition and Soul Location's views",
+   "open": "Qwen-Image-Edit 2509 + dx8152 Multiple-angles LoRA (1.25) + Qwen-Image-Lightning (Fuobe qwen-image-edit-2509-angles); Qwen-Image-Edit 2511 + fal's Multiple-Angles LoRA stays the Angles app's default (with fal's Qwen Multiple Angles in the cloud) until the angles eval suite (scripts/eval/cases/angles.json) promotes Fuobe Angles, which is its own app next to it, and stays for Cinema's recomposition and Soul Location's views",
    "hosted": [
     "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles ($0.035 per megapixel; rotate_right_left −90…90 (positive = left), vertical_angle −1…1 (−1 bird's-eye, 1 worm's-eye), move_forward 0–10, wide_angle_lens, lora_scale 1.25, 6 steps; no prompt field)"
    ],
@@ -23428,7 +23428,7 @@
     "prompt": "prompt",
     "image": "image_url"
    },
-   "output": "video.url",
+   "output": "masks[].url",
    "price": "Your request will cost $0.01 per request.",
    "verified": true,
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/sam-3-1/image",

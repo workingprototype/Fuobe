@@ -58,6 +58,11 @@ export interface StudioConfig {
    * says what comes out ("24 → 60 fps", "1280×720 → 3840×2160"). Upscale hub video modes.
    */
   clipFacts?: boolean;
+  /**
+   * Read the voice track's length (Lipsync): a talking avatar is as long as its voice, so a per-second price counts its
+   * seconds and the request carries them (params.sourceDuration). Not while a video is attached (lip re-sync).
+   */
+  voiceFacts?: boolean;
   /** Offer every output format of the studio's models on this engine; picking one another model writes moves the request there (SDR to HDR, Export). */
   formatPicker?: boolean;
   /** The models' enum settings chip ("Director" by default; "Options" for a tool's settings such as Topaz's model). */

@@ -857,15 +857,18 @@ function matteOutputs(response: unknown): ExtractedOutput[] {
 }
 
 /**
- * Pixelate faces on the cloud (fal's SAM 3.1 image): the answer is masks, not the picture. The first mask is the
- * result and every mask rides along (meta.masks, white = a face), so the browser pixelates under all of them
- * (src/lib/soul-post.ts). No mask: nothing was found, which is no result.
+ * Pixelate faces on the cloud (fal's SAM 3.1 image): the answer is masks, not the picture. One answer carries every mask
+ * (meta.masks, white = a face): the server pixelates the picture SAM looked at under all of them (src/server/generations.ts
+ * mosaicOutput). An answer that found no face (an empty masks list) is still an answer, with no masks: the picture stays
+ * as it is, as on the GPU. Anything else is no result.
  */
 function faceMaskOutputs(response: unknown): ExtractedOutput[] {
   const r = body(response);
-  const masks = isObj(r) && Array.isArray(r.masks) ? r.masks.map(fileOf).filter((f): f is NonNullable<ReturnType<typeof fileOf>> => !!f) : [];
-  const all = masks.length ? masks : isObj(r) && fileOf(r.image) ? [fileOf(r.image)!] : [];
-  if (!all.length) return [];
+  if (!isObj(r)) return [];
+  const masks = Array.isArray(r.masks) ? r.masks.map(fileOf).filter((f): f is NonNullable<ReturnType<typeof fileOf>> => !!f) : [];
+  // Without a masks list, the mask preview (`image`) is the one mask.
+  const all = Array.isArray(r.masks) ? masks : fileOf(r.image) ? [fileOf(r.image)!] : [];
+  if (!all.length) return Array.isArray(r.masks) ? [{ url: "", kind: "image", meta: { role: "mask", masks: [] } }] : [];
   return [{ url: all[0].url, kind: "image", contentType: all[0].contentType, meta: { role: "mask", masks: all.map((m) => m.url) } }];
 }
 

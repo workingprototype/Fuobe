@@ -259,6 +259,10 @@ def fal_prices(endpoint):
     return "; ".join(dict.fromkeys(lines[:6])) or None
 
 
+# What an answer holds when it's neither pictures (t2i, edit) nor a video: SAM 3.1's face masks (the face mosaic).
+OUTPUT_OF = {"face-mosaic": "masks[].url"}
+
+
 def base_record(ep, op, kf, price=None):
     inputs = fal(ep)
     missing = [f for f in kf.values() if f not in inputs]
@@ -266,7 +270,7 @@ def base_record(ep, op, kf, price=None):
         sys.exit(f"{ep}: keyFields {missing} are not inputs")
     print(f"{ep}: {len(inputs)} inputs")
     return {"provider": "fal", "endpoint": ep, "operation": op, "status": "active", "inputs": inputs, "keyFields": kf,
-            "output": "images[].url" if op in ("t2i", "edit") else "video.url", "price": price if price is not None else fal_price(ep), "verified": True,
+            "output": OUTPUT_OF.get(op) or ("images[].url" if op in ("t2i", "edit") else "video.url"), "price": price if price is not None else fal_price(ep), "verified": True,
             "schemaUrl": f"https://fal.ai/api/openapi/queue/openapi.json?endpoint_id={ep}", "checked": TODAY}
 
 

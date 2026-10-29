@@ -158,7 +158,7 @@ describe("extract frame on both engines", () => {
 
 describe("apps on the new models", () => {
   // Every app this package routes runs with only its inputs on both engines: no note needed, the pinned model, its settings.
-  const ids = ["app-virtual-try-on", "app-angles", "app-product-shot", "app-image-to-3d", "app-hook-frame"];
+  const ids = ["app-virtual-try-on", "app-angles", "app-fuobe-angles", "app-product-shot", "app-image-to-3d", "app-hook-frame"];
   const plan = (id: string, engine: "cloud" | "open", presetOptions?: Record<string, string>) => {
     const preset = getPreset(id)!;
     const route = engine === "cloud" ? preset.cloud! : preset.open!;
@@ -181,12 +181,23 @@ describe("apps on the new models", () => {
     expect(plan("app-image-to-3d", "open").model.id).toBe("oss-trellis2");
   });
 
-  it("Angles: the choices set the camera fields on the cloud and the LoRA's words on the open engine (Fuobe Angles, O11)", () => {
-    const choice = { rotate: "45-right", height: "from-above", distance: "close-up" };
+  it("Angles: the choices set the camera sliders on the cloud and the LoRA's words on the open engine", () => {
+    const choice = { angle: "back-left", height: "high-angle", distance: "close-up" };
     const cloud = plan("app-angles", "cloud", choice);
+    expect(cloud.model.id).toBe("qwen-multiple-angles");
+    expect(cloud.params.extra).toMatchObject({ horizontal_angle: 225, vertical_angle: 60, zoom: 10 });
+    expect(cloud.prompt.length).toBeGreaterThan(0);
+    const open = plan("app-angles", "open", choice);
+    expect(open.prompt).toMatch(/^<sks> back-left quarter view high-angle shot close-up/);
+    expect(open.loras[0]?.file).toMatch(/multiple-angles/);
+  });
+
+  it("Fuobe Angles: the choices set the camera fields on the cloud and the LoRA's words on the open engine (O11)", () => {
+    const choice = { rotate: "45-right", height: "from-above", distance: "close-up" };
+    const cloud = plan("app-fuobe-angles", "cloud", choice);
     expect(cloud.model.id).toBe("fuobe-angles");
     expect(cloud.params.extra).toMatchObject({ rotate_right_left: -45, vertical_angle: -1, move_forward: 10 });
-    const open = plan("app-angles", "open", choice);
+    const open = plan("app-fuobe-angles", "open", choice);
     expect(open.prompt).toMatch(/^将镜头向右旋转45度 Rotate the camera 45 degrees to the right\. .*Turn the camera to a close-up\. .*bird's-eye view\.$/);
     expect(open.loras[0]?.file).toMatch(/multiple-angles/);
   });

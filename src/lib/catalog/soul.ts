@@ -52,7 +52,7 @@ export interface SoulLook {
   overlay?: SoulOverlay;
   /**
    * A step after the picture (O11): "face-mosaic" pixelates the faces (PixeletedFace): SAM 3.1 and a mosaic on the GPU, fal's
-   * SAM 3.1 masks pixelated in the browser in the cloud (src/lib/catalog/open-tools.ts).
+   * SAM 3.1 masks pixelated by the server in the cloud (src/lib/catalog/open-tools.ts).
    */
   post?: SoulPost;
   /** A Fuobe-trained LoRA should replace the public one or the words (research §6). */
@@ -250,11 +250,6 @@ export function promptWithLoras(prompt: string, triggers: string[], kept: Pick<L
   return after ? `${after}, ${rest}` : rest;
 }
 
-/**
- * What happens to a Soul result after generation, read from its request (the grade preset, the overlay and Soul
- * Cinema's 21:9 crop the browser applies; meta.grade / meta.overlay / meta.crop tell API clients). Undefined for
- * other models.
- */
 /** The step a Soul run's look asks for after its picture (the face mosaic), or none. Soul Cinema has none. */
 export function soulPostStep(modelId: string, presetId: string | null | undefined): SoulPost | undefined {
   const kind = soulKind(modelId);
@@ -262,6 +257,11 @@ export function soulPostStep(modelId: string, presetId: string | null | undefine
   return soulLook(presetId ?? DEFAULT_LOOK)?.post;
 }
 
+/**
+ * What happens to a Soul result after generation, read from its request (the grade preset, the overlay and Soul
+ * Cinema's 21:9 crop the browser applies; meta.grade / meta.overlay / meta.crop tell API clients). Undefined for
+ * other models.
+ */
 export function soulPostSteps(
   modelId: string,
   presetId: string | null | undefined,

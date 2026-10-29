@@ -223,9 +223,18 @@ export function Composer({ docked }: { docked: boolean }) {
   // Upscale hub: the attached clip's header (length, size, frame rate). Its length prices per-second tools and
   // travels with the request (params.sourceDuration); a clip swapped since a Reuse never keeps the old one's.
   const facts = useClipFacts(config.clipFacts && !typed.slots.video?.uploading ? typed.slots.video?.ref : undefined).data;
+  // Lipsync: a talking avatar is as long as its voice (the voice's header prices it and goes with the request); not while a
+  // video is attached (lip re-sync keeps the clip's length).
+  const voiceRef = config.voiceFacts && !typed.slots.video?.ref && !typed.slots.audio?.uploading ? typed.slots.audio?.ref : undefined;
+  const voice = useClipFacts(voiceRef).data;
   const draft = useMemo(
-    () => (config.clipFacts ? { ...typed, params: { ...typed.params, sourceDuration: typed.slots.video?.ref ? facts?.duration : undefined } } : typed),
-    [config.clipFacts, typed, facts?.duration],
+    () =>
+      config.clipFacts
+        ? { ...typed, params: { ...typed.params, sourceDuration: typed.slots.video?.ref ? facts?.duration : undefined } }
+        : config.voiceFacts
+          ? { ...typed, params: { ...typed.params, sourceDuration: voiceRef ? voice?.duration : undefined } }
+          : typed,
+    [config.clipFacts, config.voiceFacts, typed, facts?.duration, voiceRef, voice?.duration],
   );
   const liveElements = useElements().data;
   const elements = (hydrated && liveElements) || EMPTY;

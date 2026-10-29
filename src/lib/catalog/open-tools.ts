@@ -10,7 +10,8 @@
  *   frames, 25 steps, shift 10, text and audio guidance 5, colour correction), fal's InfiniteTalk in the cloud.
  *   Fuobe Speak · Motion is Wan 2.2 S2V on both engines (a Speak v1-like route: the body and the scene move).
  * - The face mosaic (Fuobe Soul's PixeletedFace look): SAM 3.1 finds the faces, a mosaic covers them. On the GPU one
- *   graph does both; in the cloud fal's SAM 3.1 answers with the masks and the browser pixelates under them.
+ *   graph does both; in the cloud fal's SAM 3.1 answers with the masks and the server pixelates under them (the browser,
+ *   for a picture the server can't decode).
  */
 import { loraEntry, loraRef } from "./loras";
 import type { Engine, LoraRef } from "./types";
@@ -24,8 +25,9 @@ const ANGLES_ENTRY = loraEntry("qwen-edit-2509-multiple-angles");
 export const ANGLES_LORA: LoraRef | undefined = ANGLES_ENTRY && loraRef(ANGLES_ENTRY);
 
 /**
- * fal's Multiple-Angles LoRA for Qwen-Image-Edit 2511 (its `<sks>` pose words), which Cinema's recomposition and Soul
- * Location's other views run on the GPU next to Fuobe Angles' 2509 recipe (the Angles app's open route until O11).
+ * fal's Multiple-Angles LoRA for Qwen-Image-Edit 2511 (its `<sks>` pose words): the Angles app's open route, Cinema's
+ * recomposition and Soul Location's other views on the GPU, next to Fuobe Angles' 2509 recipe (its own app until the angles
+ * eval suite promotes it).
  */
 export const ANGLES_2511_LORA: LoraRef = {
   file: "qwen-image-edit-2511-multiple-angles-lora.safetensors",

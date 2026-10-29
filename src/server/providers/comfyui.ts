@@ -680,6 +680,11 @@ export interface PrepareContext {
   media?: (name: string) => MediaInfo | undefined;
   /** The ComfyUI server's RAM in bytes, for graphs that hold a whole clip in memory. */
   serverRam?: () => Promise<number | undefined>;
+  /**
+   * The route puts the run's one LoRA in the graph's own LoRA slot (ModelRoute.loraSlot: Fuobe Speak's FusioniX on kijai's
+   * InfiniteTalk graph, with the settings it goes with). Without it a graph with no model loader refuses a LoRA.
+   */
+  loraSlot?: boolean;
 }
 
 export interface PreparedPrompt {
@@ -925,14 +930,19 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     Object.assign(values, { width: clip.width, height: clip.height, fps: Math.round(clip.fps * 1000) / 1000 });
   }
   if (b.frames && span) values.frames = computeFrames(span, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
-  // Lip re-sync runs as long as the new voice; a voice past the frame cap is refused, not cut.
-  const voiceLength = ctx.op === "lipsync" && b.frames && !span ? ctx.media?.(String(values.audio ?? ""))?.duration : undefined;
+  // Lip re-sync and a talking avatar run as long as the voice (its header, or the length the run was given); a voice past
+  // the frame cap is refused, not cut.
+  const voiceLength =
+    (ctx.op === "lipsync" || ctx.op === "avatar") && b.frames && !span
+      ? (ctx.op === "avatar" && input.sourceDuration && input.sourceDuration > 0 ? input.sourceDuration : ctx.media?.(String(values.audio ?? ""))?.duration)
+      : undefined;
   if (voiceLength) {
     const step = Number(d.frameStep ?? 4);
     const frames = Math.ceil((voiceLength * fps) / step) * step + 1;
     const cap = Number(manifest.limits?.maxFrames ?? 0);
     if (cap && frames > cap) {
-      throw new ProviderError(`Lip re-sync on the open engine takes up to ${seconds(cap / fps)} s of speech per job (this voice is ${seconds(voiceLength)} s) — split it into shorter parts`);
+      const what = ctx.op === "avatar" ? "A talking avatar" : "Lip re-sync";
+      throw new ProviderError(`${what} on the open engine takes up to ${seconds(cap / fps)} s of speech per job (this voice is ${seconds(voiceLength)} s) — split it into shorter parts`);
     }
     values.frames = frames;
   }
@@ -1135,9 +1145,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   }
   if (b.sideBySide && input.sideBySide !== undefined) values.sideBySide = input.sideBySide;
   // A wrapper graph that loads its LoRA itself (kijai's InfiniteTalk: WanVideoLoraSelect, no core model loader to attach
-  // one after) takes the run's LoRA there: Fuobe Speak's FusioniX in place of the graph's lightx2v. One at most.
+  // one after) takes the run's LoRA there on a route made for it: Fuobe Speak's FusioniX in place of the graph's lightx2v,
+  // with the steps and guidance it needs. One at most. Other routes on the graph (InfiniteTalk Long, tuned for lightx2v)
+  // refuse a LoRA below.
   let loras = input.loras ?? [];
-  if (loras.length && b.lora && !canTakeLoras(workflow)) {
+  if (loras.length && b.lora && ctx.loraSlot && !canTakeLoras(workflow)) {
     if (loras.length > 1) throw new ProviderError(`${manifest.title} takes one LoRA (it loads it itself): ${loras.map((l) => l.file).join(", ")}`);
     values.lora = loras[0].file;
     values.loraStrength = loras[0].strength ?? 1;
@@ -1430,6 +1442,7 @@ export const comfyProvider: ProviderAdapter = {
     const { manifest, workflow: wf, meta } = await prepareWorkflow(route.endpoint, asked, {
       generationId,
       op: route.op,
+      loraSlot: route.loraSlot === true,
       upload: (data, contentType, name) => uploadTo(worker, data, contentType, name),
       media: mediaInfoFor,
       serverRam: async () => (await comfyJson<{ system?: { ram_total?: number } }>("/system_stats", worker).catch(() => undefined))?.system?.ram_total,

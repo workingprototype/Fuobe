@@ -1790,7 +1790,7 @@ const originals: ModelDef[] = [
   {
     ...original({
       id: "fuobe-speak",
-      open: [{ ...comfy("avatar", "infinitetalk-wanwrapper", "InfiniteTalk + FusioniX, 25 steps, shift 10, guidance 5 / 5, 15 motion frames"), extra: { ...SPEAK_GRAPH } }],
+      open: [{ ...comfy("avatar", "infinitetalk-wanwrapper", "InfiniteTalk + FusioniX, 25 steps, shift 10, guidance 5 / 5, 15 motion frames"), extra: { ...SPEAK_GRAPH }, loraSlot: true }],
       tagline: "A portrait speaks your voice track, lips, face and head in sync, long takes · InfiniteTalk + FusioniX free on your GPU (16 GB), or hosted on fal",
       options: { resolutions: ["480p", "720p"], seed: true, maxImages: 1, promptOptional: true, defaultPrompt: SPEAK_PROMPT },
     }),
@@ -1815,7 +1815,7 @@ const originals: ModelDef[] = [
 /**
  * Fuobe Soul's face mosaic on the GPU (build plan O11): SAM 3.1 finds the faces (or what the words name) and a block
  * mosaic covers them, in one graph. A helper step after a look that asks for it (PixeletedFace); in the cloud fal's
- * SAM 3.1 makes the masks and the browser pixelates (sam-3-1-face-mask).
+ * SAM 3.1 makes the masks and Fuobe pixelates under them (sam-3-1-face-mask).
  */
 const faceMosaic: ModelDef = o({
   id: "oss-face-mosaic",

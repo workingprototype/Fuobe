@@ -12,15 +12,17 @@ import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
-import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
+import { avatarSeconds, estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, loraName, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
 import { promptWithLoras, soulKind, soulLook, soulPostStep, soulPostSteps } from "@/lib/catalog/soul";
 import { isDop } from "@/lib/catalog/dop";
+import { postStepCost } from "@/lib/composer";
 import { MIXED_ORIGINAL, originalFrameSize } from "@/lib/catalog/mixed-media";
 import { imageSize } from "@/lib/image-size";
-import { finishSteps } from "@/lib/soul-post";
+import { finishSteps, mosaicPixels, unionMasks } from "@/lib/soul-post";
+import { ANGLES_ORIGINAL, MOSAIC_SCALE } from "@/lib/catalog/open-tools";
 import {
   CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
@@ -54,7 +56,7 @@ import { offeredLoras, offeredRoutes, requireOffered } from "./model-access";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
-import { convertMask } from "./png";
+import { convertMask, decodePng, encodePng } from "./png";
 import { engineMode, getSetting } from "./settings";
 import { fetchRemoteToFile } from "./remote-fetch";
 import { adoptFile, contentTypeFor, deleteAsset, localHead, readRef, saveFile, scratchDir } from "./storage";
@@ -499,12 +501,14 @@ export function offeredFor(m: ModelDef, asked: Engine | undefined): ModelDef {
 }
 
 /**
- * Fuobe Mixed Media's single picture in the cloud (DoP's Mixed Media stills, an API caller's edit) drawn at about 1
- * megapixel in its picture's shape, as it's priced: without a size, fal keeps the upload's own (a 12-megapixel photo
- * costs 12 times as much). The studio sends each frame's size itself; a picture that isn't a file in Fuobe keeps fal's.
+ * Fuobe Mixed Media's single picture in the cloud (DoP's Mixed Media stills, an API caller's edit), and Fuobe Angles' other
+ * camera, drawn at about 1 megapixel in its picture's shape, as it's priced (and as the GPU graphs scale it): without a
+ * size, fal keeps the upload's own (a 12-megapixel photo costs 12 times as much). The studio sends each Mixed Media frame's
+ * size itself; a picture that isn't a file in Fuobe keeps fal's.
  */
+const SIZED_EDITS = new Set([MIXED_ORIGINAL, ANGLES_ORIGINAL]);
 function sizedMixedFrame(plan: ReturnType<typeof planGeneration>, req: GenerationRequest): ReturnType<typeof planGeneration> {
-  if (plan.model.id !== MIXED_ORIGINAL || plan.model.engine !== "cloud" || plan.op !== "edit" || plan.params.extra?.image_size) return plan;
+  if (!SIZED_EDITS.has(plan.model.id) || plan.model.engine !== "cloud" || plan.op !== "edit" || plan.params.extra?.image_size) return plan;
   const first = req.inputs?.images?.[0];
   const head = first ? localHead(first) : null;
   const size = head ? imageSize(head) : null;
@@ -583,6 +587,14 @@ function prepare(original: GenerationRequest) {
     const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
     notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
   }
+  // A talking avatar is as long as its voice, up to what a frame-count route makes a call (fal's InfiniteTalk about 29 s, Wan
+  // 2.2 S2V 7.5 s): a longer voice is cut there, and said.
+  const voice = !demo && plan.op === "avatar" && route.map?.numFrames ? plan.params.sourceDuration : undefined;
+  if (voice && voice > 0) {
+    const reach = avatarSeconds({ routes: [route] }, voice, plan.params.fps);
+    const half = (x: number) => Math.round(x * 2) / 2;
+    if (reach < voice - 0.25) notes.push(`${plan.model.name} on ${provider(route.provider).label} makes up to ${half(reach)} s a call, so this one stops ${half(reach)} s into the ${half(voice)} s voice`);
+  }
   // A route that can't batch (Replicate's Nano Banana Pro beside fal's num_images; a ComfyUI graph, which makes
   // one picture a run: Fuobe Soul on the open engine) runs one job per output.
   if (!demo && !route.map?.numOutputs && plan.perJobOutputs > 1) {
@@ -613,6 +625,8 @@ export function previewGeneration(asked: GenerationRequest) {
     ...fitted,
     dropped: [...switchedOff, ...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped],
   };
+  // PixeletedFace pixelates each picture's faces afterwards (createMosaicRun): fal's SAM 3.1 per picture in the cloud.
+  const post = demo || moved.request.postMade ? 0 : postStepCost(plan.model.id, moved.request.presetId, plan.model.engine, plan.jobs * plan.perJobOutputs, getModel);
   return {
     model: plan.model,
     op: plan.op,
@@ -620,7 +634,7 @@ export function previewGeneration(asked: GenerationRequest) {
     outputs: plan.jobs * plan.perJobOutputs,
     demo,
     providerId,
-    costUsd: cost === null ? null : cost * plan.jobs,
+    costUsd: cost === null ? null : post ? Math.round((cost * plan.jobs + post) * 1000) / 1000 : cost * plan.jobs,
     // The engine it runs on (a Fuobe Original picks one per request).
     engine: plan.model.engine,
     // What the route runs (the evaluation harness records it): the provider endpoint, the final prompt and the LoRAs it loads.
@@ -681,10 +695,11 @@ export function createGenerations(asked: GenerationRequest, opts: CreateOptions 
   // Fuobe DoP's relight effects: the start frame is relit first, then animated.
   const relight = !opts.dependsOn && shotModel ? relightStep(original, shotModel) : undefined;
   if (relight) return createRelitClip(original, relight);
-  // Fuobe Soul's PixeletedFace look: the picture, then its faces pixelated (SAM 3.1 + a mosaic). A step of a pipeline
-  // (Soul's own picture inside this one) runs as it is.
-  if (!opts.dependsOn && !original.step && shotModel && soulPostStep(shotModel.id, original.presetId) === "face-mosaic") {
-    return createMosaicRun(original, shotModel);
+  // Fuobe Soul's PixeletedFace look: the picture, then its faces pixelated (SAM 3.1 + a mosaic), also as a pipeline step or a
+  // Canvas node (it waits for what they wait for). The picture made inside that run (postMade) runs as it is.
+  if (!original.postMade && shotModel && soulPostStep(shotModel.id, original.presetId) === "face-mosaic") {
+    const waitsFor = opts.dependsOn === undefined ? undefined : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
+    return createMosaicRun(original, shotModel, { batchId: opts.batchId, dependsOn: waitsFor });
   }
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
@@ -1171,6 +1186,10 @@ async function submit(
     };
     // What the caller said about the clip's length wins; the header fills the rest.
     Object.assign(input, { ...source, ...(plan.params.sourceDuration !== undefined && { sourceDuration: plan.params.sourceDuration }) });
+    // A talking avatar renders as long as its voice: priced for it once its header is read (an API call that didn't say).
+    if (plan.op === "avatar" && plan.params.sourceDuration === undefined && input.sourceDuration && providerId !== "mock" && plan.model.engine !== "open") {
+      update(id, { cost_usd: estimateCost(plan.model, { ...plan.params, sourceDuration: input.sourceDuration }, 1, plan.op, plan.loras.length > 0 && !!route.loraEndpoint) });
+    }
     // An upscale that wouldn't enlarge the clip (a 1080p clip at a default 1080p; a 4K clip would even shrink):
     // a tier the model only defaulted to moves up to the next one it offers, one the caller picked is refused.
     if (plan.op === "upscale-video" && input.sourceSize) {
@@ -1406,30 +1425,29 @@ async function pollOne(r: Row): Promise<void> {
   const outputs: OutputFile[] = [];
   // Remove background: of a cut-out and its mask (BiRefNet's answer), the one asked for (params.matteOutput).
   const matte = r.op === "bg-remove-video" ? (JSON.parse(r.request_json) as GenerationRequest).params?.matteOutput : undefined;
-  for (const o of keepMatte(res.outputs as RichOutput[], matte)) {
+  // The face mosaic's cloud step answers with the faces' masks: the result is the picture, pixelated under them.
+  const faceMasks = r.op === "face-mosaic" && res.outputs.length > 0 && (res.outputs as RichOutput[]).every((o) => o.meta?.role === "mask" && Array.isArray(o.meta.masks));
+  if (faceMasks) {
     try {
-      outputs.push(await persistOutput(o, r.id));
+      outputs.push(await mosaicOutput(r, res.outputs as RichOutput[]));
     } catch (e) {
-      outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...inlineText(o.text, o.meta), ...(o.draftId ? { draftId: o.draftId } : {}) });
-      console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
+      update(r.id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null });
+      return;
+    }
+  } else {
+    for (const o of keepMatte(res.outputs as RichOutput[], matte)) {
+      try {
+        outputs.push(await persistOutput(o, r.id));
+      } catch (e) {
+        outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...inlineText(o.text, o.meta), ...(o.draftId ? { draftId: o.draftId } : {}) });
+        console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
+      }
     }
   }
   // Fuobe Soul: what follows in the browser (the look's grade, an overlay, Soul Cinema's 21:9 crop), on each image;
   // API clients read it as meta.
   const post = soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
   if (post) for (const [i, o] of outputs.entries()) if (o.kind === "image") outputs[i] = { ...o, meta: { ...o.meta, ...post } };
-  // The face mosaic's cloud step (fal's SAM 3.1): its outputs are the faces' masks; the browser pixelates the picture it
-  // looked at under them (meta.mosaic, src/lib/soul-post.ts), as it finishes Soul's looks.
-  if (r.op === "face-mosaic") {
-    const source = (JSON.parse(r.request_json) as GenerationRequest).inputs?.images?.[0];
-    const scale = (JSON.parse(r.request_json) as GenerationRequest).params?.extra?.mosaicScale;
-    for (const [i, o] of outputs.entries()) {
-      const masks = o.meta?.masks;
-      if (o.kind === "image" && source && Array.isArray(masks) && masks.length) {
-        outputs[i] = { ...o, meta: { ...o.meta, mosaic: { source, masks, ...(typeof scale === "number" && { scale }) } } };
-      }
-    }
-  }
   // Fuobe DoP's colour-grade effects: the grade the browser applies to the clip (the result's "Apply the grade" step).
   const grade = isDop(r.model_id) && r.preset_id ? getPreset(r.preset_id)?.grade : undefined;
   if (grade) for (const [i, o] of outputs.entries()) if (o.kind === "video") outputs[i] = { ...o, meta: { ...o.meta, grade } };
@@ -1440,6 +1458,50 @@ async function pollOne(r: Row): Promise<void> {
     message: null,
     completed_at: Date.now(),
   });
+}
+
+/**
+ * The face mosaic's cloud step (fal's SAM 3.1 answered with the faces' masks): the picture it looked at, pixelated under
+ * every mask, made here when the picture and the masks are PNGs (fal's Soul pictures are), so the Library, share links,
+ * Canvas and API clients get the finished picture. A picture the server can't decode is kept as it is with the masks
+ * (meta.mosaic) for the browser to pixelate (src/components/studio/soul-finish.ts). No face found: the picture as it is, as
+ * the GPU graph returns it. The masks are kept as files of the generation (meta.masks).
+ */
+async function mosaicOutput(r: Row, given: RichOutput[]): Promise<OutputFile> {
+  const req = JSON.parse(r.request_json) as GenerationRequest;
+  const source = req.inputs?.images?.[0];
+  if (!source) throw new Error("The face mosaic has no picture to pixelate");
+  const asked = req.params?.extra?.mosaicScale;
+  const scale = typeof asked === "number" && asked > 0 && asked < 1 ? asked : MOSAIC_SCALE;
+  const links = given.flatMap((o) => (o.meta?.masks as unknown[]).filter((u): u is string => typeof u === "string" && !!u));
+  const masks: string[] = [];
+  for (const [i, url] of [...new Set(links)].entries()) masks.push(String(await keepLink(url, `mask-${i}`, r.id)));
+  const picture = await readRef(source);
+  let data = picture.data;
+  let contentType = picture.contentType;
+  let done = !masks.length;
+  if (masks.length) {
+    try {
+      const img = decodePng(picture.data);
+      const layers = await Promise.all(masks.map(async (m) => decodePng((await readRef(m)).data)));
+      if (layers.some((l) => l.width !== img.width || l.height !== img.height)) throw new Error("The masks aren't the picture's size");
+      const view = (b: Buffer) => new Uint8ClampedArray(b.buffer, b.byteOffset, b.byteLength);
+      mosaicPixels(view(img.data), unionMasks(layers.map((l) => view(l.data))), img.width, img.height, scale);
+      data = encodePng(img);
+      contentType = "image/png";
+      done = true;
+    } catch (e) {
+      console.warn(`[fuobe] face mosaic ${r.id} is left to the browser: ${(e as Error).message}`);
+    }
+  }
+  const asset = saveFile({ data, contentType, source: "generation", generationId: r.id });
+  return {
+    url: asset.url,
+    kind: "image",
+    contentType: asset.contentType,
+    assetId: asset.id,
+    meta: { masks, faces: masks.length, ...(!done && { mosaic: { source: asset.url, masks, scale } }) },
+  };
 }
 
 /** Outputs may carry text (transcripts, translations, scripts) and structured extras (layer boxes, cues, stems). */
@@ -1475,21 +1537,12 @@ export async function persistArtifacts(meta: Record<string, unknown> | undefined
     out = { ...out, [key]: kept };
   }
   for (const key of LINKS) if (typeof meta[key] === "string" && meta[key] !== main) out = { ...out, [key]: await keepLink(meta[key], key, generationId) };
-  for (const key of LINK_LISTS) {
-    const list = meta[key];
-    if (!Array.isArray(list)) continue;
-    const kept: unknown[] = [];
-    for (const [i, v] of list.entries()) kept.push(v === main ? v : await keepLink(v, `${key}-${i}`, generationId));
-    out = { ...out, [key]: kept };
-  }
   return out;
 }
 
 /** Maps of extra files by name, and single extra files, that a result links to (see persistArtifacts). */
 const LINK_MAPS = ["artifacts", "formats"] as const;
 const LINKS = ["preview"] as const;
-/** Lists of extra files: SAM 3.1's masks of the faces (the face mosaic's cloud step), kept here so the browser can read them. */
-const LINK_LISTS = ["masks"] as const;
 
 /** A provider's link stored as a file of the generation (its local URL), or the link as it was when it can't be fetched. */
 async function keepLink(v: unknown, label: string, generationId: string): Promise<unknown> {
@@ -1520,10 +1573,6 @@ function relinkMain(meta: Record<string, unknown> | undefined, from: string, to:
     out = { ...out, [key]: Object.fromEntries(Object.entries(links as Record<string, unknown>).map(([k, v]) => [k, v === from ? to : v])) };
   }
   for (const key of LINKS) if (meta[key] === from) out = { ...out, [key]: to };
-  for (const key of LINK_LISTS) {
-    const list = meta[key];
-    if (Array.isArray(list) && list.includes(from)) out = { ...out, [key]: list.map((v) => (v === from ? to : v)) };
-  }
   return out;
 }
 

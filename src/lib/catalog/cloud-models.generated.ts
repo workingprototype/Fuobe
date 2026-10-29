@@ -7028,7 +7028,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "sam",
     "engine": "cloud",
     "kind": "image",
-    "tagline": "Finds the faces (or what you name) in a picture; the browser pixelates them",
+    "tagline": "Finds the faces (or what you name) in a picture; Fuobe pixelates them",
     "routes": [
       {
         "op": "face-mosaic",

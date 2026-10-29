@@ -109,6 +109,7 @@ export const LIPSYNC_STUDIO: StudioConfig = {
   anyOf: [["image", "video"]],
   defaultModels: { cloud: "kling-avatar-2", open: "oss-infinitetalk" },
   promptOptional: true,
+  voiceFacts: true,
 };
 
 export const UPSCALE_STUDIO: StudioConfig = {

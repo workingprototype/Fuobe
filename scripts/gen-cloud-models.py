@@ -658,9 +658,9 @@ model("fuobe-speak-motion", "Fuobe Speak · Motion", "Fuobe Original", "fuobe-sp
                {"byResolution": {"480p": 0.1, "580p": 0.15, "720p": 0.2}}),
       defaults={"resolution": "480p"})
 # The face mosaic's cloud step (Fuobe Soul's PixeletedFace look): SAM 3.1 finds every face and answers with their masks;
-# the browser pixelates under them. A helper step, not a picker model.
+# Fuobe pixelates under them (the server, or the browser for a picture it can't decode). A helper step, not a picker model.
 model("sam-3-1-face-mask", "SAM 3.1 face mask", "Meta", "sam", "image",
-      "Finds the faces (or what you name) in a picture; the browser pixelates them",
+      "Finds the faces (or what you name) in a picture; Fuobe pixelates them",
       [("face-mosaic", "fal-ai/sam-3-1/image")], hidden=True, pricing=("request", 0.01),
       fixed={"apply_mask": False, "return_multiple_masks": True, "max_masks": 16, "output_format": "png"}, api_defaults={"prompt": "face"})
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",

@@ -414,38 +414,62 @@ export function createRelitClip(
 
 /**
  * Fuobe Soul's PixeletedFace look (O11): each picture, then its faces pixelated on the engine it was made on: one SAM 3.1 +
- * mosaic graph on the GPU; in the cloud fal's SAM 3.1 finds the faces and the browser pixelates under its masks. One
- * two-step pipeline per picture (a later step takes one result), all in one batch.
+ * mosaic graph on the GPU; in the cloud fal's SAM 3.1 finds the faces and the server (or, for a picture it can't decode, the
+ * browser) pixelates under its masks. One two-step pipeline per picture (a later step takes one result), all in one batch,
+ * each picture on its own seed (seed + i, as a batch of jobs gets). A run that waits for earlier steps (a Canvas node, a
+ * pipeline step) waits with its picture. The mosaics come first: a caller that takes the first result (a pipeline's next
+ * step, a Canvas node) gets the pixelated picture.
  */
-export function createMosaicRun(original: GenerationRequest, model: ModelDef): Generation[] {
+export function createMosaicRun(original: GenerationRequest, model: ModelDef, opts: { batchId?: string; dependsOn?: string[] } = {}): Generation[] {
   const n = Math.max(1, Math.min(4, original.params?.numOutputs ?? 1));
   const engine = model.engine;
   const step = faceMosaicStep(engine);
   const words = original.prompt?.trim() || "Pixelated face";
-  const batchId = nanoid(10);
-  const items: Generation[] = [];
+  const seed = original.params?.seed;
+  const deps = opts.dependsOn ?? [];
+  const existing: Record<string, string> = Object.fromEntries(deps.map((id, i) => [`in${i}`, id]));
+  const own = original.step;
+  const batchId = opts.batchId ?? nanoid(10);
+  const mosaics: Generation[] = [];
+  const pictures: Generation[] = [];
+  const made: Generation[] = [];
   try {
     for (let i = 0; i < n; i++) {
       const of = n > 1 ? ` ${i + 1} of ${n}` : "";
-      const { items: made } = createPipeline(
+      const params = { ...original.params, numOutputs: 1, ...(seed !== undefined && seed >= 0 && { seed: seed + i }) };
+      const { items, byKey } = createPipeline(
         [
-          { key: "picture", request: { ...original, engine, params: { ...original.params, numOutputs: 1 }, step: { label: `Before the face mosaic${of}`, index: 0, of: 2 } } },
+          {
+            key: "picture",
+            request: { ...original, engine, postMade: true, params, step: { label: own ? `${own.label} · before the face mosaic${of}` : `Before the face mosaic${of}`, index: 0, of: 2 } },
+            ...(deps.length > 0 && { after: Object.keys(existing) }),
+          },
           {
             key: "mosaic",
-            request: { feature: original.feature, modelId: step.modelId, op: step.op, prompt: step.prompt, title: words, step: { label: `Face mosaic${of}`, index: 1, of: 2 } },
+            request: {
+              feature: original.feature,
+              modelId: step.modelId,
+              op: step.op,
+              prompt: step.prompt,
+              title: words,
+              ...(original.batchTitle && { batchTitle: original.batchTitle }),
+              step: { label: own ? `${own.label}${of}` : `Face mosaic${of}`, index: 1, of: 2 },
+            },
             after: "picture",
             chain: [{ slot: "images", position: "first" }],
           },
         ],
-        { batchId },
+        { batchId, ...(deps.length > 0 && { existing }) },
       );
-      items.push(...made);
+      made.push(...items);
+      mosaics.push(byKey.mosaic);
+      pictures.push(byKey.picture);
     }
   } catch (e) {
-    for (const g of items) void cancelGeneration(g.id);
+    for (const g of made) void cancelGeneration(g.id);
     throw e;
   }
-  return items;
+  return [...mosaics, ...pictures];
 }
 
 /** The model a storyboard film is animated with. */

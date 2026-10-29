@@ -492,6 +492,12 @@ export interface ModelRoute {
    * FieldMap.defaults for a graph.
    */
   extra?: Record<string, unknown>;
+  /**
+   * A ComfyUI wrapper graph that loads one LoRA itself (kijai's InfiniteTalk) takes the run's LoRA in that slot, in place of
+   * its own: only on a route whose recipe brings that LoRA and the settings it needs (Fuobe Speak's FusioniX with 25 steps).
+   * Other routes on the graph refuse a LoRA rather than swap out the one its settings are tuned for.
+   */
+  loraSlot?: true;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";
@@ -876,6 +882,11 @@ export interface GenerationRequest {
   frame?: { scene: string; index: number; of: number };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
   step?: { label: string; index: number; of: number };
+  /**
+   * Server-set: the picture of a look whose step after it (PixeletedFace's face mosaic) is the next step of the same run
+   * (src/server/chains.ts createMosaicRun), so it doesn't start another.
+   */
+  postMade?: boolean;
   /** Server-set: what the user calls this result, shown instead of the prompt (Library, feeds). */
   title?: string;
   /** Server-set: the name of the batch it belongs to (an Assist plan's summary): the Library stack's title. */
