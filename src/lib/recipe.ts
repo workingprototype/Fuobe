@@ -73,7 +73,7 @@ const ChainSlotSchema = z.object({
  * Fields the server sets on a request (the run's stamp, the demo flag, what the runner filled in, a step's label):
  * a recipe never carries them, whatever its file says.
  */
-export const SERVER_FIELDS = ["skill", "demo", "chainFilled", "chainSkipped", "notice", "step", "batchTitle"] as const;
+export const SERVER_FIELDS = ["skill", "demo", "chainFilled", "chainSkipped", "notice", "step", "batchTitle", "asked"] as const;
 
 /** A GenerationRequest with placeholders in it: checked for its shape here, for its models and values on the server. */
 const RequestSchema = z
@@ -147,6 +147,8 @@ export const RecipeSchema = z.object({
       thread: z.string().max(40).optional(),
       canvas: z.string().max(40).optional(),
       at: z.string().regex(DAY).optional(),
+      /** Made from results the demo provider made (W2): nothing has shown it works on a real engine yet. */
+      demo: z.boolean().optional(),
     })
     .optional(),
 });

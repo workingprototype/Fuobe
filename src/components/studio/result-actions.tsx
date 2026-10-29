@@ -3,6 +3,7 @@
 import {
   ArchiveRestore,
   AudioLines,
+  BookmarkPlus,
   Box,
   CircleDot,
   Clapperboard,
@@ -59,6 +60,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ReviewMenuItems } from "@/components/library/review";
 import { useShare } from "@/components/share/share-provider";
+import { useSkillBuilder } from "@/components/skills/skill-builder-provider";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCreateGeneration, useGenerationActions, useSaveElement } from "@/lib/api";
@@ -98,6 +100,7 @@ export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
   finalize: Sparkles,
   compare: Columns2,
   reuse: RotateCcw,
+  "make-skill": BookmarkPlus,
   "copy-prompt": Copy,
   share: Share2,
   pin: Pin,
@@ -204,6 +207,7 @@ export function useActionRunner(opts: RunnerOptions = {}) {
   const confirmForever = useConfirmForever();
   const deleteUpload = useContext(UploadDeleteContext);
   const share = useShare();
+  const skillBuilder = useSkillBuilder();
   return (a: OutputAction, g: Generation, index: number) => {
     const o = g.outputs[index];
     switch (a.id) {
@@ -230,6 +234,9 @@ export function useActionRunner(opts: RunnerOptions = {}) {
         );
       case "reuse":
         return opts.onReuse?.(g);
+      case "make-skill":
+        if (!skillBuilder) return void toast.error("Make a skill from the Library or a studio page");
+        return skillBuilder.open([g.id]);
       case "compare":
         return opts.onCompare?.();
       case "view-3d":

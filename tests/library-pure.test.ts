@@ -77,6 +77,7 @@ describe("outputActions", () => {
       "menu:genjutsu",
       "menu:save-character",
       "menu:reuse",
+      "menu:make-skill",
       "menu:copy-prompt",
       "menu:share",
       "menu:pin",
@@ -91,7 +92,7 @@ describe("outputActions", () => {
 
   it("gives SVG results no raster hand-offs, but keeps them on demo placeholders", () => {
     const svg = (p: Partial<Generation>, o: Partial<Generation["outputs"][number]> = {}) => gen({ provider: "fal", outputs: [{ url: "/api/files/outputs/d/logo.svg", kind: "image", contentType: "image/svg+xml", ...o }], ...p });
-    expect(ids(svg({}))).toEqual(["bar:download", "bar:favorite", "menu:copy-prompt", "menu:share", "menu:pin", "menu:review", "menu:delete"]);
+    expect(ids(svg({}))).toEqual(["bar:download", "bar:favorite", "menu:make-skill", "menu:copy-prompt", "menu:share", "menu:pin", "menu:review", "menu:delete"]);
     expect(ids(svg({}, { url: "https://v3.fal.media/files/x/logo.svg", contentType: undefined }))[0]).toBe("bar:download");
     expect(ids(svg({ feature: "upload", provider: "local" }))).toEqual(["bar:download", "menu:delete-upload"]);
     // A demo picture is an SVG standing in for a raster result: it can still be animated (a demo Vectorize result can't).
@@ -114,12 +115,23 @@ describe("outputActions", () => {
       "menu:grade",
       "menu:genjutsu",
       "menu:finalize",
+      "menu:make-skill",
       "menu:copy-prompt",
       "menu:share",
       "menu:pin",
       "menu:review",
       "menu:delete",
     ]);
+  });
+
+  it("offers Make a skill right after Reuse settings, on finished results only", () => {
+    const menu = (g: Generation, ctx = {}) => outputActions(g, 0, ctx).filter((a) => a.placement === "menu").map((a) => a.id);
+    const m = menu(gen(), { reuse: true });
+    expect(m.indexOf("make-skill")).toBe(m.indexOf("reuse") + 1);
+    expect(outputActions(gen(), 0).find((a) => a.id === "make-skill")).toEqual({ id: "make-skill", label: "Make a skill from this…", placement: "menu" });
+    for (const status of ["queued", "running", "failed", "canceled"] as const) expect(menu(gen({ status }))).not.toContain("make-skill");
+    expect(menu(gen({ deletedAt: 5 }))).not.toContain("make-skill");
+    expect(menu(gen({ feature: "upload" }))).not.toContain("make-skill");
   });
 
   it("handles audio, text, 3D, layers, favorites and the Trash", () => {
