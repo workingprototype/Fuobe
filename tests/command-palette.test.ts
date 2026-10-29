@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { NAV } from "@/components/nav-items";
 import { APPS, EFFECTS, getModel, MODELS, MOTIONS } from "@/lib/catalog";
-import { entryScore, indexEntries, normalize, rankPalette, wordScore, type PaletteEntry } from "@/lib/command-search";
+import { entryScore, indexEntries, normalize, rankPalette, skillEntries, wordScore, type PaletteEntry } from "@/lib/command-search";
 import { modelHref, paletteIndex } from "@/lib/palette-index";
 import { modelSearchText, toModelRow } from "@/lib/model-rows";
 import { hubModePaths, studioRoutes } from "./e2e/_routes.mjs";
@@ -82,9 +82,20 @@ describe("palette ranking", () => {
 
   it("orders groups by their best match and caps each group", () => {
     const groups = rankPalette(ALL, "zoom");
-    for (const g of groups) expect(g.entries.length).toBeLessThanOrEqual({ page: 6, setting: 4, app: 5, motion: 4, effect: 4, model: 5, recent: 5 }[g.kind]);
+    for (const g of groups) expect(g.entries.length).toBeLessThanOrEqual({ page: 6, setting: 4, skill: 4, app: 5, motion: 4, effect: 4, model: 5, recent: 5 }[g.kind]);
     const best = groups.map((g) => entryScore("zoom", g.entries[0]));
     expect(best).toEqual([...best].sort((a, b) => b - a));
+  });
+
+  it("lists “Run <skill>…” for skills that run by themselves, and finds them", () => {
+    const skills = [
+      { name: "lamp-turntable", title: "Lamp turntable", description: "A turntable from a product photo.", recipe: true, enabled: true },
+      { name: "off", title: "Switched off", description: "x", recipe: true, enabled: false },
+      { name: "playbook", title: "Playbook only", description: "x", enabled: true },
+    ];
+    const entries = skillEntries(skills);
+    expect(entries).toEqual([expect.objectContaining({ kind: "skill", label: "Run Lamp turntable…", href: "/assist/skills?run=lamp-turntable" })]);
+    expect(rankPalette([...ALL, ...entries], "turntable").find((g) => g.kind === "skill")?.entries.map((e) => e.label)).toEqual(["Run Lamp turntable…"]);
   });
 
   it("matches nothing on an empty query (the palette shows its own start list)", () => {

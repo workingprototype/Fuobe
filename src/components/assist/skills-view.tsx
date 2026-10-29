@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Download, FileUp, Loader2, MessageSquarePlus, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Copy, Download, FileUp, Loader2, MessageSquarePlus, Pencil, Play, Plus, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useDeferredValue, useId, useRef, useState } from "react";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,7 +31,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { SKILL_LIMITS, SKILL_NAME_RE, skillSlug, type Skill, type SkillSummary } from "@/lib/assist";
 import { cn } from "@/lib/utils";
 import { radioKeys } from "@/components/studio/radio-keys";
-import { useSkill, useSkillActions, useSkills, type SkillForm } from "./hooks";
+import { useRecipe, useRecipeActions, useSkill, useSkillActions, useSkills, type RecipeFailure, type SkillForm } from "./hooks";
+import { RunSkillDialog } from "./run-skill-dialog";
 import { RailButton } from "./shell";
 import { SKILL_ICONS, SkillIcon } from "./skill-icon";
 
@@ -53,6 +55,8 @@ function Skills() {
   const pathname = usePathname();
   const params = useSearchParams();
   const viewing = params.get("skill");
+  // ?run=<name>: the skill's Run form (a deep link, ⌘K's "Run …", the skill's Run… button).
+  const running = params.get("run");
   const [tab, setTab] = useState<"builtin" | "user">("builtin");
   const [query, setQuery] = useState("");
   const q = useDeferredValue(query.trim().toLowerCase());
@@ -66,6 +70,12 @@ function Skills() {
   const own = all.filter((s) => s.source === "user");
   const filter = (list: SkillSummary[]) => (q ? list.filter((s) => `${s.name} ${s.title} ${s.description} ${s.whenToUse} ${(s.tags ?? []).join(" ")}`.toLowerCase().includes(q)) : list);
   const open = (name: string | null) => router.replace(name ? `${pathname}?skill=${name}` : pathname, { scroll: false });
+  // The Run form opened from a skill's dialog goes back to it when it closes.
+  const runFrom = useRef<string | null>(null);
+  const run = (name: string, from: string | null = null) => {
+    runFrom.current = from;
+    router.replace(`${pathname}?run=${name}`, { scroll: false });
+  };
 
   const upload = async (f: File, replace = false) => {
     setUploading(true);
@@ -164,7 +174,15 @@ function Skills() {
           </TabsContent>
         </Tabs>
       </div>
-      <SkillDetail name={viewing} onClose={() => open(null)} onEdit={(s) => (open(null), setEditing(s))} />
+      <SkillDetail name={viewing} onClose={() => open(null)} onEdit={(s) => (open(null), setEditing(s))} onRun={(name) => run(name, name)} />
+      <RunSkillDialog
+        name={running}
+        onClose={() => {
+          const back = runFrom.current;
+          runFrom.current = null;
+          open(back);
+        }}
+      />
       <SkillEditor
         skill={editing}
         onClose={() => setEditing(null)}
@@ -227,14 +245,65 @@ function SkillGrid({ list, loading, onOpen, onToggle, empty }: { list: SkillSumm
             <Switch size="sm" checked={s.enabled} onCheckedChange={(v) => onToggle(s, v)} aria-label={`${s.enabled ? "Switch off" : "Switch on"} ${s.title}`} className="relative z-10" />
           </div>
           <p className="mt-3 line-clamp-3 text-[13px] text-muted-foreground">{s.description}</p>
-          {s.files.length > 0 && <p className="mt-auto pt-3 text-[11px] text-muted-foreground">+ {s.files.length} file{s.files.length > 1 ? "s" : ""}</p>}
+          {(s.recipe || s.files.length > 0) && (
+            <div className="mt-auto flex flex-wrap items-center gap-2 pt-3 text-[11px] text-muted-foreground">
+              {s.recipe && (
+                <span className="inline-flex h-5 items-center gap-1 rounded-full bg-brand-faint px-2 font-medium text-brand-text">
+                  <Play className="size-3" aria-hidden /> Runs by itself
+                </span>
+              )}
+              {s.files.length > 0 && (
+                <span>
+                  + {s.files.length} file{s.files.length > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+          )}
         </li>
       ))}
     </ul>
   );
 }
 
-function SkillDetail({ name, onClose, onEdit }: { name: string | null; onClose: () => void; onEdit: (s: Skill) => void }) {
+/**
+ * Under a recipe skill's description: where it was checked ("Checked 29 Oct · Cloud ✓ · GPU not checked"), or in amber
+ * why it needs a re-check, with Re-check (the plan and the free dry run).
+ */
+function RecipeStatus({ skill }: { skill: Skill }) {
+  const recipe = useRecipe(skill.name, !!skill.recipe);
+  const actions = useRecipeActions();
+  const [busy, setBusy] = useState(false);
+  const v = recipe.data;
+  if (!skill.recipe || !v) return null;
+  const recheck = Object.values(v.recheck).flat();
+  const recheckNow = async () => {
+    setBusy(true);
+    try {
+      const r = await actions.verify(skill.name);
+      if (r.ok) toast.success("Checked — it still runs", { description: "Priced, and run once on the demo provider for free." });
+      else toast.error("The check didn't pass", { description: r.engines.flatMap((e) => [...e.plan.errors, ...(e.dryRun?.problems ?? [])])[0] });
+    } catch (e) {
+      const f = e as RecipeFailure;
+      toast.error(f.message, { description: f.problems?.slice(1).join("; ") || undefined });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const canCheck = skill.source === "user";
+  return (
+    <div className={cn("mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]", recheck.length || v.why ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>
+      {recheck.length || v.why ? <AlertTriangle className="size-3.5 shrink-0" aria-hidden /> : <ShieldCheck className="size-3.5 shrink-0" aria-hidden />}
+      <span className="min-w-0 break-words">{v.why ?? (recheck.length ? `Needs a re-check: ${recheck[0]}` : v.line)}</span>
+      {canCheck && !v.why && (recheck.length > 0 || !v.ready.length) && (
+        <Button variant="outline" size="xs" className="h-6 rounded-full px-2 text-[12px]" onClick={() => void recheckNow()} disabled={busy}>
+          {busy && <Loader2 className="animate-spin" />} {v.ready.length ? "Re-check" : "Check it (free)"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function SkillDetail({ name, onClose, onEdit, onRun }: { name: string | null; onClose: () => void; onEdit: (s: Skill) => void; onRun: (name: string) => void }) {
   const skill = useSkill(name);
   const actions = useSkillActions();
   const router = useRouter();
@@ -255,6 +324,7 @@ function SkillDetail({ name, onClose, onEdit }: { name: string | null; onClose: 
               <div className="min-w-0 flex-1">
                 <DialogTitle className="font-heading text-[24px] leading-tight font-normal">{s.title}</DialogTitle>
                 <DialogDescription className="mt-1">{s.description}</DialogDescription>
+                <RecipeStatus skill={s} />
                 <p className="mt-1.5 font-mono text-[11px] text-muted-foreground">
                   /{s.name} · {s.source === "builtin" ? "Built-in" : "Yours"}
                   {s.studio && (
@@ -293,11 +363,33 @@ function SkillDetail({ name, onClose, onEdit }: { name: string | null; onClose: 
             </div>
             <DialogFooter className="mx-0 mb-0 flex-row flex-wrap items-center gap-2 border-t px-5 py-3 sm:justify-between">
               <div className="flex flex-wrap gap-1.5">
-                <Button variant="ghost" size="sm" asChild>
-                  <a href={`/api/assist/skills/${s.name}/download`} download>
-                    <Download /> SKILL.md
-                  </a>
-                </Button>
+                {s.files.length > 0 ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        <Download /> Download <ChevronDown className="opacity-60" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem asChild>
+                        <a href={`/api/assist/skills/${s.name}/download`} download>
+                          SKILL.md
+                        </a>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <a href={`/api/assist/skills/${s.name}/download?format=zip`} download>
+                          Skill with its files (.zip)
+                        </a>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={`/api/assist/skills/${s.name}/download`} download>
+                      <Download /> SKILL.md
+                    </a>
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -324,9 +416,20 @@ function SkillDetail({ name, onClose, onEdit }: { name: string | null; onClose: 
                   </>
                 )}
               </div>
-              <Button size="sm" onClick={() => router.push(`/assist?skill=${s.name}`)} disabled={!s.enabled}>
-                <MessageSquarePlus /> Use in a new chat
-              </Button>
+              {s.recipe ? (
+                <div className="flex flex-wrap gap-1.5">
+                  <Button variant="ghost" size="sm" onClick={() => router.push(`/assist?skill=${s.name}`)} disabled={!s.enabled}>
+                    <MessageSquarePlus /> Use in a new chat
+                  </Button>
+                  <Button size="sm" onClick={() => onRun(s.name)} disabled={!s.enabled}>
+                    <Play /> Run…
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" onClick={() => router.push(`/assist?skill=${s.name}`)} disabled={!s.enabled}>
+                  <MessageSquarePlus /> Use in a new chat
+                </Button>
+              )}
             </DialogFooter>
             <AlertDialog open={confirm} onOpenChange={setConfirm}>
               <AlertDialogContent>

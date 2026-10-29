@@ -29,12 +29,17 @@ import {
   type FilledCheck,
   type Recipe,
   type RecipeValues,
+  type EngineCheck,
+  type RecipePlace,
+  type RecipeEstimate,
+  type RecipeRun,
+  type RecipeView,
   type VerifiedEngine,
+  type VerifyResult,
 } from "@/lib/recipe";
 import type { Skill } from "@/lib/assist";
 import { planSteps } from "./assist/studio-tools";
 import { executeTool, getTool, planFor, validateInput } from "./assist/tools";
-import type { JobPlace } from "./assist/define";
 import { createPipeline } from "./chains";
 import { llmText, llmTextBackend } from "./enhance";
 import { cancelGeneration, createGenerations, currentRequest, getGeneration, previewChained } from "./generations";
@@ -188,7 +193,7 @@ interface RunPlan {
   jobs: PlannedJob[];
   total: number | null;
   errors: string[];
-  place?: JobPlace;
+  place?: RecipePlace;
 }
 
 /** Price one compiled run the way it would start (planSteps / planFor), with what stops it. */
@@ -310,25 +315,6 @@ function valuesForCheck(recipe: Recipe, files = false): RecipeValues {
 // ---------------------------------------------------------------------------
 // What a page shows
 
-export interface RecipeView {
-  name: string;
-  title: string;
-  builtin: boolean;
-  recipe: Recipe;
-  /** Engines its steps allow on this install. */
-  engines: Engine[];
-  /** Engines it may run on now: its plan check passed there. */
-  ready: Engine[];
-  /** Why it needs a re-check, per engine checked before. */
-  recheck: Partial<Record<Engine, string[]>>;
-  /** "Checked 29 Oct · Cloud ✓ · GPU not checked". */
-  line: string;
-  /** Why it runs nowhere on this install. */
-  why?: string;
-  /** Each step's model and its licence on each engine, as information. */
-  models: { engine: Engine; name: string; licence: string }[];
-}
-
 export function recipeView(name: string): RecipeView {
   const { skill, recipe } = getRecipe(name);
   const engines = recipeEngines(recipe);
@@ -435,28 +421,12 @@ function engineFor(recipe: Recipe, asked: Engine | undefined): Engine {
 // ---------------------------------------------------------------------------
 // Estimate and run
 
-export interface RecipeEstimate {
-  engine: Engine;
-  /** One entry per row: its jobs priced, and what stops it. */
-  runs: { line: number; jobs: PlannedJob[]; total: number | null; errors: string[] }[];
-  /** The first run's jobs ("What runs"). */
-  jobs: PlannedJob[];
-  /** Every run together (null: a price that varies). */
-  total: number | null;
-  /** Every job would run on the demo provider. */
-  demo: boolean;
-  runnable: boolean;
-  /** What stops every run (no column for an input, too many rows, a recipe that runs nowhere). */
-  errors: string[];
-  place?: JobPlace;
-}
-
 /** Price one run or many (rows priced together, with a total) on an engine, without starting anything. */
 export function estimateRecipe(name: string, input: RunInput, asked?: Engine): RecipeEstimate {
   const { skill, recipe } = getRecipe(name);
   const engine = engineFor(recipe, asked);
   const { rows, errors } = rowsOf(recipe, input);
-  let place: JobPlace | undefined;
+  let place: RecipePlace | undefined;
   const runs = rows.map((r) => {
     if (!r.values) return { line: r.line, jobs: [], total: null, errors: r.errors };
     try {
@@ -480,13 +450,6 @@ export function estimateRecipe(name: string, input: RunInput, asked?: Engine): R
     errors,
     ...(place && { place }),
   };
-}
-
-export interface RecipeRun {
-  /** The run's batch (a pipeline's rows share it), its generations, and the studio page a tool run opens in. */
-  batchId?: string;
-  ids: string[];
-  href?: string;
 }
 
 /**
@@ -553,14 +516,6 @@ export async function runRecipe(name: string, input: RunInput, asked?: Engine): 
 // Checks
 
 export type VerifyLevel = "plan" | "demo" | "real";
-
-export interface EngineCheck {
-  engine: Engine;
-  /** `notes`: what stops a real run on this install that isn't the recipe's fault (a provider to connect). */
-  plan: { ok: boolean; total: number | null; demo: boolean; errors: string[]; notes: string[] };
-  dryRun?: { ok: boolean; problems: string[]; skipped?: string };
-  real?: { ok: boolean; problems: string[]; notes: string[]; demo: boolean };
-}
 
 const TERMINAL = new Set(["succeeded", "failed", "canceled"]);
 
@@ -699,12 +654,6 @@ async function realRun(skill: Skill, recipe: Recipe, engine: Engine): Promise<No
   }
   if (helpers.length) trashGenerations(helpers);
   return { ok: !problems.length, problems, notes, demo };
-}
-
-export interface VerifyResult {
-  ok: boolean;
-  engines: EngineCheck[];
-  view: RecipeView;
 }
 
 /**

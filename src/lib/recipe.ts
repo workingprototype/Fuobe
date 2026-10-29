@@ -13,6 +13,7 @@
  * (src/server/recipes.ts). Nothing here reads the catalog: the server checks models, prices and engines.
  */
 import { z } from "zod";
+import type { PlannedJob } from "./assist";
 import type { ChainSlot, GenerationRequest, MediaKind, OutputFile } from "./catalog/types";
 import type { MediaInfo } from "./media-probe";
 
@@ -801,4 +802,70 @@ export function verifiedLine(recipe: Pick<Recipe, "verified">, engines: RecipeEn
   const last = days.sort().at(-1)!;
   const parts = engines.map((e) => (v[e]?.dryRun ? `${ENGINE_WORDS[e]} ✓` : v[e]?.plan ? `${ENGINE_WORDS[e]} priced` : `${ENGINE_WORDS[e]} not checked`));
   return [`Checked ${shortDay(last)}`, ...parts].join(" · ");
+}
+
+// ---------------------------------------------------------------------------
+// What the recipe routes answer (src/server/recipes.ts)
+
+/** Where a studio tool's run opens (its studio and page), or why it runs in the Library. */
+export interface RecipePlace {
+  studio?: string;
+  href?: string;
+  fallback?: string;
+}
+
+export interface RecipeView {
+  name: string;
+  title: string;
+  builtin: boolean;
+  recipe: Recipe;
+  /** Engines its steps allow on this install. */
+  engines: RecipeEngine[];
+  /** Engines it may run on now: its plan check passed there. */
+  ready: RecipeEngine[];
+  /** Why it needs a re-check, per engine checked before. */
+  recheck: Partial<Record<RecipeEngine, string[]>>;
+  /** "Checked 29 Oct · Cloud ✓ · GPU not checked". */
+  line: string;
+  /** Why it runs nowhere on this install. */
+  why?: string;
+  /** Each step's model and its licence on each engine, as information. */
+  models: { engine: RecipeEngine; name: string; licence: string }[];
+}
+
+export interface RecipeEstimate {
+  engine: RecipeEngine;
+  /** One entry per row: its jobs priced, and what stops it. */
+  runs: { line: number; jobs: PlannedJob[]; total: number | null; errors: string[] }[];
+  /** The first run's jobs ("What runs"). */
+  jobs: PlannedJob[];
+  /** Every run together (null: a price that varies). */
+  total: number | null;
+  /** Every job would run on the demo provider. */
+  demo: boolean;
+  runnable: boolean;
+  /** What stops every run (no column for an input, too many rows, a recipe that runs nowhere). */
+  errors: string[];
+  place?: RecipePlace;
+}
+
+export interface RecipeRun {
+  /** The run's batch (a pipeline's rows share it), its generations, and the studio page a tool run opens in. */
+  batchId?: string;
+  ids: string[];
+  href?: string;
+}
+
+export interface EngineCheck {
+  engine: RecipeEngine;
+  /** `notes`: what stops a real run on this install that isn't the recipe's fault (a provider to connect). */
+  plan: { ok: boolean; total: number | null; demo: boolean; errors: string[]; notes: string[] };
+  dryRun?: { ok: boolean; problems: string[]; skipped?: string };
+  real?: { ok: boolean; problems: string[]; notes: string[]; demo: boolean };
+}
+
+export interface VerifyResult {
+  ok: boolean;
+  engines: EngineCheck[];
+  view: RecipeView;
 }
