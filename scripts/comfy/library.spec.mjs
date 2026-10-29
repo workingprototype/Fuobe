@@ -2140,6 +2140,28 @@ export const SPEC = [
       'Control: frame 0 = the restyled frame (image, kept), frames 1..N-1 = Depth Anything 3 depth maps (generated); the restyled frame is also the VACE reference. Lightx2v 4 steps. frames must be 4n+1 and <= the segment length.',
   },
   {
+    id: 'video-evolution-wan22-fun-vace',
+    title: 'Evolve a <=5 s segment: Wan 2.2 Fun VACE from the noised segment, depth control + a direction frame',
+    capability: 'v2v',
+    handBuilt: 'hand-built/video-evolution-wan22-fun-vace.json',
+    bindings: {
+      video: [b('1', 'file')], image: [b('4', 'image')], prompt: [b('12', 'text')], negativePrompt: [b('13', 'text')],
+      width: [b('3', 'width'), b('5', 'width'), b('9', 'width'), b('15', 'width')],
+      height: [b('3', 'height'), b('5', 'height'), b('9', 'height'), b('15', 'height')],
+      frames: [b('30', 'value')], fps: [b('26', 'fps')], seed: [b('22', 'noise_seed'), b('23', 'noise_seed')], steps: [b('46', 'value')],
+      cfg: [b('22', 'cfg'), b('23', 'cfg')], shift: [b('20', 'shift'), b('21', 'shift')], controlStrength: [b('15', 'strength')],
+      denoise: [b('45', 'value')],
+    },
+    outputs: [{ node: '27', kind: 'video' }],
+    limits: { maxWidth: 1280, maxHeight: 1280, dimensionMultiple: 16, maxFrames: 81, frameStep: 4 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Wan 2.2 Fun VACE, lightx2v, Depth Anything 3 mono-large)',
+    notes:
+      'Fuobe Evolution (build plan O13) on the GPU: video-segment-resample (<=81 frames @16 fps + first frame) -> qwen-image-edit-2511 takes the first frame toward the creative direction (images 2-3 = references) -> this graph -> video-concat-N -> the clip\'s sound. ' +
+      'Unlike video-restyle-wan22-fun-vace the sampler starts from the segment itself: reference latent + VAE-encoded frames (LatentConcat on t, the shape WanVaceToVideo makes), noised to denoise (low 0.45, medium 0.65, high 0.85) the way KSampler does it: a schedule of floor(steps / denoise) steps of which the last `steps` run (ComfyMathExpression), the high-noise expert for the first half. ' +
+      'Control: Depth Anything 3 depth on every frame (no kept frame, no masks); the direction frame is the VACE reference. frames must be 4n+1 and equal the segment\'s frame count (the source latent and the VACE latent must line up). Same weights as the restyle graph.',
+  },
+  {
     id: 'mixed-media-zimage-frames',
     title: 'Mixed Media: per-frame stylisation at 4-24 fps (Z-Image Turbo img2img + Fun Union ControlNet canny)',
     capability: 'v2v',
