@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useProgressive } from "@/components/use-progressive";
 import { copyText } from "@/lib/clipboard";
 import type { ManifestWorkflow } from "@/lib/comfy";
+import { installScript } from "@/lib/comfy-install";
 import { cn } from "@/lib/utils";
 import { capabilityGroup, usedByIndex, WORKFLOW_GROUPS, type ComfyRoute } from "@/lib/workflow-usage";
 
@@ -21,15 +22,6 @@ interface ComfyStatus {
   generatedAt: string;
   comfyuiCommit?: string;
   workflows: WF[];
-}
-
-function downloadScript(wf: WF): string {
-  // Optional alternatives (FILM for RIFE) are listed on the card, not installed by default.
-  const lines = wf.models
-    .filter((m) => m.url && m.present !== true && !m.optional)
-    .map((m) => `mkdir -p "$COMFYUI/models/${m.folder}" && wget -c -O "$COMFYUI/models/${m.folder}/${m.file}" "${m.url}"`);
-  const nodes = wf.customNodes.map((n) => `git -C "$COMFYUI/custom_nodes" clone ${n.repo}`);
-  return ["COMFYUI=${COMFYUI:-$HOME/ComfyUI}", ...nodes, ...lines].join("\n");
 }
 
 async function fetchStatus(): Promise<ComfyStatus> {
@@ -108,7 +100,7 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
           size="sm"
           className="max-w-full"
           onClick={async () => {
-            if (await copyText(downloadScript(wf))) toast("Install commands copied");
+            if (await copyText(installScript(wf))) toast("Install commands copied");
             else toast.error("Couldn’t copy — your browser blocked the clipboard");
           }}
         >
