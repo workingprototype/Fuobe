@@ -265,6 +265,12 @@ export const KNOWN_MODELS = {
   // round 4 (r4/video-finish): the chunked SeedVR2 graph is hand-built, so its files are named here (same files as the template).
   'seedvr2_3b_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors' },
   'seedvr2_ema_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors' },
+  // N7-5 (Fly path, docs/research/new-models-7.md §3.4 / §3.6): Uni3C's ControlNet for core ModelPatchLoader and the Wan 2.1 I2V
+  // 720P it was trained on, at the revisions the research read (1,997,314,376 B and 16,401,356,938 B); the 480P fp8 file
+  // InfiniteTalk's native graph already uses is the drop-in to try on a smaller GPU (`checkpoint`).
+  'Wan21_Uni3C_controlnet_fp16.safetensors': { folder: 'model_patches', url: 'https://huggingface.co/Kijai/WanVideo_comfy/resolve/8260d429d19fd7a72304cad059160b95d843913f/Wan21_Uni3C_controlnet_fp16.safetensors' },
+  'wan2.1_i2v_720p_14B_fp8_scaled.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Wan-2.1/resolve/123acf1cc74bccbb9bfff8ac1ee72edc08c2341d/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors' },
+  'Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors' },
 };
 
 const WAN_NEG_EN =
@@ -3310,6 +3316,35 @@ export const SPEC = [
       'cutout is true by default (manifest defaults). ' +
       'numGaussians up to 1,048,576 (262,144 by default); seed drives both the sampler and the decoder. RenderSplat also takes a look_at camera, so a view picked in the browser can be rendered on the server. ' +
       '3.78 GB of weights (TripoSplat 0.74, DINOv3 ViT-H 1.68, TripoSplat VAE decoder 0.58, FLUX.2 VAE 0.34, BiRefNet 0.44). VRAM unverified. Validated by /prompt only.',
+  },
+  {
+    // N7-5: Cinema's "Film this path" on the open engine (docs/research/new-models-7.md §3.6, the wan21-i2v-uni3c-path table).
+    id: 'wan21-i2v-uni3c-path',
+    title: 'Fly path: a still filmed along a camera path, Wan 2.1 I2V guided by Uni3C on a browser render of the path (core nodes)',
+    capability: 'camera-path',
+    handBuilt: 'hand-built/wan21-i2v-uni3c-path.json',
+    bindings: {
+      image: [b('5', 'image')], video: [b('7', 'file')], prompt: [b('10', 'text')], negativePrompt: [b('11', 'text')],
+      width: [b('12', 'width')], height: [b('12', 'height')], seed: [b('13', 'seed')], steps: [b('13', 'steps')], cfg: [b('13', 'cfg')],
+      shift: [b('18', 'shift')], strength: [b('9', 'strength')], checkpoint: [b('1', 'unet_name')], filenamePrefix: [b('16', 'filename_prefix')],
+    },
+    outputs: [{ node: '16', kind: 'video' }],
+    defaults: { fps: 16, checkpoint: 'wan2.1_i2v_720p_14B_fp8_scaled.safetensors' },
+    limits: { maxWidth: 1280, maxHeight: 1280, dimensionMultiple: 16, maxFrames: 81, frameStep: 4 },
+    vramGb: 48,
+    optionalModels: ['Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors'],
+    license: 'Apache-2.0 (Wan 2.1 I2V 14B; Uni3C, alibaba-damo-academy/Uni3C — Kijai\'s repack repo carries no licence field)',
+    notes:
+      'Cinema 3D scene "Film this path" (N7-5): the still is the start image (WanImageToVideo, 81 frames, CLIP vision H) and the browser\'s render of the MoGe mesh or ' +
+      'point cloud along the path (src/components/cinema/scene-engine.ts recordPath: 81 frames, 16 fps, black where nothing was seen) is the `video`, which core ' +
+      'WanUni3CControlnetApply encodes with the Wan VAE as Uni3C\'s render_video (it pads or cuts it to the latent\'s frame count and resizes it, centre crop, to the ' +
+      'output size; it has no hole-mask input, so the render\'s mask stays in the browser for WorldCast, N7-9). Model path: UNETLoader -> ModelSamplingSD3 (shift 5) -> ' +
+      'Uni3C (strength 1, 0-1) -> KSampler (30 steps, cfg 5, uni_pc / simple; Uni3C\'s own sampler settings are 50 steps at cfg 5 — to confirm on a GPU). ' +
+      'Weights: Kijai/WanVideo_comfy Wan21_Uni3C_controlnet_fp16 @ 8260d429 in models/model_patches (its header has every key core ModelPatchLoader\'s Uni3C branch ' +
+      'reads; loading it is inferred, not run) and Wan 2.1 I2V 14B 720P fp8 scaled (Comfy-Org/Wan-2.1 @ 123acf1c), the base Uni3C was trained on. The 480P Q8 GGUF ' +
+      'Fuobe pins for InfiniteTalk can\'t load through a core node (UNETLoader reads no GGUF; that needs city96\'s ComfyUI-GGUF pack), so the core drop-in to try ' +
+      'first on a smaller GPU is the 480P fp8 file the native InfiniteTalk graph uses (`checkpoint`): both are dim 5120, which the Uni3C node checks. ' +
+      'VRAM: Uni3C\'s own figures are 46-51 GB with offload (Fuobe\'s older 24 GB note is unverified). Validated by /prompt only (no GPU here).',
   },
 
   // ---- Content Factory: read a reference video ---------------------------------------------
