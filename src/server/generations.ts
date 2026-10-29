@@ -12,7 +12,8 @@ import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
-import { avatarSeconds, estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
+import { clipWindowProblem } from "@/lib/catalog/clip-windows";
+import { avatarSeconds, clipEditSeconds, estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, loraName, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
@@ -1212,6 +1213,16 @@ async function submit(
     // A talking avatar renders as long as its voice: priced for it once its header is read (an API call that didn't say).
     if (plan.op === "avatar" && plan.params.sourceDuration === undefined && input.sourceDuration && providerId !== "mock" && plan.model.engine !== "open") {
       update(id, { cost_usd: estimateCost(plan.model, { ...plan.params, sourceDuration: input.sourceDuration }, 1, plan.op, plan.loras.length > 0 && !!route.loraEndpoint) });
+    }
+    // A clip edit of a clip sent as it is (Edit video, an API call; the studios that cut clips keep to the windows
+    // themselves): one outside the model's window is refused before it's paid for (Happy Horse bills 60 s and returns
+    // 15), and one that keeps the clip's length is priced for it once the header is read (a call that didn't say).
+    if (plan.op === "v2v" && input.sourceDuration && !req.chain?.length && req.params?.duration === undefined && providerId !== "mock" && plan.model.engine !== "open") {
+      const problem = clipWindowProblem(plan.model, input.sourceDuration);
+      if (problem) throw new Error(problem);
+      if (plan.params.sourceDuration === undefined && clipEditSeconds(plan.model, input, plan.op) !== undefined) {
+        update(id, { cost_usd: estimateCost(plan.model, { ...plan.params, sourceDuration: input.sourceDuration }, 1, plan.op, plan.loras.length > 0 && !!route.loraEndpoint) });
+      }
     }
     // An upscale that wouldn't enlarge the clip (a 1080p clip at a default 1080p; a 4K clip would even shrink):
     // a tier the model only defaulted to moves up to the next one it offers, one the caller picked is refused.

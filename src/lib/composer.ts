@@ -7,6 +7,7 @@ import { FORMAT_INFO } from "./av/formats";
 import { fpsPlan, fpsSummary } from "./av/fps";
 import { targetShortEdge, upscaledSize, upscaleFactorFor, upscaleTier } from "./av/upscale";
 import { wholeClipProblem, wholeClipTool } from "./av/video-finish";
+import { clipWindowProblem } from "./catalog/clip-windows";
 import { addFrameAt, frameTimes, framesInputs, removeFrameAt, spread, type FrameSupport } from "./catalog/keyframes";
 import { FACE_MOSAIC_MODELS } from "./catalog/open-tools";
 import { soulPostStep } from "./catalog/soul";
@@ -264,17 +265,19 @@ export function clipOutcome(
 
 
 /**
- * What the attached clip's header rules out before Generate, in the server's words (Upscale hub): a tier that
- * wouldn't enlarge the clip (one picked; a default moves up), or an open tool that holds the whole clip (FPS
- * Boost, SDR to HDR, EXR export) in more memory than half the ComfyUI's RAM (`ramBytes`, when it said).
+ * What the attached clip's header rules out before Generate, in the server's words: a clip edit outside the model's
+ * window (Edit video: Happy Horse takes 3–15 s); a tier that wouldn't enlarge the clip (Upscale hub: one picked; a
+ * default moves up), or an open tool that holds the whole clip (FPS Boost, SDR to HDR, EXR export) in more memory
+ * than half the ComfyUI's RAM (`ramBytes`, when it said).
  */
 export function clipBlocker(
   op: Operation | undefined,
   facts: { width?: number; height?: number; fps?: number; duration?: number } | undefined,
   params: GenParams,
-  model: Pick<ModelDef, "engine" | "options" | "defaults"> | undefined,
+  model: (Pick<ModelDef, "engine" | "options" | "defaults"> & Partial<Pick<ModelDef, "id" | "name">>) | undefined,
   ramBytes: number | undefined,
 ): string | null {
+  if (op === "v2v" && model?.id && facts?.duration) return clipWindowProblem({ id: model.id, name: model.name ?? model.id }, facts.duration);
   if (!facts?.width || !facts.height || !model) return null;
   if (op === "upscale-video") {
     const tier = upscaleTier(params.resolution ?? model.defaults?.resolution, model.options.resolutions, { width: facts.width, height: facts.height }, params.resolution !== undefined);

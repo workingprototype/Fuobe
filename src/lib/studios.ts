@@ -376,6 +376,8 @@ export const VIDEO_EDIT_STUDIO: StudioConfig = {
   feed: { features: ["video-edit"] },
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
   multiRef: { label: "Add ref", max: 4 },
+  // A clip edit that keeps the clip's length is priced on its seconds, and one outside the model's window is refused.
+  clipFacts: true,
   defaultModels: { cloud: "kling-o3", open: "oss-wan22-fun-control" },
   related: { href: "/genjutsu?mode=swap", label: "Swap an object or restyle it with Genjutsu" },
 };

@@ -11,6 +11,7 @@ import type {
   PresetRoute,
   Pricing,
 } from "./types";
+import { sourceSeconds } from "./clip-windows";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
 import { anglesPrompt, anglesWords, ANGLES_ORIGINAL } from "./open-tools";
@@ -605,6 +606,20 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
 const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
 
 /**
+ * The seconds a clip edit that keeps the clip's length is billed for (Happy Horse, Runway Aleph, Lucy Edit, Kling O3 4K
+ * edit…: a v2v model with no length to ask for): the clip's (params.sourceDuration, when the caller knows it), up to the
+ * most its window takes (./clip-windows). Undefined for a model asked for a length, or when the clip's length isn't known.
+ */
+export function clipEditSeconds(model: Pick<ModelDef, "id" | "options" | "routes">, params: Pick<GenParams, "sourceDuration">, op?: Operation): number | undefined {
+  const seconds = params.sourceDuration;
+  if (op !== "v2v" || !seconds || !(seconds > 0) || model.options.durations?.length) return undefined;
+  const routes = model.routes.filter((r) => r.op === "v2v");
+  if (!routes.length || routes.some((r) => r.map?.duration)) return undefined;
+  const max = sourceSeconds(model.id).max;
+  return max !== undefined ? Math.min(seconds, max) : seconds;
+}
+
+/**
  * The seconds a talking avatar is made (and billed) for a voice `seconds` long: as long as the voice, or what a
  * frame-count route's limits make of it, in the seconds it bills (fal's InfiniteTalk: 41–721 frames, 25 a second; Wan 2.2
  * S2V: 40–120 frames, a video second being 16 of them at any frame rate).
@@ -693,7 +708,8 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
     per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
   }
   if (p.unit === "second") {
-    const seconds = clip ?? voice ?? params.duration ?? model.defaults?.duration ?? 5;
+    // A length the caller set wins (Shorts, Mixed Media and Genjutsu say the seconds they bill); then a clip edit's clip.
+    const seconds = clip ?? voice ?? params.duration ?? clipEditSeconds(model, params, op) ?? model.defaults?.duration ?? 5;
     const mp = p.videoMegapixel ? videoMegapixels(model, params, seconds) : undefined;
     const rate = p.videoMegapixel && (withLoras && p.videoMegapixel.withLoras !== undefined ? p.videoMegapixel.withLoras : p.videoMegapixel.usd);
     per = mp !== undefined && rate ? Math.ceil(mp - 1e-9) * rate : usd * seconds;

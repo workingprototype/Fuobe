@@ -4,6 +4,7 @@
  * src/server/shorts.ts, src/server/mixed-media.ts); the browser gets the rows. A Fuobe Original runs on
  * both engines: each answer is for the engine asked about (its default engine when none is named).
  */
+import { sourceSeconds } from "./clip-windows";
 import { onEngine } from "./engines";
 import { getModel } from "./index";
 import { routesFor } from "./plan";
@@ -44,23 +45,8 @@ export function reframes(modelId: string, engine?: Engine): boolean {
   return routes.length > 0 && routes.every((r) => r.map?.aspectRatio);
 }
 
-/**
- * How long a clip each restyle model takes (docs/research/paid-model-apis-3.md, "Input windows"):
- * a cut outside it is paid for and then refused by the provider.
- */
-const SOURCE_SECONDS: Record<string, { min?: number; max?: number }> = {
-  "kling-o3-4k-edit": { min: 3, max: 15 },
-  // It reads 3–60 s but returns at most the first 15 s.
-  "happy-horse-video-edit": { min: 3, max: 15 },
-  "runway-aleph-2": { min: 2, max: 30 },
-  "wan-2-7": { min: 2, max: 10 },
-  // Higgsfield feeds Gemini Omni Flash ≤10 s segments.
-  "gemini-omni-flash": { max: 10 },
-};
-
-export function sourceSeconds(modelId: string): { min?: number; max?: number } {
-  return SOURCE_SECONDS[modelId] ?? {};
-}
+/** How long a clip each restyle model takes (./clip-windows): a cut outside it is paid for and then refused by the provider. */
+export { sourceSeconds };
 
 /** The cloud model's 720p setting, when it has one (Higgsfield renders Shorts at 720p). */
 export function resolutionFor(modelId: string, engine?: Engine): string | undefined {
