@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ChevronDown, Cloud, Cpu, FileUp, Info, Loader2, Minus, Play, Plus, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -22,7 +22,7 @@ import type { Engine } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { checkValues, isMediaType, parseRows, RECIPE_LIMITS, type RecipeEstimate, type RecipeParam, type RecipeView } from "@/lib/recipe";
 import { cn } from "@/lib/utils";
-import { useRecipe, useRecipeActions, type RecipeFailure } from "./hooks";
+import { useRecipe, useRecipeActions, useSkillActions, type RecipeFailure } from "./hooks";
 import { PlanJobs } from "./plan-jobs";
 import { SkillIcon } from "./skill-icon";
 
@@ -82,6 +82,8 @@ function priceLine(e: RecipeEstimate | undefined, runs: number): string {
 function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
   const { recipe, name } = view;
   const actions = useRecipeActions();
+  const skillActions = useSkillActions();
+  const qc = useQueryClient();
   const router = useRouter();
   const [tab, setTab] = useState<"one" | "many">("one");
   const [values, setValues] = useState<Record<string, string | number | undefined>>(() => Object.fromEntries(recipe.params.map((p) => [p.id, p.default])));
@@ -89,7 +91,7 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
   const [csv, setCsv] = useState("");
   const [engine, setEngine] = useState<Engine>(view.ready[0] ?? view.engines[0] ?? "cloud");
   const [tried, setTried] = useState(false);
-  const [busy, setBusy] = useState<"run" | "check" | null>(null);
+  const [busy, setBusy] = useState<"run" | "check" | "on" | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -101,8 +103,11 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
   const rowsOk = !!rows && !rows.errors.length && rows.rows.length > 0 && rows.rows.every((r) => !r.errors.length);
   const runs = tab === "many" ? (rows?.rows.length ?? 0) : 1;
   const body = tab === "one" ? { values: checked.values ?? form, engine } : { csv, engine };
-  const key = useDebounced(JSON.stringify(body), 400);
-  const canPrice = ready && !uploading && (tab === "one" ? !!checked.values : rowsOk);
+  const sent = JSON.stringify(body);
+  const key = useDebounced(sent, 400);
+  // The price on screen is for `key`: Run starts exactly that, and only once it is what the form says now.
+  const fresh = key === sent;
+  const canPrice = view.enabled && ready && !uploading && (tab === "one" ? !!checked.values : rowsOk);
   const estimate = useQuery({
     queryKey: ["assist-recipe-estimate", name, key],
     enabled: canPrice,
@@ -112,7 +117,7 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
   });
   const est = canPrice ? estimate.data : undefined;
   const estError = canPrice && estimate.error ? (estimate.error as Error).message : (est?.errors[0] ?? est?.runs.flatMap((r) => r.errors)[0]);
-  const runnable = canPrice && !!est?.runnable && !estimate.isFetching;
+  const runnable = canPrice && fresh && !!est?.runnable && !estimate.isFetching;
   const recheck = view.recheck[engine];
 
   const check = async () => {
@@ -138,12 +143,25 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
     }
   };
 
+  const switchOn = async () => {
+    setBusy("on");
+    try {
+      await skillActions.toggle(name, true);
+      await qc.invalidateQueries({ queryKey: ["assist-recipe", name] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const run = async () => {
     setTried(true);
     if (!runnable) return;
     setBusy("run");
     try {
-      const r = await actions.run(name, body);
+      // What was priced (the debounced key), which `fresh` says is what the form holds.
+      const r = await actions.run(name, JSON.parse(key) as typeof body);
       const started = r.runs.filter((x) => !x.error);
       const failed = r.runs.filter((x) => x.error);
       const href = started[0]?.href ?? "/library";
@@ -163,7 +181,7 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
     }
   };
 
-  const price = !ready ? "" : estError ? "" : estimate.isFetching && !est ? "Pricing…" : priceLine(est, runs);
+  const price = !ready ? "" : estError ? "" : !fresh || estimate.isFetching ? "Pricing…" : priceLine(est, runs);
   return (
     <>
       <DialogHeader className="flex-row items-start gap-3 border-b px-5 pt-5 pb-4 text-left">
@@ -174,7 +192,18 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
         </div>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-        {view.why ? (
+        {!view.enabled ? (
+          <Notice
+            tone="warn"
+            action={
+              <Button size="sm" variant="outline" onClick={() => void switchOn()} disabled={busy !== null}>
+                {busy === "on" ? <Loader2 className="animate-spin" /> : null} Switch it on
+              </Button>
+            }
+          >
+            This skill is switched off: switch it on to run it.
+          </Notice>
+        ) : view.why ? (
           <Notice tone="warn">{view.why}</Notice>
         ) : !view.ready.length ? (
           <div className="flex flex-col gap-3 rounded-xl bg-muted/60 px-4 py-3 sm:flex-row sm:items-center">
@@ -278,13 +307,13 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
       </div>
       <DialogFooter className="mx-0 mb-0 flex-col gap-2 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
         <p className={cn("min-w-0 text-[13px] break-words", estError ? "text-destructive" : "text-muted-foreground")} aria-live="polite">
-          {!ready ? "Check it first to see the price" : estError ?? (canPrice ? price : tab === "one" ? (tried ? Object.values(checked.errors)[0] : "Fill in the inputs to see the price") : rows ? (rows.errors[0] ?? "Fix the rows marked below") : "Paste rows to see the total")}
+          {!view.enabled ? "Switched off" : !ready ? "Check it first to see the price" : estError ?? (canPrice ? price : tab === "one" ? (tried ? Object.values(checked.errors)[0] : "Fill in the inputs to see the price") : rows ? (rows.errors[0] ?? "Fix the rows marked below") : "Paste rows to see the total")}
         </p>
         <div className="flex shrink-0 gap-1.5 max-sm:w-full">
           <Button variant="ghost" size="sm" onClick={onClose} className="max-sm:flex-1">
             Cancel
           </Button>
-          <Button size="sm" onClick={() => void run()} disabled={busy !== null || !ready || (tried && !runnable)} className="max-sm:flex-[2]">
+          <Button size="sm" onClick={() => void run()} disabled={busy !== null || !view.enabled || !ready || (canPrice && (!fresh || estimate.isFetching)) || (tried && !runnable)} className="max-sm:flex-[2]">
             {busy === "run" ? <Loader2 className="animate-spin" /> : <Play />}
             {runs > 1 ? `Run ${runs}` : "Run"}
             {runnable && est && !est.demo && est.total ? ` · ${formatCost(est.total)}` : ""}
@@ -371,9 +400,12 @@ function Field({
     );
   }
   if (p.type === "number") {
-    const n = typeof value === "number" ? value : Number(value ?? p.min ?? 0);
+    // What was typed stays as typed ("0." on the way to "0.5"); checkValues reads it as a number.
+    const typed = typeof value === "number" ? value : Number(value ?? NaN);
+    const n = Number.isFinite(typed) ? typed : (p.min ?? 0);
     const step = p.step ?? 1;
-    const clamp = (x: number) => Math.min(p.max ?? Infinity, Math.max(p.min ?? -Infinity, x));
+    const places = (String(step).split(".")[1] ?? "").length;
+    const clamp = (x: number) => Number(Math.min(p.max ?? Infinity, Math.max(p.min ?? -Infinity, x)).toFixed(places));
     return (
       <div className="space-y-1.5">
         {label}
@@ -386,7 +418,7 @@ function Field({
             inputMode="decimal"
             value={value === undefined ? "" : String(value)}
             placeholder={example}
-            onChange={(e) => onChange(e.target.value === "" ? undefined : Number.isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value))}
+            onChange={(e) => onChange(e.target.value === "" ? undefined : e.target.value)}
             className="h-8 w-16 border-0 bg-transparent text-center tabular-nums shadow-none"
             aria-invalid={!!error}
           />

@@ -1,9 +1,9 @@
 // Skills W1 in a real browser (demo mode: no keys, ComfyUI unreachable). A skill with a recipe is seeded over the API;
 // its card says "Runs by itself"; /assist/skills?run=<name> opens the Run form, which asks for a free check first,
 // then runs it once from the form (a photo, a name, a shape) and three times from pasted CSV rows, each priced first
-// ("Demo" here); the skill's dialog says where it was checked, and in amber that it needs a re-check after its route
-// changed, and Re-check clears it. ⌘K lists "Run <skill>…". At 1440 and 390 px, light and dark: nothing scrolls
-// sideways, and on a phone the form fills the screen.
+// ("Demo" here); a switched-off skill's form says so and switches it back on; the skill's dialog says where it was
+// checked, and in amber that it needs a re-check after its route changed, and Re-check clears it. ⌘K lists
+// "Run <skill>…". At 1440 and 390 px, light and dark: nothing scrolls sideways, and on a phone the form fills the screen.
 // Usage: node tests/e2e/skills-run.mjs [appUrl] [--shots <dir>]   (app running in demo mode). Exits 1 on a failed check.
 import fs from "node:fs";
 import path from "node:path";
@@ -155,6 +155,13 @@ try {
         await dialog.getByLabel("Rows to run").fill(`product,name\n${photo},Desk lamp\nnot-a-link,Floor lamp\n`);
         check(`${tag}: a bad row is marked inline`, await seen(dialog.getByText(/Product photo: a file from Fuobe/)));
         check(`${tag}: …and the footer says to fix it, with no price`, await seen(dialog.getByText("Fix the rows marked below")));
+        // A switched-off skill's form says so (its Run is off), and switches it back on.
+        await send("PATCH", `/api/assist/skills/${NAME}`, { enabled: false });
+        await openRoute(page, `${app}/assist/skills?run=${NAME}`);
+        check(`${tag}: a switched-off skill's form says so`, await seen(dialog.getByText("This skill is switched off")));
+        check(`${tag}: …and its Run button is off`, await dialog.getByRole("button", { name: /^Run/ }).isDisabled());
+        await dialog.getByRole("button", { name: "Switch it on" }).click();
+        check(`${tag}: Switch it on brings the form back`, await seen(dialog.getByText("Runs in the cloud")));
         // 4. Re-check: a different route than the one checked (Replicate preferred) needs a re-check, and Re-check clears it.
         await send("PUT", "/api/settings", { cloudProvider: "replicate" });
         await openRoute(page, `${app}/assist/skills?skill=${NAME}`);

@@ -215,10 +215,17 @@ export function useRecipeActions() {
     run: (name: string, body: RecipeBody) => recipeCall<{ engine: Engine; runs: RecipeRun[]; demo: boolean }>(`/api/assist/skills/${name}/run`, body),
     /** Check it (plan + the free dry run by default); the skill's status is refreshed with the result. */
     verify: async (name: string, body: { level?: "plan" | "demo" | "real"; engine?: Engine; confirm?: boolean } = {}) => {
-      const r = await recipeCall<VerifyResult>(`/api/assist/skills/${name}/verify`, { level: "demo", ...body });
-      qc.setQueryData(["assist-recipe", name], r.view);
-      void qc.invalidateQueries({ queryKey: ["assist-skills"] });
-      return r;
+      try {
+        const r = await recipeCall<VerifyResult>(`/api/assist/skills/${name}/verify`, { level: "demo", ...body });
+        qc.setQueryData(["assist-recipe", name], r.view);
+        return r;
+      } catch (e) {
+        // Refused (the recipe changed while it was checked, say): show the recipe as it is now.
+        void qc.invalidateQueries({ queryKey: ["assist-recipe", name] });
+        throw e;
+      } finally {
+        void qc.invalidateQueries({ queryKey: ["assist-skills"] });
+      }
     },
   };
 }
