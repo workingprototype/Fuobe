@@ -19,6 +19,7 @@ export const HUB_MODES: Record<HubKind, { id: string; label: string }[]> = {
     { id: "voice-change", label: "Voice change" },
     { id: "translate", label: "Translate" },
     { id: "transcribe", label: "Transcribe" },
+    { id: "split", label: "Split soundtrack" },
     { id: "sfx", label: "Sound effects" },
     { id: "music", label: "Music" },
     { id: "loop", label: "Loop / extend" },

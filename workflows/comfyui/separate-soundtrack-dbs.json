@@ -1,0 +1,124 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "input.wav"
+    },
+    "_meta": {
+      "title": "Soundtrack to split (audio, or a video with sound)"
+    }
+  },
+  "2": {
+    "class_type": "DBSLoader",
+    "inputs": {
+      "model": "DBS-BSRNN-DnR",
+      "device": "auto"
+    },
+    "_meta": {
+      "title": "DBS Loader"
+    }
+  },
+  "3": {
+    "class_type": "DBSSeparate",
+    "inputs": {
+      "model": [
+        "2",
+        0
+      ],
+      "audio": [
+        "1",
+        0
+      ],
+      "channels": "mono",
+      "output_sample_rate": "input"
+    },
+    "_meta": {
+      "title": "DBS Separate (music / sfx / speech)"
+    }
+  },
+  "4": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "1",
+        0
+      ],
+      "audio2": [
+        "3",
+        2
+      ],
+      "merge_method": "subtract"
+    },
+    "_meta": {
+      "title": "Background: the original minus the speech"
+    }
+  },
+  "5": {
+    "class_type": "SaveAudioAdvanced",
+    "inputs": {
+      "audio": [
+        "3",
+        2
+      ],
+      "filename_prefix": "fuobe/separate-soundtrack-dbs",
+      "format": "flac"
+    },
+    "_meta": {
+      "title": "Dialogue (voice stem)"
+    }
+  },
+  "6": {
+    "class_type": "SaveAudioAdvanced",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/separate-soundtrack-dbs",
+      "format": "flac"
+    },
+    "_meta": {
+      "title": "Music stem"
+    }
+  },
+  "7": {
+    "class_type": "SaveAudioAdvanced",
+    "inputs": {
+      "audio": [
+        "3",
+        1
+      ],
+      "filename_prefix": "fuobe/separate-soundtrack-dbs",
+      "format": "flac"
+    },
+    "_meta": {
+      "title": "Effects stem"
+    }
+  },
+  "8": {
+    "class_type": "SaveAudioAdvanced",
+    "inputs": {
+      "audio": [
+        "4",
+        0
+      ],
+      "filename_prefix": "fuobe/separate-soundtrack-dbs",
+      "format": "flac"
+    },
+    "_meta": {
+      "title": "Music & effects (background stem)"
+    }
+  },
+  "9": {
+    "class_type": "PreviewAny",
+    "inputs": {
+      "source": [
+        "3",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "DBS report"
+    }
+  }
+}

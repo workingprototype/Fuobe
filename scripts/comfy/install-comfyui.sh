@@ -31,6 +31,11 @@ declare -A NODES=(
   [ComfyUI-HunyuanVideo-Foley]="https://github.com/phazei/ComfyUI-HunyuanVideo-Foley afd2960b8ad9036a9f55a15daf514112ff68e010"
   # round 4 (2026-10-22): VTracer image → SVG (the Vectorize app's open route)
   [ComfyUI-ToSVG]="https://github.com/Yanick112/ComfyUI-ToSVG 1022ba05318dccb4fe586ce5bbd09f1f0b3c7909"
+  # DBS soundtrack separation (dialogue / music / effects; docs/research/dbs-separation-7.md §4). MIT code, vendored DBS
+  # code Apache-2.0. The Comfy Registry flags its only version (0.1.0, dbs-soundtrack-separation) and gives no public
+  # reason; the code was read at this commit (no network, exec or download paths in the nodes). It needs einops and
+  # safetensors only, both already installed below. Weights: the DBS_WEIGHTS block at the end of this script.
+  [ComfyUI-DBS]="https://github.com/hiroki-abe-58/ComfyUI-DBS f656e53434b5485c148a2866fbd6ddc6b6152ed6"
 )
 # Licences are information (Settings → Models & licences has the switches): every pack is installed, the
 # non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, used by the captions-whisper-burnin workflow) included.
@@ -138,5 +143,33 @@ if [ "${REAL_MODELS:-0}" != "1" ]; then
   mkdir -p "$COMFYUI_DIR/models/facerestore_models"
   [ -n "$(ls -A "$COMFYUI_DIR/models/facerestore_models")" ] || touch "$COMFYUI_DIR/models/facerestore_models/placeholder_do_not_use.pth"
 fi
+
+# --- DBS weights (separate-soundtrack-dbs): 4 files, 23 MB, at the revisions docs/research/dbs-separation-7.md §3.1 read,
+# into models/dbs/<model>/ (the ComfyUI-DBS loader reads config.json + model.safetensors from there), each checked with
+# sha256sum -c. Small enough to fetch here; DBS_WEIGHTS=0 skips it.
+if [ "${DBS_WEIGHTS:-1}" = "1" ]; then
+  DBS_DIR="$COMFYUI_DIR/models/dbs"
+  mkdir -p "$DBS_DIR/DBS-BSRNN-DnR" "$DBS_DIR/DBS-TIGER-DnR"
+  for spec in "DBS-BSRNN-DnR 5af343f57f106fbb95efe8a60f1a3999eeb0aef8" "DBS-TIGER-DnR 22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b"; do
+    read -r name rev <<<"$spec"
+    for f in config.json model.safetensors; do
+      [ -s "$DBS_DIR/$name/$f" ] && continue
+      if curl -fsSL --retry 3 -o "$DBS_DIR/$name/$f.part" "https://huggingface.co/JusperLee/$name/resolve/$rev/$f"; then
+        mv "$DBS_DIR/$name/$f.part" "$DBS_DIR/$name/$f"
+      else
+        rm -f "$DBS_DIR/$name/$f.part"
+        echo "warn: could not download JusperLee/$name/$f at $rev"
+      fi
+    done
+  done
+  (cd "$DBS_DIR" && sha256sum -c --quiet <<'SHA'
+26290f93e7b501113325e922e7b0c18edca944634e6b9be39856a55204628405  DBS-BSRNN-DnR/model.safetensors
+57055e2b71913d98a4e1ed426b71617f0dfc372901cc5a8a3bc4a5c69415043e  DBS-BSRNN-DnR/config.json
+3d8205743f2a6f5a6704f5d4104d7cf5bf7bf02dab2fd728da31f4c69225cadb  DBS-TIGER-DnR/model.safetensors
+c7f7893323e78f9b99747a13090558a13c4f4b77383a38acb9979709fd04d1d8  DBS-TIGER-DnR/config.json
+SHA
+  ) || echo "warn: a DBS weight file is missing or failed its SHA-256 check (delete models/dbs/<model> and re-run)"
+fi
+# --- end DBS weights
 
 echo "ComfyUI installed in $COMFYUI_DIR. Start it with: $SCRIPT_DIR/start-comfyui.sh"
