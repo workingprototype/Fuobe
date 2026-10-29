@@ -1,0 +1,3336 @@
+{
+ "asOf": "2026-10-29",
+ "scope": "Open-H3-Regenerate-2K (NVIDIA NVlabs), WorldCast (PixCtrol) and MOSS-Image Layout (LinXce, for OpenMOSS's MOSS-Image), researched to place them in Fuobe on both engines. Licences recorded as information (owner's decision). Read-only: no code from these repositories was run or installed; nothing ran on a GPU or a paid API.",
+ "doc": "docs/research/new-models-7.md",
+ "fuobe": {
+  "branch": "claude/fuobe-parity-4",
+  "commit": "7d7a765be3ae154610473172680250417b440264",
+  "comfyuiPin": "fc04da91b2ab12f99e4716371a7e4f98ac982597"
+ },
+ "items": [
+  {
+   "id": "open-h3-regenerate-2k",
+   "name": "Open-H3-Regenerate-2K (NVIDIA NVlabs, Sana team; SoL-Refiner Stage I on MiniMax H3)",
+   "section": "§2",
+   "summary": "A video-to-video refiner: one refiner LoRA on frozen MiniMax H3 redraws a 384p-768p draft plus a prompt at 1080p, 2K (default) or 4K in 3 Euler steps. Generative regeneration, not a faithful upscaler. Open replacement for MiniMax's closed H3-Regenerate-2K API.",
+   "inputs": {
+    "draft": "a video; the reference encodes at 1344x768 (768p) or 1024x576 (576p) after 24 fps resampling, cover-crop and padding to 121 (+3) frames; the ComfyUI pack also takes 'keep (snap to 32)' and up to 3,600 frames padded to H3's 17k+5 grid",
+    "prompt": "required",
+    "latent": "optional pre-encoded normalized H3 latent [24,37,48,84] (768P) or [24,37,36,64] (576P)",
+    "notTaken": [
+     "reference images",
+     "audio (held as encoded silence; the pack muxes the draft's sound back)"
+    ]
+   },
+   "outputs": {
+    "sizes": [
+     "768P (refine only)",
+     "1080P (1920x1088 cropped)",
+     "2K 2560x1440 (default)",
+     "4K 3840x2160 (2176 rows, two latent upscales via 2K)"
+    ],
+    "fps": 24,
+    "framesReference": 121,
+    "framesClaimed": "up to 360 (15 s) per pass"
+   },
+   "recipe": {
+    "upscaler": "LBH-123-AI LatentResizer3D, 345,280,216 params, 1-4x spatial, latent to latent (2K: 36x64 -> 90x160)",
+    "renoise": "x = (1 - 0.909375) * upscaled + 0.909375 * noise",
+    "sigmas": [
+     0.909375,
+     0.857143,
+     0.666667,
+     0
+    ],
+    "sigmas2step": [
+     0.7,
+     0.494118,
+     0
+    ],
+    "startSigmaRule": "shift-6: 6s/(1+5s)",
+    "cfg": 1,
+    "sampler": "euler",
+    "decoder": "released H3 VAE, or the StreamRender fast H3 VAE decoder (24 layers, 1.62B params; 1.6 s vs 15 s at 2K; 30.0 dB PSNR vs the released decoder)"
+   },
+   "selfReported": {
+    "speedB200": {
+     "standard_fwd": 87.26,
+     "sol_engine_fwd": 37.39,
+     "sol_engine_fwd_fast_vae": 22.45,
+     "unit": "s per 5 s clip at 2560x1440"
+    },
+    "vbench": {
+     "open": 0.814,
+     "api": 0.802
+    },
+    "unipercept": {
+     "open": 60.0,
+     "api": 53.4
+    },
+    "userStudy": "174 of 200 preferences (87%)"
+   },
+   "packagings": [
+    {
+     "what": "NVIDIA merged LoRA",
+     "content": "refiner (rank 384, step-5000 EMA) + LightX2V FL2VA Turbo v1.2 (rank 128, alpha 8) + LMS Sharp v1.0 (rank 64), concatenated on the rank axis, strengths and alpha folded; rank 576 on 312 linears; FP32; Diffusers keys",
+     "verify": "MERGE_VERIFY.json max matvec rel. error 2.23e-8"
+    },
+    {
+     "what": "NVIDIA sharp_curve_branches",
+     "content": "50 AdaLN curve branches; curve_B all zero in blocks 0, 7, 10, 25, 37, 49 (6 of 50 checked); the LMS source's adaln lora_B zero in blocks 0, 25, 49",
+     "verdict": "appears to be a no-op; skip it (curve_name 'none')"
+    },
+    {
+     "what": "Kijai refiner slice",
+     "content": "ranks 0:384 only, ComfyUI keys, qkv fused (rank 1152), SwiGLU halves swapped, scale baked; 'The refiner part ONLY'",
+     "toMatchNvidia": "also load Turbo v1.2 (comfyui file, alpha tensors) + LMS Sharp r64; never together with a full merge"
+    },
+    {
+     "what": "Community repacks",
+     "content": "father558 r128 SVD (~4.5% avg error), DrakenZA rank-576 / r128 swiglu_fixed, 1038lab mirror",
+     "verdict": "unverified; A/B before adopting"
+    }
+   ],
+   "weights": [
+    {
+     "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+     "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+     "file": "lora/open_h3_regenerate_2k_lora.safetensors",
+     "folder": "loras",
+     "bytes": 12452449080,
+     "sizeGb": 12.452,
+     "sha256": "8e36a0912ab72f7f3b00f41e3c7c97c7dfdec21e66c88ab22f08b9b0c681bb04",
+     "url": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K/blob/5809c33730c18b6b1c827b40974855a4288641b3/lora/open_h3_regenerate_2k_lora.safetensors",
+     "licence": "MiniMax H3 Community License (territory excludes the EU, UK, Republic of Korea and US; show 'MiniMax H3'; over US$20M revenue needs MiniMax's written OK); merged Turbo (Apache-2.0 at 3ec17a3) and LMS (no stated licence) keep their own terms",
+     "role": "the merged refiner LoRA (pack route)"
+    },
+    {
+     "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+     "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+     "file": "lora/sharp_curve_branches.safetensors",
+     "folder": "loras",
+     "bytes": 1238746768,
+     "sizeGb": 1.239,
+     "sha256": "26ff1c4ea50fc5b0cea252912b67ec308a65d534cef026ef56f415ae92102e4e",
+     "url": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K/blob/5809c33730c18b6b1c827b40974855a4288641b3/lora/sharp_curve_branches.safetensors",
+     "licence": "LMS Sharp's terms (not declared)",
+     "role": "optional; curve_B tensors checked are zero"
+    },
+    {
+     "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+     "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+     "file": "vae_fast/fast_h3_vae_noncausal_24l.safetensors",
+     "folder": "vae",
+     "bytes": 6471256328,
+     "sizeGb": 6.471,
+     "sha256": "8658f1e85b5997c4ba716406a2f148bfa36cf97d4d5fcd402c7bd341f54e77a1",
+     "url": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K/blob/5809c33730c18b6b1c827b40974855a4288641b3/vae_fast/fast_h3_vae_noncausal_24l.safetensors",
+     "licence": "MiniMax H3 Community License (territory excludes the EU, UK, Republic of Korea and US; show 'MiniMax H3'; over US$20M revenue needs MiniMax's written OK) (distilled Model Derivative, licence §I.11)",
+     "role": "fast decoder; same bytes as Efficient-Large-Model/Sol-H3-VAE sol_h3_vae.safetensors @ 6a8a33fc"
+    },
+    {
+     "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+     "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+     "file": "latent_upsampler/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors",
+     "folder": "latent_upscale_models",
+     "bytes": 690592992,
+     "sizeGb": 0.691,
+     "sha256": "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6",
+     "url": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K/blob/5809c33730c18b6b1c827b40974855a4288641b3/latent_upsampler/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors",
+     "licence": "Apache-2.0 (LBH HF tag; NVIDIA's copy ships the Apache text); LBH node code MIT",
+     "role": "latent upscaler; identical to LBH-123-AI/Minimax_h3_latent_Upscaler @ 3f941d5d182014dd5c0a5e16330420ee2d4aa0c6 (which also has fp16 690,592,672 B and an fp32 .pth 1,381,251,539 B)"
+    },
+    {
+     "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+     "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+     "file": "lora/lora_config.json",
+     "bytes": 2107,
+     "sizeGb": 0.0,
+     "url": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K/blob/5809c33730c18b6b1c827b40974855a4288641b3/lora/lora_config.json",
+     "licence": "-",
+     "role": "merge recipe (pins Alissonerdx 849fb3d4, now dead)"
+    },
+    {
+     "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+     "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+     "file": "base_model/",
+     "bytes": 144051199094,
+     "sizeGb": 144.051,
+     "url": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K/tree/5809c33730c18b6b1c827b40974855a4288641b3",
+     "licence": "MiniMax H3 Community; LICENSE-Qwen.txt is Apache-2.0",
+     "role": "Diffusers H3 for NVIDIA's reference code only (whole repo 164,904,315,541 B)"
+    },
+    {
+     "repo": "Comfy-Org/MiniMax-H3",
+     "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+     "file": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+     "folder": "diffusion_models",
+     "bytes": 20970379616,
+     "sizeGb": 20.97,
+     "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/blob/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+     "licence": "MiniMax H3 Community License (territory excludes the EU, UK, Republic of Korea and US; show 'MiniMax H3'; over US$20M revenue needs MiniMax's written OK)",
+     "role": "the base rdh's workflows load (LFS oid e889202c..., prefix only; identical at e5eb578a). Lighter at e5eb578a, untested: fl2va_pruned_w6a8 15,983,746,636 B, fl2va_pruned_fp8_scaled 20,958,205,608 B"
+    },
+    {
+     "repo": "Comfy-Org/MiniMax-H3",
+     "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+     "file": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+     "folder": "diffusion_models",
+     "bytes": 20970379616,
+     "sizeGb": 20.97,
+     "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/blob/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+     "licence": "MiniMax H3 Community License (territory excludes the EU, UK, Republic of Korea and US; show 'MiniMax H3'; over US$20M revenue needs MiniMax's written OK)",
+     "role": "already pinned by Fuobe (library.spec.mjs L189); the pack reads only its 32 KB adaln_t_table"
+    },
+    {
+     "repo": "Comfy-Org/MiniMax-H3",
+     "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+     "file": "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+     "folder": "text_encoders",
+     "bytes": 15687142551,
+     "sizeGb": 15.687,
+     "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/blob/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+     "licence": "MiniMax H3 Community License (territory excludes the EU, UK, Republic of Korea and US; show 'MiniMax H3'; over US$20M revenue needs MiniMax's written OK)",
+     "role": "already pinned (L190)"
+    },
+    {
+     "repo": "Comfy-Org/MiniMax-H3",
+     "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+     "file": "vae/minimax_h3_video_vae_fp16.safetensors",
+     "folder": "vae",
+     "bytes": 5207808496,
+     "sizeGb": 5.208,
+     "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/blob/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_video_vae_fp16.safetensors",
+     "licence": "MiniMax H3 Community License (territory excludes the EU, UK, Republic of Korea and US; show 'MiniMax H3'; over US$20M revenue needs MiniMax's written OK)",
+     "role": "already pinned (L191)"
+    },
+    {
+     "repo": "Comfy-Org/MiniMax-H3",
+     "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
+     "file": "vae/minimax_h3_audio_vae_fp32.safetensors",
+     "folder": "vae",
+     "bytes": 605254808,
+     "sizeGb": 0.605,
+     "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/blob/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_audio_vae_fp32.safetensors",
+     "licence": "MiniMax H3 Community License (territory excludes the EU, UK, Republic of Korea and US; show 'MiniMax H3'; over US$20M revenue needs MiniMax's written OK)",
+     "role": "already pinned (L192)"
+    },
+    {
+     "repo": "Kijai/MiniMax-H3-experimental",
+     "revision": "f5c3b1d5a63e008a691fca1b6096fd57a5307536",
+     "file": "loras/minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors",
+     "folder": "loras",
+     "bytes": 5868409512,
+     "sizeGb": 5.868,
+     "sha256": "4bf30291343eef5e51ee867ba37dd31bce3133d1da1ace1a245a7130b88818c2",
+     "url": "https://huggingface.co/Kijai/MiniMax-H3-experimental/blob/f5c3b1d5a63e008a691fca1b6096fd57a5307536/loras/minimax_h3_open_regenerate_2k_refiner_rank_384_bf16.safetensors",
+     "licence": "not declared (a slice of NVIDIA's merge; MiniMax H3 Community presumably applies, inference)",
+     "role": "core-only route: refiner slice, ComfyUI keys, 416 BF16 tensors"
+    },
+    {
+     "repo": "Kijai/MiniMax-H3-experimental",
+     "revision": "f5c3b1d5a63e008a691fca1b6096fd57a5307536",
+     "file": "loras/minimax_h3_open_regenerate_2k_refiner_rank_16_bf16.safetensors",
+     "folder": "loras",
+     "bytes": 155133472,
+     "sizeGb": 0.155,
+     "sha256": "add559cd92e2b17b42ac080516b476df120903e485fc98add4538e0217820fbd",
+     "url": "https://huggingface.co/Kijai/MiniMax-H3-experimental/blob/f5c3b1d5a63e008a691fca1b6096fd57a5307536/loras/minimax_h3_open_regenerate_2k_refiner_rank_16_bf16.safetensors",
+     "licence": "not declared",
+     "role": "lossy SVD resize; not recommended"
+    },
+    {
+     "repo": "lightx2v/Minimax-h3-Turbo",
+     "revision": "3ec17a324ced54151364f24f8b5fb6bf7e26414f",
+     "file": "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+     "folder": "loras",
+     "bytes": 1956193000,
+     "sizeGb": 1.956,
+     "url": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/blob/3ec17a324ced54151364f24f8b5fb6bf7e26414f/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+     "licence": "Apache-2.0 in the card at 3ec17a3; the field is removed at main 30f485ed",
+     "role": "core-only route and the prompt -> 768p draft (N7-10); per-module alpha tensors (training_alpha 8, rank 128)"
+    },
+    {
+     "repo": "Alissonerdx/Minimax-H3-ComfyUI",
+     "revision": "fd3dde7b3ec1ae4e09fafc46f000bedcc2db219b",
+     "file": "loras/minimax_h3_lms_v1.0_r64.safetensors",
+     "folder": "loras",
+     "bytes": 1239664536,
+     "sizeGb": 1.24,
+     "sha256": "16f3195bc6bffa431c0598dc2031e520ba058b4fcbc9f104db9e3fdfdeacf60c",
+     "url": "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/blob/fd3dde7b3ec1ae4e09fafc46f000bedcc2db219b/loras/minimax_h3_lms_v1.0_r64.safetensors",
+     "licence": "repo 'other / mixed-asset-licenses'; LMS has no stated licence",
+     "role": "core-only route; NVIDIA's pin 849fb3d4 no longer resolves"
+    },
+    {
+     "repo": "DrakenZA/Open-H3-Regenerate-2K-ComfyUI",
+     "revision": "f81f29e4daed980eaf70ca3c653257911f780d6d",
+     "file": "open_h3_regenerate_2k_comfy_swiglu_fixed.safetensors",
+     "folder": "loras",
+     "bytes": 8802581272,
+     "sizeGb": 8.803,
+     "url": "https://huggingface.co/DrakenZA/Open-H3-Regenerate-2K-ComfyUI/blob/f81f29e4daed980eaf70ca3c653257911f780d6d/open_h3_regenerate_2k_comfy_swiglu_fixed.safetensors",
+     "licence": "not declared",
+     "role": "community full merge in ComfyUI keys; 'Runtime loading and output fidelity NOT yet verified' (1038lab mirror sha dc08fe95...); r128 copy 1,956,195,288 B (sha 25f9af42...)"
+    }
+   ],
+   "nodePacks": [
+    {
+     "url": "https://github.com/rdh9616/ComfyUI-Open-H3-Regenerate",
+     "commit": "9b686c5ffd380e9d1351f9b8beef6d20d703ca3e",
+     "licence": "Apache-2.0",
+     "nodeClasses": [
+      "OpenH3RegenLora",
+      "OpenH3RegenSigmas",
+      "OpenH3RegenPrepareDraft",
+      "OpenH3RegenUpscale",
+      "OpenH3RegenRefineLatent",
+      "OpenH3RegenFastVAEDecode",
+      "OpenH3RegenFinish",
+      "OpenH3SaveRefinedLatent",
+      "OpenH3LoadRefinedLatent",
+      "OpenH3VideoToPrompt"
+     ],
+     "requirements": "av, safetensors (both already in ComfyUI's requirements.txt); ComfyUI with native H3 (tested 0.42.0); the LBH pack (OpenH3RegenUpscale raises without MinimaxH3LatentUpscaler3D, __init__.py L415-418)",
+     "notes": "v1.0.0, 3 commits on 2026-10-28; replaces AdaLN forwards; vendors NVIDIA's fast decoder with a 2-line header; re-hosts no weights. Imports exist at Fuobe's pin fc04da91; nothing was run."
+    },
+    {
+     "url": "https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler",
+     "commit": "40316cf008b2fd8663263270669eb4da23f89d2c",
+     "licence": "MIT (code); weights Apache-2.0",
+     "nodeClasses": [
+      "MinimaxH3LatentUpscaler3D",
+      "MinimaxH3LatentUpscalerNode2D",
+      "MMH3TemporalSplitParamsV10",
+      "MMH3SpatialSplitParamsV10",
+      "MMH3SplitUpscale"
+     ],
+     "requirements": "none (no requirements.txt); weights in models/latent_upscale_models",
+     "notes": "3 resize modes, align 32, temporal chunking, force_unload, ROCm device option, fp32/fp16/bf16; 'saves time, not VRAM'. Not installed locally."
+    },
+    {
+     "url": "https://github.com/comfyanonymous/ComfyUI",
+     "commit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
+     "licence": "GPL-3.0",
+     "nodeClasses": [
+      "UNETLoader",
+      "CLIPLoader",
+      "VAELoader",
+      "LoadVideo",
+      "GetVideoComponents",
+      "VAEEncode",
+      "CLIPTextEncode",
+      "BlockSparseAttention",
+      "RandomNoise",
+      "KSamplerSelect",
+      "BasicGuider",
+      "SamplerCustomAdvanced",
+      "ManualSigmas",
+      "LoraLoaderModelOnly",
+      "VAEDecodeTiled",
+      "CreateVideo",
+      "SaveVideo",
+      "MinimaxHailuo03RegenerateNode (closed paid API node, $0.0715/s)"
+     ],
+     "requirements": "Sol-Attn needs comfy-kitchen's kernel (CUDA sm_80+ or ROCm WMMA); otherwise dense attention",
+     "notes": "No H3 latent upscaler and no open regenerate node in core, even v0.43.1 (086099f5)."
+    }
+   ],
+   "graph": {
+    "id": "video-regenerate-h3",
+    "status": "proposal; from rdh's example_workflows/'Open-H3 Regenerate 2K - Draft Video.json' (28 nodes, links dumped from the file) minus the note (1), PreviewAny (5, 14, 15) and OpenH3VideoToPrompt (13); 16.text set directly; curve_name 'none'; OpenH3SaveRefinedLatent (24) kept for the decode-recovery path",
+    "nodes": [
+     {
+      "id": "2",
+      "class": "UNETLoader",
+      "inputs": {
+       "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+       "weight_dtype": "default"
+      }
+     },
+     {
+      "id": "3",
+      "class": "OpenH3RegenLora",
+      "inputs": {
+       "lora_name": "open_h3_regenerate_2k_lora.safetensors",
+       "curve_name": "none",
+       "curve_table": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+       "strength": 1.0,
+       "curve_strength": 1.0,
+       "lora_dtype": "bf16",
+       "model": [
+        "2",
+        0
+       ]
+      }
+     },
+     {
+      "id": "4",
+      "class": "BlockSparseAttention",
+      "widgets": [
+       "sol-attn",
+       1.2,
+       0.0,
+       0.9,
+       "0,1,49",
+       12288,
+       256,
+       "exact_kv_and_rows",
+       true
+      ],
+      "inputs": {
+       "model": [
+        "3",
+        0
+       ]
+      }
+     },
+     {
+      "id": "6",
+      "class": "CLIPLoader",
+      "inputs": {
+       "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+       "type": "minimax",
+       "device": "default"
+      }
+     },
+     {
+      "id": "7",
+      "class": "VAELoader",
+      "inputs": {
+       "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      }
+     },
+     {
+      "id": "8",
+      "class": "VAELoader",
+      "inputs": {
+       "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+      }
+     },
+     {
+      "id": "9",
+      "class": "LoadVideo",
+      "inputs": {
+       "file": "draft.mp4"
+      }
+     },
+     {
+      "id": "10",
+      "class": "GetVideoComponents",
+      "inputs": {
+       "video": [
+        "9",
+        0
+       ]
+      }
+     },
+     {
+      "id": "11",
+      "class": "OpenH3RegenPrepareDraft",
+      "inputs": {
+       "size": "768p (1344x768)",
+       "max_frames": 121,
+       "images": [
+        "10",
+        0
+       ],
+       "source_fps": [
+        "10",
+        2
+       ]
+      },
+      "outputs": {
+       "1": "frame_count (read by 24 and 26)"
+      }
+     },
+     {
+      "id": "12",
+      "class": "VAEEncode",
+      "inputs": {
+       "pixels": [
+        "11",
+        0
+       ],
+       "vae": [
+        "7",
+        0
+       ]
+      }
+     },
+     {
+      "id": "16",
+      "class": "CLIPTextEncode",
+      "inputs": {
+       "text": "<prompt, set directly>",
+       "clip": [
+        "6",
+        0
+       ]
+      }
+     },
+     {
+      "id": "17",
+      "class": "OpenH3RegenUpscale",
+      "inputs": {
+       "model_name": "minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors (rdh's example: the fp32 .pth)",
+       "resolution": "2k (2560x1440)",
+       "precision": "bf16",
+       "temporal_chunking": false,
+       "latent": [
+        "12",
+        0
+       ]
+      }
+     },
+     {
+      "id": "18",
+      "class": "OpenH3RegenRefineLatent",
+      "inputs": {
+       "audio_mode": "silence (reference)",
+       "latent": [
+        "17",
+        0
+       ],
+       "audio_vae": [
+        "8",
+        0
+       ]
+      }
+     },
+     {
+      "id": "19",
+      "class": "OpenH3RegenSigmas",
+      "inputs": {
+       "steps": 3,
+       "start_sigma": 0.0
+      }
+     },
+     {
+      "id": "20",
+      "class": "RandomNoise",
+      "widgets": [
+       1766580932,
+       "fixed"
+      ]
+     },
+     {
+      "id": "21",
+      "class": "KSamplerSelect",
+      "inputs": {
+       "sampler_name": "euler"
+      }
+     },
+     {
+      "id": "22",
+      "class": "BasicGuider",
+      "inputs": {
+       "model": [
+        "4",
+        0
+       ],
+       "conditioning": [
+        "16",
+        0
+       ]
+      }
+     },
+     {
+      "id": "23",
+      "class": "SamplerCustomAdvanced",
+      "inputs": {
+       "noise": [
+        "20",
+        0
+       ],
+       "guider": [
+        "22",
+        0
+       ],
+       "sampler": [
+        "21",
+        0
+       ],
+       "sigmas": [
+        "19",
+        0
+       ],
+       "latent_image": [
+        "18",
+        0
+       ]
+      }
+     },
+     {
+      "id": "24",
+      "class": "OpenH3SaveRefinedLatent",
+      "widgets": [
+       121,
+       "open_h3_regen"
+      ],
+      "inputs": {
+       "samples": [
+        "23",
+        0
+       ],
+       "frame_count": [
+        "11",
+        1
+       ],
+       "audio": [
+        "10",
+        1
+       ]
+      }
+     },
+     {
+      "id": "25",
+      "class": "OpenH3RegenFastVAEDecode",
+      "widgets": [
+       "fast_h3_vae_noncausal_24l.safetensors",
+       false
+      ],
+      "inputs": {
+       "samples": [
+        "24",
+        0
+       ],
+       "vae": [
+        "7",
+        0
+       ]
+      }
+     },
+     {
+      "id": "26",
+      "class": "OpenH3RegenFinish",
+      "widgets": [
+       121,
+       "auto (1088 -> 1080, 2176 -> 2160)"
+      ],
+      "inputs": {
+       "images": [
+        "25",
+        0
+       ],
+       "frame_count": [
+        "11",
+        1
+       ],
+       "audio": [
+        "10",
+        1
+       ]
+      }
+     },
+     {
+      "id": "27",
+      "class": "CreateVideo",
+      "widgets": [
+       24.0,
+       "auto",
+       "sRGB",
+       "none"
+      ],
+      "inputs": {
+       "images": [
+        "26",
+        0
+       ],
+       "audio": [
+        "26",
+        1
+       ]
+      }
+     },
+     {
+      "id": "28",
+      "class": "SaveVideo",
+      "widgets": [
+       "video/open_h3_regen_2k",
+       "auto",
+       "auto",
+       "auto"
+      ],
+      "inputs": {
+       "video": [
+        "27",
+        0
+       ]
+      }
+     }
+    ],
+    "linkNote": "Links are from the example file; widget names on pack nodes are descriptive where the example lists only values: copy exact names from the pack's INPUT_TYPES.",
+    "bindings": {
+     "video": "9.file",
+     "prompt": "16.text",
+     "resolution": "17.resolution ('1080p ...' | '2k (2560x1440)' | '4k (3840x2160)')",
+     "draftSize": "11.size",
+     "frames": "11.max_frames (24 and 26 read 11's frame-count output)",
+     "startSigma": "19.start_sigma (0.7 Close / 0.8 Balanced / 0 = release 0.909)",
+     "steps": "19.steps (3, or 2 Faster)",
+     "seed": "20.noise_seed",
+     "filenamePrefix": "28.filename_prefix"
+    },
+    "outputs": [
+     {
+      "node": "28",
+      "kind": "video"
+     }
+    ],
+    "install": "OPEN_H3_REGEN=1 block in scripts/comfy/install-comfyui.sh cloning both packs at the commits above",
+    "coreOnlyFallback": "UNETLoader -> LoraLoaderModelOnly x3 (Kijai r384 + Turbo v1.2 comfyui + LMS r64) -> BlockSparseAttention -> ManualSigmas '0.909375, 0.857143, 0.666667, 0' -> RandomNoise/BasicGuider/SamplerCustomAdvanced -> VAEDecodeTiled; still needs the LBH node (or pixel upscale + VAEEncode) and has no audio-masked refine latent. Untested."
+   },
+   "hosted": [
+    {
+     "provider": "fal",
+     "id": "minimax/h3/reference-to-video/lora",
+     "also": [
+      "minimax/h3/image-to-video/lora",
+      "minimax/h3/text-to-video/lora"
+     ],
+     "inputs": {
+      "resolution": "480P|768P|2K|4K (default 2K); '2K and 4K upscale a 768P base result'",
+      "loras": "1-3",
+      "prompt": "string",
+      "references": "images, videos, audio",
+      "duration": "5-15",
+      "seed": "integer"
+     },
+     "price": {
+      "480p": 0.0625,
+      "768p": 0.075,
+      "2k": 0.1625,
+      "4k": 0.2,
+      "unit": "USD per second"
+     },
+     "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/reference-to-video/lora",
+     "inFuobe": "Character swap cloud route; sends only 480P/768P (character-swap.ts falResolution L172)"
+    },
+    {
+     "provider": "fal",
+     "id": "minimax/h3/image-to-video",
+     "also": [
+      "minimax/h3/text-to-video",
+      "minimax/h3/reference-to-video"
+     ],
+     "inputs": {
+      "resolution": "480P|768P|2K|4K at generation time"
+     },
+     "price": {
+      "480p": 0.05,
+      "768p": 0.06,
+      "2k": 0.13,
+      "4k": 0.16,
+      "unit": "USD per second",
+      "referenceImages": "first 5 free, then $0.08 each"
+     },
+     "source": "fal models API pricingInfoOverride",
+     "inFuobe": "minimax-h3 cloud model lists 480P-4K (cloud-models.generated.ts L6157-6162)"
+    },
+    {
+     "provider": "replicate",
+     "id": "minimax/h3",
+     "inputs": {
+      "resolution": "768P|2K (default 2K)",
+      "duration": "4-15",
+      "ratio": "adaptive, 21:9 ... 9:16",
+      "first_frame_image": "url",
+      "last_frame_image": "url",
+      "reference_image/video/audio_urls": "lists"
+     },
+     "price": {
+      "768p": 0.08,
+      "2k": 0.13,
+      "unit": "USD per second"
+     },
+     "source": "https://replicate.com/minimax/h3",
+     "inFuobe": "not wired"
+    },
+    {
+     "provider": "minimax",
+     "id": "POST https://api.minimax.io/v2/video_regeneration",
+     "inputs": {
+      "model": "MiniMax-H3",
+      "resolution": "2K",
+      "source": "source_task_id (whitelist) or content[] with one base_video + the exact post-Context-IR prompt (<= 40,000 chars) + the original references",
+      "sourceSpec": "unmodified H3 768P output: 24 fps, sides /32, 589,824-1,032,192 px, 107-362 frames in steps of 17, audio track",
+      "callback_url": "optional",
+      "aigc_watermark": "default false"
+     },
+     "price": {
+      "output": 0.05,
+      "unit": "USD per second",
+      "plus": "original inputs billed again (video $0.05/s of original duration; first 5 images free then $0.025; audio free)"
+     },
+     "source": "https://platform.minimax.io/docs/api-reference/video-generation-v2-regeneration.md; https://platform.minimax.io/docs/guides/pricing-paygo.md L266-276",
+     "inFuobe": "no provider"
+    },
+    {
+     "provider": "comfy-org",
+     "id": "MinimaxHailuo03RegenerateNode ('MiniMax H3 Regenerate to 2K')",
+     "inputs": {
+      "video": "unmodified H3 768P output",
+      "prompt": "exact original",
+      "resolution": "2K",
+      "references": "<= 9 images, <= 3 videos, <= 3 audios",
+      "watermark": "bool"
+     },
+     "price": {
+      "perSecond": 0.0715,
+      "unit": "USD (Comfy credits)"
+     },
+     "source": "http://127.0.0.1:8188/object_info/MinimaxHailuo03RegenerateNode; ComfyUI v0.43.1 comfy_api_nodes/nodes_minimax.py L1494-1640",
+     "inFuobe": "not wired (needs a Comfy.org account)"
+    },
+    {
+     "provider": "fal",
+     "id": "fal-ai/seedvr/upscale/video",
+     "inputs": {
+      "video_url": "url",
+      "scale/target": "..."
+     },
+     "price": {
+      "perOutputMegapixel": 0.001
+     },
+     "source": "fal models API",
+     "inFuobe": "seedvr-video (faithful)"
+    },
+    {
+     "provider": "fal",
+     "id": "topaz/upscale/video/generative",
+     "inputs": {
+      "video_url": "url",
+      "model": "Starlight variants",
+      "target": "resolution/fps"
+     },
+     "price": {
+      "10sAt30fps": {
+       "to1080p": 1.2,
+       "4k": 2.6,
+       "fast2To1080p": 0.6,
+       "fast2At4k": 1.3
+      },
+      "note": "60 fps doubles"
+     },
+     "source": "fal models API",
+     "inFuobe": "topaz-starlight"
+    },
+    {
+     "provider": "fal",
+     "id": "topaz/upscale/video/creative",
+     "inputs": {
+      "video_url": "url",
+      "target": "resolution"
+     },
+     "price": {
+      "10sAt30fps": {
+       "to1080p": 3.0,
+       "4k": 5.0
+      }
+     },
+     "source": "fal models API; already recorded in docs/research/paid-model-apis.json",
+     "inFuobe": "not yet (add a model() line, N7-3)"
+    }
+   ],
+   "hostedRecipe": "No host runs the open model. (1) For H3 renders Fuobe makes on fal, ask for 2K/4K at generation time (a new render). (2) For other clips use SeedVR (faithful), Starlight or Topaz creative. (3, later) MiniMax direct or Comfy credits for the closed regenerate, only for unmodified H3 768P outputs with their exact prompt.",
+   "hardware": {
+    "b200": "~150 GB for sol_engine_fwd with CUDA graphs; 5 s at 2K in 22.45 s (fast decoder) / 87.26 s (standard_fwd); first call per shape 39 s",
+    "rtxPro5000_72GB": "refine 122 s + fast decode 24 s = about 3 min warm (206 s cold); dense attention refine 474 s; prompt -> 768p -> 2K about 5 min",
+    "fastDecoder": "12 s at 1080p; 2K: 22 s / 21 GB peak for 5 s, 69 s / 45 GB for 15 s; VRAM ~6.5 GB + 26 KB per latent token",
+    "rtx5090D_32GB": "community, lossy r128 LoRA: 3-step at about 1080p in 1 min 42 s",
+    "ram": "merged LoRA copy 6.2 GB (bf16) / 12.4 GB (fp32)",
+    "newDownloadsGb": {
+     "lora": 12.45,
+     "fastVae": 6.47,
+     "upscalerBf16": 0.69,
+     "total": 19.6,
+     "plusFl2vaIfNeeded": 20.97,
+     "curveFileIfKept": 1.24
+    },
+    "fuobeAdvice": "24 GB with offloading and 64-128 GB RAM; 48 GB+ for 768p (character-swap.ts L462); 2K below 48 GB untested"
+   },
+   "licences": [
+    {
+     "name": "MiniMax H3 Community License",
+     "source": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/6818f6c32d12b210915e44ad56a4228c2608f160/LICENSE",
+     "bytes": 17604,
+     "appliesTo": [
+      "merged LoRA",
+      "fast VAE decoder",
+      "FL2VA / ref2va bases",
+      "H3 encoder and VAEs"
+     ],
+     "terms": [
+      "§I.3/§I.5 territory: worldwide excluding the EU, UK, Republic of Korea and US",
+      "§II royalty-free use, distribution, derivatives inside the territory",
+      "§III copy of the Agreement, notices on modified files, NOTICE text outside Hosted Services; 'Powered by MiniMax H3' encouraged",
+      "§IV.1 over US$20M yearly revenue needs written authorisation",
+      "§IV.2 prominently display 'MiniMax H3' on commercial UIs",
+      "§V.2 bind users to §V and Exhibit A",
+      "§V.3 no improving other AI models with the works or outputs",
+      "§V.4 no use or display outside the territory",
+      "§V.5 safeguards and a reporting mechanism for services",
+      "§VI.4 no claim over outputs",
+      "Exhibit A item 12: disclose machine-generated content in public environments"
+     ],
+     "fuobe": "recorded as commercial: true, hostedOk: true (character-swap.ts L81)"
+    },
+    {
+     "name": "Comfy's statement on local outputs",
+     "source": "https://docs.comfy.org/tutorials/video/minimax/minimax-h3",
+     "terms": [
+      "'Commercial use of locally generated outputs requires a MiniMax commercial license' (via Comfy); Comfy Cloud generations 'already include commercial rights'"
+     ],
+     "note": "conflicts with the licence text; information only"
+    },
+    {
+     "name": "Apache-2.0",
+     "appliesTo": [
+      "NVlabs/Sana sol-engine code",
+      "rdh9616 pack",
+      "LBH upscaler weights",
+      "LightX2V Turbo (card at 3ec17a3)",
+      "Qwen3-VL (LICENSE-Qwen.txt)"
+     ]
+    },
+    {
+     "name": "MIT",
+     "appliesTo": [
+      "LBH node code"
+     ]
+    },
+    {
+     "name": "not declared",
+     "appliesTo": [
+      "LMS Sharp v1.0",
+      "Kijai/MiniMax-H3-experimental",
+      "father558, DrakenZA, 1038lab repacks",
+      "Sol-H3-VAE copy"
+     ]
+    },
+    {
+     "name": "other / minimax-h3-community-license-agreement",
+     "appliesTo": [
+      "VideoRebirthAI/hyperflow @ 5bde94d (optional drafter, not needed)"
+     ]
+    }
+   ],
+   "fuobeToday": [
+    "character-swap.ts L27 qualities 480p/768p; L160 characterQuality; L172 falResolution 480P/768P only",
+    "swap-studio.ts L81 qualityFor 0.5/1 MP; L1356 FINISH_UNAVAILABLE; stage-review.tsx L174, L247-248",
+    "studios.ts L129 VIDEO_UPSCALE_STUDIO; models.ts L42 VIDEO_UPSCALE_TIERS; L423-445 oss-seedvr2 / oss-upscale-video-esrgan",
+    "output-actions.ts L150 'Render this draft in 1080p' (only finishing action)",
+    "canvas.ts L230, L348 Upscale node",
+    "faceless.ts L599-654 Upscale to 1080p",
+    "cinema.ts L559 VIDEO_RESOLUTIONS 480p/720p/1080p",
+    "install-comfyui.sh L63-94 pins only the Character swap packs; library.spec.mjs L189-193 H3 ref2va, encoder, VAEs, Turbo 8-step v1.0"
+   ],
+   "risks": [
+    "redraws: identity and background can change (fox -> wolf at sigma 0.909); default 0.8 and composite only the mask for swaps",
+    "not Akatz's Finish (backplate + alpha stays unavailable)",
+    "MiniMax H3 licence territory and terms; Comfy's local-commercial statement",
+    "dead pin Alissonerdx 849fb3d4; pin LMS by sha at fd3dde7b",
+    "LightX2V licence field removed at main; keep 3ec17a3",
+    "zero curve branches checked in 6 of 50 blocks only",
+    "hardware: 72 GB and B200 tested; 2K on 24-48 GB untested; Sol-Attn needs sm_80+",
+    "downloads ~19.6 GB (+20.97 GB FL2VA if needed); 6.2-12.4 GB RAM",
+    "single-author pack v1.0.0, tested on ComfyUI 0.42 (Fuobe pins 0.41.0-7)",
+    "community repacks unverified; never load a full merge with Kijai's slice",
+    "reference does 5 s; 15 s claimed; seams beyond",
+    "always mux the source audio back",
+    "prompt dependence",
+    "self-reported quality and speed"
+   ],
+   "unknowns": [
+    "ref2va vs FL2VA base",
+    "all 50 curve_B zero?",
+    "VRAM floor at 1080p / 2K on 24-48 GB",
+    "pack on fc04da91",
+    "portrait drafts",
+    "identity at sigma 0.8 and mask-composite edges",
+    "what fal's 2K/4K runs",
+    "MiniMax regenerate on fal/Replicate outputs",
+    "core-only parity",
+    "community repacks",
+    "seams > 15 s",
+    "LMS / Kijai / LightX2V-main licences",
+    "2-step and 1080p on consumer GPUs",
+    "Alissonerdx h3_upscaler_lms_v0.1 as upscaler"
+   ],
+   "sources": [
+    "https://nvlabs.github.io/Sana/Open-H3-Regenerate-2K/",
+    "https://github.com/NVlabs/Sana/tree/sol-engine/models/Open-H3-Regenerate-2K @ 6e4a44002149418a547434b91d7280a8bbdcace3 (README, infer.py, open_h3/pipeline.py, sigmas.py, upscaler.py)",
+    "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K @ 5809c33730c18b6b1c827b40974855a4288641b3 (README, tree API, lora_config.json, MERGE_VERIFY.json, safetensors headers by byte range)",
+    "https://huggingface.co/Kijai/MiniMax-H3-experimental @ f5c3b1d5a63e008a691fca1b6096fd57a5307536 (tree, commits 7afab6c / a671238, README, metadata)",
+    "https://github.com/rdh9616/ComfyUI-Open-H3-Regenerate @ 9b686c5ffd380e9d1351f9b8beef6d20d703ca3e (README, __init__.py, regen_core.py, example_workflows)",
+    "https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler @ 40316cf008b2fd8663263270669eb4da23f89d2c; https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler @ 3f941d5d182014dd5c0a5e16330420ee2d4aa0c6",
+    "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/6818f6c32d12b210915e44ad56a4228c2608f160/LICENSE and README.md",
+    "https://huggingface.co/Comfy-Org/MiniMax-H3 (trees at 1c41cfca and e5eb578a)",
+    "https://huggingface.co/lightx2v/Minimax-h3-Turbo @ 3ec17a324ced54151364f24f8b5fb6bf7e26414f and main 30f485ed",
+    "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI @ fd3dde7b3ec1ae4e09fafc46f000bedcc2db219b (849fb3d4: 'Invalid rev id')",
+    "https://huggingface.co/father558/H3-Open-Regenerate-2K-ComfyUI-r128; https://huggingface.co/DrakenZA/Open-H3-Regenerate-2K-ComfyUI; https://huggingface.co/1038lab/Open-H3-Regenerate-2K",
+    "https://platform.minimax.io/docs/api-reference/video-generation-v2-regeneration.md; https://platform.minimax.io/docs/guides/pricing-paygo.md",
+    "https://docs.comfy.org/tutorials/video/minimax/minimax-h3",
+    "fal: models API searches and OpenAPI for minimax/h3/reference-to-video/lora and minimax/h3/image-to-video; https://replicate.com/minimax/h3",
+    "Local ComfyUI read-only: /object_info, /object_info/MinimaxHailuo03RegenerateNode, /home/user/ComfyUI @ fc04da91; ComfyUI v0.43.1 @ 086099f5"
+   ],
+   "placements": [
+    {
+     "where": "Upscale -> Video: 'Open-H3 Regenerate · creative' beside SeedVR2 'Restore · faithful'",
+     "files": [
+      "src/lib/studios.ts L129",
+      "src/lib/catalog/models.ts L42, L423-445"
+     ],
+     "open": "video-regenerate-h3 (oss-h3-regenerate)",
+     "cloud": "topaz-starlight; add topaz/upscale/video/creative",
+     "priority": "P0",
+     "package": "n7-3-regenerate-2k"
+    },
+    {
+     "where": "Result tiles / Library viewer: 'Regenerate in 2K'",
+     "files": [
+      "src/lib/output-actions.ts L150"
+     ],
+     "open": "oss-h3-regenerate prefilled with the generation's prompt",
+     "cloud": "fal H3 re-render at 2K (same inputs and seed); SeedVR / Starlight for others",
+     "priority": "P0",
+     "package": "n7-3-regenerate-2k"
+    },
+    {
+     "where": "Canvas Upscale node: 'Regenerate (creative)'",
+     "files": [
+      "src/lib/catalog/canvas.ts L230, L348"
+     ],
+     "open": "oss-h3-regenerate",
+     "cloud": "topaz-starlight",
+     "priority": "P0",
+     "package": "n7-3-regenerate-2k"
+    },
+    {
+     "where": "Character Swap Studio -> Assemble -> Finish: 'Sharpen to 1080p / 2K / 4K'",
+     "files": [
+      "src/components/swap-studio/stage-review.tsx L174, L247-248",
+      "src/lib/catalog/swap-studio.ts L1356"
+     ],
+     "open": "take master -> regenerate (sigma 0.8) -> mask composite -> assemble",
+     "cloud": "re-queue segments on fal H3 LoRA route at 2K/4K as new takes",
+     "priority": "P0",
+     "package": "n7-4-character-swap-2k"
+    },
+    {
+     "where": "Genjutsu -> Character swap -> Quality 1080p / 2K / 4K",
+     "files": [
+      "src/lib/catalog/character-swap.ts L27, L160, L172"
+     ],
+     "open": "swap -> regenerate -> composite -> mux",
+     "cloud": "resolution 2K/4K on the fal LoRA route",
+     "priority": "P0",
+     "package": "n7-4-character-swap-2k"
+    },
+    {
+     "where": "Faceless 'Regenerate to 1080p'",
+     "files": [
+      "src/lib/catalog/faceless.ts L599-654"
+     ],
+     "open": "per scene, 576p preset, sigma 0.8",
+     "cloud": "unchanged seedvr-video",
+     "priority": "P2",
+     "package": "n7-10-regenerate-more"
+    },
+    {
+     "where": "Edit video / Shorts segments: 'Enhance (H3 regenerate)'",
+     "files": [],
+     "open": "1080p, RIFE to 24 fps first",
+     "cloud": "seedvr-video / topaz-starlight",
+     "priority": "P2",
+     "package": "n7-10-regenerate-more"
+    },
+    {
+     "where": "Cinema / Video studio H3 shots: 'Finish in 2K' + 2K tier",
+     "files": [
+      "src/lib/catalog/cinema.ts L559"
+     ],
+     "open": "rdh 'Prompt to 2K' graph + saved latent",
+     "cloud": "fal minimax/h3/* at 2K",
+     "priority": "P2",
+     "package": "n7-10-regenerate-more"
+    }
+   ]
+  },
+  {
+   "id": "worldcast",
+   "name": "WorldCast: World-Consistent Character Video Generation with Large-Angle Camera Control (PixCtrol; Xiaomi MiLM Plus + Wuhan University)",
+   "section": "§3",
+   "summary": "One photo + 1-4 anchor views + a prompt + a camera path -> 81 frames at 480x832 where the camera flies around the character and its geometry, look and identity hold. A two-stage fine-tune plus a 1B anchor-memory side branch on Wan2.1-I2V-14B-720P; not a LoRA.",
+   "components": {
+    "depth": "Depth Pro [37] (paper §3.3)",
+    "masks": "SAM 3 [39] (§3.4)",
+    "poses": "VGGT-Omega [40] (§3.4)",
+    "depthAnything3": "evaluation only (Appendix C.3)"
+   },
+   "inputs": {
+    "firstFrame": "one photo",
+    "anchors": "front / left_side / right_side / back, RoPE slots 25/30/35/40 (first frame slot 0), each with a SAM 3 mask and an azimuth (demo: front 0, right_side 91.79, back 171.39, left_side 266.91, left_sign -1)",
+    "prompt": "one sentence",
+    "path": "cam_info.json (81 camera-to-world poses, OpenCV +Z forward, 3x3 pixel intrinsic) + render.mp4 + render_mask.mp4 (0 covered, 255 hole) + no_padding_black/{first_frame.png, person_mask/, anchors_aligned_camera_info.json}"
+   },
+   "outputs": {
+    "frames": 81,
+    "size": "832 high x 480 wide",
+    "fps": 15,
+    "steps": 50,
+    "cfg": 5.0,
+    "shift": 2.0,
+    "seed": 42
+   },
+   "table1": {
+    "columns": [
+     "ATE",
+     "RTE",
+     "RRE",
+     "MEt3R",
+     "ArcFace",
+     "CLIP",
+     "DINO",
+     "Subj.",
+     "IQ"
+    ],
+    "WorldCast": [
+     0.065,
+     0.02,
+     0.896,
+     0.228,
+     0.555,
+     0.83,
+     0.719,
+     0.917,
+     0.719
+    ],
+    "Uni3C": [
+     0.098,
+     0.033,
+     1.069,
+     0.324,
+     0.374,
+     0.823,
+     0.691,
+     0.911,
+     0.711
+    ],
+    "GEN3C": [
+     0.13,
+     0.038,
+     1.255,
+     0.306,
+     0.433,
+     0.819,
+     0.696,
+     0.915,
+     0.716
+    ],
+    "Lyra 2.0": [
+     0.142,
+     0.034,
+     1.741,
+     0.316,
+     0.394,
+     0.817,
+     0.691,
+     0.916,
+     0.725
+    ],
+    "DepthDirector": [
+     0.289,
+     0.066,
+     1.732,
+     0.332,
+     0.423,
+     0.826,
+     0.686,
+     0.919,
+     0.705
+    ],
+    "MVGenMaster*": [
+     0.218,
+     0.152,
+     6.938,
+     0.301,
+     0.299,
+     0.821,
+     0.707,
+     0.862,
+     0.691
+    ],
+    "ablation": "Stage 1 only (no anchor memory): ATE 0.100, ArcFace 0.370 (about Uni3C)"
+   },
+   "architecture": {
+    "stage1": "base_dit: fine-tuned self-attention of 40 blocks + camera_proj (Plucker 6 -> 256 -> 5120, patch 1x2x2) + i2v_channel_adapter [36,53,1,1,1] (latents 16 + y 20 + render latent 16 + hole mask 1); block 0 q.bias matches Wan 2.1 720P in only 94 of 5,120 values",
+    "stage2": "GAMA bank: 20 layers after blocks 0, 2, ..., 38; 5120 -> 1024, AdaLN, 8 heads x 128, FFN 4096, DiT RoPE, zero-init proj_out; anchor_channel_adapter [36,37,1,1,1]; tensor layout equals Kijai's Uni3C controlnet",
+    "sampling": "flow matching, 50 steps, CFG 5, shift 2, tiled VAE",
+    "anchorPoses": "anchors_aligned_camera_info.json (w2c); missing -> anchor Plucker skipped (worldcast_pipeline.py L367-378)",
+    "lineage": "Uni3C (same FIXME line in camera.py, same manifest fields, --invert_camera_extrinsic for Uni3C's w2c cam_info)"
+   },
+   "cameraPaths": [
+    {
+     "preset": "orbit_360",
+     "path": "level 360 ring, closed",
+     "h3Max": "(0,0,e,1) (0.25,90) (0.5,180) (0.75,270) (1,360)"
+    },
+    {
+     "preset": "orbit_<N>[_cw|_ccw]",
+     "path": "level arc, sweep (0,360]",
+     "h3Max": "(0,0) -> (1,+-N), a key every <= 90 deg"
+    },
+    {
+     "preset": "orbit_tilt_20",
+     "path": "ring tilted 20 deg",
+     "h3Max": "azimuth 0 -> 360, elevation e +- 20 wave over 5 keys (approximation)"
+    },
+    {
+     "preset": "orbit_180_push",
+     "path": "180 arc, radius ripple amp 0.25, 2 waves",
+     "h3Max": "azimuth 0 -> 180, distance 1, 0.75, 1, 0.75, 1 (approximation)"
+    },
+    {
+     "preset": "lemniscate",
+     "path": "Gerono figure-8 in the screen plane, 60 deg lobe",
+     "h3Max": "small azimuth/elevation oscillations (guess)"
+    },
+    {
+     "preset": "zoom_out",
+     "path": "dolly to 1.5x distance",
+     "h3Max": "distance 1 -> 1.5"
+    },
+    {
+     "preset": "zoom_in",
+     "path": "move_frac 0.4 (0.6x distance)",
+     "h3Max": "distance 1 -> 0.6"
+    },
+    {
+     "preset": "turn_left / turn_right",
+     "path": "truck 0.5x subject distance",
+     "h3Max": "free_camera_preset truck"
+    },
+    {
+     "preset": "orbit_360_push, spiral",
+     "path": "on the HF card only; not in released TRAJECTORIES",
+     "h3Max": "-"
+    }
+   ],
+   "weights": [
+    {
+     "repo": "ly56/worldcast",
+     "revision": "27635f27a2f9414dd8b78542eb390b565a288a53",
+     "file": "checkpoints/base_dit.safetensors",
+     "bytes": 8401611192,
+     "sizeGb": 8.402,
+     "url": "https://huggingface.co/ly56/worldcast/blob/27635f27a2f9414dd8b78542eb390b565a288a53/checkpoints/base_dit.safetensors",
+     "licence": "Apache-2.0 (card)",
+     "role": "Stage 1 (406 bf16 tensors, 4.20B params); card says '~2 GB' for the trained modules, real repo 10.38 GB"
+    },
+    {
+     "repo": "ly56/worldcast",
+     "revision": "27635f27a2f9414dd8b78542eb390b565a288a53",
+     "file": "checkpoints/worldcast_bank.safetensors",
+     "bytes": 1982937976,
+     "sizeGb": 1.983,
+     "url": "https://huggingface.co/ly56/worldcast/blob/27635f27a2f9414dd8b78542eb390b565a288a53/checkpoints/worldcast_bank.safetensors",
+     "licence": "Apache-2.0 (card)",
+     "role": "Stage 2 anchor memory (484 bf16 tensors, 0.99B params); must match base_dit's release"
+    },
+    {
+     "repo": "Wan-AI/Wan2.1-I2V-14B-720P",
+     "revision": "8823af45fcc58a8aa999a54b04be9abc7d2aac98",
+     "file": "diffusion_pytorch_model-0000{1..7}-of-00007.safetensors + models_t5_umt5-xxl-enc-bf16.pth + models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth + Wan2.1_VAE.pth",
+     "sizeGb": 82.22,
+     "url": "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P/tree/8823af45fcc58a8aa999a54b04be9abc7d2aac98",
+     "licence": "Apache-2.0",
+     "role": "the base WorldCast's loader opens (82.22 GB in all; DiT shards in F32)"
+    },
+    {
+     "repo": "Comfy-Org/Wan-2.1",
+     "revision": "123acf1cc74bccbb9bfff8ac1ee72edc08c2341d",
+     "file": "split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+     "folder": "diffusion_models",
+     "bytes": 16401356938,
+     "sizeGb": 16.401,
+     "url": "https://huggingface.co/Comfy-Org/Wan-2.1/blob/123acf1cc74bccbb9bfff8ac1ee72edc08c2341d/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+     "licence": "Apache-2.0",
+     "role": "ComfyUI form of the base (the repo was renamed from Wan_2.1_ComfyUI_repackaged; old URLs redirect)"
+    },
+    {
+     "repo": "Kijai/WanVideo_comfy",
+     "revision": "8260d429d19fd7a72304cad059160b95d843913f",
+     "file": "Wan21_Uni3C_controlnet_fp16.safetensors",
+     "folder": "model_patches",
+     "bytes": 1997314376,
+     "sizeGb": 1.997,
+     "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/8260d429d19fd7a72304cad059160b95d843913f/Wan21_Uni3C_controlnet_fp16.safetensors",
+     "licence": "no licence field; Uni3C is Apache-2.0",
+     "role": "the Uni3C stand-in for core ModelPatchLoader + WanUni3CControlnetApply"
+    },
+    {
+     "repo": "facebook/VGGT-Omega",
+     "revision": "1041e80fc0e911235d3426b0a3d9a81075111a53",
+     "file": "vggt_omega_1b_512.pt",
+     "bytes": 4576706117,
+     "sizeGb": 4.577,
+     "url": "https://huggingface.co/facebook/VGGT-Omega/blob/1041e80fc0e911235d3426b0a3d9a81075111a53/vggt_omega_1b_512.pt",
+     "licence": "FAIR Noncommercial Research License; gated, manual approval",
+     "role": "the paper's pose estimator (also _416_reproduce 4,576,703,488 B and _256_text 5,399,490,950 B)"
+    },
+    {
+     "repo": "apple/DepthPro",
+     "revision": "ccd1350a774eb2248bcdfb3be430e38f1d3087ef",
+     "file": "depth_pro.pt",
+     "bytes": 1904446787,
+     "sizeGb": 1.904,
+     "url": "https://huggingface.co/apple/DepthPro/blob/ccd1350a774eb2248bcdfb3be430e38f1d3087ef/depth_pro.pt",
+     "licence": "Apple ML Research licence: research only, no commercial products or services",
+     "role": "the paper's depth estimator"
+    },
+    {
+     "repo": "Comfy-Org/Depth-Anything-3",
+     "revision": "8265be070134dc7459217308cdc03109bde199b0",
+     "file": "geometry_estimation/depth_anything_3_base.safetensors",
+     "folder": "geometry_estimation",
+     "bytes": 541524124,
+     "sizeGb": 0.542,
+     "url": "https://huggingface.co/Comfy-Org/Depth-Anything-3/blob/8265be070134dc7459217308cdc03109bde199b0/geometry_estimation/depth_anything_3_base.safetensors",
+     "licence": "Apache-2.0 repack (upstream small/base/mono-large/metric-large Apache-2.0; large/giant CC-BY-NC-4.0)",
+     "role": "permissive stand-in (small 137,254,980 B; metric_large and mono_large 1,336,748,056 B each)"
+    },
+    {
+     "repo": "Comfy-Org/sam3.1",
+     "revision": "7bb8374780a725b4353ed31f3a9395c9742b5621",
+     "file": "checkpoints/sam3.1_multiplex_fp16.safetensors",
+     "folder": "checkpoints",
+     "bytes": 1745546848,
+     "sizeGb": 1.746,
+     "url": "https://huggingface.co/Comfy-Org/sam3.1/blob/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors",
+     "licence": "Meta SAM License",
+     "role": "masks; already pinned (library.spec.mjs L187)"
+    },
+    {
+     "repo": "Viggle/Meridian",
+     "revision": "9c57d46fbb3924cdac553a1005a8597b574b7225",
+     "file": "comfyui/meridian_teacher_lora.safetensors + comfyui/meridian_turbo_lora.safetensors",
+     "bytes": 3767512840,
+     "sizeGb": 3.768,
+     "url": "https://huggingface.co/Viggle/Meridian/tree/9c57d46fbb3924cdac553a1005a8597b574b7225",
+     "licence": "MiniMax H3 Community (territory-restricted); code Apache-2.0",
+     "role": "related alternative on H3 (1,883,756,424 + 1,883,756,416 B); needs minimax_h3_fl2va_bf16"
+    }
+   ],
+   "nodePacks": [
+    {
+     "url": "(none) no WorldCast ComfyUI pack or port",
+     "commit": null,
+     "licence": null,
+     "nodeClasses": [],
+     "notes": "GitHub repo/code search and HF search 2026-10-29; a port needs custom DiT code; core comfy/ldm/wan/uni3c.py and WanUni3CCnetPatch are the natural starting point"
+    },
+    {
+     "url": "https://github.com/comfyanonymous/ComfyUI",
+     "commit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
+     "licence": "GPL-3.0",
+     "nodeClasses": [
+      "ModelPatchLoader",
+      "WanUni3CControlnetApply",
+      "LoadDA3Model",
+      "DA3Inference",
+      "DA3Render",
+      "DA3GeometryToMesh",
+      "LoadMoGeModel",
+      "MoGeInference",
+      "MoGeRender",
+      "MoGePointMapToMesh",
+      "MoGeGeometryToFOV",
+      "SAM3_Detect",
+      "SAM3_VideoTrack",
+      "SAM3_TrackToMask",
+      "WanCameraEmbedding",
+      "WanCameraImageToVideo",
+      "CreateCameraInfo",
+      "CameraAngle",
+      "RenderSplat",
+      "File3DToSplat",
+      "TransformSplat",
+      "MiniMaxH3ReferenceToVideo",
+      "MiniMaxH3SigmaShift"
+     ],
+     "notes": "WanUni3CControlnetApply: model, model_patch, vae, render_video, strength, start/end; no mask input (nodes_model_patch.py L934-966); experimental. DA3 multiview poses not exportable. RenderSplat turntable only. CameraAngle horizontal 0-360, vertical -30..60, zoom 0-10."
+    },
+    {
+     "url": "https://github.com/kijai/ComfyUI-WanVideoWrapper",
+     "commit": "088128b224242e110d3906c6750e9a3a348a659b",
+     "licence": "Apache-2.0",
+     "nodeClasses": [
+      "WanVideoUni3C_ControlnetLoader",
+      "WanVideoUni3C_embeds",
+      "WanVideoReCamMasterGenerateOrbitCamera",
+      "WanVideoReCamMasterCameraEmbed",
+      "WanVideoReCamMasterDefaultCamera",
+      "ReCamMasterPoseVisualizer",
+      "WanVideoFunCameraEmbeds"
+     ],
+     "notes": "pinned (install-comfyui.sh L16); Uni3C render_mask 'NOT IMPLEMENTED!'; no WorldCast support"
+    },
+    {
+     "url": "https://github.com/NyckM/3d-Camera-control-H3-Minimax",
+     "commit": "36c4218a2561328436d440fa9134631ee515471b",
+     "licence": "Apache-2.0",
+     "nodeClasses": [
+      "BruxosH3Camera",
+      "BruxosH3CameraGuideRender",
+      "BruxosH3CameraGuideVideo",
+      "BruxosH3CameraPromptCompose",
+      "BruxosH3MotionReference",
+      "BruxosH3SubjectBox",
+      "BruxosH3ImagePath",
+      "BruxosMeridianTextCond",
+      "BruxosMeridianReference"
+     ],
+     "notes": "Registry bruxosdovfx/ComfyUI-H3-Camera-Editor ('Camera H3 Bruxos' v33.0.0); not pinned. BruxosH3Camera Depth Warp + depth or core MOGE_GEOMETRY -> depth_warp IMAGE + warp_mask MASK (a server-side path renderer); Meridian format only (73-243 frames, 24 fps, grey-128 holes)."
+    },
+    {
+     "url": "https://huggingface.co/Viggle/Meridian (comfyui/ custom nodes)",
+     "commit": "9c57d46fbb3924cdac553a1005a8597b574b7225",
+     "licence": "code Apache-2.0; weights MiniMax H3 Community",
+     "nodeClasses": [
+      "MeridianFrozenPrompt",
+      "MeridianGeometry"
+     ],
+     "notes": "MeridianGeometry shells out to a Python with VGGT-Omega (FAIR-NC). 88-113 GiB on a B200."
+    }
+   ],
+   "graph": {
+    "id": "wan21-i2v-uni3c-path",
+    "status": "proposal; core nodes only; not built or validated",
+    "nodes": [
+     {
+      "id": "1",
+      "class": "UNETLoader",
+      "inputs": {
+       "unet_name": "wan2.1_i2v_720p_14B_fp8_scaled.safetensors (or test the pinned wan2.1-i2v-14b-480p-Q8_0.gguf)"
+      }
+     },
+     {
+      "id": "2",
+      "class": "CLIPLoader",
+      "inputs": {
+       "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+       "type": "wan"
+      }
+     },
+     {
+      "id": "3",
+      "class": "VAELoader",
+      "inputs": {
+       "vae_name": "wan_2.1_vae.safetensors"
+      }
+     },
+     {
+      "id": "4",
+      "class": "CLIPVisionLoader",
+      "inputs": {
+       "clip_name": "clip_vision_h.safetensors"
+      }
+     },
+     {
+      "id": "5",
+      "class": "LoadImage",
+      "inputs": {
+       "image": "<photo>"
+      }
+     },
+     {
+      "id": "6",
+      "class": "CLIPVisionEncode",
+      "inputs": {
+       "crop": "none",
+       "clip_vision": [
+        "4",
+        0
+       ],
+       "image": [
+        "5",
+        0
+       ]
+      }
+     },
+     {
+      "id": "7",
+      "class": "LoadVideo",
+      "inputs": {
+       "file": "<render.mp4>"
+      }
+     },
+     {
+      "id": "7b",
+      "class": "GetVideoComponents",
+      "inputs": {
+       "video": [
+        "7",
+        0
+       ]
+      }
+     },
+     {
+      "id": "8",
+      "class": "ModelPatchLoader",
+      "inputs": {
+       "name": "Wan21_Uni3C_controlnet_fp16.safetensors"
+      }
+     },
+     {
+      "id": "9",
+      "class": "WanUni3CControlnetApply",
+      "inputs": {
+       "model": [
+        "1",
+        0
+       ],
+       "model_patch": [
+        "8",
+        0
+       ],
+       "vae": [
+        "3",
+        0
+       ],
+       "render_video": [
+        "7b",
+        0
+       ],
+       "strength": 1.0,
+       "start_percent": 0.0,
+       "end_percent": 1.0
+      }
+     },
+     {
+      "id": "10",
+      "class": "CLIPTextEncode",
+      "inputs": {
+       "text": "<prompt>",
+       "clip": [
+        "2",
+        0
+       ]
+      }
+     },
+     {
+      "id": "11",
+      "class": "CLIPTextEncode",
+      "inputs": {
+       "text": "<negative>",
+       "clip": [
+        "2",
+        0
+       ]
+      }
+     },
+     {
+      "id": "12",
+      "class": "WanImageToVideo",
+      "inputs": {
+       "width": 480,
+       "height": 832,
+       "length": 81,
+       "batch_size": 1,
+       "positive": [
+        "10",
+        0
+       ],
+       "negative": [
+        "11",
+        0
+       ],
+       "vae": [
+        "3",
+        0
+       ],
+       "clip_vision_output": [
+        "6",
+        0
+       ],
+       "start_image": [
+        "5",
+        0
+       ]
+      }
+     },
+     {
+      "id": "13",
+      "class": "KSampler",
+      "inputs": {
+       "model": [
+        "9",
+        0
+       ],
+       "note": "steps/CFG as Fuobe's Wan 2.1 I2V graphs; confirm on a GPU"
+      }
+     },
+     {
+      "id": "14",
+      "class": "VAEDecode"
+     },
+     {
+      "id": "15",
+      "class": "CreateVideo",
+      "inputs": {
+       "fps": 16
+      }
+     },
+     {
+      "id": "16",
+      "class": "SaveVideo"
+     }
+    ],
+    "bindings": {
+     "image": "5.image",
+     "video": "7.file",
+     "prompt": "10.text",
+     "negativePrompt": "11.text",
+     "width": "12.width",
+     "height": "12.height",
+     "seed": "13.seed",
+     "steps": "13.steps",
+     "strength": "9.strength",
+     "filenamePrefix": "16.filename_prefix"
+    },
+    "outputs": [
+     {
+      "node": "16",
+      "kind": "video"
+     }
+    ],
+    "renderVideo": "browser: scene-engine.ts records the MoGe mesh / point cloud along the path (transparent = hole); server alternative: BruxosH3Camera Depth Warp from core MoGeInference"
+   },
+   "worldcastWorker": {
+    "approach": "an HTTP worker on the user's GPU running WorldCast's Apache-2.0 code at 7ccf2e0d (torch 2.8.0+cu128, transformers 5.8.1), like docs/workers/tribe-v2.md; a Fuobe node pack later",
+    "casePrep": "depth MoGe 2 (MIT) or DA3 metric-large (Apache-2.0); masks SAM3_Detect; path from Fuobe's camera-path library; render + mask from the same point cloud; anchors from the views' azimuths; anchor poses on a ring (guess) or omitted"
+   },
+   "hosted": [
+    {
+     "provider": "fal",
+     "id": "minimax/h3-max/camera-controls",
+     "inputs": {
+      "image_url": "required, first frame, one image",
+      "camera_trajectory": "2-12 keyframes {time 0-1, azimuth deg unbounded (<= 32 turns), elevation -90..90, distance > 0}",
+      "free_camera_preset": "truck/pedestal/dolly/pan/tilt/roll pairs or s_curve_forward (overrides the trajectory)",
+      "prompt": "optional; default freezes the scene",
+      "prompt_expansion_mode": "required: disabled|balanced|quality",
+      "duration": "0.92-15 s (default 5)",
+      "resolution": "480P|768P|1080P (default 480P; 1080P is a latent refinement of 768P)",
+      "seed": "integer",
+      "enable_safety_checker": "bool"
+     },
+     "price": {
+      "promoUntil": "2026-10-31",
+      "promo": {
+       "480p": 0.0325,
+       "768p": 0.052,
+       "1080p": 0.104
+      },
+      "list": {
+       "480p": 0.05,
+       "768p": 0.08,
+       "1080p": 0.16
+      },
+      "unit": "USD per second"
+     },
+     "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max/camera-controls; docs/research/paid-model-apis-2.json L23027-23156",
+     "inFuobe": "research record only; no route"
+    },
+    {
+     "provider": "fal",
+     "id": "minimax/h3-max/multi-angle/image-to-video",
+     "inputs": "legacy alias of camera-controls (page 308-redirects; llms.txt byte-identical)",
+     "price": "same",
+     "source": "https://fal.ai/models/minimax/h3-max/multi-angle/image-to-video",
+     "inFuobe": "do not use"
+    },
+    {
+     "provider": "fal",
+     "id": "minimax/h3-max/reference-to-video",
+     "inputs": {
+      "reference_image_urls": "named Image 1..n in the prompt",
+      "reference_video_urls": "list",
+      "reference_audio_urls": "list",
+      "maxFiles": 12,
+      "prompt": "string",
+      "duration": "s",
+      "resolution": "480P|768P|1080P",
+      "prompt_expansion_mode": "enum"
+     },
+     "price": {
+      "480p": 0.05,
+      "768p": 0.08,
+      "1080p": 0.16,
+      "unit": "USD per second",
+      "referenceTokens": "4,096 included, then $0.02 per 1,000"
+     },
+     "source": "https://fal.ai/models/minimax/h3-max/reference-to-video/llms.txt",
+     "inFuobe": "minimax-h3-max op ref2v (cloud-models.generated.ts L6244)"
+    },
+    {
+     "provider": "fal",
+     "id": "blackforestlabs/flux-3-max/keyframes-to-video",
+     "inputs": {
+      "keyframes": "<= 10 {image_url, frame_index}",
+      "prompt": "string",
+      "duration": "5-20 s",
+      "aspect_ratio": "enum",
+      "generate_audio": "bool",
+      "reasoning_level": "enum",
+      "seed": "integer"
+     },
+     "price": {
+      "promoUntil": "2026-11-07",
+      "promo": {
+       "720p": 0.0425,
+       "1080p": 0.0725
+      },
+      "list": {
+       "720p": 0.17,
+       "1080p": 0.29
+      },
+      "unit": "USD per second"
+     },
+     "source": "https://fal.ai/models/blackforestlabs/flux-3-max/keyframes-to-video/llms.txt",
+     "inFuobe": "flux-3-max (L15360); FRAMES_MODELS.cloud (keyframes.ts L58)"
+    },
+    {
+     "provider": "fal",
+     "id": "fal-ai/qwen-image-edit-2511-multiple-angles",
+     "inputs": {
+      "image_urls": "list",
+      "horizontal_angle": "0-360",
+      "vertical_angle": "-30..90",
+      "zoom": "0-10",
+      "additional_prompt": "string"
+     },
+     "price": {
+      "perMegapixel": 0.035
+     },
+     "source": "https://fal.ai/models/fal-ai/qwen-image-edit-2511-multiple-angles/llms.txt",
+     "inFuobe": "qwen-multiple-angles (L3475); Angles app"
+    },
+    {
+     "provider": "fal",
+     "id": "fal-ai/marigold-v2",
+     "inputs": {
+      "image": "url"
+     },
+     "price": {
+      "perImage": 0.03
+     },
+     "source": "https://fal.ai/models/fal-ai/marigold-v2/llms.txt",
+     "inFuobe": "marigold-depth (L15326); Cinema's cloud 3D scene"
+    }
+   ],
+   "hostedRecipe": "(A) exact path from one photo: H3 Max camera-controls with the path's keyframes, expansion disabled, a prompt that lets the character move; (B) identity-anchored turnaround: FLUX 3 Max keyframes with the views (+ Qwen Multiple Angles fills); (C) H3 Max reference-to-video with the anchors and an orbit prompt; (D) A then an identity pass. Default A; B or C with 3+ views.",
+   "hardware": {
+    "worldcast": ">= 48 GB recommended (README; card); time not stated; fp8/offload plumbing exists in vendored DiffSynth but is not exposed",
+    "uni3cOfficial": "1 H20 with offload: 50.8 GB, about 20 min; 4 H20 SP+FSDP: 46.1 GB/GPU, under 5 min",
+    "guess": "20-40 min per clip on one 80 GB card",
+    "disk": "82.22 GB Wan base (or 16.4 GB fp8_scaled) + 10.38 GB WorldCast; VGGT-Omega 4.58, Depth Pro 1.90, SAM 3.1 1.75",
+    "meridian": "B200: 73 frames ~36 s at 88 GiB; 124 ~80 s at 89 GiB; 243 ~150 s at 113 GiB"
+   },
+   "licences": [
+    {
+     "name": "Apache-2.0",
+     "appliesTo": [
+      "WorldCast code @ 7ccf2e0d",
+      "WorldCast weights @ 27635f27",
+      "Wan2.1-I2V-14B-720P",
+      "DiffSynth-Studio",
+      "Uni3C",
+      "DA3 small/base/mono-large/metric-large",
+      "WanVideoWrapper",
+      "Camera H3 Bruxos",
+      "fal Qwen Multiple-Angles LoRA"
+     ]
+    },
+    {
+     "name": "training-data note",
+     "terms": [
+      "Stage 1 used SpatialVID (CC BY-NC-SA 4.0); the authors state use is 'strictly for academic research purposes and not for any commercial applications'",
+      "UE5/Blender sets use Fab/Sketchfab assets with unstated licences",
+      "CLACT not released"
+     ]
+    },
+    {
+     "name": "FAIR Noncommercial Research License",
+     "appliesTo": [
+      "VGGT-Omega (gated)"
+     ]
+    },
+    {
+     "name": "Apple ML Research licence (research only)",
+     "appliesTo": [
+      "Depth Pro"
+     ]
+    },
+    {
+     "name": "CC-BY-NC-4.0",
+     "appliesTo": [
+      "DA3-LARGE, DA3-GIANT"
+     ]
+    },
+    {
+     "name": "MIT",
+     "appliesTo": [
+      "MoGe 2"
+     ]
+    },
+    {
+     "name": "Meta SAM License",
+     "appliesTo": [
+      "SAM 3 / SAM 3.1"
+     ]
+    },
+    {
+     "name": "GPL-3.0",
+     "appliesTo": [
+      "ComfyUI core nodes"
+     ]
+    },
+    {
+     "name": "MiniMax H3 Community (territory-restricted)",
+     "appliesTo": [
+      "Viggle Meridian weights",
+      "H3 orbit LoRAs (pablodawson, MATLOWAI)"
+     ]
+    },
+    {
+     "name": "paid APIs",
+     "appliesTo": [
+      "fal H3 Max camera-controls / reference-to-video",
+      "FLUX 3 Max keyframes"
+     ]
+    }
+   ],
+   "fuobeToday": [
+    "cinema.ts L347 RAW_MOVES (33; drone-orbit L363, bullet-time L367, arc-left L370, arc-right L372, helicopter-shot L380); L473 MOVE_MOTION; L510 MOVE_FUN_CAMERA (pans/zooms/static); L590 CINEMA_CAMERA_LORA null for orbits (L606-623)",
+    "motions.ts L94-102 Orbit category; oss-loras.generated.ts L3040/L3070/L3100 ostris Wan 2.2 orbit LoRAs",
+    "scene3d.ts FlyPose L91, flyStep L129, lookStep L140, medianDepth L208, buildPointCloud L414, scenePose L555-575; scene-viewer.tsx Capture L224-245; cinema.ts SCENE_MODELS L1880, planRecompose L1914",
+    "model3d.ts L81-88 VIEW_SIDES (object's own left/right); turntable.ts MediaRecorder",
+    "elements.ts L22 MAX_ELEMENT_PHOTOS 80; character-sheet.tsx L320 front/three-quarter/profile/back; apps.ts L265-302 Angles",
+    "keyframes.ts L19 MAX_KEYFRAMES 10; L58 FRAMES_MODELS cloud flux-3-max, open oss-wan22-14b; chains.ts L197 createKeyframeFilm",
+    "cloud-models.generated.ts minimax-h3-max ref2v L6244; no camera-controls route",
+    "install-comfyui.sh L12 ComfyUI fc04da91, L16 WanVideoWrapper 088128b; library.spec.mjs L160 Wan 2.1 I2V 480p Q8 GGUF only; comfyui-oss.md L2367 'wrapper-only' is stale"
+   ],
+   "risks": [
+    "preprocessing for new cases not released (README sections missing); Uni3C cam_render uses Depth Pro (research-only)",
+    ">= 48 GB, 50 steps at CFG 5, 82 GB base; fp8/offload untested",
+    "not a LoRA: replaced attention; LoRA stacking untested",
+    "size mislabel ('~2 GB' vs 10.38 GB); patch-embedding paper/release mismatch",
+    "BANK_CONFIG must match; a newer checkpoint may change the format",
+    "card presets orbit_360_push / spiral not implemented",
+    "left/right convention (left_side ~267 deg, left_sign -1)",
+    "SpatialVID academic-only statement; preprocessing models non-commercial; stand-ins unvalidated",
+    "holes on pull-backs and trucks; synthetic anchors may drift",
+    "name collisions with other 'WorldCast' projects",
+    "a one-commit, week-old repo",
+    "stand-in caveats: experimental core Uni3C nodes; Kijai file load inferred; Uni3C 46-51 GB officially; H3 Max default prompt freezes the scene; promo ends 2026-10-31",
+    "Comfy-Org Wan repo renamed (redirects)",
+    "consent and impersonation"
+   ],
+   "unknowns": [
+    "WorldCast time and VRAM; 24-32 GB with fp8/offload; step-distill LoRAs",
+    "patch embedding",
+    "how users get anchors and aligned anchor cameras; quality without them",
+    "Uni3C-style preprocessing as a WorldCast case; DA3/MoGe depth scale",
+    "Kijai Uni3C via ModelPatchLoader on fc04da91; the 480p GGUF with Uni3C; Bruxos output as render_video",
+    "Meridian on Fuobe's pin and on int8 FL2VA; its VRAM",
+    "H3 Max azimuth sign, distance meaning, character motion with a custom prompt, 360 limits",
+    "CLACT licence/date; training code; newer checkpoint format; a Kijai/Comfy port",
+    "animals and objects"
+   ],
+   "sources": [
+    "https://pixctrol.github.io/WorldCast/",
+    "https://arxiv.org/abs/2610.33135 and https://arxiv.org/html/2610.33135v1 (§3.3, §3.4, §4.1, Tables 1-3, Fig. 5, Appendix A, C.3, ethics, reproducibility, bibliography)",
+    "https://github.com/PixCtrol/WorldCast @ 7ccf2e0ded1238bf6dea1b285c29bcf322e337cb (README, requirements.txt, pyproject.toml, LICENSE, demo.py, scripts/infer/infer_worldcast.py, scripts/data/trajectories.py, scripts/data/anchor_views.py, diffsynth/pipelines/camera.py, diffsynth/pipelines/worldcast_pipeline.py, diffsynth/core/vram/layers.py, demo_case/)",
+    "https://huggingface.co/ly56/worldcast @ 27635f27a2f9414dd8b78542eb390b565a288a53 (API, tree, commits, README, safetensors headers, byte comparison with Wan-AI shard 1)",
+    "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P @ 8823af45; https://huggingface.co/Comfy-Org/Wan-2.1 @ 123acf1c",
+    "https://huggingface.co/facebook/VGGT-Omega @ 1041e80f; https://huggingface.co/apple/DepthPro @ ccd1350a (LICENSE); https://huggingface.co/Comfy-Org/Depth-Anything-3 @ 8265be07; https://huggingface.co/Comfy-Org/sam3.1 @ 7bb83747",
+    "https://huggingface.co/Kijai/WanVideo_comfy Wan21_Uni3C_controlnet_fp16.safetensors @ 8260d429 (header); https://github.com/alibaba-damo-academy/Uni3C (README, LICENSE, cam_render.py)",
+    "fal llms.txt and OpenAPI: minimax/h3-max/camera-controls, multi-angle/image-to-video (alias), reference-to-video, flux-3-max/keyframes-to-video, qwen-image-edit-2511-multiple-angles, marigold-v2",
+    "https://huggingface.co/Viggle/Meridian @ 9c57d46f; https://github.com/NyckM/3d-Camera-control-H3-Minimax @ 36c4218a",
+    "GitHub and HF searches for 'worldcast', 'worldcast_bank', 'SourceSelfAttentionBank' (2026-10-29)",
+    "Local ComfyUI read-only /object_info (1,546 nodes); /home/user/ComfyUI @ fc04da91 comfy_extras/nodes_model_patch.py L336-365, L934-966"
+   ],
+   "placements": [
+    {
+     "where": "Cinema 3D scene viewer: 'Fly path' strip + 'Film this path'",
+     "files": [
+      "src/components/cinema/scene-viewer.tsx L224-245",
+      "src/components/cinema/scene-engine.ts",
+      "src/lib/scene3d.ts",
+      "src/lib/catalog/cinema.ts L1914"
+     ],
+     "open": "browser path render -> wan21-i2v-uni3c-path; WorldCast later",
+     "cloud": "fal minimax/h3-max/camera-controls",
+     "priority": "P0",
+     "package": "n7-5-fly-path"
+    },
+    {
+     "where": "Character Sheet / Soul Cast: 'Turnaround video'; Elements character page: 'Fly around this character'",
+     "files": [
+      "src/app/(studio)/character-sheet/page.tsx",
+      "src/components/fashion/character-sheet.tsx L320",
+      "src/app/(studio)/elements/[id]/page.tsx"
+     ],
+     "open": "Frames chain (Wan 2.2 14B) with the views; WorldCast later",
+     "cloud": "minimax-h3-max ref2v or FLUX 3 Max keyframes; Qwen Multiple Angles fills",
+     "priority": "P0",
+     "package": "n7-6-turnaround"
+    },
+    {
+     "where": "DoP / Motions Orbit category and Cinema orbit moves: 'Exact' switch",
+     "files": [
+      "src/lib/catalog/motions.ts L94-102",
+      "src/lib/catalog/cinema.ts L363-372, L606-615",
+      "src/components/cinema/camera-moves.tsx"
+     ],
+     "open": "auto depth -> path render -> Uni3C graph",
+     "cloud": "H3 Max camera-controls with preset keys",
+     "priority": "P1",
+     "package": "n7-7-exact-orbits"
+    },
+    {
+     "where": "Image to 3D: 'Film it photoreal'",
+     "files": [
+      "src/app/(studio)/image-to-3d/page.tsx",
+      "src/lib/av/model3d.ts",
+      "src/components/model3d/turntable.ts"
+     ],
+     "open": "turntable recording as render_video",
+     "cloud": "H3 Max camera-controls or ref2v",
+     "priority": "P1",
+     "package": "n7-7-exact-orbits"
+    },
+    {
+     "where": "Canvas 'Camera path' + 'Fly around' nodes; Assist/MCP fly_around",
+     "files": [
+      "src/lib/catalog/canvas.ts L221",
+      "src/server/assist/studio-tools.ts"
+     ],
+     "open": "server-side render (Bruxos Depth Warp or a small renderer) -> Uni3C",
+     "cloud": "H3 Max camera-controls / ref2v / FLUX 3 Max keyframes",
+     "priority": "P1",
+     "package": "n7-7-exact-orbits"
+    },
+    {
+     "where": "The same buttons on the open engine: WorldCast worker",
+     "files": [
+      "docs/workers/worldcast.md (new)",
+      "workers/worldcast/ (new)"
+     ],
+     "open": "WorldCast worker with Fuobe-prepared cases",
+     "cloud": "unchanged recipes A-D",
+     "priority": "P1",
+     "package": "n7-9-worldcast-worker"
+    }
+   ]
+  },
+  {
+   "id": "moss-image-layout",
+   "name": "MOSS-Image Layout Prompt editor (LinXce/Comfyui-Moss-LayoutPrompt) for MOSS-Image (OpenMOSS / MOSI AI)",
+   "section": "§4",
+   "summary": "A ComfyUI box editor that compiles one row per box into MOSS-Image's JSON layout prompt and outputs the canvas size. A pure prompt compiler (Apache-2.0). MOSS-Image is an Apache-2.0 text-to-image model (single-stream DiT + Qwen3.5-9B + FLUX.2 small VAE) that reads layout boxes and renders Chinese and English text.",
+   "layoutFormat": {
+    "shape": {
+     "summary": {
+      "meta": [
+       "..."
+      ],
+      "canvas": "single|multi_panel|collage",
+      "caption": "...",
+      "palette": [
+       "..."
+      ]
+     },
+     "items": [
+      {
+       "label": "object|character|text",
+       "caption": "...",
+       "text": "...",
+       "bbox": "[y_min, x_min, y_max, x_max]",
+       "tags": [
+        "..."
+       ],
+       "palette": [
+        "..."
+       ]
+      }
+     ],
+     "bbox_coord_space": "abs_centralized",
+     "bbox_format": "yxyx"
+    },
+    "coordinates": "pixels, origin at the canvas centre, x right, y down",
+    "conversion": "[floor(round(y1,9)) - H//2, floor(round(x1,9)) - W//2, ceil(round(y2,9)) - H//2, ceil(round(x2,9)) - W//2]",
+    "serialisation": "json.dumps(ensure_ascii=False, separators=(',', ':'), allow_nan=False); color dropped",
+    "zeroItems": "the trimmed summary caption",
+    "testVectors": [
+     {
+      "canvas": [
+       1024,
+       1024
+      ],
+      "draft": [
+       128,
+       96,
+       896,
+       224
+      ],
+      "compiled": [
+       -416,
+       -384,
+       -288,
+       384
+      ],
+      "source": "LinXce example draft"
+     },
+     {
+      "canvas": [
+       1024,
+       1024
+      ],
+      "draft": [
+       128,
+       288,
+       896,
+       640
+      ],
+      "compiled": [
+       -224,
+       -384,
+       128,
+       384
+      ],
+      "source": "LinXce example draft"
+     },
+     {
+      "canvas": [
+       1024,
+       1024
+      ],
+      "draft": [
+       288,
+       800,
+       736,
+       864
+      ],
+      "compiled": [
+       288,
+       -224,
+       352,
+       224
+      ],
+      "source": "LinXce example draft"
+     },
+     {
+      "canvas": [
+       1536,
+       1024
+      ],
+      "draft": [
+       176,
+       224,
+       800,
+       864
+      ],
+      "compiled": [
+       -288,
+       -592,
+       352,
+       32
+      ],
+      "source": "skills/moss-image-prompt-enhancer/references/layout.md L68"
+     },
+     {
+      "compiled": [
+       [
+        -240,
+        160,
+        -64,
+        640
+       ],
+       [
+        -241,
+        159,
+        -63,
+        641
+       ]
+      ],
+      "source": "LinXce tests/test_layout.py"
+     }
+    ],
+    "keyOrder": {
+     "mossDocsAndCoreNode": "summary meta, canvas, caption; item label, caption, text, bbox",
+     "linxceEditor": "summary caption, canvas, meta?, palette?; item label, caption, bbox, color?, text?, tags?, palette?",
+     "falSample": "bbox before text",
+     "recommendation": "emit MOSS's documented order; decode order-blind"
+    }
+   },
+   "otherFormats": [
+    {
+     "target": "ComfyUI CreateBoundingBoxes",
+     "format": "elements {type obj|text, bbox, text, desc, color_palette <= 5}",
+     "coords": "0-1000 integers, yxyx",
+     "source": "comfy_extras/nodes_bounding_boxes.py L276-288, L308-373"
+    },
+    {
+     "target": "core MOSSImageLayoutPrompt",
+     "format": "MOSS JSON from those elements; character_boxes; summary {caption} only",
+     "coords": "via the 0-1000 grid",
+     "source": "comfy_extras/nodes_moss_image.py L9-47"
+    },
+    {
+     "target": "FLUX.3",
+     "format": "caption citing <obj_N> + [{id, bbox, desc}]",
+     "coords": "0-1000 yxyx",
+     "source": "comfy_extras/nodes_flux.py L304-330"
+    },
+    {
+     "target": "Ideogram 4",
+     "format": "{high_level_description?, style_description?, compositional_deconstruction: {background, elements}}",
+     "coords": "0-1000",
+     "source": "comfy_extras/nodes_json_prompt.py L7-71"
+    },
+    {
+     "target": "Bria FIBO 2 VGL",
+     "format": "objects[].location, text_render[].location as free strings",
+     "coords": "words",
+     "source": "fal OpenAPI bria/fibo-2/generate"
+    }
+   ],
+   "weights": [
+    {
+     "repo": "Comfy-Org/MOSS-Image",
+     "revision": "530a4c94f92c35ef6818b1b035a983fe9dcf5f54",
+     "file": "diffusion_models/moss_image_sft_int8_convrot.safetensors",
+     "folder": "diffusion_models",
+     "sizeGb": 5.414,
+     "url": "https://huggingface.co/Comfy-Org/MOSS-Image/blob/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_sft_int8_convrot.safetensors",
+     "licence": "Apache-2.0",
+     "role": "recommended DiT (the Comfy template default)"
+    },
+    {
+     "repo": "Comfy-Org/MOSS-Image",
+     "revision": "530a4c94f92c35ef6818b1b035a983fe9dcf5f54",
+     "file": "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+     "folder": "text_encoders",
+     "sizeGb": 7.344,
+     "url": "https://huggingface.co/Comfy-Org/MOSS-Image/blob/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+     "licence": "Apache-2.0 (Qwen3.5-9B)",
+     "role": "recommended encoder (the template's note says 9.08 GB: wrong, that is the int8 file in GiB)"
+    },
+    {
+     "repo": "Comfy-Org/MOSS-Image",
+     "revision": "530a4c94f92c35ef6818b1b035a983fe9dcf5f54",
+     "file": "vae/flux2-vae_small.safetensors",
+     "folder": "vae",
+     "bytes": 249521340,
+     "sizeGb": 0.25,
+     "sha256": "d8d52ba036475f5fb07c8b435e176d3d97ebfa82f0d1a1c317f9cc1e25bd013b",
+     "url": "https://huggingface.co/Comfy-Org/MOSS-Image/blob/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/vae/flux2-vae_small.safetensors",
+     "licence": "Apache-2.0 (byte-identical to black-forest-labs/FLUX.2-small-decoder @ a3efc24f)",
+     "role": "recommended VAE"
+    },
+    {
+     "repo": "Comfy-Org/MOSS-Image",
+     "revision": "530a4c94f92c35ef6818b1b035a983fe9dcf5f54",
+     "file": "(whole repo)",
+     "sizeGb": 68.751,
+     "url": "https://huggingface.co/Comfy-Org/MOSS-Image/tree/530a4c94f92c35ef6818b1b035a983fe9dcf5f54",
+     "licence": "Apache-2.0 tag; color/depth LoRA Apache-2.0 (darask0); edit LoRA untagged (chinoll, code GPLv3)",
+     "role": "68.751 GB: base/sft bf16 10.165 each, base/sft int8 5.414 each; qwen3.5_9b bf16 19.306, int8 9.748, w4a8 7.344; flux2-vae 0.336 (sha 868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3, = Comfy-Org/Flux-2-Klein-4B's, Apache-2.0); flux2-vae_small 0.250; loras/moss_image_color_depth_control 0.313 and moss_image_edit_lora_rank_64_bf16 0.297 (need ComfyUI >= v0.43.1)"
+    },
+    {
+     "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+     "revision": "f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+     "file": "(Diffusers layout)",
+     "sizeGb": 27.229,
+     "url": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT/tree/f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+     "licence": "Apache-2.0",
+     "role": "source weights (transformer 3 shards, text encoder 4 shards, tokenizer, VAE, pipeline_moss_image.py)"
+    },
+    {
+     "repo": "OpenMOSS-Team/MOSS-Image-Base",
+     "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+     "file": "(Diffusers layout)",
+     "sizeGb": 27.229,
+     "url": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base/tree/85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+     "licence": "Apache-2.0",
+     "role": "base for LoRA training"
+    },
+    {
+     "repo": "Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot",
+     "revision": "8fdeb392c6322418687fc2519a7958c954497a22",
+     "file": "moss_image_sft_8stepdmd_int8_convrot.safetensors",
+     "folder": "diffusion_models",
+     "sizeGb": 5.414,
+     "url": "https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/blob/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors",
+     "licence": "Apache-2.0",
+     "role": "Fast tier: drop-in for the int8 DiT, 8 steps, CFG 1"
+    },
+    {
+     "repo": "lodestones/MOSS-Image-SFT-8-steps-dmd",
+     "revision": "f95df83b5e90ae91ea412434b3f9b7f1c8c6314f",
+     "file": "lora.safetensors",
+     "folder": "loras",
+     "sizeGb": 1.189,
+     "url": "https://huggingface.co/lodestones/MOSS-Image-SFT-8-steps-dmd/blob/f95df83b5e90ae91ea412434b3f9b7f1c8c6314f/lora.safetensors",
+     "licence": "Apache-2.0",
+     "role": "8-step DMD LoRA (strength 1; lora_latest 0.7); 'Trained on compact-JSON scene_graph captions'"
+    },
+    {
+     "repo": "akhaliq/MOSS-Image-SFT-4-steps",
+     "revision": "2ded95c37a029360245926fe72e475e30039bbfb",
+     "file": "lora.safetensors",
+     "folder": "loras",
+     "sizeGb": 1.189,
+     "url": "https://huggingface.co/akhaliq/MOSS-Image-SFT-4-steps/blob/2ded95c37a029360245926fe72e475e30039bbfb/lora.safetensors",
+     "licence": "Apache-2.0",
+     "role": "4-step v2 Euler-native LoRA, CFG 1"
+    },
+    {
+     "repo": "Kijai/MOSS-image_experimental",
+     "revision": "9869b2855d0921c10ecee0011c88f7b961a736a6",
+     "file": "loras/ (4 files)",
+     "folder": "loras",
+     "sizeGb": 4.892,
+     "url": "https://huggingface.co/Kijai/MOSS-image_experimental/tree/9869b2855d0921c10ecee0011c88f7b961a736a6",
+     "licence": "no tag",
+     "role": "4-step rank 72; banding fix blocks 21-49; SFT-minus-Base rank 256 / 512 (4.892 GB)"
+    },
+    {
+     "repo": "MATLOWAI/MOSS-Image-SFT-DeBand",
+     "revision": "6d6b6179727a5c39c01082b6a4893a2d338d8f62",
+     "file": "moss_image_sft_banding_fix_L37-41_bf16 (+ L32-36_extra)",
+     "folder": "loras",
+     "sizeGb": 1.133,
+     "url": "https://huggingface.co/MATLOWAI/MOSS-Image-SFT-DeBand/tree/6d6b6179727a5c39c01082b6a4893a2d338d8f62",
+     "licence": "Apache-2.0",
+     "role": "banding-fix LoRAs (1.133 GB each); repo 18.455 GB"
+    },
+    {
+     "repo": "KBlueLeaf/MOSS-Image-FP16-fixed",
+     "revision": "ba6360149256790c5434e4a5b8ebf2c9899785b4",
+     "file": "comfyui/moss_image_{base,sft}_fp16_fixed.safetensors",
+     "folder": "diffusion_models",
+     "sizeGb": 10.165,
+     "url": "https://huggingface.co/KBlueLeaf/MOSS-Image-FP16-fixed/tree/ba6360149256790c5434e4a5b8ebf2c9899785b4",
+     "licence": "Apache-2.0",
+     "role": "FP16-safe DiT for GPUs without bf16 (10.165 GB each; repo 40.694 GB)"
+    }
+   ],
+   "nodePacks": [
+    {
+     "url": "https://github.com/LinXce/Comfyui-Moss-LayoutPrompt",
+     "commit": "326ad58e3e5055cc59b90fe5b5d2bcddf3698a4d",
+     "licence": "Apache-2.0",
+     "nodeClasses": [
+      "MOSSImageLayoutPrompt",
+      "MOSSImageLayoutPromptAdvance"
+     ],
+     "requirements": "dependencies = []; comfy_api.latest V3 nodes; WEB_DIRECTORY ./web (moss_layout.js, 114,136 B, DOM widget, min node 980x680); not on the Comfy Registry",
+     "notes": "Its stable node id collides with core's MOSSImageLayoutPrompt (built-ins load first; duplicates are skipped), so only the Advance node is usable and its JS attaches to the core class. Do not install into Fuobe's ComfyUI; port the compiler to TypeScript."
+    },
+    {
+     "url": "https://github.com/OpenMOSS/MOSS-Image/tree/main/comfyui/moss-image",
+     "commit": "2b46b1e0e13b5aaec253879e0d006a42564b8b27",
+     "licence": "Apache-2.0",
+     "nodeClasses": [
+      "MOSSImageUNETLoader",
+      "MOSSImageCLIPLoader",
+      "MOSSImageHFLoader",
+      "MOSSImageHFDiTLoader",
+      "MOSSImageHFTextEncoderLoader",
+      "MOSSImageHFVAELoader"
+     ],
+     "requirements": "ComfyUI's own; Registry 'moss-image' by 'mosi' v0.1.1",
+     "notes": "optional; its README calls the native core path 'recommended'"
+    },
+    {
+     "url": "https://github.com/comfyanonymous/ComfyUI",
+     "commit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
+     "licence": "GPL-3.0",
+     "nodeClasses": [
+      "MOSSImageLayoutPrompt (core, experimental)",
+      "CreateBoundingBoxes (experimental)",
+      "Flux3LayoutPrompt",
+      "BuildJsonPromptIdeogram",
+      "UNETLoader",
+      "CLIPLoader (type moss_image)",
+      "VAELoader",
+      "EmptyFlux2LatentImage",
+      "SkipLayerGuidanceDiTSimple",
+      "ModelSamplingAuraFlow",
+      "KSampler",
+      "TextGenerate",
+      "ComfySwitchNode",
+      "ResolutionSelector",
+      "PreviewAny"
+     ],
+     "requirements": "core only; int8_convrot / w4a8_gptq through comfy-kitchen 0.2.37, whose CUDA backend needs PyTorch built for CUDA >= 13 (quant_ops.py L22-28)",
+     "notes": "includes e087d8f6 (PR #17095, MOSS-Image support); supported_inference_dtypes bf16/fp32"
+    },
+    {
+     "url": "https://github.com/comfyanonymous/ComfyUI/tree/v0.43.1",
+     "commit": "086099f5d8886163ef77dc354f8382cb7431582a",
+     "licence": "GPL-3.0",
+     "nodeClasses": [
+      "MOSSImageControl",
+      "TextEncodeMOSSImageEdit"
+     ],
+     "requirements": "a pin bump; comfyui-workflow-templates==0.11.98",
+     "notes": "needed only for the colour/depth-control and edit LoRAs"
+    }
+   ],
+   "graph": {
+    "id": "moss-image-t2i",
+    "status": "proposal from Comfy-Org workflow_templates image_moss_image_t2i_bboxes.json (head 14220b8bd3e86baa852959f17039613191e66656; sha256 225aa1c2831bc24083971099d1d6e756f6930e4e7a225268ee95b9ec808fad2c) without the subgraph wrapper, TextGenerate upsampler, box nodes and switches; core nodes only",
+    "nodes": [
+     {
+      "id": "1",
+      "class": "UNETLoader",
+      "inputs": {
+       "unet_name": "moss_image_sft_int8_convrot.safetensors",
+       "weight_dtype": "default"
+      }
+     },
+     {
+      "id": "2",
+      "class": "CLIPLoader",
+      "inputs": {
+       "clip_name": "qwen3.5_9b_w4a8_gptq.safetensors",
+       "type": "moss_image"
+      }
+     },
+     {
+      "id": "3",
+      "class": "VAELoader",
+      "inputs": {
+       "vae_name": "flux2-vae_small.safetensors"
+      }
+     },
+     {
+      "id": "4",
+      "class": "CLIPTextEncode",
+      "inputs": {
+       "text": "<prompt or compiled layout>",
+       "clip": [
+        "2",
+        0
+       ]
+      }
+     },
+     {
+      "id": "5",
+      "class": "CLIPTextEncode",
+      "inputs": {
+       "text": "nsfw, worst quality, bad anatomy, watermark, jpeg artifact",
+       "clip": [
+        "2",
+        0
+       ]
+      }
+     },
+     {
+      "id": "6",
+      "class": "EmptyFlux2LatentImage",
+      "inputs": {
+       "width": 1024,
+       "height": 1024,
+       "batch_size": 1
+      }
+     },
+     {
+      "id": "7",
+      "class": "SkipLayerGuidanceDiTSimple",
+      "widgets": [
+       "",
+       "22",
+       0,
+       0.5
+      ],
+      "inputs": {
+       "model": [
+        "1",
+        0
+       ]
+      }
+     },
+     {
+      "id": "8",
+      "class": "KSampler",
+      "inputs": {
+       "model": [
+        "7",
+        0
+       ],
+       "seed": 0,
+       "steps": 25,
+       "cfg": 2.5,
+       "sampler_name": "er_sde",
+       "scheduler": "simple",
+       "denoise": 1.0,
+       "positive": [
+        "4",
+        0
+       ],
+       "negative": [
+        "5",
+        0
+       ],
+       "latent_image": [
+        "6",
+        0
+       ]
+      }
+     },
+     {
+      "id": "9",
+      "class": "VAEDecode",
+      "inputs": {
+       "samples": [
+        "8",
+        0
+       ],
+       "vae": [
+        "3",
+        0
+       ]
+      }
+     },
+     {
+      "id": "10",
+      "class": "SaveImage",
+      "inputs": {
+       "filename_prefix": "fuobe",
+       "images": [
+        "9",
+        0
+       ]
+      }
+     }
+    ],
+    "tiers": {
+     "standard": {
+      "steps": 25,
+      "cfg": 2.5,
+      "sampler": "er_sde",
+      "scheduler": "simple"
+     },
+     "quality": {
+      "steps": 50,
+      "cfg": 3,
+      "sampler": "euler"
+     },
+     "fast": {
+      "unet": "moss_image_sft_8stepdmd_int8_convrot.safetensors",
+      "steps": 8,
+      "cfg": 1
+     }
+    },
+    "bindings": {
+     "prompt": "4.text",
+     "negativePrompt": "5.text",
+     "width": "6.width",
+     "height": "6.height",
+     "seed": "8.seed",
+     "steps": "8.steps",
+     "cfg": "8.cfg",
+     "filenamePrefix": "10.filename_prefix"
+    },
+    "outputs": [
+     {
+      "node": "10",
+      "kind": "image"
+     }
+    ],
+    "manifest": {
+     "capability": "t2i",
+     "limits": {
+      "dimensionMultiple": 16,
+      "maxWidth": 2048,
+      "maxHeight": 2048
+     },
+     "vramGb": 16,
+     "vramNote": "guess",
+     "license": "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder)"
+    },
+    "validation": "MOSS is native at fc04da91, so /prompt validation on the library's CPU ComfyUI is possible; renders need a GPU"
+   },
+   "hosted": [
+    {
+     "provider": "fal",
+     "id": "fal-ai/moss-image",
+     "inputs": "see endpointRecords; enable_prompt_expansion defaults to true (send false with a layout); image_size 512-2048 multiples of 16",
+     "price": {
+      "perMegapixel": 0.05
+     },
+     "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/moss-image; https://fal.ai/models/fal-ai/moss-image",
+     "inFuobe": "not yet"
+    },
+    {
+     "provider": "fal",
+     "id": "fal-ai/moss-image/lora",
+     "inputs": "as fal-ai/moss-image + loras <= 3 {path, scale 0-4}",
+     "price": "unpublished ('$0 per compute second' on the page)",
+     "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/moss-image/lora",
+     "inFuobe": "not yet"
+    },
+    {
+     "provider": "mosi",
+     "id": "POST https://api.mosi.cn/v1/images/generations (moss-image-sft-1.0 | moss-image-base-1.0)",
+     "inputs": {
+      "prompt": "<= 4,000 chars (layout JSON allowed; Layout-to-Image page)",
+      "prompt_enhance": "default false",
+      "negative_prompt": "<= 4,000",
+      "size": "WxH, sides 256-2048, multiple of 16, <= 2,097,152 px",
+      "n": "1 only",
+      "seed": "0-2^53-1",
+      "num_inference_steps": "1-100",
+      "guidance_scale": "0-10",
+      "response_format": "url",
+      "output_watermark": "{enabled}; visible watermark on by default"
+     },
+     "price": "not listed (2026-10-29)",
+     "source": "https://platform.mosi.cn/en/docs/reference/images-generations; https://platform.mosi.cn/en/docs/reference/layout-image-generation",
+     "inFuobe": "no provider"
+    },
+    {
+     "provider": "wavespeed",
+     "id": "wavespeed-ai/moss-image/text-to-image, …/text-to-image-lora",
+     "inputs": "prompt, tiers incl. 1.5K, ratios 1:3-3:1, $0.001 prompt-enhance option; no JSON layouts mentioned",
+     "price": "from $0.02 / $0.025",
+     "source": "https://wavespeed.ai/moss-image-api",
+     "inFuobe": "no provider"
+    },
+    {
+     "provider": "replicate",
+     "id": "none",
+     "inputs": "-",
+     "price": "-",
+     "source": "openmoss/moss-image, openmoss-team/moss-image, prunaai/moss-image all 404",
+     "inFuobe": "-"
+    },
+    {
+     "provider": "fal",
+     "id": "blackforestlabs/flux-3/text-to-image",
+     "inputs": "prompt (FLUX.3 layout table inside, unverified on fal), aspect_ratio, resolution, enable_prompt_expansion (default false)",
+     "price": "not recorded",
+     "source": "fal OpenAPI",
+     "inFuobe": "flux-3 (L1136)"
+    },
+    {
+     "provider": "fal",
+     "id": "ideogram/v4.5",
+     "inputs": "prompt <= 10,000 chars (Ideogram JSON accepted? guess), enable_prompt_expansion default true",
+     "price": {
+      "perImage": 0.03
+     },
+     "source": "fal OpenAPI",
+     "inFuobe": "ideogram-4-5 (L1335)"
+    },
+    {
+     "provider": "fal",
+     "id": "bria/fibo-2/generate",
+     "inputs": "prompt, vgl {objects, text_render with location words, ...}",
+     "price": {
+      "perImage": 0.04
+     },
+     "source": "fal OpenAPI",
+     "inFuobe": "bria-fibo-2 (L16526)"
+    }
+   ],
+   "hostedRecipe": "Not needed for MOSS: send the compiled layout as prompt with enable_prompt_expansion false and image_size {width, height} = the canvas on fal, or prompt_enhance false, size 'WxH' and output_watermark {enabled: false} on MOSI (<= 4,000 chars). Other models get their own compiler.",
+   "hardware": {
+    "official": "no VRAM figure; memory modes GPU resident / Component / Sequential",
+    "guess": "the 13 GB int8/w4a8 set fits 12-16 GB GPUs with offloading",
+    "fastPath": "comfy-kitchen 0.2.37 + PyTorch cu130 for int8/w4a8 kernels",
+    "dtypes": "bf16 or fp32 only in core",
+    "appleM1Max32GB": "1024^2, 20 steps, bf16: 320.4 s; 768x1024, 28 steps, fp16: 344-395 s (docs/macos.md L60-64)",
+    "steps": "official >= 50 at CFG 3; template 25 at CFG 2.5 er_sde; few-step adapters at CFG 1"
+   },
+   "licences": [
+    {
+     "name": "Apache-2.0",
+     "appliesTo": [
+      "LinXce pack",
+      "OpenMOSS repo and loader pack and prompt-enhancer skill",
+      "MOSS-Image Base/SFT weights",
+      "Qwen3.5-9B",
+      "FLUX.2 small decoder / flux2-vae (via BFL and Flux-2-Klein-4B distributions)",
+      "darask0 colour/depth LoRA",
+      "lodestones, akhaliq, Spectrallic, MATLOWAI, KBlueLeaf adapters",
+      "DutchIT prompt enhancer"
+     ]
+    },
+    {
+     "name": "not tagged",
+     "appliesTo": [
+      "Kijai/MOSS-image_experimental",
+      "chinoll/Moss-Image-Edit (project code GPLv3)"
+     ]
+    },
+    {
+     "name": "GPL-3.0",
+     "appliesTo": [
+      "ComfyUI core"
+     ]
+    },
+    {
+     "name": "paid APIs",
+     "appliesTo": [
+      "fal-ai/moss-image ($0.05/MP, 'Commercial use' tag)",
+      "fal-ai/moss-image/lora (price unpublished)",
+      "MOSI (no image price listed; watermark by default)",
+      "WaveSpeedAI (from $0.02)"
+     ]
+    },
+    {
+     "name": "Fuobe (open source)",
+     "appliesTo": [
+      "a TypeScript port of the compiler (BROWSER_LICENCE, licences.ts L382)"
+     ]
+    }
+   ],
+   "fuobeToday": [
+    "no MOSS-Image in the catalog or the 150-entry manifest; object_info.subset.json L1736 lists the moss_image CLIPLoader type",
+    "comfyui-oss-4.md L298 ('Add as opt-in after a GPU test'); paid-model-apis-4.md L316 ('Seen but not recorded')",
+    "install-comfyui.sh L12 fc04da91 includes native MOSS and the core box nodes",
+    "sketch-editor.tsx; sketch.ts applySketch (composer.tsx L383, generations.ts L528); StudioConfig.sketch (studio-context.tsx L45)",
+    "Frames mode precedent: StudioConfig.frames (studio-context.tsx L71); composer.ts L541/L553/L579; VIDEO_STUDIO frames: true (studios.ts L84); IMAGE_STUDIO studios.ts L6",
+    "GenParams types.ts L658 (aspectRatio, resolution, extra L729, enhancePrompt); computeDimensions comfy.ts L233; dimensionMultiple comfyui.ts L905; FieldMap.size types.ts L427-436 (no min); sizeValue payload.ts L101; enhancer generations.ts L1129-1137",
+    "canvas.ts CanvasNodeType L44, NODE_SPECS L221, outputType L570, sourceOf L814",
+    "ads/layout.ts planAd L246; server/ads.ts NO_TEXT L150, visualRequest L152; marketing.ts wordsOnTop L962",
+    "layers.ts rotatedBounds L479, resizeBox L617, rectFrom L655; ocr.ts",
+    "cloud-models.generated.ts flux-3 L1136, ideogram-4-5 L1335 ($0.03), bria-fibo-2 L16526 ($0.04)",
+    "skills/: 20 skill folders, no layout skill"
+   ],
+   "risks": [
+    "node-id collision (don't install the LinXce pack)",
+    "layout prompts 'Experimental'; no benchmark",
+    "prompt rewriting destroys layouts (fal expansion default true; Fuobe enhancePrompt; template upsampler)",
+    "canvas must match the render size exactly (rounding, 512-2048 clamps, no FieldMap min)",
+    "key order inconsistent across MOSS tools",
+    "prompt limits: fal 16,384 chars; MOSI 4,000; Ideogram 10,000",
+    "core box nodes round to a 0-1000 grid",
+    "plugin graphs not portable to native loaders",
+    "heavy: 13 GB, >= 50 steps; cu130 for fast int8/w4a8",
+    "SFT banding; control/edit LoRAs need ComfyUI >= v0.43.1",
+    "LinXce editor Chinese-only, presets to 3840 px",
+    "fal safety checker black images; MOSI watermark and refusals; unpublished prices",
+    "few-step adapters may not keep layouts"
+   ],
+   "unknowns": [
+    "official VRAM; time at 25 vs 50 steps on 16-24 GB",
+    "fal follows a layout verbatim with expansion off? MP rounding; /lora price; MOSI price",
+    "key-order sensitivity",
+    "Ideogram JSON and FLUX.3 table on fal",
+    "multi_panel / collage quality",
+    "few-step adapters and layouts",
+    "TextGenerate on the MOSS encoder at the pin",
+    "int8/w4a8 without cu130",
+    "edit LoRA and Kijai licences",
+    "which release has each MOSS fix"
+   ],
+   "sources": [
+    "https://github.com/LinXce/Comfyui-Moss-LayoutPrompt @ 326ad58e3e5055cc59b90fe5b5d2bcddf3698a4d (nodes.py, layout.py, README.md, tests/test_layout.py, web/moss_layout.js, example_workflows/moss-layout-prompt.json, pyproject.toml, LICENSE)",
+    "https://github.com/OpenMOSS/MOSS-Image @ 2b46b1e0e13b5aaec253879e0d006a42564b8b27 (README.md, USERGUIDE.md, skills/moss-image-prompt-enhancer/, comfyui/, docs/macos.md)",
+    "https://huggingface.co/Comfy-Org/MOSS-Image @ 530a4c94f92c35ef6818b1b035a983fe9dcf5f54; https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT @ f972bd4b; https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base @ 85975793; adapters (Kijai, lodestones, akhaliq, Spectrallic, MATLOWAI, KBlueLeaf, darask0, chinoll); Qwen/Qwen3.5-9B; black-forest-labs/FLUX.2-small-decoder @ a3efc24f; Comfy-Org/Flux-2-Klein-4B @ 5b3abca5",
+    "https://github.com/Comfy-Org/workflow_templates templates image_moss_image_t2i_bboxes / base_t2i_bboxes / t2i / base_t2i (head 14220b8b)",
+    "Local ComfyUI /home/user/ComfyUI @ fc04da91 (nodes_moss_image.py, nodes_bounding_boxes.py, nodes_flux.py, nodes_json_prompt.py, supported_models.py, text_encoders/moss_image.py, qwen35.py, quant_ops.py, nodes.py); ComfyUI v0.43.1 @ 086099f5",
+    "fal OpenAPI fal-ai/moss-image and fal-ai/moss-image/lora (re-fetched 2026-10-29; sha256 of the files: bcbe232cb4aea54cbc6eb085f6ef95836afad99a4f18619527d0980b62dbabbb and e8273ac1f39a7d876b0fabf21cacbc415adb7ee4131e018b13334d2e811574e8); https://fal.ai/models/fal-ai/moss-image; bria/fibo-2/generate, blackforestlabs/flux-3/text-to-image, ideogram/v4.5",
+    "https://platform.mosi.cn/en/docs/reference/images-generations; https://platform.mosi.cn/en/docs/reference/layout-image-generation; https://platform.mosi.cn/app/pricing",
+    "https://wavespeed.ai/moss-image-api; Replicate slugs (404); https://api.comfy.org/nodes/moss-layoutprompt ('Node not found')"
+   ],
+   "placements": [
+    {
+     "where": "Shared layout library",
+     "files": [
+      "src/lib/layout-prompt.ts (new)",
+      "tests/layout-prompt.test.ts (new)"
+     ],
+     "open": "compileMoss + parser + validation",
+     "cloud": "the same + compileFlux3 / compileIdeogram / compileVgl / compileWords",
+     "priority": "P0",
+     "package": "n7-1-moss-image"
+    },
+    {
+     "where": "Catalog + library: oss-moss-image and moss-image",
+     "files": [
+      "src/lib/catalog/models.ts",
+      "scripts/comfy/library.spec.mjs",
+      "workflows/comfyui/manifest.json",
+      "scripts/gen-cloud-models.py"
+     ],
+     "open": "moss-image-t2i (core nodes)",
+     "cloud": "fal-ai/moss-image ($0.05/MP), /lora",
+     "priority": "P0",
+     "package": "n7-1-moss-image"
+    },
+    {
+     "where": "Image studio composer: 'Layout' chip",
+     "files": [
+      "src/lib/studios.ts L6",
+      "src/components/studio/studio-context.tsx L71",
+      "src/lib/composer.ts L541-579",
+      "src/components/studio/composer.tsx",
+      "src/components/studio/layout-editor.tsx (new)"
+     ],
+     "open": "compiled at the exact render size",
+     "cloud": "moss-image; flux-3 / ideogram-4-5 compilers",
+     "priority": "P0",
+     "package": "n7-2-layout-mode"
+    },
+    {
+     "where": "Result viewer: 'Edit layout'; editor Import / Export",
+     "files": [
+      "src/lib/output-actions.ts"
+     ],
+     "open": "stored draft",
+     "cloud": "decode fal actual_prompt",
+     "priority": "P0",
+     "package": "n7-2-layout-mode"
+    },
+    {
+     "where": "Canvas 'Layout' node",
+     "files": [
+      "src/lib/catalog/canvas.ts L44, L221, L570, L814",
+      "src/components/canvas/nodes.tsx"
+     ],
+     "open": "sourceOf compiles per downstream model",
+     "cloud": "same",
+     "priority": "P1",
+     "package": "n7-8-layouts-everywhere"
+    },
+    {
+     "where": "Marketing Studio / Ads Studio: 'Words drawn by the model'",
+     "files": [
+      "src/lib/catalog/marketing.ts L962",
+      "src/components/ads/layout.ts L246",
+      "src/server/ads.ts L150-152"
+     ],
+     "open": "AdPlan rects -> layout -> oss-moss-image",
+     "cloud": "moss-image / ideogram-4-5 / flux-3",
+     "priority": "P1",
+     "package": "n7-8-layouts-everywhere"
+    },
+    {
+     "where": "Assist layout-poster skill + 'Plan layout'",
+     "files": [
+      "skills/layout-poster/SKILL.md (new)"
+     ],
+     "open": "text LLM writes a draft",
+     "cloud": "text-llm",
+     "priority": "P1",
+     "package": "n7-8-layouts-everywhere"
+    },
+    {
+     "where": "Storyboard 'One sheet'; Layers 'Re-render from layers'; Sketch colour/depth control after a pin bump",
+     "files": [
+      "src/lib/catalog/storyboard.ts",
+      "src/lib/layers.ts L479",
+      "src/server/layers.ts"
+     ],
+     "open": "oss-moss-image (+ MOSSImageControl after >= v0.43.1)",
+     "cloud": "moss-image; no hosted control",
+     "priority": "P2",
+     "package": "n7-11-moss-sheets-control"
+    }
+   ]
+  }
+ ],
+ "endpointRecords": [
+  {
+   "family": "moss-image",
+   "model": "MOSS-Image (SFT)",
+   "title": "MOSS-Image",
+   "vendor": "OpenMOSS",
+   "operation": "t2i",
+   "provider": "fal",
+   "endpoint": "fal-ai/moss-image",
+   "falCategory": "text-to-image",
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "minLength": 1,
+     "maxLength": 16384,
+     "desc": "Text prompt for image generation. Supports natural language, tag sequences, and JSON layouts.",
+     "examples": [
+      "A wide view of a refrigerator beside a kitchen counter with a fruit bowl. A small sticky note on the refrigerator door is handwritten in Chinese:\n\"记得买牛奶和鸡蛋！\n牛奶两盒，鸡蛋一打。\""
+     ]
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": "",
+     "maxLength": 16384,
+     "desc": "Negative prompt. When empty, guidance uses transformer layer skipping for the negative branch."
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Plan a structured layout from your prompt before generation. Preserves requested visible text and uses the selected image dimensions. If enhancement is unavailable, uses the original prompt."
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "width": {
+         "type": "integer",
+         "maximum": 14142,
+         "default": 512,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        },
+        "height": {
+         "type": "integer",
+         "maximum": 14142,
+         "default": 512,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        }
+       }
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string"
+      }
+     ],
+     "required": false,
+     "default": "square_hd",
+     "desc": "Output image size. Width and height are rounded to multiples of 16 between 512 and 2048 pixels."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "minimum": 1,
+     "maximum": 100,
+     "default": 50,
+     "desc": "Number of denoising steps."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "minimum": 0,
+     "maximum": 10,
+     "default": 3,
+     "desc": "Classifier-free guidance scale."
+    },
+    "seed": {
+     "type": "integer",
+     "nullable": true,
+     "required": false,
+     "desc": "Random seed for reproducible generation."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "minimum": 1,
+     "maximum": 4,
+     "default": 1,
+     "desc": "Number of images to generate."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Enable output content moderation. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "jpeg",
+     "desc": "Output image format."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Return images as data URIs instead of storing them in request history."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "negativePrompt": "negative_prompt",
+    "aspectRatio": "image_size",
+    "numOutputs": "num_images",
+    "seed": "seed",
+    "steps": "num_inference_steps",
+    "guidance": "guidance_scale",
+    "enhancePrompt": "enable_prompt_expansion"
+   },
+   "output": "images[].url",
+   "outputShape": {
+    "actual_prompt": "union",
+    "seed": "integer",
+    "has_nsfw_concepts": "array",
+    "images": "array"
+   },
+   "price": "$0.05 per megapixel",
+   "pricing": {
+    "usd": 0.05,
+    "unit": "megapixel",
+    "note": "Your request will cost $0.05 per megapixel (model page, 2026-10-29)"
+   },
+   "license": "Apache-2.0 weights (OpenMOSS-Team/MOSS-Image-SFT); hosted under fal's terms",
+   "notes": "Send enable_prompt_expansion false with a Fuobe layout. image_size width/height are rounded to multiples of 16 between 512 and 2048. Flagged outputs come back black unless the account may disable the checker. Output actual_prompt is the expanded abs_centralized layout when expansion ran.",
+   "verified": true,
+   "sourceUrl": "https://fal.ai/models/fal-ai/moss-image",
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/moss-image",
+   "capability": "t2i",
+   "fetched": "2026-10-29"
+  },
+  {
+   "family": "moss-image",
+   "model": "MOSS-Image LoRA",
+   "title": "MOSS-Image",
+   "vendor": "OpenMOSS",
+   "operation": "t2i",
+   "provider": "fal",
+   "endpoint": "fal-ai/moss-image/lora",
+   "falCategory": null,
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "minLength": 1,
+     "maxLength": 16384,
+     "desc": "Text prompt for image generation. Supports natural language, tag sequences, and JSON layouts.",
+     "examples": [
+      "A wide view of a refrigerator beside a kitchen counter with a fruit bowl. A small sticky note on the refrigerator door is handwritten in Chinese:\n\"记得买牛奶和鸡蛋！\n牛奶两盒，鸡蛋一打。\""
+     ]
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": "",
+     "maxLength": 16384,
+     "desc": "Negative prompt. When empty, guidance uses transformer layer skipping for the negative branch."
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Plan a structured layout from your prompt before generation. Preserves requested visible text and uses the selected image dimensions. If enhancement is unavailable, uses the original prompt."
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "width": {
+         "type": "integer",
+         "maximum": 14142,
+         "default": 512,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        },
+        "height": {
+         "type": "integer",
+         "maximum": 14142,
+         "default": 512,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        }
+       }
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string"
+      }
+     ],
+     "required": false,
+     "default": "square_hd",
+     "desc": "Output image size. Width and height are rounded to multiples of 16 between 512 and 2048 pixels."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "minimum": 1,
+     "maximum": 100,
+     "default": 50,
+     "desc": "Number of denoising steps."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "minimum": 0,
+     "maximum": 10,
+     "default": 3,
+     "desc": "Classifier-free guidance scale."
+    },
+    "seed": {
+     "type": "integer",
+     "nullable": true,
+     "required": false,
+     "desc": "Random seed for reproducible generation."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "minimum": 1,
+     "maximum": 4,
+     "default": 1,
+     "desc": "Number of images to generate."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Enable output content moderation. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "jpeg",
+     "desc": "Output image format."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Return images as data URIs instead of storing them in request history."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "desc": "URL or the path to the LoRA weights."
+      },
+      "scale": {
+       "type": "number",
+       "maximum": 4,
+       "minimum": 0,
+       "default": 1,
+       "desc": "The scale of the LoRA weight. This is used to scale the LoRA weight before merging it with the base model."
+      }
+     },
+     "maxItems": 3,
+     "required": false,
+     "default": [],
+     "desc": "LoRAs to apply, trained on MOSS-Image Base or SFT. Up to 3 LoRAs are merged together."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "negativePrompt": "negative_prompt",
+    "aspectRatio": "image_size",
+    "numOutputs": "num_images",
+    "seed": "seed",
+    "steps": "num_inference_steps",
+    "guidance": "guidance_scale",
+    "enhancePrompt": "enable_prompt_expansion",
+    "loras": "loras"
+   },
+   "output": "images[].url",
+   "outputShape": {
+    "actual_prompt": "union",
+    "seed": "integer",
+    "has_nsfw_concepts": "array",
+    "images": "array"
+   },
+   "price": "unpublished",
+   "pricing": {
+    "usd": null,
+    "unit": "unknown",
+    "note": "The model page shows '$0 per compute second' (looks unpublished); assume at least $0.05 per megapixel until fal publishes a price (guess)"
+   },
+   "license": "Apache-2.0 weights (OpenMOSS-Team/MOSS-Image-SFT); hosted under fal's terms",
+   "notes": "Send enable_prompt_expansion false with a Fuobe layout. image_size width/height are rounded to multiples of 16 between 512 and 2048. Flagged outputs come back black unless the account may disable the checker. Output actual_prompt is the expanded abs_centralized layout when expansion ran.",
+   "verified": true,
+   "sourceUrl": "https://fal.ai/models/fal-ai/moss-image/lora",
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/moss-image/lora",
+   "capability": "t2i",
+   "fetched": "2026-10-29"
+  }
+ ],
+ "buildPlan": {
+  "rules": [
+   "put each item where users already work (a button, mode or choice in an existing studio)",
+   "both engines where a route exists; say where one engine has none",
+   "one package per natural feature, small enough for one engineer",
+   "licences are information; every package adds its Settings rows, all on"
+  ],
+  "packages": [
+   {
+    "key": "n7-1-moss-image",
+    "id": "N7-1",
+    "title": "MOSS-Image on both engines and the layout compiler",
+    "priority": "P0",
+    "effort": "medium",
+    "dependsOn": [],
+    "items": [
+     "moss-image-layout"
+    ],
+    "sections": [
+     "§4.1",
+     "§4.2",
+     "§4.3",
+     "§4.4",
+     "§4.6",
+     "§4.7",
+     "§4.9",
+     "§4.10"
+    ],
+    "brief": "Goal. Add MOSS-Image (OpenMOSS; Apache-2.0; strong Chinese and English text; reads layout boxes) as an image model on both engines, and a pure TypeScript layout library that every later surface uses. This package adds no new screen: the model appears in the Image studio's model picker, and the Layout mode is N7-2. Research: new-models-7.md §4.1-§4.10.\n\nWhere it lands (exact spots).\n- New `src/lib/layout-prompt.ts` and `tests/layout-prompt.test.ts`.\n- `src/lib/catalog/models.ts`: a new open ModelDef `oss-moss-image` (kind image, op t2i) next to the other open image models.\n- `scripts/comfy/hand-built/moss-image-t2i.json`, its entry in `scripts/comfy/library.spec.mjs`, and `workflows/comfyui/manifest.json` (built with `npm run build -- moss-image-t2i` in `scripts/comfy`).\n- `scripts/gen-cloud-models.py` (a `model(...)` line for the cloud `moss-image`) and `src/lib/catalog/cloud-models.generated.ts` (regenerated with `pnpm gen:catalog`).\n- `src/lib/catalog/types.ts` L427-436 (`FieldMap.size`) and `src/lib/catalog/payload.ts` L101 (`sizeValue`): add a `min`.\n- A `ModelOptions.layout?: \"moss\" | \"flux3\" | \"ideogram\" | \"vgl\"` flag (set on `oss-moss-image`, `moss-image`, `flux-3`, `ideogram-4-5`, `bria-fibo-2`).\n\nThe library (`src/lib/layout-prompt.ts`, §4.2-§4.3).\n- Neutral types: `LayoutDraft { summary: { caption, meta: string[], canvas: \"single\" | \"multi_panel\" | \"collage\", palette?: string[] }, items: LayoutItem[], aspect? }` and `LayoutItem { label: \"object\" | \"character\" | \"text\", caption, text?, box: [x0, y0, x1, y1] as 0-1 fractions of the canvas, tags?, palette?, color? }`. Fractions keep a draft valid when the render size changes.\n- `compileMoss(draft, width, height)`: pixels = fraction x size; top/left = floor(round(v, 9)), bottom/right = ceil(round(v, 9)); subtract H//2 from y and W//2 from x; order yxyx; drop `color`; compact JSON with no ASCII escaping; keys in MOSS's documented order (summary: meta, canvas, caption, palette; item: label, caption, text, bbox, tags, palette; root `bbox_coord_space: \"abs_centralized\"`, `bbox_format: \"yxyx\"`); zero items returns the trimmed summary caption.\n- `decodeMoss(prompt, width, height)`: back to a draft, blind to key order (fal's `actual_prompt` puts bbox before text).\n- `parseLayout(text)`: tolerant like LinXce's browser parser: prose around the JSON, double-encoded strings, `{layout | draft | source}` wrappers up to 4 levels, LinXce drafts (`bbox_coord_space` \"abs\", `bbox_format` \"xyxy\", pixel boxes plus width/height), legacy `scene_type` / `elements` prompts, compiled abs_centralized prompts, and ComfyUI `CreateBoundingBoxes` elements (0-1000 grid, yxyx).\n- `validateLayout(draft, width, height, target)`: sides multiples of 16; a text item needs its words (\"Type the words for box 2\"); boxes inside the canvas; a warning above 2048 px a side or 4 MP; MOSI's 4,000-character prompt limit when the target is MOSI.\n- Other compilers (§4.3): `compileFlux3` (a caption citing `<obj_N>`, then `[{\"id\":\"obj_N\",\"bbox\":[0-1000 yxyx],\"desc\":...}]`, the shape of ComfyUI's `Flux3LayoutPrompt`, `comfy_extras/nodes_flux.py` L304-330); `compileIdeogram` (`{high_level_description, style_description?, compositional_deconstruction: {background, elements}}`, the shape of `BuildJsonPromptIdeogram`, `nodes_json_prompt.py` L7-71); `compileVgl` (Bria FIBO 2 `objects[].location` / `text_render[].location` as words from a thirds grid); `compileWords` (plain sentences for every other model). `layoutCompilerFor(model)` picks one from `ModelOptions.layout`.\n\nOpen engine (§4.6).\n- Graph `moss-image-t2i`, core nodes only: UNETLoader `moss_image_sft_int8_convrot.safetensors` -> CLIPLoader `qwen3.5_9b_w4a8_gptq.safetensors` type `moss_image` -> VAELoader `flux2-vae_small.safetensors` -> CLIPTextEncode positive / negative -> EmptyFlux2LatentImage -> SkipLayerGuidanceDiTSimple ('', '22', 0, 0.5) -> KSampler -> VAEDecode -> SaveImage. Bindings: prompt, negativePrompt, width, height, seed, steps, cfg, filenamePrefix. Defaults 1024 x 1024, 25 steps, CFG 2.5, er_sde / simple (the Comfy template); a Quality setting at 50 steps, CFG 3, euler (USERGUIDE). Default negative: \"nsfw, worst quality, bad anatomy, watermark, jpeg artifact\".\n- Weights, pinned at Comfy-Org/MOSS-Image @ 530a4c94f92c35ef6818b1b035a983fe9dcf5f54: `diffusion_models/moss_image_sft_int8_convrot.safetensors` (5.414 GB), `text_encoders/qwen3.5_9b_w4a8_gptq.safetensors` (7.344 GB), `vae/flux2-vae_small.safetensors` (0.250 GB): 13.01 GB in all. Optional Fast tier: Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot @ 8fdeb392c6322418687fc2519a7958c954497a22 (`moss_image_sft_8stepdmd_int8_convrot.safetensors`, 5.414 GB, a drop-in UNET at 8 steps, CFG 1; Apache-2.0).\n- Manifest: capability t2i, `limits.dimensionMultiple` 16, `maxWidth` / `maxHeight` 2048, `vramGb` 16 with a note that it is a guess, `license` \"Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder)\", notes on the cu130 PyTorch build that comfy-kitchen's int8 / w4a8 kernels need (`comfy/quant_ops.py` L22-28).\n- MOSS is native in Fuobe's pinned ComfyUI (`fc04da91`), so `node validate-workflows.mjs moss-image-t2i` can run `/prompt` validation on the library's CPU ComfyUI. A real render needs a GPU.\n- Do not install the LinXce pack or OpenMOSS's loader pack (§4.6: the LinXce node id collides with core's).\n\nCloud engine (§4.7).\n- Make `scripts/gen-cloud-models.py` read `docs/research/new-models-7.json` -> `endpointRecords` (the two fal MOSS records, in the same shape as `paid-model-apis-4.json` `endpoints`) the way it reads RESEARCH_4.\n- `model(\"moss-image\", \"MOSS-Image\", \"OpenMOSS\", \"moss\", \"image\", ...)` with route t2i on `fal-ai/moss-image`; LoRAs through `fal-ai/moss-image/lora` (`loras` <= 3 of {path, scale 0-4}) using Fuobe's existing LoRA plumbing. Pricing unit megapixel, $0.05. The `/lora` price is unpublished (\"$0 per compute second\" on the page): show it as unknown, never as free.\n- FieldMap: prompt, negative_prompt, `size` {key `image_size`, multiple 16, min 512, max 2048}, num_images (1-4), seed, num_inference_steps, guidance_scale, output_format png. `enable_prompt_expansion` is false whenever the request carries a layout (`params.extra.layout`) and true (fal's default) for a plain prompt.\n- Demo mode: the mock provider returns a placeholder image as for the other t2i models.\n\nLicences as information (§4.5). Settings -> Models & licences rows (they come from the ModelDefs and the manifest): MOSS-Image SFT Apache-2.0; Qwen3.5-9B Apache-2.0; FLUX.2 small decoder Apache-2.0 (byte-identical to BFL's FLUX.2-small-decoder); the fal endpoint as a paid API (fal's safety checker returns black images for flagged outputs). Everything starts on.\n\nTests.\n- `tests/layout-prompt.test.ts`: the five vectors of §4.2 (1024 x 1024: [128,96,896,224] -> [-416,-384,-288,384], [128,288,896,640] -> [-224,-384,128,384], [288,800,736,864] -> [288,-224,352,224]; 1536 x 1024: [176,224,800,864] -> [-288,-592,352,32]; LinXce's [-240,160,-64,640] and [-241,159,-63,641] cases from `tests/test_layout.py`); zero items -> caption; key order; Chinese text kept unescaped; decode round trip at another key order; every parser case; validation messages; each other compiler's output.\n- A library test (new `tests/comfy-library-7.test.ts` or the existing library test): the manifest entry's bindings, limits, model pins and sizes.\n- A catalog test: the `moss-image` payload against `endpointRecords` (image_size object at multiples of 16 clamped to 512-2048; expansion false with a layout; the megapixel price for 1024 x 1024 and 1536 x 1024).\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the Image studio's model picker lists MOSS-Image on both engines with its price ($0.05 per megapixel in the cloud; \"on your GPU, about 13 GB of files\" on the open engine), and Settings -> Models & licences shows the new rows with switches.\n\nWhat can't be verified here: no GPU (no real render, VRAM, speed or text accuracy); no fal key (payloads are checked against the schema only). Say both in the PR."
+   },
+   {
+    "key": "n7-2-layout-mode",
+    "id": "N7-2",
+    "title": "Layout mode in the Image studio, Edit layout on results, Import and Export",
+    "priority": "P0",
+    "effort": "large",
+    "dependsOn": [
+     "n7-1-moss-image"
+    ],
+    "items": [
+     "moss-image-layout"
+    ],
+    "sections": [
+     "§4.2",
+     "§4.9",
+     "§4.10",
+     "§4.11"
+    ],
+    "brief": "Goal. Let people draw boxes where they already write prompts. The Image studio composer gets a \"Layout\" chip next to the sketch tools, the same way the Video studio has Frames mode. Each box gets one row (Object / Character / Text, what it looks like, the exact words). Results can be reopened as boxes. Research: new-models-7.md §4.10 rows 3-5, §4.2, §4.11.\n\nWhere it lands (exact spots).\n- `src/lib/studios.ts` L6 `IMAGE_STUDIO`: `layout: true`.\n- `src/components/studio/studio-context.tsx`: `StudioConfig.layout?: boolean`, next to `frames` (L71).\n- `src/lib/composer.ts`: `enterLayout` / `layoutRequest` / `leaveLayout`, mirroring `enterFrames` / `framesRequest` / `leaveFrames` (L541 / L553 / L579).\n- `src/components/studio/composer.tsx`: the chip, the draft in composer state, the request (`params.extra.layout` = the neutral draft from N7-1) and Reuse.\n- New `src/components/studio/layout-editor.tsx`, built from `src/components/studio/sketch-editor.tsx`'s dialog pattern and the box maths in `src/lib/layers.ts` (`rectFrom` L655, `resizeBox` L617).\n- The plan: `src/lib/catalog/plan.ts` compiles the draft once the render size is known. Open: the size from `computeDimensions` (`src/lib/comfy.ts` L233) and the manifest's `dimensionMultiple` (`src/server/providers/comfyui.ts` L905). Cloud: the size from `sizeValue` (`src/lib/catalog/payload.ts` L101). The plan writes the compiled prompt plus the exact width and height the model will render.\n- `src/server/generations.ts` L1129-1137: never run the prompt enhancer on a layout request.\n- `src/lib/output-actions.ts`: an \"Edit layout\" action.\n\nUI.\n- A canvas preview in the chosen aspect ratio. Drag to draw a box; numbered tabs; select, move, resize; Delete removes a box; arrow keys nudge it; clicking the same spot in an overlap cycles through stacked boxes (as LinXce's editor does).\n- The rows: a segmented label (Object / Character / Text), \"What it looks like\", \"Exact words\" (required for Text, with an inline error), an optional colour. The composer's prompt box becomes the summary caption. A canvas type (Single / Panels / Collage) and optional tags.\n- Desktop: rows beside the canvas. At 390 px: the canvas on top, rows in a bottom sheet, boxes still draggable by touch.\n- Import / Export menu (browser only): import a LinXce draft, a compiled MOSS prompt (decoded against the current canvas), a legacy scene prompt or ComfyUI `CreateBoundingBoxes` elements; copy the compiled prompt or the draft.\n- Model list: models that read boxes come first with a small \"Reads boxes\" badge (MOSS-Image, FLUX.3, Ideogram 4.5); any other model shows one line: \"This model reads the layout as words, not exact positions.\"\n- A warning when the render size would exceed 2048 px a side or 4 MP.\n\nEngines.\n- Open: `oss-moss-image` (N7-1) with the compiled prompt and exact width/height.\n- Cloud: `moss-image` on fal with `enable_prompt_expansion: false` and `image_size: {width, height}` equal to the canvas; `flux-3` and `ideogram-4-5` with their own compilers and their prompt expansion off; other models get `compileWords`.\n\nEdit layout on results.\n- Shown when the generation has `params.extra.layout`, or when it is a fal MOSS output with `actual_prompt` (decode it with `decodeMoss` at the image's own width and height, so even a plain-prompt render becomes an editable layout).\n- Opens the Image studio in Layout mode with the draft and the same seed.\n\nTests: the composer helpers (enter, leave, request); the plan compiles at the exact size for an open model (multiple 16) and for fal (clamped 512-2048, min respected); `enhancePrompt` is ignored for a layout request; the Edit layout action appears only when it can work; decode from a stored `actual_prompt` fixture; Reuse round trip. Extend the repo's composer e2e script with drawing one box and submitting in demo mode.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: drawing, moving and resizing boxes with mouse and touch; the rows sheet at 390 px; Import / Export; Reuse; Edit layout from a feed tile; the warning line.\n\nWhat can't be verified here: real MOSS / FLUX.3 / Ideogram renders and how well they follow the boxes (no GPU, no fal key); use demo mode. Layout prompts are \"Experimental\" per MOSS's own guide: say so in the mode's hint."
+   },
+   {
+    "key": "n7-3-regenerate-2k",
+    "id": "N7-3",
+    "title": "Regenerate in 2K: an open finishing step in Upscale, on result tiles and in Canvas",
+    "priority": "P0",
+    "effort": "large",
+    "dependsOn": [],
+    "items": [
+     "open-h3-regenerate-2k"
+    ],
+    "sections": [
+     "§2.1",
+     "§2.2",
+     "§2.3",
+     "§2.4",
+     "§2.5",
+     "§2.6",
+     "§2.7",
+     "§2.8",
+     "§2.9",
+     "§2.10"
+    ],
+    "brief": "Goal. Make Open-H3-Regenerate-2K a finishing step people reach from places they already use: Upscale -> Video (\"Regenerate · creative\" beside SeedVR2 \"Restore · faithful\"), a \"Regenerate in 2K\" action on video results, and the Canvas Upscale node. The open engine runs NVIDIA's recipe; the cloud uses the honest hosted analogues because nobody hosts the open model. Research: new-models-7.md §2.\n\nOpen engine.\n- Install (§2.6): an opt-in `OPEN_H3_REGEN=1` block in `scripts/comfy/install-comfyui.sh` (next to the H3 blocks at L63-94) that clones rdh9616/ComfyUI-Open-H3-Regenerate @ 9b686c5ffd380e9d1351f9b8beef6d20d703ca3e (Apache-2.0) and LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler @ 40316cf008b2fd8663263270669eb4da23f89d2c (MIT) into `custom_nodes`. The rdh pack needs `av` and `safetensors`, which ComfyUI's own requirements.txt already installs (`av>=17.0.0`, `safetensors>=0.4.2`), so nothing goes into the union line. Never install the packs on the library's validation server.\n- Weights (§2.4), pinned in `scripts/comfy/library.spec.mjs`: `loras/open_h3_regenerate_2k_lora.safetensors` (12,452,449,080 B, SHA-256 8e36a0912ab72f7f3b00f41e3c7c97c7dfdec21e66c88ab22f08b9b0c681bb04) and `vae/fast_h3_vae_noncausal_24l.safetensors` (6,471,256,328 B, 8658f1e85b5997c4ba716406a2f148bfa36cf97d4d5fcd402c7bd341f54e77a1) from Efficient-Large-Model/Open-H3-Regenerate-2K @ 5809c33730c18b6b1c827b40974855a4288641b3; `latent_upscale_models/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors` (690,592,992 B, 4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6; same bytes as LBH-123-AI/Minimax_h3_latent_Upscaler @ 3f941d5d); `diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors` (20,970,379,616 B, Comfy-Org/MiniMax-H3 @ 1c41cfca8ebba91d0af792a05c5761fb2c3a7975). Reuse the already pinned Qwen3-VL encoder, video and audio VAEs and the ref2va file (the pack reads only its 32 KB `adaln_t_table`). Skip `sharp_curve_branches.safetensors`: its tensors are zero in the blocks checked (§2.3).\n- Graph `video-regenerate-h3` (§2.6 table): rdh's \"Draft Video\" example without the note, the three PreviewAny nodes and `OpenH3VideoToPrompt` (CLIPTextEncode 16 gets the prompt directly), `curve_name` \"none\", and `OpenH3SaveRefinedLatent` (24) kept so a failed decode can be redone from the saved latent. Bindings: video (9.file), prompt (16.text), resolution (17), draftSize (11.size), frames (11.max_frames; nodes 24 and 26 read 11's frame-count output), startSigma (19.start_sigma), steps (19.steps), seed (20), filenamePrefix (28). The combo values are strings exactly as the pack lists them ('768p (1344x768)', '576p (1024x576)', 'keep (snap to 32)', '1080p ...', '2k (2560x1440)', '4k (3840x2160)'); copy them from the pack's INPUT_TYPES, not from this text.\n- Manifest entry: capability `upscale-video`, `customNodes` with both pins, `vramGb` 48 with a note (\"measured: about 3 min per 5 s at 2K on a 72 GB RTX PRO 5000; 22 s on a B200; a community run reached about 1080p on 32 GB with a lossy LoRA\"), the licence text (§2.5), `validated: false` until it runs on a GPU box.\n- ModelDef `oss-h3-regenerate` in `src/lib/catalog/models.ts` next to `oss-seedvr2` (L423): name \"Open-H3 Regenerate\", tagline \"Redraws a soft clip at 1080p, 2K or 4K. Details may change; motion and layout stay.\" Resolutions 1080p / 1440p / 2160p (`VIDEO_UPSCALE_TIERS`, L42; 1440p -> \"2k\", 2160p -> \"4k\"), default 1440p. Controls: Creativity (Close = start_sigma 0.7, Balanced = 0.8 default, More detail = 0, the release 0.909) and Speed (3 steps, or \"Faster\" = 2 steps). Prompt required.\n- Provider (`src/server/providers/comfyui.ts`): frames = round(seconds x 24), at most 360 per pass; clips over 15 s are split into 15 s parts and joined with the existing `video-concat-encoded` graph, with a seam note; the source sound is muxed back (the pack's Finish node keeps it). Draft preset: 768p for H3 sources (the generation's model is an H3 model or a Character swap), 576p for other models, 'keep (snap to 32)' for portrait and odd shapes.\n- Prompt: the generation's own prompt when there is one; for uploads, a one-paragraph description written by Fuobe's existing reading route (`oss-reference-brief` on the open engine, the text LLM with frames in the cloud), editable before running. No server is called from inside the graph.\n\nCloud engine (§2.7).\n- No hosted open model. In Upscale -> Video the \"creative\" choice on the cloud is `topaz-starlight` (exists) plus Topaz creative (Astra 2, `topaz/upscale/video/creative`, already recorded in `docs/research/paid-model-apis.json`; add a `model(...)` line in `scripts/gen-cloud-models.py`): 10 s at 30 fps costs $3.00 up to 1080p, $5.00 at 4K.\n- \"Regenerate in 2K\" on a fal H3 result (the `minimax-h3` model, the cloud Character swap): re-run the same endpoint with the same inputs and seed and `resolution: \"2K\"` (or \"4K\"); label it \"Re-render at 2K · a new render\" with its price ($0.13/s plain H3, $0.1625/s on the LoRA route; 4K $0.16 / $0.20). Other cloud results: SeedVR (faithful, $0.001 per output megapixel) or Starlight.\n- MiniMax's closed `/v2/video_regeneration` and Comfy's partner node are not built here (they need unmodified H3 768P outputs and the exact post-Context-IR prompt); record them in the research only.\n\nPlacements.\n- `VIDEO_UPSCALE_STUDIO` (`src/lib/studios.ts` L129): the open model list shows SeedVR2 \"Restore · faithful\" and Open-H3 \"Regenerate · creative\" side by side.\n- `src/lib/output-actions.ts` L150: \"Regenerate in 2K\" next to \"Render this draft in 1080p\" for finished video results (and in next-step chips for H3 / LTX / Wan / SANA videos), opening Upscale -> Video prefilled with the clip, its prompt and 2K.\n- `src/lib/catalog/canvas.ts` L230 / L348: the Upscale node gets a \"Regenerate (creative)\" choice (open `oss-h3-regenerate`, cloud `topaz-starlight`).\n\nCopy. \"Regenerate · creative: redraws your clip at 2K. Details may change; motion and layout stay.\" \"Restore · faithful: keeps every detail and sharpens it.\" GPU line: \"About 3 minutes per 5 s at 2K on a 72 GB GPU. Needs about 40 GB of new files (OPEN_H3_REGEN=1 in install-comfyui.sh).\" Blocker without the packs: \"Your ComfyUI is missing the Open-H3 Regenerate nodes: run scripts/comfy/install-comfyui.sh with OPEN_H3_REGEN=1.\"\n\nLicences as information (§2.5): rows for the merged LoRA (MiniMax H3 Community: territory excludes the US, EU, UK and Republic of Korea; show \"MiniMax H3\"; over US$20M needs MiniMax's OK; plus Comfy's note that local commercial output needs a MiniMax licence; the merged Turbo part is Apache-2.0 at 3ec17a3, the LMS part has no stated licence), the fast VAE and the FL2VA base (MiniMax H3 Community), the LBH upscaler (weights Apache-2.0, code MIT), and `NODE_PACKS` entries in `src/lib/licences.ts` L406 for both packs. All start on.\n\nTests: manifest bindings (string combos, frames on node 11 only, curve none, start sigma, steps, node 24 kept); the tier -> combo map; window split for 5 / 15 / 20 / 40 s; the draft preset by source; the ModelDef and its controls; output-action presence per source and engine; the cloud re-render payload (same seed and inputs, resolution \"2K\") and its price; install-script pins.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: Upscale -> Video with both open choices and the Creativity control; the price and GPU lines; the \"Regenerate in 2K\" menu item on a feed tile and in the Library viewer; the Canvas Upscale choice.\n\nWhat can't be verified here: any GPU run; whether the rdh pack loads on Fuobe's pinned ComfyUI 0.41.0-7 (tested on 0.42.0); whether Fuobe's ref2va base would do instead of FL2VA; VRAM below 72 GB; any fal call. Validate on a disposable GPU ComfyUI with the packs installed (`node validate-workflows.mjs video-regenerate-h3`)."
+   },
+   {
+    "key": "n7-4-character-swap-2k",
+    "id": "N7-4",
+    "title": "Character swap in 2K: Swap Studio's Finish and Genjutsu's Quality",
+    "priority": "P0",
+    "effort": "medium",
+    "dependsOn": [
+     "n7-3-regenerate-2k"
+    ],
+    "items": [
+     "open-h3-regenerate-2k"
+    ],
+    "sections": [
+     "§2.1",
+     "§2.6",
+     "§2.7",
+     "§2.9",
+     "§2.10",
+     "§2.11"
+    ],
+    "brief": "Goal. Character swaps come back at H3's 768p. Turn Character Swap Studio's dead \"Finish\" panel into a working \"Sharpen to 1080p / 2K / 4K\", and let Genjutsu's Character swap offer 1080p, 2K and 4K, on both engines, without touching the background or the sound. Research: new-models-7.md §2.10 rows 4-5, §2.11.\n\nWhere it lands (exact spots).\n- `src/components/swap-studio/stage-review.tsx` L247-248 (the Finish panel in `AssembleStage`, L174): two cards. \"Sharpen to 1080p / 2K / 4K\" (runnable: resolution segmented control, price or GPU time, Run). \"Clean backplate + alpha\" (still Not available, keeping `FINISH_UNAVAILABLE`, `src/lib/catalog/swap-studio.ts` L1356).\n- `src/lib/catalog/swap-studio.ts` / `swap-studio-plan.ts`: a finish plan per chosen take.\n- `src/lib/catalog/character-swap.ts`: qualities (L27), `characterQuality` (L160), `falResolution` (L172), prices; `src/lib/catalog/genjutsu.ts`: the plan steps.\n\nOpen engine.\n- Per chosen take: its 16-bit FFV1 master (already kept by `video-character-swap-h3-segment`) -> `video-regenerate-h3` (N7-3) with draftSize 'keep (snap to 32)' (H3's own canvas, any shape), the take's prompt, start_sigma 0.8 (rdh: \"stays closer to the draft\"), the take's seed, and a resolution capped at the source clip's size (never above the source).\n- Then a mask composite, so only the character comes from the regenerate: a new core-node graph `video-composite-mask` (LoadVideo source + LoadVideo regenerated scaled to the source size with ImageScale + the approved whole-shot mask from `video-mask-h3-relay` -> ImageToMask (red) -> GrowMask -> FeatherMask -> ImageCompositeMasked -> CreateVideo with the source audio -> SaveVideo). Validate it on the library's CPU ComfyUI (core nodes only).\n- Then the existing assembly. Takes over 15 s run in 15 s windows.\n- Genjutsu Character swap: keep the 768p swap and add steps to the plan: swap -> regenerate (σ 0.8) -> mask composite -> mux.\n\nCloud engine.\n- There is no hosted post-hoc regenerate. Re-queue the chosen segments on fal `minimax/h3/reference-to-video/lora` with the same prompt, LoRA, references and seed and `resolution` \"2K\" or \"4K\" ($0.1625/s or $0.20/s instead of $0.075/s at 768p). They are new takes: show them beside the 768p take for approval (Swap Studio already has takes and comparisons).\n- Watch the cloud assembly: `cloudFilmSize` (`swap-studio.ts` L403-411) keeps fal merge-videos' 512-2048 px, so a 2K or 4K take is joined at no more than 2048 px on the long side. Say \"joined at 2048 px\" or offer 2K only where the join keeps it.\n- Genjutsu: `falResolution` returns \"2K\" / \"4K\" for those qualities; prices 5 s at 2K = $0.81, 15 s at 2K = $2.44. H3 Max Recast stays at 768P / 1080P.\n- Fallback for an already assembled film: SeedVR or Topaz creative (N7-3).\n\nCopy. Sharpen card: \"Redraws each chosen take at 2K, then puts only your character back over the original footage. The background and the sound stay as filmed. Faces can change slightly; compare before you keep it.\" Genjutsu Quality hint: \"2K and 4K redraw the 768p swap at the higher size.\"\n\nLicences: the MiniMax H3 rows already exist for the Character swap; N7-3 adds the regenerate files. \"MiniMax H3\" stays displayed where H3 runs.\n\nTests: quality mapping (480p / 768p unchanged; 1080p / 2K / 4K add the finish step); `falResolution` for every quality; the price table; the finish plan per take (regenerate -> composite -> assemble) with the resolution capped at the source; `video-composite-mask` bindings; the cloud re-queue payload; the 2048 px join note; `FINISH_UNAVAILABLE` still shown for the backplate card.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: Swap Studio's Assemble stage with the two Finish cards; Genjutsu's Quality picker with 2K / 4K and their prices.\n\nWhat can't be verified here: GPU runs; whether σ 0.8 keeps the swapped identity; how the mask edge looks at 2K; any fal call. Add eval cases (scripts/eval) that compare identity (face similarity to the character) and background difference against the source, so a GPU run can decide the default σ."
+   },
+   {
+    "key": "n7-5-fly-path",
+    "id": "N7-5",
+    "title": "Fly path in Cinema's 3D scene, and the camera-path library",
+    "priority": "P0",
+    "effort": "large",
+    "dependsOn": [],
+    "items": [
+     "worldcast"
+    ],
+    "sections": [
+     "§3.3",
+     "§3.6",
+     "§3.7",
+     "§3.9",
+     "§3.10",
+     "§3.11"
+    ],
+    "brief": "Goal. People already fly a camera through Cinema's 3D scene and capture one still. Let them keyframe a path (or pick Orbit 360°, Arc, Push-pull arc, Tilted ring, Figure-8, Dolly in / out) and press \"Film this path\" to get a 5 s move that follows it exactly. The cloud uses fal's H3 Max camera-controls; the open engine uses a Uni3C render-guided Wan 2.1 graph on core nodes. This package also ships the camera-path library that N7-6, N7-7 and N7-9 reuse. Research: new-models-7.md §3.3, §3.6, §3.7, §3.10 row 1.\n\nThe library: `src/lib/camera-path.ts` (pure) + `tests/camera-path.test.ts`.\n- `CameraKey { t (0-1), azimuth (degrees, unwrapped, signed), elevation (degrees), distance (1 = the photo's own) }`.\n- Presets named after WorldCast's (`scripts/data/trajectories.py`, re-implemented, not copied): orbit_360; orbit_N clockwise / counter-clockwise; orbit_tilt_20; orbit_180_push (radius ripple 25%, 2 waves); lemniscate; zoom_in (0.6x); zoom_out (1.5x); truck left / right. Every path starts at the photo's own pose (t 0, azimuth 0, elevation 0, distance 1).\n- `fromScenePose` / `toScenePose` using `scenePose` (`src/lib/scene3d.ts` L555-575): azimuth = horizontal unwrapped along the path; elevation = vertical; distance proportional to 2^(-(zoom - 5) / 5), the inverse of its zoom formula.\n- `toH3MaxTrajectory(keys)`: 2-12 keyframes {time 0-1, azimuth (signed, at most 32 turns), elevation clamped -90..90, distance > 0}; trucks become `free_camera_preset`.\n- `framePoses(keys, frames, pivotDepth, fovDeg)`: per-frame camera-to-world matrices (OpenCV, +Z forward) looking at the pivot (`medianDepth`, `scene3d.ts` L208) plus a pixel intrinsic: for the browser render now and WorldCast (N7-9) later.\n\nCloud engine.\n- Add `minimax/h3-max/camera-controls` as a route on the existing `minimax-h3-max` model (or a hidden helper model) with a `model(...)` change in `scripts/gen-cloud-models.py`; the endpoint record is already in `docs/research/paid-model-apis-2.json` (L23027-23156). Do not use the legacy alias `minimax/h3-max/multi-angle/image-to-video`.\n- Payload: `image_url` = the scene's source photo; `camera_trajectory` from `toH3MaxTrajectory`; `prompt_expansion_mode` \"disabled\"; `prompt` always sent (the endpoint's default prompt freezes the scene): the user's motion words, defaulting to \"The character keeps moving naturally while the camera follows the path\"; `duration` 5 (1-15); `resolution` 768P default (480P / 1080P); `seed`.\n- Prices (fal, 2026-10-29): $0.0325 / $0.052 / $0.104 per s at 480p / 768p / 1080p until 2026-10-31, then $0.05 / $0.08 / $0.16. Show the price that applies on the run date.\n\nOpen engine.\n- Graph `wan21-i2v-uni3c-path` (§3.6 table), core nodes only: UNETLoader (Wan 2.1 I2V) -> ModelPatchLoader `Wan21_Uni3C_controlnet_fp16.safetensors` -> WanUni3CControlnetApply (render_video, strength 1, 0-1) -> CLIPLoader umt5 fp8 (type wan) / CLIPVisionLoader clip_vision_h / VAELoader wan_2.1_vae -> WanImageToVideo (81 frames) -> KSampler -> VAEDecode -> CreateVideo (16 fps) -> SaveVideo. Bindings image, video (the path render), prompt, negativePrompt, width, height, seed, steps, strength, filenamePrefix.\n- Weights: `model_patches/Wan21_Uni3C_controlnet_fp16.safetensors` (1,997,314,376 B, Kijai/WanVideo_comfy @ 8260d429d19fd7a72304cad059160b95d843913f). First test the Wan 2.1 I2V 480p Q8 GGUF Fuobe already pins (`library.spec.mjs` L160); if Uni3C needs the 720p model, pin `split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors` (16,401,356,938 B, Comfy-Org/Wan-2.1 @ 123acf1cc74bccbb9bfff8ac1ee72edc08c2341d). The encoder, CLIP vision and VAE are already pinned.\n- `/prompt` validation on the library's CPU ComfyUI is possible (core nodes); runs need a GPU (Uni3C's own figures: 46-51 GB with offload; Fuobe's older 24 GB note is unverified).\n- The render: `src/components/cinema/scene-engine.ts` gains `recordPath(poses, { frames: 81, fps: 16, width, height })`, which renders each frame of the MoGe mesh or point cloud along `framePoses` with a transparent clear and encodes `render.mp4` (MediaRecorder, as `src/components/model3d/turntable.ts` does, or frame-by-frame), plus a hole mask from the alpha (unused by core's Uni3C node, kept for N7-9).\n\nUI.\n- `src/components/cinema/scene-viewer.tsx`, beside Capture (L224-245): a \"Path\" strip with \"+ Keyframe\" (adds the current pose), preset chips, one chip per key (\"1.2 s · 90° · +10° · 1.2x\"), a Preview button that flies the viewer's camera along the path, a duration (5 s default), a motion-words field and \"Film this path\". At 390 px the strip folds into a sheet.\n- `src/lib/catalog/cinema.ts`: a `path` action next to Recompose (`planRecompose`, L1914): cloud -> camera-controls; open -> upload the render, then the Uni3C graph. The result lands next to the scene as a new take.\n\nLicences as information: Uni3C (Apache-2.0; Kijai's repo has no licence field), Wan 2.1 I2V (Apache-2.0), fal H3 Max camera-controls (paid; MiniMax's and fal's terms).\n\nTests: presets -> keys (orbit_360 gives 5 keys 0..360; arcs signed; tilt; push distances; zooms); `toH3MaxTrajectory` limits and clamps; `framePoses` (frame 0 equals the photo pose; orthonormal; looks at the pivot); the scenePose round trip; the cinema `path` plan on both engines; the payload against the camera-controls record; the Uni3C manifest bindings.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the Path strip, the chips, Preview, Film; the 390 px sheet; the Recompose and Capture buttons still work.\n\nWhat can't be verified here: no GPU (Uni3C VRAM, loading Kijai's file through ModelPatchLoader, the 480p GGUF question, quality); no fal key. H3 Max's azimuth sign is not documented: put it behind one constant and flip it after the first paid test."
+   },
+   {
+    "key": "n7-6-turnaround",
+    "id": "N7-6",
+    "title": "Turnaround video for cast sheets and characters",
+    "priority": "P0",
+    "effort": "small",
+    "dependsOn": [],
+    "items": [
+     "worldcast"
+    ],
+    "sections": [
+     "§3.1",
+     "§3.3",
+     "§3.7",
+     "§3.9",
+     "§3.10"
+    ],
+    "brief": "Goal. WorldCast's promise is \"one photo plus a few angles -> the camera flies around the character, and the back and sides look right\". Fuobe can give most of that today with routes it already has: one click on a cast sheet or a saved character makes a 360° turnaround of the same person, on both engines. N7-9 later swaps the open engine for WorldCast itself behind the same buttons. Research: new-models-7.md §3.7 recipes (B) and (C), §3.10 row 2.\n\nWhere it lands (exact spots).\n- The Character Sheet page result (`src/app/(studio)/character-sheet/page.tsx`; `src/components/fashion/character-sheet.tsx`, the \"Front, three-quarter, profile and back views\" result near L320) and Cinema's Soul Cast results: a \"Turnaround video\" button.\n- A character's Elements page (`src/app/(studio)/elements/[id]/page.tsx`): \"Fly around this character\" (pick the hero photo and, once N7-5 lands, a path preset; otherwise Orbit 360°).\n\nViews. One function `viewAzimuth(side)` with tests: front 0°, right 90°, back 180°, left 270°, using the subject's own left and right like Image to 3D's side picker (`src/lib/av/model3d.ts` L81-88). Order the views front -> right -> back -> left -> front. Write down WorldCast's convention for N7-9 (its left_side sits near 267° with `left_sign` -1).\n\nOpen engine.\n- Frames mode's existing chain (`createKeyframeFilm`, `src/server/chains.ts` L197; `FRAMES_MODELS.open` = `oss-wan22-14b`, `src/lib/catalog/keyframes.ts` L58) with the views at t 0 / 0.25 / 0.5 / 0.75 / 1.0 and a fixed orbit prompt (\"The camera orbits 360 degrees around the person at a constant height; the person stands naturally\").\n- Missing views come from the Angles app's open route (`src/lib/catalog/apps.ts` L265-302) at horizontal 90 / 180 / 270.\n- Optional: the pinned MiniMax H3 ref2va route with the sheet as <Picture> references and an orbit prompt (territory-restricted licence; information only).\n\nCloud engine.\n- Three or more views: `minimax-h3-max` op `ref2v` (`minimax/h3-max/reference-to-video`, already in the catalog at `cloud-models.generated.ts` L6244) with the views as Image 1..n and an orbit prompt: 5 s at 768P with up to four square references is $0.40.\n- Or FLUX 3 Max keyframes-to-video (`flux-3-max`, Frames mode's cloud model) with the views as keyframes spread over the duration: $0.0425/s on the promo until 2026-11-07, then $0.17/s at 720p.\n- Missing angles: `qwen-multiple-angles` ($0.035 per megapixel).\n- Only a hero photo: H3 Max camera-controls with Orbit 360° when N7-5's route exists; otherwise ref2v with one image.\n\nConsent. \"Fly around this character\" on a real person follows Soul ID's consent line (`SOUL_ID_COPY`, `src/lib/catalog/training.ts`); WorldCast's own ethics statement warns about impersonation.\n\nTests: `viewAzimuth` and the ordering; the plan per engine and per view count (1-5 views, with and without fills); prices; the ref2v payload (`reference_image_urls` <= 12, the prompt names Image N); the keyframe-film request for the open engine.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the button on the Character Sheet result, on Soul Cast results and on an element's page; the price or GPU line; progress; the result in the feed.\n\nWhat can't be verified here: GPU runs and paid calls; how well identity holds around the back. Add an eval suite (`scripts/eval/cases`) with ArcFace similarity of sampled frames to the sheet's views, so a GPU / key run can pick the default route."
+   },
+   {
+    "key": "n7-7-exact-orbits",
+    "id": "N7-7",
+    "title": "Exact orbits in DoP, Cinema moves, Image to 3D and Canvas",
+    "priority": "P1",
+    "effort": "medium",
+    "dependsOn": [
+     "n7-5-fly-path"
+    ],
+    "items": [
+     "worldcast"
+    ],
+    "sections": [
+     "§3.3",
+     "§3.6",
+     "§3.7",
+     "§3.10"
+    ],
+    "brief": "Goal. Orbits are already a pick in Fuobe DoP, Cinema's Director and Image to 3D, but they follow a LoRA's or a prompt's idea of an orbit. Add an \"Exact\" switch so the move follows numbers: degrees, direction, height tilt and a radius pulse, on both engines, reusing N7-5's library, cloud route and Uni3C graph. Research: new-models-7.md §3.10 rows 3-5.\n\nWhere it lands (exact spots).\n- Fuobe DoP / Motions: the Orbit category (`src/lib/catalog/motions.ts` L94-102; `src/app/(studio)/motions/page.tsx`): an \"Exact\" switch on 360 Orbit, Arc Left, Arc Right and Lazy Orbit with degrees (30-360), direction (clockwise / counter-clockwise seen from above), tilt (0-20°) and pulse (none / 25%).\n- Cinema's Director: the orbit moves (drone-orbit L363, arc-left L370, arc-right L372, bullet-time L367 in `src/lib/catalog/cinema.ts`; `CINEMA_CAMERA_LORA` is null for them, L606-615): the same switch in the move picker (`src/components/cinema/camera-moves.tsx`).\n- Image to 3D (`src/app/(studio)/image-to-3d/page.tsx`; `src/lib/av/model3d.ts`): \"Film it photoreal\" next to \"Animate the spin\".\n- Canvas (`src/lib/catalog/canvas.ts` `NODE_SPECS` L221): a \"Camera path\" node (preset or keys) and a \"Fly around\" node (image + optional views + path -> video).\n- Assist / MCP: a `fly_around` tool (`src/server/assist/studio-tools.ts`).\n\nOpen engine.\n- Automatic depth with the 3D scene's model (`oss-scene-moge`, MoGe 2, MIT) -> the browser point cloud (`buildPointCloud`, `src/lib/scene3d.ts` L414) -> N7-5's `recordPath` along the preset -> `wan21-i2v-uni3c-path`.\n- Image to 3D: record the TRELLIS.2 / TripoSplat result along the path as the render instead of a point cloud.\n- Canvas and Assist run without a browser view, so they need a server-side render. Option A: pin Camera H3 Bruxos (NyckM/3d-Camera-control-H3-Minimax @ 36c4218a2561328436d440fa9134631ee515471b, Apache-2.0, no Python dependencies) and use `BruxosH3Camera` Depth Warp from core `MoGeInference`; its output is Meridian-shaped (73 / 90 / 107 / 124 ... frames at 24 fps, grey-128 holes), so resample to 81 frames at 16 fps and turn grey holes black. Option B: a small headless point-cloud renderer in Fuobe's server. Pick after a `/prompt` validation of option A on the CPU server.\n- The ostris Wan 2.2 orbit LoRAs stay as the \"Loose\" choice.\n\nCloud engine. H3 Max camera-controls (N7-5) with the preset as keyframes; with reference views (Canvas \"Fly around\" with views), `minimax-h3-max` ref2v or FLUX 3 Max keyframes as in N7-6. 5 s at 768P = $0.40 at list price.\n\nTests: Exact settings -> keys; the DoP plan, the Cinema plan with Exact on both engines, the Image to 3D plan; Canvas node types, ports and outputs; the Assist tool schema; (if option A) the Bruxos pin in `install-comfyui.sh` and its licence row in `NODE_PACKS`.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the Exact switch and its controls on the Motions page and in Cinema's move picker; \"Film it photoreal\" in Image to 3D; the two Canvas nodes.\n\nWhat can't be verified here: GPU runs and paid calls; whether the Bruxos pack loads on Fuobe's pin."
+   },
+   {
+    "key": "n7-8-layouts-everywhere",
+    "id": "N7-8",
+    "title": "Layouts in Canvas, Marketing, Ads and Assist",
+    "priority": "P1",
+    "effort": "medium",
+    "dependsOn": [
+     "n7-1-moss-image",
+     "n7-2-layout-mode"
+    ],
+    "items": [
+     "moss-image-layout"
+    ],
+    "sections": [
+     "§4.3",
+     "§4.9",
+     "§4.10"
+    ],
+    "brief": "Goal. Everything in Fuobe that already knows where things go on a canvas can produce a layout: Canvas pipelines, Marketing Studio's formats, Ads Studio's planned rectangles, and Assist. Research: new-models-7.md §4.10 rows 6-8.\n\nWhere it lands (exact spots).\n- Canvas: a \"Layout\" node (`CanvasNodeType` \"layout\" at `src/lib/catalog/canvas.ts` L44; `NODE_SPECS` L221 in the Inputs group; `outputType` L570 returns text; `sourceOf` L814 compiles the draft for the downstream model at that node's render size with N7-1's `layoutCompilerFor`). A card in `src/components/canvas/nodes.tsx` with a mini box preview and \"Edit layout\" (N7-2's editor). With a Table node upstream, `{Column}` placeholders in text items fill row by row before compiling: one layout, a batch of posters.\n- Marketing Studio: `wordsOnTop` (`src/lib/catalog/marketing.ts` L962) is true on every open-engine run today. Add a format option \"Words drawn by the model\" that turns the format's copy rectangles into a layout (headline, price and button as text items; logo area and product as object items) and renders it with `oss-moss-image`. Browser compositing stays the default because it gives exact fonts.\n- Ads Studio: `planAd` (`src/components/ads/layout.ts` L246) already returns the rectangles; map `AdPlan` -> a layout draft. With the new option, `visualRequest` (`src/server/ads.ts` L152) sends the layout instead of the `NO_TEXT` instruction (L150). Without it, a \"keep clear\" layout (only the product as an object item, the copy rectangles left empty) can keep the product out of the words' space.\n- Assist: `skills/layout-poster/SKILL.md`, adapted from OpenMOSS's Apache-2.0 prompt-enhancer skill and its `references/layout.md` (keep the notice), plus a \"Plan layout\" button in N7-2's editor: Fuobe's text LLM writes a pixel draft from a sentence (\"a sale poster for my candle shop, 30% off\"); `validateLayout` checks it; the user adjusts it.\n\nEngines. Open: `oss-moss-image`. Cloud: `moss-image` on fal, or `ideogram-4-5` / `flux-3` with their compilers, as \"draws the exact text in place\" choices (expansion off). Core `TextGenerate` on the MOSS encoder as the planner is unproven on Fuobe's pin (the think-block fix #17121 came later): don't use it yet.\n\nTests: `sourceOf(layout)` per downstream model and size; table substitution; the `AdPlan` -> draft mapping; `wordsOnTop` with the new option on both engines; the keep-clear layout; the skill file is picked up by Assist's skill loader; the planner's output passes `validateLayout`.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the Canvas Layout node and its editor; the Marketing and Ads option and its hint; the Plan layout button.\n\nWhat can't be verified here: how well MOSS-Image draws the copy (no GPU, no fal key); use demo mode and the eval harness later."
+   },
+   {
+    "key": "n7-9-worldcast-worker",
+    "id": "N7-9",
+    "title": "WorldCast on your GPU: the Fuobe Fly-Around Original's open half",
+    "priority": "P1",
+    "effort": "large",
+    "dependsOn": [
+     "n7-5-fly-path",
+     "n7-6-turnaround"
+    ],
+    "items": [
+     "worldcast"
+    ],
+    "sections": [
+     "§3.1",
+     "§3.2",
+     "§3.4",
+     "§3.5",
+     "§3.6",
+     "§3.8",
+     "§3.11"
+    ],
+    "brief": "Goal. Put the real WorldCast behind the Fly path (N7-5), Turnaround / Fly around (N7-6) and Exact orbit (N7-7) buttons on the open engine, so the back and sides follow the user's own reference views. WorldCast has no ComfyUI port and needs custom DiT code, so the first step is a worker; a Fuobe node pack can follow if the quality is worth it. Research: new-models-7.md §3.1-§3.6, §3.8, §3.11.\n\nThe worker (§3.6 option 1).\n- Contract in `docs/workers/worldcast.md`, written like `docs/workers/tribe-v2.md`: an HTTP service on the user's GPU, outside ComfyUI. `POST /cases` (multipart: first_frame.png, person_mask.png, render.mp4, render_mask.mp4, cam_info.json with 81 camera-to-world poses in OpenCV convention and a 3x3 pixel intrinsic, up to four anchors {side, image, mask, azimuth}, an optional anchors_aligned_camera_info.json, prompt, seed, steps 50, cfg 5.0, shift 2.0, height 832, width 480) -> a job id; `GET /jobs/{id}` -> status and progress; `GET /jobs/{id}/video` -> the MP4 (81 frames at 15 fps). A setting `WORLDCAST_URL` (Settings -> Open-source engine, beside the isolated worker URL).\n- A thin reference server in `workers/worldcast/` that imports PixCtrol/WorldCast @ 7ccf2e0ded1238bf6dea1b285c29bcf322e337cb (Apache-2.0) in its own virtualenv (the README's verified combination: torch 2.8.0+cu128 with transformers 5.8.1). Review that code before running it. Weights: ly56/worldcast @ 27635f27a2f9414dd8b78542eb390b565a288a53 (`checkpoints/base_dit.safetensors` 8,401,611,192 B and `checkpoints/worldcast_bank.safetensors` 1,982,937,976 B; both from the same release) and Wan-AI/Wan2.1-I2V-14B-720P @ 8823af45fcc58a8aa999a54b04be9abc7d2aac98 (82.22 GB). Check it first on `demo_case_traj5.json`.\n\nFuobe prepares the case (permissive models only; the paper's Depth Pro and VGGT-Omega are research-only / non-commercial).\n- Depth: MoGe 2 (MIT, the 3D scene's `oss-scene-moge`) or Depth Anything 3 metric-large (Apache-2.0, Comfy-Org/Depth-Anything-3 @ 8265be07).\n- Masks: core `SAM3_Detect` with the pinned `sam3.1_multiplex_fp16`.\n- Path: `framePoses` from N7-5's library; `render.mp4` / `render_mask.mp4` from N7-5's recorder (mask 0 = covered, 255 = hole).\n- Anchors: the element's or sheet's views with azimuths in WorldCast's convention (front 0°, right_side about 90°, back about 180°, left_side about 270°, `left_sign` -1); anchor poses on a ring at the subject distance (a guess), or leave `anchors_aligned_camera_info.json` out (the code then skips anchor Plücker rays; quality impact unknown).\n- The `no_padding_black/` crops are not documented: read them from `demo_case/` and `diffsynth/pipelines/worldcast_pipeline.py` L842-869 before building.\n\nFuobe side.\n- An open ModelDef `oss-worldcast` routed to the worker. The three buttons prefer it when `WORLDCAST_URL` answers, and otherwise fall back to the Uni3C graph / Frames chain with a line saying so (\"Runs on Uni3C: add a WorldCast worker (48 GB+) for sides that match your photos\").\n- Output is portrait 480 x 832 at 15 fps; offer RIFE to 24 fps and the existing upscalers after it.\n\nLicences as information (§3.5): WorldCast weights Apache-2.0 with the note that Stage 1 trained on SpatialVID (CC BY-NC-SA 4.0) \"strictly for academic research purposes\" by the authors' statement; Wan 2.1 720P Apache-2.0; MoGe 2 MIT; DA3 Apache-2.0; SAM 3.1 SAM License. VGGT-Omega (FAIR-NC, gated) and Depth Pro (Apple research-only) only if a user opts in.\n\nTests: the case builder (files, shapes, matrix conventions, the side -> azimuth map); the worker client against a mock server (submit, poll, download, errors); the fallback line when no worker answers; the ModelDef's visibility.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the worker URL row in Settings; the three buttons' engine line with and without a worker.\n\nWhat can't be verified here: everything on the GPU: at least 48 GB, an 82 GB base download, an unknown run time (20-40 min per clip on one 80 GB card is a guess), quality with DA3 / MoGe depth instead of Depth Pro, and quality without aligned anchor cameras."
+   },
+   {
+    "key": "n7-10-regenerate-more",
+    "id": "N7-10",
+    "title": "Regenerate in Faceless, video segments and Cinema H3 shots",
+    "priority": "P2",
+    "effort": "medium",
+    "dependsOn": [
+     "n7-3-regenerate-2k"
+    ],
+    "items": [
+     "open-h3-regenerate-2k"
+    ],
+    "sections": [
+     "§2.6",
+     "§2.7",
+     "§2.10"
+    ],
+    "brief": "Goal. Once N7-3's regenerate graph exists, offer it in the three other places soft clips are finished: Faceless episodes, edited segments, and H3 shots in Cinema and the Video studio (\"draft at 768p, finish only the keeper in 2K\"). Research: new-models-7.md §2.10 rows 6-8.\n\nWhere it lands (exact spots).\n- Faceless \"Upscale to 1080p\" (`src/lib/catalog/faceless.ts` L599-654): add \"Regenerate to 1080p (sharper, may redraw)\" on the open engine: per scene (<= 15 s) at 1080p, draft preset 576p, start_sigma 0.8, the scene's own prompt, then the existing join and music. ESRGAN stays the fast default; the cloud keeps `seedvr-video` (1080p, 121 frames ≈ $0.25).\n- Edit video and Shorts segments: \"Enhance (H3 regenerate)\" on a selected segment of at most 15 s: 1080p, 576p preset, the segment's restyle prompt; Wan VACE output at 16 fps goes through the existing RIFE graph to 24 fps first. Cloud: `seedvr-video` or `topaz-starlight`.\n- Cinema and the Video studio: \"Finish in 2K\" on an H3 take, and a 2K tier for H3 models (`VIDEO_RESOLUTIONS`, `src/lib/catalog/cinema.ts` L559, today 480p / 720p / 1080p). Cloud: re-render on fal `minimax/h3/*` at 2K ($0.13/s; LoRA route $0.1625/s). Open: a plain open H3 graph `video-h3-t2v-2k` from rdh's \"Prompt to 2K\" example (FL2VA pruned int8 + `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` from lightx2v/Minimax-h3-Turbo @ 3ec17a324ced54151364f24f8b5fb6bf7e26414f, 1,956,193,000 B; MiniMaxH3ImageToVideo; BasicScheduler simple 6; er_sde), saving the 768p latent so \"Finish in 2K\" later decodes from it (`OpenH3SaveRefinedLatent` / `OpenH3LoadRefinedLatent`, or NVIDIA's `--save-latents` ladder).\n\nLicences: Turbo v1.2 is Apache-2.0 in its card at 3ec17a3 (the field is gone at main); the rest as N7-3.\n\nTests: Faceless plan per engine with the new option; segment length checks (<= 15 s) and the RIFE step; Cinema's 2K tier only for H3 models; the saved-latent hand-off bindings.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the Faceless option, the segment action and Cinema's tier.\n\nWhat can't be verified here: GPU runs, the 768p H3 draft graph, fal calls."
+   },
+   {
+    "key": "n7-11-moss-sheets-control",
+    "id": "N7-11",
+    "title": "MOSS one-sheet storyboards, re-render from Layers, and painted colour / depth control",
+    "priority": "P2",
+    "effort": "medium",
+    "dependsOn": [
+     "n7-1-moss-image",
+     "n7-2-layout-mode"
+    ],
+    "items": [
+     "moss-image-layout"
+    ],
+    "sections": [
+     "§4.4",
+     "§4.6",
+     "§4.10",
+     "§4.11"
+    ],
+    "brief": "Goal. Three later uses of MOSS-Image's layouts, each in a studio people already use. Research: new-models-7.md §4.10 rows 9-11.\n\n- Storyboard (`/storyboard`, `src/lib/catalog/storyboard.ts`): a \"One sheet\" option. `summary.canvas` \"multi_panel\", one item per panel with its shot caption; the browser crops the panels into frames afterwards. Open `oss-moss-image`; cloud `moss-image`. Quality on many panels is a guess: gate the option behind a GPU test result.\n- Layers (`/layers`; `src/lib/layers.ts`, `src/server/layers.ts`): \"Re-render from layers\". Each visible layer's `rotatedBounds` box (L479) and name become object items; OCR lines (`src/lib/ocr.ts`) become text items; the result is one coherent repaint that matches the arrangement. Cloud alternatives: `ideogram-4-5`, `flux-3`.\n- After a ComfyUI pin bump to >= v0.43.1 (`086099f5`; it requires `comfyui-workflow-templates==0.11.98` and a full library re-validation): the Sketch editor's draw mode feeds MOSS colour regions or a depth map through core `MOSSImageControl` with Comfy-Org's `loras/moss_image_color_depth_control` (0.313 GB, from darask0, Apache-2.0; its training depth maps came from Depth Anything V2 Large, CC-BY-NC-4.0: information only). No hosted equivalent: the cloud falls back to the box layout. Guess-level; needs a GPU test.\n\nTests: the multi-panel draft and the crop maths; layers -> draft (rotation bounds, OCR text items); the pin-bump checks (install script, manifest re-validation) if that part is taken.\n\nBrowser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the Storyboard option, the Layers action, and (if built) the Sketch editor's colour-region mode.\n\nWhat can't be verified here: render quality (no GPU, no fal key); the pin bump's effect on the rest of the library needs a full re-validation run."
+   }
+  ]
+ }
+}
