@@ -72,6 +72,8 @@ export interface JoinOptions {
   /** Clips that already exist, placed before the chained ones (extend: the original video). */
   before?: string[];
   step?: GenerationRequest["step"];
+  /** A recipe's free dry run (GenerationRequest.demo): the join runs on the demo provider too. */
+  demo?: boolean;
 }
 
 const joinModelId = (engine: Engine) => (engine === "open" ? "oss-join-clips" : "join-clips");
@@ -105,6 +107,7 @@ export function joinClips(ids: string[], o: JoinOptions): Generation {
         feature: o.feature,
         modelId,
         op: "concat",
+        ...(o.demo && { demo: true }),
         prompt: o.title,
         inputs: last && o.before?.length ? { videos: o.before } : undefined,
         // ComfyUI's join plays at the first clip's frame rate (linked in the workflow).
@@ -175,6 +178,7 @@ export function createShotFilm(original: GenerationRequest, model: ModelDef): Ge
         engine: model.engine,
         feature: original.feature,
         batchId,
+        demo: original.demo,
         title: overall || shots.map((s) => tidy(s.prompt)).join(" / "),
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
@@ -243,6 +247,7 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
         engine: model.engine,
         feature: original.feature,
         batchId,
+        demo: original.demo,
         title: tidy(original.prompt) || "Keyframe film",
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
@@ -295,6 +300,7 @@ export function createExtendChain(original: GenerationRequest, model: ModelDef):
       engine: model.engine,
       feature: original.feature,
       batchId,
+      demo: original.demo,
       title: tidy(original.prompt) || "Extended video",
       before: [video],
       step: { label: "Extended video", index: 2, of: 3 },

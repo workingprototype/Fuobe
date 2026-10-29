@@ -1,9 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clapperboard, Cpu, Film, KeyRound, Layers, LayoutGrid, Loader2, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
+import { Bell, Clapperboard, Cpu, Film, KeyRound, Layers, LayoutGrid, Loader2, Play, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useSkills } from "@/components/assist/hooks";
 import { NAV } from "@/components/nav-items";
 import { MediaThumb } from "@/components/studio/result-media";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
@@ -11,7 +12,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Command as CommandPrimitive } from "cmdk";
 import { useEngineMode, useGenerations, useModelAccess } from "@/lib/api";
 import type { Generation } from "@/lib/catalog/types";
-import { indexEntries, KIND_LABELS, rankPalette, type PaletteEntry, type PaletteIndex, type PaletteKind } from "@/lib/command-search";
+import { indexEntries, KIND_LABELS, rankPalette, skillEntries, type PaletteEntry, type PaletteIndex, type PaletteKind } from "@/lib/command-search";
 import { useModKey } from "@/lib/keys";
 import { userTitle } from "@/lib/library";
 import { cn } from "@/lib/utils";
@@ -80,7 +81,7 @@ const SETTING_ENTRIES: (PaletteEntry & { icon: LucideIcon })[] = SETTINGS.map((s
 // Icons as elements made once (a component picked during render would remount on every keystroke).
 const iconEl = (Icon: LucideIcon) => <Icon className="text-muted-foreground" />;
 const ICONS = new Map<string, React.ReactNode>([...PAGES, ...SETTING_ENTRIES].map((e) => [e.key, iconEl(e.icon)]));
-const KIND_ICONS: Partial<Record<PaletteKind, React.ReactNode>> = { app: iconEl(LayoutGrid), motion: iconEl(Film), effect: iconEl(Wand2), model: iconEl(Clapperboard) };
+const KIND_ICONS: Partial<Record<PaletteKind, React.ReactNode>> = { app: iconEl(LayoutGrid), motion: iconEl(Film), effect: iconEl(Wand2), model: iconEl(Clapperboard), skill: iconEl(Play) };
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -150,7 +151,12 @@ function PaletteBody({ onPick, onOpenRecent, onClose }: { onPick: (e: PaletteEnt
     staleTime: Infinity,
   });
   const recent = useGenerations({ q: dq || undefined, limit: 5, statuses: ["succeeded"] }, { keepPrevious: true });
-  const entries = useMemo(() => [...PAGES, ...SETTING_ENTRIES, ...(index.data ? indexEntries(index.data, mode, access) : [])], [index.data, mode, access]);
+  // Skills that run by themselves: "Run <skill>…" opens its Run form.
+  const skills = useSkills();
+  const entries = useMemo(
+    () => [...PAGES, ...SETTING_ENTRIES, ...skillEntries(skills.data ?? []), ...(index.data ? indexEntries(index.data, mode, access) : [])],
+    [index.data, mode, access, skills.data],
+  );
   const groups = useMemo(() => rankPalette(entries, query), [entries, query]);
   const recentItems = (recent.data ?? []).filter((g) => g.outputs[0]);
   const searching = !!query.trim();

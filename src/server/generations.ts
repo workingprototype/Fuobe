@@ -154,6 +154,24 @@ function update(id: string, fields: Partial<Row>): void {
     .run({ ...fields, __now: Date.now(), __id: id });
 }
 
+/**
+ * Set server fields on rows a studio tool made, after it made them (a skill recipe's tool run: the `skill` stamp and the
+ * skill's `batchTitle`), and on every row of their batches (the tool's helper steps). Returns those batches.
+ */
+export function stampRequests(ids: string[], fields: (batches: string[]) => Pick<GenerationRequest, "skill" | "batchTitle">): string[] {
+  if (!ids.length) return [];
+  const marks = (n: number) => Array.from({ length: n }, () => "?").join(", ");
+  const batches = (db().prepare(`SELECT DISTINCT batch_id FROM generations WHERE id IN (${marks(ids.length)}) AND batch_id IS NOT NULL`).all(...ids) as { batch_id: string }[]).map((r) => r.batch_id);
+  const rows = db()
+    .prepare(`SELECT id, request_json FROM generations WHERE id IN (${marks(ids.length)})${batches.length ? ` OR batch_id IN (${marks(batches.length)})` : ""}`)
+    .all(...ids, ...batches) as Pick<Row, "id" | "request_json">[];
+  const set = fields(batches);
+  db().transaction(() => {
+    for (const r of rows) update(r.id, { request_json: JSON.stringify({ ...(JSON.parse(r.request_json) as GenerationRequest), ...set }) });
+  })();
+  return batches;
+}
+
 /** One generation; a row in the Trash reads as missing unless `includeDeleted`. */
 export function getGeneration(id: string, opts: { includeDeleted?: boolean } = {}): Generation | null {
   ensureRunner();
@@ -305,6 +323,8 @@ export const ASSET_REFS: AssetRef[] = [
   { table: "assist_schedules", cols: ["attachments_json"], what: "scheduled task", name: "title" },
   // Character Swap Studio: the character picture, each clip and its 24 fps copy, masks, anchors, takes and their masters.
   { table: "swap_projects", cols: ["data_json"], what: "Character Swap project", name: "name" },
+  // A user skill's bundled text files: its recipe.json names the files a run starts from (an example, a fixed logo).
+  { table: "skills", cols: ["files_json"], what: "skill", key: "name", name: "title" },
 ];
 
 /**
@@ -326,7 +346,6 @@ export const ASSET_FREE: Record<string, string> = {
   "assist_projects.skills_json": "skill names",
   "assist_thread_state.skills_json": "skill names",
   "skills.meta_json": "SKILL.md front matter",
-  "skills.files_json": "a skill's own text files, stored inline",
   "lora_mirrors.source_url": "where a LoRA file downloads from (civitai, Hugging Face), without the key",
   "lora_mirrors.hosted_url": "the provider's copy of a LoRA file (fal or Replicate storage), never ours",
   "shares.tags_json": "words",
@@ -398,12 +417,13 @@ export function deleteGeneration(id: string): void {
  * `loras` and `seconds` (the clip length asked for) prefer a route that carries every LoRA and makes that
  * length (Replicate's Wan 2.2 fast renders only 81–121 frames, fal's 17–161).
  */
-export function chooseRoute(candidates: ModelRoute[], images = 0, loras: LoraRef[] = [], seconds?: number): { route: ModelRoute; demo: boolean } {
+export function chooseRoute(candidates: ModelRoute[], images = 0, loras: LoraRef[] = [], seconds?: number, forceDemo = false): { route: ModelRoute; demo: boolean } {
   // Honour the preferred cloud aggregator (Settings → API configuration) when a model is on several.
   const preferred = getSetting("cloudProvider");
   const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
-  if (demo === "on") return { route: routes[0], demo: true };
+  // A request marked demo (a skill recipe's free dry run) runs on the demo provider whatever Settings says.
+  if (demo === "on" || forceDemo) return { route: routes[0], demo: true };
   const takes = (r: ModelRoute) => !r.map?.maxImages || images <= r.map.maxImages;
   // A route that carries every LoRA wins (Replicate's Wan 2.2 takes one per expert, fal's takes a Mix), then one
   // that makes the length asked; otherwise the first ready one runs and the plan's notes say what it changes.
@@ -552,7 +572,7 @@ function prepare(original: GenerationRequest) {
   if (access.dropped.length) plan = { ...plan, loras: access.loras, prompt: withoutTriggers(plan.prompt, plan.loras.filter((l) => !access.loras.some((k) => k.file === l.file)), access.loras) };
   else if (access.loras.some((l, i) => l !== plan.loras[i])) plan = { ...plan, loras: access.loras };
   // A preset can route to another model than the one asked for: its routes that are on (or the switch that's off).
-  const { route, demo } = chooseRoute(offeredRoutes(plan.model, routesFor(plan.model, plan.op)), req.inputs?.images?.length ?? 0, plan.loras, seconds);
+  const { route, demo } = chooseRoute(offeredRoutes(plan.model, routesFor(plan.model, plan.op)), req.inputs?.images?.length ?? 0, plan.loras, seconds, !!worded.demo);
   // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
   // takes at most so many (the plan's notes say which were left out). Open runs carry them all. Without a
   // civitai key a look's civitai LoRA the run can't get is left out (and said), rather than failing at the
@@ -909,14 +929,15 @@ const submitting = (): Set<string> => (globalThis.__fuobeSubmitting ??= new Set<
  * placeholder, helps nobody). Returns the error for a step that can't match its dependencies, and
  * whether it should run as a demo because they did.
  */
-function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route: ModelRoute }, deps: Pick<Row, "provider">[]): { error?: string; forceDemo?: boolean } {
+function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route: ModelRoute }, deps: Pick<Row, "provider">[], asked?: Pick<GenerationRequest, "demo">): { error?: string; forceDemo?: boolean } {
   const demoDeps = deps.filter((d) => d.provider === "mock").length;
   if (p.demo && demoDeps < deps.length) {
     const needs = p.route.provider === "llm" ? "Claude or Ollama" : provider(p.route.provider).label;
     return { error: `${p.plan.model.name} needs ${needs} to continue what the earlier steps made for real — connect it in Settings, then retry` };
   }
   if (!p.demo && demoDeps > 0) {
-    if (getSetting("demoMode") === "off") return { error: "An earlier step ran as a demo — retry it with its provider connected" };
+    // A dry run (GenerationRequest.demo) stays a demo even with Settings → Demo mode off.
+    if (getSetting("demoMode") === "off" && !asked?.demo) return { error: "An earlier step ran as a demo — retry it with its provider connected" };
     return { forceDemo: true };
   }
   return {};
@@ -1078,7 +1099,7 @@ async function advanceDependents(): Promise<void> {
       const filled = withChainInputs({ ...request, chain: slots }, values as string[]);
       const original: GenerationRequest = { ...filled, chain: request.chain, chainFilled: true };
       const prepared = prepare(original);
-      const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
+      const mode = chainMode(prepared, deps as Pick<Row, "provider">[], original);
       if (mode.error) throw new Error(mode.error);
       const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
       update(r.id, {

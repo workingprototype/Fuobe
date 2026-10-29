@@ -198,6 +198,8 @@ export interface Skill extends SkillMeta {
   enabled: boolean;
   /** Extra files that came with an uploaded skill (references, examples), readable with load_skill. */
   files: { path: string; size: number }[];
+  /** Its files hold a valid recipe.json: it runs by itself from a form, with no LLM (src/lib/recipe.ts). */
+  recipe?: boolean;
   createdAt: number;
   updatedAt: number;
 }

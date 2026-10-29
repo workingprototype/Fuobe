@@ -2,8 +2,10 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 import { parseSkillMd, SKILL_LIMITS, SKILL_NAME_RE, toSkillMd, type Skill, type SkillMeta, type SkillSummary } from "@/lib/assist";
+import { parseRecipe, RECIPE_FILE, stripChecks, stripExamples, type Recipe } from "@/lib/recipe";
 import { unzip, ZipError } from "./assist/unzip";
 import { db } from "./db";
+import { zip } from "./zip";
 
 /**
  * Assist skills: SKILL.md playbooks the agent loads on demand (Supercomputer's Skills).
@@ -54,7 +56,8 @@ function readBuiltin(dir: string): BuiltinEntry {
       .filter((f) => f !== "SKILL.md" && TEXT_FILE.test(f))
       .slice(0, MAX_FILES)
       .map((f) => ({ path: f.split(path.sep).join("/"), size: fs.statSync(path.join(BUILTIN_DIR, dir, f)).size }));
-    entry = { mtime, skill: { ...parsed.skill, source: "builtin", files, createdAt: mtime, updatedAt: mtime } };
+    const recipe = files.some((f) => f.path === RECIPE_FILE) && parseRecipe(fs.readFileSync(path.join(BUILTIN_DIR, dir, RECIPE_FILE), "utf8")).ok;
+    entry = { mtime, skill: { ...parsed.skill, source: "builtin", files, ...(recipe && { recipe }), createdAt: mtime, updatedAt: mtime } };
   }
   cache.set(dir, entry);
   if (entry.error) console.warn(`[skills] skills/${dir}/SKILL.md: ${entry.error}`);
@@ -99,6 +102,7 @@ type StoredFile = { path: string; content: string };
 function fromRow(r: Row): Skill {
   const meta = JSON.parse(r.meta_json) as Pick<SkillMeta, "icon" | "studio" | "tags" | "offline">;
   const files = JSON.parse(r.files_json) as StoredFile[];
+  const recipe = files.find((f) => f.path === RECIPE_FILE);
   return {
     name: r.name,
     title: r.title,
@@ -109,6 +113,7 @@ function fromRow(r: Row): Skill {
     source: "user",
     enabled: !!r.enabled,
     files: files.map((f) => ({ path: f.path, size: Buffer.byteLength(f.content) })),
+    ...(recipe && parseRecipe(recipe.content).ok && { recipe: true }),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -159,6 +164,62 @@ export function skillFile(name: string, file: string): string | null {
   }
   const r = db().prepare("SELECT files_json FROM skills WHERE name = ?").get(name) as { files_json: string } | undefined;
   return (JSON.parse(r?.files_json ?? "[]") as StoredFile[]).find((f) => f.path === file)?.content ?? null;
+}
+
+/** Every file bundled with a skill, with its text (the .zip download). */
+export function skillFiles(name: string): StoredFile[] {
+  const s = getSkill(name);
+  if (!s) return [];
+  return s.files.flatMap((f) => {
+    const content = skillFile(name, f.path);
+    return content === null ? [] : [{ path: f.path, content }];
+  });
+}
+
+/** A skill's recipe (a valid recipe.json in its files), or null. */
+export function skillRecipe(name: string): Recipe | null {
+  const text = skillFile(name, RECIPE_FILE);
+  if (text === null) return null;
+  const parsed = parseRecipe(text);
+  return parsed.ok ? parsed.recipe : null;
+}
+
+/** A path a skill's file may have: relative, no `..`, a text file. */
+const safeFilePath = (p: string) => p.length <= 200 && TEXT_FILE.test(p) && !p.startsWith("/") && !p.includes("\\") && !p.split("/").some((x) => !x || x === "." || x === "..");
+
+/**
+ * Write (or with null, remove) one of a user skill's files, within its limits (MAX_FILES, MAX_FILES_BYTES). Built-in
+ * skills are read from disk and never change: duplicate one first.
+ */
+export function setSkillFile(name: string, file: string, content: string | null): Skill {
+  const cur = getSkill(name);
+  if (!cur) throw new SkillError("No such skill", 404);
+  if (cur.source === "builtin") throw new SkillError("Built-in skills can't be changed — Duplicate it first, then change your copy", 403);
+  if (!safeFilePath(file)) throw new SkillError(`“${file}” isn't a file name a skill can carry (a text file such as notes.md or recipe.json)`);
+  const r = db().prepare("SELECT files_json FROM skills WHERE name = ?").get(name) as { files_json: string };
+  const files = (JSON.parse(r.files_json) as StoredFile[]).filter((f) => f.path !== file);
+  if (content !== null) files.push({ path: file, content });
+  if (files.length > MAX_FILES) throw new SkillError(`A skill carries at most ${MAX_FILES} files`);
+  const bytes = files.reduce((n, f) => n + Buffer.byteLength(f.content), 0);
+  if (bytes > MAX_FILES_BYTES) throw new SkillError(`A skill's files add up to at most ${Math.round(MAX_FILES_BYTES / 1000)} KB`);
+  db().prepare("UPDATE skills SET files_json = ?, updated_at = ? WHERE name = ?").run(JSON.stringify(files), Date.now(), name);
+  return getSkill(name)!;
+}
+
+/**
+ * The skill with its files as a .zip (one folder, as importSkill reads it). A recipe's examples and source stay home
+ * unless `examples` (they name this install's files, faces and words), and files fixed in its steps become inputs the
+ * other install asks for (stripExamples). Its checks never travel: they were this install's (stripChecks).
+ */
+export function skillArchive(name: string, o: { examples?: boolean } = {}): Buffer | null {
+  const s = getSkill(name);
+  if (!s) return null;
+  const files = skillFiles(name).map((f) => {
+    if (f.path !== RECIPE_FILE) return f;
+    const parsed = parseRecipe(f.content);
+    return parsed.ok ? { ...f, content: `${JSON.stringify(o.examples ? stripChecks(parsed.recipe) : stripExamples(parsed.recipe), null, 2)}\n` } : f;
+  });
+  return zip([{ name: `${name}/SKILL.md`, data: Buffer.from(toSkillMd(s)) }, ...files.map((f) => ({ name: `${name}/${f.path}`, data: Buffer.from(f.content) }))]);
 }
 
 /** The skill as a SKILL.md file (download, duplicate). */
@@ -286,6 +347,16 @@ export function setSkillEnabled(name: string, enabled: boolean): Skill {
   return getSkill(name)!;
 }
 
+/**
+ * An uploaded recipe.json without its `verified` dates: they were another install's checks (or anyone's typing), and
+ * a recipe runs here only after it has been checked here (src/server/recipes.ts verifyRecipe).
+ */
+function unverified(text: string): string {
+  const parsed = parseRecipe(text);
+  if (!parsed.ok || !parsed.recipe.verified) return text;
+  return `${JSON.stringify(stripChecks(parsed.recipe), null, 2)}\n`;
+}
+
 export interface ImportResult {
   skill: Skill;
   /** Files in the archive that weren't kept (binary, too many, too big). */
@@ -329,7 +400,7 @@ export function importSkill(file: { name: string; data: Buffer }, opts: { replac
         continue;
       }
       bytes += e.data.length;
-      files.push({ path: rel, content: e.data.toString("utf8") });
+      files.push({ path: rel, content: rel === RECIPE_FILE ? unverified(e.data.toString("utf8")) : e.data.toString("utf8") });
     }
   } else {
     throw new SkillError("Upload a .zip or .skill archive, or a SKILL.md file");

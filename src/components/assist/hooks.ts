@@ -20,6 +20,7 @@ import type {
 import type { ConnectorView } from "@/lib/assist-connectors";
 import type { ScheduleRule, ScheduleView } from "@/lib/assist-schedule";
 import type { Engine, Generation } from "@/lib/catalog/types";
+import type { RecipeEstimate, RecipeRun, RecipeView, VerifyResult } from "@/lib/recipe";
 
 /** A rule as the dialog sends it: the server sets when "every N hours" starts counting. */
 export type ScheduleRuleInput = ScheduleRule extends infer R ? (R extends { kind: "hours" } ? Omit<R, "from"> : R) : never;
@@ -172,6 +173,59 @@ export function useSkillActions() {
       const r = await json<{ skill: Skill; skipped: string[]; replaced: boolean }>(await fetch(`/api/assist/skills/upload${replace ? "?replace=1" : ""}`, { method: "POST", body: form }));
       refresh();
       return r;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Skills that run by themselves (recipe.json, src/lib/recipe.ts)
+
+/** A refusal from the recipe routes: the reason, and every problem of a recipe that can't run as it is. */
+export type RecipeFailure = Error & { status?: number; problems?: string[] };
+
+async function recipeCall<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const out = (await res.json().catch(() => ({}))) as T & { error?: string; problems?: string[] };
+  if (!res.ok) throw Object.assign(new Error(out.error ?? `Request failed (${res.status})`), { status: res.status, problems: out.problems }) as RecipeFailure;
+  return out;
+}
+
+/** A skill's recipe with where it runs and what was checked; null when the skill has none. */
+export function useRecipe(name: string | null, enabled = true) {
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-recipe", name],
+      enabled: !!name && enabled,
+      retry: false,
+      queryFn: async () => json<RecipeView>(await fetch(`/api/assist/skills/${name}/recipe`)),
+    }),
+  );
+}
+
+export interface RecipeBody {
+  values?: Record<string, unknown>;
+  csv?: string;
+  engine?: Engine;
+}
+
+export function useRecipeActions() {
+  const qc = useQueryClient();
+  return {
+    estimate: (name: string, body: RecipeBody) => recipeCall<RecipeEstimate>(`/api/assist/skills/${name}/estimate`, body),
+    run: (name: string, body: RecipeBody) => recipeCall<{ engine: Engine; runs: RecipeRun[]; demo: boolean }>(`/api/assist/skills/${name}/run`, body),
+    /** Check it (plan + the free dry run by default); the skill's status is refreshed with the result. */
+    verify: async (name: string, body: { level?: "plan" | "demo" | "real"; engine?: Engine; confirm?: boolean } = {}) => {
+      try {
+        const r = await recipeCall<VerifyResult>(`/api/assist/skills/${name}/verify`, { level: "demo", ...body });
+        qc.setQueryData(["assist-recipe", name], r.view);
+        return r;
+      } catch (e) {
+        // Refused (the recipe changed while it was checked, say): show the recipe as it is now.
+        void qc.invalidateQueries({ queryKey: ["assist-recipe", name] });
+        throw e;
+      } finally {
+        void qc.invalidateQueries({ queryKey: ["assist-skills"] });
+      }
     },
   };
 }
