@@ -1,11 +1,16 @@
 /**
- * Runs once when the server starts: start the generation runner right away, so jobs that were in
+ * Runs once when the server starts, before it takes requests. First the identity bootstrap (accounts: the
+ * pre-accounts snapshot, the root secret and its fingerprint, the auth.json import, FUOBE_PASSWORD): a server
+ * that must not start (a changed secret key, an unknown FUOBE_MODE) stops here with one line. Then start the
+ * generation runner right away, so jobs that were in
  * flight before a restart keep advancing (and live updates flow) even when the UI only lists them.
  * Also empties what has been in the Trash for 30 days (then daily), starts Assist's scheduled tasks and Character
  * Swap Studio's sweep.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.NEXT_PHASE === "phase-production-build") return;
+  const { startIdentity } = await import("./server/identity/bootstrap");
+  await startIdentity();
   const { ensureRunner } = await import("./server/generations");
   ensureRunner();
   const { ensureTrashPurge } = await import("./server/library");

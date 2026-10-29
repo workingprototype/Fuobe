@@ -8,7 +8,7 @@ import { PageHeader, PageShell } from "@/components/page-shell";
 import { MODELS } from "@/lib/catalog";
 import type { Manifest } from "@/lib/comfy";
 import { FUOBE_REPO } from "@/lib/connections";
-import { ATTRIBUTIONS, buildLicenceList } from "@/lib/licences";
+import { ATTRIBUTIONS, buildLicenceList, PINNED_LIBRARIES } from "@/lib/licences";
 
 export const metadata: Metadata = { title: "About & licences" };
 
@@ -148,6 +148,19 @@ export default async function Page() {
             Models you pull into Ollama for Assist and prompt enhancement carry their own licences: <code className="font-mono text-[12px]">ollama show &lt;model&gt; --license</code>.
           </li>
           <li>The optional TRIBE v2 worker for the Virality page isn&apos;t bundled; its weights are CC BY-NC 4.0 (non-commercial).</li>
+          <li>
+            Sign-in runs on{" "}
+            {PINNED_LIBRARIES.map((l, i) => (
+              <span key={l.name}>
+                {i ? (i === PINNED_LIBRARIES.length - 1 ? " and " : ", ") : ""}
+                <a href={l.licence.url} target="_blank" rel="noreferrer" className="text-brand-text underline underline-offset-2">
+                  {l.name} {l.version}
+                </a>{" "}
+                ({l.licence.name})
+              </span>
+            ))}
+            .
+          </li>
           <li>
             Each workflow&apos;s models, sizes and download links are on the{" "}
             <Link href="/workflows" className="text-brand-text underline underline-offset-2">
