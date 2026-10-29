@@ -13,7 +13,7 @@ import { ConnectField, useSettings } from "@/components/connect-field";
 import { GetStarted } from "@/components/get-started";
 import { LoraSettings } from "@/components/lora-settings";
 import { useStatus, type StatusInfo } from "@/lib/api";
-import { connectionSummary, ENGINE_MODE_LABEL, FAL_KEYS_URL, showFirstRun } from "@/lib/connections";
+import { AI_TOOLKIT_REPO, connectionSummary, DEFAULT_AI_TOOLKIT_URL, ENGINE_MODE_LABEL, FAL_KEYS_URL, showFirstRun } from "@/lib/connections";
 import { cn } from "@/lib/utils";
 import { ConnectorSettings } from "@/components/assist/connectors-settings";
 import { NotificationSettings } from "@/components/notification-settings";
@@ -340,6 +340,39 @@ export function SettingsForm({ prices }: { prices?: string }) {
         description="Looks, camera moves and effects add LoRA files to open models, on your GPU and in the cloud; an adapter is the LoRA an Original always loads (Fuobe Try-On's). Fuobe fetches the pinned version a run needs and shows each file's licence; what may run where is your call in Models & licences."
       >
         <LoraSettings folder={get("comfyLorasDir")} civitaiKey={get("civitaiKey")} />
+      </Section>
+
+      <Section
+        id="training"
+        title="Training · AI-Toolkit"
+        description={
+          <>
+            Train Soul IDs and Fuobe looks (LoRAs) on your own GPU with{" "}
+            <a href={AI_TOOLKIT_REPO} target="_blank" rel="noreferrer" className="text-brand-text underline-offset-2 hover:underline">
+              AI-Toolkit
+            </a>
+            : free, and the file stays yours. Without it, train in the cloud on fal.ai, or download a training kit from the Train dialog.
+          </>
+        }
+        inactive={mode === "cloud" ? "Not used in Paid APIs only mode" : undefined}
+      >
+        <ConnectField
+          name="aiToolkitUrl"
+          setting={get("aiToolkitUrl")}
+          provider="ai-toolkit"
+          label="AI-Toolkit URL"
+          placeholder={DEFAULT_AI_TOOLKIT_URL}
+          hint="Where AI-Toolkit's UI listens (in ai-toolkit/ui: npm run build_and_start). Test checks it answers."
+        />
+        <ConnectField name="aiToolkitToken" setting={get("aiToolkitToken")} provider="ai-toolkit" label="Auth token (optional)" hint="The AI_TOOLKIT_AUTH the trainer was started with, if any." />
+        <ConnectField
+          name="aiToolkitDatasetDir"
+          setting={get("aiToolkitDatasetDir")}
+          provider="ai-toolkit"
+          label="Photos folder (optional)"
+          placeholder="/mnt/shared/datasets"
+          hint="Where Fuobe writes the training photos. Blank: Fuobe's data folder, for an AI-Toolkit on this machine; on another machine, a folder both can read."
+        />
       </Section>
 
       <Section

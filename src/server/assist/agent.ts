@@ -29,6 +29,7 @@ import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { offeredDefault } from "../model-access";
+import { ollamaModels, ollamaSoon } from "../providers/llm";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
 import { readRef } from "../storage";
@@ -364,17 +365,16 @@ export async function updateThread(id: string, patch: ThreadPatch): Promise<Assi
 // ---------------------------------------------------------------------------
 // Which LLM runs a chat: modes
 
-let ollamaProbe: { at: number; url: string; ok: boolean; models: string[] } | null = null;
+/**
+ * Whether Ollama answers, and the models it has: the check text steps use (providers/llm), so a busy Ollama (loading
+ * a model, writing a long answer) keeps chats on it instead of the offline planner. Read as routing reads it, so
+ * opening Assist doesn't wait on an Ollama that never answers (ollamaSoon).
+ */
 async function probeOllama(): Promise<{ ok: boolean; models: string[] }> {
-  const url = getSetting("ollamaUrl").replace(/\/+$/, "");
-  if (ollamaProbe && ollamaProbe.url === url && Date.now() - ollamaProbe.at < 30_000) return ollamaProbe;
-  const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(800) })
-    .then(async (r) => (r.ok ? ((await r.json().catch(() => ({}))) as { models?: { name?: string }[] }) : null))
-    .catch(() => null);
-  ollamaProbe = { at: Date.now(), url, ok: !!res, models: (res?.models ?? []).map((m) => m.name ?? "").filter(Boolean).slice(0, 50) };
-  return ollamaProbe;
+  const ok = await ollamaSoon();
+  return { ok, models: ok ? ollamaModels() : [] };
 }
-const ollamaReachable = async () => (await probeOllama()).ok;
+const ollamaReachable = () => ollamaSoon();
 
 /**
  * Which LLM drives new chats by default: Claude when a key is set (on open-source-only installs only when
@@ -432,7 +432,7 @@ export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<R
     const agent = await resolveAgent();
     return { mode: agent === "claude" ? "smart" : "free", agent, model: null, effort: null };
   }
-  const noKey = "Smart and Claude need an Anthropic API key (Settings → API keys) — using Free instead.";
+  const noKey = "Smart and Claude need an Anthropic API key (Settings → Prompt enhancement) — using Free instead.";
   if (choice.mode === "smart") return claudeAllowed() ? { mode: "smart", agent: "claude", model: DEFAULT_CLAUDE_MODEL, effort: DEFAULT_EFFORT } : free(noKey);
   if (choice.mode === "free") return free();
   // Manual
@@ -1325,7 +1325,7 @@ function refreshFlags(s: State): void {
 }
 
 function errorText(e: unknown): string {
-  if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → API keys.";
+  if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → Prompt enhancement.";
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limited right now. Try again in a minute.";
   if (e instanceof Anthropic.BadRequestError && /\bmcp\b|connector/i.test(e.message)) return `A connector didn't work: ${e.message}. Check it in Settings → Assist connectors, or switch it off.`;
   if (e instanceof Anthropic.APIError) return `Claude returned an error (${e.status ?? "network"}): ${e.message}`;

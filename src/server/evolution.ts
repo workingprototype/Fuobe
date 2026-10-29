@@ -142,7 +142,7 @@ export async function writeDirection(body: z.infer<typeof DirectionSchema>): Pro
   if (!textModel || !offeredModel(textModel)) return offline(`the text model is switched off in ${ACCESS_PLACE}`);
   const backend = llmTextBackend();
   const ollama = backend === "ollama" || (backend === "claude" && body.engine === "open");
-  if (!backend) return offline("no text model is set up (Settings → AI helper)");
+  if (!backend) return offline("no text model is set up (Settings → Prompt enhancement)");
   if (ollama && !(await probeOllama())) return offline("Ollama isn't running");
   const max = EVOLUTION.llmReferences[body.engine];
   const frame = body.frame ? [{ data: Buffer.from(body.frame.split(",")[1], "base64"), contentType: body.frame.slice(5, body.frame.indexOf(";")) }] : [];

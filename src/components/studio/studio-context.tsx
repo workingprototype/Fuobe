@@ -55,7 +55,8 @@ export interface StudioConfig {
   extraModels?: string[];
   /**
    * Read the attached clip's header (length, size, frame rate): prices count its seconds and the composer
-   * says what comes out ("24 → 60 fps", "1280×720 → 3840×2160"). Upscale hub video modes.
+   * says what comes out ("24 → 60 fps", "1280×720 → 3840×2160"). Upscale hub video modes, and Edit video (a clip
+   * edit that keeps the clip's length is billed on it, inside the model's window).
    */
   clipFacts?: boolean;
   /**

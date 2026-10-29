@@ -4,6 +4,7 @@
  * src/server/shorts.ts, src/server/mixed-media.ts); the browser gets the rows. A Fuobe Original runs on
  * both engines: each answer is for the engine asked about (its default engine when none is named).
  */
+import { sourceSeconds } from "./clip-windows";
 import { onEngine } from "./engines";
 import { getModel } from "./index";
 import { routesFor } from "./plan";
@@ -44,22 +45,8 @@ export function reframes(modelId: string, engine?: Engine): boolean {
   return routes.length > 0 && routes.every((r) => r.map?.aspectRatio);
 }
 
-/**
- * How long a clip each restyle model takes (docs/research/paid-model-apis-3.md, "Input windows"):
- * a cut outside it is paid for and then refused by the provider.
- */
-const SOURCE_SECONDS: Record<string, { min?: number; max?: number }> = {
-  "kling-o3-4k-edit": { min: 3, max: 15 },
-  "happy-horse-video-edit": { min: 3, max: 60 },
-  "runway-aleph-2": { min: 2, max: 30 },
-  "wan-2-7": { min: 2, max: 10 },
-  // Higgsfield feeds Gemini Omni Flash ≤10 s segments.
-  "gemini-omni-flash": { max: 10 },
-};
-
-export function sourceSeconds(modelId: string): { min?: number; max?: number } {
-  return SOURCE_SECONDS[modelId] ?? {};
-}
+/** How long a clip each restyle model takes (./clip-windows): a cut outside it is paid for and then refused by the provider. */
+export { sourceSeconds };
 
 /** The cloud model's 720p setting, when it has one (Higgsfield renders Shorts at 720p). */
 export function resolutionFor(modelId: string, engine?: Engine): string | undefined {
@@ -87,8 +74,8 @@ export interface RestyleModelInfo {
 }
 
 /**
- * What one unit costs at the resolution the studios ask for, counting input seconds when the model bills them. Fuobe
- * Shorts in the cloud bills frames ÷ 16 as seconds: a second of a 30 fps clip, the common case, is shown.
+ * What one unit costs at the resolution the studios ask for. Fuobe Shorts in the cloud bills frames ÷ 16 as seconds:
+ * a second of a 30 fps clip, the common case, is shown.
  */
 export function unitPrice(m: ModelDef): number | null {
   const p = m.pricing;
@@ -96,7 +83,7 @@ export function unitPrice(m: ModelDef): number | null {
   const res = resolutionFor(m.id, m.engine) ?? m.defaults?.resolution;
   const usd = (res && p.byResolution?.[res]) || p.usd;
   if (m.id === SHORTS_ORIGINAL && p.unit === "second") return (usd * SHORTS.original.maxFps) / SHORTS.original.billFps;
-  return p.unit === "second" && p.inputSeconds ? usd * 2 : usd;
+  return usd;
 }
 
 const UNIT: Record<string, string> = { second: "s", megapixel: "MP" };

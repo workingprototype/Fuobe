@@ -710,10 +710,13 @@ model("wan-vace-reframe", "Wan VACE Reframe (hosted)", "Alibaba Wan", "wan", "vi
       [("reframe", "fal-ai/wan-vace-14b/reframe")], defaults={"aspectRatio": "9:16"})
 
 # ----- Video restyle / edit (research part 3; Shorts Studio, Mixed Media, Ad Multiplier)
+# fal: "$0.28/second ($0.14 per input second and 0.14 per output second)" at 720p, $0.56 at 1080p: the whole price
+# per second of the clip, both halves already summed (fixes-5: it was charged twice over, input seconds again on top).
+# The output matches the input, capped at 15 s.
 model("happy-horse-video-edit", "Happy Horse Video Edit", "Alibaba", "happy-horse", "video",
-      "Restyle or swap things in 3–60 s clips, with up to 5 reference images",
+      "Restyle or swap things in 3–15 s clips, with up to 5 reference images",
       [("v2v", "alibaba/happy-horse/video-edit")], badges=["new", "audio"], defaults={"resolution": "720p"},
-      pricing=("second", 0.28, "720p, input + output seconds; 1080p $0.56", {"byResolution": {"720p": 0.28, "1080p": 0.56}, "inputSeconds": True}),
+      pricing=("second", 0.28, "720p, input and output seconds together; 1080p $0.56", {"byResolution": {"720p": 0.28, "1080p": 0.56}}),
       controls=[("audio_setting", "Audio")])
 # Happy Horse 1.1 (build plan O7): fal hosts Alibaba's three endpoints (partnerEndpoints, read
 # 2026-10-27): $0.14/s at 720p, $0.18/s at 1080p; 3-15 s; up to 9 reference images.
@@ -1996,7 +1999,7 @@ for m in M:
     pricing = None
     if m["pricing"]:
         u, usd, *rest = m["pricing"]
-        # Optional: a note, then extra Pricing fields (byResolution, inputSeconds).
+        # Optional: a note, then extra Pricing fields (byResolution, factors, …).
         note = [x for x in rest if isinstance(x, str)]
         extra = next((x for x in rest if isinstance(x, dict)), {})
         pricing = {"unit": u, "usd": usd, **({"note": note[0]} if note else {}), **extra}

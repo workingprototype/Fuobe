@@ -429,7 +429,7 @@ describe("Ad Multiplier", () => {
     const imgs = [upload("a.png"), upload("b.png")];
     const v = video();
     const hh = mk.planMultiplier({ engine: "cloud", video: v, duration: 30, images: imgs, mode: "prompt", prompt: "Swap the bottle for @image_2", quality: "720p", modelId: "happy-horse-video-edit" }, {});
-    // The first 15 s are cut first (Happy Horse returns at most 15 s and bills the input seconds too).
+    // The first 15 s are cut first (Happy Horse returns at most 15 s).
     expect(hh.steps.map((s) => s.key)).toEqual(["clip", "edit"]);
     expect(hh.steps[0].request.params).toEqual({ startTime: 0, endTime: 15 });
     expect(hh.notes.join(" ")).toMatch(/Happy Horse Video Edit recreates up to 15 s: the first 15 s of your selection are used/);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getModel } from "@/lib/catalog";
+import { getMaker, planGenjutsu } from "@/lib/catalog/genjutsu";
 import { MIXED_MODELS, MIXED_PRESETS, defaultValues, mixedFrames, planMixed, type MixedPlanInput } from "@/lib/catalog/mixed-media";
 import { estimateCost, routesFor } from "@/lib/catalog/plan";
 import { clipLengthProblem, lookFromPreset, planCloudSegments, planShorts, SHORTS_MODELS, SHORTS_PRESETS, type ShortsPlanInput } from "@/lib/catalog/shorts";
@@ -31,11 +32,45 @@ describe("restyle prices", () => {
     expect(modelInfos(["gemini-omni-flash"])[0].price).toBe("$0.10 / s");
   });
 
-  it("counts the input seconds for Happy Horse (billed on input + output): about twice the clip", () => {
+  it("prices Happy Horse video edit at $0.28 a second of clip at 720p: fal's $0.14 per input second plus $0.14 per output second, not twice that", () => {
     const hh = getModel("happy-horse-video-edit")!;
-    expect(estimateCost(hh, { resolution: "720p", duration: 10 })).toBeCloseTo(5.6);
-    expect(estimateCost(hh, { resolution: "1080p", duration: 10 })).toBeCloseTo(11.2);
-    expect(modelInfos(["happy-horse-video-edit"])[0].price).toBe("$0.56 / s");
+    expect(estimateCost(hh, { resolution: "720p", duration: 10 })).toBeCloseTo(2.8);
+    expect(estimateCost(hh, { resolution: "1080p", duration: 10 })).toBeCloseTo(5.6);
+    expect(unitPrice(hh)).toBeCloseTo(0.28);
+    expect(modelInfos(["happy-horse-video-edit"])[0].price).toBe("$0.28 / s");
+    // It reads up to 60 s but returns at most the first 15 s: a longer cut is refused before it's paid for.
+    expect(sourceSeconds("happy-horse-video-edit")).toEqual({ min: 3, max: 15 });
+    // Every studio that restyles on it pays $0.28 for each second of the selection at 720p (what they ask for).
+    const shortsPlan = planShorts(shorts({ modelId: "happy-horse-video-edit", maxRefs: 4, resolution: "720p" }));
+    const looks = shortsPlan.steps.filter((s) => s.request.modelId === "happy-horse-video-edit");
+    expect(looks).toHaveLength(5);
+    expect(looks.reduce((n, s) => n + estimateCost(hh, s.request.params!, 1, s.request.op)!, 0)).toBeCloseTo(0.28 * 47, 2);
+    const fast = planMixed({
+      engine: "cloud",
+      title: "Sketch · skate",
+      preset: MIXED_PRESETS[0],
+      values: defaultValues(MIXED_PRESETS[0]),
+      source: { url: "/api/files/skate.mp4", duration: 12, hasAudio: true },
+      range: { start: 1, end: 9 },
+      fps: 8,
+      resolution: "1K",
+      modelId: "happy-horse-video-edit",
+      mode: "fast",
+    }).steps.find((s) => s.request.modelId === "happy-horse-video-edit")!;
+    expect(estimateCost(hh, fast.request.params!, 1, fast.request.op)).toBeCloseTo(0.28 * 8, 2);
+    const genjutsu = planGenjutsu({
+      engine: "cloud",
+      mode: "restyle",
+      maker: getMaker("happy-horse-video-edit", "cloud")!,
+      title: "Genjutsu",
+      source: { url: "/api/files/clip.mp4", duration: 20, fps: 30, width: 1280, height: 720, hasAudio: true },
+      range: { start: 0, end: 20 },
+      quality: "720p",
+      references: [],
+      look: { kind: "preset", id: "shorts-claymation" },
+    }).steps.filter((s) => s.request.modelId === "happy-horse-video-edit");
+    expect(genjutsu.length).toBeGreaterThan(0);
+    expect(genjutsu.reduce((n, s) => n + estimateCost(hh, s.request.params!, 1, s.request.op)!, 0)).toBeCloseTo(0.28 * 20, 2);
   });
 
   it("never tells a restyle model a length: each keeps its clip's (Wan's 5 s default would cut segments short)", () => {
