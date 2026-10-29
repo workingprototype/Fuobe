@@ -16,7 +16,7 @@ import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, 
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, loraName, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
-import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
+import { promptWithLoras, SOUL_MODELS, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
 import { isDop } from "@/lib/catalog/dop";
 import { finishSteps } from "@/lib/soul-post";
 import {
@@ -793,8 +793,10 @@ function placeholderFor(s: ChainSlot): string {
  * A translation of timed text gets the cue list (so the timing survives); text saved only as a
  * file, or cut short inline (meta.truncated), is read back from it.
  */
-async function chainValue(o: OutputFile | undefined, s: ChainSlot, op?: Generation["op"]): Promise<string | undefined> {
+export async function chainValue(o: OutputFile | undefined, s: ChainSlot, op?: Generation["op"]): Promise<string | undefined> {
   if (!o) return undefined;
+  // The picture as it was made, before a Soul finish replaced it (a look board's next frame: its own grade comes after).
+  if (s.raw && typeof o.meta?.original === "string" && o.meta.original) return o.meta.original;
   if (s.slot !== "prompt") return o.url;
   const cues = Array.isArray(o.meta?.cues) && o.meta.cues.length ? (o.meta.cues as Cue[]) : null;
   if (op === "translate" && cues) return JSON.stringify(cues);
@@ -1381,7 +1383,10 @@ async function pollOne(r: Row): Promise<void> {
   }
   // Fuobe Soul: what follows in the browser (the look's grade, an overlay, Soul Cinema's 21:9 crop), on each image;
   // API clients read it as meta.
-  const post = soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
+  // A storyboard frame with a look gets the look's finish whatever model made it (a 21:9 board is cropped after).
+  const board = (JSON.parse(r.request_json) as GenerationRequest).frame;
+  const boardPost = board?.look ? soulPostSteps(SOUL_MODELS.soul, board.look) : undefined;
+  const post = boardPost ? { ...boardPost, ...(board?.crop && { crop: board.crop }) } : soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
   if (post) for (const [i, o] of outputs.entries()) if (o.kind === "image") outputs[i] = { ...o, meta: { ...o.meta, ...post } };
   // Fuobe DoP's colour-grade effects: the grade the browser applies to the clip (the result's "Apply the grade" step).
   const grade = isDop(r.model_id) && r.preset_id ? getPreset(r.preset_id)?.grade : undefined;
