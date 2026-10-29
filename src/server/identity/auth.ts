@@ -12,6 +12,7 @@ import { INSTALL, installMode, installValue, siteUrl } from "../mode";
 import { appendAudit } from "./audit-log";
 import { hashPassword, needsRehash, PASSWORD_MAX, PASSWORD_MIN, verifyPassword } from "./password";
 import { refusal } from "./refusals";
+import { AUTH_TABLES } from "./schema";
 import { deriveKey } from "./secret";
 
 /**
@@ -256,21 +257,21 @@ export function buildAuthOptions(site: AuthSite) {
       },
     },
     trustedOrigins: (request?: Request) => trustedOriginsFor(request),
-    user: { modelName: "auth_user" },
+    user: { modelName: AUTH_TABLES.user },
     account: {
-      modelName: "auth_account",
+      modelName: AUTH_TABLES.account,
       accountLinking: { trustedProviders: [] as string[], allowDifferentEmails: false },
     },
     session: {
-      modelName: "auth_session",
+      modelName: AUTH_TABLES.session,
       expiresIn: 30 * 86_400,
       updateAge: 86_400,
       deferSessionRefresh: true,
       freshAge: 600,
       cookieCache: { enabled: false },
     },
-    verification: { modelName: "auth_verification", storeIdentifier: "hashed" as const },
-    rateLimit: { enabled: true, storage: "database" as const, modelName: "auth_rate_limit" },
+    verification: { modelName: AUTH_TABLES.verification, storeIdentifier: "hashed" as const },
+    rateLimit: { enabled: true, storage: "database" as const, modelName: AUTH_TABLES.rateLimit },
     emailAndPassword: {
       enabled: true,
       minPasswordLength: PASSWORD_MIN,

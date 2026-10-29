@@ -4,6 +4,7 @@
  * database hooks, returnHeaders, the internal adapter — and the schema guard. A library upgrade that changes any
  * of these fails here first.
  */
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -167,5 +168,20 @@ describe("admin operations (§7.1)", () => {
     for (const m of ["createUser", "findUserByEmail", "findUserById", "findCredentialAccount", "updatePassword", "linkAccount", "deleteAccount", "deleteUserSessions", "listSessions", "deleteSession", "updateUser", "deleteAccounts", "deleteUser"] as const) {
       expect(typeof ctx.internalAdapter[m], m).toBe("function");
     }
+  });
+});
+
+describe("scripts/auth-schema.mjs", () => {
+  const run = (...args: string[]) => execFileSync(process.execPath, ["scripts/auth-schema.mjs", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+
+  it("prints exactly the SQL frozen in the identity migration", () => {
+    const frozen = fs.readFileSync(path.join(process.cwd(), "src/server/db.ts"), "utf8");
+    const statements = run().split(/;\s*\n/).map((s) => s.trim().replace(/;$/, "")).filter(Boolean);
+    expect(statements.length).toBeGreaterThanOrEqual(8);
+    for (const s of statements) expect(frozen, s).toContain(`${s};`);
+  });
+
+  it("finds nothing missing in a migrated database", () => {
+    expect(run("--db", path.join(dir, "fuobe.db"), "--check")).toMatch(/match/);
   });
 });
