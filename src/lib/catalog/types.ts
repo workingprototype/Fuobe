@@ -873,6 +873,17 @@ export interface GenerationRequest {
   /** Server-set: the name of the batch it belongs to (an Assist plan's summary): the Library stack's title. */
   batchTitle?: string;
   /**
+   * Server-set: made by a run of a skill's recipe (src/lib/recipe.ts): the skill's name and the run's id (its batch), so
+   * a run's history can be read back. Stripped from API input, like chainFilled.
+   */
+  skill?: { name: string; run: string };
+  /**
+   * Server-set: run on the demo provider whatever Settings → Demo mode says (a recipe's free dry run): chooseRoute
+   * returns the demo route, and a waiting step runs as a demo after demo steps even with Demo mode off. Stripped from
+   * API input.
+   */
+  demo?: boolean;
+  /**
    * The Image studio's style signature (Color signature + Moodboard chips): what was picked, the
    * sentences the server adds to the prompt (`prompt` keeps the user's own words), and the request as
    * it was before the signature routed it (Reuse restores that). See src/lib/catalog/palettes.ts.
