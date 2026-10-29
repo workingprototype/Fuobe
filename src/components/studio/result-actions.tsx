@@ -3,6 +3,7 @@
 import {
   ArchiveRestore,
   AudioLines,
+  BookmarkPlus,
   Box,
   CircleDot,
   Clapperboard,
@@ -96,6 +97,7 @@ export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
   finalize: Sparkles,
   compare: Columns2,
   reuse: RotateCcw,
+  "make-skill": BookmarkPlus,
   "copy-prompt": Copy,
   share: Share2,
   pin: Pin,

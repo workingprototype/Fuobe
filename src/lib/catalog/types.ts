@@ -907,6 +907,13 @@ export interface GenerationRequest {
    */
   demo?: boolean;
   /**
+   * Server-set on the row a request that expanded into several rows returns first (a multi-shot film, a Frames film, an
+   * extend on a model with no extend API, open text-to-3D, a DoP relight: src/server/chains.ts): the request as it was
+   * asked, so a skill made from the result rebuilds that one request, not the steps it became (their number changes
+   * with the input). Stripped from API input.
+   */
+  asked?: GenerationRequest;
+  /**
    * The Image studio's style signature (Color signature + Moodboard chips): what was picked, the
    * sentences the server adds to the prompt (`prompt` keeps the user's own words), and the request as
    * it was before the signature routed it (Reuse restores that). See src/lib/catalog/palettes.ts.
