@@ -13,6 +13,7 @@ import {
   inputPorts,
   isGenerator,
   modelChoices,
+  nodeEngine,
   nodeSignature,
   outputType,
   paletteItems,
@@ -347,7 +348,8 @@ describe("canvas templates", () => {
     for (const n of g.nodes.filter(isGenerator)) {
       const m = getModel(n.data.modelId!);
       expect(m, `${id}/${n.id}: ${n.data.modelId}`).toBeDefined();
-      expect(m!.engine).toBe(engine);
+      // A Fuobe Original (both engines) runs on the engine its node names.
+      expect(nodeEngine(n, m!)).toBe(engine);
     }
     expect(graphEngine(g)).toBe(engine);
     const plan = planCanvas(g, { engineMode: engine });
