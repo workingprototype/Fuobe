@@ -431,9 +431,41 @@ export const NODE_PACKS: NodePack[] = [
     ...GPL,
     note: "H3 Relay 2.0 (Sendy Software LLC and contributors); GPL-3.0 code, vendored Context Loop and Spectrum GPL-3.0. Opt-in (H3_RELAY=1): it registers HTTP routes when it loads",
   }),
+  // DBS soundtrack separation (docs/research/dbs-separation-7.md §3.2), pinned in install-comfyui.sh.
+  pack("ComfyUI-DBS", "https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/f656e53434b5485c148a2866fbd6ddc6b6152ed6", {
+    name: "MIT",
+    class: "commercial",
+    url: SPDX("MIT"),
+    note: "Dialogue / music / effects separation; MIT code, vendored DBS code Apache-2.0 with MIT notices; the DBS weights are Apache-2.0, trained on DnR v2 (CC BY 4.0)",
+  }),
 ];
 
 export const nodePack = (name: string): NodePack | undefined => NODE_PACKS.find((p) => p.name === name);
+
+/**
+ * Credits About & licences shows: attributions a licence asks for (CC BY) and the notices that ship with code Fuobe
+ * installs (the MIT notices kept in DBS's THIRD_PARTY.md). Information, like everything here.
+ */
+export interface Attribution {
+  /** What it is for, as the list names it. */
+  for: string;
+  /** The credit, as it should read. */
+  text: string;
+  licence: string;
+  url?: string;
+}
+
+export const ATTRIBUTIONS: Attribution[] = [
+  {
+    for: "DBS (dialogue, music, effects)",
+    text: "Trained on the Divide and Remaster (DnR) v2 dataset by Darius Petermann, Gordon Wichern, Zhong-Qiu Wang and Jonathan Le Roux",
+    licence: "CC BY 4.0",
+    url: "https://zenodo.org/records/6949108",
+  },
+  { for: "DBS (vendored code)", text: "BS-RoFormer, copyright (c) 2023 Phil Wang", licence: "MIT", url: "https://github.com/lucidrains/BS-RoFormer" },
+  { for: "DBS (vendored code)", text: "Music-Source-Separation-Training, copyright (c) 2024 Roman Solovyev (ZFTurbo)", licence: "MIT", url: "https://github.com/ZFTurbo/Music-Source-Separation-Training" },
+  { for: "DBS (vendored code)", text: "TIGER / Look2Hear, copyright (c) 2026 Kai Li", licence: "MIT", url: "https://github.com/JusperLee/TIGER" },
+];
 
 /** The parts of a LoRA's licence snapshot the class needs (src/lib/catalog/types.ts LoraLicence). */
 interface LoraLicenceLike {

@@ -827,7 +827,8 @@ function hdrOutputs(response: unknown): ExtractedOutput[] {
   return preview ? [{ url: preview.url, kind: "video", contentType: preview.contentType, meta: { preview: "sdr", artifacts: { exr: exr.url } } }] : [];
 }
 
-const STEM_ORDER = ["vocals", "voice", "speech", "target", "drums", "bass", "guitar", "piano", "other", "residual", "accompaniment", "instrumental"];
+// Voice first, then DBS's music and effects, then Demucs's instruments and the backgrounds.
+const STEM_ORDER = ["vocals", "voice", "speech", "target", "music", "sfx", "effects", "drums", "bass", "guitar", "piano", "other", "residual", "accompaniment", "instrumental"];
 
 /** Demucs: {vocals, drums, bass, other, guitar, piano} files; SAM Audio: {target, residual}. Voice first. */
 function stemOutputs(response: unknown): ExtractedOutput[] {

@@ -36,6 +36,7 @@ import {
 } from "@/lib/comfy";
 import { fpsPlan } from "@/lib/av/fps";
 import { crossfadeProblem, fadeCurveWav } from "@/lib/av/crossfade";
+import { dbsChannelsFor, dbsModelFor } from "@/lib/av/split";
 import { expandAudioJoinWorkflow, expandVideoJoinWorkflow } from "@/lib/av/joins";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
@@ -449,6 +450,27 @@ export async function probeComfy(force = false): Promise<boolean> {
   return sharedCheck("comfy", url, () => checkComfy(url));
 }
 
+declare global {
+  /** The torch device each ComfyUI address reported last (GET /system_stats devices[0].type), and when. */
+  var __fuobeComfyDevice: Map<string, { type?: string; at: number }> | undefined;
+}
+
+/**
+ * The connected ComfyUI's first torch device type ("cuda" for NVIDIA and ROCm, "cpu", "mps"…), from GET /system_stats
+ * (devices[0], as Settings' test reads it), kept for a minute; undefined when the server doesn't say or can't be reached.
+ */
+export async function comfyDevice(worker: ComfyWorker = "main"): Promise<string | undefined> {
+  const url = baseUrl(worker);
+  if (!url) return undefined;
+  const cache = (globalThis.__fuobeComfyDevice ??= new Map());
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < 60_000) return hit.type;
+  const s = await comfyJson<{ devices?: { type?: unknown }[] }>("/system_stats", worker).catch(() => undefined);
+  const type = typeof s?.devices?.[0]?.type === "string" ? (s.devices[0].type as string) : undefined;
+  if (s) cache.set(url, { type, at: Date.now() });
+  return type;
+}
+
 /** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
 export function comfyRam(): number | undefined {
   const cur = globalThis.__fuobeComfyReach;
@@ -595,6 +617,8 @@ export interface PrepareContext {
   media?: (name: string) => MediaInfo | undefined;
   /** The ComfyUI server's RAM in bytes, for graphs that hold a whole clip in memory. */
   serverRam?: () => Promise<number | undefined>;
+  /** The server's first torch device type ("cuda", "cpu", "mps"…; GET /system_stats devices[0].type): DBS picks its model by it. */
+  device?: () => Promise<string | undefined>;
   /**
    * The route puts the run's one LoRA in the graph's own LoRA slot (ModelRoute.loraSlot: Fuobe Speak's FusioniX on kijai's
    * InfiniteTalk graph, with the settings it goes with). Without it a graph with no model loader refuses a LoRA.
@@ -1083,6 +1107,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // A Video concatenator clip muted in the canvas (video-fit-clip): its sound becomes silence below.
   const muted = manifest.id === "video-fit-clip" && extra.mute === true;
   delete extra.mute;
+  // DBS (separate-soundtrack-dbs): the model asked for, else the host's pick (DBS-TIGER on a CUDA GPU, DBS-BSRNN on a
+  // CPU); "each channel" for stereo stems, and always for more than 2 channels (the header's count, else the browser's).
+  if (b.separationModel) values.separationModel = dbsModelFor(extra.separationModel, extra.separationModel ? undefined : await ctx.device?.().catch(() => undefined));
+  if (b.channels) values.channels = dbsChannelsFor(extra.channels, ctx.media?.(String(values.audio ?? ""))?.channels ?? (Number(extra.sourceChannels) || undefined));
+  for (const k of ["separationModel", "channels", "sourceChannels"]) delete extra[k];
   for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
   if (audio2 && ctx.op !== "dialogue" && ctx.op !== "voice-change") values.audio2 = audio2;
   // Soundtrack mix: a silent bed as long as the video, so neither track cuts the other short.
@@ -1361,6 +1390,7 @@ export const comfyProvider: ProviderAdapter = {
       upload: (data, contentType, name) => uploadTo(worker, data, contentType, name),
       media: mediaInfoFor,
       serverRam: async () => (await comfyJson<{ system?: { ram_total?: number } }>("/system_stats", worker).catch(() => undefined))?.system?.ram_total,
+      device: () => comfyDevice(worker),
     });
     const { clientId } = ensureSocket(worker);
     const res = await comfyFetch(

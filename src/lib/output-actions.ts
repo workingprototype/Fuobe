@@ -26,6 +26,7 @@ export type OutputActionId =
   | "genjutsu"
   | "voice-change"
   | "loop-audio"
+  | "split-soundtrack"
   | "copy-text"
   | "view-3d"
   | "download"
@@ -118,6 +119,7 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("lipsync", "Lipsync", `/lipsync?video=${q(o.url)}`);
       link("upscale", "Upscale", `/upscale/video?video=${q(o.url)}`);
       link("add-sound", "Add sound", `/audio/video?video=${q(o.url)}`);
+      link("split-soundtrack", "Split soundtrack", `/audio/split?video=${q(o.url)}`);
       // A Fuobe DoP colour-grade effect: the clip opens in Color grading with its grade picked (one click to export).
       const dopGrade = gradeOf(o);
       link("grade", dopGrade ? `Apply the ${dopGrade.name} grade` : "Color grade", `/color-grade?video=${q(o.url)}${dopGrade ? `&preset=${q(dopGrade.id)}` : ""}`);
@@ -129,6 +131,7 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("voice-change", "Change voice", `/audio/voice-change?audio=${q(o.url)}`);
       link("loop-audio", "Loop / extend", `/audio/loop?audio=${q(o.url)}`);
+      link("split-soundtrack", "Split soundtrack", `/audio/split?audio=${q(o.url)}`);
       break;
     case "text":
       out.push({ id: "copy-text", label: "Copy", placement: "primary" }, file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
@@ -163,8 +166,10 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
 const NEXT_STEPS: Partial<Record<OutputFile["kind"], OutputActionId[]>> = {
   image: ["animate", "upscale", "edit"],
   video: ["extend", "upscale", "add-sound"],
-  audio: ["lipsync", "voice-change"],
+  audio: ["lipsync", "voice-change", "split-soundtrack"],
 };
+/** Clips made with their sound (or keeping the source's): Split soundtrack instead of Add sound. */
+const SOUNDED_VIDEO_OPS = new Set<Generation["op"]>(["v2a", "mux", "lipsync", "trim", "captions"]);
 
 /**
  * Up to `max` next steps for output `index` (Animate, Upscale, Edit for a picture), taken from
@@ -175,7 +180,8 @@ export function nextSteps(g: Generation, index: number, max = 3): OutputAction[]
   if (!o || g.status !== "succeeded") return [];
   const all = outputActions(g, index);
   // A clip with a grade still to apply (a Fuobe DoP colour-grade effect) offers it first.
-  const order: OutputActionId[] = o.kind === "video" && gradeOf(o) ? ["grade", ...(NEXT_STEPS.video ?? [])] : (NEXT_STEPS[o.kind] ?? []);
+  const video = o.kind === "video" && g.op && SOUNDED_VIDEO_OPS.has(g.op) ? (NEXT_STEPS.video ?? []).map((id) => (id === "add-sound" ? "split-soundtrack" : id)) : NEXT_STEPS.video;
+  const order: OutputActionId[] = o.kind === "video" ? [...(gradeOf(o) ? (["grade"] as const) : []), ...(video ?? [])] : (NEXT_STEPS[o.kind] ?? []);
   return order
     .map((id) => all.find((a) => a.id === id && a.href))
     .filter((a): a is OutputAction => !!a)

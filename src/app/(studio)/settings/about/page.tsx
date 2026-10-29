@@ -8,7 +8,7 @@ import { PageHeader, PageShell } from "@/components/page-shell";
 import { MODELS } from "@/lib/catalog";
 import type { Manifest } from "@/lib/comfy";
 import { FUOBE_REPO } from "@/lib/connections";
-import { buildLicenceList } from "@/lib/licences";
+import { ATTRIBUTIONS, buildLicenceList } from "@/lib/licences";
 
 export const metadata: Metadata = { title: "About & licences" };
 
@@ -95,6 +95,32 @@ export default async function Page() {
           </ul>
         </section>
       )}
+
+      <section aria-labelledby="credits" className="mt-8">
+        <h2 id="credits" className="text-[15px] font-semibold">
+          Credits
+        </h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">Attributions the licences of the data and code behind Fuobe&apos;s open models ask for.</p>
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+          {ATTRIBUTIONS.map((a) => (
+            <li key={a.text} className="min-w-0 rounded-xl border px-4 py-3">
+              <p className="text-[13px] [overflow-wrap:anywhere]">
+                {a.url ? (
+                  <a href={a.url} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-brand-text">
+                    {a.text}
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                ) : (
+                  a.text
+                )}
+              </p>
+              <p className="mt-0.5 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
+                {a.licence} · for {a.for}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <section aria-labelledby="licences" className="mt-10">
         <h2 id="licences" className="font-heading text-[24px] leading-tight">

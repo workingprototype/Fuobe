@@ -211,6 +211,18 @@ describe("3D models, stems and other extras", () => {
     ]);
   });
 
+  it("stems sort voice first, then music and effects (DBS names), then instruments and the backgrounds", () => {
+    const res = {
+      residual: file("https://v3.fal.media/files/rest.wav", "audio/wav"),
+      effects: file("https://v3.fal.media/files/fx.wav", "audio/wav"),
+      drums: file("https://v3.fal.media/files/drums.wav", "audio/wav"),
+      music: file("https://v3.fal.media/files/music.wav", "audio/wav"),
+      sfx: file("https://v3.fal.media/files/sfx.wav", "audio/wav"),
+      speech: file("https://v3.fal.media/files/speech.wav", "audio/wav"),
+    };
+    expect(extractOutputs(res, "separate-audio").map((o) => o.meta?.stem)).toEqual(["speech", "music", "sfx", "effects", "drums", "residual"]);
+  });
+
   it("keeps Recraft's new style id and puts Bria's matte on the cut-out", () => {
     expect(extractOutputs({ images: [file("https://v3.fal.media/files/a.png", "image/png")], style_id: "style-9" }, "t2i")[0].meta).toEqual({ styleId: "style-9" });
     const cut = extractOutputs({ image: file("https://v3.fal.media/files/cut.png", "image/png"), mask: file("https://v3.fal.media/files/mask.png", "image/png") }, "edit");

@@ -20,6 +20,8 @@ export interface MediaInfo {
   frames?: number;
   hasVideo: boolean;
   hasAudio: boolean;
+  /** Audio channels, where the header says (WAV, FLAC, MP3); unset for MP4 and the rest. */
+  channels?: number;
 }
 
 const fourcc = (b: Uint8Array, o: number) => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]);
@@ -201,13 +203,17 @@ function probeIsoBmff(data: Uint8Array): MediaInfo | null {
 function probeWav(data: Uint8Array): MediaInfo | null {
   const d = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let byteRate = 0;
+  let channels = 0;
   for (let o = 12; o + 8 <= data.length; ) {
     const id = fourcc(data, o);
     let size = d.getUint32(o + 4, true);
-    if (id === "fmt ") byteRate = d.getUint32(o + 16, true);
+    if (id === "fmt ") {
+      channels = d.getUint16(o + 10, true);
+      byteRate = d.getUint32(o + 16, true);
+    }
     if (id === "data") {
       if (!size || size === 0xffffffff || o + 8 + size > data.length) size = data.length - o - 8; // streamed header
-      return byteRate ? { container: "wav", duration: size / byteRate, hasVideo: false, hasAudio: true } : null;
+      return byteRate ? { container: "wav", duration: size / byteRate, hasVideo: false, hasAudio: true, ...(channels > 0 && { channels }) } : null;
     }
     o += 8 + size + (size % 2);
   }
@@ -215,12 +221,13 @@ function probeWav(data: Uint8Array): MediaInfo | null {
 }
 
 function probeFlac(data: Uint8Array): MediaInfo | null {
-  // STREAMINFO is always the first metadata block: 20-bit sample rate, 36-bit total samples.
+  // STREAMINFO is always the first metadata block: 20-bit sample rate, 3-bit channels - 1, 36-bit total samples.
   const o = 8 + 10;
   const rate = (data[o] << 12) | (data[o + 1] << 4) | (data[o + 2] >> 4);
+  const channels = ((data[o + 2] >> 1) & 0x07) + 1;
   const total = (data[o + 3] & 0x0f) * 2 ** 32 + ((data[o + 4] << 24) >>> 0) + (data[o + 5] << 16) + (data[o + 6] << 8) + data[o + 7];
   if (!rate) return null;
-  return { container: "flac", ...(total ? { duration: total / rate } : {}), hasVideo: false, hasAudio: true };
+  return { container: "flac", ...(total ? { duration: total / rate } : {}), hasVideo: false, hasAudio: true, channels };
 }
 
 const MP3_BITRATES: Record<string, number[]> = {
@@ -248,8 +255,8 @@ function probeMp3(data: Uint8Array): MediaInfo | null {
   const tag = fourcc(data, x);
   if ((tag === "Xing" || tag === "Info") && data[x + 7] & 1) {
     const frames = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(x + 8);
-    return { container: "mp3", duration: (frames * samplesPerFrame) / rate, hasVideo: false, hasAudio: true };
+    return { container: "mp3", duration: (frames * samplesPerFrame) / rate, hasVideo: false, hasAudio: true, channels: mono ? 1 : 2 };
   }
   if (!bitrate) return null;
-  return { container: "mp3", duration: ((data.length - o) * 8) / bitrate, hasVideo: false, hasAudio: true };
+  return { container: "mp3", duration: ((data.length - o) * 8) / bitrate, hasVideo: false, hasAudio: true, channels: mono ? 1 : 2 };
 }

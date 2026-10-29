@@ -2405,7 +2405,8 @@ export const SPEC = [
     license: 'DBS weights Apache-2.0 (JusperLee; trained on DnR v2, CC BY 4.0); ComfyUI-DBS code MIT; vendored DBS code Apache-2.0 with MIT notices (BS-RoFormer, MSST, TIGER)',
     notes:
       'CPU OK, about 1.7 GiB on CUDA. audio = an audio file or a video (LoadAudio reads a video\'s soundtrack without decoding frames). ' +
-      'DBSLoader model DBS-BSRNN-DnR (fast: 18.9 MB, 9.07 dB SI-SDR on DnR v2, the CPU default) or DBS-TIGER-DnR (best: 4.1 MB, 10.13 dB, about 4x slower on a CPU, the CUDA default); device auto. ' +
+      'DBSLoader model DBS-BSRNN-DnR (fast: 18.9 MB, 9.07 dB SI-SDR on DnR v2, the CPU default) or DBS-TIGER-DnR (best: 4.1 MB, 10.13 dB, about 3x slower on a CPU, the CUDA default); device auto. ' +
+      'Measured on a 4-CPU host (torch 2.14.1+cpu, 10-20 s clips): DBS-BSRNN 0.17-0.33x real time per channel, DBS-TIGER 0.08-0.09x. ' +
       'DBSSeparate channels mono (the mean of the channels, the official usage) or each channel (every channel separated on its own: 2x the time for stereo, 6x for 5.1; ' +
       'the provider forces it for inputs with more than 2 channels, where the subtract below would also take speech out of the LFE and surrounds); output_sample_rate input. ' +
       'Outputs in order: voice (speech), music, effects (sfx), background = original minus speech (AudioMerge subtract: with mono it keeps the original stereo image at mono cost; ' +

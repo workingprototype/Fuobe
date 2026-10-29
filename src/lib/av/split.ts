@@ -1,0 +1,373 @@
+import type { Engine, GenerationRequest } from "@/lib/catalog/types";
+import { clock, type ToolPlan } from "./audio-tools";
+
+/**
+ * Audio → Split soundtrack (DBS D1, docs/research/dbs-separation-7.md): any audio or video split into Dialogue,
+ * Music, Effects and Music & effects stems, a free live mixer over them, and the mix exported or put back on the video.
+ * Pure: the page and the server (src/server/audio-tools.ts) share it, and the ComfyUI provider takes its model and
+ * channel rules.
+ *
+ * - Open engine (ComfyUI + ComfyUI-DBS, CPU or GPU): one job on oss-dbs-separate (graph separate-soundtrack-dbs).
+ * - Cloud: none. DBS is hosted nowhere, and a different model in its place (fal's SAM Audio) is the owner's call, not
+ *   taken: the cloud engine says the tool runs on your GPU. A result's mix still goes back on a video on either engine
+ *   (oss-mux / fal merge-audio-video).
+ */
+
+export const SPLIT_FEATURE = "audio-split";
+export const SPLIT_MODEL = "oss-dbs-separate";
+/** Putting a mix back on its video: the open stream-copy mux, or fal's merge on the cloud. */
+export const REMUX_FEATURE = "audio-split-remux";
+export const REMUX_MODELS: Record<Engine, string> = {
+  open: "oss-mux",
+  cloud: "merge-audio-video",
+};
+
+/** Why the cloud engine has no Split soundtrack (and what Engine mode "Paid APIs only" says). */
+export const CLOUD_SPLIT_PROBLEM =
+  "Split soundtrack runs on your GPU (open source): DBS isn't hosted on fal or Replicate, so the cloud engine can't split dialogue, music and effects. Switch to the open engine.";
+export const CLOUD_ONLY_PROBLEM = "Split soundtrack runs on your GPU (open source), but this install is set to paid cloud APIs only (Settings → Engine mode)";
+
+// ---------------------------------------------------------------------------
+// The DBS models and how a host picks one
+
+export type SplitQuality = "fast" | "best";
+export type DbsModel = "DBS-BSRNN-DnR" | "DBS-TIGER-DnR";
+export const DBS_MODELS: Record<SplitQuality, DbsModel> = {
+  fast: "DBS-BSRNN-DnR",
+  best: "DBS-TIGER-DnR",
+};
+export const QUALITY_LABELS: Record<SplitQuality, string> = {
+  fast: "Fast (DBS-BSRNN)",
+  best: "Best (DBS-TIGER)",
+};
+export type DbsChannels = "mono" | "each channel";
+
+/**
+ * The model a host does best with: DBS-TIGER (10.13 dB) on a CUDA GPU, where both run well over 10x real time
+ * (ROCm reports "cuda" too); DBS-BSRNN (9.07 dB) on a CPU, where it runs about 4x faster than DBS-TIGER.
+ */
+export function hostPick(deviceType?: string | null): SplitQuality {
+  return deviceType === "cuda" ? "best" : "fast";
+}
+
+/** The DBSLoader model a run gets: the one asked for ("fast" / "best" or the model's name), else the host's pick. */
+export function dbsModelFor(asked: unknown, deviceType?: string | null): DbsModel {
+  if (asked === "DBS-BSRNN-DnR" || asked === "DBS-TIGER-DnR") return asked;
+  if (asked === "fast" || asked === "best") return DBS_MODELS[asked];
+  return DBS_MODELS[hostPick(deviceType)];
+}
+
+/**
+ * DBSSeparate's channel mode: "mono" (the mean of the channels, the official usage) unless stereo stems are asked
+ * for; always "each channel" for more than 2 channels, where the background (original minus the mono speech) would
+ * also take speech out of the LFE and surround channels.
+ */
+export function dbsChannelsFor(asked: unknown, channels?: number | null): DbsChannels {
+  if (typeof channels === "number" && channels > 2) return "each channel";
+  return asked === "each channel" || asked === "stereo" || asked === true ? "each channel" : "mono";
+}
+
+/** How many times the model runs over the clip: once in mono, once per channel otherwise. */
+export function separationPasses(mode: DbsChannels, channels?: number | null): number {
+  return mode === "mono" ? 1 : Math.max(2, Math.round(channels ?? 2));
+}
+
+// ---------------------------------------------------------------------------
+// Time on the open engine
+
+/**
+ * Times real time (seconds of audio per second of work, one pass), as measured. CPU: real runs on a 4-CPU host
+ * (torch 2.14.1+cpu, ComfyUI-DBS f656e53, 10–20 s clips, other jobs sharing the CPU; docs/research/dbs-separation-7.md
+ * §2.4): DBS-BSRNN 0.17–0.33x, typically 0.27x; DBS-TIGER 0.08–0.09x. GPU: the pack author's RTX 5090 (the same
+ * section); a smaller GPU is slower, so the estimate is a range.
+ */
+export const DBS_SPEED: Record<"cpu" | "cuda", Record<SplitQuality, number>> = {
+  cpu: { fast: 0.27, best: 0.09 },
+  cuda: { fast: 22.4, best: 15.9 },
+};
+/** Loading the model and the audio, saving four FLAC stems (seconds, measured on the CPU host). */
+const OVERHEAD_SECONDS = 3;
+
+/** About how long a split takes, as a range in seconds (a busy or slower host takes longer). */
+export function splitTime(o: { seconds: number; quality: SplitQuality; mode: DbsChannels; channels?: number | null; device?: string | null }): { low: number; high: number } {
+  const speed = DBS_SPEED[o.device === "cuda" ? "cuda" : "cpu"][o.quality];
+  const work = (Math.max(0, o.seconds) * separationPasses(o.mode, o.channels)) / speed;
+  // CPU: from a bit faster than measured to the slowest run measured on a busy host; a GPU smaller than the
+  // reference card can be several times slower.
+  const [lo, hi] = o.device === "cuda" ? [1, 4] : [0.8, 1.6];
+  return {
+    low: Math.round(OVERHEAD_SECONDS + work * lo),
+    high: Math.round(OVERHEAD_SECONDS + work * hi),
+  };
+}
+
+/** "about 1–2 min", "under a minute" */
+export function durationWords(r: { low: number; high: number }): string {
+  if (r.high < 60) return "under a minute";
+  const lo = Math.max(1, Math.round(r.low / 60));
+  const hi = Math.max(lo, Math.round(r.high / 60));
+  if (hi >= 90) return `about ${Math.round((r.low / 3600) * 10) / 10}–${Math.round((r.high / 3600) * 10) / 10} h`;
+  return lo === hi ? `about ${lo} min` : `about ${lo}–${hi} min`;
+}
+
+// ---------------------------------------------------------------------------
+// The plan
+
+export interface SplitInput {
+  engine: Engine;
+  /** The audio or video file (/api/files/…). */
+  media: string;
+  kind: "audio" | "video";
+  name?: string;
+  quality?: SplitQuality;
+  /** Stereo stems: every channel separated on its own (about twice as long for stereo). */
+  stereo?: boolean;
+  /** The source's channel count (its header, else what the browser decoded). */
+  channels?: number;
+  /** Seconds the soundtrack runs, when known. */
+  seconds?: number;
+}
+
+export interface SplitPlan extends ToolPlan {
+  quality: SplitQuality | null;
+  mode: DbsChannels;
+}
+
+const STEP_LABEL: Record<DbsChannels, string> = {
+  mono: "Dialogue, music, effects",
+  "each channel": "Dialogue, music, effects · every channel",
+};
+
+/** One DBS job on the open engine; throws what's in the way (in words the page shows). */
+export function planSplit(i: SplitInput): SplitPlan {
+  if (i.engine === "cloud") throw new Error(CLOUD_SPLIT_PROBLEM);
+  if (!i.media) throw new Error(`Add the ${i.kind === "video" ? "video" : "audio"} to split`);
+  const mode = dbsChannelsFor(i.stereo ? "each channel" : "mono", i.channels);
+  const name = i.name?.trim();
+  const title = `Split · ${name || (i.kind === "video" ? "video soundtrack" : "soundtrack")}`;
+  const extra: Record<string, unknown> = { channels: mode };
+  if (i.quality) extra.separationModel = DBS_MODELS[i.quality];
+  if (i.channels && i.channels > 0) extra.sourceChannels = Math.round(i.channels);
+  const request: GenerationRequest = {
+    modelId: SPLIT_MODEL,
+    op: "separate-audio",
+    feature: SPLIT_FEATURE,
+    batchTitle: title,
+    title,
+    inputs: i.kind === "video" ? { video: i.media } : { audio: i.media },
+    params: {
+      extra,
+      ...(i.seconds &&
+        i.seconds > 0 && {
+          sourceDuration: Math.round(i.seconds * 1000) / 1000,
+        }),
+    },
+    step: { label: STEP_LABEL[mode], index: 0, of: 1 },
+  };
+  const forced = mode === "each channel" && !i.stereo;
+  const passes = separationPasses(mode, i.channels);
+  return {
+    steps: [{ key: "split", request }],
+    length: i.seconds && i.seconds > 0 ? i.seconds : null,
+    quality: i.quality ?? null,
+    mode,
+    summary: `Splits ${i.kind === "video" ? "the video's soundtrack" : "it"} into dialogue, music, effects and music & effects${mode === "each channel" ? `, every channel on its own (${passes} passes)` : ""}.`,
+    notes: [
+      ...(forced ? [`This file has ${i.channels} channels, so each is split on its own: about ${passes}x the time.`] : []),
+      "Dialogue comes out clean; music and effects can bleed into each other.",
+    ],
+  };
+}
+
+/** The mix put back on its video (the picture copied untouched on the open engine). */
+export function planRemux(i: { engine: Engine; video: string; audio: string; name?: string }): ToolPlan {
+  const title = `Remix · ${i.name?.trim() || "video"}`;
+  return {
+    steps: [
+      {
+        key: "remux",
+        request: {
+          modelId: REMUX_MODELS[i.engine],
+          op: "mux",
+          feature: REMUX_FEATURE,
+          batchTitle: title,
+          title,
+          inputs: { video: i.video, audio: i.audio },
+          step: {
+            label: i.engine === "open" ? "New soundtrack · picture copied" : "New soundtrack",
+            index: 0,
+            of: 1,
+          },
+        },
+      },
+    ],
+    length: null,
+    summary: "Puts your mix on the video in place of its sound.",
+    notes: i.engine === "open" ? ["The picture is copied as it is, not re-encoded."] : [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Stems and the mixer (the browser's WebAudio graph and its export use these numbers)
+
+export type StemId = "voice" | "music" | "effects" | "background";
+export const STEMS: { id: StemId; label: string; hint: string }[] = [
+  { id: "voice", label: "Dialogue", hint: "Speech, clean" },
+  { id: "music", label: "Music", hint: "Score and songs (singing lands here)" },
+  { id: "effects", label: "Effects", hint: "Sound effects and ambience" },
+  {
+    id: "background",
+    label: "Music & effects",
+    hint: "Everything but the dialogue",
+  },
+];
+export const stemLabel = (id: string): string => STEMS.find((s) => s.id === id)?.label ?? id;
+
+export const LEVEL_MIN = -24;
+export const LEVEL_MAX = 6;
+
+export interface StemMix {
+  /** Level in dB, LEVEL_MIN…LEVEL_MAX. */
+  db: number;
+  mute: boolean;
+  solo: boolean;
+}
+export type Mix = Record<StemId, StemMix>;
+
+const on = (db = 0): StemMix => ({ db, mute: false, solo: false });
+const off = (db = 0): StemMix => ({ db, mute: true, solo: false });
+
+/**
+ * The original back: dialogue plus music & effects (they sum to the source exactly). The separate music and effects
+ * stems start muted, so nothing plays twice.
+ */
+export const ORIGINAL_MIX: Mix = {
+  voice: on(),
+  music: off(),
+  effects: off(),
+  background: on(),
+};
+
+export const PRESETS: { id: string; label: string; mix: Mix }[] = [
+  { id: "original", label: "Original", mix: ORIGINAL_MIX },
+  {
+    id: "no-dialogue",
+    label: "No dialogue",
+    mix: { voice: off(), music: off(), effects: off(), background: on() },
+  },
+  {
+    id: "dialogue-only",
+    label: "Dialogue only",
+    mix: { voice: on(), music: off(), effects: off(), background: off() },
+  },
+  {
+    id: "music-only",
+    label: "Music only",
+    mix: { voice: off(), music: on(), effects: off(), background: off() },
+  },
+  {
+    id: "music-under",
+    label: "Music under dialogue (−12 dB)",
+    mix: { voice: on(), music: off(), effects: off(), background: on(-12) },
+  },
+];
+
+/** The preset a mix is, if any (levels within 0.5 dB, solo off). */
+export function presetOf(mix: Mix): string | null {
+  const same = (a: StemMix, b: StemMix) => a.mute === b.mute && a.solo === b.solo && (a.mute || Math.abs(a.db - b.db) < 0.5);
+  return PRESETS.find((p) => STEMS.every((s) => same(mix[s.id], p.mix[s.id])))?.id ?? null;
+}
+
+export const clampDb = (db: number): number => Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, Math.round(db * 2) / 2));
+
+/** A level in dB as a gain (0 dB = 1, −6 dB ≈ 0.5, +6 dB ≈ 2). */
+export function dbToGain(db: number): number {
+  return Number.isFinite(db) ? 10 ** (db / 20) : 0;
+}
+
+/** "+3 dB", "−12 dB", "0 dB" */
+export function dbLabel(db: number): string {
+  const v = Math.round(db * 2) / 2;
+  return v === 0 ? "0 dB" : `${v > 0 ? "+" : "−"}${Math.abs(v)} dB`;
+}
+
+/** What each stem plays at: muted = 0; while any stem is soloed, only the soloed ones play. */
+export function stemGains(mix: Mix): Record<StemId, number> {
+  const solo = STEMS.some((s) => mix[s.id].solo);
+  return Object.fromEntries(STEMS.map((s) => [s.id, mix[s.id].mute || (solo && !mix[s.id].solo) ? 0 : dbToGain(clampDb(mix[s.id].db))])) as Record<StemId, number>;
+}
+
+/**
+ * Mute or unmute a stem. Music & effects is the music and effects stems together, so turning it on turns those two
+ * off, and turning either of them on turns it off: nothing plays twice.
+ */
+export function setMute(mix: Mix, id: StemId, mute: boolean): Mix {
+  const next: Mix = { ...mix, [id]: { ...mix[id], mute } };
+  if (!mute && id === "background") {
+    next.music = { ...next.music, mute: true };
+    next.effects = { ...next.effects, mute: true };
+  }
+  if (!mute && (id === "music" || id === "effects")) next.background = { ...next.background, mute: true };
+  return next;
+}
+
+export function setSolo(mix: Mix, id: StemId, solo: boolean): Mix {
+  return { ...mix, [id]: { ...mix[id], solo } };
+}
+
+/** A level change unmutes the stem (moving a fader means you want to hear it). */
+export function setLevel(mix: Mix, id: StemId, db: number): Mix {
+  const next = mix[id].mute ? setMute(mix, id, false) : mix;
+  return { ...next, [id]: { ...next[id], db: clampDb(db) } };
+}
+
+/** "Dialogue + Music & effects −12 dB" — the mix in words, for its title in the Library. */
+export function mixName(mix: Mix): string {
+  const preset = presetOf(mix);
+  if (preset && preset !== "original") return PRESETS.find((p) => p.id === preset)!.label;
+  const g = stemGains(mix);
+  const parts = STEMS.filter((s) => g[s.id] > 0).map((s) => `${s.label}${Math.abs(mix[s.id].db) >= 0.5 ? ` ${dbLabel(mix[s.id].db)}` : ""}`);
+  return parts.length ? parts.join(" + ") : "Silence";
+}
+
+// ---------------------------------------------------------------------------
+// Export: the rendered mix as a WAV file
+
+/**
+ * The gain that keeps a mix from clipping: 1 when its peak is at or under full scale, else just enough to bring the
+ * peak to −0.1 dBFS (the whole mix, so the balance stays as set).
+ */
+export function headroomGain(peak: number): number {
+  const ceiling = dbToGain(-0.1);
+  return peak > ceiling ? ceiling / peak : 1;
+}
+
+/** 16-bit PCM WAV from planar float channels (−1…1, clipped), as the export uploads it. */
+export function encodeWav(channels: Float32Array[], sampleRate: number): Uint8Array {
+  const n = channels.length ? channels[0].length : 0;
+  const ch = Math.max(1, channels.length);
+  const bytes = new Uint8Array(44 + n * ch * 2);
+  const d = new DataView(bytes.buffer);
+  const text = (o: number, s: string) => [...s].forEach((c, k) => d.setUint8(o + k, c.charCodeAt(0)));
+  text(0, "RIFF");
+  d.setUint32(4, 36 + n * ch * 2, true);
+  text(8, "WAVE");
+  text(12, "fmt ");
+  d.setUint32(16, 16, true);
+  d.setUint16(20, 1, true);
+  d.setUint16(22, ch, true);
+  d.setUint32(24, sampleRate, true);
+  d.setUint32(28, sampleRate * ch * 2, true);
+  d.setUint16(32, ch * 2, true);
+  d.setUint16(34, 16, true);
+  text(36, "data");
+  d.setUint32(40, n * ch * 2, true);
+  for (let i = 0, o = 44; i < n; i++)
+    for (let c = 0; c < ch; c++, o += 2) {
+      const v = Math.max(-1, Math.min(1, channels[c]?.[i] ?? 0));
+      d.setInt16(o, Math.round(v < 0 ? v * 0x8000 : v * 0x7fff), true);
+    }
+  return bytes;
+}
+
+export { clock };

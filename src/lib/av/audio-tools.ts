@@ -57,6 +57,11 @@ export interface AudioToolPreview {
   steps: number;
   costUsd: number | null;
   demo: boolean;
+  /** Split soundtrack: about how long the open engine takes (seconds, a range), and the DBS model the host would pick. */
+  estimate?: { low: number; high: number };
+  hostPick?: "fast" | "best";
+  /** The ComfyUI host's device type ("cpu", "cuda"…), when it said. */
+  device?: string;
 }
 
 export interface LoopInput {

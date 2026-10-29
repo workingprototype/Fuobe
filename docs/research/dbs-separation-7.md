@@ -90,7 +90,19 @@ Measured by the pack's author (`docs/VERIFICATION.md` L96–108; Windows 11, RTX
 | DBS-BSRNN | CPU, 24 threads | 60 s, mono | 32.8 s | 1.83x | – |
 
 - **On a CPU, use DBS-BSRNN.** It has 4x the MACs of DBS-TIGER but runs 3.7x faster there.
-- **Fuobe's ComfyUI host** (4 logical CPUs, 14.3 GB RAM, torch 2.14.1+cpu, started with `--cpu`; `/system_stats`, `nproc`) was not measured, because the research rules forbid running the pack. Guess, scaling from 24 threads to 4: DBS-BSRNN at 0.3–0.6x real time, so a 1-minute clip takes 2–3 minutes; DBS-TIGER about 4x slower than that.
+- **Fuobe's ComfyUI host** (4 logical CPUs, 14.3 GB RAM, torch 2.14.1+cpu, started with `--cpu`; `/system_stats`, `nproc`) was not measured during the research, because the research rules forbid running the pack. The guess then, scaling from 24 threads to 4: DBS-BSRNN at 0.3–0.6x real time, so a 1-minute clip takes 2–3 minutes; DBS-TIGER about 4x slower than that.
+- **Measured on this host (package D1, 2026-10-29).** ComfyUI-DBS at `f656e53` on an isolated CPU worker (a copy of the same ComfyUI `fc04da91`, Python 3.13, torch 2.14.1+cpu, `--cpu`), the four weight files of §3.1 at their pinned revisions (`sha256sum -c` OK), graph `separate-soundtrack-dbs` with `output_sample_rate` `input`, synthetic 44.1 kHz test mixes (speech, a chord bed, noise bursts). The host was shared with other jobs (load average 3.4–6 on 4 CPUs), so these are a busy host's numbers. "Seconds" is the pack's own report (separation only); a run adds about 1–2 s to load and save.
+
+  | Model | Input | Channels | Seconds | Real time (per channel) |
+  |---|---|---|---|---|
+  | DBS-BSRNN | 20 s stereo WAV | mono | 73.7 | 0.27x |
+  | DBS-BSRNN | 20 s MP4 (H.264 + AAC, read by `LoadAudio`) | mono | 61.1 | 0.33x |
+  | DBS-TIGER | 20 s stereo WAV | mono | 220.7 | 0.09x |
+  | DBS-BSRNN | 20 s stereo WAV | each channel (2 passes) | 232.4 | 0.17x |
+  | DBS-TIGER | 10 s stereo WAV | each channel (2 passes) | 247.0 | 0.08x |
+  | DBS-BSRNN | 10 s 5.1 WAV | each channel (6 passes) | 193.4 | 0.31x |
+
+  So DBS-BSRNN runs at about 0.27x real time here (a minute of audio in about 4 minutes, 3–6 on a busy host) and DBS-TIGER at about 0.09x (about 11 minutes a minute): 3x slower, not 4x. Stereo stems cost one pass per channel. On the 20 s test mix, against its known parts (a sanity check, not a benchmark): the dialogue stem scored 14.6 dB SI-SDR with DBS-BSRNN and 18.5 dB with DBS-TIGER (the mix itself scores −1.0 dB as "dialogue"); the music-and-effects bed 15.6 and 19.4 dB. Music + effects + speech matched the channel mean of the input to 3e-5 (16-bit FLAC). Split soundtrack's time estimate uses 0.27x / 0.09x per pass (`src/lib/av/split.ts` `DBS_SPEED`).
 - **Threads.** The upstream demo runs DBS-TIGER on a CPU with one thread and NNPACK off and says that is faster and identical (`demo/README.md` L74–75; `demo/backend.py` L134–155). The pack measured that mode as 3.3x slower and not bit-identical (71.5 s against 21.4 s for 10 s of audio; VERIFICATION.md L112–114). Which wins on a 4-core host is unknown.
 - **Memory.** The stems of the whole input stay in memory until the end: 12 bytes per input sample at 44.1 kHz, about 0.3 GB per 10 minutes (VERIFICATION.md L107–108). An hour of audio would need about 1.9 GB on top of the decoded input (my arithmetic).
 

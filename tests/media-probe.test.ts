@@ -62,8 +62,10 @@ describe("media probe", () => {
   });
 
   it("reads WAV, FLAC and MP3 lengths", () => {
-    expect(probeMedia(wav(2.5))).toEqual({ container: "wav", duration: 2.5, hasVideo: false, hasAudio: true });
-    expect(probeMedia(wav(1, 48000, 2))?.duration).toBe(1);
+    expect(probeMedia(wav(2.5))).toEqual({ container: "wav", duration: 2.5, hasVideo: false, hasAudio: true, channels: 1 });
+    expect(probeMedia(wav(1, 48000, 2))).toMatchObject({ duration: 1, channels: 2 });
+    // Split soundtrack separates every channel of a 5.1 file on its own: the header says how many there are.
+    expect(probeMedia(wav(1, 48000, 6))?.channels).toBe(6);
     // FLAC STREAMINFO: 44.1 kHz, 132300 samples = 3 s
     const flac = Buffer.alloc(42);
     flac.write("fLaC", 0);
@@ -75,7 +77,7 @@ describe("media probe", () => {
     flac[20] = ((rate & 0xf) << 4) | (1 << 1);
     flac[21] = 0xf0 | Math.floor(total / 2 ** 32);
     flac.writeUInt32BE(total >>> 0, 22);
-    expect(probeMedia(flac)).toEqual({ container: "flac", duration: 3, hasVideo: false, hasAudio: true });
+    expect(probeMedia(flac)).toEqual({ container: "flac", duration: 3, hasVideo: false, hasAudio: true, channels: 2 });
     // MP3 with a Xing header: MPEG-1 Layer III, 44.1 kHz stereo, 100 frames × 1152 samples
     const mp3 = Buffer.alloc(417 * 3);
     mp3.set([0xff, 0xfb, 0x90, 0x00], 0);
@@ -83,6 +85,7 @@ describe("media probe", () => {
     mp3.writeUInt32BE(1, 4 + 32 + 4);
     mp3.writeUInt32BE(100, 4 + 32 + 8);
     expect(probeMedia(mp3)?.duration).toBeCloseTo((100 * 1152) / 44100, 6);
+    expect(probeMedia(mp3)?.channels).toBe(2);
     // CBR without a header: 128 kbps → bytes × 8 / bitrate
     const cbr = Buffer.alloc(16000);
     cbr.set([0xff, 0xfb, 0x90, 0x00], 0);
