@@ -809,11 +809,14 @@ declare global {
 }
 
 const DRAFT_TTL_MS = 6 * 60 * 60_000;
+const DRAFT_MAX = 200;
 
-/** What drafts' checks found, by recipe (kept a few hours, in memory: the server's own word, never the browser's). */
+/** What drafts' checks found, by recipe (the newest few hundred for a few hours, in memory: the server's own word, never the browser's). */
 function draftChecks(): Map<string, DraftChecks> {
   const m = (globalThis.__fuobeDraftChecks ??= new Map());
   for (const [k, v] of m) if (Date.now() - v.at > DRAFT_TTL_MS) m.delete(k);
+  // Oldest first (a Map keeps insertion order; a check of the same recipe is set again, so it moves to the end).
+  while (m.size > DRAFT_MAX) m.delete(m.keys().next().value!);
   return m;
 }
 
@@ -883,6 +886,7 @@ export async function checkDraft(input: unknown, level: "plan" | "demo", title =
   const key = draftKey(recipe);
   const { checks, verified } = await checkEngines({ name: "draft", title }, recipe, level, engines, draftChecks().get(key)?.verified);
   const entry = draftChecks().get(key);
+  draftChecks().delete(key);
   draftChecks().set(key, { verified: { ...entry?.verified, ...verified }, at: Date.now(), ...(entry?.saved && { saved: entry.saved }) });
   if (entry?.saved) adoptChecks(entry.saved, recipe, verified);
   return { ok: allPassed(checks), engines: checks, ready: engines.filter((e) => !!verified[e]?.plan) };
@@ -917,6 +921,7 @@ export async function saveDraft(input: DraftSave): Promise<RecipeView> {
     deleteSkill(input.name);
     throw e;
   }
+  draftChecks().delete(key);
   draftChecks().set(key, { verified: { ...known, ...verified }, at: Date.now(), saved: input.name });
   return recipeView(input.name);
 }

@@ -220,6 +220,25 @@ describe("draftFromGenerations", () => {
     expect(mixed.refusals).toEqual([expect.objectContaining({ id: "dub-film", reason: expect.stringContaining("on its own") })]);
   });
 
+  it("lifts a Katana job and a captioned video to their tools", () => {
+    row({ id: "kat-final", feature: "katana", kind: "video", op: "concat", request: { feature: "katana", modelId: "join-clips", op: "concat" }, outputs: [{ url: clip, kind: "video" }] });
+    const now = Date.now();
+    db()
+      .prepare("INSERT INTO katana_jobs (id, data_json, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run("kat1", JSON.stringify({ title: "edit", engine: "cloud", reference: clip, photos: [photo], instructions: "keep the jacket", motionModel: "kling-o3", segments: [{ start: 0, end: 5 }, { start: 5, end: 9 }], keepAudio: true, batchId: "kb", steps: { final: "kat-final" }, final: "final" }), now, now);
+    const kat = builder.draftFromGenerations(["kat-final"]).draft!;
+    expect(kat.recipe.steps).toEqual([expect.objectContaining({ kind: "tool", tool: "katana", input: { reference: clip, photos: [photo], instructions: "keep the jacket", segment_seconds: 5, motion_model: "kling-o3", keep_audio: true } })]);
+    expect(kat.candidates.map((c) => [c.type, c.example])).toEqual([
+      ["video", clip],
+      ["image", photo],
+      ["text", "keep the jacket"],
+    ]);
+
+    row({ id: "cap-burn", feature: "captions", kind: "video", op: "captions", request: { feature: "captions", modelId: "veed-subtitles", op: "captions", inputs: { video: clip }, params: { sourceLanguage: "en", targetLanguage: "Spanish" } }, outputs: [{ url: clip, kind: "video" }] });
+    const cap = builder.draftFromGenerations(["cap-burn"]).draft!;
+    expect(cap.recipe.steps).toEqual([expect.objectContaining({ kind: "tool", tool: "add_captions", input: { video: clip, spoken_language: "English", translate_to: "Spanish" } })]);
+  });
+
   it("links results handed on by hand (the composer's Animate) into a chain", async () => {
     const [a] = gens.createGenerations({ feature: "image", modelId: "nano-banana-pro", op: "t2i", prompt: "a brass desk lamp", params: { numOutputs: 2 } });
     await settle([a.id]);
@@ -350,6 +369,19 @@ describe("choices, body, check and save", () => {
     // Saving the same name twice, or a reserved one, is refused.
     expect((await saveRoute.POST(json({ name: "lamp-turntable", title: "x", description: "x", body: "x", recipe }))).status).toBe(409);
     expect(() => skills.createSkill({ name: "draft", title: "Draft", description: "x", body: "x" })).toThrow(/reserved/);
+  });
+
+  it("writes a dry run still going when the draft was saved into the saved skill", async () => {
+    const p = await turntable();
+    const { draft } = builder.draftFromGenerations([p.byKey.scene.id]);
+    const recipe = lib.buildRecipe(draft!, { varies: { [draft!.candidates.find((c) => c.kind === "text")!.id]: true } });
+    await recipes.checkDraft(recipe, "plan");
+    const dry = recipes.checkDraft(recipe, "demo");
+    const view = await recipes.saveDraft({ name: "scene-early", title: "Scene", description: "A scene.", body: "# Scene", recipe });
+    expect(view.recipe.verified?.cloud?.plan).toBeTruthy();
+    expect(view.recipe.verified?.cloud?.dryRun ?? null).toBeNull();
+    expect((await dry).ok).toBe(true);
+    expect(recipes.recipeView("scene-early").recipe.verified?.cloud?.dryRun).toBeTruthy();
   });
 
   it("refuses to save a recipe whose plan fails, and keeps no half-made skill", async () => {
