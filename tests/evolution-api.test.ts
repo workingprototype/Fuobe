@@ -128,7 +128,7 @@ describe("Evolution: runs (demo)", () => {
     expect(evolve.request).toMatchObject({ engine: "cloud", params: { extra: { video_strength: 0.35 } } });
     expect(evolve.request.prompt).toBe(direction);
     const done = await settle(final.id);
-    expect(done.status, done.error).toBe("succeeded");
+    expect(done.status, done.error ?? undefined).toBe("succeeded");
     expect(done.outputs[0].kind).toBe("video");
   });
 
@@ -142,7 +142,7 @@ describe("Evolution: runs (demo)", () => {
     const evolve = gens.getGeneration(rows.find((r) => r.model_id === "fuobe-evolution")!.id)!;
     expect(evolve.request).toMatchObject({ engine: "open", params: { extra: { denoise: 0.85 } } });
     const done = await settle(final.id);
-    expect(done.status, done.error).toBe("succeeded");
+    expect(done.status, done.error ?? undefined).toBe("succeeded");
     expect(done.feature).toBe("evolution");
   });
 });
