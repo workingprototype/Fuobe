@@ -16,19 +16,26 @@ export function pinnedRepo(url: string): { repo: string; ref: string; dir?: stri
 }
 
 /**
- * The commands that install one node pack into $COMFYUI/custom_nodes/<name>. git can't clone a /tree/ page address,
- * so a pinned pack is cloned from its repo and the commit checked out; a pack in a folder of a bigger repo is copied
- * out of a sparse checkout at that commit (as scripts/comfy/install-comfyui.sh does for h3_character_swap).
+ * The commands that install one node pack into $COMFYUI/custom_nodes/<name>, safe to run again, as
+ * scripts/comfy/install-comfyui.sh does. git can't clone a /tree/ page address, so a pinned pack is cloned from its
+ * repo (an existing clone is kept), then the commit fetched and checked out, so an older checkout moves to the pin; a
+ * pack in a folder of a bigger repo (h3_character_swap) is copied out of a sparse checkout at that commit, unless it's
+ * already there.
  */
 export function nodeInstall(node: { name: string; repo: string }): string {
   const pin = pinnedRepo(node.repo);
   if (!pin) return `git -C "$COMFYUI/custom_nodes" clone ${node.repo}`;
   const dest = `"$COMFYUI/custom_nodes/${node.name}"`;
-  if (!pin.dir) return `git clone ${pin.repo} ${dest} && git -C ${dest} checkout -q ${pin.ref}`;
+  if (!pin.dir) {
+    return [
+      `{ [ -d "$COMFYUI/custom_nodes/${node.name}/.git" ] || git clone ${pin.repo} ${dest}; } \\`,
+      `  && { git -C ${dest} fetch -q --depth 1 origin ${pin.ref} 2>/dev/null || true; } && git -C ${dest} checkout -q ${pin.ref}`,
+    ].join("\n");
+  }
   return [
-    `tmp="$(mktemp -d)" && git clone -q --filter=blob:none --no-checkout ${pin.repo} "$tmp" \\`,
+    `[ -d ${dest} ] || { tmp="$(mktemp -d)" && git clone -q --filter=blob:none --no-checkout ${pin.repo} "$tmp" \\`,
     `  && git -C "$tmp" sparse-checkout set --no-cone /${pin.dir}/ && git -C "$tmp" checkout -q ${pin.ref} \\`,
-    `  && cp -r "$tmp/${pin.dir}" ${dest}; rm -rf "$tmp"`,
+    `  && cp -r "$tmp/${pin.dir}" ${dest}; rm -rf "$tmp"; }`,
   ].join("\n");
 }
 

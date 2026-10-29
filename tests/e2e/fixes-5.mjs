@@ -105,7 +105,7 @@ try {
     await page.goto(`${app}/workflows`, { waitUntil: "load" });
     await page.getByRole("searchbox").or(page.getByPlaceholder(/search/i)).first().fill("h3");
     for (const [id, want] of [
-      ["video-character-swap-h3-relay", /git clone https:\/\/github\.com\/akatz-ai\/h3-relay "\$COMFYUI\/custom_nodes\/h3-relay" && git -C "\$COMFYUI\/custom_nodes\/h3-relay" checkout -q e2a7665b/],
+      ["video-character-swap-h3-relay", /git clone https:\/\/github\.com\/akatz-ai\/h3-relay "\$COMFYUI\/custom_nodes\/h3-relay"; }[\s\S]*git -C "\$COMFYUI\/custom_nodes\/h3-relay" checkout -q e2a7665b/],
       ["video-character-swap-h3", /sparse-checkout set --no-cone \/worker_nodes\/h3_character_swap\/ && git -C "\$tmp" checkout -q 0670e4fd/],
     ]) {
       const card = page.locator("article").filter({ hasText: id }).filter({ has: page.getByText(id, { exact: true }) }).first();
