@@ -204,6 +204,16 @@ function peaksOf(buf: AudioBuffer, bars = BARS): number[] {
   });
 }
 
+/** Stop sources without their "ended" handlers firing. */
+function silence(nodes: AudioBufferSourceNode[]) {
+  for (const n of nodes) {
+    n.onended = null;
+    try {
+      n.stop();
+    } catch {}
+  }
+}
+
 function useStemPlayer(stems: Stem[]) {
   const ctx = useRef<AudioContext | null>(null);
   const gains = useRef<Partial<Record<StemId, GainNode>>>({});
@@ -215,17 +225,18 @@ function useStemPlayer(stems: Stem[]) {
   const [position, setPosition] = useState(0);
   const key = stems.map((s) => s.url).join("|");
 
-  // Decode every stem when they arrive (the mixer is keyed by its result, so a new split starts a new player).
+  // One audio context per set of stems (the mixer is keyed by its result): a gain per stem, every stem decoded once.
+  // It closes with the mixer (and React's dev double-mount gets a fresh one, not a closed one).
   useEffect(() => {
     let live = true;
     if (!stems.length) return;
-    const ac = (ctx.current ??= new AudioContext());
+    const ac = new AudioContext();
+    ctx.current = ac;
+    gains.current = {};
     for (const s of stems) {
-      if (!gains.current[s.id]) {
-        const g = ac.createGain();
-        g.connect(ac.destination);
-        gains.current[s.id] = g;
-      }
+      const g = ac.createGain();
+      g.connect(ac.destination);
+      gains.current[s.id] = g;
       void fetch(s.url)
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -237,6 +248,12 @@ function useStemPlayer(stems: Stem[]) {
     }
     return () => {
       live = false;
+      silence(sources.current);
+      sources.current = [];
+      started.current = null;
+      ctx.current = null;
+      gains.current = {};
+      void ac.close();
     };
     // The stems' addresses say when they changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -246,12 +263,7 @@ function useStemPlayer(stems: Stem[]) {
   const ready = stems.length > 0 && stems.every((s) => buffers[s.id]);
 
   const stop = useCallback((keepPosition = true) => {
-    for (const s of sources.current) {
-      s.onended = null;
-      try {
-        s.stop();
-      } catch {}
-    }
+    silence(sources.current);
     sources.current = [];
     if (keepPosition && started.current && ctx.current) setPosition(Math.min(length, started.current.offset + ctx.current.currentTime - started.current.at));
     started.current = null;
@@ -296,19 +308,6 @@ function useStemPlayer(stems: Stem[]) {
     }, 100);
     return () => clearInterval(t);
   }, [playing, length]);
-
-  // Close the audio context with the page.
-  useEffect(
-    () => () => {
-      for (const s of sources.current) {
-        try {
-          s.stop();
-        } catch {}
-      }
-      void ctx.current?.close();
-    },
-    [],
-  );
 
   /** Live gains: the mix, or one stem alone at its level while its own Play is on. */
   const apply = useCallback(
@@ -497,7 +496,7 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
         </h3>
         <span className="rounded-full bg-success/15 px-2 py-0.5 text-[12px] font-medium text-success">Free · plays in your browser</span>
       </div>
-      <p className="text-[13px] text-muted-foreground">Dialogue comes out clean; music and effects can bleed into each other. Every stem is already in your Library.</p>
+      <p className="text-[13px] text-muted-foreground">Every stem is already in your Library. Mixing here is free: nothing runs until you export.</p>
       {player.failed && (
         <p className="text-[13px] text-destructive" role="alert">
           {player.failed}
@@ -644,7 +643,10 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
           <Panel>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <p className="min-w-0 flex-1 text-[13px] text-muted-foreground">
-                <span className="font-medium text-foreground">Split soundtrack runs on your GPU (open source).</span> DBS isn&apos;t hosted on fal or Replicate, so there&apos;s no cloud route for dialogue, music and effects.
+                <span className="font-medium text-foreground">Split soundtrack runs on your GPU (open source).</span>{" "}
+                {mode === "cloud"
+                  ? "This install is set to paid cloud APIs only (Settings → Engine mode), and DBS isn't hosted on fal or Replicate."
+                  : "DBS isn't hosted on fal or Replicate, so there's no cloud route for dialogue, music and effects."}
               </p>
               {mode === "both" ? (
                 <Button variant="outline" size="sm" className="shrink-0 rounded-full" onClick={() => setEngine("open")}>
