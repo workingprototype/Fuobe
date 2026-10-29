@@ -163,6 +163,25 @@ describe("Ollama reachability under load", () => {
     }
   });
 
+  it("Assist reads the same check: a busy Ollama keeps chats on it, with the models it last listed", async () => {
+    const agent = await import("@/server/assist/agent");
+    expect(await llm.probeOllama(true)).toBe(true);
+    expect(llm.ollamaModels()).toEqual(["qwen3:8b"]);
+    // Busy: its list comes after Assist's old 0.8 s limit, which took Ollama for gone and chats to the offline planner.
+    delay = 1500;
+    expect(await llm.probeOllama(true)).toBe(true);
+    expect(await agent.availability()).toMatchObject({ ollama: true, ollamaModels: ["qwen3:8b"] });
+    setSetting("enhanceProvider", "auto");
+    try {
+      expect(await agent.resolveAgent()).toBe("ollama");
+    } finally {
+      setSetting("enhanceProvider", "ollama");
+    }
+    // A refused port is down for Assist too, with no models.
+    setSetting("ollamaUrl", `http://127.0.0.1:${await closedPort()}`);
+    expect(await agent.availability()).toMatchObject({ ollama: false, ollamaModels: [] });
+  });
+
   it("a late Ollama that answers the longer look is reachable; a check of an address changed meanwhile keeps to itself", async () => {
     delay = 1000;
     const old = llm.probeOllama(true);

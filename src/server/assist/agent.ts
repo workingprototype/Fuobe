@@ -29,6 +29,7 @@ import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { offeredDefault } from "../model-access";
+import { ollamaModels, probeOllama as ollamaAnswers } from "../providers/llm";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
 import { readRef } from "../storage";
@@ -364,17 +365,15 @@ export async function updateThread(id: string, patch: ThreadPatch): Promise<Assi
 // ---------------------------------------------------------------------------
 // Which LLM runs a chat: modes
 
-let ollamaProbe: { at: number; url: string; ok: boolean; models: string[] } | null = null;
+/**
+ * Whether Ollama answers, and the models it has: the check text steps use (providers/llm), so a busy Ollama (loading
+ * a model, writing a long answer) keeps chats on it instead of the offline planner.
+ */
 async function probeOllama(): Promise<{ ok: boolean; models: string[] }> {
-  const url = getSetting("ollamaUrl").replace(/\/+$/, "");
-  if (ollamaProbe && ollamaProbe.url === url && Date.now() - ollamaProbe.at < 30_000) return ollamaProbe;
-  const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(800) })
-    .then(async (r) => (r.ok ? ((await r.json().catch(() => ({}))) as { models?: { name?: string }[] }) : null))
-    .catch(() => null);
-  ollamaProbe = { at: Date.now(), url, ok: !!res, models: (res?.models ?? []).map((m) => m.name ?? "").filter(Boolean).slice(0, 50) };
-  return ollamaProbe;
+  const ok = await ollamaAnswers();
+  return { ok, models: ok ? ollamaModels() : [] };
 }
-const ollamaReachable = async () => (await probeOllama()).ok;
+const ollamaReachable = () => ollamaAnswers();
 
 /**
  * Which LLM drives new chats by default: Claude when a key is set (on open-source-only installs only when

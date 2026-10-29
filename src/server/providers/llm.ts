@@ -39,30 +39,48 @@ export function textOutput(text: string, cues?: Cue[] | null, meta: Record<strin
 // Which LLM
 
 declare global {
-  /** Reachability of Ollama: when it last answered, and when a longer look last went unanswered (./reach). */
-  var __fuobeOllamaReach: Reach | undefined;
+  /** Reachability of Ollama, the models it listed when it last answered, when it last answered, and when a longer look last went unanswered (./reach). */
+  var __fuobeOllamaReach: (Reach & { models?: string[] }) | undefined;
   var __fuobeLlmJobs: Map<string, LlmJob> | undefined;
 }
 
 const ollamaUrl = () => getSetting("ollamaUrl").replace(/\/+$/, "");
 const PROBE_MS = 15_000;
 
+/** What GET /api/tags got: an answer (with the names of the models pulled), a no, or nothing in time. */
+function askOllama(url: string, timeoutMs: number) {
+  return ask<string[]>(`${url}/api/tags`, timeoutMs, {
+    read: async (r) => {
+      const models = ((await r.json()) as { models?: { name?: unknown }[] } | null)?.models;
+      return Array.isArray(models) ? models.map((m) => (typeof m?.name === "string" ? m.name : "")).filter(Boolean).slice(0, 50) : undefined;
+    },
+  });
+}
+
 /**
  * Is Ollama answering GET /api/tags? By the busy-vs-down rules ComfyUI has (./reach): a refused port or an HTTP
  * error is down at once; no answer in time is busy when it answered lately, else it gets the longer look when its
  * port takes a connection. Cached for 15 s (`force` checks now); one check runs at a time. Routing reads the cached
- * answer (see llmBackends).
+ * answer (see llmBackends), and so does Assist (with the models). A busy Ollama keeps the models it last listed.
  */
 export async function probeOllama(force = false): Promise<boolean> {
   const cur = globalThis.__fuobeOllamaReach;
   const url = ollamaUrl();
   if (!force && cur && cur.url === url && Date.now() - cur.at < PROBE_MS) return cur.ok;
   return sharedCheck("ollama", url, async () => {
-    const { reach } = await checkReach(url, globalThis.__fuobeOllamaReach, (ms) => ask(`${url}/api/tags`, ms));
+    const prev = globalThis.__fuobeOllamaReach?.url === url ? globalThis.__fuobeOllamaReach : undefined;
+    const { reach, asked } = await checkReach(url, prev, (ms) => askOllama(url, ms));
+    const models = (asked.answer === "yes" ? asked.value : undefined) ?? prev?.models;
     // The address may have changed while this ran: the new one's check speaks for it.
-    if (url === ollamaUrl()) globalThis.__fuobeOllamaReach = reach;
+    if (url === ollamaUrl()) globalThis.__fuobeOllamaReach = reach.ok && models ? { ...reach, models } : reach;
     return reach.ok;
   });
+}
+
+/** The models the reachable Ollama listed when it last answered ([] when it's down, or no check has read them yet). */
+export function ollamaModels(): string[] {
+  const cur = globalThis.__fuobeOllamaReach;
+  return cur?.ok && cur.url === ollamaUrl() ? (cur.models ?? []) : [];
 }
 
 /**
