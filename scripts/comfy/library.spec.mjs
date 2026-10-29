@@ -106,6 +106,13 @@
 //   audioCfg                              (MultiTalkWav2VecEmbeds audio guidance)
 //   threshold, mosaicScale                (face mosaic: SAM3_Detect threshold; the mosaic's scale, 0.04 = blocks of 25 px)
 //   prompt*                               (face mosaic: what SAM 3.1 pixelates, "face" when the run gives no words)
+// Keys added with DBS soundtrack separation (docs/research/dbs-separation-7.md §4). * = the provider fills it:
+//   separationModel*                      (DBSLoader model: DBS-BSRNN-DnR (fast) | DBS-TIGER-DnR (best); params.extra.separationModel,
+//                                          else the host's pick: TIGER when /system_stats says the device is cuda, BSRNN on a CPU)
+//   channels*                             (DBSSeparate channels: mono | each channel; params.extra.channels, forced to "each channel"
+//                                          for inputs with more than 2 channels)
+// Entry field requiredModels: files a loader reads by a name with no extension (DBSLoader's model folder), listed in the
+// manifest like any model (KNOWN_MODELS keys are the path under the folder, e.g. 'DBS-BSRNN-DnR/model.safetensors').
 
 import fs from 'node:fs';
 
@@ -139,6 +146,8 @@ export const CUSTOM_NODE_REPOS = {
   // validation server (entries list them with `packs`); install-comfyui.sh pins both.
   h3_character_swap: 'https://github.com/akatz-labs/h3-character-swap-tool/tree/0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b/worker_nodes/h3_character_swap',
   'h3-relay': 'https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220',
+  // DBS soundtrack separation (docs/research/dbs-separation-7.md §4): pinned in install-comfyui.sh, not on the validation server.
+  'ComfyUI-DBS': 'https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/f656e53434b5485c148a2866fbd6ddc6b6152ed6',
 };
 
 // Node classes of the packs entries list in `packs` (packs the validation server doesn't have installed): the build
@@ -146,6 +155,7 @@ export const CUSTOM_NODE_REPOS = {
 export const PACK_CLASSES = {
   h3_character_swap: /^H3CharacterSwap/,
   'h3-relay': /^(H3Relay|LabsH3)/,
+  'ComfyUI-DBS': /^DBS(Loader|Separate)$/,
 };
 
 // Model download locations for files that the source workflow does not annotate
@@ -265,6 +275,12 @@ export const KNOWN_MODELS = {
   // round 4 (r4/video-finish): the chunked SeedVR2 graph is hand-built, so its files are named here (same files as the template).
   'seedvr2_3b_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors' },
   'seedvr2_ema_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors' },
+  // DBS (docs/research/dbs-separation-7.md §3.1): DBSLoader reads models/dbs/<model>/{config.json, model.safetensors}, so the
+  // keys are paths under the folder (what GET /models/dbs lists). Pinned revisions; install-comfyui.sh checks the SHA-256.
+  'DBS-BSRNN-DnR/model.safetensors': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/model.safetensors' },
+  'DBS-BSRNN-DnR/config.json': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/config.json' },
+  'DBS-TIGER-DnR/model.safetensors': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/model.safetensors' },
+  'DBS-TIGER-DnR/config.json': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/config.json' },
 };
 
 const WAN_NEG_EN =
@@ -2364,6 +2380,37 @@ export const SPEC = [
       'Dubbing step 1. Changed from the research graph: LoadAudio replaces LoadVideo + GetVideoComponents (LoadAudio decodes the soundtrack of a video upload too, without decoding frames), so it takes audio or video. ' +
       'Outputs in order: voice stem, background stem (music + effects), cue lines ("start-end: text", seconds), plain transcript, detected language (PreviewAny, folded into the text outputs\' meta). ' +
       'ASR runs on the separated vocals. 52 languages auto-detected (30 selectable).',
+  },
+  // DBS soundtrack separation (docs/research/dbs-separation-7.md §4.4, graph A): the one graph behind Split soundtrack (and
+  // Remove dialogue, Clean up dialogue, "Original sound" later). ComfyUI-DBS is not on the validation server: checked
+  // statically there (core nodes) and validated + run on an isolated worker with the pack and the weights.
+  {
+    id: 'separate-soundtrack-dbs',
+    title: 'Split a soundtrack into dialogue, music and effects (DBS, ComfyUI-DBS)',
+    capability: 'separate-audio',
+    handBuilt: 'hand-built/separate-soundtrack-dbs.json',
+    packs: ['ComfyUI-DBS'],
+    requiredModels: ['DBS-BSRNN-DnR/model.safetensors', 'DBS-BSRNN-DnR/config.json'],
+    optionalModels: ['DBS-TIGER-DnR/model.safetensors', 'DBS-TIGER-DnR/config.json'],
+    bindings: { audio: [b('1', 'audio')], separationModel: [b('2', 'model')], channels: [b('3', 'channels')] },
+    outputs: [
+      { node: '5', kind: 'audio', stem: 'voice' },
+      { node: '6', kind: 'audio', stem: 'music' },
+      { node: '7', kind: 'audio', stem: 'effects' },
+      { node: '8', kind: 'audio', stem: 'background' },
+      { node: '9', kind: 'text', role: 'report' },
+    ],
+    defaults: { separationModel: 'DBS-BSRNN-DnR', channels: 'mono' },
+    vramGb: 0,
+    license: 'DBS weights Apache-2.0 (JusperLee; trained on DnR v2, CC BY 4.0); ComfyUI-DBS code MIT; vendored DBS code Apache-2.0 with MIT notices (BS-RoFormer, MSST, TIGER)',
+    notes:
+      'CPU OK, about 1.7 GiB on CUDA. audio = an audio file or a video (LoadAudio reads a video\'s soundtrack without decoding frames). ' +
+      'DBSLoader model DBS-BSRNN-DnR (fast: 18.9 MB, 9.07 dB SI-SDR on DnR v2, the CPU default) or DBS-TIGER-DnR (best: 4.1 MB, 10.13 dB, about 4x slower on a CPU, the CUDA default); device auto. ' +
+      'DBSSeparate channels mono (the mean of the channels, the official usage) or each channel (every channel separated on its own: 2x the time for stereo, 6x for 5.1; ' +
+      'the provider forces it for inputs with more than 2 channels, where the subtract below would also take speech out of the LFE and surrounds); output_sample_rate input. ' +
+      'Outputs in order: voice (speech), music, effects (sfx), background = original minus speech (AudioMerge subtract: with mono it keeps the original stereo image at mono cost; ' +
+      'AudioMerge scales the whole result down when it peaks over 1.0), and the pack\'s JSON report (model, device, rates, windows, seconds, times real time). ' +
+      'Stems are FLAC, so they still add up to the source. Voice is first, so a chain without a stem takes the dialogue. Trained on synthetic English mixes (DnR v2): dialogue separates well (15-16 dB), music against effects less so (5.7-7.8 dB).',
   },
   {
     id: 'captions-qwen3-asr',

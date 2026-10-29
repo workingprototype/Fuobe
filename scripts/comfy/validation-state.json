@@ -413,6 +413,12 @@
     "error": null,
     "at": "2026-10-17T21:22:10.139Z"
   },
+  "separate-soundtrack-dbs": {
+    "sha256": "446a72103ae501fe15e3f8a196a9321d378990e8a4eddef268f7b1defb5aed35",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-29T17:59:49.683Z"
+  },
   "sfx-hunyuan-foley": {
     "sha256": "54a10b4f9586f3e65c0f9cd1bcedf02d1842e3bf73df9dd98304eef0f07b212a",
     "validated": true,
