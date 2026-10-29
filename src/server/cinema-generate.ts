@@ -140,6 +140,9 @@ export function generateInProject(projectId: string, input: CinemaRequest, folde
     ...(input.moves?.length ? { moves: input.moves } : {}),
     ...(input.action === "grid" && input.grid ? { grid: input.grid } : {}),
     ...(input.action === "recompose" && input.capture ? { camera: { lens: input.capture.lens, aperture: input.capture.aperture, pose: input.capture.pose } } : {}),
+    ...(input.action === "path" && input.path
+      ? { path: { keys: input.path.keys, duration: plan.steps[0]?.request.params?.duration ?? 5, ...(input.path.preset ? { preset: input.path.preset } : {}) } }
+      : {}),
   };
   const batchId = nanoid(10);
   const made: Record<string, Generation[]> = {};
