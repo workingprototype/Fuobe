@@ -3,6 +3,7 @@ import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
 import { loraEntry, loraRef } from "./loras";
+import { ANGLES_LORA, MOSAIC_SCALE, MOSAIC_TARGET, SPEAK_GRAPH, SPEAK_LORA, SPEAK_PROMPT } from "./open-tools";
 import { CINEMA_CROP, SOUL_ASPECTS, SOUL_TIERS } from "./soul";
 import { CLOUD_SHAPES, denoiseFor, EVOLUTION, EVOLUTION_DEFAULT_RESOLUTION, EVOLUTION_RESOLUTIONS, INTENSITIES, videoStrengthFor, type Intensity } from "./evolution";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelOptions, type ModelRoute, type Operation } from "./types";
@@ -623,6 +624,18 @@ const open: ModelDef[] = [
     tagline: "Temporally stable, flicker-free depth · grayscale or inferno",
     routes: [comfy("depth-video", "video-depth-vda-small")],
     // VideoDepthAnythingOutput draws gray or inferno only; turbo, magma and viridis are the cloud's.
+    options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
+  }),
+  // Higgsfield's Depth Map runs Video Depth Anything Large (build plan O11). Its weights are CC-BY-NC-4.0: the licence is
+  // information (Settings → Models & licences lists it as Non-commercial, with a switch); the Depth map's default stays Small.
+  o({
+    id: "oss-video-depth-vda-large",
+    name: "Video Depth Anything (large)",
+    vendor: "ByteDance",
+    family: "depth-anything",
+    kind: "video",
+    tagline: "The finest temporally stable depth, the model hosted depth tools use · non-commercial weights (CC-BY-NC-4.0) · 8 GB",
+    routes: [comfy("depth-video", "video-depth-vda-large", "Video Depth Anything Large (about 1.5 GB, downloaded on first run)")],
     options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
   }),
   // Remove object (Video tools → Remove object; docs/research/comfyui-oss-4.md §b). The prompt names what to remove
@@ -1794,7 +1807,64 @@ const originals: ModelDef[] = [
     // The GPU graph follows a restyled first frame it can't make itself (fal's route runs without one, on the words).
     engineOptions: { open: { requires: { images: 1, msg: "Add the clip's first frame in the new look: Wan 2.2 Fun VACE carries it through every frame" } } },
   },
+  // Fuobe Angles (O11): Higgsfield Angles' recipe, Qwen-Image-Edit 2509 with dx8152's Multiple-angles LoRA. The camera is the
+  // hosted route's own fields on both engines (rotate −90…90°, positive = left; tilt −1…1; move forward 0–10; a wide-angle lens in
+  // the Angles app); on the GPU src/lib/catalog/open-tools.ts turns them into the LoRA's words. Words of your own are the GPU's
+  // only (fal's route has no prompt field).
+  {
+    ...original({
+      id: "fuobe-angles",
+      open: [comfy("edit", "qwen-image-edit-2509-angles", "Qwen-Image-Edit 2509 + Lightning + the Multiple-angles LoRA at 1.25, 6 steps")],
+      tagline: "The same shot from another camera: rotate, tilt, move closer, go wide · Qwen-Image-Edit 2509 + Multiple-angles LoRA, free on your GPU (24 GB), or hosted on fal",
+      options: { maxImages: 1, seed: true, promptOptional: true, sliders: ORIGINAL_HALVES.get("fuobe-angles")?.options.sliders },
+    }),
+    // The GPU graph loads the LoRA itself; as the recipe's LoRA it is downloaded before a run and has a switch in Settings.
+    engineOptions: { open: { ...(ANGLES_LORA && { loras: [ANGLES_LORA] }) }, cloud: { promptless: true } },
+  },
+  // Fuobe Speak (O11): InfiniteTalk. On the GPU, Higgsfield's Infinite Talk settings on kijai's wrapper graph (FusioniX in place of
+  // the lightx2v distill LoRA, 15 motion frames, 25 steps, shift 10, text and audio guidance 5, colour match): about ten times the
+  // fast pass's time (InfiniteTalk Long). In the cloud, fal's InfiniteTalk, which takes none of those knobs. As long as the voice.
+  {
+    ...original({
+      id: "fuobe-speak",
+      open: [{ ...comfy("avatar", "infinitetalk-wanwrapper", "InfiniteTalk + FusioniX, 25 steps, shift 10, guidance 5 / 5, 15 motion frames"), extra: { ...SPEAK_GRAPH }, loraSlot: true }],
+      tagline: "A portrait speaks your voice track, lips, face and head in sync, long takes · InfiniteTalk + FusioniX free on your GPU (16 GB), or hosted on fal",
+      options: { resolutions: ["480p", "720p"], seed: true, maxImages: 1, promptOptional: true, defaultPrompt: SPEAK_PROMPT },
+    }),
+    engineDefaults: { open: { aspectRatio: "auto" } },
+    // The GPU graph frames the portrait itself (its shape by default); the LoRA is the recipe's, downloaded before a run.
+    engineOptions: { open: { aspectRatios: ["auto", ...VID_AR], negativePrompt: true, ...(SPEAK_LORA && { loras: [SPEAK_LORA] }) } },
+  },
+  // Fuobe Speak · Motion (O11): a Speak v1-like route, Wan 2.2 Speech-to-Video. The body and the scene move with the speech; fal
+  // makes 2.5–7.5 s a call (num_frames 40–120), the GPU graph up to about 14 s.
+  {
+    ...original({
+      id: "fuobe-speak-motion",
+      open: [comfy("avatar", "wan22-s2v-14b", "Wan 2.2 S2V 14B with the lightx2v 4-step LoRA, up to about 14 s")],
+      tagline: "Speech with the body and the scene moving · Wan 2.2 S2V free on your GPU (24 GB), or hosted on fal (up to 7.5 s)",
+      options: { resolutions: ["480p", "580p", "720p"], seed: true, negativePrompt: true, maxImages: 1, promptOptional: true, defaultPrompt: SPEAK_PROMPT },
+    }),
+    engineDefaults: { open: { aspectRatio: "9:16" } },
+    engineOptions: { open: { aspectRatios: VID_AR, resolutions: ["480p", "720p"] } },
+  },
 ];
+
+/**
+ * Fuobe Soul's face mosaic on the GPU (build plan O11): SAM 3.1 finds the faces (or what the words name) and a block
+ * mosaic covers them, in one graph. A helper step after a look that asks for it (PixeletedFace); in the cloud fal's
+ * SAM 3.1 makes the masks and Fuobe pixelates under them (sam-3-1-face-mask).
+ */
+const faceMosaic: ModelDef = o({
+  id: "oss-face-mosaic",
+  name: "Pixelate faces",
+  vendor: "Meta SAM 3.1 + ComfyUI",
+  family: "sam",
+  kind: "image",
+  tagline: "SAM 3.1 finds every face and covers it with large blocks · core nodes, 4 GB",
+  routes: [comfy("face-mosaic", "image-face-mosaic-sam3", "SAM 3.1 face mask, grown 12 px, a 25 px block mosaic under it")],
+  options: { maxImages: 1, promptOptional: true, defaultPrompt: MOSAIC_TARGET, sliders: [{ param: "mosaicScale", label: "Block size (smaller = bigger blocks)", min: 0.01, max: 0.2, step: 0.01, default: MOSAIC_SCALE }] },
+  hidden: true,
+});
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */
 const local: ModelDef[] = [
@@ -1877,4 +1947,4 @@ const local: ModelDef[] = [
   }),
 ];
 
-export const MODELS: ModelDef[] = [...originals, ...cloud, ...open, ...local];
+export const MODELS: ModelDef[] = [...originals, ...cloud, ...open, faceMosaic, ...local];

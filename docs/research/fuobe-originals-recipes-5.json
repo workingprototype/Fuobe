@@ -6104,6 +6104,237 @@
    },
    "output": "video.url",
    "inputsChecked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "id": "fal-ai/ltx-2.3-quality/hdr/lora",
+   "family": "LTX-2.3 quality",
+   "op": "sdr-to-hdr",
+   "roleForOriginals": "Upscale's SDR to HDR (build plan O11): the hosted LTX-2.3 HDR pass when LoRAs ride along (the plain fal-ai/ltx-2.3-quality/hdr otherwise)",
+   "lora": {
+    "field": "loras",
+    "required": true,
+    "itemFields": "transformer:string default=\"both\" enum=[\"high\", \"low\", \"both\"]; path:string; scale:number default=1 minimum=0 maximum=2",
+    "maxCount": 3
+   },
+   "keyFieldsRequired": [
+    "loras",
+    "prompt",
+    "video_url"
+   ],
+   "price": "Your request will cost $0.0027075 per megapixel of generated HDR video data (width × height × frames), rounded up. For example, if you generate 121 HDR frames at 1280 × 720, your total generated output is ≈112 MP, and your request will cost $0.3032.",
+   "baseLicence": "LTX-2 / LTX-2.x Community License",
+   "commercialWeights": true,
+   "licenceNote": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1). Information, never a gate",
+   "status": "active",
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx-2.3-quality/hdr/lora",
+   "pageUrl": "https://fal.ai/models/fal-ai/ltx-2.3-quality/hdr/lora",
+   "pathAccepts": "Direct HTTP(S) download URL of the LoRA file (.safetensors). Max size: 3 GB.",
+   "checked": "2026-10-29",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to guide generation.",
+     "examples": [
+      "A sunset over the Pacific Ocean, vibrant orange and purple sky, deep contrast, cinematic HDR."
+     ]
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "desc": "SDR input video to lift into HDR. This mode is video-conditioned."
+    },
+    "num_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 121,
+     "minimum": 9,
+     "maximum": 481,
+     "desc": "The number of frames to generate."
+    },
+    "resolution": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        },
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "auto",
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "auto",
+     "desc": "Output video size. The output is generated at up to ~720p (shorter side capped at 704px); larger requested sizes are scaled down, preserving the aspect ratio."
+    },
+    "frames_per_second": {
+     "type": "number",
+     "required": false,
+     "default": 24,
+     "minimum": 1,
+     "maximum": 60,
+     "desc": "Frames per second of the generated video."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 15,
+     "minimum": 8,
+     "maximum": 30,
+     "desc": "Number of inference steps. Defaults to 15 and can be increased up to 30."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 20,
+     "desc": "Classifier-free guidance scale. The default is tuned for fast, high-quality generation."
+    },
+    "generate_audio": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Whether to include audio in the returned video. When disabled, the final MP4 is returned without an audio track."
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": "color distortion, overexposure, static, blurry details, subtitles, style, artwork, painting, frame, still, dim overall tone, worst quality, low quality, JPEG compression artifacts, ugly, mutilated, extra fingers, poorly drawn hands, poorly drawn face, deformed, disfigured, malformed limbs, fused fingers, motionless frame, cluttered background, three legs, crowded background, walking backwards",
+     "desc": "The negative prompt to steer generation away from."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Whether to enable prompt expansion."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Whether to enable the safety checker."
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality preset of the generated video."
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the generated video."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If True, the media is returned as a data URI inline in the response. Useful for short-lived requests and tests."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "Direct HTTP(S) download URL of the LoRA file (.safetensors). The file is downloaded through an SSRF-safe downloader before it is loaded. Max size: 3 GB.",
+       "examples": [
+        "https://example.com/path/to/lora.safetensors"
+       ]
+      },
+      "transformer": {
+       "type": "enum",
+       "values": [
+        "high",
+        "low",
+        "both"
+       ],
+       "valueType": "string",
+       "required": false,
+       "default": "both",
+       "desc": "Forward-compatibility flag for multi-transformer architectures. LTX-2.3 has a single transformer, so 'both' is the right choice for almost all users."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 2,
+       "desc": "Strength of the LoRA application (0.0 to 2.0). Higher values = stronger effect on the generated video."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "maxItems": 3,
+     "required": true,
+     "desc": "Up to 3 LoRAs to apply on top of LTX-2.3. Each path is downloaded through the registry SSRF-safe downloader before it is loaded. Max size: 3 GB per LoRA."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "video": "video_url",
+    "resolution": "resolution",
+    "numFrames": "num_frames",
+    "fps": "frames_per_second",
+    "generateAudio": "generate_audio",
+    "seed": "seed",
+    "negativePrompt": "negative_prompt",
+    "loras": "loras"
+   },
+   "output": "video.url",
+   "inputsChecked": "2026-10-29"
   }
  ],
  "noHostedLora": [
@@ -11832,7 +12063,9 @@
    "hostedEndpoint": "fal-ai/z-image/turbo/lora",
    "comfyWorkflow": "z-image-turbo-t2i",
    "notes": "Do the pixelation in post: SAM 3.1 face mask, then a mosaic filter on the masked area.",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "post": "face-mosaic",
+   "postNote": "Added 2026-10-29 (o/o11-open-tools): the pixelation is a step after the picture: SAM 3.1 finds the faces, a mosaic covers them (open: image-face-mosaic-sam3; cloud: fal-ai/sam-3-1/image's masks, pixelated by the server, or the browser for a picture it can't decode)."
   },
   {
    "id": "255f4045-d68b-42b1-9e4c-f49d3263a9d7",
@@ -18367,7 +18600,43 @@
     "fal-ai/wan/v2.2-14b/speech-to-video ($0.10/0.15/0.20 per second at 480/580/720p)",
     "fal-ai/ltx-2.3-22b/audio-to-video/lora (audio-driven LTX with LoRAs)"
    ],
-   "licence": "InfiniteTalk Apache-2.0; Wan Apache-2.0"
+   "licence": "InfiniteTalk Apache-2.0; Wan Apache-2.0",
+   "original": {
+    "id": "fuobe-speak",
+    "added": "2026-10-29",
+    "open": {
+     "workflow": "infinitetalk-wanwrapper",
+     "lora": "fusionix-i2v-14b",
+     "defaults": {
+      "motionFrame": 15,
+      "steps": 25,
+      "shift": 10,
+      "cfg": 5,
+      "audioCfg": 5,
+      "colorCorrection": 1,
+      "scheduler": "unipc"
+     },
+     "note": "Higgsfield's 'Infinite Talk' form: motion_frame 15, sample_steps 25, sample_shift 10, sample_text_guide_scale 5, sample_audio_guide_scale 5, color_correction_strength 1, LoRA fusex at 1 (higgsfield-originals-5.md §3.13). In kijai's WanVideoWrapper: WanVideoImageToVideoMultiTalk motion_frame, WanVideoSampler steps / shift / cfg / scheduler (InfiniteTalk's default solver is UniPC), MultiTalkWav2VecEmbeds audio_cfg_scale, and colormatch 'reinhard' for the colour correction (InfiniteTalk matches each window's Lab mean and spread to the portrait, which is Reinhard's transfer; the wrapper has no strength, so 1 = on)."
+    },
+    "cloud": {
+     "endpoint": "fal-ai/infinitalk",
+     "fps": 25,
+     "note": "No motion_frame, shift, guidance or LoRA fields: the like-for-like copy runs only on the GPU. num_frames 41–721 at 25 fps follows the voice's length."
+    },
+    "motion": {
+     "id": "fuobe-speak-motion",
+     "open": {
+      "workflow": "wan22-s2v-14b"
+     },
+     "cloud": {
+      "endpoint": "fal-ai/wan/v2.2-14b/speech-to-video",
+      "fps": 16,
+      "note": "num_frames 40–120 (a multiple of 4) at 16 fps: 2.5–7.5 s a call; $0.10 / $0.15 / $0.20 per video second at 480p / 580p / 720p."
+     },
+     "note": "A Speak v1-like route: Higgsfield's Speak (v1) is a DoP-family image-to-video job driven by audio; Wan 2.2 S2V is the open model that does that (body and scene motion with the speech)."
+    },
+    "licence": "InfiniteTalk Apache-2.0; Wan 2.1 / 2.2 Apache-2.0; FusioniX Apache-2.0 card (merged LoRAs unchecked)"
+   }
   },
   {
    "id": "soul-id",
@@ -18453,6 +18722,32 @@
      "fashn-tryon"
     ],
     "licences": "Licences are information (Settings → Models & licences): every model, the try-on LoRA included, has its switch"
+   }
+  },
+  {
+   "id": "angles",
+   "higgsfield": "Higgsfield Angles (job QWEN_CAMERA_CONTROL: rotate_degree, move_forward_level, vertical_angle, sample_steps, loras lightx + camera_angle)",
+   "open": "Qwen-Image-Edit 2509 + dx8152 Multiple-angles LoRA (1.25) + Qwen-Image-Lightning (Fuobe qwen-image-edit-2509-angles); Qwen-Image-Edit 2511 + fal's Multiple-Angles LoRA stays the Angles app's default (with fal's Qwen Multiple Angles in the cloud) until the angles eval suite (scripts/eval/cases/angles.json) promotes Fuobe Angles, which is its own app next to it, and stays for Cinema's recomposition and Soul Location's views",
+   "hosted": [
+    "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles ($0.035 per megapixel; rotate_right_left −90…90 (positive = left), vertical_angle −1…1 (−1 bird's-eye, 1 worm's-eye), move_forward 0–10, wide_angle_lens, lora_scale 1.25, 6 steps; no prompt field)"
+   ],
+   "licence": "Qwen-Image-Edit 2509 Apache-2.0; dx8152 Multiple-angles Apache-2.0; Qwen-Image-Lightning Apache-2.0",
+   "original": {
+    "id": "fuobe-angles",
+    "added": "2026-10-29",
+    "cloud": {
+     "endpoint": "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles",
+     "defaults": {
+      "lora_scale": 1.25,
+      "num_inference_steps": 6
+     }
+    },
+    "open": {
+     "workflow": "qwen-image-edit-2509-angles",
+     "lora": "qwen-edit-2509-multiple-angles",
+     "steps": 6,
+     "words": "rotate: '将镜头向左旋转{n}度 Rotate the camera {n} degrees to the left.' (right for a negative angle); forward 1–5: '将镜头向前移动 Move the camera forward.', above 5: '将镜头转为特写镜头 Turn the camera to a close-up.'; vertical −1: '将相机转向鸟瞰视角 Turn the camera to a bird's-eye view.', 1: '将相机切换到仰视视角 Turn the camera to a worm's-eye view.'; wide-angle: '将镜头转为广角镜头 Turn the camera to a wide-angle lens.' (the LoRA card's instructions, as the public HF Space builds them)"
+    }
    }
   }
  ],
@@ -22666,6 +22961,542 @@
    "verified": true,
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max/recast",
    "checked": "2026-10-27"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles",
+   "operation": "edit",
+   "status": "active",
+   "inputs": {
+    "image_urls": {
+     "type": "array",
+     "items": "string",
+     "required": true,
+     "desc": "The URL of the image to adjust camera angle for.",
+     "examples": [
+      [
+       "https://v3.fal.media/files/monkey/i3saq4bAPXSIl08nZtq9P_ec535747aefc4e31943136a6d8587075.png"
+      ]
+     ]
+    },
+    "image_size": {
+     "nullable": true,
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        },
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "desc": "The size of the generated image. If not provided, the size of the final input image will be used."
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 1,
+     "minimum": 0,
+     "maximum": 20,
+     "desc": "The CFG (Classifier Free Guidance) scale. Controls how closely the model follows the prompt."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 6,
+     "minimum": 2,
+     "maximum": 50,
+     "desc": "The number of inference steps to perform."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "Acceleration level for image generation. 'regular' balances speed and quality."
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": " ",
+     "desc": "The negative prompt for the generation",
+     "examples": [
+      " "
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. Same seed with same prompt will produce same result."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and won't be saved in history."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Whether to enable the safety checker for the generated image. Disabling it requires account authorization; unauthorized requests are always checked."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "png",
+      "jpeg",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the output image"
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "Number of images to generate"
+    },
+    "rotate_right_left": {
+     "type": "number",
+     "required": false,
+     "default": 0,
+     "minimum": -90,
+     "maximum": 90,
+     "desc": "Rotate camera left (positive) or right (negative) in degrees. Positive values rotate left, negative values rotate right."
+    },
+    "move_forward": {
+     "type": "number",
+     "required": false,
+     "default": 0,
+     "minimum": 0,
+     "maximum": 10,
+     "desc": "Move camera forward (0=no movement, 10=close-up)"
+    },
+    "vertical_angle": {
+     "type": "number",
+     "required": false,
+     "default": 0,
+     "minimum": -1,
+     "maximum": 1,
+     "desc": "Adjust vertical camera angle (-1=bird's-eye view/looking down, 0=neutral, 1=worm's-eye view/looking up)"
+    },
+    "wide_angle_lens": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Enable wide-angle lens effect"
+    },
+    "lora_scale": {
+     "type": "number",
+     "required": false,
+     "default": 1.25,
+     "minimum": 0,
+     "maximum": 4,
+     "desc": "The scale factor for the LoRA model. Controls the strength of the camera control effect."
+    }
+   },
+   "keyFields": {
+    "images": "image_urls",
+    "negativePrompt": "negative_prompt",
+    "numOutputs": "num_images",
+    "seed": "seed"
+   },
+   "output": "images[].url",
+   "price": "$0.035 per megapixels",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles",
+   "checked": "2026-10-29"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/wan/v2.2-14b/speech-to-video",
+   "operation": "avatar",
+   "status": "active",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The text prompt used for video generation.",
+     "examples": [
+      "Summer beach vacation style, a white cat wearing sunglasses sits on a surfboard."
+     ]
+    },
+    "negative_prompt": {
+     "type": "string",
+     "required": false,
+     "default": "",
+     "desc": "Negative prompt for video generation."
+    },
+    "num_frames": {
+     "type": "integer",
+     "required": false,
+     "default": 80,
+     "minimum": 40,
+     "maximum": 120,
+     "desc": "Number of frames to generate. Must be between 40 to 120, (must be multiple of 4).",
+     "examples": [
+      80
+     ]
+    },
+    "frames_per_second": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "default": 16,
+     "minimum": 4,
+     "maximum": 60,
+     "desc": "Frames per second of the generated video. Must be between 4 to 60. When using interpolation and `adjust_fps_for_interpolation` is set to true (default true,) the final FPS will be multiplied by the number of interpolated frames plus one. For example, if the generated frames per second is 16 and the number of interpolated frames is 1, the final frames per second will be 32. If `adjust_fps_for_interpolation` is set to false, this value will be used as-is.",
+     "examples": [
+      16
+     ]
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "Random seed for reproducibility. If None, a random seed is chosen."
+    },
+    "resolution": {
+     "type": "enum",
+     "values": [
+      "480p",
+      "580p",
+      "720p"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "480p",
+     "desc": "Resolution of the generated video (480p, 580p, or 720p).",
+     "examples": [
+      "480p"
+     ]
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 27,
+     "minimum": 2,
+     "maximum": 40,
+     "desc": "Number of inference steps for sampling. Higher values give better quality but take longer.",
+     "examples": [
+      27
+     ]
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, input data will be checked for safety before processing. Disabling it requires account authorization; unauthorized requests are always checked.",
+     "examples": [
+      true
+     ]
+    },
+    "enable_output_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If set to true, output video will be checked for safety after generation.",
+     "examples": [
+      false
+     ]
+    },
+    "guidance_scale": {
+     "type": "number",
+     "required": false,
+     "default": 3.5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Classifier-free guidance scale. Higher values give better adherence to the prompt but may decrease quality.",
+     "examples": [
+      3.5
+     ]
+    },
+    "shift": {
+     "type": "number",
+     "required": false,
+     "default": 5,
+     "minimum": 1,
+     "maximum": 10,
+     "desc": "Shift value for the video. Must be between 1.0 and 10.0.",
+     "examples": [
+      5
+     ]
+    },
+    "video_quality": {
+     "type": "enum",
+     "values": [
+      "low",
+      "medium",
+      "high",
+      "maximum"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "high",
+     "desc": "The quality of the output video. Higher quality means better visual quality but larger file size.",
+     "examples": [
+      "high"
+     ]
+    },
+    "video_write_mode": {
+     "type": "enum",
+     "values": [
+      "fast",
+      "balanced",
+      "small"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "balanced",
+     "desc": "The write mode of the output video. Faster write mode means faster results but larger file size, balanced write mode is a good compromise between speed and quality, and small write mode is the slowest but produces the smallest file size.",
+     "examples": [
+      "balanced"
+     ]
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the input image. If the input image does not match the chosen aspect ratio, it is resized and center cropped.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/example_inputs/wan_s2v_cat.png"
+     ]
+    },
+    "audio_url": {
+     "type": "string",
+     "required": true,
+     "desc": "The URL of the audio file.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/example_inputs/wan_s2v_talk.wav"
+     ]
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "image": "image_url",
+    "audio": "audio_url",
+    "negativePrompt": "negative_prompt",
+    "resolution": "resolution",
+    "numFrames": "num_frames",
+    "fps": "frames_per_second",
+    "seed": "seed"
+   },
+   "output": "video.url",
+   "price": "Your request will cost $0.20 per video second for 720p, $0.15 per video second for 580p, $0.10 per video second for 480p. Video seconds are calculated at 16 frames per second.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wan/v2.2-14b/speech-to-video",
+   "checked": "2026-10-29"
+  },
+  {
+   "provider": "fal",
+   "endpoint": "fal-ai/sam-3-1/image",
+   "operation": "face-mosaic",
+   "status": "active",
+   "inputs": {
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of the image to be segmented",
+     "examples": [
+      "https://raw.githubusercontent.com/facebookresearch/segment-anything-2/main/notebooks/images/truck.jpg"
+     ]
+    },
+    "prompt": {
+     "type": "string",
+     "required": false,
+     "default": "wheel",
+     "desc": "Text prompt for segmentation",
+     "examples": [
+      "wheel"
+     ]
+    },
+    "point_prompts": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "object_id": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "Optional object identifier. Prompts sharing an object id refine the same object. When a text prompt is also given, the id selects which detected object the points refine."
+      },
+      "frame_index": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "The frame index to interact with."
+      },
+      "y": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "Y Coordinate of the prompt"
+      },
+      "x": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "X Coordinate of the prompt"
+      },
+      "label": {
+       "nullable": true,
+       "type": "enum",
+       "values": [
+        0,
+        1
+       ],
+       "valueType": "integer",
+       "required": false,
+       "desc": "1 for foreground, 0 for background"
+      }
+     },
+     "required": false,
+     "default": [],
+     "desc": "List of point prompts"
+    },
+    "box_prompts": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "x_max": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "X Max Coordinate of the box"
+      },
+      "object_id": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "Optional object identifier. Boxes sharing an object id refine the same object."
+      },
+      "x_min": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "X Min Coordinate of the box"
+      },
+      "frame_index": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "The frame index to interact with."
+      },
+      "y_max": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "Y Max Coordinate of the box"
+      },
+      "y_min": {
+       "nullable": true,
+       "type": "integer",
+       "required": false,
+       "desc": "Y Min Coordinate of the box"
+      }
+     },
+     "required": false,
+     "default": [],
+     "desc": "Box prompt coordinates (x_min, y_min, x_max, y_max). Multiple boxes supported - use object_id to group boxes for the same object or leave empty for separate objects."
+    },
+    "apply_mask": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "Apply the mask on the image."
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If True, the media will be returned as a data URI."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the generated image."
+    },
+    "return_multiple_masks": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If True, upload and return multiple generated masks as defined by `max_masks`."
+    },
+    "max_masks": {
+     "type": "integer",
+     "required": false,
+     "default": 3,
+     "minimum": 1,
+     "maximum": 32,
+     "desc": "Maximum number of masks to return when `return_multiple_masks` is enabled."
+    },
+    "include_scores": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to include mask confidence scores."
+    },
+    "include_boxes": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to include bounding boxes for each mask (when available)."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "image": "image_url"
+   },
+   "output": "masks[].url",
+   "price": "Your request will cost $0.01 per request.",
+   "verified": true,
+   "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/sam-3-1/image",
+   "checked": "2026-10-29"
   }
  ],
  "partnerEndpoints": [
@@ -23006,6 +23837,51 @@
    ],
    "hostedEndpoint": "fal-ai/qwen-image-edit-plus-lora",
    "notes": "The v2 next-scene LoRA the GPU's storyboard-qwen-edit-2509-next-scene graph loads (at 0.75), so a cloud board's next frames run the same recipe on fal's hosted Qwen-Image-Edit 2509 (loras: [{path, scale}], up to 3; $0.035 per megapixel). Card licence MIT, base Qwen/Qwen-Image-Edit-2509 (Apache-2.0); a prompt starting \"Next Scene:\" continues the previous panel (image 1) with a new shot. Pinned 2026-10-29 from the Hugging Face API (repo head, the file's LFS SHA256 and size)."
+  },
+  {
+   "key": "qwen-edit-2509-multiple-angles",
+   "name": "Multiple-angles for Qwen-Image-Edit 2509 (dx8152)",
+   "url": "https://huggingface.co/dx8152/Qwen-Edit-2509-Multiple-angles/resolve/main/%E9%95%9C%E5%A4%B4%E8%BD%AC%E6%8D%A2.safetensors",
+   "page": "https://huggingface.co/dx8152/Qwen-Edit-2509-Multiple-angles",
+   "file": "qwen-edit-2509-multiple-angles-dx8152.safetensors",
+   "strength": 1.25,
+   "base": "qwen-image-edit-2509",
+   "licence": "Apache-2.0",
+   "commercial": true,
+   "hostedOk": true,
+   "download": "direct",
+   "released": "2025-10-31",
+   "revision": "c342b0e746c3a3275af1a4a0c6ae78e0e4802531",
+   "sha256": "e0cea9508025a39e41f50da0e7d10fbd9db182d057c745136a42ef8829914c8f",
+   "sizeBytes": 236117032,
+   "checked": "2026-10-29",
+   "usedBy": [
+    "fuobe-angles"
+   ],
+   "hostedEndpoint": "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles",
+   "notes": "The camera-move LoRA behind Higgsfield Angles (higgsfield-originals-5.md §3.22). Its file is named 镜头转换.safetensors upstream; Fuobe keeps it under an ASCII name. It takes camera instructions in Chinese with English (rotate left / right by degrees, move forward or a close-up, bird's-eye or worm's-eye view, a wide-angle lens), which Fuobe Angles writes from its controls on the GPU. fal hosts the same LoRA (its LoRA gallery's multiple-angles route, lora_scale 1.25 and 6 steps by default) and builds the words itself. Strength 1.25, as fal and the public HF Space (linoyts/Qwen-Image-Edit-Angles) fuse it."
+  },
+  {
+   "key": "fusionix-i2v-14b",
+   "name": "FusioniX for Wan 2.1 I2V 14B (vrgamedevgirl84)",
+   "url": "https://huggingface.co/vrgamedevgirl84/Wan14BT2VFusioniX/resolve/main/FusionX_LoRa/Wan2.1_I2V_14B_FusionX_LoRA.safetensors",
+   "page": "https://huggingface.co/vrgamedevgirl84/Wan14BT2VFusioniX",
+   "file": "Wan2.1_I2V_14B_FusionX_LoRA.safetensors",
+   "strength": 1.0,
+   "base": "wan2.1-i2v-14b-480p",
+   "licence": "Apache-2.0 (the repository's card); FusioniX merges other LoRAs (CausVid, AccVideo, MoviiGen, MPS reward…) whose own licences were not checked",
+   "commercial": true,
+   "hostedOk": true,
+   "download": "direct",
+   "released": "2025-06-10",
+   "revision": "b9793a1f84727f2f69bdffecc2f50f0abfa746a6",
+   "sha256": "0eb5df85d5bc5fba32966de8b357c7643413219479605cc933412b60305c01f8",
+   "sizeBytes": 371128616,
+   "checked": "2026-10-29",
+   "usedBy": [
+    "fuobe-speak"
+   ],
+   "notes": "The LoRA Higgsfield's 'Infinite Talk' engine loads ('fusex', scale 1, rank 32; higgsfield-originals-5.md §3.13) and InfiniteTalk's README recommends. Fuobe Speak loads it on InfiniteTalk (kijai's WanVideoWrapper) on the GPU in place of the lightx2v distill LoRA. fal's InfiniteTalk takes no LoRA, so the cloud half runs without it. Check on the first live run: the licences of the LoRAs merged into it."
   }
  ]
 }

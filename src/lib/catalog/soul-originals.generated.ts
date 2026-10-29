@@ -1601,6 +1601,7 @@ export const SOUL_ORIGINALS: SoulLook[] = [
     ],
     "base": "z-image",
     "coverage": "prompt+core",
+    "post": "face-mosaic",
     "note": "Do the pixelation in post: SAM 3.1 face mask, then a mosaic filter on the masked area.",
     "legacyStyleId": "34c50302-83ff-487d-b3a9-e35e501d80a7"
   },

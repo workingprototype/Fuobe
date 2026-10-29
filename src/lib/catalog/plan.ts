@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
+import { anglesPrompt, anglesWords, ANGLES_ORIGINAL } from "./open-tools";
 import { numFramesValue, sizeValue } from "./payload";
 import { characterScale, CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
@@ -150,6 +151,8 @@ const PROMPTLESS = new Set<Operation>([
   "timeline",
   // round 4: tools that work from their inputs (removing an object needs a prompt only on models that read one)
   "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop", "audio-join", "scene-3d", "splat", "rig-3d", "extract-frames", "images-to-video", "overlay",
+  // round 5 (O11): the face mosaic names the faces itself ("face")
+  "face-mosaic",
 ]);
 
 /**
@@ -256,6 +259,10 @@ export function planGeneration(
     prompt = r.prompt;
     loras = r.loras;
     notes.push(...r.notes);
+    // PixeletedFace: a second step pixelates the faces (src/server/chains.ts createMosaicRun).
+    if (r.look?.post === "face-mosaic") {
+      notes.push(model.engine === "open" ? "Then SAM 3.1 pixelates the faces on your GPU (free)" : `Then fal's SAM 3.1 finds the faces (${"$"}0.01 a picture) and they're pixelated`);
+    }
     const own = new Set(req.loras ?? []);
     soulPlan = {
       ...(r.look && { look: r.look.id }),
@@ -275,6 +282,16 @@ export function planGeneration(
     // An @character's trained LoRA on FLUX, klein, Krea or any other model: at the character strength's scale, as on Soul.
     const own = charStrength === undefined ? req.loras : req.loras.map((l) => ({ ...l, strength: characterScale(charStrength) }));
     loras = [...own, ...loras];
+  }
+  // Fuobe Angles: the camera's fields go to fal as they are; on the GPU they become the Multiple-angles LoRA's own words,
+  // the user's note after them. fal's route takes no words of its own.
+  if (model.id === ANGLES_ORIGINAL) {
+    if (model.engine === "open") prompt = anglesPrompt(params.extra, prompt);
+    else {
+      if (!anglesWords(params.extra)) throw new Error("Move the camera first: rotate it, tilt it, move it closer or go wide");
+      if (prompt) notes.push("The hosted Multiple-angles route takes no words: your note is used on your GPU only");
+      prompt = "";
+    }
   }
   // The words a model takes when none are given (Fuobe Try-On: its LoRA's own instruction).
   if (!prompt && model.options.defaultPrompt) prompt = model.options.defaultPrompt;
@@ -497,6 +514,7 @@ const NEEDS: Partial<
   "video-insert": { video: true, images: 1, msg: "Add the video and a picture of what to add" },
   keyframes: { images: 1, msg: "Add the keyframes, in order" },
   "sdr-to-hdr": { video: true, msg: "Add the video to convert" },
+  "face-mosaic": { images: 1, msg: "Add the picture whose faces to pixelate" },
   "export-video": { video: true, msg: "Add the video to export" },
   ocr: { images: 1, msg: "Add the image to read" },
   "still-motion": { images: 1, msg: "Add the still to move over" },
@@ -587,6 +605,17 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
 const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
 
 /**
+ * The seconds a talking avatar is made (and billed) for a voice `seconds` long: as long as the voice, or what a
+ * frame-count route's limits make of it, in the seconds it bills (fal's InfiniteTalk: 41–721 frames, 25 a second; Wan 2.2
+ * S2V: 40–120 frames, a video second being 16 of them at any frame rate).
+ */
+export function avatarSeconds(model: Pick<ModelDef, "routes">, seconds: number, fps?: number): number {
+  const f = model.routes.find((r) => r.op === "avatar" && r.map?.numFrames)?.map?.numFrames;
+  const frames = f ? numFramesValue(f, { sourceDuration: seconds, fps }) : undefined;
+  return f && frames ? frames / f.fps : seconds;
+}
+
+/**
  * A prompt without the trigger words of LoRAs a run leaves out: an open motion's template starts with its LoRA's
  * trigger ("e13c7r1c electricity effect. …", see withOssLoras), which means nothing to the model without the LoRA.
  * A trigger a kept LoRA shares stays.
@@ -654,6 +683,8 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   const usd = withLoras && p.withLoras !== undefined ? (at(p.withLorasByResolution) ?? p.withLoras) : at(p.byResolution) || p.usd;
   let per = usd;
   const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
+  // A talking avatar is as long as its voice (params.sourceDuration: the voice's header, read by the studio or the server).
+  const voice = op === "avatar" && params.sourceDuration && params.sourceDuration > 0 ? avatarSeconds(model, params.sourceDuration, params.fps) : undefined;
   if (p.unit === "image") per = usd * n;
   // Per megapixel of every image made: Soul's sizes are known (about 1 or 2 MP), so is a size sent as fal's image_size
   // {width, height} (Fuobe Mixed Media's frames); other models are taken as 1 MP.
@@ -662,12 +693,12 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
     per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
   }
   if (p.unit === "second") {
-    const seconds = clip ?? params.duration ?? model.defaults?.duration ?? 5;
+    const seconds = clip ?? voice ?? params.duration ?? model.defaults?.duration ?? 5;
     const mp = p.videoMegapixel ? videoMegapixels(model, params, seconds) : undefined;
     const rate = p.videoMegapixel && (withLoras && p.videoMegapixel.withLoras !== undefined ? p.videoMegapixel.withLoras : p.videoMegapixel.usd);
     per = mp !== undefined && rate ? Math.ceil(mp - 1e-9) * rate : usd * seconds * (p.inputSeconds ? 2 : 1);
   }
-  if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
+  if (p.unit === "minute") per = (usd * (voice ?? params.duration ?? 60)) / 60;
   // Settings that change the price (60 fps, a Pro tier, a cheaper model).
   for (const f of p.factors ?? []) {
     const v = f.param === "targetFps" ? (params.targetFps ?? model.defaults?.targetFps) : (params.extra?.[f.param] ?? model.options.controls?.find((c) => c.param === f.param)?.default);

@@ -1,3 +1,4 @@
+import { ANGLES_2511_LORA } from "./open-tools";
 import { CAST_LOOK } from "./soul-cards";
 import type { InputSlot, Preset, PresetOption, PresetRoute } from "./types";
 
@@ -263,7 +264,9 @@ export const APPS: Preset[] = [
     hue: 190,
     badges: ["top"],
     // The cloud model turns its rotate / tilt / zoom settings into the Multiple-Angles LoRA's own words; the open
-    // route runs that LoRA on Qwen-Image-Edit 2511 with the same words ("<sks> front-left quarter view …").
+    // route runs that LoRA on Qwen-Image-Edit 2511 with the same words ("<sks> front-left quarter view …"). Fuobe Angles
+    // (the next app, O11) is Higgsfield Angles' 2509 recipe; it replaces this default only when the angles eval suite
+    // (scripts/eval/cases/angles.json) promotes it.
     options: [
       angleOption("angle", "Angle", "horizontal_angle", [
         ["Front", "front view", 0],
@@ -296,10 +299,59 @@ export const APPS: Preset[] = [
     open: {
       modelId: "oss-qwen-edit",
       op: "edit",
-      loras: [{ file: "qwen-image-edit-2511-multiple-angles-lora.safetensors", url: "https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA/resolve/main/qwen-image-edit-2511-multiple-angles-lora.safetensors", strength: 1 }],
+      loras: [ANGLES_2511_LORA],
       promptTemplate: "<sks> {option:angle} {option:height} {option:distance}. {prompt}",
     },
     parity: "Both engines run the same Multiple-Angles LoRA: hosted by fal on the cloud, added to Qwen-Image-Edit 2511 on the open engine (0.3 GB)",
+  }),
+  app({
+    name: "Fuobe Angles",
+    category: "Camera",
+    description: "Turn the camera on the same shot: rotate, tilt, move closer, go wide",
+    icon: "Rotate3d",
+    hue: 205,
+    badges: ["new", "beta"],
+    // Fuobe Angles (O11): Higgsfield Angles' recipe, Qwen-Image-Edit 2509 + dx8152's Multiple-angles LoRA on both engines, next
+    // to the Angles app's 2511 route (which stays the default until the angles eval suite promotes this one). The choices set
+    // the hosted route's own fields (rotate −90…90°, positive = left; vertical −1 above … 1 below; move forward 0–10; a
+    // wide-angle lens); on the GPU they become the LoRA's words (src/lib/catalog/open-tools.ts). The default turns it.
+    options: [
+      {
+        ...angleOption("rotate", "Rotate", "rotate_right_left", [
+          ["90° left", "", 90],
+          ["45° left", "", 45],
+          ["Front", "", 0],
+          ["45° right", "", -45],
+          ["90° right", "", -90],
+        ]),
+        default: "45-left",
+      },
+      angleOption("height", "Camera height", "vertical_angle", [
+        ["Eye level", "", 0],
+        ["From above", "", -1],
+        ["From below", "", 1],
+      ]),
+      angleOption("distance", "Distance", "move_forward", [
+        ["As is", "", 0],
+        ["Closer", "", 5],
+        ["Close-up", "", 10],
+      ]),
+      {
+        key: "lens",
+        label: "Lens",
+        choices: [
+          { value: "normal", label: "Normal", prompt: "", extra: { wide_angle_lens: false } },
+          { value: "wide", label: "Wide-angle", prompt: "", extra: { wide_angle_lens: true } },
+        ],
+      },
+    ],
+    userPrompt: "optional",
+    placeholder: "Anything to keep in mind (used on your GPU)",
+    prompt: "{prompt}",
+    cloud: { modelId: "fuobe-angles", op: "edit" },
+    open: { modelId: "fuobe-angles", op: "edit" },
+    parity:
+      "Both engines run Higgsfield Angles' recipe, Qwen-Image-Edit 2509 + the Multiple-angles LoRA: hosted on fal, or with Qwen-Image-Lightning on your GPU (24 GB). fal's route takes no words of its own. Not yet measured: the Angles app stays the default until the angles evaluation suite promotes this recipe",
   }),
   app({
     name: "Shots",

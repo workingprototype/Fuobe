@@ -79,7 +79,9 @@ export type Operation =
   | "rig-3d" // 3D model (+ params.animation) → rigged / animated model
   | "extract-frames" // video → an image every params.frameInterval frames (meta.index)
   | "images-to-video" // images in order → a video at params.fps
-  | "overlay"; // image + a second image (logo) → composited (params.position, params.scale)
+  | "overlay" // image + a second image (logo) → composited (params.position, params.scale)
+  // round 5 (O11)
+  | "face-mosaic"; // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -146,6 +148,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   "extract-frames": "Extract frames",
   "images-to-video": "Images to video",
   overlay: "Overlay image",
+  "face-mosaic": "Pixelate faces",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -214,6 +217,7 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   "extract-frames": "image",
   "images-to-video": "video",
   overlay: "image",
+  "face-mosaic": "image",
 };
 
 /**
@@ -420,8 +424,10 @@ export interface FieldMap {
    * Also video models whose length is a frame count (Wan 2.2, LTX-2.3 22B), where `step` keeps the count at
    * step·n + 1 (Wan 4n+1, LTX 8n+1). `fromDuration`: the frames to add (extend), so params.duration counts,
    * never the input clip's length, at the clip's own frame rate when it is known (fal's LTX-2.3 extend matches it).
+   * `multiple`: a count that must be a multiple of it (fal's Wan 2.2 S2V: 4n). A talking-avatar route (fal's
+   * InfiniteTalk, Wan 2.2 S2V) renders as long as the voice: its header's length is params.sourceDuration.
    */
-  numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number; fromDuration?: boolean };
+  numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number; multiple?: number; fromDuration?: boolean };
   /**
    * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
    * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
@@ -480,6 +486,18 @@ export interface ModelRoute {
    * start/end-frame clip of `endpoint` per pair of frames, then joined; src/server/chains.ts).
    */
   chained?: true;
+  /**
+   * A ComfyUI route's graph settings sent unless the request sets them (params.extra wins): Fuobe Speak's InfiniteTalk
+   * defaults on kijai's wrapper graph (motion frames, steps, shift, text and audio guidance, colour match), the cloud's
+   * FieldMap.defaults for a graph.
+   */
+  extra?: Record<string, unknown>;
+  /**
+   * A ComfyUI wrapper graph that loads one LoRA itself (kijai's InfiniteTalk) takes the run's LoRA in that slot, in place of
+   * its own: only on a route whose recipe brings that LoRA and the settings it needs (Fuobe Speak's FusioniX with 25 steps).
+   * Other routes on the graph refuse a LoRA rather than swap out the one its settings are tuned for.
+   */
+  loraSlot?: true;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";
@@ -868,6 +886,11 @@ export interface GenerationRequest {
   frame?: { scene: string; index: number; of: number; look?: string; crop?: "21:9" };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
   step?: { label: string; index: number; of: number };
+  /**
+   * Server-set: the picture of a look whose step after it (PixeletedFace's face mosaic) is the next step of the same run
+   * (src/server/chains.ts createMosaicRun), so it doesn't start another.
+   */
+  postMade?: boolean;
   /** Server-set: what the user calls this result, shown instead of the prompt (Library, feeds). */
   title?: string;
   /** Server-set: the name of the batch it belongs to (an Assist plan's summary): the Library stack's title. */
@@ -1035,7 +1058,7 @@ export interface PresetChoice {
   /** Text substituted for {option:<key>} in the prompt template. */
   prompt: string;
   /** Model settings this choice sets (params.extra), e.g. the camera angle sliders of Qwen Multiple Angles; what the user set wins. */
-  extra?: Record<string, number | string>;
+  extra?: Record<string, number | string | boolean>;
 }
 
 export interface PresetOption {

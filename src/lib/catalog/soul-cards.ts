@@ -18,6 +18,8 @@ export interface SoulLookCard {
   grade?: string;
   /** Drawn on the result in the browser: a date stamp, a CCTV caption, a photo-booth print. */
   overlay?: "date-stamp" | "cctv" | "photo-booth";
+  /** A step after the picture: "face-mosaic" pixelates the faces (SAM 3.1 + a mosaic; priced into the run). */
+  post?: "face-mosaic";
   /** Some of its LoRAs download from civitai (needs the user's free civitai key). */
   civitai: boolean;
   /** Made for Fuobe Soul HD (Qwen-Image 2512: lettering). */
