@@ -17951,6 +17951,54 @@
     "fal-ai/qwen-image-edit-2511/lora with a next-scene LoRA"
    ],
    "licence": "Apache-2.0"
+  },
+  {
+   "id": "marketing",
+   "higgsfield": "Marketing Studio Image (GPT Image 2.5 + prompt templates), Ads Studio (LLM concepts + GPT Image 2.5), AI Influencer (a prompt compiler on an image model), Photodump (Soul batch), Instadump (Popcorn keyframes), Fashion Factory (Soul v1 base shots, Nano Banana outfit and photoset)",
+   "open": "qwen-image-edit-2511-multi + template prompts; product-shot-qwen-edit-2509 for a standalone product shot; qwen-image-2512-t2i without a product; soul-cast-sheet-zimage with the Realistic look for the AI Influencer sheet; z-image-turbo-t2i + character LoRA (Photodump, Fashion base shots); tryon-flux2-klein-4b; qwen-image-edit-2511-multi (Instadump, Fashion photoset, Add your face)",
+   "hosted": "fal-ai/qwen-image-edit-2511/lora, fal-ai/qwen-image-2512/lora, fal-ai/z-image/turbo/lora, fal-ai/flux-2/klein/4b/edit/lora (with the try-on LoRA)",
+   "licence": "Apache-2.0 weights throughout (Qwen-Image 2512 / Edit 2511 / Edit 2509, Z-Image Turbo, FLUX.2 [klein] 4B, the White_to_Scene and try-on LoRAs)",
+   "note": "Build plan O10. The words of a headline, a CTA or an ad are set over the picture in the browser on both engines, so they come out exact; partner models (GPT Image 2.5, Nano Banana Pro, Ideogram, Recraft, Seedream 5.0, FASHN) stay as choices.",
+   "original": {
+    "model": "fuobe-marketing-image",
+    "added": "2026-10-28",
+    "cloud": {
+     "edit": "fal-ai/qwen-image-edit-2511 (fal-ai/qwen-image-edit-2511/lora with LoRAs; Replicate qwen/qwen-image-edit-2511)",
+     "t2i": "fal-ai/qwen-image-2512 (fal-ai/qwen-image-2512/lora with LoRAs)",
+     "price": "$0.03 per megapixel for an edit, $0.035 with LoRAs; text to image $0.02 per megapixel"
+    },
+    "open": {
+     "edit": "qwen-image-edit-2511-multi (up to 3 references: product, person, setting)",
+     "productShot": "product-shot-qwen-edit-2509 (one product photo, Standalone: cut out, put on white, relit into the scene)",
+     "t2i": "qwen-image-2512-t2i"
+    },
+    "ads": "the Ads Studio visual: fuobe-marketing-image (edit with the product photo, else text to image), the copy from Claude, Ollama or Fuobe's offline writer, composited in the browser",
+    "influencer": {
+     "sheet": "fuobe-soul at 16:9, 1080p tier, look v1-realistic (cloud); soul-cast-sheet-zimage with the same look's LoRAs (open)",
+     "face": "qwen-image-edit-2511-cloud / oss-qwen-edit with the sheet as image 1"
+    },
+    "photodump": {
+     "trained": "fuobe-soul + the character's Soul ID LoRA + one Fuobe prompt per pack photo",
+     "untrained": "qwen-image-edit-2511-cloud / oss-qwen-edit with the photos as references (Instadump)"
+    },
+    "fashion": {
+     "base": "fuobe-soul with the character's Soul ID (else Qwen-Image-Edit 2511 with their photos)",
+     "outfit": "fuobe-tryon: tryon-flux2-klein-4b on the open engine; fal-ai/flux-2/klein/4b/edit/lora with the try-on LoRA (adapterLoras tryon-klein-4b) in the cloud",
+     "photoset": "qwen-image-edit-2511-cloud / oss-qwen-edit, one Fuobe prompt per template shot"
+    },
+    "partners": [
+     "gpt-image-2-5",
+     "nano-banana-pro",
+     "ideogram-4-5",
+     "ideogram-3",
+     "recraft-4-1",
+     "bria-product-shot",
+     "product-photography",
+     "seedream-5-pro",
+     "fashn-tryon"
+    ],
+    "licences": "Licences are information (Settings → Models & licences): every model, the try-on LoRA included, has its switch"
+   }
   }
  ],
  "counts": {
@@ -22453,6 +22501,32 @@
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=alibaba/happy-horse/v1.1/reference-to-video",
    "checked": "2026-10-27",
    "replaces": "a route of the provider build plan O7 removed"
+  }
+ ],
+ "adapterLoras": [
+  {
+   "key": "tryon-klein-4b",
+   "name": "Virtual Try-On for FLUX.2 [klein] 4B (xocialize)",
+   "url": "https://huggingface.co/xocialize/tryon-FLUX.2-klein-4B-lora/resolve/main/tryon-klein-4b.safetensors",
+   "page": "https://huggingface.co/xocialize/tryon-FLUX.2-klein-4B-lora",
+   "file": "tryon-klein-4b.safetensors",
+   "trigger": "TRYON",
+   "strength": 1.0,
+   "base": "flux2-klein-4b",
+   "licence": "Apache-2.0",
+   "commercial": true,
+   "hostedOk": true,
+   "download": "direct",
+   "released": "2026-07-15",
+   "revision": "5e590220c687190a3d8dc66d173570f9de097984",
+   "sha256": "e251c836b4792910cb322317f58a91063f73bef7255031912886af840dc7dd43",
+   "sizeBytes": 92426760,
+   "checked": "2026-10-28",
+   "usedBy": [
+    "fuobe-tryon"
+   ],
+   "hostedEndpoint": "fal-ai/flux-2/klein/4b/edit/lora",
+   "notes": "Rank-32 edit LoRA trained by xocialize with ai-toolkit on FLUX.2-klein-base-4B (Apache-2.0); card licence apache-2.0, so fal may host it (build plan O10's check). Three ordered inputs: person, top (or a dress / whole outfit), bottom; trigger TRYON. Trained on clothing-agnostic people: the open graph greys the old outfit out first (ClothesSegment), the hosted route sends the photo as it is (quality unmeasured until the eval harness runs the fashion suite)."
   }
  ]
 }

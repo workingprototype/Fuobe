@@ -4,7 +4,7 @@ import type { LoraEntry, MotionEffectLoras } from "./loras";
 /** When the LoRA research (licences, civitai permissions, pinned versions) was read. */
 export const LORA_LIBRARY_AS_OF = "2026-10-23";
 
-/** Every LoRA the Originals use: Soul looks (group "look") and motion / effect LoRAs, one entry per local file. */
+/** Every LoRA the Originals use: Soul looks (group "look"), motion / effect LoRAs and the adapters a recipe always loads, one entry per local file. */
 export const LORA_LIBRARY: LoraEntry[] = [
   {
     "key": "awportrait",
@@ -3102,6 +3102,30 @@ export const LORA_LIBRARY: LoraEntry[] = [
     },
     "released": "2026-07-27",
     "hostedEndpoint": "fal-ai/ltx-2.3-22b/reference-video-to-video/lora (unverified for this IC-LoRA)"
+  },
+  {
+    "key": "tryon-klein-4b",
+    "name": "Virtual Try-On for FLUX.2 [klein] 4B (xocialize)",
+    "file": "tryon-klein-4b.safetensors",
+    "url": "https://huggingface.co/xocialize/tryon-FLUX.2-klein-4B-lora/resolve/5e590220c687190a3d8dc66d173570f9de097984/tryon-klein-4b.safetensors",
+    "page": "https://huggingface.co/xocialize/tryon-FLUX.2-klein-4B-lora",
+    "strength": 1.0,
+    "base": "flux2-klein-4b",
+    "download": "direct",
+    "group": "adapter",
+    "trigger": "TRYON",
+    "version": "5e590220c687190a3d8dc66d173570f9de097984",
+    "sha256": "e251c836b4792910cb322317f58a91063f73bef7255031912886af840dc7dd43",
+    "sizeBytes": 92426760,
+    "licence": {
+      "commercial": true,
+      "hostedOk": true,
+      "snapshotDate": "2026-10-28",
+      "name": "Apache-2.0"
+    },
+    "released": "2026-07-15",
+    "hostedEndpoint": "fal-ai/flux-2/klein/4b/edit/lora",
+    "notes": "Rank-32 edit LoRA trained by xocialize with ai-toolkit on FLUX.2-klein-base-4B (Apache-2.0); card licence apache-2.0, so fal may host it (build plan O10's check). Three ordered inputs: person, top (or a dress / whole outfit), bottom; trigger TRYON. Trained on clothing-agnostic people: the open graph greys the old outfit out first (ClothesSegment), the hosted route sends the photo as it is (quality unmeasured until the eval harness runs the fashion suite)."
   }
 ];
 

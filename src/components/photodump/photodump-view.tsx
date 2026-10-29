@@ -29,7 +29,8 @@ const MODEL_NAMES: Record<string, string> = {
   "fuobe-soul": "Fuobe Soul + Soul ID",
   "nano-banana-pro": "Nano Banana Pro",
   "seedream-5-pro": "Seedream 5.0 Pro",
-  "oss-qwen-edit": "Qwen-Image-Edit",
+  "qwen-image-edit-2511-cloud": "Qwen-Image-Edit 2511",
+  "oss-qwen-edit": "Qwen-Image-Edit 2511",
 };
 const TABS = [
   ["all", "All"],

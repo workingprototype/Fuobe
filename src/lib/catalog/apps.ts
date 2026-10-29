@@ -1,3 +1,4 @@
+import { CAST_LOOK } from "./soul-cards";
 import type { InputSlot, Preset, PresetOption, PresetRoute } from "./types";
 
 /*
@@ -409,24 +410,26 @@ export const APPS: Preset[] = [
     userPrompt: "required",
     placeholder: "Who are they? e.g. “a 26-year-old surfer and photographer from Lisbon, freckles, sun-bleached curls”",
     prompt: "{prompt}",
-    // Nano Banana Pro draws the sheet in the cloud, as the AI Influencer builder does (build plan O7; O10 moves it to
-    // Fuobe Soul's sheet).
+    // Fuobe Soul draws the wide sheet in the cloud in the casting look, as the AI Influencer builder does (build plan O10).
     cloud: {
-      modelId: "nano-banana-pro",
+      modelId: "fuobe-soul",
       op: "t2i",
-      params: { aspectRatio: "16:9" },
+      look: CAST_LOOK,
+      params: { aspectRatio: "16:9", resolution: "1080p" },
       promptTemplate:
         "A character sheet of an original character: {prompt}. Front, three-quarter, profile and back views side by side on a plain light studio background, full body, the same face, hairstyle and outfit in every view, photorealistic, high detail.",
     },
     // The Soul Cast sheet workflow: Z-Image Turbo draws the turnaround (front, three-quarter, profile, back) and
     // cuts it into the four views, which make a better character element than one wide sheet.
+    // Fuobe Soul's own base: the casting look's words and LoRAs go on it too.
     open: {
       modelId: "oss-zimage-soul-cast",
       op: "t2i",
+      look: CAST_LOOK,
       promptTemplate: "An original character: {prompt}. The same face, hairstyle and outfit in every view, photorealistic, high detail.",
     },
     parity:
-      "Save the sheet as a character (tile menu) to use it in any prompt with @. From your own photos or a Soul Cast build, use Character Sheet. The open version draws the turnaround on Z-Image Turbo and cuts it into the four views",
+      "Save the sheet as a character (tile menu) to use it in any prompt with @. From your own photos or a Soul Cast build, use Character Sheet. Fuobe Soul draws it in the Realistic look; the open version draws the turnaround in the same look on Z-Image Turbo and cuts it into the four views",
   }),
   app({
     name: "Match Lighting",

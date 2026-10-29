@@ -72,7 +72,7 @@ M = []
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
           sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
-          frame_step=None, original=False, sizes=None):
+          frame_step=None, original=False, sizes=None, keep_shape=False):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
@@ -88,13 +88,17 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     original: a Fuobe Original's cloud half (written to ORIGINAL_CLOUD; models.ts joins it to the ComfyUI routes).
     sizes: {tier: {aspect: [w, h]}}: exact sizes per resolution tier (Fuobe Soul's table): FieldMap.size.table, sent
     as width / height fields or as one {width, height} object field (fal's image_size); the tiers become the resolutions.
+    keep_shape: an edit model that also offers "auto" (keep image 1's shape and size): a route whose size field may be
+    left out for that (fal's nullable image_size) lists the shapes it takes (EnumField.accepts), so "auto" is left out
+    and the API follows the input image; a route whose own default matches the input (Replicate's match_input_image)
+    leaves it out the same way.
     A route's options dict may also set max_images (FieldMap.maxImages), note, loraEndpoint (the same model with LoRAs:
     FieldMap.loras comes from its research record) and pin (a Replicate model run by version: the research's version)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
                   ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or [],
-                  frame_step=frame_step, original=original, sizes=sizes))
+                  frame_step=frame_step, original=original, sizes=sizes, keep_shape=keep_shape))
 
 
 # ----- Image
@@ -192,7 +196,9 @@ model("qwen-image-edit-2511-cloud", "Qwen-Image-Edit 2511 (hosted)", "Alibaba Qw
       [("edit", "fal-ai/qwen-image-edit-2511", "fal", {"loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"}),
        ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]})], defaults={"aspectRatio": "1:1"},
       # Replicate's aspect_ratio has no 21:9, 3:2, 2:3, 5:4 or 4:5: each route lists what it takes (fit_values).
-      fit_values=True)
+      # "auto" keeps image 1's shape and size (the AI Influencer's sheet stays 16:9): fal's image_size and Replicate's
+      # aspect_ratio (match_input_image by default) are left out.
+      fit_values=True, keep_shape=True)
 # Qwen-Image-Edit 2509 with its LoRAs (O4): Fuobe DoP's relight effects relight the start frame with the 2509 Relight
 # LoRA before the clip is made. A helper step, not a picker model.
 model("qwen-image-edit-2509-cloud", "Qwen-Image-Edit 2509 (hosted)", "Alibaba Qwen", "qwen-image", "image",
@@ -254,6 +260,25 @@ model("fuobe-soul-cinema", "Fuobe Soul Cinema", "Fuobe Original", "fuobe-soul", 
       [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
        ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE})],
       original=True, sizes=SOUL_SIZES, defaults={"aspectRatio": "16:9", "resolution": "720p"})
+# ----- Originals (O10): Marketing Studio Image and Fashion Factory's try-on on hosted open weights
+# (docs/research/fuobe-originals-recipes-5.json studios[marketing]). models.ts joins each to its ComfyUI routes.
+# Fuobe Marketing Image: Qwen-Image-Edit 2511 with the product (and person, setting) as references, Qwen-Image 2512
+# without one; the format's template prompt is written by the Marketing plan, and the words of a headline are set
+# over the picture in the browser. The price is the edit's; a picture made without a product photo costs $0.02 per MP.
+model("fuobe-marketing-image", "Fuobe Marketing Image", "Fuobe Original", "fuobe-marketing", "image",
+      "Product shots, ads, posters and listings from your product photo: Qwen-Image-Edit 2511 with Fuobe's templates",
+      [("edit", "fal-ai/qwen-image-edit-2511", "fal", {"loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"}),
+       ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]}),
+       ("t2i", "fal-ai/qwen-image-2512", "fal", {"loraEndpoint": "fal-ai/qwen-image-2512/lora"})],
+      original=True, fit_values=True, defaults={"aspectRatio": "3:4"},
+      pricing=("megapixel", 0.03, "an edit; $0.02 per MP for a picture made without a product photo", {"withLoras": 0.035}))
+# Fuobe Try-On: FLUX.2 [klein] 4B edit with xocialize's try-on LoRA (adapterLoras tryon-klein-4b, Apache-2.0, so fal may
+# host it), the person image 1, the garment image 2, a bottom image 3. Every run carries the LoRA (ModelOptions.loras),
+# so it goes to the /lora endpoint: $0.01 per MP in and out, each photo resized to about 1 MP.
+model("fuobe-tryon", "Fuobe Try-On", "Fuobe Original", "fuobe-tryon", "image",
+      "Dresses the person in image 1 in the garment in image 2 (a bottom in image 3): FLUX.2 [klein] 4B with a try-on LoRA",
+      [("edit", "fal-ai/flux-2/klein/4b/edit", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/edit/lora"})],
+      original=True, pricing=("image", 0.03, "about 3 MP at $0.01: the photos in (each about 1 MP) and the picture out"))
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 
@@ -1705,8 +1730,10 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             # A model that asks for "auto" (Fuobe DoP · LTX: the start frame's shape) keeps it when the API takes it;
             # otherwise the default fallback below would make every clip square (1:1, the first size listed).
             auto = "auto" in enum and m["defaults"].get("aspectRatio") == "auto"
-            fmap["aspectRatio"] = {"key": key, "values": {**({"auto": "auto"} if auto else {}), **IMAGE_SIZE_MAP}}
-            opts["aspectRatios"] = union(opts.get("aspectRatios", []), (["auto"] if auto else []) + IMG_AR)
+            # keep_shape: "auto" leaves a nullable size out, so the API keeps the input image's shape and size.
+            keep = bool(m.get("keep_shape")) and not auto and bool(spec.get("nullable"))
+            fmap["aspectRatio"] = {"key": key, "values": {**({"auto": "auto"} if auto else {}), **IMAGE_SIZE_MAP}, **({"accepts": IMG_AR} if keep else {})}
+            opts["aspectRatios"] = union(opts.get("aspectRatios", []), (["auto"] if auto else []) + IMG_AR + (["auto"] if keep else []))
         else:
             fmap["aspectRatio"] = key
             ratios = [v for v in enum if RATIO.match(str(v)) or v == "auto"]

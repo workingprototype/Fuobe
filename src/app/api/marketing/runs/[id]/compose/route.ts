@@ -11,7 +11,7 @@ const Body = z.object({
   auto: z.boolean().optional(),
 });
 
-/** Save an open-engine result with its words set in the browser (an uploaded PNG) to the Library. */
+/** Save a result with its words set in the browser (an uploaded PNG: open models, Fuobe Marketing Image) to the Library. */
 export async function POST(request: Request, ctx: RouteContext<"/api/marketing/runs/[id]/compose">) {
   const { id } = await ctx.params;
   const body = await readBody(request, Body, "Upload the image first");

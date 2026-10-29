@@ -5,6 +5,7 @@ import { dualEngine, onEngine } from "./engines";
 import { localOnly, needsToken, triggerOf } from "./loras";
 import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
 import { soulRecipe } from "./soul";
+import { CAST_LOOK } from "./soul-cards";
 import type { Engine, GenerationRequest, GenParams, LoraRef, ModelDef, Operation } from "./types";
 
 /*
@@ -568,7 +569,7 @@ export const CINEMA_STILL_MODEL = "fuobe-soul-cinema";
 /** Fuobe Soul: Soul Cast and Soul Location. */
 export const SOUL_BUILDER_MODEL = "fuobe-soul";
 /** The Soul look a cast sheet is made in (natural, unretouched skin and fabric) and a location in (a widescreen film still). */
-export const CAST_LOOK = "v1-realistic";
+export { CAST_LOOK };
 export const LOCATION_LOOK = "v1-movie";
 /** The open Soul Cast sheet graph (soul-cast-sheet-zimage): the sheet, then its four views as their own pictures. */
 export const CAST_SHEET_MODEL = "oss-zimage-soul-cast";

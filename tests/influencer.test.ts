@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { getModel, getPreset } from "@/lib/catalog";
 import { planGeneration } from "@/lib/catalog/plan";
+import { CAST_LOOK } from "@/lib/catalog/soul-cards";
 import {
   categoriesFor,
   cleanState,
@@ -17,6 +18,7 @@ import {
   faceOfRun,
   getOption,
   INFLUENCER_CATEGORIES,
+  INFLUENCER_LOOK,
   INFLUENCER_START,
   influencerBlocker,
   influencerName,
@@ -459,8 +461,37 @@ describe("the plan per engine", () => {
   const ALL = { has: () => true };
   const valid = (p: ReturnType<typeof planInfluencer>) => p.steps.map((s) => planGeneration(s.request, getModel, getPreset));
 
-  it("cloud: Nano Banana Pro draws a wide sheet from the compiled prompt, Seedream 5.0 Pro when asked", () => {
-    const p = planInfluencer(run({ start: "face", photo: face, clothing: [clothes[0]] }), ALL);
+  it("cloud: Fuobe Soul draws the wide sheet, then hosted Qwen-Image-Edit 2511 puts your face and clothing on it", () => {
+    const p = planInfluencer(run({ start: "face", photo: face, clothing: clothes }), ALL);
+    expect(p.modelId).toBe("qwen-image-edit-2511-cloud");
+    expect(p.notes).toEqual(["Two steps: Fuobe Soul draws the sheet, then Qwen-Image-Edit 2511 puts your face on it"]);
+    expect(p.steps.map((s) => [s.key, s.request.feature, s.request.modelId, s.after])).toEqual([
+      ["sheet", "influencer-step", "fuobe-soul", undefined],
+      ["dress", "influencer", "qwen-image-edit-2511-cloud", "sheet"],
+    ]);
+    // The sheet in Soul's casting look, wide and 1080p; fal's Qwen edit takes the face and all three clothing references.
+    expect(p.steps[0].request).toMatchObject({ engine: "cloud", presetId: INFLUENCER_LOOK, op: "t2i", prompt: compileSheetPrompt({ state }), params: { aspectRatio: "16:9", resolution: "1080p", numOutputs: 1 } });
+    expect(p.steps[1].request.inputs?.images).toEqual([face, ...clothes]);
+    expect(p.steps[1].request.prompt).toContain("the face of the person in image 2");
+    expect(p.steps[1].request.prompt).toContain("clothing shown in images 3, 4 and 5");
+    expect(p.steps[1].chain).toEqual([{ slot: "images", position: "first" }]);
+    const [sheet] = valid(p);
+    expect(sheet.model.id).toBe("fuobe-soul");
+    expect(sheet.soul?.look).toBe(INFLUENCER_LOOK);
+    const scratch = planInfluencer(run({ direction: "A potter from Porto" }), ALL);
+    expect(scratch.modelId).toBe("fuobe-soul");
+    expect(scratch.steps).toHaveLength(1);
+    expect(scratch.steps[0].request).toMatchObject({ feature: "influencer", op: "t2i", prompt: compileSheetPrompt({ state, direction: "A potter from Porto" }) });
+    valid(scratch);
+    // Fuobe Soul switched off in the cloud (or the hosted edit): Nano Banana Pro draws it in one pass, and says why.
+    const off = planInfluencer(run({ start: "face", photo: face }), { has: (id, engine) => !(id === "fuobe-soul" && engine === "cloud") });
+    expect(off.modelId).toBe("nano-banana-pro");
+    expect(off.notes).toEqual(["Fuobe Soul is switched off in Settings → Models & licences — Nano Banana Pro draws the sheet"]);
+    expect(INFLUENCER_LOOK).toBe(CAST_LOOK);
+  });
+
+  it("cloud partners: Nano Banana Pro draws a wide sheet from the compiled prompt, Seedream 5.0 Pro when asked", () => {
+    const p = planInfluencer(run({ modelId: "nano-banana-pro", start: "face", photo: face, clothing: [clothes[0]] }), ALL);
     expect(p.modelId).toBe("nano-banana-pro");
     expect(p.notes).toEqual([]);
     expect(p.steps).toHaveLength(1);
@@ -468,19 +499,15 @@ describe("the plan per engine", () => {
     expect(p.steps[0].request.prompt).toContain("the face of the person in image 1");
     expect(p.steps[0].request.prompt).toContain("clothing shown in image 2");
     valid(p);
-    const scratch = planInfluencer(run({ direction: "A potter from Porto" }), ALL);
-    expect(scratch.steps[0].request).toMatchObject({ op: "t2i", prompt: compileSheetPrompt({ state, direction: "A potter from Porto" }) });
-    expect(scratch.steps[0].request.inputs).toBeUndefined();
-    valid(scratch);
     const seedream = planInfluencer(run({ modelId: "seedream-5-pro", clothing: clothes }), ALL);
     expect(seedream.modelId).toBe("seedream-5-pro");
     expect(seedream.steps[0].request.params).toEqual({ numOutputs: 1, aspectRatio: "16:9" });
     expect(seedream.steps[0].request.inputs?.images).toEqual(clothes);
     valid(seedream);
-    // Nothing else is asked for: not Higgsfield's AI Influencer, not a model the builder doesn't list.
+    // Nothing else is asked for: not Higgsfield's AI Influencer, not a model the builder doesn't list: the default runs.
     for (const modelId of ["ai-influencer", "flux-3-max"]) {
       const other = planInfluencer(run({ modelId }), ALL);
-      expect(other.modelId).toBe("nano-banana-pro");
+      expect(other.modelId).toBe("fuobe-soul");
       expect(other.steps[0].request.params?.extra).toBeUndefined();
     }
     // Seedream missing from the install: Nano Banana Pro.

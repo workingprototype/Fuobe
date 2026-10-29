@@ -599,6 +599,12 @@ export function mediaInfoFor(name: unknown): MediaInfo | undefined {
  */
 const CAMERA_POSE_GRAPH: Record<string, string> = { "wan22-i2v-14b": "wan22-fun-camera-14b", "wan22-i2v-14b-lightx2v": "wan22-fun-camera-14b" };
 
+/**
+ * Fuobe Marketing Image's Standalone product shot (params.extra.productShot with one product photo) runs the product-shot
+ * graph: the product cut out with BiRefNet, put on white and relit into the scene (Qwen-Image-Edit 2509 + White_to_Scene).
+ */
+const PRODUCT_SHOT_GRAPH: Record<string, string> = { "qwen-image-edit-2511-multi": "product-shot-qwen-edit-2509" };
+
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
 const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {
   // Edit graphs whose extra images feed TextEncodeQwenImageEditPlus: a repeated reference is harmless.
@@ -809,6 +815,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // in is injected on its experts as on the plain image-to-video graph.
   const posed = CAMERA_POSE_GRAPH[endpoint];
   if (posed && typeof extra.cameraMotion === "string" && extra.cameraMotion) endpoint = posed;
+  const shot = PRODUCT_SHOT_GRAPH[endpoint];
+  if (shot && extra.productShot === true && (input.images?.length ?? 0) === 1 && loadManifest().workflows.some((w) => w.id === shot)) endpoint = shot;
+  delete extra.productShot;
 
   const { manifest, workflow } = getWorkflow(endpoint);
   const d = manifest.defaults;

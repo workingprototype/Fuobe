@@ -94,9 +94,10 @@ describe("Models & licences in listings and picks", () => {
   it("lists every model, LoRA and node pack with its licence, and flips switches through the settings API", async () => {
     const list = (await (await settingsRoute.GET()).json()) as import("@/lib/model-access").AccessList;
     expect(list.models.length).toBeGreaterThan(300);
-    // The library's 114 LoRAs, the preset LoRA map's files that aren't library files, and MiniMax H3's four (Akatz Labs'
-    // swap LoRA V1.5 and V1 and Person Remover V1, lightx2v's H3 Turbo), each once.
-    expect(list.loras.length).toBe(170);
+    // The library's 115 LoRAs (Fuobe Try-On's try-on LoRA among them), the preset LoRA map's files that aren't library
+    // files, and MiniMax H3's four (Akatz Labs' swap LoRA V1.5 and V1 and Person Remover V1, lightx2v's H3 Turbo), each once.
+    expect(list.loras.length).toBe(171);
+    expect(list.loras.find((l) => l.file === "tryon-klein-4b.safetensors")).toMatchObject({ group: "adapter", on: true, licence: { name: "Apache-2.0", class: "commercial" } });
     expect(list.loras.find((l) => l.file === "h3_character_swap_v1.5.safetensors")).toMatchObject({ group: "adapter", base: "MiniMax H3", on: true, licence: { name: "MiniMax H3 Community License", class: "regions" } });
     expect(list.packs.find((p) => p.name === "h3_character_swap")).toMatchObject({ licence: { name: "GPL-3.0" }, on: true });
     expect(new Set(list.loras.map((l) => l.file)).size).toBe(list.loras.length);

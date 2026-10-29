@@ -36,6 +36,12 @@ export const DEFAULT_LOOK = "v1-general";
  */
 export const OWN_LOOK = "own-style";
 
+/**
+ * The look a casting sheet is drawn in (natural, unretouched skin and fabric): Soul Cast, Character Sheet's Build from
+ * scratch, the AI Influencer builder and app.
+ */
+export const CAST_LOOK = "v1-realistic";
+
 const BY_ID = new Map(SOUL_LOOK_CARDS.map((c) => [c.id, c]));
 
 /** A look's card by its Fuobe id, or by Higgsfield's old style id (settings saved before the Originals). */

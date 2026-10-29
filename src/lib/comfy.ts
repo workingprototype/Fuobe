@@ -167,8 +167,11 @@ export function canTakeLoras(wf: ComfyWorkflow): boolean {
  */
 export function injectLoras(
   wf: ComfyWorkflow,
-  loras: (LoraRef & { target?: "high" | "low" | "both" })[],
+  all: (LoraRef & { target?: "high" | "low" | "both" })[],
 ): ComfyWorkflow {
+  // A LoRA the graph loads itself (Fuobe Try-On's try-on LoRA in tryon-flux2-klein-4b) isn't loaded twice.
+  const own = new Set(Object.values(wf).flatMap((n) => (/^LoraLoader/.test(n.class_type) && typeof n.inputs.lora_name === "string" ? [n.inputs.lora_name] : [])));
+  const loras = all.filter((l) => !own.has(l.file));
   if (!loras.length) return wf;
   const out = cloneWorkflow(wf);
   const loaders = Object.entries(out).filter(([, n]) => MODEL_LOADERS.has(n.class_type));

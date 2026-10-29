@@ -2,7 +2,8 @@
 """
 Generate src/lib/catalog/lora-library.generated.ts: every LoRA the Fuobe Originals use, with its pinned
 download, unique local file name and a licence snapshot, plus the motion / effect preset → LoRA map.
-Source: docs/research/fuobe-originals-recipes-5.json (loraLibrary, presets, motionsEffects).
+Source: docs/research/fuobe-originals-recipes-5.json (loraLibrary, presets, motionsEffects, adapterLoras: the LoRAs an
+Original's recipe always loads, such as Fuobe Try-On's try-on LoRA).
 
 The LoRA files are never committed: src/server/loras.ts downloads them (pinned civitai versions,
 Hugging Face files) into ComfyUI's loras folder, or mirrors them for the cloud engine.
@@ -187,6 +188,13 @@ for m in DATA["motionsEffects"]:
         row["notes"] = m["notes"]
     motions.append(row)
 
+# Adapters: a LoRA an Original's recipe always loads (Fuobe Try-On's try-on LoRA, build plan O10). Its licence is said
+# like any other's, and Settings → Models & licences has its switch.
+for raw in DATA.get("adapterLoras") or []:
+    e = add(entry(raw, raw["key"], "adapter", checked=raw.get("checked")))
+    if not (e["licence"]["commercial"] and e["licence"]["hostedOk"]):
+        notes.append(f"adapter {e['key']} ({', '.join(raw.get('usedBy') or [])}): commercial={e['licence']['commercial']} hostedOk={e['licence']['hostedOk']}")
+
 keys = [e["key"] for e in library]
 dup = sorted({k for k in keys if keys.count(k) > 1})
 if dup:
@@ -203,7 +211,7 @@ ts = (
     'import type { LoraEntry, MotionEffectLoras } from "./loras";\n\n'
     f"/** When the LoRA research (licences, civitai permissions, pinned versions) was read. */\n"
     f"export const LORA_LIBRARY_AS_OF = {json.dumps(AS_OF)};\n\n"
-    "/** Every LoRA the Originals use: Soul looks (group \"look\") and motion / effect LoRAs, one entry per local file. */\n"
+    "/** Every LoRA the Originals use: Soul looks (group \"look\"), motion / effect LoRAs and the adapters a recipe always loads, one entry per local file. */\n"
     f"export const LORA_LIBRARY: LoraEntry[] = {json.dumps(library, indent=2, ensure_ascii=False)};\n\n"
     "/** Motion and effect presets (Higgsfield's generic names) → their LoRA keys in LORA_LIBRARY, with the research's status. */\n"
     f"export const MOTION_EFFECT_LORAS: MotionEffectLoras[] = {json.dumps(motions, indent=2, ensure_ascii=False)};\n"
