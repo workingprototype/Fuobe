@@ -833,6 +833,12 @@
     "error": null,
     "at": "2026-10-16T20:57:25.481Z"
   },
+  "wan21-i2v-uni3c-path": {
+    "sha256": "ef09d7fcaec315ccaf13684135468490153921abc680a4dc12e4748781afd998",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-29T20:11:15.958Z"
+  },
   "wan21-vace-14b-ref2v": {
     "sha256": "c78c05dc0d19131b8ccbc40aebff19323d0c7de70f6d93a4aeb2e76773637e27",
     "validated": true,

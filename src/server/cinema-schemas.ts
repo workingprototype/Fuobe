@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { DISTANCE, MAX_KEYS } from "@/lib/camera-path";
 import { APERTURE, LENS } from "@/lib/scene3d";
 import { CinemaError } from "./cinema";
 
@@ -79,7 +80,7 @@ export const GenerateBody = z.object({
   input: z.object({
     engine: z.enum(["cloud", "open"]),
     mode: z.enum(["video", "image"]),
-    action: z.enum(["generate", "extend-forward", "extend-backward", "edit", "grid", "cast", "location", "location-view", "scene", "recompose"]).default("generate"),
+    action: z.enum(["generate", "extend-forward", "extend-backward", "edit", "grid", "cast", "location", "location-view", "scene", "recompose", "path"]).default("generate"),
     modelId: z.string().max(80).optional(),
     prompt: z.string().max(60_000).default(""),
     moves: z.array(z.string().max(40)).max(12).optional(),
@@ -115,6 +116,26 @@ export const GenerateBody = z.object({
         lens: z.number().min(LENS.min).max(LENS.max),
         aperture: z.number().min(APERTURE.min).max(APERTURE.max),
         pose: z.object({ horizontal: z.number().min(0).max(360), vertical: z.number().min(-30).max(90), zoom: z.number().min(0).max(10) }),
+      })
+      .optional(),
+    // Fly path (N7-5): the keyframes, the length, the open engine's render along the path and the move it started from.
+    path: z
+      .object({
+        keys: z
+          .array(
+            z.object({
+              t: z.number().min(0).max(1),
+              azimuth: z.number().min(-360 * 32).max(360 * 32),
+              elevation: z.number().min(-90).max(90),
+              distance: z.number().min(DISTANCE.min).max(DISTANCE.max),
+              truck: z.number().min(-4).max(4).optional(),
+            }),
+          )
+          .min(1)
+          .max(MAX_KEYS),
+        duration: z.number().min(1).max(15).optional(),
+        render: FileRef.optional(),
+        preset: z.string().max(40).optional(),
       })
       .optional(),
   }),
