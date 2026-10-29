@@ -706,6 +706,20 @@ Also new and worth a later look: Lightricks LTX-2.5 **Cinemagraph** (2026-09-10,
 - **Hosted:** fal-ai/qwen-image-edit-plus-lora-gallery/next-scene ($0.035/MP)
 - **Hosted:** fal-ai/qwen-image-edit-2511/lora with a next-scene LoRA
 - **Licences:** Apache-2.0
+- **Fuobe Popcorn looks (added 2026-10-29 for O13; JSON: `studios[popcorn].original`).** A board can take one of Fuobe Soul's 139 looks: frame 1 is made on Fuobe Soul with the look (its LoRAs, words and grade) on either engine; the next frames continue from the frame before with the look's words; every frame gets the look's grade and overlay after it is made (the browser's Soul finish), and each next frame is made from the previous frame as it came out, before its finish, so the grade is applied once. With references, frame 1 stays on the reference model (Nano Banana Pro in the cloud, Qwen-Image-Edit on the GPU) with the look's words. Fuobe Soul has no 21:9: a 21:9 board in a look is made at 16:9 and cropped. The next-frame models are unchanged; the hosted next-scene route (`fal-ai/qwen-image-edit-plus-lora-gallery/next-scene`) still has no schema read.
+
+### evolution
+
+**Higgsfield:** Evolution (`hf_evolution`, a gated test model): one video plus up to 40 references, `change_intensity` low / medium / high, an optional creative direction of up to 10,000 characters, 480p / 720p / 1080p ([`higgsfield-originals-5.md`](higgsfield-originals-5.md) §3.20; the engine underneath is speculative).
+
+*Added 2026-10-29 for O13 (JSON: `studios[evolution]`). Fuobe's own recipe, unmeasured until the evaluation harness runs the `evolution` suite.*
+
+- **Change intensity:** denoise 0.45 / 0.65 / 0.85 (build plan O13); in the cloud LTX-2.3's `video_strength` = 1 − denoise (0.55 / 0.35 / 0.15; the field's description: lower values give the model more freedom to change the video; fal's default 0.01 all but re-renders it).
+- **Open (ComfyUI):** Fuobe `video-evolution-wan22-fun-vace`: per ≤81-frame segment at 16 fps (video-segment-resample), Qwen-Image-Edit 2511 takes the segment's first frame toward the direction (images 2–3 = the first two references), then Wan 2.2 Fun VACE re-renders the segment from the segment itself: reference latent + VAE-encoded frames, noised to the intensity's denoise the way KSampler does it (a schedule of floor(4 / denoise) steps, the last 4 run, Lightx2v 4-step), the high-noise expert for the first half, Depth Anything 3 depth on every frame, the direction frame as the VACE reference. Then video-concat-N and the clip's own sound. Same weights as the restyle graph (24 GB).
+- **Hosted:** `fal-ai/ltx-2.3-22b/video-to-video` (`/lora` when a LoRA rides along), the direction as the scene, prompt expansion off, `generate_audio` off (the clip's sound goes back on), `match_video_length` and `match_input_fps` off, 24 fps, at most 481 frames a call (a clip over 20 s runs as equal pieces, joined), the tier's size for the clip's nearest shape from Fuobe Cinema's table; $0.001605 per megapixel of video. The endpoint takes no images, so in the cloud the references shape the direction only.
+- **Direction:** an LLM writes it from the references and the user's few words (Claude in the cloud, Ollama with a vision model on the GPU; up to 8 / 4 references and a frame of the clip are sent), as a description of the finished video; without one (no key, Ollama not running, demo mode, the text model switched off) Fuobe's offline writer builds it from the intensity, the words and the number of references.
+- **Unverified:** nothing rendered; the denoise values and `video_strength` at them; whether fal resamples a 30 fps input to the fixed 24 fps; the high-noise expert at low denoise (Wan 2.2's experts split by noise level, and at 0.45 the first steps start below the usual switch point).
+- **Licences:** Wan 2.2 Fun VACE, lightx2v, Qwen-Image-Edit 2511 Apache-2.0; LTX-2.x Community License (free under US$10M annual revenue)
 
 ---
 
