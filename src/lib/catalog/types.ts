@@ -7,6 +7,7 @@
  * (fal, replicate, comfyui, ...). Presets (apps, camera motions, effects) sit on top
  * of models and add prompt templates, fixed inputs and LoRAs.
  */
+import type { CameraKey } from "@/lib/camera-path";
 import type { SignatureRecord } from "./palettes";
 
 export type Engine = "cloud" | "open";
@@ -81,7 +82,9 @@ export type Operation =
   | "images-to-video" // images in order → a video at params.fps
   | "overlay" // image + a second image (logo) → composited (params.position, params.scale)
   // round 5 (O11)
-  | "face-mosaic"; // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
+  | "face-mosaic" // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
+  // N7-5
+  | "camera-path"; // image + params.cameraPath (+ inputs.video: the open engine's render along the path) → the camera following the path
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -149,6 +152,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   "images-to-video": "Images to video",
   overlay: "Overlay image",
   "face-mosaic": "Pixelate faces",
+  "camera-path": "Fly path",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -218,6 +222,7 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   "images-to-video": "video",
   overlay: "image",
   "face-mosaic": "image",
+  "camera-path": "video",
 };
 
 /**
@@ -451,6 +456,12 @@ export interface FieldMap {
   ranges?: Record<string, { min?: number; max?: number; integer?: boolean }>;
   /** The most images this route's image list takes, when fewer than the model's options.maxImages (another route takes more). */
   maxImages?: number;
+  /**
+   * A camera path (params.cameraPath, build plan N7-5) as the API's keyframes [{time, azimuth, elevation, distance}]:
+   * `min`–`max` of them, the height kept inside `elevation`, at most `maxTurns` turns of travel. `free`: the API's fixed
+   * moves (H3 Max's free_camera_preset), which a pure slide (Truck left / right) is sent as instead of the keyframes.
+   */
+  cameraPath?: { key: string; min: number; max: number; elevation: [number, number]; maxTurns: number; free?: { key: string; values: string[] } };
   /** An empty prompt is left out rather than sent as "" (APIs that read a missing prompt as "no words": Bria Expand). */
   omitEmptyPrompt?: boolean;
   /** params.extra keys this route has no field for (a model-wide control only its other routes read): left out. */
@@ -741,6 +752,8 @@ export interface GenParams {
   scale?: number;
   /** An animation preset for a rigged model (the provider's preset id). */
   animation?: string | number;
+  /** A camera path's keyframes (N7-5, src/lib/camera-path.ts): the cloud route sends them as its trajectory. */
+  cameraPath?: CameraKey[];
   /** Free-form advanced params forwarded to the provider payload. */
   extra?: Record<string, unknown>;
 }
