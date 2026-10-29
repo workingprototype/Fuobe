@@ -34,6 +34,10 @@ export interface PlannedJob {
 /** Whether an approval card's plan can run: something to run, and no pipeline with a broken step. */
 export const planRunnable = (jobs: PlannedJob[]): boolean => jobs.some((j) => !j.error) && !jobs.some((j) => j.atomic && j.error);
 
+/** The line under a "Remember this?" card: nothing is saved until the person says yes, and nothing when they don't. */
+export const memoryCardLine = (status: "pending" | "approved" | "declined"): string =>
+  status === "approved" ? "Saved to memory for future chats" : status === "declined" ? "Not saved to memory" : "Saves to memory for future chats";
+
 export type AssistItem =
   | { id: string; role: "user"; text: string; attachments?: string[]; skills?: string[] }
   | { id: string; role: "assistant"; text: string }
