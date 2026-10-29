@@ -341,11 +341,15 @@ COMFYUI_URL=http://127.0.0.1:<port> COMFYUI_MODELS_DIR=<that ComfyUI>/models nod
   public reason; the code was read at this commit. It needs only einops and safetensors, already installed.
 - **Weights** (23 MB): `install-comfyui.sh` downloads `config.json` and `model.safetensors` of JusperLee/DBS-BSRNN-DnR and
   JusperLee/DBS-TIGER-DnR at pinned revisions into `models/dbs/<model>/` and checks them with `sha256sum -c` (`DBS_WEIGHTS=0`
-  skips it). The manifest lists them by their path under the folder (`requiredModels` / `optionalModels`), which is what
-  `GET /models/dbs` answers, so the Workflows page knows when they are there.
+  skips it). The manifest lists all four by their path under the folder (`requiredModels`: a CUDA host runs DBS-TIGER, so
+  the Workflows page's install commands fetch both models), which is what `GET /models/dbs` answers, so the Workflows page
+  knows when they are there.
 - **Host pick**: the provider uses DBS-TIGER when `GET /system_stats` says the first device is `cuda` and DBS-BSRNN otherwise
-  (about 3x faster on a CPU: 0.27x real time against 0.09x on a 4-CPU host), unless the run picks one; `each channel` for
-  stereo stems and always for files with more than 2 channels.
+  (about 3x faster on a CPU: 0.27x real time against 0.09x on a 4-CPU host), unless the run picks one; the other model when
+  `GET /models/dbs` shows the pick isn't on disk, and a model asked for that isn't there is refused in words before the
+  job is queued. `each channel` for stereo stems. ComfyUI saves audio as mono or stereo only (a 5.1 waveform is written as
+  scrambled stereo three times as long), so a file with more than 2 channels is split in `mono` and its background is the
+  music and effects stems added up (the provider rewires node 4 to `AudioMerge` add).
 
 ## Adding a workflow
 

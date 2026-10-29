@@ -5,7 +5,7 @@
  * one (the soundtrack step would fail after every restyle was paid for).
  *
  * Reads the EBML elements up to the first Cluster: Segment → Info (TimecodeScale, Duration) and
- * Tracks → TrackEntry (TrackType, DefaultDuration, Video → PixelWidth / PixelHeight). Pure.
+ * Tracks → TrackEntry (TrackType, DefaultDuration, Video → PixelWidth / PixelHeight, Audio → Channels). Pure.
  */
 
 export interface WebmInfo {
@@ -15,6 +15,8 @@ export interface WebmInfo {
   fps?: number;
   hasAudio: boolean;
   hasVideo: boolean;
+  /** The first sound track's channel count (Matroska's default is 1 when the Audio element doesn't say). */
+  channels?: number;
 }
 
 const ID = {
@@ -30,6 +32,8 @@ const ID = {
   Video: 0xe0,
   PixelWidth: 0xb0,
   PixelHeight: 0xba,
+  Audio: 0xe1,
+  Channels: 0x9f,
   Cluster: 0x1f43b675,
 } as const;
 
@@ -104,7 +108,12 @@ export function probeWebm(buf: Buffer): WebmInfo | null {
         const fields = children(buf, track.start, track.end);
         const type = fields.find((f) => f.id === ID.TrackType);
         const kind = type ? uint(buf, type.start, type.end - type.start) : 0;
-        if (kind === 2) info.hasAudio = true;
+        if (kind === 2 && !info.hasAudio) {
+          info.hasAudio = true;
+          const audio = fields.find((f) => f.id === ID.Audio);
+          const count = audio ? children(buf, audio.start, audio.end).find((a) => a.id === ID.Channels) : undefined;
+          info.channels = count ? uint(buf, count.start, count.end - count.start) || 1 : 1;
+        }
         if (kind !== 1) continue;
         info.hasVideo = true;
         const frame = fields.find((f) => f.id === ID.DefaultDuration);

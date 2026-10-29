@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { GenInput } from "@/lib/catalog/types";
 import type { ComfyWorkflow, Manifest, ManifestWorkflow } from "@/lib/comfy";
 import { installScript, nodeInstall } from "@/lib/comfy-install";
 import { ATTRIBUTIONS, licenceInfo, nodePack, workflowLicence } from "@/lib/licences";
+import type { DbsModel } from "@/lib/av/split";
 import type { MediaInfo } from "@/lib/media-probe";
 
 // DBS D1's ground on the open engine: the pinned pack and weights, graph A (separate-soundtrack-dbs) in the manifest,
@@ -13,7 +14,7 @@ import type { MediaInfo } from "@/lib/media-probe";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-comfy-dbs-"));
 process.env.FUOBE_DATA_DIR = tmp;
 process.env.COMFYUI_URL = "http://comfy.test:8188";
-const { collectOutputs, prepareWorkflow } = await import("@/server/providers/comfyui");
+const { collectOutputs, comfyDbsModels, prepareWorkflow } = await import("@/server/providers/comfyui");
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const root = path.resolve(__dirname, "..");
@@ -68,12 +69,12 @@ describe("separate-soundtrack-dbs in the manifest", () => {
     expect(graph["9"].inputs.source).toEqual(["3", 3]);
   });
 
-  it("lists the BSRNN pair as required and the TIGER pair as optional, under models/dbs, at pinned revisions", () => {
+  it("lists both models as required (a CUDA host runs DBS-TIGER), under models/dbs, at pinned revisions", () => {
     expect(entry.models).toEqual([
-      { file: "DBS-BSRNN-DnR/model.safetensors", folder: "dbs", url: `https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/${BSRNN}/model.safetensors`, sizeGb: 0.019 },
+      { file: "DBS-BSRNN-DnR/model.safetensors", folder: "dbs", url: `https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/${BSRNN}/model.safetensors`, sizeGb: 0.02 },
       { file: "DBS-BSRNN-DnR/config.json", folder: "dbs", url: `https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/${BSRNN}/config.json`, sizeGb: 0 },
-      { file: "DBS-TIGER-DnR/model.safetensors", folder: "dbs", url: `https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/${TIGER}/model.safetensors`, sizeGb: 0.004, optional: true },
-      { file: "DBS-TIGER-DnR/config.json", folder: "dbs", url: `https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/${TIGER}/config.json`, sizeGb: 0, optional: true },
+      { file: "DBS-TIGER-DnR/model.safetensors", folder: "dbs", url: `https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/${TIGER}/model.safetensors`, sizeGb: 0.004 },
+      { file: "DBS-TIGER-DnR/config.json", folder: "dbs", url: `https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/${TIGER}/config.json`, sizeGb: 0 },
     ]);
     expect(entry.customNodes).toEqual([{ name: "ComfyUI-DBS", repo: `https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/${PACK}` }]);
   });
@@ -84,8 +85,9 @@ describe("separate-soundtrack-dbs in the manifest", () => {
     expect(script).toContain(`git -C "$COMFYUI/custom_nodes/ComfyUI-DBS" checkout -q ${PACK}`);
     expect(script).toContain(`mkdir -p "$COMFYUI/models/dbs/DBS-BSRNN-DnR" && wget -c -O "$COMFYUI/models/dbs/DBS-BSRNN-DnR/model.safetensors" "https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/${BSRNN}/model.safetensors"`);
     expect(script).toContain('"$COMFYUI/models/dbs/DBS-BSRNN-DnR/config.json"');
-    // TIGER is optional: named on the card, not installed by default.
-    expect(script).not.toContain("DBS-TIGER-DnR");
+    // TIGER too: a GPU host set up from the Workflows page runs it by default, so its install fetches it.
+    expect(script).toContain(`mkdir -p "$COMFYUI/models/dbs/DBS-TIGER-DnR" && wget -c -O "$COMFYUI/models/dbs/DBS-TIGER-DnR/model.safetensors" "https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/${TIGER}/model.safetensors"`);
+    expect(script).toContain('"$COMFYUI/models/dbs/DBS-TIGER-DnR/config.json"');
   });
 });
 
@@ -123,14 +125,24 @@ describe("the library spec", async () => {
     expect(spec.CUSTOM_NODE_REPOS["ComfyUI-DBS"]).toBe(`https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/${PACK}`);
     expect(spec.KNOWN_MODELS["DBS-TIGER-DnR/model.safetensors"]).toEqual({ folder: "dbs", url: `https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/${TIGER}/model.safetensors` });
     const e = spec.SPEC.find((s: { id: string }) => s.id === "separate-soundtrack-dbs");
-    expect(e).toMatchObject({ packs: ["ComfyUI-DBS"], requiredModels: ["DBS-BSRNN-DnR/model.safetensors", "DBS-BSRNN-DnR/config.json"], optionalModels: ["DBS-TIGER-DnR/model.safetensors", "DBS-TIGER-DnR/config.json"] });
+    expect(e).toMatchObject({ packs: ["ComfyUI-DBS"], requiredModels: ["DBS-BSRNN-DnR/model.safetensors", "DBS-BSRNN-DnR/config.json", "DBS-TIGER-DnR/model.safetensors", "DBS-TIGER-DnR/config.json"] });
+    expect(e).not.toHaveProperty("optionalModels");
     expect(build.BINDING_KEYS.has("separationModel")).toBe(true);
     expect(build.BINDING_KEYS.has("channels")).toBe(true);
+  });
+
+  it("rounds sizes to two decimals, three only where two would read 0, so no other entry's size moves", () => {
+    // film_net_fp16 (68,882,302 bytes) stays 0.07, as tests/video-finish.test.ts expects after a full rebuild.
+    expect(build.gb(68_882_302)).toBe(0.07);
+    expect(build.gb(18_900_000)).toBe(0.02);
+    expect(build.gb(4_100_000)).toBe(0.004);
+    expect(build.gb(1_200)).toBe(0);
+    expect(build.gb(9_660_000_000)).toBe(9.66);
   });
 });
 
 describe("the provider fills the DBS bindings", () => {
-  async function prepare(input: GenInput, opts: { device?: string; media?: Record<string, MediaInfo> } = {}) {
+  async function prepare(input: GenInput, opts: { device?: string; media?: Record<string, MediaInfo>; installed?: DbsModel[] } = {}) {
     let asked = 0;
     const res = await prepareWorkflow("separate-soundtrack-dbs", { seed: 1, ...input }, {
       generationId: "gen1",
@@ -141,6 +153,7 @@ describe("the provider fills the DBS bindings", () => {
         asked++;
         return opts.device;
       },
+      dbsModels: async () => opts.installed,
     });
     return { wf: res.workflow, asked };
   }
@@ -156,14 +169,31 @@ describe("the provider fills the DBS bindings", () => {
     expect((await prepare({ audio: "film.wav", extra: { separationModel: "best" } }, { device: "cpu" })).wf["2"].inputs.model).toBe("DBS-TIGER-DnR");
   });
 
-  it("separates the mono mix unless stereo stems are asked for, and each channel of a file with more than 2", async () => {
-    expect((await prepare({ audio: "film.wav" })).wf["3"].inputs.channels).toBe("mono");
-    expect((await prepare({ audio: "film.wav", extra: { channels: "each channel" } })).wf["3"].inputs.channels).toBe("each channel");
+  it("never sends a model the host doesn't have: the other one for the host's pick, words for one asked for", async () => {
+    // A GPU ComfyUI with only BSRNN on disk: the default run takes BSRNN instead of failing inside DBSLoader.
+    expect((await prepare({ audio: "film.wav" }, { device: "cuda", installed: ["DBS-BSRNN-DnR"] })).wf["2"].inputs.model).toBe("DBS-BSRNN-DnR");
+    expect((await prepare({ audio: "film.wav" }, { device: "cuda", installed: ["DBS-BSRNN-DnR", "DBS-TIGER-DnR"] })).wf["2"].inputs.model).toBe("DBS-TIGER-DnR");
+    await expect(prepare({ audio: "film.wav", extra: { separationModel: "DBS-TIGER-DnR" } }, { device: "cuda", installed: ["DBS-BSRNN-DnR"] })).rejects.toThrow(
+      /^Best \(DBS-TIGER\) isn't installed on your ComfyUI \(models\/dbs\/DBS-TIGER-DnR\)/,
+    );
+  });
+
+  it("separates the mono mix unless stereo stems are asked for; a file with more than 2 channels in mono, its bed from music + effects", async () => {
+    const plain = (await prepare({ audio: "film.wav" })).wf;
+    expect(plain["3"].inputs.channels).toBe("mono");
+    expect(plain["4"].inputs).toEqual({ audio1: ["1", 0], audio2: ["3", 2], merge_method: "subtract" });
+    const stereo = (await prepare({ audio: "film.wav", extra: { channels: "each channel" } })).wf;
+    expect(stereo["3"].inputs.channels).toBe("each channel");
+    expect(stereo["4"].inputs.merge_method).toBe("subtract");
+    // ComfyUI saves mono or stereo only: a 6-channel stem would come out as scrambled stereo three times as long.
     const surround: MediaInfo = { container: "wav", duration: 10, hasVideo: false, hasAudio: true, channels: 6 };
-    expect((await prepare({ audio: "film.wav", extra: { channels: "mono" } }, { media: { "film.wav": surround } })).wf["3"].inputs.channels).toBe("each channel");
-    // An MP4 the header doesn't count: the channels the browser decoded.
-    expect((await prepare({ video: "clip.mp4", extra: { sourceChannels: 6 } })).wf["3"].inputs.channels).toBe("each channel");
-    expect((await prepare({ video: "clip.mp4", extra: { sourceChannels: 2 } })).wf["3"].inputs.channels).toBe("mono");
+    const five = (await prepare({ audio: "film.wav", extra: { channels: "each channel" } }, { media: { "film.wav": surround } })).wf;
+    expect(five["3"].inputs.channels).toBe("mono");
+    expect(five["4"].inputs).toEqual({ audio1: ["3", 0], audio2: ["3", 1], merge_method: "add" });
+    // A file the header doesn't count: the channels the browser decoded.
+    const decoded = (await prepare({ video: "clip.ogg", extra: { sourceChannels: 6 } })).wf;
+    expect([decoded["3"].inputs.channels, decoded["4"].inputs.merge_method]).toEqual(["mono", "add"]);
+    expect((await prepare({ video: "clip.mp4", extra: { sourceChannels: 2 } })).wf["4"].inputs.merge_method).toBe("subtract");
   });
 
   it("reads a video's soundtrack with LoadAudio and keeps the rest of the graph as built", async () => {
@@ -173,6 +203,32 @@ describe("the provider fills the DBS bindings", () => {
     expect(["5", "6", "7", "8"].map((id) => wf[id].inputs.filename_prefix)).toEqual(Array(4).fill("fuobe/gen1"));
     // Nothing of the page's own keys reaches the graph.
     expect(JSON.stringify(wf)).not.toContain("sourceChannels");
+  });
+});
+
+describe("which DBS models the host has (GET /models/dbs)", () => {
+  it("reads the dbs folder's list, keeps it a few seconds, and says nothing when the pack isn't loaded", async () => {
+    globalThis.__fuobeComfyDbs = undefined;
+    let answer: Response = Response.json(["DBS-BSRNN-DnR/config.json", "DBS-BSRNN-DnR/model.safetensors", "DBS-TIGER-DnR/model.safetensors"]);
+    const fetch = vi.fn(async (url: string) => {
+      expect(url).toBe("http://comfy.test:8188/models/dbs");
+      return answer.clone();
+    });
+    vi.stubGlobal("fetch", fetch);
+    try {
+      expect(await comfyDbsModels()).toEqual(["DBS-BSRNN-DnR"]);
+      expect(await comfyDbsModels()).toEqual(["DBS-BSRNN-DnR"]);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      // A run asks afresh: a model installed a moment ago is there.
+      answer = Response.json(["DBS-BSRNN-DnR/config.json", "DBS-BSRNN-DnR/model.safetensors", "DBS-TIGER-DnR/config.json", "DBS-TIGER-DnR/model.safetensors"]);
+      expect(await comfyDbsModels("main", 0)).toEqual(["DBS-BSRNN-DnR", "DBS-TIGER-DnR"]);
+      // No ComfyUI-DBS: no dbs folder (404), so the host can't say and nothing is refused for it.
+      answer = new Response("Not found", { status: 404 });
+      expect(await comfyDbsModels("main", 0)).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+      globalThis.__fuobeComfyDbs = undefined;
+    }
   });
 });
 
@@ -199,16 +255,20 @@ describe("licences, as information", () => {
       licence: {
         name: "MIT",
         class: "commercial",
-        note: "Dialogue / music / effects separation; MIT code, vendored DBS code Apache-2.0 with MIT notices; the DBS weights are Apache-2.0, trained on DnR v2 (CC BY 4.0)",
+        note: "Dialogue / music / effects separation; MIT code, vendored DBS code Apache-2.0 with MIT notices; the DBS weights are Apache-2.0, trained on DnR v2 (CC BY 4.0). Some FSD50K and FMA clips inside DnR v2 carry their own CC licences, NC variants included; whether that reaches the weights or their outputs is unresolved",
       },
     });
     expect(licenceInfo(workflowLicence(entry))).toMatchObject({ name: "Apache-2.0", class: "commercial" });
   });
 
   it("credits DnR v2 (CC BY 4.0) and the three MIT notices of the vendored code", () => {
-    expect(ATTRIBUTIONS.find((a) => a.licence === "CC BY 4.0")?.text).toBe(
-      "Trained on the Divide and Remaster (DnR) v2 dataset by Darius Petermann, Gordon Wichern, Zhong-Qiu Wang and Jonathan Le Roux",
-    );
+    const dnr = ATTRIBUTIONS.find((a) => a.licence === "CC BY 4.0");
+    expect(dnr?.text).toBe("Trained on the Divide and Remaster (DnR) v2 dataset by Darius Petermann, Gordon Wichern, Zhong-Qiu Wang and Jonathan Le Roux");
+    // The open question about DnR's own source clips, recorded as information (research §3.2).
+    expect(dnr?.note).toMatch(/^Some FSD50K and FMA clips inside DnR v2 carry their own CC licences, NC variants included\./);
+    expect(entry.notes).toMatch(/NC variants included; whether that reaches the weights or their outputs is unresolved/);
+    // Still information: the workflow's licence row reads Apache-2.0, nothing is flagged or hidden for it.
+    expect(licenceInfo(workflowLicence(entry)).class).toBe("commercial");
     expect(ATTRIBUTIONS.filter((a) => a.licence === "MIT").map((a) => a.text)).toEqual([
       "BS-RoFormer, copyright (c) 2023 Phil Wang",
       "Music-Source-Separation-Training, copyright (c) 2024 Roman Solovyev (ZFTurbo)",

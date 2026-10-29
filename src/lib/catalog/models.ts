@@ -1138,7 +1138,7 @@ const open: ModelDef[] = [
   }),
   // DBS (docs/research/dbs-separation-7.md): dialogue, music and effects from any soundtrack, small enough for a CPU. The
   // provider picks the model by the host (DBS-TIGER on CUDA, DBS-BSRNN otherwise) unless one is asked for, and separates
-  // every channel on its own for inputs with more than 2 channels. Split soundtrack (src/lib/av/split.ts) runs on it.
+  // a file with more than 2 channels in mono (ComfyUI saves mono or stereo only). Split soundtrack (src/lib/av/split.ts) runs on it.
   o({
     id: "oss-dbs-separate",
     name: "DBS (dialogue, music, effects)",

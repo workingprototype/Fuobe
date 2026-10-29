@@ -436,7 +436,7 @@ export const NODE_PACKS: NodePack[] = [
     name: "MIT",
     class: "commercial",
     url: SPDX("MIT"),
-    note: "Dialogue / music / effects separation; MIT code, vendored DBS code Apache-2.0 with MIT notices; the DBS weights are Apache-2.0, trained on DnR v2 (CC BY 4.0)",
+    note: "Dialogue / music / effects separation; MIT code, vendored DBS code Apache-2.0 with MIT notices; the DBS weights are Apache-2.0, trained on DnR v2 (CC BY 4.0). Some FSD50K and FMA clips inside DnR v2 carry their own CC licences, NC variants included; whether that reaches the weights or their outputs is unresolved",
   }),
 ];
 
@@ -453,6 +453,8 @@ export interface Attribution {
   text: string;
   licence: string;
   url?: string;
+  /** What the admin should also know (an open licence question), shown under the credit. */
+  note?: string;
 }
 
 export const ATTRIBUTIONS: Attribution[] = [
@@ -461,6 +463,7 @@ export const ATTRIBUTIONS: Attribution[] = [
     text: "Trained on the Divide and Remaster (DnR) v2 dataset by Darius Petermann, Gordon Wichern, Zhong-Qiu Wang and Jonathan Le Roux",
     licence: "CC BY 4.0",
     url: "https://zenodo.org/records/6949108",
+    note: "Some FSD50K and FMA clips inside DnR v2 carry their own CC licences, NC variants included. Whether that reaches the DBS weights or what they make is unresolved: recorded here as information.",
   },
   { for: "DBS (vendored code)", text: "BS-RoFormer, copyright (c) 2023 Phil Wang", licence: "MIT", url: "https://github.com/lucidrains/BS-RoFormer" },
   { for: "DBS (vendored code)", text: "Music-Source-Separation-Training, copyright (c) 2024 Roman Solovyev (ZFTurbo)", licence: "MIT", url: "https://github.com/ZFTurbo/Music-Source-Separation-Training" },

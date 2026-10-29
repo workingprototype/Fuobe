@@ -1,7 +1,8 @@
 /**
  * Just enough of the common media containers to know a file's shape before a job runs: duration, displayed
- * size, frame rate / count and which tracks it has. Reads MP4 / MOV / M4A (ISO-BMFF), WAV, FLAC and MP3 from
- * the bytes in memory; anything else (WebM, MKV, Ogg…) is "unknown" (null) and callers fall back to safe defaults.
+ * size, frame rate / count, which tracks it has and how many audio channels. Reads MP4 / MOV / M4A (ISO-BMFF),
+ * WAV, FLAC and MP3 from the bytes in memory; anything else (WebM, MKV, Ogg…) is "unknown" (null) and callers fall
+ * back to safe defaults.
  */
 export interface MediaInfo {
   /**
@@ -20,23 +21,34 @@ export interface MediaInfo {
   frames?: number;
   hasVideo: boolean;
   hasAudio: boolean;
-  /** Audio channels, where the header says (WAV, FLAC, MP3); unset for MP4 and the rest. */
+  /**
+   * Audio channels, where the header says: WAV, FLAC, MP3, and an MP4 / MOV / M4A's first sound track (its sample
+   * entry, or an AAC track's own config); the server's WebM / Matroska reader adds them for those.
+   */
   channels?: number;
 }
 
 const fourcc = (b: Uint8Array, o: number) => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]);
 
-export function probeMedia(data: Uint8Array): MediaInfo | null {
+/**
+ * The facts in `data`: a whole file, or (`size` = the whole file's length) the start of a WAV, FLAC or MP3, whose
+ * header says all of it.
+ */
+export function probeMedia(data: Uint8Array, size = data.length): MediaInfo | null {
   try {
     if (data.length < 12) return null;
-    if (fourcc(data, 0) === "RIFF" && fourcc(data, 8) === "WAVE") return probeWav(data);
+    if (fourcc(data, 0) === "RIFF" && fourcc(data, 8) === "WAVE") return probeWav(data, size);
     if (fourcc(data, 0) === "fLaC") return probeFlac(data);
     if (fourcc(data, 4) === "ftyp" || ["moov", "mdat", "free", "wide", "skip"].includes(fourcc(data, 4))) return probeIsoBmff(data);
-    return probeMp3(data);
+    return probeMp3(data, size);
   } catch {
     return null;
   }
 }
+
+/** A WAV, FLAC or MP3 (an ID3 tag or a frame at the very start): its header at the start says what the file is. */
+const headerSays = (head: Uint8Array) =>
+  (fourcc(head, 0) === "RIFF" && fourcc(head, 8) === "WAVE") || fourcc(head, 0) === "fLaC" || fourcc(head, 0).startsWith("ID3") || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0);
 
 // ---------------------------------------------------------------------------
 // Probing a file without reading all of it
@@ -51,14 +63,14 @@ const ISO_TOP = ["ftyp", "moov", "mdat", "free", "wide", "skip"];
 /**
  * {@link probeMedia} without reading the whole file: an MP4 / MOV is walked box header by box header
  * to its moov box (at the start, or after the media data like a camera file) and only that is read,
- * so a 200 MB clip costs a few small reads. Other containers are probed when the whole file fits in
- * the first read, else unknown (null).
+ * so a 200 MB clip costs a few small reads. A WAV, FLAC or MP3 is read from its header (the first read);
+ * other containers are probed when the whole file fits in the first read, else unknown (null).
  */
 export async function probeMediaRanges(read: ReadRange, size: number): Promise<MediaInfo | null> {
   try {
     const head = await read(0, Math.min(size, HEAD_BYTES));
     if (head.length < 12) return null;
-    if (!ISO_TOP.includes(fourcc(head, 4))) return size <= head.length ? probeMedia(head) : null;
+    if (!ISO_TOP.includes(fourcc(head, 4))) return size <= head.length ? probeMedia(head) : headerSays(head) ? probeMedia(head, size) : null;
     for (let o = 0; o + 8 <= size; ) {
       const h = o + 16 <= head.length ? head.subarray(o, o + 16) : await read(o, Math.min(size, o + 16));
       if (h.length < 8) return null;
@@ -146,6 +158,65 @@ function timing(d: DataView, b: Box): [number, number] {
   return [d.getUint32(b.start + 12), d.getUint32(b.start + 16)];
 }
 
+/**
+ * A sound track's channel count from its first sample entry (stsd): an AAC track's AudioSpecificConfig (esds) when it
+ * names a layout, else the entry's channelcount (QuickTime version 2 entries keep the real count further on); 0 when
+ * none says.
+ */
+function soundChannels(d: DataView, stsd: Box): number {
+  const entry = boxes(d, stsd.start + 8, stsd.end).next().value;
+  // SampleEntry (6 reserved, data reference index) then version, revision, vendor, channelcount.
+  if (!entry || entry.start + 28 > entry.end) return 0;
+  const version = d.getUint16(entry.start + 8);
+  let channels = version === 2 && entry.start + 44 <= entry.end ? d.getUint32(entry.start + 40) : d.getUint16(entry.start + 16);
+  if (entry.type === "mp4a") {
+    const extra = version === 1 ? 16 : version === 2 ? 36 : 0;
+    for (const b of boxes(d, entry.start + 28 + extra, entry.end)) if (b.type === "esds") channels = aacChannels(d, b) || channels;
+  }
+  return channels > 0 && channels <= 64 ? channels : 0;
+}
+
+/** An esds box's AudioSpecificConfig channelConfiguration as a count (1–6, 7 = 7.1 = 8 channels); 0 when it doesn't say. */
+function aacChannels(d: DataView, esds: Box): number {
+  let o = esds.start + 4; // version + flags
+  // A descriptor: tag, then a size of 1–4 bytes (7 bits each).
+  const descriptor = (tag: number): number | null => {
+    if (o + 2 > esds.end || d.getUint8(o) !== tag) return null;
+    o++;
+    let size = 0;
+    for (let i = 0; i < 4 && o < esds.end; i++) {
+      const b = d.getUint8(o++);
+      size = (size << 7) | (b & 0x7f);
+      if (!(b & 0x80)) break;
+    }
+    return size;
+  };
+  if (descriptor(0x03) === null || o + 3 > esds.end) return 0; // ES_Descriptor
+  const flags = d.getUint8(o + 2);
+  o += 3;
+  if (flags & 0x80) o += 2; // dependsOn_ES_ID
+  if (flags & 0x40 && o < esds.end) o += 1 + d.getUint8(o); // URL
+  if (flags & 0x20) o += 2; // OCR_ES_Id
+  if (descriptor(0x04) === null) return 0; // DecoderConfigDescriptor
+  o += 13;
+  if (descriptor(0x05) === null || o + 2 > esds.end) return 0; // DecoderSpecificInfo = AudioSpecificConfig
+  // audioObjectType (5 bits; 31 = escape, 6 more), samplingFrequencyIndex (4; 15 = 24 more), channelConfiguration (4).
+  let pos = 0;
+  const take = (n: number) => {
+    let v = 0;
+    for (let i = 0; i < n; i++, pos++) {
+      const at = o + (pos >> 3);
+      if (at >= esds.end) return -1;
+      v = (v << 1) | ((d.getUint8(at) >> (7 - (pos & 7))) & 1);
+    }
+    return v;
+  };
+  if (take(5) === 31) take(6);
+  if (take(4) === 15) take(24);
+  const layout = take(4);
+  return layout >= 1 && layout <= 6 ? layout : layout === 7 ? 8 : 0;
+}
+
 function probeIsoBmff(data: Uint8Array): MediaInfo | null {
   const d = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let moov: Box | undefined;
@@ -162,7 +233,13 @@ function probeIsoBmff(data: Uint8Array): MediaInfo | null {
     const mdia = child(d, trak, "mdia");
     const hdlr = mdia && child(d, mdia, "hdlr");
     const handler = hdlr ? fourcc(data, hdlr.start + 8) : "";
-    if (handler === "soun") info.hasAudio = true;
+    if (handler === "soun" && !info.hasAudio) {
+      info.hasAudio = true;
+      const minf = mdia && child(d, mdia, "minf");
+      const stsd = minf && child(d, minf, "stbl") && child(d, child(d, minf, "stbl")!, "stsd");
+      const channels = stsd ? soundChannels(d, stsd) : 0;
+      if (channels > 0) info.channels = channels;
+    }
     if (handler !== "vide" || info.hasVideo) continue;
     info.hasVideo = true;
     const tkhd = child(d, trak, "tkhd");
@@ -200,7 +277,7 @@ function probeIsoBmff(data: Uint8Array): MediaInfo | null {
 // ---------------------------------------------------------------------------
 // WAV, FLAC, MP3
 
-function probeWav(data: Uint8Array): MediaInfo | null {
+function probeWav(data: Uint8Array, total: number): MediaInfo | null {
   const d = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let byteRate = 0;
   let channels = 0;
@@ -212,7 +289,7 @@ function probeWav(data: Uint8Array): MediaInfo | null {
       byteRate = d.getUint32(o + 16, true);
     }
     if (id === "data") {
-      if (!size || size === 0xffffffff || o + 8 + size > data.length) size = data.length - o - 8; // streamed header
+      if (!size || size === 0xffffffff || o + 8 + size > total) size = total - o - 8; // streamed header
       return byteRate ? { container: "wav", duration: size / byteRate, hasVideo: false, hasAudio: true, ...(channels > 0 && { channels }) } : null;
     }
     o += 8 + size + (size % 2);
@@ -236,7 +313,7 @@ const MP3_BITRATES: Record<string, number[]> = {
 };
 const MP3_RATES: Record<number, number[]> = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] };
 
-function probeMp3(data: Uint8Array): MediaInfo | null {
+function probeMp3(data: Uint8Array, total: number): MediaInfo | null {
   let o = 0;
   if (fourcc(data, 0).startsWith("ID3")) o = 10 + ((data[6] & 0x7f) << 21) + ((data[7] & 0x7f) << 14) + ((data[8] & 0x7f) << 7) + (data[9] & 0x7f);
   // The first frame header within a few KB of the tag.
@@ -258,5 +335,5 @@ function probeMp3(data: Uint8Array): MediaInfo | null {
     return { container: "mp3", duration: (frames * samplesPerFrame) / rate, hasVideo: false, hasAudio: true, channels: mono ? 1 : 2 };
   }
   if (!bitrate) return null;
-  return { container: "mp3", duration: ((data.length - o) * 8) / bitrate, hasVideo: false, hasAudio: true, channels: mono ? 1 : 2 };
+  return { container: "mp3", duration: ((total - o) * 8) / bitrate, hasVideo: false, hasAudio: true, channels: mono ? 1 : 2 };
 }

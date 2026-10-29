@@ -109,10 +109,11 @@
 // Keys added with DBS soundtrack separation (docs/research/dbs-separation-7.md §4). * = the provider fills it:
 //   separationModel*                      (DBSLoader model: DBS-BSRNN-DnR (fast) | DBS-TIGER-DnR (best); params.extra.separationModel,
 //                                          else the host's pick: TIGER when /system_stats says the device is cuda, BSRNN on a CPU)
-//   channels*                             (DBSSeparate channels: mono | each channel; params.extra.channels, forced to "each channel"
-//                                          for inputs with more than 2 channels)
+//   channels*                             (DBSSeparate channels: mono | each channel; params.extra.channels, "mono" for inputs with
+//                                          more than 2 channels, which ComfyUI can't save, with node 4 rewired to music + effects)
 // Entry field requiredModels: files a loader reads by a name with no extension (DBSLoader's model folder), listed in the
-// manifest like any model (KNOWN_MODELS keys are the path under the folder, e.g. 'DBS-BSRNN-DnR/model.safetensors').
+// manifest like any model (KNOWN_MODELS keys are the path under the folder, e.g. 'DBS-BSRNN-DnR/model.safetensors'), so the
+// Workflows page's presence check and its install commands cover them.
 
 import fs from 'node:fs';
 
@@ -2390,8 +2391,9 @@ export const SPEC = [
     capability: 'separate-audio',
     handBuilt: 'hand-built/separate-soundtrack-dbs.json',
     packs: ['ComfyUI-DBS'],
-    requiredModels: ['DBS-BSRNN-DnR/model.safetensors', 'DBS-BSRNN-DnR/config.json'],
-    optionalModels: ['DBS-TIGER-DnR/model.safetensors', 'DBS-TIGER-DnR/config.json'],
+    // Both models are required (23 MB together): a CUDA host runs DBS-TIGER unless asked otherwise, so the Workflows page's
+    // install commands fetch it and its presence check names it when it's missing.
+    requiredModels: ['DBS-BSRNN-DnR/model.safetensors', 'DBS-BSRNN-DnR/config.json', 'DBS-TIGER-DnR/model.safetensors', 'DBS-TIGER-DnR/config.json'],
     bindings: { audio: [b('1', 'audio')], separationModel: [b('2', 'model')], channels: [b('3', 'channels')] },
     outputs: [
       { node: '5', kind: 'audio', stem: 'voice' },
@@ -2407,11 +2409,14 @@ export const SPEC = [
       'CPU OK, about 1.7 GiB on CUDA. audio = an audio file or a video (LoadAudio reads a video\'s soundtrack without decoding frames). ' +
       'DBSLoader model DBS-BSRNN-DnR (fast: 18.9 MB, 9.07 dB SI-SDR on DnR v2, the CPU default) or DBS-TIGER-DnR (best: 4.1 MB, 10.13 dB, about 3x slower on a CPU, the CUDA default); device auto. ' +
       'Measured on a 4-CPU host (torch 2.14.1+cpu, 10-20 s clips): DBS-BSRNN 0.17-0.33x real time per channel, DBS-TIGER 0.08-0.09x. ' +
-      'DBSSeparate channels mono (the mean of the channels, the official usage) or each channel (every channel separated on its own: 2x the time for stereo, 6x for 5.1; ' +
-      'the provider forces it for inputs with more than 2 channels, where the subtract below would also take speech out of the LFE and surrounds); output_sample_rate input. ' +
+      'DBSSeparate channels mono (the mean of the channels, the official usage) or each channel (stereo stems: every channel separated on its own, 2x the time); output_sample_rate input. ' +
+      'ComfyUI saves audio as mono or stereo only (a 5.1 waveform comes out as scrambled stereo three times as long), so the provider splits a file with more than 2 channels in mono ' +
+      'and makes its background from music + effects (node 4 rewired to AudioMerge add) rather than the original minus the speech. ' +
       'Outputs in order: voice (speech), music, effects (sfx), background = original minus speech (AudioMerge subtract: with mono it keeps the original stereo image at mono cost; ' +
       'AudioMerge scales the whole result down when it peaks over 1.0), and the pack\'s JSON report (model, device, rates, windows, seconds, times real time). ' +
-      'Stems are FLAC, so they still add up to the source. Voice is first, so a chain without a stem takes the dialogue. Trained on synthetic English mixes (DnR v2): dialogue separates well (15-16 dB), music against effects less so (5.7-7.8 dB).',
+      'Voice + background add up to the source, except on a loud master where AudioMerge had to lower the background to fit under full scale (FLAC holds no more). ' +
+      'Voice is first, so a chain without a stem takes the dialogue. Trained on synthetic English mixes (DnR v2): dialogue separates well (15-16 dB), music against effects less so (5.7-7.8 dB). ' +
+      'Some FSD50K and FMA clips inside DnR v2 carry their own CC licences, NC variants included; whether that reaches the weights or their outputs is unresolved (recorded as information).',
   },
   {
     id: 'captions-qwen3-asr',

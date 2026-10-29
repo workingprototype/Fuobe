@@ -33,6 +33,33 @@ function mp4({ w = 1920, h = 1080, rotate = false, audio = true, frames = 300, f
   return Buffer.concat([box("ftyp", Buffer.from("mp42"), u32(0)), box("mdat", Buffer.alloc(64)), box("moov", mvhd, video, ...(audio ? [sound] : []))]);
 }
 
+/** An audio-only MP4 / M4A whose sound track's first sample entry is `entry`. */
+function soundOnly(entry: Buffer): Buffer {
+  const stsd = box("stsd", u32(0, 1), entry);
+  const sound = box("trak", box("mdia", box("mdhd", u32(0, 0, 0, 48000, 48000 * 2), Buffer.alloc(4)), box("hdlr", u32(0, 0), Buffer.from("soun"), Buffer.alloc(12)), box("minf", box("stbl", stsd))));
+  return Buffer.concat([box("ftyp", Buffer.from("M4A "), u32(0)), box("moov", box("mvhd", u32(0, 0, 0, 1000, 2000), Buffer.alloc(80)), sound)]);
+}
+
+/** An AudioSampleEntry: SampleEntry (6 reserved, data reference 1), version, revision, vendor, channelcount, sample size… */
+function audioEntry(type: string, channels: number, children: Buffer[] = [], version = 0, extra = Buffer.alloc(0)): Buffer {
+  const fields = Buffer.alloc(28);
+  fields.writeUInt16BE(1, 6);
+  fields.writeUInt16BE(version, 8);
+  fields.writeUInt16BE(channels, 16);
+  fields.writeUInt16BE(16, 18);
+  fields.writeUInt32BE(48000 * 65536, 24);
+  return box(type, fields, extra, ...children);
+}
+
+/** An esds box whose AudioSpecificConfig is AAC-LC, 48 kHz, with this channelConfiguration. */
+function esds(layout: number): Buffer {
+  const asc = Buffer.from([(2 << 3) | (3 >> 1), ((3 & 1) << 7) | (layout << 3)]);
+  const dsi = Buffer.concat([Buffer.from([0x05, asc.length]), asc]);
+  const dcd = Buffer.concat([Buffer.from([0x04, 13 + dsi.length, 0x40, 0x15]), Buffer.alloc(11), dsi]);
+  const es = Buffer.concat([Buffer.from([0x03, 3 + dcd.length, 0, 1, 0]), dcd]);
+  return box("esds", u32(0), es);
+}
+
 function wav(seconds: number, rate = 22050, channels = 1): Buffer {
   const data = Buffer.alloc(Math.round(seconds * rate) * 2 * channels);
   const h = Buffer.alloc(44);
@@ -90,6 +117,26 @@ describe("media probe", () => {
     const cbr = Buffer.alloc(16000);
     cbr.set([0xff, 0xfb, 0x90, 0x00], 0);
     expect(probeMedia(cbr)?.duration).toBeCloseTo(1, 6);
+  });
+
+  it("reads an MP4 / MOV sound track's channel count: an AAC track's own config, else the sample entry", () => {
+    // ffmpeg's 5.1 AAC: the entry says 6, and so does the AudioSpecificConfig.
+    expect(probeMedia(soundOnly(audioEntry("mp4a", 6, [esds(6)])))).toEqual({ container: "mp4", hasVideo: false, hasAudio: true, duration: 2, channels: 6 });
+    // An encoder that leaves the entry at its template value of 2: the AAC config is right (7 = 7.1, eight channels).
+    expect(probeMedia(soundOnly(audioEntry("mp4a", 2, [esds(6)])))?.channels).toBe(6);
+    expect(probeMedia(soundOnly(audioEntry("mp4a", 2, [esds(7)])))?.channels).toBe(8);
+    expect(probeMedia(soundOnly(audioEntry("mp4a", 2, [esds(2)])))?.channels).toBe(2);
+    // AC-3 and PCM entries: channelcount.
+    expect(probeMedia(soundOnly(audioEntry("ac-3", 6)))?.channels).toBe(6);
+    expect(probeMedia(soundOnly(audioEntry("sowt", 1)))?.channels).toBe(1);
+    // A QuickTime version 2 entry keeps the real count after its fixed fields (the 16-bit one reads 3).
+    const v2 = Buffer.alloc(36);
+    v2.writeUInt32BE(72, 0);
+    v2.writeDoubleBE(48000, 4);
+    v2.writeUInt32BE(6, 12);
+    expect(probeMedia(soundOnly(audioEntry("lpcm", 3, [], 2, v2)))?.channels).toBe(6);
+    // A sound track with no sample table: no count.
+    expect(probeMedia(mp4())?.channels).toBeUndefined();
   });
 
   it("says nothing about containers it doesn't read", () => {
@@ -154,6 +201,21 @@ describe("probing without reading the whole file (Trim, the Ad Multiplier)", () 
     expect(await probeUrl("/api/files/clip.mp4")).toEqual(expected);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("Not found", { status: 404 })));
     expect(await probeUrl("/api/files/gone.mp4")).toBeNull();
+  });
+
+  it("reads a big WAV, FLAC or MP3 from its header alone (Split soundtrack's 2 GB films, the mixer's FLAC stems)", async () => {
+    // A WAV header for 600 s of 48 kHz 5.1, the rest never read.
+    const head = wav(0, 48000, 6);
+    head.writeUInt32LE(600 * 48000 * 12, 40);
+    head.writeUInt32LE(36 + 600 * 48000 * 12, 4);
+    const size = 44 + 600 * 48000 * 12;
+    const r = reader(Buffer.concat([head, Buffer.alloc(300 * 1024)]));
+    expect(await probeMediaRanges(r.read, size)).toEqual({ container: "wav", duration: 600, hasVideo: false, hasAudio: true, channels: 6 });
+    expect(r.reads).toEqual([[0, 256 * 1024]]);
+    // A CBR MP3 without a Xing header: the length from the whole file's size, not the bytes read.
+    const mp3 = Buffer.alloc(300 * 1024);
+    mp3.set([0xff, 0xfb, 0x90, 0x00], 0);
+    expect((await probeMediaRanges(reader(mp3).read, 16000 * 60))?.duration).toBeCloseTo(60, 6);
   });
 
   it("probes other containers only when the whole file fits in the first read", async () => {

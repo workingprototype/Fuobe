@@ -3,45 +3,67 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  backgroundLowered,
   CLOUD_ONLY_PROBLEM,
   CLOUD_SPLIT_PROBLEM,
   clampDb,
   dbLabel,
   dbsChannelsFor,
   dbsModelFor,
+  dbsSurroundBed,
   dbToGain,
   DBS_SPEED,
   durationWords,
   encodeWav,
+  exportProblem,
   headroomGain,
   hostPick,
+  installedDbs,
+  missingDbs,
+  MIX_MAX_BYTES,
+  mixerBudget,
+  mixerBytes,
+  mixerProblem,
   mixName,
+  mixPart,
+  mixPeak,
+  mixPlan,
   ORIGINAL_MIX,
+  partFrames,
   planRemux,
   planSplit,
   presetOf,
   PRESETS,
+  SAVE_MAX_CHANNELS,
+  separationPasses,
   setLevel,
   setMute,
   setSolo,
   splitTime,
+  stemFeed,
   STEMS,
   stemGains,
+  surroundSource,
+  wavBytes,
   type Mix,
 } from "@/lib/av/split";
 import { getModel } from "@/lib/catalog";
 import { HUB_MODES, modeHref } from "@/lib/hubs";
 
 // Audio → Split soundtrack (DBS D1): the planner, the mixer maths and the API in demo mode.
+const SURROUND_NOTE =
+  "This file has 6 channels. ComfyUI saves audio in mono or stereo only, so the stems come out in mono (all channels mixed), and Music & effects is the music and effects stems added up.";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-split-"));
 process.env.FUOBE_DATA_DIR = dir;
 // Nothing listens: the open model runs on the demo provider.
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
 
 const { setSetting } = await import("@/server/settings");
-const { saveFile } = await import("@/server/storage");
+const { getAsset, saveFile, scratchDir } = await import("@/server/storage");
 const gens = await import("@/server/generations");
 const route = await import("@/app/api/audio-tools/route");
+const exportRoute = await import("@/app/api/audio-tools/export/route");
+const { fileInfo } = await import("@/server/media-facts");
 
 beforeAll(() => setSetting("demoMode", "auto"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -64,6 +86,23 @@ function upload(seconds: number, channels = 2, name = "film.wav"): string {
   buf.write("data", 36);
   buf.writeUInt32LE(n * 2 * channels, 40);
   return saveFile({ data: buf, contentType: "audio/wav", name, source: "upload" }).url;
+}
+
+/** A small MP4: a video track and, unless `channels` is null, an AAC sound track with that many channels (2 s each). */
+function mp4Sound(channels: number | null): Buffer {
+  const u32 = (...v: number[]) => Buffer.concat(v.map((n) => Buffer.from([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255])));
+  const box = (type: string, ...parts: Buffer[]) => {
+    const body = Buffer.concat(parts);
+    return Buffer.concat([u32(8 + body.length), Buffer.from(type), body]);
+  };
+  const trak = (handler: string, ...stbl: Buffer[]) =>
+    box("trak", box("mdia", box("mdhd", u32(0, 0, 0, 1000, 2000), Buffer.alloc(4)), box("hdlr", u32(0, 0), Buffer.from(handler), Buffer.alloc(12)), box("minf", box("stbl", ...stbl))));
+  const entry = Buffer.alloc(28);
+  entry.writeUInt16BE(1, 6);
+  entry.writeUInt16BE(channels ?? 2, 16);
+  entry.writeUInt16BE(16, 18);
+  const sound = channels === null ? [] : [trak("soun", box("stsd", u32(0, 1), box("mp4a", entry)))];
+  return Buffer.concat([box("ftyp", Buffer.from("isom"), u32(0)), box("moov", box("mvhd", u32(0, 0, 0, 1000, 2000), Buffer.alloc(80)), trak("vide", box("stts", u32(0, 1, 50, 40))), ...sound)]);
 }
 
 const post = (body: unknown, preview = false) =>
@@ -93,14 +132,43 @@ describe("the DBS model and channels a run gets", () => {
     expect(dbsModelFor("something else", "cpu")).toBe("DBS-BSRNN-DnR");
   });
 
-  it("separates the mono mix unless stereo stems are asked for, and every channel of anything over two", () => {
+  it("separates the mono mix unless stereo stems are asked for, and anything over two channels in mono", () => {
     expect(dbsChannelsFor(undefined, 2)).toBe("mono");
     expect(dbsChannelsFor("mono", 1)).toBe("mono");
     expect(dbsChannelsFor("each channel", 2)).toBe("each channel");
     expect(dbsChannelsFor("stereo")).toBe("each channel");
-    // 5.1: the background (original minus mono speech) would take speech out of the LFE and surrounds too.
-    expect(dbsChannelsFor("mono", 6)).toBe("each channel");
-    expect(dbsChannelsFor(undefined, 3)).toBe("each channel");
+    // 5.1: ComfyUI saves mono or stereo only (a 6-channel stem comes out as scrambled stereo), so mono, stereo asked or not.
+    expect(SAVE_MAX_CHANNELS).toBe(2);
+    expect([surroundSource(6), surroundSource(3), surroundSource(2), surroundSource(undefined)]).toEqual([true, true, false, false]);
+    expect(dbsChannelsFor("mono", 6)).toBe("mono");
+    expect(dbsChannelsFor("each channel", 6)).toBe("mono");
+    expect(dbsChannelsFor(undefined, 3)).toBe("mono");
+    // A mono file is one pass whatever is asked: no stereo stems to make, and the estimate isn't doubled.
+    expect(dbsChannelsFor("each channel", 1)).toBe("mono");
+    expect(separationPasses("each channel", 1)).toBe(1);
+    expect(separationPasses("each channel", 2)).toBe(2);
+    expect(separationPasses("each channel")).toBe(2);
+    expect(separationPasses("mono", 6)).toBe(1);
+  });
+
+  it("only picks a model the host has on disk, and refuses one asked for that isn't there", () => {
+    // GET /models/dbs: both files of a model, or it isn't there (a Windows ComfyUI answers with back slashes).
+    expect(installedDbs(["DBS-BSRNN-DnR/config.json", "DBS-BSRNN-DnR/model.safetensors", "DBS-TIGER-DnR/config.json"])).toEqual(["DBS-BSRNN-DnR"]);
+    expect(installedDbs(["DBS-TIGER-DnR\\config.json", "DBS-TIGER-DnR\\model.safetensors"])).toEqual(["DBS-TIGER-DnR"]);
+    expect(installedDbs([])).toEqual([]);
+    expect(installedDbs(null)).toBeUndefined();
+    // A GPU host set up without TIGER runs BSRNN rather than a model that isn't there; a CPU host without BSRNN, TIGER.
+    expect(hostPick("cuda", ["DBS-BSRNN-DnR"])).toBe("fast");
+    expect(hostPick("cuda", ["DBS-BSRNN-DnR", "DBS-TIGER-DnR"])).toBe("best");
+    expect(hostPick("cpu", ["DBS-TIGER-DnR"])).toBe("best");
+    expect(hostPick("cuda", [])).toBe("best");
+    expect(dbsModelFor(undefined, "cuda", ["DBS-BSRNN-DnR"])).toBe("DBS-BSRNN-DnR");
+    expect(() => dbsModelFor("best", "cuda", ["DBS-BSRNN-DnR"])).toThrow(missingDbs("DBS-TIGER-DnR", ["DBS-BSRNN-DnR"]));
+    expect(missingDbs("DBS-TIGER-DnR", ["DBS-BSRNN-DnR"])).toBe(
+      'Best (DBS-TIGER) isn\'t installed on your ComfyUI (models/dbs/DBS-TIGER-DnR). Copy the install commands from Workflows → "Split a soundtrack", or pick Fast (DBS-BSRNN).',
+    );
+    // No weights at all: said in words, not a FileNotFoundError from inside ComfyUI.
+    expect(() => dbsModelFor(undefined, "cpu", [])).toThrow(/Fast \(DBS-BSRNN\) isn't installed on your ComfyUI \(models\/dbs\/DBS-BSRNN-DnR\)\. Copy the install commands from Workflows → "Split a soundtrack"\.$/);
   });
 });
 
@@ -138,11 +206,25 @@ describe("planSplit", () => {
     expect(p.length).toBeNull();
   });
 
-  it("splits every channel of a 5.1 file on its own, and says why it takes longer", () => {
-    const p = planSplit({ engine: "open", media: "/api/files/a.wav", kind: "audio", channels: 6 });
-    expect(p.mode).toBe("each channel");
-    expect(p.steps[0].request.params?.extra).toEqual({ channels: "each channel", sourceChannels: 6 });
-    expect(p.notes[0]).toBe("This file has 6 channels, so each is split on its own: about 6x the time.");
+  it("splits a 5.1 file in mono, and says why its stems are mono", () => {
+    const p = planSplit({ engine: "open", media: "/api/files/a.wav", kind: "audio", channels: 6, stereo: true });
+    expect(p.mode).toBe("mono");
+    expect(p.steps[0].request.params?.extra).toEqual({ channels: "mono", sourceChannels: 6 });
+    expect(p.notes[0]).toBe(SURROUND_NOTE);
+    expect(p.summary).toBe("Splits it into dialogue, music, effects and music & effects.");
+  });
+
+  it("makes a surround file's background from the music and effects stems (graph A's node 4 rewired)", () => {
+    const graph = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "workflows/comfyui/separate-soundtrack-dbs.json"), "utf8"));
+    const bed = dbsSurroundBed(graph);
+    expect(bed["4"].inputs).toEqual({ audio1: ["3", 0], audio2: ["3", 1], merge_method: "add" });
+    // Nothing else changes, and the graph it came from is left as it was.
+    expect({ ...bed, "4": graph["4"] }).toEqual(graph);
+    expect(graph["4"].inputs.merge_method).toBe("subtract");
+    // A graph without DBS, or already rewired: as it is.
+    const other = { "1": { class_type: "LoadAudio", inputs: {} } };
+    expect(dbsSurroundBed(other)).toBe(other);
+    expect(dbsSurroundBed(bed)).toBe(bed);
   });
 
   it("has no cloud route: DBS isn't hosted, and no other model stands in for it", () => {
@@ -172,8 +254,11 @@ describe("time on the open engine", () => {
     const stereo = splitTime({ seconds: 60, quality: "fast", mode: "each channel", channels: 2, device: "cpu" });
     expect(stereo.high).toBe(Math.round(3 + ((60 * 2) / 0.27) * 1.6));
     expect(splitTime({ seconds: 60, quality: "best", mode: "mono" }).low).toBe(Math.round(3 + (60 / 0.09) * 0.8));
-    // A 5.1 file: six passes.
+    // A mono file with stereo stems asked for: one pass (DBS runs once per channel).
+    expect(splitTime({ seconds: 60, quality: "fast", mode: dbsChannelsFor("each channel", 1), channels: 1, device: "cpu" })).toEqual({ low: 181, high: 359 });
+    // Each channel is one pass per channel (the measured 5.1 run: six passes); a 5.1 split is mono now, one pass.
     expect(splitTime({ seconds: 10, quality: "fast", mode: "each channel", channels: 6, device: "cpu" }).low).toBe(Math.round(3 + (60 / 0.27) * 0.8));
+    expect(splitTime({ seconds: 10, quality: "fast", mode: dbsChannelsFor("each channel", 6), channels: 6, device: "cpu" }).low).toBe(Math.round(3 + (10 / 0.27) * 0.8));
     // CUDA: well over real time, a range up to 4x slower than the reference card.
     expect(splitTime({ seconds: 600, quality: "best", mode: "mono", device: "cuda" })).toEqual({ low: 41, high: 154 });
   });
@@ -252,6 +337,12 @@ describe("the mixer", () => {
     expect(mixName({ ...ORIGINAL_MIX, voice: { db: 0, mute: true, solo: false }, background: { db: 0, mute: true, solo: false } })).toBe("Silence");
   });
 
+  it("knows a background that AudioMerge lowered to fit under full scale (a loud master)", () => {
+    expect(backgroundLowered(1)).toBe(true);
+    expect(backgroundLowered(32767 / 32768)).toBe(true);
+    expect(backgroundLowered(0.97)).toBe(false);
+  });
+
   it("exports a 16-bit WAV kept under full scale", () => {
     expect(headroomGain(0.5)).toBe(1);
     expect(headroomGain(2) * 2).toBeCloseTo(dbToGain(-0.1), 6);
@@ -262,6 +353,59 @@ describe("the mixer", () => {
     expect([d.getUint16(22, true), d.getUint32(24, true), d.getUint16(34, true), d.getUint32(40, true)]).toEqual([2, 44100, 16, 4 * 2 * 2]);
     // Interleaved L/R, clipped at full scale.
     expect(Array.from({ length: 8 }, (_, i) => d.getInt16(44 + i * 2, true))).toEqual([0, 32767, 16384, -16384, -32768, 0, 32767, 0]);
+  });
+
+  it("mixes the stems as WebAudio plays them: mono up-mixed to both sides of stereo, to the centre of 5.1", () => {
+    expect([0, 1].map((c) => stemFeed(1, 2, c))).toEqual([0, 0]);
+    expect([0, 1, 2, 3, 4, 5].map((c) => stemFeed(1, 6, c))).toEqual([-1, -1, 0, -1, -1, -1]);
+    expect([0, 1, 2, 3, 4, 5].map((c) => stemFeed(6, 6, c))).toEqual([0, 1, 2, 3, 4, 5]);
+    expect([0, 1, 2].map((c) => stemFeed(2, 3, c))).toEqual([0, 1, -1]);
+    expect(stemFeed(1, 1, 0)).toBe(0);
+  });
+
+  it("writes the mix in parts that join into the WAV, lowering the whole mix when it would clip", () => {
+    const voice = { channels: [Float32Array.from([0.5, 0.5, 0.5, 0.5, 0.5])], gain: 1 };
+    const bed = { channels: [Float32Array.from([0.25, 0.5, 0.75, 0.25, 0]), Float32Array.from([-0.25, -0.5, -0.75, -0.25, 0])], gain: 1 };
+    const muted = { channels: [Float32Array.from([1, 1, 1, 1, 1])], gain: 0 };
+    const plan = mixPlan([voice, bed, muted], 8000);
+    expect(plan).toMatchObject({ frames: 5, channels: 2, sampleRate: 8000, bytes: wavBytes(5, 2) });
+    // Left 0.5 + 0.75 = 1.25 at its loudest: over full scale, so the whole mix comes down to −0.1 dBFS.
+    expect(mixPeak(plan)).toBeCloseTo(1.25, 6);
+    expect(mixPeak(plan, 3, 5)).toBeCloseTo(0.75, 6);
+    const k = headroomGain(mixPeak(plan));
+    const expected = encodeWav(
+      [Float32Array.from([0.75, 1, 1.25, 0.75, 0.5].map((v) => v * k)), Float32Array.from([0.25, 0, -0.25, 0.25, 0.5].map((v) => v * k))],
+      8000,
+    );
+    // 2 frames (8 bytes) a part: the header rides on the first.
+    const parts = [0, 2, 4].map((f) => mixPart(plan, f, f + 2, k));
+    expect(partFrames(plan, 8)).toBe(2);
+    expect(parts.map((p) => p.length)).toEqual([44 + 8, 8, 4]);
+    expect(Buffer.concat(parts)).toEqual(Buffer.from(expected));
+    // Frame 2's left sample, the loudest, lands at −0.1 dBFS.
+    expect(new DataView(parts[1].buffer).getInt16(0, true)).toBe(Math.round(1.25 * k * 0x7fff));
+    // A quiet mix is left as it is.
+    expect(headroomGain(mixPeak(mixPlan([voice], 8000)))).toBe(1);
+  });
+
+  it("knows how much the browser can hold, and says so before decoding a split too long for it", () => {
+    // Four stems of a 7-minute 5.1 clip, every channel split: 24 channels at 48 kHz as 32-bit floats.
+    const surround = mixerBytes(Array(4).fill({ seconds: 420, channels: 6 }), 48000);
+    expect(surround).toBe(420 * 48000 * 24 * 4);
+    expect(mixerBudget({ deviceMemoryGb: 8 })).toBe(2 * 1024 ** 3);
+    expect(mixerBudget({ deviceMemoryGb: 2 })).toBe(512 * 1024 ** 2);
+    expect(mixerBudget({ coarse: true })).toBe(1024 ** 3);
+    expect(mixerBudget({})).toBe(2 * 1024 ** 3);
+    expect(mixerProblem(surround, mixerBudget({}))).toBeNull();
+    // An hour of stereo on a phone: refused, in words, before anything is fetched.
+    const hour = mixerBytes([{ seconds: 3600, channels: 1 }, { seconds: 3600, channels: 1 }, { seconds: 3600, channels: 1 }, { seconds: 3600, channels: 2 }], 48000);
+    expect(mixerProblem(hour, mixerBudget({ coarse: true }))).toBe(
+      "This split is too long to mix in your browser: its stems take about 3.2 GB of memory to play, and this device has room for about 1 GB. Download the stems and mix them in an editor, or split a shorter clip.",
+    );
+    // The export itself: a WAV up to MIX_MAX_BYTES, sent in parts, so a 7-minute 5.1 mix (242 MB) is fine.
+    expect(wavBytes(420 * 48000, 6)).toBe(44 + 420 * 48000 * 12);
+    expect(exportProblem(420 * 48000, 6)).toBeNull();
+    expect(exportProblem(Math.ceil(MIX_MAX_BYTES / 12), 6)).toMatch(/^This mix would be a 2 GB WAV, over the 2 GB an export can be/);
   });
 });
 
@@ -300,12 +444,13 @@ describe("POST /api/audio-tools split and remux (demo mode)", () => {
     expect(g.outputs.every((o) => o.url.startsWith("/api/files/"))).toBe(true);
   });
 
-  it("reads a 5.1 file's channels from its header and splits each one", async () => {
+  it("reads a 5.1 file's channels from its header and splits it in mono", async () => {
     const media = upload(4, 6, "surround.wav");
-    const preview = await (await post({ tool: "split", engine: "open", media, kind: "audio" }, true)).json();
-    expect(preview.notes[0]).toBe("This file has 6 channels, so each is split on its own: about 6x the time.");
+    const preview = await (await post({ tool: "split", engine: "open", media, kind: "audio", stereo: true }, true)).json();
+    expect(preview.notes[0]).toBe(SURROUND_NOTE);
+    expect(preview.estimate).toEqual(splitTime({ seconds: 4, quality: "fast", mode: "mono", channels: 6 }));
     const run = await (await post({ tool: "split", engine: "open", media, kind: "audio" })).json();
-    expect(run.result.request.params.extra).toEqual({ channels: "each channel", sourceChannels: 6 });
+    expect(run.result.request.params.extra).toEqual({ channels: "mono", sourceChannels: 6 });
   });
 
   it("says plainly that the cloud has no split, and refuses on an install set to paid APIs only", async () => {
@@ -324,6 +469,51 @@ describe("POST /api/audio-tools split and remux (demo mode)", () => {
     expect((await (await post({ tool: "split", engine: "open", media: "/api/files/uploads/gone.wav", kind: "audio" }, true)).json()).error).toBe("That audio file is gone — add it again");
   });
 
+  it("refuses a file with no sound before anything is queued", async () => {
+    const silent = saveFile({ data: fs.readFileSync(path.join(__dirname, "fixtures", "shorts-silent.webm")), contentType: "video/webm", name: "silent.webm", source: "upload" }).url;
+    for (const preview of [true, false]) {
+      const res = await post({ tool: "split", engine: "open", media: silent, kind: "video" }, preview);
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toBe("This video has no sound to split");
+    }
+    const silentMp4 = saveFile({ data: mp4Sound(null), contentType: "video/mp4", name: "t2v.mp4", source: "upload" }).url;
+    expect((await (await post({ tool: "split", engine: "open", media: silentMp4, kind: "video" }, true)).json()).error).toBe("This video has no sound to split");
+  });
+
+  it("reads a 5.1 MP4's channels from its header, so an API call without the browser's count gets the surround rule", async () => {
+    const media = saveFile({ data: mp4Sound(6), contentType: "video/mp4", name: "film.mp4", source: "upload" }).url;
+    const preview = await (await post({ tool: "split", engine: "open", media, kind: "video" }, true)).json();
+    expect(preview).toMatchObject({ channels: 6, length: 2 });
+    expect(preview.notes[0]).toBe(SURROUND_NOTE);
+    const run = await (await post({ tool: "split", engine: "open", media, kind: "video" })).json();
+    expect(run.result.request.params.extra).toEqual({ channels: "mono", sourceChannels: 6 });
+  });
+
+  it("reads a header without reading the file: a 2.2 GB file is a few small reads", async () => {
+    const file = path.join(dir, "huge.wav");
+    const head = Buffer.alloc(44);
+    const data = 2.2e9 - 44;
+    head.write("RIFF", 0);
+    head.writeUInt32LE(36 + data, 4);
+    head.write("WAVEfmt ", 8);
+    head.writeUInt32LE(16, 16);
+    head.writeUInt16LE(1, 20);
+    head.writeUInt16LE(2, 22);
+    head.writeUInt32LE(48000, 24);
+    head.writeUInt32LE(192000, 28);
+    head.writeUInt16LE(4, 32);
+    head.writeUInt16LE(16, 34);
+    head.write("data", 36);
+    head.writeUInt32LE(data, 40);
+    fs.writeFileSync(file, head);
+    fs.truncateSync(file, 2.2e9);
+    try {
+      expect(await fileInfo(file)).toEqual({ container: "wav", duration: data / 192000, hasVideo: false, hasAudio: true, channels: 2 });
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  });
+
   it("puts a mix back on the video: free on the open engine, priced on the cloud", async () => {
     const audio = upload(3, 2, "mix.wav");
     const video = saveFile({ data: Buffer.from("not really a video"), contentType: "video/mp4", name: "clip.mp4", source: "upload" }).url;
@@ -336,5 +526,62 @@ describe("POST /api/audio-tools split and remux (demo mode)", () => {
     expect(run.result.request.inputs).toEqual({ video, audio });
     expect((await (await post({ tool: "remux", engine: "open", video, audio: "/api/files/uploads/gone.wav" }, true)).json()).error).toBe("That mix is gone — export it again");
     expect((await (await post({ tool: "remux", engine: "open", video })).json()).error).toBe("Export the mix first");
+  });
+});
+
+describe("POST /api/audio-tools/export (a mix sent in parts)", () => {
+  const send = (q: string, body: Uint8Array) => exportRoute.POST(new Request(`http://x/api/audio-tools/export?${q}`, { method: "POST", body: Buffer.from(body) }));
+
+  it("joins the parts into one WAV in the Library, whatever its size", async () => {
+    const plan = mixPlan([{ channels: [Float32Array.from({ length: 1000 }, (_, i) => Math.sin(i / 10) / 2), Float32Array.from({ length: 1000 }, () => 0.25)], gain: 1 }], 8000);
+    const per = partFrames(plan, 1000);
+    const parts = Array.from({ length: Math.ceil(plan.frames / per) }, (_, i) => mixPart(plan, i * per, (i + 1) * per));
+    expect(parts.length).toBe(4);
+    let id = "";
+    let offset = 0;
+    let res: Response | undefined;
+    for (const [i, part] of parts.entries()) {
+      const last = i === parts.length - 1;
+      res = await send(`offset=${offset}${id ? `&id=${id}` : ""}${last ? `&last=1&name=${encodeURIComponent("Film · No dialogue.wav")}` : ""}`, part);
+      if (!last) {
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        id = body.id;
+        offset = body.received;
+      }
+    }
+    expect(res!.status).toBe(201);
+    const asset = await res!.json();
+    expect(asset).toMatchObject({ kind: "audio", contentType: "audio/wav", name: "Film · No dialogue.wav", source: "upload" });
+    const stored = getAsset(asset.id)!;
+    const bytes = fs.readFileSync(path.join(dir, "files", stored.relPath));
+    expect(bytes).toEqual(Buffer.concat(parts));
+    expect(bytes.length).toBe(plan.bytes);
+    // Nothing is left behind in the scratch folder.
+    expect(fs.readdirSync(scratchDir()).filter((f) => f.startsWith("mix-"))).toEqual([]);
+  });
+
+  it("refuses what isn't a 16-bit WAV, a part that doesn't follow on, too much audio and a short export", async () => {
+    expect((await send("offset=0&last=1", new TextEncoder().encode("not a wav file at all, not even close to one"))).status).toBe(415);
+    expect((await send("offset=10", mixPart(mixPlan([{ channels: [new Float32Array(10)], gain: 1 }], 8000), 0, 10))).status).toBe(409);
+    const plan = mixPlan([{ channels: [new Float32Array(100)], gain: 1 }], 8000);
+    const first = await (await send("offset=0", mixPart(plan, 0, 50))).json();
+    expect(first.received).toBe(44 + 100);
+    expect((await send(`offset=0&id=${first.id}`, mixPart(plan, 50, 100))).status).toBe(409);
+    const short = await send(`offset=${first.received}&id=${first.id}&last=1`, mixPart(plan, 50, 60));
+    expect(short.status).toBe(409);
+    expect((await short.json()).error).toMatch(/^The export stopped short/);
+    // The short part was kept (20 bytes): the next one must start after it, and the header caps what can follow.
+    expect((await send(`offset=${first.received}&id=${first.id}`, mixPart(plan, 60, 70))).status).toBe(409);
+    expect((await send(`offset=${first.received + 20}&id=${first.id}`, new Uint8Array(400))).status).toBe(413);
+    const done = await send(`offset=${first.received + 20}&id=${first.id}&last=1&name=Mix`, mixPart(plan, 60, 100));
+    expect(done.status).toBe(201);
+    expect((await done.json()).name).toBe("Mix.wav");
+    expect((await send("offset=4&id=../../etc", new Uint8Array(4))).status).toBe(404);
+    expect((await send("offset=4&id=AAAAAAAAAAAAAAAA", new Uint8Array(4))).status).toBe(404);
+    // A header that declares more than an export can be.
+    const huge = mixPart(plan, 0, 10);
+    new DataView(huge.buffer).setUint32(4, MIX_MAX_BYTES, true);
+    expect((await send("offset=0", huge)).status).toBe(413);
   });
 });

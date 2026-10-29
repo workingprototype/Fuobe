@@ -43,33 +43,89 @@ export const QUALITY_LABELS: Record<SplitQuality, string> = {
 export type DbsChannels = "mono" | "each channel";
 
 /**
- * The model a host does best with: DBS-TIGER (10.13 dB) on a CUDA GPU, where both run well over 10x real time
- * (ROCm reports "cuda" too); DBS-BSRNN (9.07 dB) on a CPU, where it runs about 4x faster than DBS-TIGER.
+ * The DBS models a host has on disk, from GET /models/dbs (paths under the folder; a Windows ComfyUI lists them with
+ * back slashes): both files of a model, or it isn't there. Undefined when the host can't say (no list).
  */
-export function hostPick(deviceType?: string | null): SplitQuality {
-  return deviceType === "cuda" ? "best" : "fast";
+export function installedDbs(files: readonly string[] | null | undefined): DbsModel[] | undefined {
+  if (!files) return undefined;
+  const have = new Set(files.map((f) => f.replace(/\\/g, "/")));
+  return Object.values(DBS_MODELS).filter((m) => have.has(`${m}/model.safetensors`) && have.has(`${m}/config.json`));
 }
 
-/** The DBSLoader model a run gets: the one asked for ("fast" / "best" or the model's name), else the host's pick. */
-export function dbsModelFor(asked: unknown, deviceType?: string | null): DbsModel {
-  if (asked === "DBS-BSRNN-DnR" || asked === "DBS-TIGER-DnR") return asked;
-  if (asked === "fast" || asked === "best") return DBS_MODELS[asked];
-  return DBS_MODELS[hostPick(deviceType)];
+const qualityOf = (m: DbsModel): SplitQuality => (m === DBS_MODELS.best ? "best" : "fast");
+
+/**
+ * The model a host does best with: DBS-TIGER (10.13 dB) on a CUDA GPU, where both run well over 10x real time
+ * (ROCm reports "cuda" too); DBS-BSRNN (9.07 dB) on a CPU, where it runs about 3x faster than DBS-TIGER (§2.4). When
+ * the host's list of DBS models is known and its pick isn't on disk, the other one if that is.
+ */
+export function hostPick(deviceType?: string | null, installed?: readonly DbsModel[]): SplitQuality {
+  const want: SplitQuality = deviceType === "cuda" ? "best" : "fast";
+  if (!installed || installed.includes(DBS_MODELS[want])) return want;
+  const other: SplitQuality = want === "best" ? "fast" : "best";
+  return installed.includes(DBS_MODELS[other]) ? other : want;
+}
+
+/** Why a DBS model can't run on this host: its files aren't in models/dbs. */
+export function missingDbs(model: DbsModel, installed: readonly DbsModel[]): string {
+  const q = qualityOf(model);
+  const other = installed.find((m) => m !== model);
+  return `${QUALITY_LABELS[q]} isn't installed on your ComfyUI (models/dbs/${model}). Copy the install commands from Workflows → "Split a soundtrack"${other ? `, or pick ${QUALITY_LABELS[qualityOf(other)]}` : ""}.`;
 }
 
 /**
+ * The DBSLoader model a run gets: the one asked for ("fast" / "best" or the model's name), else the host's pick. With
+ * the host's list of DBS models known, a model it doesn't have is refused here, in words, rather than failing inside
+ * ComfyUI.
+ */
+export function dbsModelFor(asked: unknown, deviceType?: string | null, installed?: readonly DbsModel[]): DbsModel {
+  const named: DbsModel | undefined = asked === "DBS-BSRNN-DnR" || asked === "DBS-TIGER-DnR" ? asked : asked === "fast" || asked === "best" ? DBS_MODELS[asked] : undefined;
+  const model = named ?? DBS_MODELS[hostPick(deviceType, installed)];
+  if (installed && !installed.includes(model)) throw new Error(missingDbs(model, installed));
+  return model;
+}
+
+/**
+ * ComfyUI saves audio (SaveAudioAdvanced, comfy_api's AudioSaveHelper) as mono or stereo only: a waveform with more
+ * channels is written as "stereo" with its samples interleaved as if it had two, so a 4 s 5.1 stem comes out as 12 s
+ * of scrambled stereo (seen on the worker). A file with more channels is therefore split in mono.
+ */
+export const SAVE_MAX_CHANNELS = 2;
+
+/** A source with more channels than ComfyUI can save (5.1, 7.1): split in mono, with a mono Music & effects. */
+export const surroundSource = (channels?: number | null): boolean => typeof channels === "number" && channels > SAVE_MAX_CHANNELS;
+
+/**
  * DBSSeparate's channel mode: "mono" (the mean of the channels, the official usage) unless stereo stems are asked
- * for; always "each channel" for more than 2 channels, where the background (original minus the mono speech) would
- * also take speech out of the LFE and surround channels.
+ * for. A mono file is one pass either way, and a file with more than 2 channels is split in mono too: ComfyUI can't save
+ * its channels (SAVE_MAX_CHANNELS), and its background is then made from the music and effects stems (dbsSurroundBed),
+ * not the original minus the speech, which would keep all its channels.
  */
 export function dbsChannelsFor(asked: unknown, channels?: number | null): DbsChannels {
-  if (typeof channels === "number" && channels > 2) return "each channel";
+  if (channels === 1 || surroundSource(channels)) return "mono";
   return asked === "each channel" || asked === "stereo" || asked === true ? "each channel" : "mono";
 }
 
-/** How many times the model runs over the clip: once in mono, once per channel otherwise. */
+type GraphNode = { class_type: string; inputs: Record<string, unknown> };
+const linkedTo = (v: unknown, node: string, slot: number) => Array.isArray(v) && v[0] === node && v[1] === slot;
+
+/**
+ * Graph A's background for a surround source: the music and effects stems added up (AudioMerge add, mono) in place of
+ * the original minus the speech (which has the source's 6 or 8 channels, more than ComfyUI can save). The graph as it is
+ * when it has no DBSSeparate or no such merge.
+ */
+export function dbsSurroundBed<T extends Record<string, GraphNode>>(wf: T): T {
+  const dbs = Object.keys(wf).find((k) => wf[k].class_type === "DBSSeparate");
+  if (!dbs) return wf;
+  const merge = Object.keys(wf).find((k) => wf[k].class_type === "AudioMerge" && linkedTo(wf[k].inputs.audio2, dbs, 2) && wf[k].inputs.merge_method === "subtract");
+  if (!merge) return wf;
+  // DBSSeparate's outputs: 0 music, 1 sfx, 2 speech, 3 report.
+  return { ...wf, [merge]: { ...wf[merge], inputs: { ...wf[merge].inputs, audio1: [dbs, 0], audio2: [dbs, 1], merge_method: "add" } } };
+}
+
+/** How many times the model runs over the clip: once in mono, once per channel otherwise (stereo when unknown). */
 export function separationPasses(mode: DbsChannels, channels?: number | null): number {
-  return mode === "mono" ? 1 : Math.max(2, Math.round(channels ?? 2));
+  return mode === "mono" ? 1 : Math.max(1, Math.round(channels ?? 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +220,7 @@ export function planSplit(i: SplitInput): SplitPlan {
     },
     step: { label: STEP_LABEL[mode], index: 0, of: 1 },
   };
-  const forced = mode === "each channel" && !i.stereo;
+  const surround = surroundSource(i.channels);
   const passes = separationPasses(mode, i.channels);
   return {
     steps: [{ key: "split", request }],
@@ -173,7 +229,7 @@ export function planSplit(i: SplitInput): SplitPlan {
     mode,
     summary: `Splits ${i.kind === "video" ? "the video's soundtrack" : "it"} into dialogue, music, effects and music & effects${mode === "each channel" ? `, every channel on its own (${passes} passes)` : ""}.`,
     notes: [
-      ...(forced ? [`This file has ${i.channels} channels, so each is split on its own: about ${passes}x the time.`] : []),
+      ...(surround ? [`This file has ${i.channels} channels. ComfyUI saves audio in mono or stereo only, so the stems come out in mono (all channels mixed), and Music & effects is the music and effects stems added up.`] : []),
       "Dialogue comes out clean; music and effects can bleed into each other.",
     ],
   };
@@ -238,8 +294,11 @@ const on = (db = 0): StemMix => ({ db, mute: false, solo: false });
 const off = (db = 0): StemMix => ({ db, mute: true, solo: false });
 
 /**
- * The original back: dialogue plus music & effects (they sum to the source exactly). The separate music and effects
- * stems start muted, so nothing plays twice.
+ * The original back: dialogue plus music & effects, which the graph makes as the source minus the dialogue, so the two
+ * add up to the source. Except on a loud master: where the source minus the dialogue goes over full scale, ComfyUI's
+ * AudioMerge lowers the whole background stem to fit (FLAC can't hold more), and this plays the background that much
+ * quieter (backgroundLowered says when; the mixer says so). The separate music and effects stems start muted, so
+ * nothing plays twice.
  */
 export const ORIGINAL_MIX: Mix = {
   voice: on(),
@@ -276,6 +335,15 @@ export const PRESETS: { id: string; label: string; mix: Mix }[] = [
 export function presetOf(mix: Mix): string | null {
   const same = (a: StemMix, b: StemMix) => a.mute === b.mute && a.solo === b.solo && (a.mute || Math.abs(a.db - b.db) < 0.5);
   return PRESETS.find((p) => STEMS.every((s) => same(mix[s.id], p.mix[s.id])))?.id ?? null;
+}
+
+/**
+ * A background stem that peaks at full scale was lowered by AudioMerge (it divides the whole stem by its peak when the
+ * source minus the dialogue goes over 1.0), so dialogue plus music & effects is a little quieter than the source in the
+ * background. A stem that was left alone peaks under full scale, but for the rare one that lands on it exactly.
+ */
+export function backgroundLowered(peak: number): boolean {
+  return peak >= 0.999;
 }
 
 export const clampDb = (db: number): number => Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, Math.round(db * 2) / 2));
@@ -331,7 +399,11 @@ export function mixName(mix: Mix): string {
 }
 
 // ---------------------------------------------------------------------------
-// Export: the rendered mix as a WAV file
+// Export: the mix as a WAV file, made and uploaded in parts
+
+/** A WAV holds at most 4 GiB (32-bit sizes); the export route takes up to 2 GiB, in parts the sign-in proxy passes whole. */
+export const MIX_MAX_BYTES = 2 * 1024 ** 3;
+export const MIX_PART_BYTES = 16 * 1024 * 1024;
 
 /**
  * The gain that keeps a mix from clipping: 1 when its peak is at or under full scale, else just enough to bring the
@@ -342,15 +414,17 @@ export function headroomGain(peak: number): number {
   return peak > ceiling ? ceiling / peak : 1;
 }
 
-/** 16-bit PCM WAV from planar float channels (−1…1, clipped), as the export uploads it. */
-export function encodeWav(channels: Float32Array[], sampleRate: number): Uint8Array {
-  const n = channels.length ? channels[0].length : 0;
-  const ch = Math.max(1, channels.length);
-  const bytes = new Uint8Array(44 + n * ch * 2);
+/** The size of a 16-bit PCM WAV. */
+export const wavBytes = (frames: number, channels: number): number => 44 + frames * Math.max(1, channels) * 2;
+
+/** The 44-byte header of a 16-bit PCM WAV of `frames` frames. */
+export function wavHeader(frames: number, channels: number, sampleRate: number): Uint8Array {
+  const ch = Math.max(1, channels);
+  const bytes = new Uint8Array(44);
   const d = new DataView(bytes.buffer);
   const text = (o: number, s: string) => [...s].forEach((c, k) => d.setUint8(o + k, c.charCodeAt(0)));
   text(0, "RIFF");
-  d.setUint32(4, 36 + n * ch * 2, true);
+  d.setUint32(4, 36 + frames * ch * 2, true);
   text(8, "WAVE");
   text(12, "fmt ");
   d.setUint32(16, 16, true);
@@ -361,13 +435,128 @@ export function encodeWav(channels: Float32Array[], sampleRate: number): Uint8Ar
   d.setUint16(32, ch * 2, true);
   d.setUint16(34, 16, true);
   text(36, "data");
-  d.setUint32(40, n * ch * 2, true);
-  for (let i = 0, o = 44; i < n; i++)
-    for (let c = 0; c < ch; c++, o += 2) {
-      const v = Math.max(-1, Math.min(1, channels[c]?.[i] ?? 0));
-      d.setInt16(o, Math.round(v < 0 ? v * 0x8000 : v * 0x7fff), true);
-    }
+  d.setUint32(40, frames * ch * 2, true);
   return bytes;
+}
+
+const int16 = (v: number) => {
+  const c = Math.max(-1, Math.min(1, v));
+  return Math.round(c < 0 ? c * 0x8000 : c * 0x7fff);
+};
+
+/** 16-bit PCM WAV from planar float channels (−1…1, clipped). */
+export function encodeWav(channels: Float32Array[], sampleRate: number): Uint8Array {
+  const n = channels.length ? channels[0].length : 0;
+  const ch = Math.max(1, channels.length);
+  const bytes = new Uint8Array(wavBytes(n, ch));
+  bytes.set(wavHeader(n, ch, sampleRate));
+  const d = new DataView(bytes.buffer);
+  for (let i = 0, o = 44; i < n; i++) for (let c = 0; c < ch; c++, o += 2) d.setInt16(o, int16(channels[c]?.[i] ?? 0), true);
+  return bytes;
+}
+
+/** A decoded stem in a mix: its planar channels (one rate for all stems) and the gain it plays at. */
+export interface MixStem {
+  channels: Float32Array[];
+  gain: number;
+}
+
+/**
+ * Which channel of a stem with `n` channels feeds output channel `c` of `out` (−1: none), as WebAudio's "speakers"
+ * up-mix plays it live: mono into stereo or quad on left and right, into 5.1 on the centre; otherwise channel for
+ * channel. (A split's stems are either all one channel count, or mono beside a stereo background.)
+ */
+export function stemFeed(n: number, out: number, c: number): number {
+  if (n === 1) return out === 6 ? (c === 2 ? 0 : -1) : out === 2 || out === 4 ? (c < 2 ? 0 : -1) : c === 0 ? 0 : -1;
+  return c < n ? c : -1;
+}
+
+/** A mix ready to write: the audible stems, which of their channels feed each output channel, and the file's shape. */
+export interface MixPlan {
+  stems: MixStem[];
+  feeds: number[][];
+  frames: number;
+  channels: number;
+  sampleRate: number;
+  /** The whole WAV's size. */
+  bytes: number;
+}
+
+export function mixPlan(all: MixStem[], sampleRate: number): MixPlan {
+  const stems = all.filter((s) => s.gain > 0 && s.channels.length > 0);
+  const channels = Math.max(1, ...all.map((s) => s.channels.length));
+  const frames = Math.max(0, ...all.flatMap((s) => s.channels.map((d) => d.length)));
+  const feeds = stems.map((s) => Array.from({ length: channels }, (_, c) => stemFeed(s.channels.length, channels, c)));
+  return { stems, feeds, frames, channels, sampleRate, bytes: wavBytes(frames, channels) };
+}
+
+/** One sample of the mix: every audible stem at its gain. */
+function mixAt(p: MixPlan, c: number, i: number): number {
+  let v = 0;
+  for (let s = 0; s < p.stems.length; s++) {
+    const k = p.feeds[s][c];
+    if (k < 0) continue;
+    const data = p.stems[s].channels[k];
+    if (i < data.length) v += data[i] * p.stems[s].gain;
+  }
+  return v;
+}
+
+/** The loudest sample of the mix in frames [from, to) (the page looks at it a slice at a time, so it stays responsive). */
+export function mixPeak(p: MixPlan, from = 0, to = p.frames): number {
+  let peak = 0;
+  for (let i = from, end = Math.min(to, p.frames); i < end; i++) for (let c = 0; c < p.channels; c++) peak = Math.max(peak, Math.abs(mixAt(p, c, i)));
+  return peak;
+}
+
+/** Frames per part of about `partBytes`. */
+export const partFrames = (p: MixPlan, partBytes = MIX_PART_BYTES): number => Math.max(1, Math.floor(partBytes / (p.channels * 2)));
+
+/**
+ * Frames [from, to) of the mix as 16-bit PCM at gain `k` (headroomGain of the whole mix's peak); the part that starts
+ * at frame 0 carries the WAV header. Parts in order, joined, are the WAV file.
+ */
+export function mixPart(p: MixPlan, from: number, to: number, k = 1): Uint8Array {
+  const n = Math.max(0, Math.min(to, p.frames) - from);
+  const head = from === 0 ? 44 : 0;
+  const out = new Uint8Array(head + n * p.channels * 2);
+  if (head) out.set(wavHeader(p.frames, p.channels, p.sampleRate));
+  const d = new DataView(out.buffer);
+  for (let i = 0, o = head; i < n; i++) for (let c = 0; c < p.channels; c++, o += 2) d.setInt16(o, int16(mixAt(p, c, from + i) * k), true);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// What the browser can hold
+
+const GiB = 1024 ** 3;
+
+/** Bytes the browser holds to mix a split: every stem decoded as 32-bit float at the audio context's rate. */
+export function mixerBytes(stems: { seconds: number; channels: number }[], sampleRate: number): number {
+  return stems.reduce((n, s) => n + Math.ceil(Math.max(0, s.seconds) * sampleRate) * Math.max(1, s.channels) * 4, 0);
+}
+
+/**
+ * How much decoded audio this browser is trusted with: a quarter of the device's memory where the browser says it
+ * (Chrome, at most 8 GB reported), from 512 MiB to 2 GiB; else 1 GiB on a phone or tablet and 2 GiB on a computer.
+ */
+export function mixerBudget(o: { deviceMemoryGb?: number; coarse?: boolean }): number {
+  if (o.deviceMemoryGb && o.deviceMemoryGb > 0) return Math.min(2 * GiB, Math.max(GiB / 2, (o.deviceMemoryGb * GiB) / 4));
+  return o.coarse ? GiB : 2 * GiB;
+}
+
+const sizeWords = (bytes: number) => (bytes >= GiB ? `${Math.round((bytes / GiB) * 10) / 10} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`);
+
+/** Why the browser shouldn't decode these stems (too long for this device), or null. */
+export function mixerProblem(bytes: number, budget: number): string | null {
+  if (bytes <= budget) return null;
+  return `This split is too long to mix in your browser: its stems take about ${sizeWords(bytes)} of memory to play, and this device has room for about ${sizeWords(budget)}. Download the stems and mix them in an editor, or split a shorter clip.`;
+}
+
+/** Why a mix can't be exported as one WAV (over the export's limit), or null. */
+export function exportProblem(frames: number, channels: number): string | null {
+  const bytes = wavBytes(frames, channels);
+  return bytes > MIX_MAX_BYTES ? `This mix would be a ${sizeWords(bytes)} WAV, over the ${sizeWords(MIX_MAX_BYTES)} an export can be. Download the stems and mix them in an editor.` : null;
 }
 
 export { clock };

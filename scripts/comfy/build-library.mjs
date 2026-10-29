@@ -134,8 +134,8 @@ export const BINDING_KEYS = new Set([
   'separationModel', 'channels',
 ]);
 
-// Sizes in GB: two decimals, three under 0.1 GB (a 4 MB DBS model would otherwise read 0).
-const gb = (bytes) => (bytes < 1e8 ? Math.round(bytes / 1e6) / 1000 : Math.round((bytes / 1e9) * 100) / 100);
+// Sizes in GB: two decimals, and three where two would read 0 (a 4 MB DBS model), so no other entry's size changes.
+export const gb = (bytes) => Math.round((bytes / 1e9) * 100) / 100 || Math.round(bytes / 1e6) / 1000;
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
 const writeJson = (p, v) => fs.writeFileSync(p, JSON.stringify(v, null, 2) + '\n');
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -341,7 +341,7 @@ async function main() {
 
     // Files a loader reads by a name with no extension (DBSLoader: models/dbs/<model>/config.json + model.safetensors), which the
     // loop above can't see: listed like any model, so install help and the presence check (GET /models/<folder>) know them.
-    // Then files a model control can pick instead (FILM for RIFE, DBS-TIGER): listed as optional, so missing-model help names them.
+    // Then files a model control can pick instead (FILM for RIFE): listed as optional, so missing-model help names them.
     for (const [file, optional] of [...(spec.requiredModels || []).map((f) => [f, false]), ...(spec.optionalModels || []).map((f) => [f, true])]) {
       if (models.has(file)) continue;
       const known = KNOWN_MODELS[file];
