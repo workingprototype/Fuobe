@@ -65,8 +65,11 @@ export function LoginForm({ installName }: { installName: string }) {
         <button
           type="button"
           onClick={() => setShown((s) => !s)}
+          // One fixed name with a pressed state: "Show password, toggle button, pressed" (a swapping name would
+          // announce two states at once).
           aria-pressed={shown}
-          aria-label={shown ? "Hide password" : "Show password"}
+          aria-label="Show password"
+          aria-controls={`${id}-password`}
           className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {shown ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -80,14 +83,12 @@ export function LoginForm({ installName }: { installName: string }) {
       <Button type="submit" className="mt-4 h-11 w-full" disabled={!password || busy}>
         {busy && <Loader2 className="animate-spin" />} Sign in
       </Button>
-      <button type="button" onClick={() => setForgot((f) => !f)} aria-expanded={forgot} className="mt-4 text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+      <button type="button" onClick={() => setForgot((f) => !f)} aria-expanded={forgot} aria-controls={`${id}-forgot`} className="mt-4 text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
         Forgot password?
       </button>
-      {forgot && (
-        <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
-          On the computer where Fuobe runs, start it again with <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-foreground">FUOBE_PASSWORD</code> set to a new password. That password works right away, and every browser signs in again.
-        </p>
-      )}
+      <p id={`${id}-forgot`} hidden={!forgot} className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+        On the computer where Fuobe runs, start it again with <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-foreground">FUOBE_PASSWORD</code> set to a new password. That password works right away, and every browser signs in again.
+      </p>
     </form>
   );
 }
