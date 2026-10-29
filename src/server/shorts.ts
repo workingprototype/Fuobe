@@ -10,6 +10,7 @@ import {
   lookFromCustom,
   lookFromPreset,
   needsFit,
+  originalSegmentProblem,
   planSegments,
   planShorts,
   planStitch,
@@ -249,10 +250,12 @@ function planWith(body: ShortsBody, info: SourceInfo): { input: ShortsPlanInput;
   if (problem) throw new ShortsError(problem);
   // Every segment has to be a clip the restyle model takes (a cut outside its window is paid for, then refused).
   const limits = sourceSeconds(modelId);
-  const odd = planSegments(body.range, body.engine, { modelId, fps })
-    .map((s) => clipLengthProblem({ name: getModel(modelId)?.name ?? modelId, minSeconds: limits.min, maxSeconds: limits.max }, s.end - s.start))
-    .find(Boolean);
+  const segments = planSegments(body.range, body.engine, { modelId, fps });
+  const odd = segments.map((s) => clipLengthProblem({ name: getModel(modelId)?.name ?? modelId, minSeconds: limits.min, maxSeconds: limits.max }, s.end - s.start)).find(Boolean);
   if (odd) throw new ShortsError(`${odd} per segment — pick another model`);
+  // Fuobe Shorts in the cloud: fal's Wan 2.2 Fun VACE takes 17 frames or more, at 5 fps or more.
+  const vace = modelId === SHORTS_ORIGINAL && body.engine === "cloud" ? segments.map((s) => originalSegmentProblem(s.end - s.start, fps)).find(Boolean) : null;
+  if (vace) throw new ShortsError(`${vace} — or pick another model`);
   // A custom preset without words on a words-only model would restyle from nothing but "the look of the reference images".
   if (look.custom && !look.described && body.engine === "cloud" && !maxRefsFor(modelId, "cloud")) {
     const readers = SHORTS_MODELS.cloud.filter((id) => maxRefsFor(id, "cloud") > 0).map((id) => getModel(id)?.name ?? id);

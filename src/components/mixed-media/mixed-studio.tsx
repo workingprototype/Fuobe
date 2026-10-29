@@ -377,7 +377,8 @@ function Editor({
           },
           range: mmRange,
           fps,
-          resolution: resShown,
+          // Smooth has no Resolution control: its first frame is drawn at 1K (a 2K pick under Per frame doesn't carry over unseen).
+          resolution: smooth ? "1K" : resShown,
           modelId,
           mode,
           ...(anchor ? { anchor } : {}),

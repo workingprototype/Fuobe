@@ -18144,6 +18144,10 @@
       "match_input_num_frames": true,
       "match_input_frames_per_second": true
      },
+     "fixed": {
+      "preprocess": true
+     },
+     "fixedNote": "preprocess on: fal derives the depth control from the cut itself. With it off (fal's default), video_url is read as the control video, and fal's own example input for this endpoint is a precomputed grayscale depth-map video (wan-vace-depth-video.mp4); Fuobe sends the RGB cut. Only first_frame_url carries the restyled frame: ref_image_urls (VACE's subject references) isn't sent. Unverified until the first live run.",
      "frame": "fal-ai/qwen-image-edit-2511",
      "segment": {
       "maxFrames": 241,
@@ -18159,6 +18163,11 @@
      "restyle": "video-restyle-wan22-fun-vace",
      "join": "video-concat-N",
      "mux": "video-mux-audio"
+    },
+    "licence": {
+     "licence": "Apache-2.0",
+     "commercial": true,
+     "note": "Wan 2.2 Fun VACE A14B (the restyle) and Qwen-Image-Edit 2511 (the first frame) are Apache-2.0; on the open engine Depth Anything 3 mono-large and lightx2v too"
     }
    }
   },

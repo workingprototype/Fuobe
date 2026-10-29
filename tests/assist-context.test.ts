@@ -277,7 +277,12 @@ describe("studio tools", () => {
     expect(studio.fallbackSteps.captions({ video, translate_to: "Spanish" }, { engine: "cloud" })[0].request).toMatchObject({ modelId: "veed-subtitles", params: { targetLanguage: "Spanish" } });
     expect(plan("split_layers", { image: "/api/files/uploads/a.png", layers: 5 }).jobs).toMatchObject([{ op: "layers", modelId: "oss-qwen-layered" }]);
     expect(plan("restyle_footage", { video, style: "claymation" }, "cloud").jobs).toMatchObject([{ op: "v2v", modelId: "kling-o3" }]);
-    const ads = studio.fallbackSteps.ads({ brief: "oat milk", product_image: "/api/files/uploads/p.png", count: 8, aspect_ratios: ["1:1", "4:5", "9:16"] }, { engine: "cloud" });
+    // On your GPU: Fuobe Mixed Media's per-frame pass on the GPU, one seed (its graph reads no reference images).
+    const [open] = studio.fallbackSteps.restyle({ video, style: "anime", references: ["/api/files/uploads/r.png"] }, { engine: "open" });
+    expect(open.request).toMatchObject({ modelId: "fuobe-mixed-media", engine: "open", op: "v2v", prompt: "anime", params: { seed: 424242 }, inputs: { video } });
+    expect(open.request.inputs?.images).toBeUndefined();
+    expect(plan("restyle_footage", { video, style: "claymation" }, "open").jobs).toMatchObject([{ op: "v2v", modelId: "fuobe-mixed-media" }]);
+    const ads =studio.fallbackSteps.ads({ brief: "oat milk", product_image: "/api/files/uploads/p.png", count: 8, aspect_ratios: ["1:1", "4:5", "9:16"] }, { engine: "cloud" });
     expect(ads).toHaveLength(12);
     expect(ads[0]).toMatchObject({ modelId: "nano-banana-pro", op: "edit", inputs: { images: ["/api/files/uploads/p.png"] } });
   });

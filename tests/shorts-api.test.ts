@@ -591,7 +591,9 @@ describe("Mixed Media renders", () => {
       expect(g.prompt).toMatch(/^drkrm style, /);
     }
     // Smooth: the first frame in the look (the Original), then Fuobe Shorts' Wan 2.2 Fun VACE pass; the cut's sound back.
-    const smooth = await mixed.createMixed({ ...noir, mode: "smooth" } as never);
+    // fal's Wan 2.2 Fun VACE takes 17 frames or more: 1 s of this 16 fps clip is refused before anything is paid for.
+    await expect(mixed.createMixed({ ...noir, mode: "smooth" } as never)).rejects.toThrow(/needs at least 17 frames: select at least 1\.1 s .* or pick Per frame/);
+    const smooth = await mixed.createMixed({ ...noir, mode: "smooth", range: { start: 1, end: 3 } } as never);
     const ops = smooth.items.map((g: Generation) => `${g.modelId} ${g.op}`).sort();
     // The cut, its first frame, that frame in the look, Wan Fun VACE by depth, the selection's sound and the mux.
     expect(ops).toEqual(["extract-frame frame", "fuobe-mixed-media edit", "fuobe-shorts v2v", "merge-audio-video mux", "trim-video trim", "trim-video trim"]);

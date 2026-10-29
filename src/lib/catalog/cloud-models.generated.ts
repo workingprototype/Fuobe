@@ -18739,6 +18739,9 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
               "720p"
             ]
           },
+          "fixed": {
+            "preprocess": true
+          },
           "defaults": {
             "match_input_num_frames": true,
             "match_input_frames_per_second": true
@@ -18764,6 +18767,11 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
         "720p"
       ],
       "maxImages": 4
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.2 Fun VACE A14B weights are Apache-2.0 (the first frame's model has its own licence)"
     },
     "defaults": {
       "resolution": "720p"
@@ -18934,7 +18942,6 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
         "map": {
           "negativePrompt": "negative_prompt",
           "image": "first_frame_url",
-          "images": "ref_image_urls",
           "video": "video_url",
           "seed": "seed",
           "fps": "frames_per_second",
@@ -18948,6 +18955,9 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
               "580p",
               "720p"
             ]
+          },
+          "fixed": {
+            "preprocess": true
           },
           "defaults": {
             "match_input_num_frames": true,
@@ -18967,7 +18977,12 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
         "580p",
         "720p"
       ],
-      "maxImages": 4
+      "maxImages": 1
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.2 Fun VACE A14B (the restyle) and Qwen-Image-Edit 2511 (the first frame) are Apache-2.0; on the open engine Depth Anything 3 mono-large and lightx2v too"
     },
     "defaults": {
       "resolution": "720p"

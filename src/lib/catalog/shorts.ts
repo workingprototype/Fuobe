@@ -36,7 +36,7 @@ export const SHORTS = {
    * Fuobe Shorts in the cloud: fal's Wan 2.2 Fun VACE makes 17–241 frames at 5–30 fps, matching its input clip's count and
    * rate. A clip above 30 fps is worked at half (a third…) its rate and brought back (temporal_downsample_factor).
    */
-  original: { maxFrames: 240, maxFps: 30, billFps: 16 },
+  original: { minFrames: 17, maxFrames: 240, minFps: 5, maxFps: 30, billFps: 16 },
   accept: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm",
 } as const;
 
@@ -381,6 +381,20 @@ export function originalSegmentSeconds(fps?: number): number {
 export function planSegments(range: ShortsRange, engine: Engine, model?: { modelId?: string; fps?: number }): ShortsSegment[] {
   if (engine === "open") return planOpenSegments(range);
   return model?.modelId === SHORTS_ORIGINAL ? planCloudSegments(range, originalSegmentSeconds(model.fps)) : planCloudSegments(range);
+}
+
+/**
+ * What fal's Wan 2.2 Fun VACE won't take in a Fuobe Shorts cloud piece, if anything: fewer than 17 frames as it works them,
+ * or a clip under 5 fps. Said before anything runs (the cut, the first frame and its edit would be paid for, then refused).
+ * Null when the clip's rate isn't known.
+ */
+export function originalSegmentProblem(seconds: number, fps?: number): string | null {
+  if (!fps || !(fps > 0)) return null;
+  const o = SHORTS.original;
+  if (fps < o.minFps - 0.01) return `Wan 2.2 Fun VACE needs a clip of at least ${o.minFps} fps (this one is ${+fps.toFixed(2)} fps)`;
+  const rate = fps / (vaceDownsample(fps) + 1);
+  if (Math.floor(seconds * rate + 1e-6) < o.minFrames) return `Wan 2.2 Fun VACE needs at least ${o.minFrames} frames: select at least ${Math.ceil((o.minFrames / rate) * 10) / 10} s of this ${+fps.toFixed(2)} fps clip`;
+  return null;
 }
 
 /** The seconds fal bills for a Fuobe Shorts segment: its frames ÷ 16 ("video seconds"); an unknown rate counts as 30 fps. */

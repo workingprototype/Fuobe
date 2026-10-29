@@ -25,14 +25,15 @@ import {
   type MixedResolution,
 } from "@/lib/catalog/mixed-media";
 import { mixedLoras } from "@/lib/catalog/mixed-media-looks";
-import { clipLengthProblem, planSegments, type PlanStep } from "@/lib/catalog/shorts";
+import { clipLengthProblem, originalSegmentProblem, planSegments, type PlanStep } from "@/lib/catalog/shorts";
 import { sourceSeconds, takesImage } from "@/lib/catalog/shorts-models";
 import type { Engine, Generation, ProviderId } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { DROPPED_UNUSED, getGeneration, previewChained, unfilledRequest, waitedOnFailure } from "./generations";
-import { withoutUnreachableCivitai } from "./loras";
-import { engineMode } from "./settings";
+import { withoutMissingOnComfy, withoutUnreachableCivitai } from "./loras";
+import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { engineMode, getSetting } from "./settings";
 import { probeSource, ShortsError } from "./shorts";
 
 /**
@@ -146,7 +147,11 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
     if (body.anchor && !anchor) notes.push(`${model?.name} restyles from words only — the preview frame isn't sent`);
     notes.push(`${model?.name} restyles the clip as smooth video in one pass — Per frame redraws every frame of it instead`);
   } else if (mode === "smooth") {
-    const pieces = planSegments(body.range, body.engine, { modelId: MIXED_SMOOTH_MODEL, fps: sourceFps }).length;
+    const segments = planSegments(body.range, body.engine, { modelId: MIXED_SMOOTH_MODEL, fps: sourceFps });
+    const pieces = segments.length;
+    // fal's Wan 2.2 Fun VACE takes 17 frames or more, at 5 fps or more: refused here, before the cut and the first frame are paid for.
+    const vace = body.engine === "cloud" ? segments.map((s) => originalSegmentProblem(s.end - s.start, sourceFps)).find(Boolean) : null;
+    if (vace) throw new ShortsError(`${vace} — or pick Per frame`, 422);
     notes.push(
       body.engine === "open"
         ? `Smooth draws the first frame in the look, then Wan 2.2 Fun VACE carries it through the clip by depth: 480p at 16 fps on your GPU${pieces > 1 ? `, in ${pieces} pieces of up to 5 s` : ""}`
@@ -155,7 +160,13 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
     if (body.engine === "cloud" && sourceFps && sourceFps > 16.5) notes.push(`fal bills this clip's ${Math.round(sourceFps)} fps as ${(sourceFps / 16).toFixed(1)}× its length (video seconds at 16 fps)`);
   } else if (body.engine === "open" && body.resolution !== "1K") notes.push("The open engine renders up to 1536 px on the long side");
   // The look's LoRA: one that downloads from civitai needs the civitai key; without it the look runs on its words.
-  const reach = original && mode !== "fast" ? withoutUnreachableCivitai(mixedLoras(preset.id), body.engine === "open" ? "comfyui" : "fal") : undefined;
+  let reach = original && mode !== "fast" ? withoutUnreachableCivitai(mixedLoras(preset.id), body.engine === "open" ? "comfyui" : "fal") : undefined;
+  // On your GPU without a LoRA folder (Settings → LoRAs) Fuobe can't download one, so ComfyUI must have it already: a LoRA
+  // it doesn't list is left out and said here, rather than the render failing once it's handed over.
+  if (reach?.loras.length && body.engine === "open" && !getSetting("comfyLorasDir") && (await probeComfy())) {
+    const onComfy = withoutMissingOnComfy(reach.loras, await comfyLoraFiles());
+    reach = { loras: onComfy.loras, notes: [...reach.notes, ...onComfy.notes] };
+  }
   if (reach) notes.push(...reach.notes);
   const name = (body.source.name ?? "").replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, 40);
   return {

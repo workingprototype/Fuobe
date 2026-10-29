@@ -225,8 +225,18 @@ try {
     await estimate.waitFor({ timeout: 30_000 }).catch(() => {});
     const price = await estimate.innerText();
     check("prices · mixed: a dollar estimate before running", /≈ \$\d/.test(price), price);
+    // A 2K pick under Per frame doesn't carry over to Smooth, which shows no Resolution: its first frame is drawn at 1K.
+    await page.getByRole("radiogroup", { name: "Resolution" }).getByRole("radio", { name: "2K" }).click();
+    await page.waitForTimeout(800);
+    const asked = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().includes("/api/mixed-media/estimate")) asked.push(req.postDataJSON());
+    });
     await page.getByRole("radiogroup", { name: "Restyle" }).getByRole("radio", { name: "Smooth" }).click();
     await page.waitForTimeout(1500);
+    const smoothAsk = asked.filter((b) => b?.mode === "smooth").at(-1);
+    check("prices · mixed: Smooth asks for 1K after a 2K pick under Per frame", smoothAsk?.resolution === "1K", JSON.stringify(smoothAsk?.resolution));
+    check("prices · mixed: Smooth shows no Resolution", !(await page.getByRole("radiogroup", { name: "Resolution" }).count()));
     const smoothPrice = await estimate.innerText().catch(() => "");
     const smoothLine = (await editor.innerText()).match(/\d+\.\d s · 720p/)?.[0] ?? "";
     check("prices · mixed: Smooth counts seconds at 720p", !!smoothLine, smoothLine);

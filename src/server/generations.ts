@@ -18,6 +18,8 @@ import { fitLoras, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
 import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
 import { isDop } from "@/lib/catalog/dop";
+import { MIXED_ORIGINAL, originalFrameSize } from "@/lib/catalog/mixed-media";
+import { imageSize } from "@/lib/image-size";
 import { finishSteps } from "@/lib/soul-post";
 import {
   CHAIN_LIST_SLACK,
@@ -54,7 +56,7 @@ import { mediaFacts } from "./media-facts";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
 import { fetchRemoteToFile } from "./remote-fetch";
-import { adoptFile, contentTypeFor, deleteAsset, readRef, saveFile, scratchDir } from "./storage";
+import { adoptFile, contentTypeFor, deleteAsset, localHead, readRef, saveFile, scratchDir } from "./storage";
 
 interface Row {
   id: string;
@@ -484,6 +486,20 @@ export function offeredFor(m: ModelDef, asked: Engine | undefined): ModelDef {
   return requireOffered(m, asked ?? (mode === "both" ? undefined : mode));
 }
 
+/**
+ * Fuobe Mixed Media's single picture in the cloud (DoP's Mixed Media stills, an API caller's edit) drawn at about 1
+ * megapixel in its picture's shape, as it's priced: without a size, fal keeps the upload's own (a 12-megapixel photo
+ * costs 12 times as much). The studio sends each frame's size itself; a picture that isn't a file in Fuobe keeps fal's.
+ */
+function sizedMixedFrame(plan: ReturnType<typeof planGeneration>, req: GenerationRequest): ReturnType<typeof planGeneration> {
+  if (plan.model.id !== MIXED_ORIGINAL || plan.model.engine !== "cloud" || plan.op !== "edit" || plan.params.extra?.image_size) return plan;
+  const first = req.inputs?.images?.[0];
+  const head = first ? localHead(first) : null;
+  const size = head ? imageSize(head) : null;
+  const fit = size ? originalFrameSize(size, "1K") : undefined;
+  return fit ? { ...plan, params: { ...plan.params, extra: { ...plan.params.extra, image_size: fit } } } : plan;
+}
+
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
@@ -497,7 +513,7 @@ function prepare(original: GenerationRequest) {
   const model = allowed && dualEngine(allowed) ? onEngine(allowed, engineFor(allowed, worded.engine)) : allowed;
   const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
   const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
-  let plan = planGeneration(req, lookup, getPreset);
+  let plan = sizedMixedFrame(planGeneration(req, lookup, getPreset), req);
   if (mode !== "both" && plan.model.engine !== mode) {
     throw new Error(
       mode === "open"
@@ -519,14 +535,20 @@ function prepare(original: GenerationRequest) {
   const { route, demo } = chooseRoute(offeredRoutes(plan.model, routesFor(plan.model, plan.op)), req.inputs?.images?.length ?? 0, plan.loras, seconds);
   // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
   // takes at most so many (the plan's notes say which were left out). Open runs carry them all. Without a
-  // civitai key a Soul look's civitai LoRA the run can't get is left out (and said), rather than failing at the
-  // download: the look's words still carry it. Any other run (a motion, whose LoRA is the point) still stops there.
+  // civitai key a look's civitai LoRA the run can't get is left out (and said), rather than failing at the
+  // download: the look's words still carry it. Looks are Fuobe Soul's and Fuobe Mixed Media's (the studio's frames,
+  // Smooth's first frame, DoP's Mixed Media stills). Any other run (a motion, whose LoRA is the point) still stops there.
   const asked = plan.loras;
+  const look = !!plan.soul || plan.model.id === MIXED_ORIGINAL;
   const reachable =
-    demo || !plan.soul ? { loras: asked, notes: [] } : withoutUnreachableCivitai(asked, route.provider === "comfyui" ? "comfyui" : route.provider === "replicate" ? "replicate" : "fal");
+    demo || !look ? { loras: asked, notes: [] } : withoutUnreachableCivitai(asked, route.provider === "comfyui" ? "comfyui" : route.provider === "replicate" ? "replicate" : "fal");
   const fitted = fitLoras(reachable.loras, route);
-  // A Soul look's triggers lead the prompt: a LoRA left out takes its trigger with it.
-  const prompt = plan.soul ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras) : plan.prompt;
+  // A look's triggers lead the prompt: a LoRA left out takes its trigger with it.
+  const prompt = plan.soul
+    ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras)
+    : look
+      ? withoutTriggers(plan.prompt, asked.filter((l) => !reachable.loras.includes(l)), reachable.loras)
+      : plan.prompt;
   plan = { ...plan, prompt, loras: fitted.loras };
   const notes = [...(plan.notes ?? []), ...access.notes, ...reachable.notes, ...fitted.notes];
   // A frame-count API that can't make the length asked (Replicate's Wan 2.2 fast: 81–121 frames) says what it makes.

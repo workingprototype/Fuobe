@@ -14,7 +14,10 @@ process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9"; // nothing listens here: open runs fall back to the demo
 
 const { setSetting } = await import("@/server/settings");
-const { createGenerations, previewChained } = await import("@/server/generations");
+const { createGenerations, getGeneration, previewChained, previewGeneration } = await import("@/server/generations");
+const { saveFile } = await import("@/server/storage");
+const { estimateMixed } = await import("@/server/mixed-media");
+const { estimateShorts } = await import("@/server/shorts");
 const { createPipeline } = await import("@/server/chains");
 const { db } = await import("@/server/db");
 const { falProvider } = await import("@/server/providers/fal");
@@ -90,6 +93,9 @@ describe("Fuobe Mixed Media and Fuobe Shorts in the catalog", () => {
     // The cut is cropped to 9:16 / 16:9 first: fal's aspect_ratio is never asked for.
     expect(view("fuobe-shorts", "cloud").routes[0].map?.aspectRatio).toBeUndefined();
     expect(view("fuobe-shorts", "cloud").routes[0].map?.defaults).toEqual(shortsRecord.cloud.defaults);
+    // The weights' licence is the model's own data on both Originals (information for Settings → Models & licences).
+    expect(view("fuobe-shorts", "cloud").licence).toEqual(shortsRecord.licence);
+    expect(shortsRecord.licence).toMatchObject({ licence: "Apache-2.0", commercial: true });
   });
 
   it("are the studios' defaults, with the partners kept as choices", () => {
@@ -314,6 +320,15 @@ describe("Fuobe Shorts: segment → Qwen edit of frame 0 → Wan Fun VACE depth 
       expect(url).toContain("fal-ai/wan-22-vace-fun-a14b/depth");
       expect(body).toMatchObject({ video_url: "https://x/cut.mp4", first_frame_url: "https://x/frame.png", match_input_num_frames: true, match_input_frames_per_second: true, resolution: "720p", seed: 7, temporal_downsample_factor: 1 });
       expect(body.aspect_ratio).toBeUndefined();
+      // fal derives the depth from the RGB cut itself (preprocess, else video_url is read as a depth-map video), and the
+      // restyled frame goes only as the first frame: no VACE subject reference copy of it.
+      expect(body.preprocess).toBe(true);
+      expect(body.ref_image_urls).toBeUndefined();
+      expect(route.map?.fixed).toEqual(shortsRecord.cloud.fixed);
+      // Genjutsu's restyle runs the same endpoint, so it derives the depth too.
+      const restyle = view("fuobe-genjutsu-restyle", "cloud");
+      const r = await submit(restyle, restyle.routes[0], { prompt: "Anime.", video: "https://x/cut.mp4", images: ["https://x/frame.png"], resolution: "720p" });
+      expect(r.body).toMatchObject({ video_url: "https://x/cut.mp4", first_frame_url: "https://x/frame.png", preprocess: true });
       const frame = view("fuobe-mixed-media", "cloud");
       const sent = await submit(frame, frame.routes[0], {
         prompt: "drkrm style, Noir.",
@@ -376,5 +391,165 @@ describe("DoP's Mixed Media effects run on Fuobe Mixed Media", () => {
       expect(clip.request.chain).toEqual([{ slot: "images", position: "first" }]);
     }
     expect(sketch.id).toBe("mixed-sketch");
+  });
+});
+
+/** A PNG's first bytes: enough for its size (src/lib/image-size.ts), as a big photo's upload would start. */
+function pngHeader(width: number, height: number): Buffer {
+  const b = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+  b.writeUInt32BE(13, 8);
+  b.write("IHDR", 12, "ascii");
+  b.writeUInt32BE(width, 16);
+  b.writeUInt32BE(height, 20);
+  b[24] = 8;
+  b[25] = 2;
+  return b;
+}
+
+/** What a step handed its provider (the demo provider records the input it was given). */
+async function handedOver(id: string): Promise<Record<string, unknown>> {
+  const end = Date.now() + 20_000;
+  while (Date.now() < end) {
+    const row = db().prepare("SELECT provider_input_json, status, error FROM generations WHERE id = ?").get(id) as { provider_input_json: string | null; status: string; error: string | null };
+    if (row.provider_input_json) return JSON.parse(row.provider_input_json);
+    if (row.status === "failed") throw new Error(row.error ?? "failed");
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${getGeneration(id)?.status}: nothing handed over`);
+}
+
+describe("DoP's Mixed Media stills, as the run reaches and prices them", () => {
+  it("leaves a civitai look LoRA out without the civitai key, and says so: the still runs on the look's words", () => {
+    setSetting("falKey", "test-key");
+    try {
+      const step = getPreset("effect-paper")!.prestep!.cloud;
+      expect(step.loras?.map((l) => l.file)).toEqual(["civitai-2959128-paperdiorama.safetensors"]);
+      expect(step.prompt).toMatch(/^layered paper diorama, cut paper art, /);
+      const ask = { feature: "effect", engine: "cloud" as const, modelId: step.modelId, op: step.op, prompt: step.prompt, loras: step.loras, params: step.params, inputs: { images: ["/api/files/uploads/a.png"] } };
+      const p = previewGeneration(ask);
+      expect(p).toMatchObject({ demo: false, engine: "cloud" });
+      expect(p.loras.applied).toEqual([]);
+      expect(p.loras.dropped).toEqual([{ file: "civitai-2959128-paperdiorama.safetensors", reason: expect.stringMatching(/civitai key/) }]);
+      expect(p.notes?.join(" ")).toMatch(/V67 Layered paper diorama downloads from civitai, which needs your free API key \(Settings → LoRAs\), so this run leaves it out/);
+      // Its trigger words go with it; the look's own words stay.
+      expect(p.prompt).not.toMatch(/layered paper diorama/);
+      expect(p.prompt).toBe(step.prompt.replace(/^layered paper diorama, cut paper art, /, ""));
+      // With the key it rides along, trigger and all.
+      setSetting("civitaiKey", "a-key");
+      const keyed = previewGeneration(ask);
+      expect(keyed.loras.applied.map((l) => l.file)).toEqual(["civitai-2959128-paperdiorama.safetensors"]);
+      expect(keyed.prompt).toBe(step.prompt);
+    } finally {
+      setSetting("falKey", "");
+      setSetting("civitaiKey", "");
+    }
+  });
+
+  it("draws the still at about 1 megapixel in the picture's shape on fal, as it's priced (not a 12-megapixel upload's own size)", async () => {
+    const photo = saveFile({ data: pngHeader(4000, 3000), contentType: "image/png", name: "big.png", source: "upload" }).url;
+    const [, still] = createGenerations({ feature: "effect", modelId: "fuobe-dop", presetId: "effect-noir", engine: "cloud", prompt: "a skater", inputs: { images: [photo] } });
+    expect(still).toMatchObject({ modelId: "fuobe-mixed-media", engine: "cloud", op: "edit" });
+    const sent = await handedOver(still.id);
+    const size = mm.originalFrameSize({ width: 4000, height: 3000 }, "1K")!;
+    expect(size).toEqual({ width: 1184, height: 880 });
+    expect(sent.extra).toEqual({ control_scale: 0.75, image_size: size });
+    // About 1 megapixel: the cent the composer shows before running.
+    expect(estimateCost(view("fuobe-mixed-media", "cloud"), { extra: { image_size: size } }, 1, "edit")).toBeCloseTo(0.01, 3);
+    expect(prestepCost(getPreset("effect-noir")!, "fuobe-dop", "cloud")).toBeCloseTo(0.01, 3);
+  });
+});
+
+describe("Refused before anything is paid for", () => {
+  it("fal's Wan 2.2 Fun VACE takes 17 frames or more, at 5 fps or more (as it works them)", () => {
+    expect(sh.originalSegmentProblem(1, 16)).toMatch(/needs at least 17 frames: select at least 1\.1 s of this 16 fps clip/);
+    expect(sh.originalSegmentProblem(1.07, 16)).toBeNull();
+    expect(sh.originalSegmentProblem(4, 4)).toMatch(/needs a clip of at least 5 fps \(this one is 4 fps\)/);
+    // A 60 fps clip is worked at 30 fps: 0.5 s is 15 frames there.
+    expect(sh.originalSegmentProblem(0.5, 60)).toMatch(/at least 17 frames/);
+    expect(sh.originalSegmentProblem(0.6, 60)).toBeNull();
+    // An unknown rate is left to the header read when the render starts.
+    expect(sh.originalSegmentProblem(0.2)).toBeNull();
+  });
+
+  it("Mixed Media's Smooth in the cloud and Fuobe Shorts in the cloud say so at the estimate; Per frame and your GPU don't need it", async () => {
+    const body = (over: Record<string, unknown>) => ({
+      engine: "cloud",
+      presetId: "mixed-noir",
+      values: {},
+      source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 12 },
+      range: { start: 0, end: 1 },
+      fps: 8,
+      resolution: "1K",
+      mode: "smooth",
+      ...over,
+    });
+    await expect(estimateMixed(body({}) as never)).rejects.toThrow(/needs at least 17 frames: select at least 1\.5 s of this 12 fps clip — or pick Per frame/);
+    await expect(estimateMixed(body({ source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 4 }, range: { start: 0, end: 6 }, fps: 4 }) as never)).rejects.toThrow(/at least 5 fps/);
+    expect(await estimateMixed(body({ range: { start: 0, end: 2 } }) as never)).toMatchObject({ mode: "smooth" });
+    expect(await estimateMixed(body({ mode: "frames" }) as never)).toMatchObject({ mode: "frames", frames: 6 });
+    expect(await estimateMixed(body({ engine: "open" }) as never)).toMatchObject({ mode: "smooth" });
+    const shorts = (over: Record<string, unknown>) => ({
+      engine: "cloud",
+      presetId: "shorts-claymation",
+      modelId: "fuobe-shorts",
+      source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 4 },
+      range: { start: 0, end: 6 },
+      aspectRatio: "9:16",
+      language: "auto",
+      ...over,
+    });
+    await expect(estimateShorts(shorts({}) as never)).rejects.toThrow(/Wan 2\.2 Fun VACE needs a clip of at least 5 fps .* — or pick another model/);
+    expect(await estimateShorts(shorts({ source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 } }) as never)).toMatchObject({ segments: 1 });
+    // A partner model has its own limits.
+    expect(await estimateShorts(shorts({ modelId: "gemini-omni-flash" }) as never)).toMatchObject({ segments: 1 });
+  });
+});
+
+describe("Fuobe Mixed Media on your GPU without a LoRA folder", () => {
+  type Reach = { ok: boolean; at: number; url: string };
+  const g = globalThis as unknown as { __fuobeComfyReach?: Reach };
+  const body = { engine: "open", presetId: "mixed-noir", values: {}, source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 }, range: { start: 0, end: 2 }, fps: 8, resolution: "1K", mode: "frames" };
+
+  /** A ComfyUI that answers, with these LoRA files. */
+  async function withComfy<T>(loras: string[], run: (asked: string[]) => Promise<T>): Promise<T> {
+    const real = globalThis.fetch;
+    const before = g.__fuobeComfyReach;
+    const asked: string[] = [];
+    g.__fuobeComfyReach = { ok: true, at: Date.now(), url: "http://127.0.0.1:9" };
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      asked.push(String(url));
+      return String(url).endsWith("/models/loras") ? Response.json(loras) : new Response("{}", { status: 404 });
+    }) as typeof fetch;
+    try {
+      return await run(asked);
+    } finally {
+      globalThis.fetch = real;
+      g.__fuobeComfyReach = before;
+    }
+  }
+
+  it("runs a look whose LoRA ComfyUI hasn't on its words, and says how to add it, instead of failing once handed over", async () => {
+    const est = await withComfy(["other.safetensors"], async (asked) => {
+      const e = await estimateMixed(body as never);
+      expect(asked.filter((u) => u.endsWith("/models/loras"))).toHaveLength(1);
+      return e;
+    });
+    expect(est.notes.join(" ")).toMatch(/ComfyUI doesn't have frankbarbs DARKROOM Noir yet, and Fuobe downloads LoRAs for it only once Settings → LoRAs has its LoRA folder, so this run leaves it out \(the look runs on its words\)/);
+    // ComfyUI has it: it runs with it, nothing said.
+    const has = await withComfy(["darkroom-noir.safetensors"], () => estimateMixed(body as never));
+    expect(has.notes.join(" ")).not.toMatch(/ComfyUI doesn't have/);
+    // A LoRA folder set: Fuobe downloads it into the folder when the run is handed over, so ComfyUI isn't asked.
+    setSetting("comfyLorasDir", dir);
+    try {
+      const folder = await withComfy([], async (asked) => {
+        const e = await estimateMixed(body as never);
+        expect(asked.filter((u) => u.endsWith("/models/loras"))).toEqual([]);
+        return e;
+      });
+      expect(folder.notes.join(" ")).not.toMatch(/ComfyUI doesn't have/);
+    } finally {
+      setSetting("comfyLorasDir", "");
+    }
   });
 });
