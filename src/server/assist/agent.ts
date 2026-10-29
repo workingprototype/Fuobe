@@ -29,7 +29,7 @@ import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { offeredDefault } from "../model-access";
-import { ollamaModels, probeOllama as ollamaAnswers } from "../providers/llm";
+import { ollamaModels, ollamaSoon } from "../providers/llm";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
 import { readRef } from "../storage";
@@ -367,13 +367,14 @@ export async function updateThread(id: string, patch: ThreadPatch): Promise<Assi
 
 /**
  * Whether Ollama answers, and the models it has: the check text steps use (providers/llm), so a busy Ollama (loading
- * a model, writing a long answer) keeps chats on it instead of the offline planner.
+ * a model, writing a long answer) keeps chats on it instead of the offline planner. Read as routing reads it, so
+ * opening Assist doesn't wait on an Ollama that never answers (ollamaSoon).
  */
 async function probeOllama(): Promise<{ ok: boolean; models: string[] }> {
-  const ok = await ollamaAnswers();
+  const ok = await ollamaSoon();
   return { ok, models: ok ? ollamaModels() : [] };
 }
-const ollamaReachable = () => ollamaAnswers();
+const ollamaReachable = () => ollamaSoon();
 
 /**
  * Which LLM drives new chats by default: Claude when a key is set (on open-source-only installs only when

@@ -107,6 +107,19 @@ export function sharedCheck(key: string, url: string, run: () => Promise<boolean
   return done;
 }
 
+/** The check of the server `key` at `url` under way, if one is (to wait on what it reads). */
+export function runningCheck(key: string, url: string): Promise<boolean> | undefined {
+  const running = globalThis.__fuobeReachChecks?.get(key);
+  return running?.url === url ? running.done : undefined;
+}
+
+/** What `p` gives within `ms`, or undefined when it takes longer (it goes on). */
+export function within<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => (timer = setTimeout(() => resolve(undefined), ms)));
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
 declare global {
   /** The reachability checks under way, by server ("comfy", "ollama"). */
   var __fuobeReachChecks: Map<string, { url: string; done: Promise<boolean> }> | undefined;

@@ -7,7 +7,7 @@ import type { GenInput, ModelRoute, Operation } from "@/lib/catalog/types";
 import { engineMode, getSetting } from "../settings";
 import { toDataUri } from "../storage";
 import { comfyProvider } from "./comfyui";
-import { ask, checkReach, reachSync, sharedCheck, type Reach } from "./reach";
+import { ask, checkReach, reachSync, runningCheck, sharedCheck, takesConnection, within, type Reach } from "./reach";
 import type { PollResult, ProviderAdapter, RemoteOutput } from "./types";
 
 /**
@@ -83,15 +83,39 @@ export function ollamaModels(): string[] {
   return cur?.ok && cur.url === ollamaUrl() ? (cur.models ?? []) : [];
 }
 
+/** How long a person's question (Assist) waits for what the last check of Ollama doesn't say yet. */
+const SOON_MS = 1500;
+
+/**
+ * Is Ollama answering, for a person waiting on the answer (Assist's panel, a chat's mode)? What the last check found,
+ * as routing reads it (ollamaReady): a stale answer is refreshed in the background, not waited on. It waits, at most
+ * `waitMs`, only for what nothing has said yet: the first check of an address, or the models a check under way is
+ * reading for a reachable Ollama. A first check still going then (no answer yet) counts an Ollama whose port took the
+ * connection as busy for now, so reachable, as routing's blocking check does; the check goes on to say for sure.
+ */
+export async function ollamaSoon(waitMs = SOON_MS): Promise<boolean> {
+  const url = ollamaUrl();
+  const known = globalThis.__fuobeOllamaReach?.url === url ? globalThis.__fuobeOllamaReach : undefined;
+  if (known) {
+    if (Date.now() - known.at > PROBE_MS) void probeOllama().catch(() => false);
+    const reading = known.ok && !known.models ? runningCheck("ollama", url) : undefined;
+    if (reading) await within(reading, waitMs);
+    const now = globalThis.__fuobeOllamaReach;
+    return now?.url === url ? now.ok : known.ok;
+  }
+  const port = takesConnection(url, waitMs);
+  return (await within(probeOllama().catch(() => false), waitMs)) ?? (await port);
+}
+
 /**
  * Blocking check (reachSync): a few ms for an Ollama that answers or a refused port, at most `timeoutMs` otherwise.
  * One that takes the connection but doesn't answer in time is busy for now, and probeOllama goes on in the background
- * to say for sure.
+ * to say for sure. One that answers gets a background check too: this one can't read the models it has (Assist lists them).
  */
 function probeOllamaSync(url: string, timeoutMs = 1500): boolean {
   const { reach, sure } = reachSync(url, `${url}/api/tags`, timeoutMs);
   globalThis.__fuobeOllamaReach = reach;
-  if (!sure) void probeOllama(true).catch(() => false);
+  if (!sure || reach.ok) void probeOllama(true).catch(() => false);
   return reach.ok;
 }
 

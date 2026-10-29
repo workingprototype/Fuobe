@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -40,6 +41,10 @@ async function closedPort(): Promise<number> {
   await new Promise((r) => s.close(r));
   return port;
 }
+
+/** An Ollama that answers /api/tags at once, in a process of its own; it prints its port. */
+const OTHER_PROCESS_OLLAMA = `const s = require("node:http").createServer((q, r) => q.url === "/api/tags" ? r.end(JSON.stringify({ models: [{ name: "qwen3:8b" }, { name: "llama3:8b" }] })) : r.writeHead(404).end());
+s.listen(0, "127.0.0.1", () => console.log(s.address().port));`;
 
 /** What `f` gives once it's truthy (polled every 100 ms, for at most `ms`). */
 const until = async <T>(f: () => T | undefined | null | false, ms = 20_000): Promise<T> => {
@@ -180,6 +185,52 @@ describe("Ollama reachability under load", () => {
     // A refused port is down for Assist too, with no models.
     setSetting("ollamaUrl", `http://127.0.0.1:${await closedPort()}`);
     expect(await agent.availability()).toMatchObject({ ollama: false, ollamaModels: [] });
+  });
+
+  it("Assist doesn't wait on an Ollama that takes the connection but never answers: it reads the check, which goes on behind", async () => {
+    const agent = await import("@/server/assist/agent");
+    const silent = net.createServer(() => {});
+    await new Promise<void>((r) => silent.listen(0, "127.0.0.1", r));
+    try {
+      setSetting("ollamaUrl", `http://127.0.0.1:${(silent.address() as net.AddressInfo).port}`);
+      // The first look: no answer yet, but the port took the connection, so busy for now (as routing's first check says).
+      let t0 = Date.now();
+      expect(await agent.availability()).toMatchObject({ ollama: true, ollamaModels: [] });
+      expect(Date.now() - t0).toBeLessThan(2500);
+      // The check behind it says for sure after the longer look; Assist doesn't wait for that either.
+      await until(() => globalThis.__fuobeOllamaReach?.ok === false);
+      t0 = Date.now();
+      expect(await agent.availability()).toMatchObject({ ollama: false, ollamaModels: [] });
+      expect(await agent.resolveMode({ mode: "free" })).toMatchObject({ agent: "offline" });
+      expect(Date.now() - t0).toBeLessThan(300);
+      // Its cache is old: the answer it has, at once, and a fresh check in the background.
+      globalThis.__fuobeOllamaReach = { ...globalThis.__fuobeOllamaReach!, at: Date.now() - 60_000 };
+      t0 = Date.now();
+      expect(await agent.availability()).toMatchObject({ ollama: false });
+      expect(Date.now() - t0).toBeLessThan(300);
+      await until(() => Date.now() - (globalThis.__fuobeOllamaReach?.at ?? 0) < 10_000);
+    } finally {
+      silent.close();
+    }
+  });
+
+  it("after routing's blocking first check, Assist lists Ollama's models (that check can't read them)", async () => {
+    const agent = await import("@/server/assist/agent");
+    // An Ollama in another process, so the blocking check (which holds this thread) gets its answer.
+    const child = spawn(process.execPath, ["-e", OTHER_PROCESS_OLLAMA], { stdio: ["ignore", "pipe", "inherit"] });
+    try {
+      const port = await new Promise<number>((resolve, reject) => {
+        child.stdout.once("data", (d: Buffer) => resolve(Number(String(d).trim())));
+        child.once("exit", () => reject(new Error("the stand-in Ollama exited")));
+      });
+      setSetting("ollamaUrl", `http://127.0.0.1:${port}`);
+      expect(llm.llmBackends(ROUTE)).toEqual(["ollama"]);
+      // A sure answer: no check goes on behind it, and none has read the models yet.
+      expect(globalThis.__fuobeOllamaReach).toMatchObject({ ok: true });
+      expect(await agent.availability()).toMatchObject({ ollama: true, ollamaModels: ["qwen3:8b", "llama3:8b"] });
+    } finally {
+      child.kill();
+    }
   });
 
   it("a late Ollama that answers the longer look is reachable; a check of an address changed meanwhile keeps to itself", async () => {
