@@ -191,6 +191,9 @@ try {
       check(`${tagLine}: it opens the review of that result's step`, (await seen(dialog.getByText("What changes next time"), 30_000)) && (await dialog.locator("ol > li").count()) === 1 && (await dialog.getByText("Prompt", { exact: true }).count()) === 1);
       check(`${tagLine}: nothing scrolls sideways`, await noSideScroll(page));
       if (phone) {
+        // Measured at rest: the dialog opens with a short zoom (from 95 %), and a box read while it runs is that much
+        // smaller (389×841 for a 390×844 review three quarters of the way in) whatever its layout is.
+        await dialog.evaluate((el) => Promise.race([Promise.all(el.getAnimations().map((a) => a.finished)).catch(() => {}), new Promise((r) => setTimeout(r, 5000))]));
         const box = await dialog.boundingBox();
         check(`${tagLine}: on a phone the review fills the screen`, !!box && box.width >= width - 1 && box.height >= height - 2, box ? `${Math.round(box.width)}×${Math.round(box.height)}` : "");
         const inner = await dialog.evaluate((el) => [...el.querySelectorAll("*")].every((n) => n.scrollWidth <= n.clientWidth + 1 || getComputedStyle(n).overflowX !== "visible" || n.tagName === "PRE"));
