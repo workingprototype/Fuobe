@@ -16,7 +16,7 @@ import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, 
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, loraName, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
-import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
+import { promptWithLoras, soulKind, soulLook, soulPostStep, soulPostSteps } from "@/lib/catalog/soul";
 import { isDop } from "@/lib/catalog/dop";
 import { MIXED_ORIGINAL, originalFrameSize } from "@/lib/catalog/mixed-media";
 import { imageSize } from "@/lib/image-size";
@@ -42,7 +42,7 @@ import {
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
-import { createExtendChain, createKeyframeFilm, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
+import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
@@ -681,6 +681,11 @@ export function createGenerations(asked: GenerationRequest, opts: CreateOptions 
   // Fuobe DoP's relight effects: the start frame is relit first, then animated.
   const relight = !opts.dependsOn && shotModel ? relightStep(original, shotModel) : undefined;
   if (relight) return createRelitClip(original, relight);
+  // Fuobe Soul's PixeletedFace look: the picture, then its faces pixelated (SAM 3.1 + a mosaic). A step of a pipeline
+  // (Soul's own picture inside this one) runs as it is.
+  if (!opts.dependsOn && !original.step && shotModel && soulPostStep(shotModel.id, original.presetId) === "face-mosaic") {
+    return createMosaicRun(original, shotModel);
+  }
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
@@ -1118,6 +1123,14 @@ async function submit(
       };
       return adapter.prepareFile(f.data, f.contentType, f.name, route);
     };
+    // A talking avatar is as long as its voice (fal's InfiniteTalk and Wan 2.2 S2V take a frame count): the voice's header.
+    const prepVoice = async (ref?: string) => {
+      if (!ref) return undefined;
+      const f = await readRef(ref);
+      const facts = mediaFacts(f.data);
+      if (facts.duration && !source.sourceDuration) source = { ...source, sourceDuration: facts.duration };
+      return adapter.prepareFile(f.data, f.contentType, f.name, route);
+    };
     const prepMask = async (ref?: string) => {
       if (!ref) return undefined;
       const f = await readRef(ref);
@@ -1145,7 +1158,7 @@ async function submit(
       endImage: await prep(req.inputs?.endImage),
       mask: await prepMask(req.inputs?.mask),
       video: await prepVideo(req.inputs?.video),
-      audio: await prep(req.inputs?.audio),
+      audio: await (plan.op === "avatar" ? prepVoice : prep)(req.inputs?.audio),
       audio2: await prep(req.inputs?.audio2),
       voiceAudio: await prep(req.inputs?.voiceAudio),
       voiceAudio2: await prep(req.inputs?.voiceAudio2),
@@ -1405,6 +1418,18 @@ async function pollOne(r: Row): Promise<void> {
   // API clients read it as meta.
   const post = soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
   if (post) for (const [i, o] of outputs.entries()) if (o.kind === "image") outputs[i] = { ...o, meta: { ...o.meta, ...post } };
+  // The face mosaic's cloud step (fal's SAM 3.1): its outputs are the faces' masks; the browser pixelates the picture it
+  // looked at under them (meta.mosaic, src/lib/soul-post.ts), as it finishes Soul's looks.
+  if (r.op === "face-mosaic") {
+    const source = (JSON.parse(r.request_json) as GenerationRequest).inputs?.images?.[0];
+    const scale = (JSON.parse(r.request_json) as GenerationRequest).params?.extra?.mosaicScale;
+    for (const [i, o] of outputs.entries()) {
+      const masks = o.meta?.masks;
+      if (o.kind === "image" && source && Array.isArray(masks) && masks.length) {
+        outputs[i] = { ...o, meta: { ...o.meta, mosaic: { source, masks, ...(typeof scale === "number" && { scale }) } } };
+      }
+    }
+  }
   // Fuobe DoP's colour-grade effects: the grade the browser applies to the clip (the result's "Apply the grade" step).
   const grade = isDop(r.model_id) && r.preset_id ? getPreset(r.preset_id)?.grade : undefined;
   if (grade) for (const [i, o] of outputs.entries()) if (o.kind === "video") outputs[i] = { ...o, meta: { ...o.meta, grade } };
@@ -1450,12 +1475,21 @@ export async function persistArtifacts(meta: Record<string, unknown> | undefined
     out = { ...out, [key]: kept };
   }
   for (const key of LINKS) if (typeof meta[key] === "string" && meta[key] !== main) out = { ...out, [key]: await keepLink(meta[key], key, generationId) };
+  for (const key of LINK_LISTS) {
+    const list = meta[key];
+    if (!Array.isArray(list)) continue;
+    const kept: unknown[] = [];
+    for (const [i, v] of list.entries()) kept.push(v === main ? v : await keepLink(v, `${key}-${i}`, generationId));
+    out = { ...out, [key]: kept };
+  }
   return out;
 }
 
 /** Maps of extra files by name, and single extra files, that a result links to (see persistArtifacts). */
 const LINK_MAPS = ["artifacts", "formats"] as const;
 const LINKS = ["preview"] as const;
+/** Lists of extra files: SAM 3.1's masks of the faces (the face mosaic's cloud step), kept here so the browser can read them. */
+const LINK_LISTS = ["masks"] as const;
 
 /** A provider's link stored as a file of the generation (its local URL), or the link as it was when it can't be fetched. */
 async function keepLink(v: unknown, label: string, generationId: string): Promise<unknown> {
@@ -1486,6 +1520,10 @@ function relinkMain(meta: Record<string, unknown> | undefined, from: string, to:
     out = { ...out, [key]: Object.fromEntries(Object.entries(links as Record<string, unknown>).map(([k, v]) => [k, v === from ? to : v])) };
   }
   for (const key of LINKS) if (meta[key] === from) out = { ...out, [key]: to };
+  for (const key of LINK_LISTS) {
+    const list = meta[key];
+    if (Array.isArray(list) && list.includes(from)) out = { ...out, [key]: list.map((v) => (v === from ? to : v)) };
+  }
   return out;
 }
 

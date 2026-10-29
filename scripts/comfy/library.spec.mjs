@@ -1849,7 +1849,7 @@ export const SPEC = [
 
   {
     id: 'video-depth-vda-large',
-    title: 'Video Depth Map (Video Depth Anything Large: Higgsfield Depth Map\'s model, non-commercial weights)',
+    title: 'Video Depth Map (Video Depth Anything Large, non-commercial weights)',
     capability: 'depth-video',
     handBuilt: 'hand-built/video-depth-vda-small.json',
     transforms: [{ op: 'set', node: '3', input: 'model', value: 'video_depth_anything_vitl.pth' }],

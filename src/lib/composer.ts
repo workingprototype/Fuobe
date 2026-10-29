@@ -8,6 +8,8 @@ import { fpsPlan, fpsSummary } from "./av/fps";
 import { targetShortEdge, upscaledSize, upscaleFactorFor, upscaleTier } from "./av/upscale";
 import { wholeClipProblem, wholeClipTool } from "./av/video-finish";
 import { addFrameAt, frameTimes, framesInputs, removeFrameAt, spread, type FrameSupport } from "./catalog/keyframes";
+import { FACE_MOSAIC_MODELS } from "./catalog/open-tools";
+import { soulPostStep } from "./catalog/soul";
 import { COLORMAPS, type Engine, type GenParams, type InputSlot, type MatteOutput, type MediaKind, type ModelDef, type Operation, type Preset, type VideoFormat } from "./catalog/types";
 import { spokenLanguageName } from "./speech-languages";
 
@@ -744,6 +746,16 @@ export function followEngineParams(params: GenParams, from: GenParams, to: GenPa
  * What a step before the clip adds to its price (Fuobe DoP relights a start frame first), when the run is on the
  * preset's own model: a partner model runs the effect's words alone.
  */
+/**
+ * A step after the run that costs on its own: Fuobe Soul's PixeletedFace look pixelates each picture's faces (SAM 3.1:
+ * free on the GPU, fal's per-request price in the cloud), one step per picture.
+ */
+export function postStepCost(modelId: string | undefined, look: string | undefined, engine: Engine, pictures: number, getModel: (id: string) => ModelDef | undefined): number {
+  if (!modelId || soulPostStep(modelId, look) !== "face-mosaic") return 0;
+  const step = getModel(FACE_MOSAIC_MODELS[engine]);
+  return step?.engine === "cloud" && step.pricing?.unit === "request" ? step.pricing.usd * Math.max(1, pictures) : 0;
+}
+
 export function prestepCost(preset: Pick<Preset, "type" | "open" | "cloud" | "prestep"> | undefined, modelId: string | undefined, engine: Engine): number {
   if (!preset?.prestep || !modelId || presetModel(preset, engine) !== modelId) return 0;
   return preset.prestep[engine].usd ?? 0;

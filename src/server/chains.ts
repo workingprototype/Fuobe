@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { getModel, supportsOp } from "@/lib/catalog";
 import { MODEL3D_STEP_FEATURE, stillPromptFor3d } from "@/lib/av/model3d";
 import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
+import { faceMosaicStep } from "@/lib/catalog/open-tools";
 import { onEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
 import type { ChainSlot, Engine, GenParams, Generation, GenerationRequest, LoraRef, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
@@ -409,6 +410,42 @@ export function createRelitClip(
     void cancelGeneration(relit.id);
     throw e;
   }
+}
+
+/**
+ * Fuobe Soul's PixeletedFace look (O11): each picture, then its faces pixelated on the engine it was made on: one SAM 3.1 +
+ * mosaic graph on the GPU; in the cloud fal's SAM 3.1 finds the faces and the browser pixelates under its masks. One
+ * two-step pipeline per picture (a later step takes one result), all in one batch.
+ */
+export function createMosaicRun(original: GenerationRequest, model: ModelDef): Generation[] {
+  const n = Math.max(1, Math.min(4, original.params?.numOutputs ?? 1));
+  const engine = model.engine;
+  const step = faceMosaicStep(engine);
+  const words = original.prompt?.trim() || "Pixelated face";
+  const batchId = nanoid(10);
+  const items: Generation[] = [];
+  try {
+    for (let i = 0; i < n; i++) {
+      const of = n > 1 ? ` ${i + 1} of ${n}` : "";
+      const { items: made } = createPipeline(
+        [
+          { key: "picture", request: { ...original, engine, params: { ...original.params, numOutputs: 1 }, step: { label: `Before the face mosaic${of}`, index: 0, of: 2 } } },
+          {
+            key: "mosaic",
+            request: { feature: original.feature, modelId: step.modelId, op: step.op, prompt: step.prompt, title: words, step: { label: `Face mosaic${of}`, index: 1, of: 2 } },
+            after: "picture",
+            chain: [{ slot: "images", position: "first" }],
+          },
+        ],
+        { batchId },
+      );
+      items.push(...made);
+    }
+  } catch (e) {
+    for (const g of items) void cancelGeneration(g.id);
+    throw e;
+  }
+  return items;
 }
 
 /** The model a storyboard film is animated with. */

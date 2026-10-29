@@ -1134,6 +1134,15 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     else if (want !== "gray") throw new ProviderError(b.colormap ? "The open engine's depth maps come in grayscale or inferno — turbo, magma and viridis are on the cloud" : "This depth model makes grayscale maps only — pick Video Depth Anything for inferno");
   }
   if (b.sideBySide && input.sideBySide !== undefined) values.sideBySide = input.sideBySide;
+  // A wrapper graph that loads its LoRA itself (kijai's InfiniteTalk: WanVideoLoraSelect, no core model loader to attach
+  // one after) takes the run's LoRA there: Fuobe Speak's FusioniX in place of the graph's lightx2v. One at most.
+  let loras = input.loras ?? [];
+  if (loras.length && b.lora && !canTakeLoras(workflow)) {
+    if (loras.length > 1) throw new ProviderError(`${manifest.title} takes one LoRA (it loads it itself): ${loras.map((l) => l.file).join(", ")}`);
+    values.lora = loras[0].file;
+    values.loraStrength = loras[0].strength ?? 1;
+    loras = [];
+  }
   // Matte graphs save a cut-out and a black-and-white matte: params.matteOutput keeps one.
   const keepRole: string | undefined = ctx.op === "bg-remove-video" ? input.matteOutput : undefined;
 
@@ -1258,10 +1267,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   } catch (e) {
     throw new ProviderError((e as Error).message);
   }
-  if (input.loras?.length) {
+  if (loras.length) {
     // A LoRA a graph can't attach would be dropped without a word: say so instead.
     if (!canTakeLoras(wf)) throw new ProviderError(`${manifest.title} can't take LoRAs (it has no model loader to attach them to)`);
-    wf = injectLoras(wf, input.loras);
+    wf = injectLoras(wf, loras);
   }
   // The output not asked for isn't saved (nor encoded: ComfyUI runs only what an output node needs).
   if (keepRole && manifest.outputs.some((o) => o.role === keepRole)) for (const o of manifest.outputs) if (o.role && o.role !== keepRole) delete wf[o.node];
@@ -1416,7 +1425,9 @@ export const comfyProvider: ProviderAdapter = {
 
   async submit({ route, input, generationId }) {
     const worker = workerFor(route.endpoint);
-    const { manifest, workflow: wf, meta } = await prepareWorkflow(route.endpoint, input, {
+    // A route's own graph settings (Fuobe Speak's InfiniteTalk recipe) go in unless the run sets them.
+    const asked = route.extra ? { ...input, extra: { ...route.extra, ...input.extra } } : input;
+    const { manifest, workflow: wf, meta } = await prepareWorkflow(route.endpoint, asked, {
       generationId,
       op: route.op,
       upload: (data, contentType, name) => uploadTo(worker, data, contentType, name),

@@ -3,6 +3,7 @@ import { getModel, getPreset } from "./index";
 import { DOP_MODEL, LTX25_HOSTED } from "./dop";
 import { dualEngine, onEngine } from "./engines";
 import { localOnly, needsToken, triggerOf } from "./loras";
+import { ANGLES_2511_LORA } from "./open-tools";
 import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
 import { soulRecipe } from "./soul";
 import { CAST_LOOK } from "./soul-cards";
@@ -1639,7 +1640,7 @@ function planLocationView(input: CinemaGenerateInput): CinemaPlan {
     };
   } else {
     model = editModel("open");
-    const loras = getPreset("app-angles")?.open?.loras;
+    const loras = [ANGLES_2511_LORA];
     request = {
       feature: "cinema-location",
       modelId: model.id,
@@ -1928,7 +1929,7 @@ function planRecompose(input: CinemaGenerateInput): CinemaPlan {
     request = { feature: "cinema-recompose", modelId: model.id, op: "edit", prompt: anglesNote(lens, aperture, input.prompt), inputs: src ? { images: [src] } : undefined, params };
     notes.push(`${model.name} re-shoots the still from the angles you flew to (${Math.round(pose.horizontal)}° round, ${Math.round(pose.vertical)}° up, zoom ${pose.zoom}) — the capture itself isn't sent`);
   } else {
-    const loras = open ? getPreset("app-angles")?.open?.loras : undefined;
+    const loras = open ? [ANGLES_2511_LORA] : undefined;
     const words = recomposePrompt(lens, aperture, input.prompt);
     request = {
       feature: "cinema-recompose",

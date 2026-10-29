@@ -56,6 +56,7 @@ import {
   presetModel,
   presetOriginal,
   presetParams,
+  postStepCost,
   prestepCost,
   pushRecent,
   settingsShape,
@@ -425,6 +426,8 @@ export function Composer({ docked }: { docked: boolean }) {
       cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op, plan.loras.length > 0 && routesFor(plan.model, plan.op).some((r) => !!r.loraEndpoint));
       // A relight effect relights the start frame first (free on the GPU, about $0.04 in the cloud).
       if (cost !== null) cost += prestepCost(preset, plan.model.id, engine);
+      // PixeletedFace pixelates each picture's faces afterwards ($0.01 a picture in the cloud, free on the GPU).
+      if (cost !== null) cost += postStepCost(plan.model.id, planned.presetId, engine, planned.params?.numOutputs ?? 1, catalog.getModel);
     } catch (e) {
       planError = (e as Error).message;
     }

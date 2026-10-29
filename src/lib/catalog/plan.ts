@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
+import { anglesPrompt, anglesWords, ANGLES_ORIGINAL } from "./open-tools";
 import { numFramesValue, sizeValue } from "./payload";
 import { characterScale, CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
@@ -150,6 +151,8 @@ const PROMPTLESS = new Set<Operation>([
   "timeline",
   // round 4: tools that work from their inputs (removing an object needs a prompt only on models that read one)
   "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop", "audio-join", "scene-3d", "splat", "rig-3d", "extract-frames", "images-to-video", "overlay",
+  // round 5 (O11): the face mosaic names the faces itself ("face")
+  "face-mosaic",
 ]);
 
 /**
@@ -256,6 +259,10 @@ export function planGeneration(
     prompt = r.prompt;
     loras = r.loras;
     notes.push(...r.notes);
+    // PixeletedFace: a second step pixelates the faces (src/server/chains.ts createMosaicRun).
+    if (r.look?.post === "face-mosaic") {
+      notes.push(model.engine === "open" ? "Then SAM 3.1 pixelates the faces on your GPU (free)" : `Then SAM 3.1 finds the faces (${"$"}0.01 a picture) and they're pixelated as the picture arrives`);
+    }
     const own = new Set(req.loras ?? []);
     soulPlan = {
       ...(r.look && { look: r.look.id }),
@@ -275,6 +282,16 @@ export function planGeneration(
     // An @character's trained LoRA on FLUX, klein, Krea or any other model: at the character strength's scale, as on Soul.
     const own = charStrength === undefined ? req.loras : req.loras.map((l) => ({ ...l, strength: characterScale(charStrength) }));
     loras = [...own, ...loras];
+  }
+  // Fuobe Angles: the camera's fields go to fal as they are; on the GPU they become the Multiple-angles LoRA's own words,
+  // the user's note after them. fal's route takes no words of its own.
+  if (model.id === ANGLES_ORIGINAL) {
+    if (model.engine === "open") prompt = anglesPrompt(params.extra, prompt);
+    else {
+      if (!anglesWords(params.extra)) throw new Error("Move the camera first: rotate it, tilt it, move it closer or go wide");
+      if (prompt) notes.push("The hosted Multiple-angles route takes no words: your note is used on your GPU only");
+      prompt = "";
+    }
   }
   // The words a model takes when none are given (Fuobe Try-On: its LoRA's own instruction).
   if (!prompt && model.options.defaultPrompt) prompt = model.options.defaultPrompt;
@@ -497,6 +514,7 @@ const NEEDS: Partial<
   "video-insert": { video: true, images: 1, msg: "Add the video and a picture of what to add" },
   keyframes: { images: 1, msg: "Add the keyframes, in order" },
   "sdr-to-hdr": { video: true, msg: "Add the video to convert" },
+  "face-mosaic": { images: 1, msg: "Add the picture whose faces to pixelate" },
   "export-video": { video: true, msg: "Add the video to export" },
   ocr: { images: 1, msg: "Add the image to read" },
   "still-motion": { images: 1, msg: "Add the still to move over" },

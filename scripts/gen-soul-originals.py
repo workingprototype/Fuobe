@@ -50,6 +50,8 @@ BASES = {"z-image-turbo": "z-image", "qwen-image-2512": "qwen-2512"}
 # Which LoRA bases each Soul base loads.
 BASE_LORAS = {"z-image": re.compile(r"^z-image"), "qwen-2512": re.compile(r"^qwen-image-2512")}
 OVERLAYS = {"date-stamp", "cctv", "photo-booth"}
+# Steps after the picture (O11): the face mosaic (SAM 3.1 + a mosaic; src/lib/catalog/open-tools.ts).
+POSTS = {"face-mosaic"}
 MAX_LORAS = 3
 errors = []
 notes = []
@@ -199,6 +201,9 @@ for p in RECIPES["presets"]:
     overlay = p.get("overlay")
     if overlay and overlay not in OVERLAYS:
         errors.append(f"{where}: unknown overlay {overlay!r}")
+    post = p.get("post")
+    if post and post not in POSTS:
+        errors.append(f"{where}: unknown post step {post!r}")
     if p.get("commercialOk") is False or p.get("hostedOk") is False:
         notes.append(f"{where}: the research marks it not commercial-safe on both engines")
     entry = {
@@ -216,6 +221,8 @@ for p in RECIPES["presets"]:
         entry["grade"] = grade
     if overlay:
         entry["overlay"] = overlay
+    if post:
+        entry["post"] = post
     if p.get("trainOwn"):
         entry["train"] = True
     if clean(p.get("notes")):
@@ -293,6 +300,8 @@ for l in looks:
         card["grade"] = l["grade"]
     if l.get("overlay"):
         card["overlay"] = l["overlay"]
+    if l.get("post"):
+        card["post"] = l["post"]
     card["civitai"] = any(library[x["key"]].get("download") == "civitai-token" for x in l["loras"])
     card["hd"] = l["base"] == "qwen-2512"
     cards.append(card)

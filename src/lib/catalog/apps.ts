@@ -262,44 +262,46 @@ export const APPS: Preset[] = [
     icon: "Rotate3d",
     hue: 190,
     badges: ["top"],
-    // The cloud model turns its rotate / tilt / zoom settings into the Multiple-Angles LoRA's own words; the open
-    // route runs that LoRA on Qwen-Image-Edit 2511 with the same words ("<sks> front-left quarter view …").
+    // Fuobe Angles (O11): Higgsfield Angles' recipe, Qwen-Image-Edit 2509 + dx8152's Multiple-angles LoRA on both engines. The
+    // choices set the hosted route's own fields (rotate −90…90°, positive = left; vertical −1 above … 1 below; move forward
+    // 0–10; a wide-angle lens); on the GPU they become the LoRA's words (src/lib/catalog/open-tools.ts). The default turns it.
     options: [
-      angleOption("angle", "Angle", "horizontal_angle", [
-        ["Front", "front view", 0],
-        ["Front right", "front-right quarter view", 45],
-        ["Right side", "right side view", 90],
-        ["Back right", "back-right quarter view", 135],
-        ["Back", "back view", 180],
-        ["Back left", "back-left quarter view", 225],
-        ["Left side", "left side view", 270],
-        ["Front left", "front-left quarter view", 315],
+      {
+        ...angleOption("rotate", "Rotate", "rotate_right_left", [
+          ["90° left", "", 90],
+          ["45° left", "", 45],
+          ["Front", "", 0],
+          ["45° right", "", -45],
+          ["90° right", "", -90],
+        ]),
+        default: "45-left",
+      },
+      angleOption("height", "Camera height", "vertical_angle", [
+        ["Eye level", "", 0],
+        ["From above", "", -1],
+        ["From below", "", 1],
       ]),
-      angleOption("height", "Height", "vertical_angle", [
-        ["Eye level", "eye-level shot", 0],
-        ["Low angle", "low-angle shot", -30],
-        ["Elevated", "elevated shot", 30],
-        ["High angle", "high-angle shot", 60],
+      angleOption("distance", "Distance", "move_forward", [
+        ["As is", "", 0],
+        ["Closer", "", 5],
+        ["Close-up", "", 10],
       ]),
-      angleOption("distance", "Distance", "zoom", [
-        ["Medium", "medium shot", 5],
-        ["Close-up", "close-up", 10],
-        ["Wide", "wide shot", 0],
-      ]),
+      {
+        key: "lens",
+        label: "Lens",
+        choices: [
+          { value: "normal", label: "Normal", prompt: "", extra: { wide_angle_lens: false } },
+          { value: "wide", label: "Wide-angle", prompt: "", extra: { wide_angle_lens: true } },
+        ],
+      },
     ],
     userPrompt: "optional",
-    placeholder: "Anything to keep in mind (optional)",
-    prompt: "Show the exact same scene and subject as a {option:angle}, {option:height}, {option:distance}, as if the camera physically moved. Keep identity, outfit, props, lighting and environment consistent. {prompt}",
-    // fal builds the camera words from the sliders; this goes in as its additional_prompt (never empty, so the
-    // app runs without a note).
-    cloud: { modelId: "qwen-multiple-angles", op: "edit", promptTemplate: "Keep the same subject, identity, outfit, lighting and environment. {prompt}" },
-    open: {
-      modelId: "oss-qwen-edit",
-      op: "edit",
-      loras: [{ file: "qwen-image-edit-2511-multiple-angles-lora.safetensors", url: "https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA/resolve/main/qwen-image-edit-2511-multiple-angles-lora.safetensors", strength: 1 }],
-      promptTemplate: "<sks> {option:angle} {option:height} {option:distance}. {prompt}",
-    },
-    parity: "Both engines run the same Multiple-Angles LoRA: hosted by fal on the cloud, added to Qwen-Image-Edit 2511 on the open engine (0.3 GB)",
+    placeholder: "Anything to keep in mind (used on your GPU)",
+    prompt: "{prompt}",
+    cloud: { modelId: "fuobe-angles", op: "edit" },
+    open: { modelId: "fuobe-angles", op: "edit" },
+    parity:
+      "Both engines run Higgsfield Angles' recipe, Qwen-Image-Edit 2509 + the Multiple-angles LoRA: hosted on fal, or with Qwen-Image-Lightning on your GPU (24 GB). fal's route takes no words of its own",
   }),
   app({
     name: "Shots",

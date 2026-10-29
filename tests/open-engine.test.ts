@@ -7,6 +7,7 @@ import type { Manifest } from "@/lib/comfy";
 import { planGeneration } from "@/lib/catalog/plan";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { resample, tracksFor } from "@/lib/motion-paths";
+import { ANGLES_FIELDS, ANGLES_ORIGINAL } from "@/lib/catalog/open-tools";
 
 describe("motion paths (Wan-Move draw to video)", () => {
   it("resamples a path to evenly spaced points, one per frame", () => {
@@ -124,7 +125,8 @@ describe("round-3 open models", () => {
         for (const wid of ids) {
           const keys = Object.keys(workflowById.get(wid)?.bindings ?? {});
           for (const p of [...(m.options.sliders ?? []), ...(m.options.controls ?? [])].map((s) => s.param)) {
-            if (!PROVIDER_PARAMS.has(p) && p !== "cameraMotion") expect(keys, `${m.id} → ${wid}: ${p}`).toContain(p);
+            // Fuobe Angles' camera fields become the Multiple-angles LoRA's words in the planner (src/lib/catalog/open-tools.ts).
+            if (!PROVIDER_PARAMS.has(p) && p !== "cameraMotion" && !(m.id === ANGLES_ORIGINAL && (ANGLES_FIELDS as readonly string[]).includes(p))) expect(keys, `${m.id} → ${wid}: ${p}`).toContain(p);
           }
         }
       }
