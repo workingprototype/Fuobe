@@ -130,8 +130,12 @@ export const BINDING_KEYS = new Set([
   'historyVideo', 'historyStart', 'historyLength', 'keyFrame', 'spanFrames', 'tailStart', 'tailFrames', 'prevMask',
   // Originals O11: Fuobe Speak's InfiniteTalk recipe on kijai's wrapper, the face mosaic
   'scheduler', 'motionFrame', 'colormatch', 'audioCfg', 'threshold', 'mosaicScale',
+  // DBS soundtrack separation (docs/research/dbs-separation-7.md §4.5): the DBS model and its channel mode
+  'separationModel', 'channels',
 ]);
 
+// Sizes in GB: two decimals, and three where two would read 0 (a 4 MB DBS model), so no other entry's size changes.
+export const gb = (bytes) => Math.round((bytes / 1e9) * 100) / 100 || Math.round(bytes / 1e6) / 1000;
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
 const writeJson = (p, v) => fs.writeFileSync(p, JSON.stringify(v, null, 2) + '\n');
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -329,24 +333,26 @@ async function main() {
         const size = url ? await hfSize(url, sizeCache) : null;
         if (size && typeof size === 'object' && size.error) errs.push(`model ${val}: ${url} -> ${size.error}`);
         const bytes = typeof size === 'number' ? size : size?.size;
-        const model = { file: val, folder, url: url || null, sizeGb: bytes ? Math.round((bytes / 1e9) * 100) / 100 : null };
+        const model = { file: val, folder, url: url || null, sizeGb: bytes ? gb(bytes) : null };
         if (size?.gated) model.gated = true;
         models.set(val, model);
       }
     }
 
-    // Files a model control can pick instead (FILM for RIFE): listed as optional, so missing-model help names them.
-    for (const file of spec.optionalModels || []) {
+    // Files a loader reads by a name with no extension (DBSLoader: models/dbs/<model>/config.json + model.safetensors), which the
+    // loop above can't see: listed like any model, so install help and the presence check (GET /models/<folder>) know them.
+    // Then files a model control can pick instead (FILM for RIFE): listed as optional, so missing-model help names them.
+    for (const [file, optional] of [...(spec.requiredModels || []).map((f) => [f, false]), ...(spec.optionalModels || []).map((f) => [f, true])]) {
       if (models.has(file)) continue;
       const known = KNOWN_MODELS[file];
       if (!known?.url) {
-        errs.push(`optional model ${file}: no download URL known`);
+        errs.push(`${optional ? 'optional' : 'required'} model ${file}: no download URL known`);
         continue;
       }
       const size = await hfSize(known.url, sizeCache);
       if (size && typeof size === 'object' && size.error) errs.push(`model ${file}: ${known.url} -> ${size.error}`);
       const bytes = typeof size === 'number' ? size : size?.size;
-      models.set(file, { file, folder: known.folder, url: known.url, sizeGb: bytes ? Math.round((bytes / 1e9) * 100) / 100 : null, optional: true });
+      models.set(file, { file, folder: known.folder, url: known.url, sizeGb: bytes ? gb(bytes) : null, ...(optional && { optional: true }) });
     }
 
     // ---- custom nodes

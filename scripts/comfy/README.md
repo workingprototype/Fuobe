@@ -12,7 +12,7 @@ Full write-up (what is in the library, validation results, models, quirks for ap
 
 | file | purpose |
 |---|---|
-| `install-comfyui.sh` | reproducible CPU install of ComfyUI + 17 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3; ToSVG (VTracer) in round 4). Licences are information: the non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) is installed too, and `NC_PACKS=0` leaves it out (Settings → Models & licences has a switch per node pack). Round 4 part 4 adds Akatz Labs' GPL-3.0 `h3_character_swap` for Genjutsu's Character swap (`H3_PACK=0` leaves it out; it needs `ffmpeg` and `ffprobe`), and H3 Relay 2.0 with `H3_RELAY=1` |
+| `install-comfyui.sh` | reproducible CPU install of ComfyUI + 18 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3; ToSVG (VTracer) in round 4). Licences are information: the non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) is installed too, and `NC_PACKS=0` leaves it out (Settings → Models & licences has a switch per node pack). Round 4 part 4 adds Akatz Labs' GPL-3.0 `h3_character_swap` for Genjutsu's Character swap (`H3_PACK=0` leaves it out; it needs `ffmpeg` and `ffprobe`), and H3 Relay 2.0 with `H3_RELAY=1`. DBS D1 adds ComfyUI-DBS and its 23 MB of weights (`DBS_WEIGHTS=0` skips the weights) |
 | `install-isolated-worker.sh` | a second ComfyUI with its own code copy, base directory, `HOME` and virtualenv for LatentSync 1.6 and ThinkSound (below) |
 | `start-comfyui.sh` / `stop-comfyui.sh` | run ComfyUI in the background on 127.0.0.1:8188 (log: `$COMFYUI_DIR/logs/comfyui.log`) |
 | `export-templates.mjs` | Playwright: opens the ComfyUI frontend, `app.loadGraphData(ui)` → `app.graphToPrompt().output`, writes `build/raw/<key>.api.json` + `.meta.json` (embedded model URLs, missing node types) |
@@ -322,6 +322,34 @@ node validate-workflows.mjs video-character-swap-h3 video-character-swap-h3-rela
 - **Comfy Developer Platform** (what Openjutsu deploys to): a deployment is not a plain ComfyUI server — it is driven by
   the v2 API (`@comfyorg/sdk`: upload, job, poll), not `/prompt` and `/history` — so Fuobe does not add a provider for it.
   Point `COMFYUI_URL` at a ComfyUI that has the packs installed instead.
+
+## DBS soundtrack separation (DBS D1)
+
+One hand-built graph splits a soundtrack into dialogue, music and effects (docs/research/dbs-separation-7.md §4.4, graph A):
+
+```bash
+npm run build -- separate-soundtrack-dbs
+COMFYUI_URL=http://127.0.0.1:<port> COMFYUI_MODELS_DIR=<that ComfyUI>/models node validate-workflows.mjs separate-soundtrack-dbs --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `separate-soundtrack-dbs` | separate-audio | `LoadAudio` (audio, or a video's soundtrack) → `DBSLoader` (`separationModel`: DBS-BSRNN-DnR or DBS-TIGER-DnR) → `DBSSeparate` (`channels`: mono or each channel, `output_sample_rate` input) → stems `voice`, `music`, `effects` and `background` (the original minus the speech, `AudioMerge` subtract) as FLAC, plus the pack's JSON report | yes, on an isolated CPU worker with ComfyUI-DBS and the weights (the shared server does not have the pack); real CPU runs of 6–20 s clips there |
+
+- **Node pack**: ComfyUI-DBS (MIT; vendored DBS code Apache-2.0 with MIT notices) pinned at
+  `f656e53434b5485c148a2866fbd6ddc6b6152ed6` in `install-comfyui.sh`. The Comfy Registry flags its only version (0.1.0) with no
+  public reason; the code was read at this commit. It needs only einops and safetensors, already installed.
+- **Weights** (23 MB): `install-comfyui.sh` downloads `config.json` and `model.safetensors` of JusperLee/DBS-BSRNN-DnR and
+  JusperLee/DBS-TIGER-DnR at pinned revisions into `models/dbs/<model>/` and checks them with `sha256sum -c` (`DBS_WEIGHTS=0`
+  skips it). The manifest lists all four by their path under the folder (`requiredModels`: a CUDA host runs DBS-TIGER, so
+  the Workflows page's install commands fetch both models), which is what `GET /models/dbs` answers, so the Workflows page
+  knows when they are there.
+- **Host pick**: the provider uses DBS-TIGER when `GET /system_stats` says the first device is `cuda` and DBS-BSRNN otherwise
+  (about 3x faster on a CPU: 0.27x real time against 0.09x on a 4-CPU host), unless the run picks one; the other model when
+  `GET /models/dbs` shows the pick isn't on disk, and a model asked for that isn't there is refused in words before the
+  job is queued. `each channel` for stereo stems. ComfyUI saves audio as mono or stereo only (a 5.1 waveform is written as
+  scrambled stereo three times as long), so a file with more than 2 channels is split in `mono` and its background is the
+  music and effects stems added up (the provider rewires node 4 to `AudioMerge` add).
 
 ## Adding a workflow
 

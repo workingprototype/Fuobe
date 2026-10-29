@@ -57,15 +57,15 @@ export interface ManifestModel {
 export interface ManifestOutput {
   node: string;
   kind: MediaKind;
-  /** Audio stems of a voice/background separation. */
-  stem?: "voice" | "background";
+  /** Audio stems of a separation: voice / background, and DBS's music and effects. */
+  stem?: "voice" | "background" | "music" | "effects";
   /**
    * What a text, image or 3D output is: timed caption cues, a plain transcript, the detected language, layers, a grid's sheet or tiles…
    * Round 4: OCR "lines" (JSON, boxes 0–1000) and the "frame" the model saw, an EXR sequence's "frames", a whole-"scene" GLB and its
    * "depth" map, a Gaussian "splat", a reference video's style "brief"; a painted eraser's last tracked "mask" (handed to the next
    * window), and a matte graph's "cutout" (transparent video) and "matte" (black and white) videos. A "preview" is the clip shown
    * for an EXR export (the frames ride along zipped). A "master" is a lossless copy a later job continues from (Character Swap
-   * Studio's segment, 16-bit FFV1).
+   * Studio's segment, 16-bit FFV1). A "report" is a node's own account of the run (DBS: model, device, windows, seconds).
    */
   role?:
     | "cues"
@@ -87,7 +87,8 @@ export interface ManifestOutput {
     | "cutout"
     | "matte"
     | "preview"
-    | "master";
+    | "master"
+    | "report";
 }
 
 export interface ManifestWorkflow {

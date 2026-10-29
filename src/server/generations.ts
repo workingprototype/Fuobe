@@ -801,10 +801,12 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   prompt: "text",
 };
 
-/** Names providers give the same stem (ComfyUI: voice/background; Demucs: vocals…; SAM Audio: target/residual). */
+/** Names providers give the same stem (ComfyUI: voice/background, DBS also music/effects; Demucs: vocals…; SAM Audio: target/residual). */
 const STEM_ALIASES: Record<string, string[]> = {
   voice: ["voice", "vocals", "speech", "target"],
   background: ["background", "accompaniment", "instrumental", "residual", "no_vocals"],
+  music: ["music"],
+  effects: ["effects", "sfx"],
 };
 
 /**

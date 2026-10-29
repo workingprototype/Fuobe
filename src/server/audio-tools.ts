@@ -2,18 +2,21 @@ import "server-only";
 import fs from "node:fs/promises";
 import { z } from "zod";
 import { planJoin, planLoop, CROSSFADE_MAX, JOIN_MAX_CLIPS, LOOP_MAX_SECONDS, type AudioToolPreview, type ToolPlan } from "@/lib/av/audio-tools";
+import { CLOUD_ONLY_PROBLEM, DBS_MODELS, dbsChannelsFor, hostPick, missingDbs, planRemux, planSplit, splitTime } from "@/lib/av/split";
 import type { Engine, Generation } from "@/lib/catalog/types";
-import { probeMedia } from "@/lib/media-probe";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
+import { fileInfo } from "./media-facts";
+import { comfyDbsModels, comfyDevice } from "./providers/comfyui";
 import { engineMode } from "./settings";
 import { absolutePath } from "./storage";
 
 /**
- * The Audio hub's Loop / extend and Join tools on the server: each clip's length is read from its own header
- * (the browser's figure is the fallback for containers the probe doesn't read), the plan from
- * src/lib/av/audio-tools.ts is priced step by step, and a run is one createPipeline batch, so its result
- * lands in the Library like any generation.
+ * The Audio hub's Loop / extend, Join and Split soundtrack tools on the server: each clip's length is read from its own
+ * header (the browser's figure is the fallback for containers the probe doesn't read), the plan from
+ * src/lib/av/audio-tools.ts or src/lib/av/split.ts is priced step by step, and a run is one createPipeline batch, so its
+ * results land in the Library like any generation. Split soundtrack runs on the open engine only (DBS isn't hosted);
+ * its mix goes back on the video with a "remux" run on either engine.
  */
 
 const FileUrl = z.string().startsWith("/api/files/").max(500);
@@ -40,23 +43,68 @@ export const AudioToolBody = z.discriminatedUnion("tool", [
     crossfade: Crossfade,
     curve: Curve,
   }),
+  z.object({
+    tool: z.literal("split"),
+    engine: Engine,
+    media: FileUrl,
+    kind: z.enum(["audio", "video"]),
+    name: z.string().max(200).optional(),
+    /** Fast (DBS-BSRNN) or Best (DBS-TIGER); unset = the host's pick. */
+    quality: z.enum(["fast", "best"]).optional(),
+    stereo: z.boolean().optional(),
+    /** What the browser decoded (the server reads WAV / FLAC / MP3 headers itself). */
+    channels: z.number().int().positive().max(64).optional(),
+    sourceDuration: z.number().positive().max(36_000).optional(),
+  }),
+  z.object({
+    tool: z.literal("remux"),
+    engine: Engine,
+    video: FileUrl,
+    audio: FileUrl,
+    name: z.string().max(200).optional(),
+  }),
 ]);
 export type AudioToolRequest = z.infer<typeof AudioToolBody>;
 
 export class AudioToolError extends Error {}
 
+/** What a clip's header says. */
+interface ClipFacts {
+  duration?: number;
+  channels?: number;
+  /** False when the header says the file has no sound track (a silent video). */
+  hasAudio?: boolean;
+}
+
 declare global {
-  var __fuobeAudioLengths: Map<string, number | null> | undefined;
+  var __fuobeAudioFacts: Map<string, ClipFacts | null> | undefined;
 }
 /**
  * Lengths already read, by file and version (path, size, modified time): the page asks for a price after
  * every settled change, and a Join of big WAVs would read every file again each time.
  */
-const lengths = (globalThis.__fuobeAudioLengths ??= new Map<string, number | null>());
+const lengths = (globalThis.__fuobeAudioFacts ??= new Map<string, ClipFacts | null>());
 const LENGTHS_KEPT = 500;
 
 /** A clip's length from its header (WAV, FLAC, MP3, M4A), else the browser's. Read without blocking the server. */
 async function lengthOf(url: string, given?: number): Promise<number | undefined> {
+  return (await factsOf(url))?.duration ?? given;
+}
+
+/** Throws `gone` unless the file is still in storage. */
+async function present(url: string, gone: string): Promise<void> {
+  try {
+    if (!(await fs.stat(absolutePath(decodeURIComponent(url.slice("/api/files/".length))))).isFile()) throw new Error("not a file");
+  } catch {
+    throw new AudioToolError(gone);
+  }
+}
+
+/**
+ * A clip's length, channel count and whether it has sound, from its header (cached by file version; read in ranges, so a
+ * file of any size costs a few small reads), or null when no reader knows the file.
+ */
+async function factsOf(url: string): Promise<ClipFacts | null> {
   let file: string;
   let key: string;
   try {
@@ -68,23 +116,38 @@ async function lengthOf(url: string, given?: number): Promise<number | undefined
     throw new AudioToolError("That audio file is gone — add it again");
   }
   if (!lengths.has(key)) {
-    let data: Buffer;
+    let info: Awaited<ReturnType<typeof fileInfo>>;
     try {
-      data = await fs.readFile(file);
+      info = await fileInfo(file);
     } catch {
       throw new AudioToolError("That audio file is gone — add it again");
     }
-    const info = probeMedia(data);
     if (lengths.size >= LENGTHS_KEPT) lengths.delete(lengths.keys().next().value!);
-    lengths.set(key, info?.duration && info.duration > 0 ? Math.round(info.duration * 1000) / 1000 : null);
+    const duration = info?.duration && info.duration > 0 ? Math.round(info.duration * 1000) / 1000 : undefined;
+    lengths.set(key, info ? { ...(duration && { duration }), ...(info.channels && { channels: info.channels }), hasAudio: info.hasAudio } : null);
   }
-  return lengths.get(key) ?? given;
+  return lengths.get(key) ?? null;
 }
 
-async function plan(body: AudioToolRequest): Promise<ToolPlan & { engine: Engine }> {
+async function plan(body: AudioToolRequest): Promise<ToolPlan & { engine: Engine; split?: ClipFacts; headerChannels?: number }> {
   const mode = engineMode();
+  // Split soundtrack runs on the open engine only: an install set to paid APIs only says why, whichever engine was asked for.
+  if (body.tool === "split" && mode === "cloud") throw new AudioToolError(CLOUD_ONLY_PROBLEM);
   if (mode !== "both" && body.engine !== mode) throw new AudioToolError(mode === "open" ? "This install is set to open source only (Settings → Engine mode)" : "This install is set to paid cloud APIs only (Settings → Engine mode)");
   try {
+    if (body.tool === "split") {
+      const facts = await factsOf(body.media);
+      // A clip made without sound (a silent text-to-video take): nothing to split, said before anything is queued.
+      if (facts?.hasAudio === false) throw new AudioToolError(body.kind === "video" ? "This video has no sound to split" : "This file has no sound to split");
+      const seconds = facts?.duration ?? body.sourceDuration;
+      const channels = facts?.channels ?? body.channels;
+      return { engine: body.engine, ...planSplit({ ...body, seconds, channels }), split: { duration: seconds, channels }, headerChannels: facts?.channels };
+    }
+    if (body.tool === "remux") {
+      await present(body.audio, "That mix is gone — export it again");
+      await present(body.video, "That video is gone — add it again");
+      return { engine: body.engine, ...planRemux(body) };
+    }
     if (body.tool === "loop") {
       const sourceDuration = await lengthOf(body.audio, body.sourceDuration);
       return { engine: body.engine, ...planLoop({ ...body, sourceDuration: sourceDuration ?? 0 }) };
@@ -111,7 +174,19 @@ export async function previewAudioTool(body: AudioToolRequest): Promise<AudioToo
     demo ||= r.demo;
     cost = cost === null || r.costUsd === null ? null : cost + r.costUsd;
   }
-  return { summary: p.summary, notes: p.notes, length: p.length, steps: p.steps.length, costUsd: cost === null ? null : Math.round(cost * 1000) / 1000, demo };
+  const out: AudioToolPreview = { summary: p.summary, notes: p.notes, length: p.length, steps: p.steps.length, costUsd: cost === null ? null : Math.round(cost * 1000) / 1000, demo };
+  if (body.tool === "split") {
+    // How long it takes on this host: its device (asked once a minute), the model it would use (one it has on disk) and
+    // how many passes. A model the host doesn't have is refused here, before the run, with how to install it.
+    const [device, installed] = demo ? [undefined, undefined] : await Promise.all([comfyDevice().catch(() => undefined), comfyDbsModels().catch(() => undefined)]);
+    if (body.quality && installed && !installed.includes(DBS_MODELS[body.quality])) throw new AudioToolError(missingDbs(DBS_MODELS[body.quality], installed));
+    const pick = hostPick(device, installed);
+    const quality = body.quality ?? pick;
+    const { duration: seconds, channels } = p.split ?? {};
+    Object.assign(out, { hostPick: pick, ...(device && { device }), ...(installed && { installed: installed.map((m) => (m === DBS_MODELS.best ? "best" : "fast")) }), ...(p.headerChannels && { channels: p.headerChannels }) });
+    if (seconds) out.estimate = splitTime({ seconds, quality, mode: dbsChannelsFor(body.stereo ? "each channel" : "mono", channels), channels, device });
+  }
+  return out;
 }
 
 /** Start a run: one batch; the last step's generation is the result. */

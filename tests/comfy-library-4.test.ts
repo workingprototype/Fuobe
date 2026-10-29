@@ -60,6 +60,8 @@ const ROLES: NonNullable<ManifestOutput["role"]>[] = [
   "mask", "cutout", "matte",
   // Character Swap Studio: a segment's lossless master, which the next segment continues from.
   "master",
+  // DBS soundtrack separation: the pack's own report of the run (model, device, windows, seconds).
+  "report",
 ];
 
 describe("round-4 ComfyUI workflows", () => {

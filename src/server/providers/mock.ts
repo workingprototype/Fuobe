@@ -285,10 +285,11 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
     case "write":
       return [demoWrite(brief)];
     case "separate-audio": {
-      const stems: DemoOutput[] = [
-        { url: toDataUri(demoWav(3, [220, 330], 3), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { stem: "voice", demo: true } },
-        { url: toDataUri(demoWav(3, [110, 165]), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { stem: "background", demo: true } },
-      ];
+      const stem = (name: string, wav: Buffer): DemoOutput => ({ url: toDataUri(wav, "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { stem: name, demo: true } });
+      // A dialogue / music / effects split (DBS) returns those three and the music-and-effects bed, voice first.
+      const stems: DemoOutput[] = meta.threeStems
+        ? [stem("voice", demoWav(3, [220, 330], 3)), stem("music", demoWav(3, [262, 392])), stem("effects", demoWav(3, [90, 140], 7)), stem("background", demoWav(3, [110, 165]))]
+        : [stem("voice", demoWav(3, [220, 330], 3)), stem("background", demoWav(3, [110, 165]))];
       // Workflows that also time the voice stem (the open dub's first step) return its cues too.
       if (meta.transcript) {
         const cues = demoCues("");
@@ -412,6 +413,8 @@ export const mockProvider: ProviderAdapter = {
         master: route.provider === "comfyui" && route.endpoint === "video-character-swap-h3-segment",
         // A stem split that also transcribes (ComfyUI's dub-prepare-separate-transcribe).
         transcript: route.op === "separate-audio" && route.provider === "comfyui" && route.endpoint.includes("transcribe"),
+        // A dialogue / music / effects split (ComfyUI's separate-soundtrack-dbs): four stems.
+        threeStems: route.op === "separate-audio" && route.endpoint === "separate-soundtrack-dbs",
       },
       payload: { demo: true, ...input },
     };

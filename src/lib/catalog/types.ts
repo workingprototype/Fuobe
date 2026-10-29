@@ -56,7 +56,7 @@ export type Operation =
   | "captions" // video → the same video with burned-in captions
   | "mux" // video + audio → the video with that soundtrack
   | "image-to-3d" // image → a 3D model (.glb), optionally a turntable video
-  | "separate-audio" // audio or video → voice and background stems
+  | "separate-audio" // audio or video → stems (meta.stem): voice and background; DBS also music and effects
   | "translate" // text → the same text in params.targetLanguage (LLM)
   | "write" // brief → text (LLM: scripts, ad copy, shot lists)
   | "vectorize" // image → the same picture as an SVG
@@ -935,8 +935,9 @@ export interface ChainSlot {
   position?: "first" | "last";
   /**
    * Audio slots: take the dependency's output whose `meta.stem` is this (separate-audio makes
-   * "voice" and "background"; "voice" also matches vocals/speech/target, "background" also
-   * accompaniment/instrumental/residual/no_vocals). Without it, the first output of the slot's kind.
+   * "voice" and "background", DBS also "music" and "effects"; "voice" also matches vocals/speech/target,
+   * "background" also accompaniment/instrumental/residual/no_vocals, "effects" also sfx). Without it, the first
+   * output of the slot's kind.
    */
   stem?: string;
   /**

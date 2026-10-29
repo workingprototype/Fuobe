@@ -7,7 +7,9 @@ import type { Engine, Generation } from "@/lib/catalog/types";
 
 export type AudioToolBody =
   | { tool: "loop"; engine: Engine; audio: string; name?: string; duration: number; sourceDuration?: number; crossfade?: number; curve?: "equal-power" | "linear" }
-  | { tool: "join"; engine: Engine; clips: { url: string; name?: string; duration?: number }[]; crossfade?: number; curve?: "equal-power" | "linear" };
+  | { tool: "join"; engine: Engine; clips: { url: string; name?: string; duration?: number }[]; crossfade?: number; curve?: "equal-power" | "linear" }
+  | { tool: "split"; engine: Engine; media: string; kind: "audio" | "video"; name?: string; quality?: "fast" | "best"; stereo?: boolean; channels?: number; sourceDuration?: number }
+  | { tool: "remux"; engine: Engine; video: string; audio: string; name?: string };
 
 async function post<T>(url: string, body: AudioToolBody): Promise<T> {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

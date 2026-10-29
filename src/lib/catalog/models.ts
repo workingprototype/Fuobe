@@ -1136,6 +1136,27 @@ const open: ModelDef[] = [
     routes: [comfy("separate-audio", "dub-prepare-separate-transcribe", "voice stem, background stem, timed cues, transcript")],
     options: {},
   }),
+  // DBS (docs/research/dbs-separation-7.md): dialogue, music and effects from any soundtrack, small enough for a CPU. The
+  // provider picks the model by the host (DBS-TIGER on CUDA, DBS-BSRNN otherwise) unless one is asked for, and separates
+  // a file with more than 2 channels in mono (ComfyUI saves mono or stereo only). Split soundtrack (src/lib/av/split.ts) runs on it.
+  o({
+    id: "oss-dbs-separate",
+    name: "DBS (dialogue, music, effects)",
+    vendor: "Open source",
+    family: "dbs",
+    kind: "audio",
+    tagline: "Splits a soundtrack into dialogue, music and effects · 23 MB · CPU or GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("separate-audio", "separate-soundtrack-dbs", "voice, music, effects and music & effects (FLAC) + a speed report; ComfyUI-DBS")],
+    options: {
+      promptless: true,
+      controls: [
+        // No default: the host decides (DBS-TIGER on a CUDA GPU, DBS-BSRNN on a CPU, where it runs about 3x faster).
+        { param: "separationModel", label: "Model", values: ["DBS-BSRNN-DnR", "DBS-TIGER-DnR"], labels: { "DBS-BSRNN-DnR": "Fast (DBS-BSRNN)", "DBS-TIGER-DnR": "Best (DBS-TIGER)" } },
+        { param: "channels", label: "Stems", values: ["mono", "each channel"], default: "mono", labels: { mono: "Mono", "each channel": "Stereo stems (about twice as long)" } },
+      ],
+    },
+  }),
   o({
     id: "oss-qwen3-asr",
     name: "Qwen3-ASR",

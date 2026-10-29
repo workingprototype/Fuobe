@@ -36,6 +36,7 @@ import {
 } from "@/lib/comfy";
 import { fpsPlan } from "@/lib/av/fps";
 import { crossfadeProblem, fadeCurveWav } from "@/lib/av/crossfade";
+import { dbsChannelsFor, dbsModelFor, dbsSurroundBed, installedDbs, surroundSource, type DbsModel } from "@/lib/av/split";
 import { expandAudioJoinWorkflow, expandVideoJoinWorkflow } from "@/lib/av/joins";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
@@ -449,6 +450,49 @@ export async function probeComfy(force = false): Promise<boolean> {
   return sharedCheck("comfy", url, () => checkComfy(url));
 }
 
+declare global {
+  /** The torch device each ComfyUI address reported last (GET /system_stats devices[0].type), and when. */
+  var __fuobeComfyDevice: Map<string, { type?: string; at: number }> | undefined;
+}
+
+/**
+ * The connected ComfyUI's first torch device type ("cuda" for NVIDIA and ROCm, "cpu", "mps"…), from GET /system_stats
+ * (devices[0], as Settings' test reads it), kept for a minute; undefined when the server doesn't say or can't be reached.
+ */
+export async function comfyDevice(worker: ComfyWorker = "main"): Promise<string | undefined> {
+  const url = baseUrl(worker);
+  if (!url) return undefined;
+  const cache = (globalThis.__fuobeComfyDevice ??= new Map());
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < 60_000) return hit.type;
+  const s = await comfyJson<{ devices?: { type?: unknown }[] }>("/system_stats", worker).catch(() => undefined);
+  const type = typeof s?.devices?.[0]?.type === "string" ? (s.devices[0].type as string) : undefined;
+  if (s) cache.set(url, { type, at: Date.now() });
+  return type;
+}
+
+declare global {
+  /** The DBS models each ComfyUI address listed last (GET /models/dbs), and when. */
+  var __fuobeComfyDbs: Map<string, { models?: DbsModel[]; at: number }> | undefined;
+}
+
+/**
+ * The DBS models the connected ComfyUI has on disk (GET /models/dbs, which ComfyUI-DBS registers: both files of a
+ * model, or it isn't there), at most `maxAgeMs` old; undefined when the server can't say (unreachable, or the pack
+ * isn't loaded, so there is no dbs folder).
+ */
+export async function comfyDbsModels(worker: ComfyWorker = "main", maxAgeMs = 10_000): Promise<DbsModel[] | undefined> {
+  const url = baseUrl(worker);
+  if (!url) return undefined;
+  const cache = (globalThis.__fuobeComfyDbs ??= new Map());
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.models;
+  const files = await comfyJson<unknown>("/models/dbs", worker).catch(() => undefined);
+  const models = Array.isArray(files) ? installedDbs(files.filter((f): f is string => typeof f === "string")) : undefined;
+  cache.set(url, { models, at: Date.now() });
+  return models;
+}
+
 /** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
 export function comfyRam(): number | undefined {
   const cur = globalThis.__fuobeComfyReach;
@@ -492,7 +536,7 @@ function webmInfo(data: Buffer): MediaInfo | null {
   const w = probeWebm(data);
   if (!w) return null;
   const frames = w.duration && w.fps ? Math.round(w.duration * w.fps) : undefined;
-  return { container: "webm", duration: w.duration, videoDuration: w.hasVideo ? w.duration : undefined, width: w.width, height: w.height, fps: w.fps, frames, hasVideo: w.hasVideo, hasAudio: w.hasAudio };
+  return { container: "webm", duration: w.duration, videoDuration: w.hasVideo ? w.duration : undefined, width: w.width, height: w.height, fps: w.fps, frames, hasVideo: w.hasVideo, hasAudio: w.hasAudio, ...(w.channels && { channels: w.channels }) };
 }
 
 /** An AVI clip's header facts in MediaInfo's shape (src/server/avi-probe.ts; Character Swap Studio takes AVI). */
@@ -595,6 +639,10 @@ export interface PrepareContext {
   media?: (name: string) => MediaInfo | undefined;
   /** The ComfyUI server's RAM in bytes, for graphs that hold a whole clip in memory. */
   serverRam?: () => Promise<number | undefined>;
+  /** The server's first torch device type ("cuda", "cpu", "mps"…; GET /system_stats devices[0].type): DBS picks its model by it. */
+  device?: () => Promise<string | undefined>;
+  /** The DBS models on the server's disk (GET /models/dbs), undefined when it can't say: a run never gets one that isn't there. */
+  dbsModels?: () => Promise<DbsModel[] | undefined>;
   /**
    * The route puts the run's one LoRA in the graph's own LoRA slot (ModelRoute.loraSlot: Fuobe Speak's FusioniX on kijai's
    * InfiniteTalk graph, with the settings it goes with). Without it a graph with no model loader refuses a LoRA.
@@ -1083,6 +1131,21 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // A Video concatenator clip muted in the canvas (video-fit-clip): its sound becomes silence below.
   const muted = manifest.id === "video-fit-clip" && extra.mute === true;
   delete extra.mute;
+  // DBS (separate-soundtrack-dbs): the model asked for, else the host's pick (DBS-TIGER on a CUDA GPU, DBS-BSRNN on a
+  // CPU, the other one when the pick isn't on disk; a model that isn't there is refused in words); "each channel" for
+  // stereo stems. A source with more than 2 channels (the header's count, else the browser's) is split in mono with a
+  // mono Music & effects (dbsSurroundBed below): ComfyUI can't save more than 2 channels.
+  if (b.separationModel) {
+    const [device, installed] = await Promise.all([extra.separationModel ? undefined : ctx.device?.().catch(() => undefined), ctx.dbsModels?.().catch(() => undefined)]);
+    try {
+      values.separationModel = dbsModelFor(extra.separationModel, device, installed);
+    } catch (e) {
+      throw new ProviderError((e as Error).message, 400);
+    }
+  }
+  const sourceChannels = b.channels ? (ctx.media?.(String(values.audio ?? ""))?.channels ?? (Number(extra.sourceChannels) || undefined)) : undefined;
+  if (b.channels) values.channels = dbsChannelsFor(extra.channels, sourceChannels);
+  for (const k of ["separationModel", "channels", "sourceChannels"]) delete extra[k];
   for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
   if (audio2 && ctx.op !== "dialogue" && ctx.op !== "voice-change") values.audio2 = audio2;
   // Soundtrack mix: a silent bed as long as the video, so neither track cuts the other short.
@@ -1154,6 +1217,7 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     const id = Object.keys(wf).find((k) => wf[k].class_type === "FrameInterpolate");
     if (id) wf = bypassNode(wf, id, "images", outputIds);
   }
+  if (surroundSource(sourceChannels)) wf = dbsSurroundBed(wf);
   // Slow motion: the sound would no longer match the picture.
   if (finish.dropSound) for (const n of Object.values(wf)) if (n.class_type === "CreateVideo") delete n.inputs.audio;
   // VHS meta-batch: a manager of its own per job (a stale one loses frames), and no sound link for a silent clip.
@@ -1361,6 +1425,9 @@ export const comfyProvider: ProviderAdapter = {
       upload: (data, contentType, name) => uploadTo(worker, data, contentType, name),
       media: mediaInfoFor,
       serverRam: async () => (await comfyJson<{ system?: { ram_total?: number } }>("/system_stats", worker).catch(() => undefined))?.system?.ram_total,
+      device: () => comfyDevice(worker),
+      // Fresh: a model installed a moment ago runs.
+      dbsModels: () => comfyDbsModels(worker, 0),
     });
     const { clientId } = ensureSocket(worker);
     const res = await comfyFetch(
