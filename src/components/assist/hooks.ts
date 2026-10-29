@@ -21,6 +21,7 @@ import type { ConnectorView } from "@/lib/assist-connectors";
 import type { ScheduleRule, ScheduleView } from "@/lib/assist-schedule";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import type { RecipeEstimate, RecipeRun, RecipeView, VerifyResult } from "@/lib/recipe";
+import type { DraftRefusal, Naming, SkillDraft } from "@/lib/recipe-builder";
 
 /** A rule as the dialog sends it: the server sets when "every N hours" starts counting. */
 export type ScheduleRuleInput = ScheduleRule extends infer R ? (R extends { kind: "hours" } ? Omit<R, "from"> : R) : never;
@@ -226,6 +227,44 @@ export function useRecipeActions() {
       } finally {
         void qc.invalidateQueries({ queryKey: ["assist-skills"] });
       }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Making a skill from results (W2: src/server/recipe-builder.ts)
+
+/** A draft check's answer (src/server/recipes.ts checkDraft). */
+export interface DraftCheckResult {
+  ok: boolean;
+  engines: VerifyResult["engines"];
+  ready: Engine[];
+  why?: string;
+}
+
+/** The draft of a skill from picked results: its steps rebuilt, every input Fixed, and the picks it couldn't use. */
+export function useSkillDraft(ids: string[]) {
+  return useQuery({
+    queryKey: ["skill-draft", ids.join(",")],
+    enabled: ids.length > 0,
+    retry: false,
+    staleTime: Infinity,
+    queryFn: () => recipeCall<{ draft: SkillDraft | null; refusals: DraftRefusal[] }>("/api/assist/skills/draft", { generations: ids }),
+  });
+}
+
+export function useDraftActions() {
+  const qc = useQueryClient();
+  return {
+    /** Price it on each engine (`plan`), or add the free dry run (`demo`). */
+    check: (recipe: unknown, level: "plan" | "demo", title?: string) => recipeCall<DraftCheckResult>("/api/assist/skills/draft/check", { recipe, level, title }),
+    /** The optional naming pass (null: no LLM, or its answer didn't fit). */
+    name: async (ids: string[]) => (await recipeCall<{ naming: Naming | null }>("/api/assist/skills/draft/name", { generations: ids })).naming,
+    save: async (body: { name: string; title: string; description: string; whenToUse?: string; body: string; recipe: unknown }) => {
+      const view = await recipeCall<RecipeView>("/api/assist/skills/draft/save", body);
+      qc.setQueryData(["assist-recipe", view.name], view);
+      void qc.invalidateQueries({ queryKey: ["assist-skills"] });
+      return view;
     },
   };
 }

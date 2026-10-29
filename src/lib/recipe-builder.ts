@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { SKILL_LIMITS } from "./assist";
 import type { Engine, MediaKind } from "./catalog/types";
-import { isMediaType, leafKeys, RECIPE_LIMITS, type ParamType, type Recipe, type RecipeParam, type RecipeStep } from "./recipe";
+import { isMediaType, leafKeys, type ParamType, type Recipe, type RecipeParam, type RecipeStep } from "./recipe";
 
 // ---------------------------------------------------------------------------
 // What the draft holds
@@ -382,7 +382,7 @@ export function buildRecipe(draft: Pick<SkillDraft, "recipe" | "candidates">, ch
   // The form's order: files first, then elements, words, settings.
   const rank = (p: RecipeParam) => (isMediaType(p.type) ? 0 : p.type === "element" ? 1 : p.type === "text" ? 2 : 3);
   params.push(...[...placed, ...slotParams].sort((a, b) => rank(a) - rank(b)));
-  recipe.params = params.slice(0, RECIPE_LIMITS.params);
+  recipe.params = params;
   if (Object.keys(checks).length) recipe.checks = checks;
   return recipe;
 }

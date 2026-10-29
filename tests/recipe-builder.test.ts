@@ -220,6 +220,26 @@ describe("draftFromGenerations", () => {
     expect(mixed.refusals).toEqual([expect.objectContaining({ id: "dub-film", reason: expect.stringContaining("on its own") })]);
   });
 
+  it("links results handed on by hand (the composer's Animate) into a chain", async () => {
+    const [a] = gens.createGenerations({ feature: "image", modelId: "nano-banana-pro", op: "t2i", prompt: "a brass desk lamp", params: { numOutputs: 2 } });
+    await settle([a.id]);
+    const still = gens.getGeneration(a.id)!.outputs[1].url;
+    const [b] = gens.createGenerations({ feature: "edit", modelId: "nano-banana-pro", op: "edit", prompt: "on a plinth", inputs: { images: [still, photo] } });
+    await settle([b.id]);
+    const [c] = gens.createGenerations({ feature: "video", modelId: "kling-3", op: "i2v", prompt: "slow turntable", inputs: { images: [gens.getGeneration(b.id)!.outputs[0].url] } });
+    await settle([c.id]);
+    const { draft } = builder.draftFromGenerations([c.id, a.id, b.id]);
+    const steps = draft!.recipe.steps as Extract<NonNullable<typeof draft>["recipe"]["steps"][number], { kind: "generate" }>[];
+    expect(steps.map((s) => s.request.op)).toEqual(["t2i", "edit", "i2v"]);
+    expect(steps[1]).toMatchObject({ after: steps[0].key, chain: [{ slot: "images", position: "first" }], request: { inputs: { images: [photo] } } });
+    expect(steps[2]).toMatchObject({ after: steps[1].key, chain: [{ slot: "images", position: "first" }] });
+    expect(steps[2].request.inputs).toBeUndefined();
+    // A step that feeds another makes one result.
+    expect((steps[0].request.params as { numOutputs?: number }).numOutputs).toBe(1);
+    expect(draft!.candidates.filter((x) => x.kind === "media").map((x) => x.example)).toEqual([photo]);
+    expect(recipeProblems(draft!.recipe)).toEqual([]);
+  });
+
   it("makes unrelated picks parallel steps", async () => {
     const [a] = gens.createGenerations({ feature: "image", modelId: "nano-banana-pro", op: "t2i", prompt: "a red chair" });
     const [b] = gens.createGenerations({ feature: "image", modelId: "flux-2-pro", op: "t2i", prompt: "a blue sofa" });

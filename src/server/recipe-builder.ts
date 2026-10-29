@@ -220,6 +220,80 @@ class Walk {
 }
 
 // ---------------------------------------------------------------------------
+// Results handed on by hand (the composer's Animate, Edit, Use as reference…)
+
+/** Input fields that take one file, and the chain slot that fills each. */
+const SINGLE_SLOTS: Partial<Record<keyof NonNullable<GenerationRequest["inputs"]>, ChainSlot["slot"]>> = { endImage: "endImage", video: "video", audio: "audio", audio2: "audio2", voiceAudio: "voiceAudio" };
+
+/**
+ * A picked result whose input is another picked step's result (a picture animated from the composer, a clip extended
+ * from the Library) waits for that step instead: the file becomes a chain slot, so a new run feeds the new result on.
+ * Only to a step made before it; a step that feeds another then makes one result.
+ */
+function linkByFile(walk: Walk): void {
+  const nodes = [...walk.nodes.values()].filter((n) => n.step.kind === "generate");
+  const made = new Map<string, Node>();
+  for (const n of nodes) for (const o of n.gen.outputs) if (o.url && !made.has(o.url)) made.set(o.url, n);
+  for (const n of nodes) {
+    const step = n.step as Extract<RecipeStep, { kind: "generate" }>;
+    const inputs = { ...((step.request.inputs ?? {}) as NonNullable<GenerationRequest["inputs"]>) };
+    const after = Array.isArray(step.after) ? [...step.after] : step.after ? [step.after] : [];
+    const chain = [...(step.chain ?? [])];
+    const from = (url: unknown) => {
+      const src = typeof url === "string" ? made.get(url) : undefined;
+      return src && src !== n && src.gen.createdAt <= n.gen.createdAt && !after.includes(src.key) ? src : undefined;
+    };
+    const link = (src: Node, slot: ChainSlot) => {
+      after.push(src.key);
+      chain.push(slot);
+      const p = (src.step as Extract<RecipeStep, { kind: "generate" }>).request.params as Record<string, unknown> | undefined;
+      if (typeof p?.numOutputs === "number" && p.numOutputs > 1) {
+        p.numOutputs = 1;
+        src.notes.push("Makes one result here: the next step takes it");
+      }
+    };
+    for (const k of ["images", "videos", "audios"] as const) {
+      const list = inputs[k];
+      if (!list?.length) continue;
+      const keep: string[] = [];
+      list.forEach((url, i) => {
+        const src = from(url);
+        if (!src) return void keep.push(url);
+        link(src, { slot: k, ...(k === "images" && { position: i === 0 ? ("first" as const) : ("last" as const) }) });
+      });
+      if (keep.length) inputs[k] = keep;
+      else delete inputs[k];
+    }
+    for (const [k, slot] of Object.entries(SINGLE_SLOTS) as [keyof typeof SINGLE_SLOTS, ChainSlot["slot"]][]) {
+      const src = from(inputs[k]);
+      if (!src) continue;
+      link(src, { slot });
+      delete inputs[k];
+    }
+    if (after.length === (Array.isArray(step.after) ? step.after.length : step.after ? 1 : 0)) continue;
+    const request = { ...step.request } as Record<string, unknown>;
+    if (Object.keys(inputs).length) request.inputs = inputs;
+    else delete request.inputs;
+    n.step = { ...step, request: request as typeof step.request, after: after.length === 1 ? after[0] : after, chain };
+  }
+}
+
+/** Steps in an order where each comes after the ones it waits for (Kahn's algorithm, stable). */
+function ordered(nodes: Node[]): Node[] {
+  const keys = new Set(nodes.map((n) => n.key));
+  const waits = (n: Node) => (n.step.kind === "generate" ? (Array.isArray(n.step.after) ? n.step.after : n.step.after ? [n.step.after] : []).filter((a) => keys.has(a)) : []);
+  const out: Node[] = [];
+  const done = new Set<string>();
+  while (out.length < nodes.length) {
+    const next = nodes.find((n) => !done.has(n.key) && waits(n).every((a) => done.has(a)));
+    if (!next) return [...out, ...nodes.filter((n) => !done.has(n.key))];
+    out.push(next);
+    done.add(next.key);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Studio work rebuilt as its Assist tool's call
 
 /** A studio record that names a generation (the instr lookup assetRefSql uses), as its id and data. */
@@ -313,7 +387,7 @@ const MEDIA_SLOTS: { key: keyof NonNullable<GenerationRequest["inputs"]>; type: 
 
 const SETTING_LABELS: Record<SettingId, string> = { numOutputs: "Takes", aspectRatio: "Shape", duration: "Length (seconds)", resolution: "Quality" };
 
-function candidates(walk: Walk, leaves: Set<string>): DraftCandidate[] {
+function candidates(nodes: Node[], leaves: Set<string>): DraftCandidate[] {
   const out: DraftCandidate[] = [];
   const taken = new Set<string>();
   const labelsUsed = new Map<string, number>();
@@ -327,7 +401,6 @@ function candidates(walk: Walk, leaves: Set<string>): DraftCandidate[] {
     taken.add(id);
     out.push({ ...c, id } as DraftCandidate);
   };
-  const nodes = [...walk.nodes.values()];
   // Files: uploads, Library picks and earlier results that aren't a step here. The same file in several steps is one input.
   const media = new Map<string, DraftCandidate & { id?: string }>();
   for (const n of nodes) {
@@ -602,7 +675,8 @@ export function draftFromGenerations(ids: string[]): DraftResult {
     tools.splice(0, tools.length, ...keep);
   }
   if (tools.length) walk.nodes.set(tools[0].node.key, tools[0].node);
-  const nodes = [...walk.nodes.values()];
+  linkByFile(walk);
+  const nodes = ordered([...walk.nodes.values()]);
   if (!nodes.length) return { draft: null, refusals };
   if (nodes.length > RECIPE_LIMITS.steps) return { draft: null, refusals: [...refusals, { id: ids[0], title: "These results", reason: `They take ${nodes.length} steps; a skill has at most ${RECIPE_LIMITS.steps}` }] };
 
@@ -644,7 +718,7 @@ export function draftFromGenerations(ids: string[]): DraftResult {
   const draft: SkillDraft = {
     recipe,
     steps: draftSteps,
-    candidates: candidates(walk, leaves),
+    candidates: candidates(nodes, leaves),
     name: freeName(title),
     title,
     description,
