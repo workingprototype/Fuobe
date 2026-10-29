@@ -17,16 +17,25 @@ import { useGeneration } from "@/components/av/use-generation";
 import { useEngine, useGenerations } from "@/lib/api";
 import type { AudioToolPreview } from "@/lib/av/audio-tools";
 import {
+  backgroundLowered,
   clock,
+  CLOUD_ONLY_PROBLEM,
   CLOUD_SPLIT_PROBLEM,
   dbLabel,
   durationWords,
-  encodeWav,
+  exportProblem,
   headroomGain,
   LEVEL_MAX,
   LEVEL_MIN,
+  mixerBudget,
+  mixerBytes,
+  mixerProblem,
   mixName,
+  mixPart,
+  mixPeak,
+  mixPlan,
   ORIGINAL_MIX,
+  partFrames,
   presetOf,
   PRESETS,
   QUALITY_LABELS,
@@ -43,6 +52,7 @@ import {
 } from "@/lib/av/split";
 import type { Engine, Generation, OutputFile } from "@/lib/catalog/types";
 import { downloadHref } from "@/lib/library";
+import { probeUrl } from "@/lib/media-probe";
 import { cn } from "@/lib/utils";
 import { useAudioToolPreview, useAudioToolRun, useSettled, type AudioToolBody } from "./hooks";
 
@@ -72,9 +82,19 @@ function useHandoff(take: (s: Source) => void) {
   }, []);
 }
 
-/** The channel count the browser decodes (the server reads WAV / FLAC / MP3 headers itself; this covers MP4 and the rest). */
+/** The largest file the page decodes just to count its channels (an hour of film would take gigabytes of memory). */
+const DECODE_MAX_BYTES = 64 * 1024 * 1024;
+
+/**
+ * The channel count the browser decodes, for a file whose header the server can't read (it reads MP4 / MOV, WebM /
+ * MKV, WAV, FLAC and MP3 itself: Ogg and the rest), and only a small one: its size first, from a one-byte range.
+ */
 async function decodedChannels(url: string): Promise<number | undefined> {
   try {
+    const probe = await fetch(url, { headers: { Range: "bytes=0-0" } });
+    const total = Number(/\/(\d+)\s*$/.exec(probe.headers.get("content-range") ?? "")?.[1]);
+    await probe.body?.cancel().catch(() => {});
+    if (!(total > 0) || total > DECODE_MAX_BYTES) return undefined;
     const data = await (await fetch(url)).arrayBuffer();
     const ctx = new OfflineAudioContext(1, 1, 44100);
     return (await ctx.decodeAudioData(data)).numberOfChannels;
@@ -82,6 +102,16 @@ async function decodedChannels(url: string): Promise<number | undefined> {
     return undefined;
   }
 }
+
+/** How much decoded audio this browser is trusted with (navigator.deviceMemory where the browser says it). */
+function browserBudget(): number {
+  const deviceMemoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+  return mixerBudget({ deviceMemoryGb, coarse });
+}
+
+/** Let the page paint between slices of a long computation. */
+const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 // ---------------------------------------------------------------------------
 // Input
@@ -221,12 +251,15 @@ function useStemPlayer(stems: Stem[]) {
   const started = useRef<{ at: number; offset: number } | null>(null);
   const [buffers, setBuffers] = useState<Partial<Record<StemId, AudioBuffer>>>({});
   const [failed, setFailed] = useState<string | null>(null);
+  /** Why these stems aren't decoded here (too long for this device), or null. */
+  const [tooBig, setTooBig] = useState<string | null>(null);
   const [playing, setPlaying] = useState<false | "mix" | StemId>(false);
   const [position, setPosition] = useState(0);
   const key = stems.map((s) => s.url).join("|");
 
   // One audio context per set of stems (the mixer is keyed by its result): a gain per stem, every stem decoded once.
-  // It closes with the mixer (and React's dev double-mount gets a fresh one, not a closed one).
+  // It closes with the mixer (and React's dev double-mount gets a fresh one, not a closed one). First the stems' FLAC
+  // headers say how long they are: stems this device can't hold decoded aren't fetched at all (the tiles still download).
   useEffect(() => {
     let live = true;
     if (!stems.length) return;
@@ -237,15 +270,24 @@ function useStemPlayer(stems: Stem[]) {
       const g = ac.createGain();
       g.connect(ac.destination);
       gains.current[s.id] = g;
-      void fetch(s.url)
-        .then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.arrayBuffer();
-        })
-        .then((data) => ac.decodeAudioData(data))
-        .then((buf) => live && setBuffers((b) => ({ ...b, [s.id]: buf })))
-        .catch(() => live && setFailed(`Couldn't load the ${s.name.toLowerCase()} stem in the browser — download it instead`));
     }
+    void (async () => {
+      const facts = await Promise.all(stems.map((s) => probeUrl(s.url)));
+      if (!live) return;
+      if (facts.every((f) => f?.duration && f.channels)) {
+        const problem = mixerProblem(mixerBytes(facts.map((f) => ({ seconds: f!.duration!, channels: f!.channels! })), ac.sampleRate), browserBudget());
+        if (problem) return void setTooBig(problem);
+      }
+      for (const s of stems)
+        void fetch(s.url)
+          .then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.arrayBuffer();
+          })
+          .then((data) => ac.decodeAudioData(data))
+          .then((buf) => live && setBuffers((b) => ({ ...b, [s.id]: buf })))
+          .catch(() => live && setFailed(`Couldn't load the ${s.name.toLowerCase()} stem in the browser — download it instead`));
+    })();
     return () => {
       live = false;
       silence(sources.current);
@@ -323,7 +365,7 @@ function useStemPlayer(stems: Stem[]) {
     [playing],
   );
 
-  return { buffers, ready, failed, playing, position, length, play, stop, seek: (t: number) => (playing ? play(playing, t) : setPosition(t)), apply };
+  return { buffers, ready, failed, tooBig, playing, position, length, play, stop, seek: (t: number) => (playing ? play(playing, t) : setPosition(t)), apply };
 }
 
 function Waveform({ buffer, position, length, muted }: { buffer?: AudioBuffer; position: number; length: number; muted: boolean }) {
@@ -397,46 +439,62 @@ function StemTile({
         <label htmlFor={id} className="w-10 shrink-0 text-[12px] text-muted-foreground">
           Level
         </label>
-        <Slider id={id} min={LEVEL_MIN} max={LEVEL_MAX} step={0.5} value={[s.db]} onValueChange={([v]) => onMix(setLevel(mix, stem.id, v))} aria-label={`${stem.name} level`} className="min-w-0 flex-1" />
+        <Slider
+          id={id}
+          min={LEVEL_MIN}
+          max={LEVEL_MAX}
+          step={0.5}
+          value={[s.db]}
+          onValueChange={([v]) => onMix(setLevel(mix, stem.id, v))}
+          disabled={!player.ready}
+          aria-label={`${stem.name} level`}
+          aria-valuetext={s.mute ? `Muted, ${dbLabel(s.db)}` : dbLabel(s.db)}
+          className="min-w-0 flex-1"
+        />
         <span className="w-14 shrink-0 text-right font-mono text-[12px] tabular-nums">{s.mute ? "Muted" : dbLabel(s.db)}</span>
       </div>
     </li>
   );
 }
 
-/** Render the mix offline, exactly as it plays (gains, solo, mute), kept under full scale: 16-bit WAV bytes. */
-async function renderMix(stems: Stem[], buffers: Partial<Record<StemId, AudioBuffer>>, mix: Mix): Promise<{ wav: Uint8Array; lowered: boolean }> {
-  const bufs = stems.map((s) => buffers[s.id]!).filter(Boolean);
-  const rate = bufs[0].sampleRate;
-  const channels = Math.max(...bufs.map((b) => b.numberOfChannels));
-  const length = Math.max(...bufs.map((b) => b.length));
-  const oc = new OfflineAudioContext(channels, length, rate);
+/**
+ * The mix as it plays (gains, solo, mute; mono stems up-mixed as WebAudio does), kept under full scale, written as a
+ * 16-bit WAV and sent to the Library in parts (/api/audio-tools/export): only one part is in memory beside the stems,
+ * and no upload cap applies to the whole. The peak is found first, a slice at a time, so the page stays responsive.
+ */
+async function exportWav(stems: Stem[], buffers: Partial<Record<StemId, AudioBuffer>>, mix: Mix, name: string): Promise<{ url: string; lowered: boolean }> {
   const g = stemGains(mix);
-  for (const s of stems) {
-    if (!g[s.id] || !buffers[s.id]) continue;
-    const src = oc.createBufferSource();
-    src.buffer = buffers[s.id]!;
-    const gain = oc.createGain();
-    gain.gain.value = g[s.id];
-    src.connect(gain).connect(oc.destination);
-    src.start();
-  }
-  const out = await oc.startRendering();
-  const data = Array.from({ length: out.numberOfChannels }, (_, c) => out.getChannelData(c));
+  const decoded = stems.flatMap((s) => (buffers[s.id] ? [{ buf: buffers[s.id]!, gain: g[s.id] }] : []));
+  const plan = mixPlan(
+    decoded.map(({ buf, gain }) => ({ channels: Array.from({ length: buf.numberOfChannels }, (_, c) => buf.getChannelData(c)), gain })),
+    decoded[0]?.buf.sampleRate ?? 48000,
+  );
+  const problem = exportProblem(plan.frames, plan.channels);
+  if (problem) throw new Error(problem);
   let peak = 0;
-  for (const d of data) for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+  const slice = Math.max(1, Math.floor(2_000_000 / plan.channels));
+  for (let f = 0; f < plan.frames; f += slice) {
+    peak = Math.max(peak, mixPeak(plan, f, f + slice));
+    await tick();
+  }
   const k = headroomGain(peak);
-  if (k < 1) for (const d of data) for (let i = 0; i < d.length; i++) d[i] *= k;
-  return { wav: encodeWav(data, rate), lowered: k < 1 };
-}
-
-async function uploadWav(wav: Uint8Array, name: string): Promise<string> {
-  const form = new FormData();
-  form.append("file", new File([wav as BlobPart], name, { type: "audio/wav" }));
-  const res = await fetch("/api/uploads", { method: "POST", body: form });
-  const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
-  if (!res.ok || !body.url) throw new Error(body.error ?? `Upload failed (${res.status})`);
-  return body.url;
+  const per = partFrames(plan);
+  let id = "";
+  let offset = 0;
+  for (let f = 0; ; f += per) {
+    const last = f + per >= plan.frames;
+    const q = new URLSearchParams({ offset: String(offset), ...(id && { id }), ...(last && { last: "1", name }) });
+    const res = await fetch(`/api/audio-tools/export?${q}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: new Blob([mixPart(plan, f, f + per, k) as BlobPart]) });
+    const body = (await res.json().catch(() => ({}))) as { id?: string; received?: number; url?: string; error?: string };
+    if (!res.ok) throw new Error(body.error ?? `Export failed (${res.status})`);
+    if (last) {
+      if (!body.url) throw new Error("Export failed");
+      return { url: body.url, lowered: k < 1 };
+    }
+    id = body.id ?? "";
+    offset = body.received ?? 0;
+    await tick();
+  }
 }
 
 function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engine: Engine }) {
@@ -457,8 +515,7 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
 
   const exportMix = async (): Promise<string> => {
     if (exported.current?.key === mixKey) return exported.current.url;
-    const { wav, lowered } = await renderMix(stems, player.buffers, mix);
-    const url = await uploadWav(wav, `${name} · ${mixName(mix)}.wav`);
+    const { url, lowered } = await exportWav(stems, player.buffers, mix, `${name} · ${mixName(mix)}.wav`);
     exported.current = { key: mixKey, url };
     if (lowered) toast("The mix peaked over full scale, so it was lowered as a whole to stay clean");
     return url;
@@ -486,6 +543,18 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
       setBusy(null);
     }
   };
+  // A loud master's background stem was lowered to fit under full scale (AudioMerge): "Original" is then a little
+  // quieter in the background than the source, and the page says so.
+  const bed = player.buffers.background;
+  const lowered = useMemo(() => {
+    if (!bed) return false;
+    let peak = 0;
+    for (let c = 0; c < bed.numberOfChannels; c++) {
+      const d = bed.getChannelData(c);
+      for (let i = 0; i < d.length; i++) if (Math.abs(d[i]) > peak) peak = Math.abs(d[i]);
+    }
+    return backgroundLowered(peak);
+  }, [bed]);
   const remuxCost = remuxPrice.data ? (remuxPrice.data.demo ? "Demo · free" : engine === "open" ? "Free" : remuxPrice.data.costUsd !== null && remuxPrice.data.costUsd < 0.01 ? "under $0.01" : `≈ $${remuxPrice.data.costUsd?.toFixed(2)}`) : null;
 
   return (
@@ -502,10 +571,15 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
           {player.failed}
         </p>
       )}
+      {player.tooBig && (
+        <p className="rounded-xl bg-muted px-3 py-2 text-[13px] text-muted-foreground" role="status">
+          {player.tooBig}
+        </p>
+      )}
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Button className="rounded-full" disabled={!player.ready} onClick={() => (player.playing === "mix" ? player.stop() : player.play("mix"))}>
-          {!player.ready ? <Loader2 className="size-4 animate-spin" /> : player.playing === "mix" ? <Pause className="size-4" /> : <Headphones className="size-4" />}
-          {!player.ready ? "Loading stems…" : player.playing === "mix" ? "Pause" : "Play the mix"}
+          {player.tooBig ? <Headphones className="size-4" /> : !player.ready ? <Loader2 className="size-4 animate-spin" /> : player.playing === "mix" ? <Pause className="size-4" /> : <Headphones className="size-4" />}
+          {player.tooBig ? "Play the mix" : !player.ready ? "Loading stems…" : player.playing === "mix" ? "Pause" : "Play the mix"}
         </Button>
         <span className="font-mono text-[12px] text-muted-foreground tabular-nums">
           {clock(player.position)} / {clock(player.length)}
@@ -518,6 +592,7 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
           onValueChange={([v]) => player.seek(v)}
           disabled={!player.ready}
           aria-label="Position"
+          aria-valuetext={`${clock(player.position)} of ${clock(player.length)}`}
           className="min-w-[8rem] flex-1 basis-40"
         />
       </div>
@@ -525,6 +600,11 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
         <span className="text-[13px]">Presets</span>
         <Segmented label="Presets" value={preset ?? "custom"} onChange={(id) => id !== "custom" && setMixState(PRESETS.find((p) => p.id === id)!.mix)} options={[...PRESETS.map((p) => ({ value: p.id, label: p.label })), ...(preset ? [] : [{ value: "custom", label: "Custom" }])]} />
       </div>
+      {lowered && (
+        <p className="text-[12px] text-muted-foreground">
+          This is a loud master: Music &amp; effects was lowered a little to fit under full scale, so Original plays the background slightly quieter than the source.
+        </p>
+      )}
       <ul className="grid grid-cols-1 gap-3 md:grid-cols-2" aria-label="Stems">
         {stems.map((s) => (
           <StemTile key={s.id} stem={s} mix={mix} onMix={setMixState} player={player} />
@@ -550,6 +630,12 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
 
 const money = (p: AudioToolPreview) => (p.demo ? "Demo · free" : "Free · runs on your ComfyUI");
 
+/** What each model is, shown under the choice (not only on hover). */
+const MODEL_HINTS: Record<SplitQuality, string> = {
+  fast: "Fast: 18.9 MB, about 3x faster on a CPU.",
+  best: "Best: 4.1 MB, cleaner music and effects; the pick on an NVIDIA GPU.",
+};
+
 function stemsOf(outputs: OutputFile[]): Stem[] {
   return STEMS.flatMap((s) => {
     const o = outputs.find((x) => x.kind === "audio" && x.meta?.stem === s.id);
@@ -572,16 +658,7 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
   }, []);
   useHandoff(take);
   const ready = source && !source.uploading && source.ref ? source : null;
-  // MP4 and the like: the browser says how many channels there are (the server reads WAV / FLAC / MP3 itself).
   const readyRef = ready?.ref;
-  useEffect(() => {
-    if (!readyRef || source?.channels) return;
-    let live = true;
-    void decodedChannels(readyRef).then((n) => live && n && setSource((s) => (s && s.ref === readyRef ? { ...s, channels: n } : s)));
-    return () => {
-      live = false;
-    };
-  }, [readyRef, source?.channels]);
   const body: AudioToolBody | null = useMemo(
     () =>
       ready
@@ -601,8 +678,21 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
   );
   const preview = useAudioToolPreview(useSettled(engine === "open" ? body : null));
   const p = preview.data;
+  // A file whose header the server couldn't read (Ogg and the like): the browser counts the channels, if it's small.
+  const headerKnown = p?.channels !== undefined;
+  const asked = !!p;
+  useEffect(() => {
+    if (!readyRef || !asked || headerKnown || source?.channels) return;
+    let live = true;
+    void decodedChannels(readyRef).then((n) => live && n && setSource((s) => (s && s.ref === readyRef ? { ...s, channels: n } : s)));
+    return () => {
+      live = false;
+    };
+  }, [readyRef, asked, headerKnown, source?.channels]);
+  const channels = p?.channels ?? source?.channels;
   const picked: SplitQuality = quality ?? p?.hostPick ?? "fast";
-  const blocker = !source ? "Add a soundtrack to split" : source.uploading ? "Uploading…" : engine === "cloud" ? CLOUD_SPLIT_PROBLEM : null;
+  const cloudProblem = mode === "cloud" ? CLOUD_ONLY_PROBLEM : CLOUD_SPLIT_PROBLEM;
+  const blocker = !source ? "Add a soundtrack to split" : source.uploading ? "Uploading…" : engine === "cloud" ? cloudProblem : null;
   const error = preview.error ? (preview.error as Error).message : null;
   const go = () => {
     if (blocker) return void toast(blocker);
@@ -665,19 +755,21 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
                   label="Model"
                   value={picked}
                   onChange={(v) => setQuality(v)}
-                  options={[
-                    { value: "fast", label: QUALITY_LABELS.fast, hint: "18.9 MB, about 3x faster on a CPU" },
-                    { value: "best", label: QUALITY_LABELS.best, hint: "4.1 MB, cleaner music and effects; the pick on an NVIDIA GPU" },
-                  ]}
+                  options={(["fast", "best"] as const).map((q) => ({ value: q, label: `${QUALITY_LABELS[q]}${p?.installed && !p.installed.includes(q) ? " · not installed" : ""}`, hint: MODEL_HINTS[q] }))}
                 />
                 {!quality && p?.hostPick && <span className="text-[12px] text-muted-foreground">picked for your {p.device === "cuda" ? "GPU" : "CPU"}</span>}
               </div>
-              <div className="flex items-center gap-2">
-                <Switch id={stereoId} checked={stereo} onCheckedChange={setStereo} />
-                <label htmlFor={stereoId} className="text-[13px]">
-                  Stereo stems <span className="text-muted-foreground">(takes about twice as long)</span>
-                </label>
-              </div>
+              <p className="text-[12px] text-muted-foreground sm:pl-[4.5rem]">{MODEL_HINTS[picked]}</p>
+              {channels === 1 ? null : channels && channels > 2 ? (
+                <p className="text-[13px] text-muted-foreground">This file has {channels} channels: its stems come out in mono, as ComfyUI saves mono or stereo only.</p>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Switch id={stereoId} checked={stereo} onCheckedChange={setStereo} />
+                  <label htmlFor={stereoId} className="text-[13px]">
+                    Stereo stems <span className="text-muted-foreground">(takes about twice as long)</span>
+                  </label>
+                </div>
+              )}
             </div>
           </Panel>
         )}
@@ -698,7 +790,11 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
                 {blocker && engine !== "cloud" ? (
                   blocker
                 ) : engine === "cloud" ? (
-                  "Switch to the open engine to split"
+                  mode === "cloud" ? (
+                    "Not available on this install: it is set to paid cloud APIs only"
+                  ) : (
+                    "Switch to the open engine to split"
+                  )
                 ) : error ? (
                   error
                 ) : p ? (

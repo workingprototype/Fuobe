@@ -117,6 +117,7 @@ export default async function Page() {
               <p className="mt-0.5 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
                 {a.licence} · for {a.for}
               </p>
+              {a.note && <p className="mt-1 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">{a.note}</p>}
             </li>
           ))}
         </ul>

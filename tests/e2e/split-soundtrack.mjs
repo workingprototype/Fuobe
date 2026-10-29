@@ -72,6 +72,8 @@ try {
       const picked = await page.getByRole("radio", { checked: true, name: /Fast \(DBS-BSRNN\)|Best \(DBS-TIGER\)/ }).innerText();
       check(/Fast|Best/.test(picked), `${label}: the host's model is preselected (${picked})`);
       check(await page.getByRole("switch").isVisible(), `${label}: a Stereo stems switch`);
+      // The model's explanation is on the page, not only in a hover title (touch and keyboard users see it).
+      check(await page.getByText(/^(Fast: 18\.9 MB|Best: 4\.1 MB)/).isVisible(), `${label}: the picked model's explanation is shown`);
       await page.screenshot({ path: path.join(out, `split-open-${dname}-${theme}.png`), fullPage: true });
       await noSideScroll(page, `${label} with a source`);
       await ctx.close();
@@ -98,6 +100,7 @@ try {
     // Keyboard: Tab reaches a labelled level slider.
     const level = page.getByRole("slider", { name: "Dialogue level" });
     check(await level.isVisible(), `${kind}: labelled level sliders`);
+    check((await level.getAttribute("aria-valuetext")) === "0 dB", `${kind}: the level slider reads in dB (${await level.getAttribute("aria-valuetext")})`);
     if (dname === "390") {
       // The slider's track (role "slider" is its thumb).
       const box = await level.locator("xpath=ancestor::*[@data-slot='slider'][1]").boundingBox();
