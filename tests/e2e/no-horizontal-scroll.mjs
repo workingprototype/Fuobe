@@ -125,6 +125,8 @@ for (const scheme of schemes) {
   await ctx.close();
 }
 await browser.close();
+// The sample skill would stand in for "No skills of your own yet" in the Assist flows: it goes again.
+if (!only) await fetch(`${app}/api/assist/skills/layout-check-run`, { method: "DELETE" }).catch(() => {});
 const checks = routes.length * schemes.length;
 console.log("");
 if (wide.length) console.log(`${wide.length} of ${checks} pages scroll sideways at 390 px: ${wide.join(", ")}`);

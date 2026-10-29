@@ -218,6 +218,8 @@ try {
 } finally {
   await browser.close();
   await send("PUT", "/api/settings", { cloudProvider: "auto" });
+  // Other checks (the Assist flows) expect My skills to start empty.
+  await send("DELETE", `/api/assist/skills/${NAME}`);
 }
 console.log(failures.length ? `\n${failures.length} failed` : "\nall passed");
 process.exit(failures.length ? 1 : 0);
