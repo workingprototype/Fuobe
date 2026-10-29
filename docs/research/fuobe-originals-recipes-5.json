@@ -17813,14 +17813,14 @@
      "references": "the endpoint takes no images: references shape the direction only (unverified whether fal-ai/ltx-2.3-22b/reference-video-to-video/lora's IC-LoRA could carry one)"
     },
     "open": {
-     "segments": "≤81 frames (4n+1) at 16 fps, back to back (video-segment-resample), 480p or 720p",
+     "segments": "≤81 frames (4n+1) at 16 fps, back to back (video-segment-resample), 480p or 720p; the graph itself also loads any clip at 16 fps (VHS_LoadVideo, at most `frames` frames, cut to 4n+1) and runs as many frames as it loaded, so a whole clip sent from Edit video is neither slow motion nor a shape error",
      "directionFrame": "qwen-image-edit-2511 on the segment's first frame with the direction, up to 2 references as images 2–3",
-     "video": "video-evolution-wan22-fun-vace: reference latent + VAE-encoded segment, noised to the intensity's denoise the way KSampler does it (a schedule of floor(4 / denoise) steps, the last 4 run, Lightx2v 4-step), the high-noise expert for the first half; Depth Anything 3 depth on every frame",
+     "video": "video-evolution-wan22-fun-vace: reference latent + VAE-encoded segment, noised to denoise = the noise level it starts from (flow matching: (1 − denoise) × clip + denoise × noise). The simple scheduler with shift 5 reaches that level N − 4 steps into a schedule of N = round(4 × (5 − 4 × denoise) / denoise) steps, and the last 4 run (Lightx2v 4-step): low 0.45 → N 28 (starts at σ 0.455), medium 0.65 → N 15 (0.645), high 0.85 → N 8 (0.833). Wan 2.2's high-noise expert takes only the steps at or above its switch point (σ 0.875), so all three intensities run on the low-noise expert; full denoise is the restyle graph's 2 + 2. Depth Anything 3 depth on every frame. (Corrected 2026-10-29: the first version noised the way KSampler does, floor(4 / denoise) steps, which with 4 steps and shift 5 started every intensity at σ 0.83–1 and made high the same as full noise.)",
      "join": "video-concat-N, then the clip's own sound (video-mux-audio)"
     },
     "unverified": [
      "nothing rendered: the denoise values, LTX-2.3's video_strength at these values, and whether fal resamples a 30 fps input to the fixed 24 fps",
-     "the high-noise expert at low denoise (Wan 2.2's experts split by noise level; at 0.45 the first steps start below the usual switch point)"
+     "Lightx2v's 4-step LoRA at these start levels (it was distilled on the full-noise schedule, σ 1 → 0.94 → 0.83 → 0.63), and whether low (σ 0.45) changes enough to be seen"
     ]
    }
   },

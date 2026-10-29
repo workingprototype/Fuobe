@@ -1,30 +1,28 @@
 {
   "1": {
-    "class_type": "LoadVideo",
+    "class_type": "VHS_LoadVideo",
     "inputs": {
-      "file": "segment.mp4"
-    },
-    "_meta": {
-      "title": "source segment (<=81 frames @16 fps)"
-    }
-  },
-  "2": {
-    "class_type": "GetVideoComponents",
-    "inputs": {
-      "video": [
-        "1",
+      "video": "segment.mp4",
+      "force_rate": 16,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": [
+        "30",
         0
-      ]
+      ],
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "Wan"
     },
     "_meta": {
-      "title": "GetVideoComponents"
+      "title": "the clip resampled to 16 fps, at most `frames` frames, cut to 4n+1 (VHS Wan format)"
     }
   },
   "3": {
     "class_type": "ImageScale",
     "inputs": {
       "image": [
-        "2",
+        "1",
         0
       ],
       "upscale_method": "lanczos",
@@ -185,13 +183,13 @@
       "width": 832,
       "height": 480,
       "length": [
-        "30",
-        0
+        "1",
+        1
       ],
       "batch_size": 1,
       "strength": 1.0,
       "control_video": [
-        "32",
+        "9",
         0
       ],
       "reference_image": [
@@ -258,7 +256,10 @@
         "18",
         0
       ],
-      "shift": 5.0
+      "shift": [
+        "50",
+        0
+      ]
     },
     "_meta": {
       "title": "ModelSamplingSD3"
@@ -271,7 +272,10 @@
         "19",
         0
       ],
-      "shift": 5.0
+      "shift": [
+        "50",
+        0
+      ]
     },
     "_meta": {
       "title": "ModelSamplingSD3"
@@ -281,7 +285,7 @@
     "class_type": "KSamplerAdvanced",
     "inputs": {
       "model": [
-        "20",
+        "52",
         0
       ],
       "add_noise": "enable",
@@ -399,8 +403,8 @@
       ],
       "fps": 16.0,
       "audio": [
-        "2",
-        1
+        "1",
+        2
       ],
       "bit_depth": "auto",
       "color_space": "sRGB",
@@ -432,48 +436,14 @@
       "value": 81
     },
     "_meta": {
-      "title": "frames (4n+1, <= source frames)"
-    }
-  },
-  "32": {
-    "class_type": "ImageFromBatch",
-    "inputs": {
-      "image": [
-        "9",
-        0
-      ],
-      "batch_index": 0,
-      "length": [
-        "30",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "depth control for every frame"
-    }
-  },
-  "41": {
-    "class_type": "ImageFromBatch",
-    "inputs": {
-      "image": [
-        "3",
-        0
-      ],
-      "batch_index": 0,
-      "length": [
-        "30",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "source frames (frames)"
+      "title": "frames asked for (4n+1): the loader's cap; the graph runs as many as the clip has"
     }
   },
   "42": {
     "class_type": "VAEEncode",
     "inputs": {
       "pixels": [
-        "41",
+        "3",
         0
       ],
       "vae": [
@@ -524,7 +494,7 @@
       "value": 0.65
     },
     "_meta": {
-      "title": "denoise (change intensity: low 0.45, medium 0.65, high 0.85)"
+      "title": "denoise = the noise level the segment starts from (change intensity: low 0.45, medium 0.65, high 0.85)"
     }
   },
   "46": {
@@ -539,7 +509,7 @@
   "47": {
     "class_type": "ComfyMathExpression",
     "inputs": {
-      "expression": "max(a, floor(a / max(b, 0.05)))",
+      "expression": "max(a, round(a * (c - (c - 1) * min(b, 1)) / max(b, 0.02)))",
       "values.a": [
         "46",
         0
@@ -547,10 +517,14 @@
       "values.b": [
         "45",
         0
+      ],
+      "values.c": [
+        "50",
+        0
       ]
     },
     "_meta": {
-      "title": "schedule length = floor(steps / denoise)"
+      "title": "schedule length N: the simple scheduler's sigma is the denoise `steps` steps before its end (shift c)"
     }
   },
   "48": {
@@ -567,13 +541,13 @@
       ]
     },
     "_meta": {
-      "title": "first step run"
+      "title": "first step run (N - steps)"
     }
   },
   "49": {
     "class_type": "ComfyMathExpression",
     "inputs": {
-      "expression": "b - a + max(1, floor(a / 2))",
+      "expression": "b - a + max(1, c)",
       "values.a": [
         "46",
         0
@@ -581,10 +555,77 @@
       "values.b": [
         "47",
         1
+      ],
+      "values.c": [
+        "53",
+        1
       ]
     },
     "_meta": {
-      "title": "high-noise expert hands over to the low-noise one"
+      "title": "first step of the low-noise expert"
+    }
+  },
+  "50": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 5.0
+    },
+    "_meta": {
+      "title": "shift (ModelSamplingSD3, both experts)"
+    }
+  },
+  "51": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 0.875
+    },
+    "_meta": {
+      "title": "Wan 2.2 A14B's expert switch point (sigma 0.875: the high-noise expert at or above it)"
+    }
+  },
+  "52": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "53",
+        2
+      ],
+      "on_false": [
+        "21",
+        0
+      ],
+      "on_true": [
+        "20",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "the first sampler's expert: high-noise only when the run starts at or above the switch point"
+    }
+  },
+  "53": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "min(a - 1, max(0, floor(b * (1 - d / (c - (c - 1) * d))) - (b - a) + 1))",
+      "values.a": [
+        "46",
+        0
+      ],
+      "values.b": [
+        "47",
+        1
+      ],
+      "values.c": [
+        "50",
+        0
+      ],
+      "values.d": [
+        "51",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "steps at or above the switch point (the high-noise expert's; at least one step is left to the low-noise one)"
     }
   }
 }

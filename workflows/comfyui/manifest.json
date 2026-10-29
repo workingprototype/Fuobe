@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-29T00:50:38.204Z",
+  "generatedAt": "2026-10-29T02:03:47.224Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -9623,7 +9623,7 @@
         "video": [
           {
             "node": "1",
-            "input": "file"
+            "input": "video"
           }
         ],
         "image": [
@@ -9688,6 +9688,10 @@
         ],
         "fps": [
           {
+            "node": "1",
+            "input": "force_rate"
+          },
+          {
             "node": "26",
             "input": "fps"
           }
@@ -9720,12 +9724,8 @@
         ],
         "shift": [
           {
-            "node": "20",
-            "input": "shift"
-          },
-          {
-            "node": "21",
-            "input": "shift"
+            "node": "50",
+            "input": "value"
           }
         ],
         "controlStrength": [
@@ -9815,11 +9815,16 @@
           "sizeGb": 1.23
         }
       ],
-      "customNodes": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
       "vramGb": 24,
       "license": "Apache-2.0 (Wan 2.2 Fun VACE, lightx2v, Depth Anything 3 mono-large)",
       "validated": true,
-      "notes": "Fuobe Evolution (build plan O13) on the GPU: video-segment-resample (<=81 frames @16 fps + first frame) -> qwen-image-edit-2511 takes the first frame toward the creative direction (images 2-3 = references) -> this graph -> video-concat-N -> the clip's sound. Unlike video-restyle-wan22-fun-vace the sampler starts from the segment itself: reference latent + VAE-encoded frames (LatentConcat on t, the shape WanVaceToVideo makes), noised to denoise (low 0.45, medium 0.65, high 0.85) the way KSampler does it: a schedule of floor(steps / denoise) steps of which the last `steps` run (ComfyMathExpression), the high-noise expert for the first half. Control: Depth Anything 3 depth on every frame (no kept frame, no masks); the direction frame is the VACE reference. frames must be 4n+1 and equal the segment's frame count (the source latent and the VACE latent must line up). Same weights as the restyle graph."
+      "notes": "Fuobe Evolution (build plan O13) on the GPU: video-segment-resample (<=81 frames @16 fps + first frame) -> qwen-image-edit-2511 takes the first frame toward the creative direction (images 2-3 = references) -> this graph -> video-concat-N -> the clip's sound. Any clip loads: VHS_LoadVideo resamples it to fps (16), keeps at most `frames` frames and cuts them to 4n+1 (Wan format), and every length in the graph is the loaded count, so a short or 30 fps clip is neither a shape error nor slow motion (Edit video sends whole clips). Unlike video-restyle-wan22-fun-vace the sampler starts from the segment itself: reference latent + VAE-encoded frames (LatentConcat on t, the shape WanVaceToVideo makes), noised to denoise = the noise level it starts from (flow matching: (1 - denoise) x clip + denoise x noise; low 0.45, medium 0.65, high 0.85). The simple scheduler with shift s reaches sigma = denoise N - steps steps into a schedule of N = round(steps x (s - (s - 1) x denoise) / denoise) steps, and the last `steps` run (Lightx2v 4-step), so the run starts within a few hundredths of any denoise from 0.02 to 1 (KSampler's floor(steps / denoise) could only make 1, 0.8, 0.67, 0.57 or 0.5 with 4 steps). Wan 2.2's high-noise expert takes only the steps at or above its switch point (sigma 0.875; ComfySwitchNode gives the first sampler the low-noise expert when the run starts below it, as all three intensities do). Control: Depth Anything 3 depth on every frame (no kept frame, no masks); the direction frame is the VACE reference. Same weights as the restyle graph."
     },
     {
       "id": "mixed-media-zimage-frames",

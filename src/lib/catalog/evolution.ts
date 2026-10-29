@@ -6,7 +6,8 @@
  *
  * - On your GPU: per ≤81-frame segment at 16 fps, Qwen-Image-Edit takes the segment's first frame toward the direction
  *   (the first references as images 2–3), then Wan 2.2 Fun VACE re-renders the segment from the segment itself, noised
- *   to the intensity's denoise, with depth control and that frame as its reference (video-evolution-wan22-fun-vace).
+ *   to the intensity's denoise, with depth control and that frame as its reference (video-evolution-wan22-fun-vace, which
+ *   also loads a whole clip at 16 fps when Edit video sends one).
  * - In the cloud: LTX-2.3 22B video to video on fal, video_strength = 1 − denoise, the direction as the scene; a clip
  *   over 20 s runs as equal pieces. The endpoint takes no images: there the references shape the direction only.
  * - Then the pieces are joined and the clip's own sound put back.
@@ -43,7 +44,8 @@ export const EVOLUTION = {
 export type Intensity = "low" | "medium" | "high";
 
 /**
- * Build plan O13's change intensity: the denoise the open graph starts from (the share of each frame redrawn), and in the
+ * Build plan O13's change intensity: the denoise the open graph starts from (the noise level it takes the clip to:
+ * (1 − denoise) × clip + denoise × noise, then 4 Lightx2v steps back), and in the
  * cloud LTX-2.3's video_strength = 1 − denoise (lower gives the model more freedom). The same numbers are in the research
  * (studios[evolution].original.intensity); tests/evolution.test.ts holds them together.
  */
