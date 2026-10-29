@@ -261,6 +261,8 @@ export async function createEvolution(body: z.infer<typeof EvolutionBodySchema>)
   const info = await probeSource(body.source.url);
   let direction = body.direction?.trim() ?? "";
   let by: DirectionAnswer["by"] | "you" = "you";
+  // Refused before the writer is asked (a clip too short, too many references).
+  if (!direction) planInput(body, info, "the same scene", true);
   if (!direction) {
     const written = await writeDirection({ engine: body.engine, intensity: body.intensity, idea: body.idea, references: body.references, seconds: info.duration ?? body.source.duration });
     direction = written.direction;
