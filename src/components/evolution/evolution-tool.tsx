@@ -17,7 +17,7 @@ import { Feed } from "@/components/studio/feed";
 import { fileToList, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
 import { useEngine, useGenerations } from "@/lib/api";
-import { EVOLUTION, EVOLUTION_DEFAULT_RESOLUTION, EVOLUTION_RESOLUTIONS, INTENSITIES, type Intensity } from "@/lib/catalog/evolution";
+import { DIRECTION_CUT_NOTE, directionPrompt, EVOLUTION, EVOLUTION_DEFAULT_RESOLUTION, EVOLUTION_RESOLUTIONS, INTENSITIES, type Intensity } from "@/lib/catalog/evolution";
 import { chainState } from "@/lib/catalog/shorts";
 import { downloadHref, downloadName } from "@/lib/library";
 import { cn } from "@/lib/utils";
@@ -88,6 +88,9 @@ export function EvolutionTool({ tabs }: { tabs?: React.ReactNode }) {
     : null;
   const estimate = useEvolutionEstimate(body);
   const est = estimate.data && !estimate.isError ? estimate.data : undefined;
+  // The words stay out of the estimate's key, so a direction too long for the models is said here as you type.
+  const cut = useMemo(() => directionPrompt(direction).cut, [direction]);
+  const notes = est ? [...est.notes.filter((n) => n !== DIRECTION_CUT_NOTE), ...(cut ? [DIRECTION_CUT_NOTE] : [])] : [];
 
   const blocker = !clip
     ? "Add a clip"
@@ -291,9 +294,9 @@ export function EvolutionTool({ tabs }: { tabs?: React.ReactNode }) {
                     {actions.run.isPending ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />} Evolve
                   </Button>
                 </div>
-                {est && est.notes.length > 0 && !blocker && (
+                {est && notes.length > 0 && !blocker && (
                   <ul className="space-y-1 text-[12px] leading-snug text-muted-foreground">
-                    {est.notes.map((n) => (
+                    {notes.map((n) => (
                       <li key={n} className="flex gap-1.5">
                         <Sparkles className="mt-0.5 size-3 shrink-0 text-brand-text" />
                         <span>{n}.</span>

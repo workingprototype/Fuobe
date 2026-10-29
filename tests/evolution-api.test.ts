@@ -84,9 +84,30 @@ describe("Evolution: estimates", () => {
     expect(await say(body({ range: { start: 0, end: 3 } }))).toBe("Select at least 4 seconds");
     expect(await say(body({ engine: "open", resolution: "1080p" }))).toMatch(/isn't offered on your GPU/);
     expect(await say({ engine: "cloud" })).toBe("Add a clip and pick how much should change");
+    // Past the limits, the limit is said (not the schema's generic refusal), on every route.
+    expect(await say(body({ direction: "x".repeat(10_001) }))).toBe("Keep the direction under 10,000 characters");
+    expect(await say(body({ references: Array(41).fill(ref) }))).toBe("Use up to 40 references");
+    const create = await createRoute.POST(json(body({ references: Array(41).fill(ref) })));
+    expect([create.status, (await create.json()).error]).toEqual([422, "Use up to 40 references"]);
+    const long = await createRoute.POST(json(body({ direction: "A night market. ".repeat(700) })));
+    expect([long.status, (await long.json()).error]).toEqual([422, "Keep the direction under 10,000 characters"]);
+    const write = await directionRoute.POST(json({ engine: "cloud", references: Array(41).fill(ref) }));
+    expect([write.status, (await write.json()).error]).toEqual([422, "Use up to 40 references"]);
     changeAccess([{ kind: "model", id: "fuobe-evolution", on: false }]);
     expect(await say(body())).toBe("Fuobe Evolution is switched off in the cloud in Settings → Models & licences");
     changeAccess([{ kind: "reset" }]);
+  });
+});
+
+describe("Evolution: a direction longer than the models take", () => {
+  it("the estimate says only its first sentences reach the model, and the page says the same words", async () => {
+    const { DIRECTION_CUT_NOTE, directionPrompt } = await import("@/lib/catalog/evolution");
+    const direction = "A night market in the rain. ".repeat(80);
+    expect(directionPrompt(direction).cut).toBe(true);
+    const est = await (await estimateRoute.POST(json(body({ direction })))).json();
+    expect(est.notes).toContain(DIRECTION_CUT_NOTE);
+    const short = await (await estimateRoute.POST(json(body({ direction: "A night market in the rain." })))).json();
+    expect(short.notes).not.toContain(DIRECTION_CUT_NOTE);
   });
 });
 

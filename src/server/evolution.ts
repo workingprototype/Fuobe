@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { getModel } from "@/lib/catalog";
 import {
+  DIRECTION_CUT_NOTE,
   DIRECTION_SYSTEM,
   directionRequest,
   EVOLUTION,
@@ -40,16 +41,20 @@ export { ShortsError as EvolutionError };
 const fileUrl = z.string().startsWith("/api/files/").max(500);
 const seconds = z.number().finite().min(0).max(3600);
 const intensity = z.enum(["low", "medium", "high"]);
+// Hard caps on what a body may carry, well past the limits: a run over the limits is refused by evolutionProblem in
+// words ("Use up to 40 references"), which a schema failure can't say.
+const DIRECTION_CAP = EVOLUTION.maxDirectionChars * 10;
+const REFERENCES_CAP = EVOLUTION.maxReferences * 10;
 
 /** The body of /api/evolution (and /estimate). */
 export const EvolutionBodySchema = z.object({
   engine: z.enum(["cloud", "open"]),
   intensity: intensity.default("medium"),
   /** The creative direction; empty: written before the run (LLM or offline writer). */
-  direction: z.string().max(EVOLUTION.maxDirectionChars).optional(),
+  direction: z.string().max(DIRECTION_CAP).optional(),
   /** Your few words for the writer, when the direction is left to it. */
   idea: z.string().max(2000).optional(),
-  references: z.array(fileUrl).max(EVOLUTION.maxReferences).default([]),
+  references: z.array(fileUrl).max(REFERENCES_CAP).default([]),
   source: z.object({
     url: fileUrl,
     name: z.string().max(200).optional(),
@@ -70,7 +75,7 @@ export type EvolutionBody = z.input<typeof EvolutionBodySchema>;
 /** The estimate is asked for before the upload finishes: any URL stands in, references may still be uploading. */
 export const EvolutionEstimateSchema = EvolutionBodySchema.extend({
   source: EvolutionBodySchema.shape.source.extend({ url: z.string().max(500).default("/api/files/placeholder.mp4") }),
-  references: z.array(z.string().max(500)).max(EVOLUTION.maxReferences).default([]),
+  references: z.array(z.string().max(500)).max(REFERENCES_CAP).default([]),
 });
 
 /** The body of /api/evolution/direction: what the writer works from. */
@@ -78,7 +83,7 @@ export const DirectionSchema = z.object({
   engine: z.enum(["cloud", "open"]),
   intensity: intensity.default("medium"),
   idea: z.string().max(2000).optional(),
-  references: z.array(fileUrl).max(EVOLUTION.maxReferences).default([]),
+  references: z.array(fileUrl).max(REFERENCES_CAP).default([]),
   /** A frame of the clip the browser grabbed (a JPEG or PNG data URL, at most about 1.5 MB). */
   frame: z
     .string()
@@ -130,6 +135,7 @@ async function referenceImages(urls: string[], max: number) {
  */
 export async function writeDirection(body: z.infer<typeof DirectionSchema>): Promise<DirectionAnswer> {
   mustMatchMode(body.engine);
+  if (body.references.length > EVOLUTION.maxReferences) throw new ShortsError(`Use up to ${EVOLUTION.maxReferences} references`, 422);
   const offline = (why: string): DirectionAnswer => ({ direction: offlineDirection({ intensity: body.intensity as Intensity, idea: body.idea, references: body.references.length }), by: "offline", why });
   if (getSetting("demoMode") === "on") return offline("demo mode");
   const textModel = getModel(body.engine === "open" ? "oss-text-llm" : "text-llm");
@@ -240,7 +246,7 @@ export function estimateEvolution(body: z.infer<typeof EvolutionEstimateSchema>)
   // The price doesn't depend on the words: a stand-in direction when none is written yet.
   const { input, notes } = planInput(body, {}, body.direction?.trim() || "the same scene", false);
   const plan = planEvolution(input);
-  if (plan.cut) notes.push(`Only the first ${EVOLUTION.promptChars.toLocaleString("en")} characters of the direction reach the model`);
+  if (plan.cut) notes.push(DIRECTION_CUT_NOTE);
   return {
     ...price(plan.steps),
     modelName: getModel(EVOLUTION.model)?.name ?? "Fuobe Evolution",

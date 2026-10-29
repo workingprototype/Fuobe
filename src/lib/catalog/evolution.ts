@@ -119,6 +119,9 @@ export function evolutionProblem(o: { engine: Engine; source: Pick<EvolutionSour
 
 const tidy = (s: string) => s.replace(/\s+/g, " ").trim();
 
+/** Said when a direction is longer than the models take (the estimate's note; the page says it as you type). */
+export const DIRECTION_CUT_NOTE = `Only the first ${EVOLUTION.promptChars.toLocaleString("en")} characters of the direction reach the model, up to the last full sentence`;
+
 /** The prompt the models get: the direction, cut after a sentence once it passes EVOLUTION.promptChars. */
 export function directionPrompt(direction: string): { text: string; cut: boolean } {
   const t = tidy(direction);
