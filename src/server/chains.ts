@@ -5,7 +5,7 @@ import { MODEL3D_STEP_FEATURE, stillPromptFor3d } from "@/lib/av/model3d";
 import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
 import { onEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
-import type { ChainSlot, Engine, Generation, GenerationRequest, LoraRef, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
+import type { ChainSlot, Engine, GenParams, Generation, GenerationRequest, LoraRef, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
 import { db } from "./db";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained, previewGeneration } from "./generations";
 import { provider } from "./providers";
@@ -362,27 +362,34 @@ export function createStillTo3d(original: GenerationRequest, model: ModelDef, ro
  * Fuobe DoP's relight effects (Silhouette, Window, Practicals…): the start frame is relit first (Qwen-Image-Edit 2509
  * with its Relight LoRA, on the engine the clip runs on), then animated with the effect's words. One batch of two steps.
  */
-export function createRelitClip(original: GenerationRequest, relight: { engine: Engine; step: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[] } }): Generation[] {
+export function createRelitClip(
+  original: GenerationRequest,
+  relight: { engine: Engine; step: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[]; params?: GenParams; labels?: { step: string; clip: string } } },
+): Generation[] {
   const [image, ...rest] = original.inputs?.images ?? [];
-  if (!image) throw new Error("Add a start frame to relight");
   const { engine, step } = relight;
+  const mixed = !!step.labels;
+  if (!image) throw new Error(mixed ? "Add a start frame to draw in the look" : "Add a start frame to relight");
   // The clip runs on the engine asked for, never quietly on the other one (createGenerations refuses an engine that is off).
   const where = (e: Engine) => (e === "open" ? "on your GPU" : "in the cloud");
-  if (original.engine && original.engine !== engine) throw new Error(`This relight effect was planned ${where(engine)}, but ${where(original.engine)} was asked for`);
+  if (original.engine && original.engine !== engine) throw new Error(`This ${mixed ? "effect" : "relight effect"} was planned ${where(engine)}, but ${where(original.engine)} was asked for`);
   assertOneMode([
-    { label: "Relighting the start frame", modelId: step.modelId, op: step.op, engine },
+    { label: step.labels?.step ?? "Relighting the start frame", modelId: step.modelId, op: step.op, engine },
     { label: getModel(original.modelId)?.name ?? original.modelId, modelId: original.modelId, op: original.op ?? "i2v", engine },
   ]);
   const batchId = nanoid(10);
   const relit = createGenerations(
     {
       feature: original.feature,
+      // The step's model may run on both engines (Fuobe Mixed Media): it runs on the clip's.
+      engine,
       modelId: step.modelId,
       op: step.op,
       prompt: step.prompt,
       inputs: { images: [image] },
       ...(step.loras?.length && { loras: step.loras }),
-      step: { label: "Relit start frame", index: 0, of: 2 },
+      ...(step.params && { params: step.params }),
+      step: { label: step.labels?.step ?? "Relit start frame", index: 0, of: 2 },
     },
     { batchId },
   )[0];
@@ -393,7 +400,7 @@ export function createRelitClip(original: GenerationRequest, relight: { engine: 
         engine,
         inputs: { ...original.inputs, images: rest.length ? rest : undefined },
         chain: [{ slot: "images", position: "first" }],
-        step: { label: "Relit clip", index: 1, of: 2 },
+        step: { label: step.labels?.clip ?? "Relit clip", index: 1, of: 2 },
       },
       { batchId, dependsOn: relit.id },
     )[0];

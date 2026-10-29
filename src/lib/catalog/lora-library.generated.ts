@@ -454,8 +454,7 @@ export const LORA_LIBRARY: LoraEntry[] = [
       "snapshotDate": "2026-10-23",
       "name": "Apache-2.0"
     },
-    "released": "2026-03-02",
-    "spare": true
+    "released": "2026-03-02"
   },
   {
     "key": "albumcover",
@@ -713,8 +712,7 @@ export const LORA_LIBRARY: LoraEntry[] = [
       "snapshotDate": "2026-10-23",
       "name": "Apache-2.0"
     },
-    "released": "2025-12-08",
-    "spare": true
+    "released": "2025-12-08"
   },
   {
     "key": "y2k",
@@ -4079,3 +4077,91 @@ export const MOTION_EFFECT_LORAS: MotionEffectLoras[] = [
     "notes": "Blockbuster templates. Stop World / Frozen in Motion can reuse the bullet-time / matrix-shot LoRAs already mapped; World Morphing can use the LTX-2.3 Transition LoRA."
   }
 ];
+
+/** Fuobe Mixed Media's looks (research studios[mixed-media].original.looks): preset id → the LORA_LIBRARY keys its frames are drawn with. */
+export const MIXED_MEDIA_LOOK_LORAS: Record<string, { key: string; strength: number }[]> = {
+  "mixed-layer-mixed-media": [
+    {
+      "key": "paperdiorama",
+      "strength": 0.5
+    }
+  ],
+  "mixed-sketch": [
+    {
+      "key": "pencil",
+      "strength": 0.8
+    }
+  ],
+  "mixed-canvas": [
+    {
+      "key": "classicpainting",
+      "strength": 0.7
+    }
+  ],
+  "mixed-overexposed": [
+    {
+      "key": "sunbleach",
+      "strength": 0.6
+    }
+  ],
+  "mixed-paper": [
+    {
+      "key": "paperdiorama",
+      "strength": 0.6
+    }
+  ],
+  "mixed-noir": [
+    {
+      "key": "darkroomnoir",
+      "strength": 0.8
+    }
+  ],
+  "mixed-hand-paint": [
+    {
+      "key": "classicpainting",
+      "strength": 0.6
+    }
+  ],
+  "mixed-origami": [
+    {
+      "key": "paperdiorama",
+      "strength": 0.6
+    }
+  ],
+  "mixed-random-glow": [
+    {
+      "key": "dreamyglow",
+      "strength": 0.6
+    }
+  ],
+  "mixed-vintage": [
+    {
+      "key": "pencil",
+      "strength": 0.5
+    }
+  ],
+  "mixed-cannabis": [
+    {
+      "key": "poster",
+      "strength": 0.5
+    }
+  ],
+  "mixed-bubbles": [
+    {
+      "key": "dreamyglow",
+      "strength": 0.5
+    }
+  ],
+  "mixed-magazine": [
+    {
+      "key": "poster",
+      "strength": 0.6
+    }
+  ],
+  "mixed-modern": [
+    {
+      "key": "negspace",
+      "strength": 0.5
+    }
+  ]
+};

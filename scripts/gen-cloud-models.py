@@ -72,7 +72,7 @@ M = []
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
           sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
-          frame_step=None, original=False, sizes=None, keep_shape=False):
+          frame_step=None, original=False, sizes=None, keep_shape=False, licence=None):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
@@ -92,13 +92,14 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     left out for that (fal's nullable image_size) lists the shapes it takes (EnumField.accepts), so "auto" is left out
     and the API follows the input image; a route whose own default matches the input (Replicate's match_input_image)
     leaves it out the same way.
+    licence: the open weights' licence (ModelLicence) when no hosted LoRA endpoint the model runs on records it.
     A route's options dict may also set max_images (FieldMap.maxImages), note, loraEndpoint (the same model with LoRAs:
     FieldMap.loras comes from its research record) and pin (a Replicate model run by version: the research's version)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
                   ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or [],
-                  frame_step=frame_step, original=original, sizes=sizes, keep_shape=keep_shape))
+                  frame_step=frame_step, original=original, sizes=sizes, keep_shape=keep_shape, licence=licence))
 
 
 # ----- Image
@@ -588,12 +589,17 @@ model("fuobe-genjutsu-swap-lite", "Fuobe Genjutsu Lite · Swap", "Fuobe Original
       [("video-swap", _VACE14, "fal", {"keys": {"mask": "mask_video_url"}, "fixed": {"resolution": "480p", "acceleration": "regular"}})],
       original=True, pricing=("second", 0.04, f"480p · {_FRAMES16}"), options={"resolutions": ["480p"]},
       api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "480p"})
+# fal's Wan 2.2 Fun VACE depth endpoint reads video_url as the depth control unless preprocess is on (its example input is
+# a precomputed depth-map video): Fuobe sends the RGB clip, so fal derives the depth itself (research
+# studios[shorts].original.cloud.fixedNote; unverified until the first live run).
+SHORTS_O = next(s for s in ORIGINALS["studios"] if s["id"] == "shorts")["original"]
 model("fuobe-genjutsu-restyle", "Fuobe Genjutsu · Restyle", "Fuobe Original", "fuobe-genjutsu", "video",
       "Every frame takes the look of a restyled first frame, motion kept by depth: Wan 2.2 Fun VACE",
-      [("v2v", "fal-ai/wan-22-vace-fun-a14b/depth")],
+      [("v2v", "fal-ai/wan-22-vace-fun-a14b/depth", "fal", {"fixed": SHORTS_O["cloud"]["fixed"]})],
       original=True, fit_values=True, pricing=("second", 0.1, f"720p; 580p $0.075, 480p $0.05 · {_FRAMES16}; the first frame's restyle is priced on its own",
                                                {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
-      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "720p"})
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "720p"},
+      licence={**SHORTS_O["licence"], "note": "Wan 2.2 Fun VACE A14B weights are Apache-2.0 (the first frame's model has its own licence)"})
 # Character swap (Openjutsu / Akatz Labs' H3 Character Swap): the part of the clip (5–15 s) is Video 1, the character
 # Image 1 and the anchor first frame Image 2. Prompt expansion off so H3's reference tags reach the model as written.
 model("fuobe-character-swap", "Fuobe Character swap", "Fuobe Original", "fuobe-character-swap", "video",
@@ -602,6 +608,26 @@ model("fuobe-character-swap", "Fuobe Character swap", "Fuobe Original", "fuobe-c
       original=True, fit_values=True, badges=["audio"],
       pricing=("second", 0.075, "768p; 480p $0.0625/s; whole seconds, 5–15 per call", {"byResolution": {"768p": 0.075, "480p": 0.0625}}),
       options={"resolutions": ["480p", "768p"]}, defaults={"resolution": "768p"})
+# ----- Originals (O9): Fuobe Mixed Media and Fuobe Shorts on hosted open weights (research §8 mixed-media →
+# studios[mixed-media].original, studios[shorts].original). Mixed Media's cloud half draws one frame: Z-Image Turbo
+# with its Fun ControlNet on the frame's own outlines (preprocess canny) and the look's LoRAs, at the render's one
+# seed; src/lib/catalog/mixed-media.ts fans it out over every frame (and frame 0 of Smooth), sending the frame's
+# size (image_size {width, height}: about 1 or 4 megapixels in the clip's shape) and the look's control scale.
+# Shorts' cloud half is Wan 2.2 Fun VACE by depth from a restyled first frame; its aspect ratio isn't asked of the
+# model (the cut is cropped to 9:16 or 16:9 first, as for any restyle model that keeps its input's shape).
+MIXED_O = next(s for s in ORIGINALS["studios"] if s["id"] == "mixed-media")["original"]["cloud"]
+model("fuobe-mixed-media", "Fuobe Mixed Media", "Fuobe Original", "fuobe-mixed-media", "video",
+      "Every frame drawn again in the look under its own outlines, one seed: Z-Image Turbo + ControlNet with the look's LoRA",
+      [("edit", MIXED_O["frame"], "fal", {"fixed": MIXED_O["fixed"], "defaults": MIXED_O["defaults"]})],
+      original=True, pricing=("megapixel", per_megapixel(MIXED_O["frame"]), MIXED_O["price"]))
+# The restyled first frame goes as first_frame_url only (the recipe sends no VACE subject references: `images` is dropped),
+# and fal derives the depth from the cut (preprocess, fixed).
+model("fuobe-shorts", "Fuobe Shorts", "Fuobe Original", "fuobe-shorts", "video",
+      "Your footage in a new look, motion kept: a restyled first frame carried through every frame by depth (Wan 2.2 Fun VACE)",
+      [("v2v", SHORTS_O["cloud"]["restyle"], "fal", {"drop": ["aspectRatio", "images"], "fixed": SHORTS_O["cloud"]["fixed"]})],
+      original=True, fit_values=True, pricing=("second", 0.1, f"720p; 580p $0.075, 480p $0.05 · {_FRAMES16}; the first frame's Qwen edit is priced on its own",
+                                               {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
+      api_defaults=SHORTS_O["cloud"]["defaults"], defaults={"resolution": "720p"}, licence=SHORTS_O["licence"])
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
@@ -1937,6 +1963,8 @@ for m in M:
         d["licence"] = {"licence": lic["baseLicence"], "commercial": lic.get("commercialWeights"),
                         **({"note": lic["licenceNote"]} if lic.get("licenceNote") else {}),
                         **({"checked": lic["checked"]} if lic.get("checked") else {})}
+    elif m["licence"]:
+        d["licence"] = m["licence"]
     defaults = {k: v for k, v in m["defaults"].items()}
     # Drop defaults the model can't take.
     if "aspectRatio" in defaults and defaults["aspectRatio"] not in opts.get("aspectRatios", [defaults["aspectRatio"]]):

@@ -14,12 +14,16 @@
  * - Licences are information: a LoRA licensed for the user's GPU only (civitai "RentCivit") goes to the cloud route
  *   too, unless Settings → Models & licences keeps such LoRAs on the GPU (fitLoras then leaves it out, saying so); a
  *   non-commercial LoRA or one whose licence the research holds is used and said in the preset's line.
+ * - The Mixed Media looks (32 effects, build plan O9) draw the start frame in the Mixed Media studio's look first
+ *   (Fuobe Mixed Media: Z-Image Turbo + ControlNet with the look's LoRA, one seed), then animate it on the words.
  * - A preset with nothing of the Original's own in the cloud (no hostable LoRA, camera LoRA, hosted move, grade or
  *   relight) keeps its partner route there, Kling 2.5 Turbo on the preset's words: Fuobe DoP on the words alone
  *   becomes its cloud default only when the evaluation harness (scripts/eval, O8) promotes it. On the user's GPU it
  *   is Fuobe DoP (Wan 2.2 on the words, as before).
  */
 import { gpuOnlyLicence, libraryEntry, loraName, loraRef, triggerOf } from "./loras";
+import { defaultValues, getMixedPreset, originalFrameRequest } from "./mixed-media";
+import { mixedLoras } from "./mixed-media-looks";
 import { DOP_RECIPES, OSS_LORAS, type DopRecipe, type OssLora } from "./oss-loras.generated";
 import type { LoraRef, Operation, Preset, PresetRoute } from "./types";
 
@@ -108,6 +112,25 @@ const RELIGHT_LIGHT: Record<string, string> = {
 
 const bare = (id: string) => id.replace(/^(motion|effect|app)-/, "");
 
+/** The Mixed Media studio look a DoP Mixed Media effect is ("effect-two-color" → "mixed-two-color"). */
+export const mixedLookOf = (presetId: string) => getMixedPreset(`mixed-${bare(presetId)}`);
+
+/**
+ * A Mixed Media effect's step before the clip (O9): the still drawn in the studio look's default settings by Fuobe Mixed
+ * Media on the engine the clip runs on (its LoRA, its seed; about 1 megapixel on fal, the still's own shape).
+ */
+function mixedPrestep(presetId: string): Preset["prestep"] {
+  const look = mixedLookOf(presetId);
+  if (!look) return undefined;
+  const values = defaultValues(look);
+  const labels = { step: `Start frame as ${look.name}`, clip: `${look.name} clip` };
+  const step = (engine: "open" | "cloud") => {
+    const { modelId, prompt, loras, params } = originalFrameRequest({ engine, preset: look, values, resolution: "1K", loras: mixedLoras(look.id) });
+    return { modelId, op: "edit" as const, prompt: prompt ?? "", ...(loras?.length && { loras }), ...(params && { params }), labels };
+  };
+  return { open: step("open"), cloud: step("cloud") };
+}
+
 /** A map LoRA as a recipe's LoRA: the library's pinned download and licence when it is a library file. */
 function asRef(l: OssLora): LoraRef {
   const e = libraryEntry(l);
@@ -190,6 +213,9 @@ export function dopPreset(p: Preset): Preset {
       cloud: { modelId: RELIGHT_CLOUD, op: "edit", prompt: `${RELIGHT_TRIGGER}, ${light}`, loras: [relightLora] },
     };
   }
+  // The Mixed Media looks: the still in the look first (Fuobe Mixed Media), then Wan 2.2 animates it on the words.
+  const mixedLook = status === "mixed-media-route" ? mixedLookOf(p.id) : undefined;
+  if (mixedLook) extras.prestep = mixedPrestep(p.id);
 
   // In the cloud: LTX-2.5's own move, LTX-2.3's camera LoRA, the Wan or LTX LoRAs a host runs, a grade or a relight on
   // Wan. A LoRA licensed for the GPU only rides along on Fuobe DoP (said below; the admin can keep such LoRAs on the
@@ -226,7 +252,10 @@ export function dopPreset(p: Preset): Preset {
   const held = status === "licence-hold" ? presetLoras(p.id).map((l) => l.ref) : [];
   let parity: string;
   if (grade) parity = "Fuobe DoP animates your still without a LoRA, then your browser grades the clip";
-  else if (extras.prestep) parity = "Fuobe DoP relights your still first (Qwen-Image-Edit 2509 + its Relight LoRA), then animates it";
+  else if (mixedLook && extras.prestep) {
+    const lora = extras.prestep.cloud.loras?.length ? ` with ${names(extras.prestep.cloud.loras)}` : "";
+    parity = `Fuobe DoP draws your still as ${mixedLook.name} first (Fuobe Mixed Media: Z-Image Turbo + ControlNet${lora}), then animates it, on your GPU and in the cloud. For a whole clip restyled frame by frame, use Mixed Media`;
+  } else if (extras.prestep) parity = "Fuobe DoP relights your still first (Qwen-Image-Edit 2509 + its Relight LoRA), then animates it";
   else if (status === "mixed-media-route") parity = `${p.parity ?? ""}${p.parity ? ". " : ""}For a whole clip restyled frame by frame, use Mixed Media`;
   else if (openSays === cloudSays) parity = `Fuobe DoP: ${openSays}, on your GPU and in the cloud`;
   else parity = `Fuobe DoP on your GPU: ${openSays}. In the cloud: ${cloudSays}`;

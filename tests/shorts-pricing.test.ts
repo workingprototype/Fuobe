@@ -56,7 +56,8 @@ describe("restyled segments stay in sync with the original sound", () => {
       for (const modelId of SHORTS_MODELS.cloud) {
         const plan = planShorts(shorts({ modelId, range: { start, end }, source: { url: "/api/files/x.mp4", duration: 130, hasAudio: true } }));
         const looks = plan.steps.filter((s) => s.request.op === "v2v");
-        const sum = looks.reduce((n, s) => n + (s.request.params!.duration as number), 0);
+        // Fuobe Shorts is billed on frames ÷ 16 (duration); its segments' own lengths are sourceDuration.
+        const sum = looks.reduce((n, s) => n + ((s.request.params!.sourceDuration ?? s.request.params!.duration) as number), 0);
         expect(sum).toBeCloseTo(end - start, 2);
       }
     }

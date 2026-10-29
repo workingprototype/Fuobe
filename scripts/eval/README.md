@@ -117,8 +117,8 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `dop` | Fuobe DoP motions and effects | the 69 the research gives a LoRA, and the 20 camera moves it gives a Fun Camera pose or an LTX camera LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
 | `dop-mix` | Fuobe DoP's Mix | 5 move + effect pairs | `mix` (the candidate), `first` (the move alone) | temporal, clip |
 | `genjutsu` | Genjutsu move / swap / restyle / Character swap | 7: Motion transfer and Object swap (each also on the Lite tier), Restyle, and Character swap with and without the first frame (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
-| `mixed-media` | Mixed Media | 5 looks on one clip (through `/api/mixed-media`) | `studio` | temporal, style |
-| `shorts` | Shorts restyle | 1 | `restyle` | temporal, style, clip |
+| `mixed-media` | Fuobe Mixed Media (O9) | 7 looks on one clip, 3 s at 8 fps (through `/api/mixed-media`): 3 with a look LoRA, 4 on their words | `studio` (the Original frame by frame), `smooth` (its first frame, then Wan 2.2 Fun VACE), `words` (open: the per-frame model before O9), `partner-frames` (cloud: Nano Banana 2 per frame), `fast` (cloud: LTX-2.3 Reference Restyle) | temporal, style |
+| `shorts` | Fuobe Shorts (O9) | 2: one segment from its first frame (`/api/generations`), and a 6 s session (`/api/shorts/sessions`) | `restyle` (Fuobe Shorts), `partner` (cloud: Gemini Omni Flash) | temporal, style, clip |
 | `speak` | talking portraits | 1 portrait + voice | `infinitetalk`, `s2v` | lipsync, temporal, identity |
 | `cinema` | Fuobe Cinema (O6) | 3 Director scenes (the prompt Cinema compiles), 4 camera moves as LTX-2.3's `camera_lora` (cloud), 2 films of 3 shots | `original`, `words` (no camera LoRA), `expansion` (fal's prompt expansion on), `wan` (Wan 2.2 A14B hosted), `partner` (Seedance 2.5); all but `original` cloud only | clip, temporal, continuity |
 | `marketing` | Fuobe Marketing Image, Fuobe Try-On, the AI Influencer sheet and Instadump (O10) | 7: a Standalone product shot (the product-shot graph on your GPU; hosted Qwen-Image-Edit in the cloud), an ad's picture, a poster without a product, a try-on, the builder's sheet (through `/api/influencer`), an Instadump photo from a selfie | `original`, `partner` (cloud: GPT Image 2.5, Nano Banana Pro, Ideogram 3.0, FASHN) | clip, aesthetic, style (the product), identity (try-on, Instadump) |
@@ -193,13 +193,14 @@ small synthetic files in `fixtures/` instead.
 scripts/eval/local/
   references/soul/<look-slug>/*.jpg   # style references per look (your own or licensed images; never Higgsfield previews)
   references/mixed-media/<look>/*     # what each Mixed Media look should look like
+  references/shorts/claymation/*      # what the Shorts session's look should look like
   characters/default/*.jpg            # 20+ photos (80 at most) of ONE consenting person (soul-id)
   styles/default/*.jpg                # 20+ images in one style, a moodboard (soul-id/look)
   dop/start.png, dop/end.png          # a start frame (a person on a bridge fits the prompts), an end frame for transitions
   genjutsu/dance.mp4, character.png, style.png
   genjutsu/street.mp4, object.png     # street.mp4 at least 720 px on each side (Kling O3's edit, the cloud partner)
-  mixed-media/clip.mp4
-  shorts/clip.mp4, shorts/frame0.png
+  mixed-media/clip.mp4                # 4–10 s
+  shorts/clip.mp4, shorts/frame0.png  # clip.mp4 at least 6 s (the session case); frame0.png its first frame in the new look
   speak/portrait.png, speak/voice.wav
   marketing/product.png, person.png   # a product photo on a plain background; a full-body photo of a consenting person
   marketing/garment.png, selfie.jpg   # a garment on its own or flat-lay; a consenting person's selfie

@@ -78,7 +78,9 @@ describe("Shorts presets and catalog", () => {
       if (typeof id === "number") continue;
       expect(getModel(id), id).toBeDefined();
     }
-    expect(SHORTS_MODELS.cloud[0]).toBe("gemini-omni-flash");
+    // Fuobe Shorts (O9) is the default on both engines; Gemini Omni Flash (Higgsfield's Shorts engine) stays a choice.
+    expect(SHORTS_MODELS.cloud.slice(0, 2)).toEqual(["fuobe-shorts", "gemini-omni-flash"]);
+    expect(SHORTS_MODELS.open).toEqual(["fuobe-shorts"]);
     for (const id of SHORTS_MODELS.cloud) expect(getModel(id)!.routes.some((r) => r.op === "v2v"), id).toBe(true);
   });
 

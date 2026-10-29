@@ -1320,10 +1320,13 @@ function planCharacterSwap(input: GenjutsuPlanInput): GenjutsuPlan {
 // ---------------------------------------------------------------------------
 // Restyle
 
-/** The first frame's restyle: a Soul look's LoRAs on Z-Image (Fuobe Soul's edit), else Qwen-Image-Edit with the look's images. */
-function lookFrameRequest(engine: Engine, look: GenjutsuLook, sl: ShortsLook, refs: string[], seed: object): Pick<GenerationRequest, "modelId" | "op" | "prompt" | "presetId" | "inputs" | "params"> {
+/**
+ * The first frame's restyle: a Soul look's LoRAs on Z-Image (Fuobe Soul's edit, an Original: it runs on the engine the
+ * restyle does, never on whichever one is connected first), else Qwen-Image-Edit with the look's images.
+ */
+function lookFrameRequest(engine: Engine, look: GenjutsuLook, sl: ShortsLook, refs: string[], seed: object): Pick<GenerationRequest, "modelId" | "op" | "prompt" | "presetId" | "inputs" | "params" | "engine"> {
   if (look.kind === "soul") {
-    return { modelId: "fuobe-soul", op: "edit", presetId: look.id, prompt: "The same frame: every person, face, pose and object in place", params: { ...seed } };
+    return { modelId: "fuobe-soul", engine, op: "edit", presetId: look.id, prompt: "The same frame: every person, face, pose and object in place", params: { ...seed } };
   }
   return {
     modelId: engine === "open" ? "oss-qwen-edit" : "qwen-image-edit-2511-cloud",
@@ -1358,6 +1361,8 @@ function planFuobeRestyle(input: GenjutsuPlanInput): GenjutsuPlan {
   const seed = input.seed !== undefined ? { seed: input.seed } : {};
   const steps = plan.steps.map((s) => {
     let request: GenerationRequest = s.key === final ? { ...s.request, feature: GENJUTSU.feature, title: input.title } : { ...s.request, feature: GENJUTSU.stepFeature };
+    // The Original runs on the engine it was picked for (a model on both engines would otherwise take the first one connected).
+    if (request.modelId === m.id && m.source === "original") request = { ...request, engine: m.engine };
     // A Soul look restyles the first frame with its own LoRAs (Fuobe Soul's edit) instead of the Qwen edit.
     if (input.look?.kind === "soul" && /^frame\d/.test(s.key)) request = { ...request, ...lookFrameRequest(m.engine, input.look, look, [], seed), inputs: undefined };
     return { ...s, request };
@@ -1395,6 +1400,7 @@ function planCloudRestyle(input: GenjutsuPlanInput): GenjutsuPlan {
       key: `restyle${i}`,
       request: {
         ...(own ? { ...base, title: input.title } : helper),
+        engine: "cloud",
         modelId: m.id,
         op: "v2v",
         prompt: segmentPrompt(look),

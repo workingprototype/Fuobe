@@ -1083,7 +1083,10 @@ export interface Preset {
   prestep?: PresetPrestep;
 }
 
-/** A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, then animates it). */
+/**
+ * A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, or draws it in a Mixed Media look
+ * on Fuobe Mixed Media, then animates it).
+ */
 export interface PresetPrestep {
   open: PrestepRoute;
   cloud: PrestepRoute;
@@ -1094,6 +1097,10 @@ export interface PrestepRoute {
   op: Operation;
   prompt: string;
   loras?: LoraRef[];
+  /** The step's own settings (Fuobe Mixed Media: its seed, control scale or strength). */
+  params?: GenParams;
+  /** What the step and the clip after it are called in a run ("Start frame in the look", "Restyled clip"); relight's when unset. */
+  labels?: { step: string; clip: string };
   /** What the step costs (a 1-megapixel picture), added to the clip's price before the run; 0 on the user's GPU. */
   usd?: number;
 }

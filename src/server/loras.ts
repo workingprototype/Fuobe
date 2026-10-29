@@ -271,6 +271,22 @@ function downloadOnce(ref: LoraRef, dir: string, onProgress?: (m: string) => voi
   return p;
 }
 
+/**
+ * One copy per file and host at a time: a per-frame render (Fuobe Mixed Media: up to 240 frames with the same look LoRA)
+ * starts many submits at once, and each would otherwise read the file, ask civitai and upload it again. The ones that
+ * come after the first wait for its copy (or its error).
+ */
+const mirroring = new Map<string, Promise<LoraRef>>();
+
+function mirrorOnce(l: LoraRef, target: "fal" | "replicate", copy: () => Promise<LoraRef>): Promise<LoraRef> {
+  const key = `${target}::${l.file}`;
+  const cur = mirroring.get(key);
+  if (cur) return cur.then((done) => ({ ...l, hostedUrl: done.hostedUrl }));
+  const p = copy().finally(() => mirroring.delete(key));
+  mirroring.set(key, p);
+  return p;
+}
+
 /** The licence a copy is made under: the research's snapshot (and the permissions civitai shows today, when read). */
 const licenceSnapshot = (ref: LoraRef, entry: LoraEntry | undefined, permissionsNow?: string[] | null) => {
   const l = ref.licence ?? entry?.licence;
@@ -348,7 +364,7 @@ export async function prepareCloudLoras(
     // Only while the admin keeps GPU-only LoRAs on the GPU (fitLoras has left it out of a cloud run already).
     if (localOnly(l)) throw new LoraError(`${name} is licensed for your GPU only, and Settings → Models & licences keeps such LoRAs off the cloud`);
     if (l.own && !l.hostedUrl) {
-      out.push(await sendOwnLora(l, target, upload, onProgress));
+      out.push(await mirrorOnce(l, target, () => sendOwnLora(l, target, upload, onProgress)));
       continue;
     }
     if (cloudPath(l)) {
@@ -362,50 +378,64 @@ export async function prepareCloudLoras(
       out.push({ ...l, hostedUrl: cached.hostedUrl });
       continue;
     }
-    // The hosting right is read again before a copy is made (civitai permissions can change) and recorded with the copy.
-    // It decides only while the admin keeps GPU-only LoRAs on the GPU: then no answer, or no "Rent", means no copy.
-    const version = l.version ?? entry?.version ?? civitaiVersion(l.url);
-    const strict = !!l.keepOnGpu;
-    const modelId = entry?.civitaiModel ?? (version ? (await civitaiVersionFacts(version)).modelId : undefined);
-    const now = modelId ? await civitaiPermissions(modelId) : null;
-    if (strict && !now) throw new LoraError(`Couldn't confirm on civitai that ${name} may run on a hosted service, so it isn't copied to ${host} (Settings → Models & licences keeps LoRAs licensed for your GPU only off the cloud). Try again in a moment, or run it on your GPU`);
-    if (strict && !now!.includes("Rent")) {
-      throw new LoraError(`${name}'s civitai licence no longer allows running it on a hosted service, and Settings → Models & licences keeps such LoRAs off the cloud, so it runs only on your GPU`);
-    }
-    // A copy already on this machine is used when its bytes are the pinned ones (a same-named file may be another LoRA).
-    const local = [getSetting("comfyLorasDir"), LORA_CACHE_DIR]
-      .filter(Boolean)
-      .map((d) => {
-        try {
-          return lorasPath(d, l.file);
-        } catch {
-          return "";
-        }
-      })
-      .find((p) => p && fs.existsSync(p) && (!entry?.sha256 || sha256File(p) === entry.sha256));
-    let file = local;
-    let facts: Pick<Downloaded, "sha256" | "sizeBytes" | "version"> | null = null;
-    if (!file) {
-      const got = await downloadOnce(l, LORA_CACHE_DIR, onProgress);
-      file = got.path;
-      facts = got;
-    }
-    onProgress?.(`Copying ${name} to ${host} (once)`);
-    const data = fs.readFileSync(file);
-    const hostedUrl = await upload(data, path.basename(l.file));
-    recordCopy({
-      file: l.file,
-      target,
-      sourceUrl: l.url,
-      version: facts?.version ?? l.version ?? entry?.version ?? null,
-      hostedUrl,
-      sha256: facts?.sha256 ?? crypto.createHash("sha256").update(data).digest("hex"),
-      sizeBytes: data.length,
-      licence: { ...licenceSnapshot(l, entry, now), ...(hostingNote(now) && { hosting: hostingNote(now) }) },
-    });
-    out.push({ ...l, hostedUrl });
+    const civitai = { ...l, url: l.url };
+    out.push(await mirrorOnce(l, target, () => mirrorCivitai(civitai, entry, target, upload, onProgress)));
   }
   return out;
+}
+
+/** A civitai LoRA copied to the provider's storage (once: prepareCloudLoras runs it through mirrorOnce). */
+async function mirrorCivitai(
+  l: LoraRef & { url: string },
+  entry: LoraEntry | undefined,
+  target: "fal" | "replicate",
+  upload: (data: Buffer, name: string) => Promise<string>,
+  onProgress?: (m: string) => void,
+): Promise<LoraRef> {
+  const host = target === "fal" ? "fal.ai" : "Replicate";
+  const name = loraName(l);
+  // The hosting right is read again before a copy is made (civitai permissions can change) and recorded with the copy.
+  // It decides only while the admin keeps GPU-only LoRAs on the GPU: then no answer, or no "Rent", means no copy.
+  const version = l.version ?? entry?.version ?? civitaiVersion(l.url);
+  const strict = !!l.keepOnGpu;
+  const modelId = entry?.civitaiModel ?? (version ? (await civitaiVersionFacts(version)).modelId : undefined);
+  const now = modelId ? await civitaiPermissions(modelId) : null;
+  if (strict && !now) throw new LoraError(`Couldn't confirm on civitai that ${name} may run on a hosted service, so it isn't copied to ${host} (Settings → Models & licences keeps LoRAs licensed for your GPU only off the cloud). Try again in a moment, or run it on your GPU`);
+  if (strict && !now!.includes("Rent")) {
+    throw new LoraError(`${name}'s civitai licence no longer allows running it on a hosted service, and Settings → Models & licences keeps such LoRAs off the cloud, so it runs only on your GPU`);
+  }
+  // A copy already on this machine is used when its bytes are the pinned ones (a same-named file may be another LoRA).
+  const local = [getSetting("comfyLorasDir"), LORA_CACHE_DIR]
+    .filter(Boolean)
+    .map((d) => {
+      try {
+        return lorasPath(d, l.file);
+      } catch {
+        return "";
+      }
+    })
+    .find((p) => p && fs.existsSync(p) && (!entry?.sha256 || sha256File(p) === entry.sha256));
+  let file = local;
+  let facts: Pick<Downloaded, "sha256" | "sizeBytes" | "version"> | null = null;
+  if (!file) {
+    const got = await downloadOnce(l, LORA_CACHE_DIR, onProgress);
+    file = got.path;
+    facts = got;
+  }
+  onProgress?.(`Copying ${name} to ${host} (once)`);
+  const data = fs.readFileSync(file);
+  const hostedUrl = await upload(data, path.basename(l.file));
+  recordCopy({
+    file: l.file,
+    target,
+    sourceUrl: l.url,
+    version: facts?.version ?? l.version ?? entry?.version ?? null,
+    hostedUrl,
+    sha256: facts?.sha256 ?? crypto.createHash("sha256").update(data).digest("hex"),
+    sizeBytes: data.length,
+    licence: { ...licenceSnapshot(l, entry, now), ...(hostingNote(now) && { hosting: hostingNote(now) }) },
+  });
+  return { ...l, hostedUrl };
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +583,27 @@ export function withoutUnreachableCivitai(loras: LoraRef[], target: MirrorTarget
   return {
     loras: loras.filter((l) => !unreachable.includes(l)),
     notes: [`${list} ${names.length > 1 ? "download" : "downloads"} from civitai, which needs your free API key (Settings → LoRAs), so this run leaves ${names.length > 1 ? "them" : "it"} out`],
+  };
+}
+
+/**
+ * Before a look's run on your GPU (Fuobe Mixed Media) while Settings → LoRAs has no LoRA folder: Fuobe can't download a
+ * LoRA for ComfyUI then, so one ComfyUI doesn't list is left out (and said) and the look runs on its words, instead of
+ * failing when the run is handed over (ensureLorasOnComfy). `listed`: ComfyUI's LoRA files (null when it couldn't say:
+ * nothing is left out, ComfyUI's own check has the last word).
+ */
+export function withoutMissingOnComfy(loras: LoraRef[], listed: string[] | null): { loras: LoraRef[]; notes: string[] } {
+  if (!loras.length || !listed || getSetting("comfyLorasDir")) return { loras, notes: [] };
+  const have = new Set(listed.map((f) => f.replace(/\\/g, "/")));
+  const missing = loras.filter((l) => l.file && !have.has(l.file));
+  if (!missing.length) return { loras, notes: [] };
+  const names = [...new Set(missing.map(loraName))];
+  const list = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return {
+    loras: loras.filter((l) => !missing.includes(l)),
+    notes: [
+      `ComfyUI doesn't have ${list} yet, and Fuobe downloads LoRAs for it only once Settings → LoRAs has its LoRA folder, so this run leaves ${names.length > 1 ? "them" : "it"} out (the look runs on its words)`,
+    ],
   };
 }
 

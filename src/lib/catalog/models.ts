@@ -1726,6 +1726,37 @@ const originals: ModelDef[] = [
       },
     }),
   },
+  // Fuobe Mixed Media (O9): Higgsfield's Mixed Media rebuilt on Z-Image Turbo + its Fun ControlNet, every frame drawn
+  // again in the look (its LoRA from the research's looks map) at one seed. On your GPU the whole selection is one
+  // per-frame job (v2v); in the cloud src/lib/catalog/mixed-media.ts fans the frame route out over every frame and puts
+  // them back together. "edit" is one frame in the look on both engines: the preview, Smooth's first frame and DoP's
+  // Mixed Media effects (Smooth then carries that frame through the clip on Fuobe Shorts' Wan 2.2 Fun VACE pass).
+  {
+    ...original({
+      id: "fuobe-mixed-media",
+      open: [
+        comfy("v2v", "mixed-media-zimage-frames", "every frame on Z-Image Turbo + Fun Union ControlNet (canny) with the look's LoRA, one seed"),
+        comfy("edit", "z-image-turbo-i2i", "one frame in the look with its LoRA (Smooth's first frame, DoP's Mixed Media effects)"),
+      ],
+      tagline: "Every frame drawn again in the look, one seed · Z-Image Turbo + ControlNet free on your GPU (16 GB), or per frame on fal",
+      options: { seed: true, resolutions: ["1K", "2K"], maxImages: 1, maxOutputs: 1 },
+    }),
+    // The per-frame graph renders up to 1536 px on the long side (its manifest's limit).
+    engineOptions: { open: { resolutions: ["1K"] } },
+  },
+  // Fuobe Shorts (O9): Shorts Studio's Original, the open Shorts chain on both engines: each segment's first frame in the
+  // look (Qwen-Image-Edit 2511 with up to two reference images), then Wan 2.2 Fun VACE carries it through every frame by
+  // depth; the segments are joined and the clip's own sound put back (src/lib/catalog/shorts.ts plans the steps).
+  {
+    ...original({
+      id: "fuobe-shorts",
+      open: [comfy("v2v", "video-restyle-wan22-fun-vace", "the restyled first frame, then every frame with depth; 81 frames at 16 fps a segment")],
+      tagline: "Your footage in a new look, motion kept · Wan 2.2 Fun VACE free on your GPU (24 GB), or hosted on fal",
+      options: { seed: true, negativePrompt: true, resolutions: ["480p", "720p"], maxImages: 1 },
+    }),
+    // The GPU graph follows a restyled first frame it can't make itself (fal's route runs without one, on the words).
+    engineOptions: { open: { requires: { images: 1, msg: "Add the clip's first frame in the new look: Wan 2.2 Fun VACE carries it through every frame" } } },
+  },
 ];
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */

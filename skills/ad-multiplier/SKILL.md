@@ -26,8 +26,10 @@ Prompt is exclusive with Hook/CTA; Hook and CTA can be combined.
 Op `v2v` with the ad in `video` and the change described precisely ("same shots and timing; the
 creator is now in a sunny kitchen; the product is the green bottle from the image"), product or
 subject photos in `images`. Cloud `kling-o3` (video edit with up to 4 references), `happy-horse-video-edit`,
-`gemini-omni-flash`; open `oss-mixed-media` or `oss-wan22-vace-restyle`. Resolution 1080p by
-default (480p for quick tests). 3–5 variants per batch, each one `generate` job.
+`gemini-omni-flash`; open (with `engine: "open"`) `fuobe-mixed-media` (every frame redrawn in the
+look, one seed; it reads no photos) or `fuobe-shorts` (Wan 2.2 Fun VACE carries a restyled first
+frame, given in `images`, through the ad). Resolution 1080p by default (480p for quick tests).
+3–5 variants per batch, each one `generate` job.
 
 ## Hook / CTA variants
 1. Get the first (or last) frame: op `frame` on the ad, or ask the user for a screenshot.

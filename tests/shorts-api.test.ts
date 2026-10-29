@@ -60,6 +60,8 @@ const dependsOn = (id: string) => {
   return !v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v];
 };
 
+// Gemini Omni Flash (Higgsfield's Shorts engine, a partner choice) unless a test names another model; Fuobe Shorts, the
+// default since build plan O9, has tests of its own below.
 const body = (over: Record<string, unknown> = {}) => ({
   engine: "cloud",
   presetId: "shorts-claymation",
@@ -67,6 +69,7 @@ const body = (over: Record<string, unknown> = {}) => ({
   range: { start: 0, end: 12 },
   aspectRatio: "9:16",
   language: "auto",
+  ...(over.engine === "open" ? {} : { modelId: "gemini-omni-flash" }),
   ...over,
 });
 
@@ -245,7 +248,9 @@ describe("Shorts sessions", () => {
 
   it("runs the open engine: segment (+ first frame) → Qwen first-frame restyle → Wan VACE → join → soundtrack", async () => {
     const s = await shorts.createSession(body({ engine: "open" }) as never);
-    expect(s.settings.modelId).toBe("oss-wan22-vace-restyle");
+    // Fuobe Shorts is the open engine's restyle model (the same graph oss-wan22-vace-restyle ran), on the GPU.
+    expect(s.settings.modelId).toBe("fuobe-shorts");
+    expect(gens.getGeneration(s.segments[0].takes[0].look)).toMatchObject({ modelId: "fuobe-shorts", engine: "open", provider: "mock" });
     expect(s.segments.map((g) => g.frames)).toEqual([65, 65, 61]);
     const take = s.segments[2].takes[0];
     expect(gens.getGeneration(take.cut)).toMatchObject({ modelId: "oss-segment", op: "trim" });
@@ -257,6 +262,54 @@ describe("Shorts sessions", () => {
     const frame = gens.getGeneration(take.frame!)!;
     expect(frame.status).toBe("succeeded");
     expect(frame.request.inputs?.images?.[0]).toMatch(/^\/api\/files\//);
+  });
+
+  it("runs Fuobe Shorts in the cloud by default: cut → first frame → Qwen edit in the look → Wan Fun VACE by depth → join → sound", async () => {
+    const rest = { ...body(), modelId: undefined };
+    const s = await shorts.createSession(rest as never);
+    expect(s.settings).toMatchObject({ modelId: "fuobe-shorts", maxRefs: 2, resolution: "720p", reframes: false });
+    // A 16 fps clip: pieces of up to 240 frames (15 s) and 10 s: two 6 s segments.
+    expect(s.source).toMatchObject({ fps: expect.closeTo(16, 1) });
+    expect(s.segments.map((g) => [g.start, g.end])).toEqual([
+      [0, 6],
+      [6, 12],
+    ]);
+    const take = s.segments[1].takes[0];
+    const still = gens.getGeneration(take.still!)!;
+    expect(still).toMatchObject({ modelId: "extract-frame", op: "frame", feature: "shorts-step", request: { params: { extra: { frame_type: "first" } } } });
+    expect(dependsOn(still.id)).toEqual([take.cut]);
+    expect(gens.getGeneration(take.frame!)).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", op: "edit" });
+    expect(dependsOn(take.frame!)).toEqual([take.still]);
+    const look = gens.getGeneration(take.look)!;
+    // The Original runs on the cloud engine asked for, billed on frames ÷ 16 (16 fps: the segment's own 6 s).
+    expect(look).toMatchObject({ modelId: "fuobe-shorts", engine: "cloud", op: "v2v", feature: "shorts", request: { params: { duration: 6, sourceDuration: 6, resolution: "720p" } } });
+    expect(dependsOn(take.look)).toEqual([take.cut, take.frame]);
+    expect(shorts.sessionIds(s)).toEqual(expect.arrayContaining([take.still, take.frame]));
+    // A new take makes its own first frame; the stitch joins the takes under the clip's sound.
+    const again = shorts.regenerateSegment(s.id, 1).segments[1].takes[1];
+    expect(again.still).toEqual(expect.any(String));
+    expect(dependsOn(again.look)).toEqual([again.cut, again.frame]);
+    expect(await settle(s.stitches[0].final)).toMatchObject({ status: "succeeded", modelId: "merge-audio-video" });
+    expect(gens.getGeneration(take.frame!)!.request.inputs?.images?.[0]).toMatch(/^\/api\/files\//);
+    await settle(again.look);
+    setSetting("falKey", "test-key");
+    try {
+      const est = await shorts.estimateShorts({ ...rest, source: { url: clip, duration: 12, fps: 16 } } as never);
+      // Wan 2.2 Fun VACE at 720p, $0.10 per video second, two 6 s segments at 16 fps, plus the first frames' Qwen edits.
+      expect(est).toMatchObject({ demo: false, segments: 2 });
+      expect(est.costUsd!).toBeGreaterThanOrEqual(1.2);
+      expect(est.costUsd!).toBeLessThan(1.35);
+      // Before the clip's rate is known it is priced as 30 fps (30 ÷ 16 of its length): never less than the run costs.
+      const unknown = await shorts.estimateShorts(rest as never);
+      expect(unknown.costUsd!).toBeGreaterThan(2.25);
+      expect(est.notes.join(" ")).toMatch(/Fuobe Shorts draws each segment's first frame in the look/);
+      // A 30 fps clip is billed at 30 ÷ 16 of its length, in pieces of 8 s; a 60 fps one is worked at 30 fps.
+      const fast = await shorts.estimateShorts({ ...rest, source: { url: clip, duration: 12, fps: 60 } } as never);
+      expect(fast.notes.join(" ")).toMatch(/works this 60 fps clip at 30 fps/);
+    } finally {
+      setSetting("falKey", "");
+    }
+    shorts.deleteSession(s.id);
   });
 
   it("custom presets: references go to models that take them", async () => {
@@ -301,7 +354,7 @@ describe("Shorts sessions", () => {
     const bare = shorts.createCustomPreset({ references: [png] });
     const words = await estimateRoute.POST(json("POST", body({ presetId: bare.id })));
     expect(words.status).toBe(422);
-    expect((await words.json()).error).toBe("Gemini Omni Flash 1.1 restyles from words only — describe the look in your preset, or pick Kling O3 4K Edit or Happy Horse Video Edit");
+    expect((await words.json()).error).toBe("Gemini Omni Flash 1.1 restyles from words only — describe the look in your preset, or pick Fuobe Shorts or Kling O3 4K Edit or Happy Horse Video Edit");
     const kling = await (await estimateRoute.POST(json("POST", body({ presetId: bare.id, modelId: "kling-o3-4k-edit" })))).json();
     expect(kling.refsSent).toBe(1);
     shorts.deleteCustomPreset(bare.id);
@@ -328,6 +381,8 @@ describe("Shorts sessions", () => {
 });
 
 describe("Mixed Media renders", () => {
+  // The cloud's Per frame tests below are Nano Banana 2's lanes unless a test names another model; Fuobe Mixed Media, the
+  // default since build plan O9, has tests of its own (and tests/mixed-shorts-originals.test.ts).
   const mm = (over: Record<string, unknown> = {}) => ({
     engine: "open",
     presetId: "mixed-sketch",
@@ -336,6 +391,7 @@ describe("Mixed Media renders", () => {
     range: { start: 2, end: 7 },
     fps: 24,
     resolution: "1K",
+    ...(over.engine === "cloud" && !over.mode && !over.modelId ? { modelId: "nano-banana-2" } : {}),
     ...over,
   });
 
@@ -349,10 +405,17 @@ describe("Mixed Media renders", () => {
     expect(res.status).toBe(201);
     const { final, items } = await res.json();
     expect(items).toHaveLength(1);
-    expect(final).toMatchObject({ modelId: "oss-mixed-media", feature: "mixed-media", request: { title: "Sketch · skate" } });
-    expect(final.request.params).toMatchObject({ startTime: 2, endTime: 7, fps: 16, extra: { denoise: 0.82 } });
+    // Fuobe Mixed Media on your GPU: the look's LoRA (Sketch: pencil) and one seed for every frame.
+    expect(final).toMatchObject({ modelId: "fuobe-mixed-media", engine: "open", feature: "mixed-media", request: { title: "Sketch · skate" } });
+    expect(final.request.params).toMatchObject({ startTime: 2, endTime: 7, fps: 16, seed: 424242, extra: { denoise: 0.82 } });
+    expect(final.request.loras.map((l: { file: string }) => l.file)).toEqual(["Zimage_pencil_sketch.safetensors"]);
     expect(final.request.prompt).toMatch(/deep red \(#C1121F\) ink/);
     expect(await settle(final.id)).toMatchObject({ status: "succeeded" });
+    // An API caller that names the per-frame model from before the Original keeps it.
+    const legacy = await mixed.createMixed(mm({ modelId: "oss-mixed-media" }) as never);
+    expect(legacy.final).toMatchObject({ modelId: "oss-mixed-media" });
+    expect(legacy.final.request.loras).toBeUndefined();
+    await settle(legacy.final.id);
   });
 
   it("renders on the cloud (Fast): cut → restyle anchored on the preview still → the cut's sound", async () => {
@@ -450,7 +513,7 @@ describe("Mixed Media renders", () => {
       expect(legacy.perFrameUsd).toBeUndefined();
       const wrong = await mixedEstimateRoute.POST(json("POST", mm({ engine: "cloud", mode: "frames", modelId: "ltx-2-3-restyle", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 } })));
       expect(wrong.status).toBe(422);
-      expect((await wrong.json()).error).toBe("LTX 2.3 Reference Restyle restyles the clip as video — pick Fast for it, or Nano Banana 2 or Seedream 5.0 Flash to redraw each frame");
+      expect((await wrong.json()).error).toBe("LTX 2.3 Reference Restyle restyles the clip as video — pick Fast for it, or Fuobe Mixed Media or Nano Banana 2 or Seedream 5.0 Flash to redraw each frame");
       const still = await mixedEstimateRoute.POST(json("POST", mm({ engine: "cloud", mode: "fast", modelId: "nano-banana-2", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 } })));
       expect(still.status).toBe(422);
       expect((await still.json()).error).toMatch(/^Nano Banana 2 redraws single frames — pick Per frame/);
@@ -509,6 +572,41 @@ describe("Mixed Media renders", () => {
     expect(rebuilt?.slice(2)).toEqual(redrawn.map((g) => gens.getGeneration(g.id)!.outputs[0].url));
     // Progress follows the render across tries: all four frames.
     expect(mixed.framesProgress(third.final.id)).toEqual({ total: 4, done: 4, running: 0 });
+  });
+
+  it("renders on Fuobe Mixed Media by default, frame by frame on its own (one seed, the look's LoRA, no lanes), and Smooth", async () => {
+    const noir = { ...mm({ engine: "cloud", presetId: "mixed-noir", values: {}, range: { start: 1, end: 2 }, fps: 4 }), modelId: undefined };
+    const { final, items, frames } = await mixed.createMixed(noir as never);
+    expect(frames).toBe(4);
+    expect(items.map((g: Generation) => g.op)).toEqual(["trim", "extract-frames", "images-to-video", "mux"]);
+    expect(await settle(final.id)).toMatchObject({ status: "succeeded", feature: "mixed-media" });
+    const edits = gens.listGenerations({ batchId: final.batchId ?? undefined, features: ["mixed-media-frame-step"], limit: 50 }).sort((a, b) => a.request.step!.index - b.request.step!.index);
+    const extracted = gens.getGeneration(items[1].id)!.outputs;
+    // Each frame is its own controlled draw: only its own extracted frame goes in, every one waits for the extraction only.
+    for (const [i, g] of edits.entries()) {
+      expect(g).toMatchObject({ modelId: "fuobe-mixed-media", engine: "cloud", op: "edit", request: { params: { seed: 424242 } } });
+      expect(g.request.inputs?.images).toEqual([extracted[i].url]);
+      expect(dependsOn(g.id)).toEqual([items[1].id]);
+      expect(g.request.loras?.map((l) => l.file)).toEqual(["darkroom-noir.safetensors"]);
+      expect(g.prompt).toMatch(/^drkrm style, /);
+    }
+    // Smooth: the first frame in the look (the Original), then Fuobe Shorts' Wan 2.2 Fun VACE pass; the cut's sound back.
+    // fal's Wan 2.2 Fun VACE takes 17 frames or more: 1 s of this 16 fps clip is refused before anything is paid for.
+    await expect(mixed.createMixed({ ...noir, mode: "smooth" } as never)).rejects.toThrow(/needs at least 17 frames: select at least 1\.1 s .* or pick Per frame/);
+    const smooth = await mixed.createMixed({ ...noir, mode: "smooth", range: { start: 1, end: 3 } } as never);
+    const ops = smooth.items.map((g: Generation) => `${g.modelId} ${g.op}`).sort();
+    // The cut, its first frame, that frame in the look, Wan Fun VACE by depth, the selection's sound and the mux.
+    expect(ops).toEqual(["extract-frame frame", "fuobe-mixed-media edit", "fuobe-shorts v2v", "merge-audio-video mux", "trim-video trim", "trim-video trim"]);
+    const pass = smooth.items.find((g: Generation) => g.modelId === "fuobe-shorts")!;
+    expect(pass.engine).toBe("cloud");
+    expect(smooth.items.find((g: Generation) => g.modelId === "fuobe-mixed-media")!.engine).toBe("cloud");
+    expect(await settle(smooth.final.id)).toMatchObject({ status: "succeeded", feature: "mixed-media", modelId: "merge-audio-video" });
+    const est = await mixed.estimateMixed({ ...noir, mode: "smooth" } as never);
+    expect(est).toMatchObject({ mode: "smooth", demo: true, modelId: "fuobe-mixed-media" });
+    expect(est.notes.join(" ")).toMatch(/Smooth draws the first frame in the look/);
+    // Smooth is the Original's own; Fast is the cloud's.
+    expect((await mixedEstimateRoute.POST(json("POST", { ...noir, mode: "smooth", modelId: "nano-banana-2" }))).status).toBe(422);
+    expect((await mixedEstimateRoute.POST(json("POST", mm({ mode: "fast" })))).status).toBe(422);
   });
 
   it("says which frame failed and why, not just that an earlier step didn't finish", async () => {

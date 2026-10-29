@@ -11,7 +11,7 @@ import { VideoTrimmer, type VideoTrimmerHandle } from "@/components/studio/video
 import { LookCard } from "@/components/shorts/preset-card";
 import { useSubmitGuard } from "@/components/shorts/hooks";
 import { ClipBar, ClipDrop, costText, Field, Segmented, tabKeys } from "@/components/shorts/ui";
-import { clipDuration, useSourceClip } from "@/components/shorts/use-source-clip";
+import { clipDuration, clipSize, useSourceClip } from "@/components/shorts/use-source-clip";
 import { uploadFile, useEngine, useModelAccess } from "@/lib/api";
 import { keepOffered, offered } from "@/lib/model-access";
 import {
@@ -20,6 +20,8 @@ import {
   fpsChoices,
   FRAME_LIMITS,
   MIXED,
+  MIXED_MODES,
+  MIXED_ORIGINAL,
   MIXED_PRESETS,
   mixedFrames,
   mixedPreview,
@@ -51,11 +53,20 @@ const HOW = [
   { step: "Choose a preset", text: "Browse 33 mixed-media looks — sketch, comic, paper, neon, marble — and pick the one that fits your clip." },
   { step: "Upload your video", text: "Add a clip and trim it to up to 10 seconds. It needs at least 4 frames per second." },
   { step: "Customize settings", text: "Each preset has its own colours, materials and intensity. Save them per preset; they stay in this browser." },
-  { step: "Generate & preview", text: "Make one preview frame first to check the look, then render the whole video, frame by frame at the rate you pick. On the cloud, Fast restyles it in one video-to-video pass instead." },
+  {
+    step: "Generate & preview",
+    text: "Make one preview frame first to check the look, then render the whole video, frame by frame at the rate you pick. Smooth draws only the first frame in the look and carries it through the clip; on the cloud, Fast restyles it in one video-to-video pass.",
+  },
+];
+
+const MODE_OPTIONS: { value: MixedMode; label: string; title: string }[] = [
+  { value: "frames", label: "Per frame", title: "Every frame drawn again in the look — the mixed-media flicker" },
+  { value: "smooth", label: "Smooth", title: "The first frame in the look, then carried through the clip by depth — no flicker" },
+  { value: "fast", label: "Fast", title: "A partner video model restyles the whole clip in one pass" },
 ];
 
 /** Mixed Media: pick a look, add a ≤10 s clip, tune the settings, preview one frame, render. */
-export function MixedStudio({ models, frameModels }: { models: Record<Engine, RestyleModelInfo[]>; frameModels: RestyleModelInfo[] }) {
+export function MixedStudio({ models, frameModels }: { models: Record<Engine, RestyleModelInfo[]>; frameModels: Record<Engine, RestyleModelInfo[]> }) {
   const [tab, setTab] = useState<Tab>("presets");
   const [engine, setEngine] = useEngine();
   useEffect(() => {
@@ -105,10 +116,10 @@ export function MixedStudio({ models, frameModels }: { models: Record<Engine, Re
               <p className="text-[12px] font-semibold tracking-[0.14em] text-brand-text uppercase">No prompts, just vibe</p>
               <h2 className="mt-2 font-heading text-display text-balance">Turn any video into mixed-media art</h2>
               <p className="mx-auto mt-2 max-w-[560px] text-body text-pretty text-muted-foreground">
-                33 looks, each with its own colours and materials. Preview one frame first, then render the clip frame by frame at the rate you choose.
+                33 looks, each with its own colours and materials. Preview one frame first, then render the clip frame by frame at the rate you choose — on Fuobe Mixed Media, free on your GPU.
               </p>
             </div>
-            <Workspace engine={engine} models={models[engine]} frameModels={frameModels} />
+            <Workspace engine={engine} models={models[engine]} frameModels={frameModels[engine]} />
           </>
         )}
       </div>
@@ -132,14 +143,16 @@ function How({ onStart }: { onStart: () => void }) {
       <div className="mt-6 rounded-2xl bg-muted/60 p-5 text-[13px] text-muted-foreground">
         <p className="font-medium text-foreground">Cost</p>
         <p className="mt-1">
-          A render is counted in frames: seconds × frame rate, rounded down (10 s at 8 FPS = 80 frames). On the open engine every frame runs on your GPU for free; on the
-          cloud each frame is redrawn by an image model and priced per frame (Nano Banana 2 or Seedream 5.0 Flash). Fast restyles the clip in one video-to-video pass,
-          priced by the model. The estimate shows before you generate.
+          A render is counted in frames: seconds × frame rate, rounded down (10 s at 8 FPS = 80 frames; at most 10 s × 24 FPS = 240). Fuobe Mixed Media draws every
+          frame again in the look — Z-Image Turbo following the frame&apos;s own outlines, with the look&apos;s LoRA and one seed — free on your GPU, or on the cloud
+          at about a cent a frame. Nano Banana 2 and Seedream 5.0 Flash redraw frames too, priced per frame. Smooth draws only the first frame in the look, then Wan 2.2
+          Fun VACE carries it through the clip by depth, priced per second. Fast restyles the clip in one video-to-video pass, priced by the model. The estimate shows
+          before you generate.
         </p>
         <p className="mt-2">
-          To keep a render quick, the cloud redraws frames in runs of {FRAME_LIMITS.lane} side by side: each frame matches the one before it, and each run starts from
-          your preview frame, so the look can shift slightly every {FRAME_LIMITS.lane} frames. If a frame fails, the frames still waiting stop, and Try again redraws only
-          the frames that didn’t finish.
+          Over {FRAME_LIMITS.perClip} frames, the frames go back together as clips and are joined. Nano Banana 2 and Seedream redraw frames in runs of {FRAME_LIMITS.lane}{" "}
+          side by side, each frame matching the one before it and each run starting from your preview frame, so their look can shift slightly every {FRAME_LIMITS.lane}{" "}
+          frames. If a frame fails, the frames still waiting stop, and Try again redraws only the frames that didn’t finish.
         </p>
       </div>
       <div className="mt-6 text-center">
@@ -152,6 +165,7 @@ function How({ onStart }: { onStart: () => void }) {
 }
 
 function Workspace({ engine, models, frameModels }: { engine: Engine; models: RestyleModelInfo[]; frameModels: RestyleModelInfo[] }) {
+  const [hasClip, setHasClip] = useState(false);
   const [presetId, setPresetId] = useState<string | null>(null);
   const preset = MIXED_PRESETS.find((p) => p.id === presetId) ?? null;
   const [values, setValues] = useState<MixedValues>({});
@@ -227,7 +241,7 @@ function Workspace({ engine, models, frameModels }: { engine: Engine; models: Re
         )}
       </section>
       <aside ref={panel} id="mm-editor" className="scrollbar-none min-w-0 scroll-mt-16 lg:sticky lg:top-16 lg:max-h-[calc(100svh-4.5rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-2xl">
-        <Editor engine={engine} models={models} frameModels={frameModels} preset={preset} values={values} setValues={setValues} />
+        <Editor engine={engine} models={models} frameModels={frameModels} preset={preset} values={values} setValues={setValues} onClip={setHasClip} />
       </aside>
       {preset && !panelVisible && (
         <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 lg:hidden">
@@ -239,7 +253,7 @@ function Workspace({ engine, models, frameModels }: { engine: Engine; models: Re
             <Sparkles className="size-4 shrink-0" />
             <span className="min-w-0 flex-1 truncate text-left">{preset.name}</span>
             <span className="flex shrink-0 items-center gap-1">
-              Add a clip <ArrowDown className="size-4" />
+              {hasClip ? "Settings & render" : "Add a clip"} <ArrowDown className="size-4" />
             </span>
           </button>
         </div>
@@ -258,6 +272,7 @@ function Editor({
   preset,
   values,
   setValues,
+  onClip,
 }: {
   engine: Engine;
   models: RestyleModelInfo[];
@@ -265,9 +280,13 @@ function Editor({
   preset: MixedPreset | null;
   values: MixedValues;
   setValues: (v: MixedValues) => void;
+  /** Whether a clip is loaded (the phone bar says what's next). */
+  onClip?: (has: boolean) => void;
 }) {
   const source = useSourceClip(MIXED.maxBytes);
   const { clip } = source;
+  const hasClip = !!clip;
+  useEffect(() => onClip?.(hasClip), [hasClip, onClip]);
   // Hand-off: /mixed-media?video=/api/files/… (a result or a Library clip).
   useEffect(() => {
     const video = new URLSearchParams(window.location.search).get("video");
@@ -280,17 +299,24 @@ function Editor({
   const [fpsChoice, setFpsChoice] = useState<FpsChoice>(MIXED.defaultFps as number);
   const [manual, setManual] = useState<number>(MIXED.defaultFps);
   const [resolution, setResolution] = useState<MixedResolution>("1K");
-  // Cloud: frame by frame (the default, priced per frame) or Fast (one video-to-video pass).
-  const [mode, setMode] = useState<MixedMode>("frames");
+  // Frame by frame (the default, priced per frame), Smooth (the first frame, then carried through by depth) or, on the
+  // cloud, Fast (one video-to-video pass). A mode the engine hasn't (Fast on your GPU) reads as Per frame.
+  const [picked, setMode] = useState<MixedMode>("frames");
+  const mode: MixedMode = MIXED_MODES[engine].includes(picked) ? picked : "frames";
   const cloud = engine === "cloud";
-  const frameMode = cloud && mode === "frames";
+  const frameMode = mode === "frames";
+  const smooth = mode === "smooth";
   // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
   const access = useModelAccess();
-  const models = keepOffered(frameMode ? frameModels : restyleModels, (m) => offered(access, m.id, engine));
-  const slot = frameMode ? "frames" : engine;
-  const [pickedModel, setModel] = useState<Record<Engine | "frames", string>>({ cloud: "", open: "", frames: "" });
+  const models = keepOffered(
+    smooth ? frameModels.filter((m) => m.id === MIXED_ORIGINAL) : frameMode ? frameModels : restyleModels,
+    (m) => offered(access, m.id, engine),
+  );
+  const slot = `${engine}:${mode}`;
+  const [pickedModel, setModel] = useState<Record<string, string>>({});
   const modelId = (models.some((m) => m.id === pickedModel[slot]) && pickedModel[slot]) || models[0]?.id;
   const model = models.find((m) => m.id === modelId);
+  const original = modelId === MIXED_ORIGINAL;
   const [previewId, setPreviewId] = useState<string | null>(null);
   // Every main step of the latest render (cut → frames or restyle → sound), so a failed step shows its own error.
   const [renderIds, setRenderIds] = useState<string[]>([]);
@@ -313,24 +339,27 @@ function Editor({
   const problem = mmRange ? mixedRangeProblem(mmRange, duration, sourceFps) : null;
   const frames = mmRange ? mixedFrames(seconds, fps) : 0;
   // Fast restyles the cut as video: the resolution is the model's own setting nearest to 1K / 2K / 4K
-  // (choices that land on the same one are off). Per frame draws each frame at 1K–4K (Seedream up to 2K).
-  const fast = cloud && !frameMode;
+  // (choices that land on the same one are off). Per frame draws each frame at 1K–4K (Seedream and the Original up to 2K
+  // in the cloud; your GPU renders up to 1536 px). Smooth renders at its own size (720p in the cloud, 480p on your GPU).
+  const fast = cloud && mode === "fast";
   const lengthIssue = (m: RestyleModelInfo) => (fast && seconds ? clipLengthProblem(m, seconds) : null);
   const resOptions = MIXED.resolutions.map((r, i) => {
     if (frameMode) {
-      const capped = r === "4K" && modelId === "seedream-5-flash";
+      const capped = r === "4K" && cloud && (modelId === "seedream-5-flash" || original);
       return { value: r, label: r, hint: undefined, disabled: capped, title: capped ? `${model?.name} draws frames up to 2K` : `Each frame at ${r}` };
     }
     const at = fast ? nearestResolution(model?.resolutions, r) : undefined;
     const prev = i > 0 && fast ? nearestResolution(model?.resolutions, MIXED.resolutions[i - 1]) : undefined;
     return { value: r, label: r, hint: at, disabled: fast && !!at && at === prev, title: fast && at === prev ? `${model?.name} renders up to ${at}` : at };
   });
-  const showResolution = !fast || resOptions.some((o) => o.hint && !o.disabled && o.value !== "1K");
+  const showResolution = !smooth && (!fast || resOptions.some((o) => o.hint && !o.disabled && o.value !== "1K"));
   const resShown: MixedResolution = resOptions.find((o) => o.value === resolution)?.disabled ? ([...resOptions].reverse().find((o) => !o.disabled)?.value ?? "1K") : resolution;
   const modelRes = fast ? nearestResolution(model?.resolutions, resShown) : undefined;
   const previewImage = preview?.status === "succeeded" ? preview.outputs.find((o) => o.kind === "image") : undefined;
-  // Per frame always starts from the approved preview; Fast only when the model takes a still.
-  const anchor = cloud && (frameMode || model?.image) && previewImage && !anchorOff ? previewImage.url : undefined;
+  // The partner editors start every run of frames from the approved preview; Fast only when the model takes a still. The
+  // Original needs no anchor: frame 1 is drawn exactly as the preview was (same look, LoRA and seed).
+  const anchor = cloud && !original && (frameMode || (fast && model?.image)) && previewImage && !anchorOff ? previewImage.url : undefined;
+  const size = clipSize(clip);
 
   const body: MixedBody | null =
     preset && mmRange && !problem
@@ -338,12 +367,20 @@ function Editor({
           engine,
           presetId: preset.id,
           values,
-          source: { url: clip?.url ?? "/api/files/placeholder.mp4", name: clip?.name, duration, fps: sourceFps },
+          source: {
+            url: clip?.url ?? "/api/files/placeholder.mp4",
+            name: clip?.name,
+            duration,
+            fps: sourceFps,
+            // The frames' size on the Original (and so their price) follows the clip's shape.
+            ...(size.width && size.height ? { width: size.width, height: size.height } : {}),
+          },
           range: mmRange,
           fps,
-          resolution: resShown,
+          // Smooth has no Resolution control: its first frame is drawn at 1K (a 2K pick under Per frame doesn't carry over unseen).
+          resolution: smooth ? "1K" : resShown,
           modelId,
-          ...(cloud ? { mode } : {}),
+          mode,
           ...(anchor ? { anchor } : {}),
         }
       : null;
@@ -351,7 +388,7 @@ function Editor({
   const est = estimate.data;
 
   // A new clip, preset or engine starts without a preview (and so does another frame editor: the preview is its own work).
-  const key = `${preset?.id}|${clip?.preview}|${engine}|${frameMode ? modelId : ""}`;
+  const key = `${preset?.id}|${clip?.preview}|${engine}|${mode === "fast" ? "" : modelId}`;
   const [lastKey, setLastKey] = useState(key);
   if (key !== lastKey) {
     setLastKey(key);
@@ -469,21 +506,14 @@ function Editor({
         )}
       </Field>
 
-      {cloud && (
-        <Field label="Restyle" hint={frameMode ? "Every frame redrawn · priced per frame" : "One video-to-video pass · priced by the model"}>
-          <Segmented<MixedMode>
-            label="Restyle"
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: "frames", label: "Per frame", title: "Each frame is redrawn by an image model, looking at the frame before it" },
-              { value: "fast", label: "Fast", title: "A video model restyles the whole clip in one pass" },
-            ]}
-          />
-        </Field>
-      )}
+      <Field
+        label="Restyle"
+        hint={frameMode ? `Every frame drawn again · ${cloud ? "priced per frame" : "free on your GPU"}` : smooth ? `First frame, then carried through · ${cloud ? "priced per second" : "free on your GPU"}` : "One video-to-video pass · priced by the model"}
+      >
+        <Segmented<MixedMode> label="Restyle" value={mode} onChange={setMode} options={MODE_OPTIONS.filter((o) => MIXED_MODES[engine].includes(o.value))} />
+      </Field>
 
-      {(!cloud || frameMode) && (
+      {frameMode && (
         <Field label="Frame rate" hint={sourceFps ? `Uploaded video has ${Math.round(sourceFps)} FPS` : "8 FPS is the classic stop-motion look"}>
           <Segmented<FpsChoice>
             label="Frame rate"
@@ -537,7 +567,7 @@ function Editor({
         }
       >
         {models.length > 1 ? (
-          <Select value={modelId} onValueChange={(v) => setModel((m) => ({ ...m, [engine]: v }))}>
+          <Select value={modelId} onValueChange={(v) => setModel((m) => ({ ...m, [slot]: v }))}>
             <SelectTrigger className="w-full" aria-label="Model">
               <SelectValue>
                 <span className="flex min-w-0 items-center gap-2">
@@ -568,7 +598,15 @@ function Editor({
             <span className="font-medium">{model?.name ?? "—"}</span> <span className="text-muted-foreground">· {model?.price}</span>
           </div>
         )}
-        {model && <p className="text-[12px] leading-snug text-muted-foreground">{model.tagline}</p>}
+        {model && (
+          <p className="text-[12px] leading-snug text-muted-foreground">
+            {smooth
+              ? `Fuobe Original · the first frame drawn in the look, then Wan 2.2 Fun VACE carries it through the clip by depth${cloud ? " at 720p" : " (480p, 16 FPS on your GPU)"}.`
+              : original
+                ? `Fuobe Original · every frame drawn again by Z-Image Turbo along its own outlines, with the look's LoRA and one seed${cloud ? ", hosted on fal" : ""}.`
+                : model.tagline}
+          </p>
+        )}
       </Field>
 
       <div className="space-y-2 rounded-xl border p-3">
@@ -589,6 +627,13 @@ function Editor({
               </div>
             )}
           </div>
+        )}
+        {/* The cloud draws the preview and the frames on one route; your GPU draws a Per frame preview on the per-frame graph
+            itself (a one-frame clip), but Smooth's first frame on another (Z-Image's image-to-image), so it says nothing there. */}
+        {original && (cloud ? !!previewImage : frameMode && preview?.status === "succeeded") && (
+          <p className="flex items-center gap-1.5 text-[12px] text-brand-text">
+            <Wand2 className="size-3.5 shrink-0" /> {smooth ? "The first frame is drawn just like this, then carried through the clip" : "Every frame is drawn like this one: same look, LoRA and seed"}
+          </p>
         )}
         {anchor && (
           <p className="flex items-center gap-1.5 text-[12px] text-brand-text">
@@ -616,14 +661,20 @@ function Editor({
       <div className="space-y-3 border-t pt-4">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-[13px] text-muted-foreground">
-            {!mmRange ? "Estimate" : fast ? `${seconds.toFixed(1)} s${modelRes ? ` · ${modelRes}` : ""}` : `${est?.frames ?? frames} frames · ${+(est?.fps ?? fps).toFixed(2)} FPS`}
+            {!mmRange
+              ? "Estimate"
+              : fast
+                ? `${seconds.toFixed(1)} s${modelRes ? ` · ${modelRes}` : ""}`
+                : smooth
+                  ? `${seconds.toFixed(1)} s · ${cloud ? "720p" : "480p, 16 FPS"}`
+                  : `${est?.frames ?? frames} frames · ${+(est?.fps ?? fps).toFixed(2)} FPS`}
           </span>
           <span className="flex items-center gap-1.5 font-mono text-[13px] font-medium tabular-nums" aria-live="polite">
             {estimate.isFetching && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
             {body ? costText(est, engine) : "—"}
           </span>
         </div>
-        {frameMode && est && !est.demo && typeof est.perFrameUsd === "number" && (
+        {frameMode && cloud && est && !est.demo && typeof est.perFrameUsd === "number" && (
           <p className="text-[12px] text-muted-foreground tabular-nums">
             {est.frames} frames × ${est.perFrameUsd.toFixed(3).replace(/0$/, "")} a frame ({model?.name}), plus a few cents to cut and rebuild the clip
           </p>

@@ -11,6 +11,10 @@ import {
   MIXED_FRAME_FEATURE,
   MIXED_FRAME_MODELS,
   MIXED_MODELS,
+  MIXED_MODES,
+  MIXED_OPEN_LEGACY,
+  MIXED_ORIGINAL,
+  MIXED_SMOOTH_MODEL,
   mixedFrames,
   mixedRangeProblem,
   nearestResolution,
@@ -20,13 +24,16 @@ import {
   type MixedPlanInput,
   type MixedResolution,
 } from "@/lib/catalog/mixed-media";
-import { clipLengthProblem, type PlanStep } from "@/lib/catalog/shorts";
+import { mixedLoras } from "@/lib/catalog/mixed-media-looks";
+import { clipLengthProblem, originalSegmentProblem, planSegments, type PlanStep } from "@/lib/catalog/shorts";
 import { sourceSeconds, takesImage } from "@/lib/catalog/shorts-models";
 import type { Engine, Generation, ProviderId } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { DROPPED_UNUSED, getGeneration, previewChained, unfilledRequest, waitedOnFailure } from "./generations";
-import { engineMode } from "./settings";
+import { withoutMissingOnComfy, withoutUnreachableCivitai } from "./loras";
+import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { engineMode, getSetting } from "./settings";
 import { probeSource, ShortsError } from "./shorts";
 
 /**
@@ -41,13 +48,14 @@ export interface MixedBody {
   engine: Engine;
   presetId: string;
   values?: Record<string, unknown>;
-  source: { url: string; name?: string; duration?: number; fps?: number };
+  /** width / height / fps: what the browser read, for estimates made before the server has the file. */
+  source: { url: string; name?: string; duration?: number; fps?: number; width?: number; height?: number };
   range: { start: number; end: number };
   fps: number;
   resolution: MixedResolution;
-  /** Cloud Fast: the restyle model; cloud Per frame: the frame editor (MIXED_FRAME_MODELS). */
+  /** Per frame: the frame model (MIXED_FRAME_MODELS in the cloud, the Original on your GPU); Fast: the restyle model; Smooth: the Original. */
   modelId?: string;
-  /** Cloud: frame by frame or Fast (one video-to-video pass). Without it, Fast for a Fast restyle model, else Per frame. */
+  /** Frame by frame, Smooth or (cloud) Fast. Without it, Fast for a Fast restyle model, else Per frame. */
   mode?: MixedMode;
   /** Cloud: the approved preview still (anchors the render: Per frame always, Fast when the model takes an image). */
   anchor?: string;
@@ -57,20 +65,32 @@ export interface MixedBody {
 }
 
 /**
- * How a cloud render restyles: the mode asked for, else Fast when the model named is a Fast restyle model (an API
- * caller from before Per frame), else Per frame. A model that belongs to the other mode is refused, not swapped.
+ * How a render restyles: the mode asked for, else Fast when the model named is a Fast restyle model (an API caller from
+ * before Per frame), else Per frame. A model that belongs to another mode is refused, not swapped; Smooth is the
+ * Original's own, and Fast is the cloud's.
  */
-function cloudMode(body: Pick<MixedBody, "engine" | "mode" | "modelId">): MixedMode | undefined {
-  if (body.engine !== "cloud") return undefined;
+function renderMode(body: Pick<MixedBody, "engine" | "mode" | "modelId">): MixedMode {
   const fastModel = !!body.modelId && MIXED_MODELS.cloud.includes(body.modelId);
-  const frameModel = !!body.modelId && (MIXED_FRAME_MODELS as readonly string[]).includes(body.modelId);
-  const mode = body.mode ?? (fastModel ? "fast" : "frames");
+  const frameModel = !!body.modelId && (MIXED_FRAME_MODELS as readonly string[]).includes(body.modelId) && body.modelId !== MIXED_ORIGINAL;
+  const mode = body.mode ?? (body.engine === "cloud" && fastModel ? "fast" : "frames");
   const name = (id: string) => getModel(id)?.name ?? id;
-  if (mode === "frames" && fastModel) {
+  if (!MIXED_MODES[body.engine].includes(mode)) throw new ShortsError("Fast runs in the cloud — on your GPU pick Per frame or Smooth", 422);
+  if (body.engine === "cloud" && mode === "frames" && fastModel) {
     throw new ShortsError(`${name(body.modelId!)} restyles the clip as video — pick Fast for it, or ${MIXED_FRAME_MODELS.map(name).join(" or ")} to redraw each frame`, 422);
   }
-  if (mode === "fast" && frameModel) throw new ShortsError(`${name(body.modelId!)} redraws single frames — pick Per frame for it, or a Fast restyle model`, 422);
+  if (mode === "fast" && (frameModel || body.modelId === MIXED_ORIGINAL)) {
+    throw new ShortsError(`${name(body.modelId!)} redraws single frames — pick Per frame${frameModel ? "" : " or Smooth"} for it, or a Fast restyle model`, 422);
+  }
+  if (mode === "smooth" && body.modelId && body.modelId !== MIXED_ORIGINAL) throw new ShortsError(`Smooth is ${name(MIXED_ORIGINAL)}'s own — pick Per frame or Fast for ${name(body.modelId)}`, 422);
   return mode;
+}
+
+/** The models a mode chooses from on an engine (the first is its default). */
+function modeModels(engine: Engine, mode: MixedMode): readonly string[] {
+  if (mode === "smooth") return [MIXED_ORIGINAL];
+  if (mode === "fast") return MIXED_MODELS.cloud;
+  // On your GPU, an API caller that names the per-frame model from before the Original keeps it.
+  return engine === "cloud" ? MIXED_FRAME_MODELS : [...MIXED_MODELS.open, MIXED_OPEN_LEGACY];
 }
 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th")}`;
@@ -88,15 +108,17 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
   const problem = mixedRangeProblem(body.range, duration, sourceFps);
   if (problem) throw new ShortsError(problem);
   const fps = clampFps(body.fps, sourceFps);
-  const mode = cloudMode(body);
-  const choices: readonly string[] = mode === "frames" ? MIXED_FRAME_MODELS : MIXED_MODELS[body.engine];
+  const mode = renderMode(body);
+  const choices = modeModels(body.engine, mode);
   const modelId = body.modelId && choices.includes(body.modelId) ? body.modelId : choices[0];
   const model = getModel(modelId);
   const len = body.range.end - body.range.start;
   const notes: string[] = [];
   let frames = mixedFrames(len, fps);
   let rate = fps;
-  if (mode === "frames") {
+  const size = info.width && info.height ? { width: info.width, height: info.height } : body.source.width && body.source.height ? { width: body.source.width, height: body.source.height } : undefined;
+  const original = modelId === MIXED_ORIGINAL;
+  if (body.engine === "cloud" && mode === "frames") {
     // Frames are every Nth frame of the clip: say so when that isn't the rate picked.
     if (!sourceFps) throw new ShortsError("Couldn't read this clip's frame rate — pick Fast to restyle it as video", 422);
     const s = frameSampling(len, fps, sourceFps);
@@ -104,6 +126,7 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
     rate = s.fps;
     if (Math.abs(s.fps - fps) > 0.01) notes.push(`Frames are every ${s.interval === 1 ? "" : `${ordinal(s.interval)} `}frame of this ${+sourceFps.toFixed(2)} FPS clip: ${+s.fps.toFixed(2)} FPS, ${frames} frames`);
     if (modelId === "seedream-5-flash") notes.push(`Seedream 5.0 Flash takes no seed, so frames vary a little more than with Nano Banana 2${body.resolution === "4K" ? "; it draws up to 2K" : ""}`);
+    else if (original && body.resolution === "4K") notes.push(`${model?.name} draws frames at up to 2K (about 4 megapixels)`);
     else if (frames > FRAME_LIMITS.perClip && body.resolution !== "1K") {
       // merge-videos sizes the joined clips 512–2048 px a side.
       notes.push(`Over ${FRAME_LIMITS.perClip} frames are made as clips and joined at up to ${FRAME_LIMITS.joinMaxPx} px${frameResolution(frames, body.resolution) !== body.resolution ? ", so frames are drawn at 2K" : ""}`);
@@ -118,11 +141,33 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
       throw new ShortsError(`${tooShort} — select ${more ? "more" : "less"}${other ? `, or pick ${getModel(other)?.name ?? other}` : ""}`);
     }
   }
-  const anchor = mode === "frames" ? body.anchor : mode === "fast" && body.anchor && takesImage(modelId) ? body.anchor : undefined;
+  // The partner editors start each lane from the approved preview; the Original draws every frame on its own (one seed).
+  const anchor = mode === "frames" && body.engine === "cloud" && !original ? body.anchor : mode === "fast" && body.anchor && takesImage(modelId, "cloud") ? body.anchor : undefined;
   if (mode === "fast") {
     if (body.anchor && !anchor) notes.push(`${model?.name} restyles from words only — the preview frame isn't sent`);
     notes.push(`${model?.name} restyles the clip as smooth video in one pass — Per frame redraws every frame of it instead`);
-  } else if (!mode && body.resolution !== "1K") notes.push("The open engine renders up to 1536 px on the long side");
+  } else if (mode === "smooth") {
+    const segments = planSegments(body.range, body.engine, { modelId: MIXED_SMOOTH_MODEL, fps: sourceFps });
+    const pieces = segments.length;
+    // fal's Wan 2.2 Fun VACE takes 17 frames or more, at 5 fps or more: refused here, before the cut and the first frame are paid for.
+    const vace = body.engine === "cloud" ? segments.map((s) => originalSegmentProblem(s.end - s.start, sourceFps)).find(Boolean) : null;
+    if (vace) throw new ShortsError(`${vace} — or pick Per frame`, 422);
+    notes.push(
+      body.engine === "open"
+        ? `Smooth draws the first frame in the look, then Wan 2.2 Fun VACE carries it through the clip by depth: 480p at 16 fps on your GPU${pieces > 1 ? `, in ${pieces} pieces of up to 5 s` : ""}`
+        : `Smooth draws the first frame in the look, then Wan 2.2 Fun VACE carries it through the clip by depth at 720p${pieces > 1 ? `, in ${pieces} pieces (each starts from its own first frame)` : ""}`,
+    );
+    if (body.engine === "cloud" && sourceFps && sourceFps > 16.5) notes.push(`fal bills this clip's ${Math.round(sourceFps)} fps as ${(sourceFps / 16).toFixed(1)}× its length (video seconds at 16 fps)`);
+  } else if (body.engine === "open" && body.resolution !== "1K") notes.push("The open engine renders up to 1536 px on the long side");
+  // The look's LoRA: one that downloads from civitai needs the civitai key; without it the look runs on its words.
+  let reach = original && mode !== "fast" ? withoutUnreachableCivitai(mixedLoras(preset.id), body.engine === "open" ? "comfyui" : "fal") : undefined;
+  // On your GPU without a LoRA folder (Settings → LoRAs) Fuobe can't download one, so ComfyUI must have it already: a LoRA
+  // it doesn't list is left out and said here, rather than the render failing once it's handed over.
+  if (reach?.loras.length && body.engine === "open" && !getSetting("comfyLorasDir") && (await probeComfy())) {
+    const onComfy = withoutMissingOnComfy(reach.loras, await comfyLoraFiles());
+    reach = { loras: onComfy.loras, notes: [...reach.notes, ...onComfy.notes] };
+  }
+  if (reach) notes.push(...reach.notes);
   const name = (body.source.name ?? "").replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, 40);
   return {
     frames,
@@ -141,7 +186,8 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
       modelId,
       mode,
       sourceFps,
-      ...(info.width && info.height ? { sourceSize: { width: info.width, height: info.height } } : {}),
+      ...(size && { sourceSize: size }),
+      ...(reach && { loras: reach.loras }),
       anchor,
       modelResolution: mode === "fast" ? nearestResolution(model?.options.resolutions, body.resolution) : undefined,
       // LTX follows the clip's outlines, like the open engine's canny ControlNet.
