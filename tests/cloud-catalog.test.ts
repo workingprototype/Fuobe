@@ -11,6 +11,10 @@ const research = ["paid-model-apis.json", "paid-model-apis-2.json", "paid-model-
 );
 const byId = new Map<string, Endpoint>();
 for (const e of research) byId.set(`${e.provider}:${e.endpoint}`, { ...byId.get(`${e.provider}:${e.endpoint}`), ...e });
+// Research #7 (MOSS-Image on fal and its /lora twin): endpointRecords in the shape of part 4's endpoints.
+for (const e of (JSON.parse(fs.readFileSync("docs/research/new-models-7.json", "utf8")) as { endpointRecords: Endpoint[] }).endpointRecords) {
+  byId.set(`${e.provider}:${e.endpoint}`, { ...byId.get(`${e.provider}:${e.endpoint}`), ...e });
+}
 // Originals (O1): the hosted open-weight endpoints that take LoRAs, and the plain endpoints of the same models.
 const originals = JSON.parse(fs.readFileSync("docs/research/fuobe-originals-recipes-5.json", "utf8")) as {
   hostedLoraEndpoints: (Endpoint & { id: string })[];

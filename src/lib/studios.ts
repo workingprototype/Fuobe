@@ -18,6 +18,8 @@ export const IMAGE_STUDIO: StudioConfig = {
   slots: [],
   multiRef: { label: "Add ref", max: 8 },
   defaultModels: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" },
+  // A model's own settings (MOSS-Image's Quality, Ideogram's speed) sit under "Options".
+  controlsTitle: "Options",
   // Color signature + Moodboard chips, and the models they can move a request to. Fuobe Soul's PixeletedFace look runs
   // the face mosaic after the picture: its step's model is known here so the price counts it before the run.
   signature: true,

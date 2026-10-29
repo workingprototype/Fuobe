@@ -413,6 +413,8 @@ export function Composer({ docked }: { docked: boolean }) {
     (lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null) ?? accessError ?? comfyBlock;
   let op: Operation | undefined;
   let cost: number | null = null;
+  // The run goes to a LoRA endpoint whose price isn't published (fal's MOSS-Image /lora).
+  let loraPriceUnknown = false;
   let planError: string | null = null;
   if (model && !engineError && !presetLoading) {
     try {
@@ -432,7 +434,9 @@ export function Composer({ docked }: { docked: boolean }) {
       const plan = planGeneration({ ...planned, prompt: planned.prompt || (config.promptOptional ? " " : "") }, catalog.getModel, catalog.getPreset);
       op = plan.op;
       // A run with LoRAs (a Soul look) goes to the route's LoRA endpoint, which has its own price.
-      cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op, plan.loras.length > 0 && routesFor(plan.model, plan.op).some((r) => !!r.loraEndpoint));
+      const withLoras = plan.loras.length > 0 && routesFor(plan.model, plan.op).some((r) => !!r.loraEndpoint);
+      cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op, withLoras);
+      loraPriceUnknown = withLoras && !!plan.model.pricing?.lorasUnknown;
       // A relight effect relights the start frame first (free on the GPU, about $0.04 in the cloud).
       if (cost !== null) cost += prestepCost(preset, plan.model.id, engine);
       // PixeletedFace pixelates each picture's faces afterwards ($0.01 a picture in the cloud, free on the GPU).
@@ -544,7 +548,7 @@ export function Composer({ docked }: { docked: boolean }) {
   const alternative = config.comfyOnly?.alternative;
   const alternativeHref = alternative && `${alternative.href}${video?.startsWith("/api/files/") ? `&video=${encodeURIComponent(video)}` : ""}`;
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
-  const costText = costLabel({ demo, cost }, formatCost);
+  const costText = costLabel({ demo, cost, unknown: loraPriceUnknown }, formatCost);
 
   // Attachments: only when something is attached, a required slot is still empty, or none of a "one of these" group is filled (U8).
   const kinds = [...attach.kinds];
@@ -1016,12 +1020,18 @@ export function Composer({ docked }: { docked: boolean }) {
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="shrink-0 text-[12px] font-medium text-muted-foreground tabular-nums">
-                <span className="sm:hidden">{costLabel({ demo, cost, compact: true }, formatCost)}</span>
+                <span className="sm:hidden">{costLabel({ demo, cost, compact: true, unknown: loraPriceUnknown }, formatCost)}</span>
                 <span className="hidden sm:inline">{costText}</span>
               </span>
             </TooltipTrigger>
             <TooltipContent>
-              {demo ? "Demo mode: no key connected for this model, so outputs are free placeholders" : cost === 0 ? "Runs on your own GPU" : "Estimated cost, billed by the provider to your key"}
+              {demo
+                ? "Demo mode: no key connected for this model, so outputs are free placeholders"
+                : cost === 0
+                  ? "Runs on your own GPU"
+                  : cost === null
+                    ? "The provider publishes no price for this model with LoRAs yet: it bills your key at its own rate"
+                    : "Estimated cost, billed by the provider to your key"}
             </TooltipContent>
           </Tooltip>
         )}

@@ -262,7 +262,10 @@ export function modelLicence(m: ModelDef): { licence: LicenceInfo; cloud?: Licen
   const cloudRoutes = cloud.filter((r) => r.provider !== "llm");
   const cloudLicence = cloudRoutes.length ? paidApiLicence(m.vendor, cloudRoutes) : cloud.length ? routeLicence(cloud[0], m) : undefined;
   if (openLicence) return { licence: openLicence, ...(cloudLicence && { cloud: cloudLicence }), packs };
-  return { licence: cloudLicence ?? { name: "Not recorded", class: "unknown", note: "" }, packs };
+  // A hosted open model (fal's MOSS-Image) says what its weights are and what the research noted about the host.
+  const stop = (t: string) => t.trim().replace(/\.?$/, ".");
+  const weights = m.licence && cloudLicence?.class === "paid-api" ? ` Weights: ${stop(m.licence.note ?? m.licence.licence)}` : "";
+  return { licence: cloudLicence ? { ...cloudLicence, note: weights ? `${stop(cloudLicence.note)}${weights}` : cloudLicence.note } : { name: "Not recorded", class: "unknown", note: "" }, packs };
 }
 
 /** The presets a map key names: a map v2 preset id, or a round-1 slug (the motion, effect or app it matches). */

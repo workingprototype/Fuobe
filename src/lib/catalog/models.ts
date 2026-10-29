@@ -52,6 +52,24 @@ const TRYON_LORA = loraEntry("tryon-klein-4b");
 /** The try-on LoRA card's own instruction, for a run with no words. */
 export const TRYON_PROMPT = "a full-body photo of a person. Replace the outfit with the top and bottom as shown in the reference images. The final image is a full body shot.";
 
+/**
+ * MOSS-Image's sampler settings on your GPU (the graph's own defaults are Standard): Standard is Comfy's template
+ * (25 steps, CFG 2.5, er_sde), Quality OpenMOSS's guide (50 steps, CFG 3, euler), Fast Spectrallic's SFT with the
+ * 8-step DMD LoRA merged in (8 steps, CFG 1; a 5.4 GB file of its own; untested on layouts).
+ */
+const MOSS_QUALITY: NonNullable<ModelOptions["controls"]>[number] = {
+  param: "quality",
+  label: "Quality",
+  values: ["standard", "quality", "fast"],
+  default: "standard",
+  labels: { standard: "Standard · 25 steps", quality: "Best · 50 steps", fast: "Fast · 8 steps (extra 5.4 GB file)" },
+  sets: {
+    standard: { steps: 25, cfg: 2.5, sampler: "er_sde", scheduler: "simple" },
+    quality: { steps: 50, cfg: 3, sampler: "euler", scheduler: "simple" },
+    fast: { steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", unet: "moss_image_sft_8stepdmd_int8_convrot.safetensors" },
+  },
+};
+
 type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badges"] };
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
 
@@ -170,6 +188,27 @@ const open: ModelDef[] = [
     routes: [comfy("t2i", "sdxl-t2i")],
     options: { aspectRatios: IMG_AR, seed: true, negativePrompt: true },
     defaults: { aspectRatio: "1:1" },
+  }),
+  // MOSS-Image (OpenMOSS, Apache-2.0; research #7 §4.6): plain words, or a layout of boxes compiled to its JSON
+  // (src/lib/layout-prompt.ts). The cloud half is `moss-image` on fal.
+  o({
+    id: "oss-moss-image",
+    name: "MOSS-Image",
+    vendor: "OpenMOSS",
+    family: "moss",
+    kind: "image",
+    tagline: "Clean Chinese and English text, follows layout boxes · on your GPU, about 13 GB of files",
+    badges: ["new"],
+    routes: [comfy("t2i", "moss-image-t2i", "MOSS-Image SFT int8, Qwen3.5-9B w4a8, FLUX.2 small decoder; core nodes")],
+    options: {
+      aspectRatios: IMG_AR,
+      resolutions: ["1K", "1.5K"],
+      seed: true,
+      negativePrompt: true,
+      layout: "moss",
+      controls: [MOSS_QUALITY],
+    },
+    defaults: { aspectRatio: "1:1", resolution: "1K" },
   }),
   o({
     id: "oss-qwen-edit",
