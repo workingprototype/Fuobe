@@ -2013,7 +2013,19 @@ function planPath(input: CinemaGenerateInput): CinemaPlan {
     request = { feature: "cinema-path", modelId: model.id, op: "camera-path", prompt, inputs: src ? { images: [src] } : undefined, params };
   }
   const blocker = !src ? "Pick the scene's still" : !moving ? "Add a keyframe or pick a move first" : open && !path?.render ? PATH_RENDER_FIRST : undefined;
-  return finish(model, [{ key: "main", request }], notes, blocker);
+  const step: CinemaStep = { key: "main", request };
+  if (!blocker) return finish(model, [step], notes);
+  // Priced before it can run (the price depends on the length and the quality only), so Film shows what it will cost
+  // while the path is still being made: priced with stand-ins for the still and the render, then blocked.
+  const stand: GenerationRequest = { ...request, inputs: { images: [PLACEHOLDER.image], ...(open ? { video: PLACEHOLDER.video } : {}) } };
+  return { ...finish(model, [{ key: "main", request: stand }], notes), steps: [step], blocker };
+}
+
+/** What a filmed path's take remembers: the keys it was planned with (from the photo's pose) and the clip's real length. */
+export function pathTake(input: Pick<CinemaGenerateInput, "engine" | "path">, plan: CinemaPlan): CinemaTakeInfo["path"] {
+  const params = plan.steps[0]?.request.params;
+  const duration = input.engine === "open" ? PATH_FRAMES / PATH_FPS : (params?.duration ?? 5);
+  return { keys: params?.cameraPath ?? normalizeKeys(input.path?.keys ?? []), duration, ...(input.path?.preset ? { preset: input.path.preset } : {}) };
 }
 
 /** Everything a Generate press would run, priced, without running it (the browser shows it live). */

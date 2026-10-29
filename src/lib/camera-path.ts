@@ -109,14 +109,24 @@ export function presetKeys(id: string): CameraKey[] | null {
 // ---------------------------------------------------------------------------
 // Editing a path
 
-/** Keys in time order inside 0–1, starting at the photo's pose (prepended when the first key isn't at 0). */
+/** Whether a key is the photo's own camera (where every path starts). */
+export function isPhotoPose(k: CameraKey): boolean {
+  const near = (a: number, b: number, eps: number) => Math.abs(a - b) < eps;
+  return near(k.azimuth, 0, 0.05) && near(k.elevation, 0, 0.05) && near(k.distance, 1, 1e-3) && near(k.truck ?? 0, 0, 1e-3);
+}
+
+/**
+ * Keys in time order inside 0–1, starting at the photo's pose: the clip's first frame is the photo, so a key at time 0
+ * anywhere else (an API or MCP caller's; the editor never makes one) is replaced by the photo's pose, and the photo's
+ * pose is put first when the path starts later.
+ */
 export function normalizeKeys(keys: readonly CameraKey[]): CameraKey[] {
   const list = keys
     .filter((k) => [k.t, k.azimuth, k.elevation, k.distance].every(Number.isFinite))
     .map((k) => ({ ...k, t: clamp(k.t, 0, 1), elevation: clamp(k.elevation, -90, 90), distance: clamp(k.distance, DISTANCE.min, DISTANCE.max) }))
     .sort((a, b) => a.t - b.t);
-  if (!list.length || list[0].t > 0) list.unshift({ ...PHOTO_KEY });
-  return list;
+  const start = list.find((k) => k.t === 0 && isPhotoPose(k));
+  return [start ?? { ...PHOTO_KEY }, ...list.filter((k) => k.t > 0)];
 }
 
 /** The same keys, evenly spaced in time (what adding or removing a key leaves). */

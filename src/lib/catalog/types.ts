@@ -572,9 +572,10 @@ export interface ModelOptions {
   /**
    * What this model needs beyond its operation's own inputs, checked before a job is created (the
    * composer shows `msg` inline): reference images for a style-reference t2i model, a prompt for a
-   * model whose operation is otherwise promptless, a painted mask or clicked points (video erasers).
+   * model whose operation is otherwise promptless, a painted mask or clicked points (video erasers), a video to follow
+   * (the open Fly path's render).
    */
-  requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; msg: string };
+  requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; video?: boolean; msg: string };
   /** Output formats it can write (params.format: SDR to HDR, export). */
   formats?: VideoFormat[];
   /** Depth maps: the colour maps it draws (params.colormap; see COLORMAPS). Unset = grayscale only. */

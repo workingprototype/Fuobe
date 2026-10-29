@@ -18,13 +18,13 @@ const cinema = await import("@/server/cinema");
 const generateRoute = await import("@/app/api/cinema/projects/[id]/generate/route");
 const { saveFile } = await import("@/server/storage");
 const { encodePng } = await import("@/server/png");
-const { getModel } = await import("@/lib/catalog");
+const { getModel, getPreset } = await import("@/lib/catalog");
 const { buildPayload } = await import("@/lib/catalog/payload");
-const { estimateCost } = await import("@/lib/catalog/plan");
+const { estimateCost, planGeneration } = await import("@/lib/catalog/plan");
 const { getWorkflow, prepareWorkflow } = await import("@/server/providers/comfyui");
 const { mockProvider } = await import("@/server/providers/mock");
-const { planCinema, PATH_MODELS, PATH_RENDER_FIRST } = await import("@/lib/catalog/cinema");
-const { DEFAULT_MOTION, PHOTO_KEY, presetKeys } = await import("@/lib/camera-path");
+const { pathTake, planCinema, PATH_MODELS, PATH_RENDER_FIRST } = await import("@/lib/catalog/cinema");
+const { DEFAULT_MOTION, PATH_FPS, PATH_FRAMES, PHOTO_KEY, presetKeys } = await import("@/lib/camera-path");
 
 beforeAll(() => {
   setSetting("demoMode", "auto");
@@ -113,6 +113,46 @@ describe("planning a fly path", () => {
     expect(planCinema(film("cloud", { path: { keys: [PHOTO_KEY] } }), ctx).blocker).toBe("Add a keyframe or pick a move first");
     expect(planCinema(film("cloud", { path: undefined }), ctx).blocker).toBe("Add a keyframe or pick a move first");
     expect(planCinema(film("open", { path: { keys: orbit } }), ctx).blocker).toBe(PATH_RENDER_FIRST);
+  });
+
+  it("shows the price that applies before the path is ready: Film never reads 'Free' for a paid run", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-29T12:00:00Z"), toFake: ["Date"] });
+    const start = planCinema(film("cloud", { path: { keys: [PHOTO_KEY], duration: 5 } }), ctx);
+    expect(start.blocker).toBe("Add a keyframe or pick a move first");
+    expect(start.costUsd).toBe(0.26);
+    expect(planCinema(film("cloud", { resolution: "1080P", path: { keys: [PHOTO_KEY], duration: 10 } }), ctx).costUsd).toBe(1.04);
+    expect(planCinema(film("cloud", { source: undefined }), ctx)).toMatchObject({ blocker: "Pick the scene's still", costUsd: 0.26 });
+    // The blocked step keeps what was really asked (no stand-ins), and the open engine stays free.
+    expect(start.steps[0].request.inputs).toEqual({ images: [STILL] });
+    expect(planCinema(film("open", { path: { keys: [PHOTO_KEY] } }), ctx)).toMatchObject({ blocker: "Add a keyframe or pick a move first", costUsd: 0 });
+  });
+
+  it("starts every path at the photo's pose, even when a caller sends a different first key", () => {
+    const sent = [
+      { t: 0, azimuth: 90, elevation: 0, distance: 1 },
+      { t: 1, azimuth: 180, elevation: 0, distance: 1 },
+    ];
+    for (const engine of ["cloud", "open"] as const) {
+      const plan = planCinema(film(engine, { path: { keys: sent, ...(engine === "open" ? { render: RENDER } : {}) } }), ctx);
+      expect(plan.blocker).toBeUndefined();
+      expect(plan.steps[0].request.params?.cameraPath).toEqual([PHOTO_KEY, sent[1]]);
+    }
+  });
+
+  it("remembers the path it planned and the clip's real length: 81 frames at 16 fps on the open engine", () => {
+    const open = film("open", { path: { keys: orbit, duration: 8, render: RENDER, preset: "orbit_360" } });
+    expect(pathTake(open, planCinema(open, ctx))).toEqual({ keys: orbit, duration: PATH_FRAMES / PATH_FPS, preset: "orbit_360" });
+    const cloud = film("cloud", { path: { keys: orbit, duration: 8 } });
+    expect(pathTake(cloud, planCinema(cloud, ctx))).toEqual({ keys: orbit, duration: 8 });
+  });
+
+  it("a direct run of either helper is refused up front without its still (and, on the GPU, the render)", () => {
+    const run = (modelId: string, inputs: Record<string, unknown> | undefined) => () =>
+      planGeneration({ feature: "video", modelId, op: "camera-path", prompt: "x", inputs, params: { cameraPath: orbit } }, getModel, getPreset);
+    expect(run("minimax-h3-max-camera", undefined)).toThrow("Add the still to film along the path");
+    expect(run("minimax-h3-max-camera", { images: [STILL] })).not.toThrow();
+    expect(run("oss-uni3c-path", { images: [STILL] })).toThrow(/render of the path/);
+    expect(run("oss-uni3c-path", { images: [STILL], video: RENDER })).not.toThrow();
   });
 });
 
@@ -266,6 +306,22 @@ describe("Cinema API: Film this path in demo mode", () => {
     expect(take).toMatchObject({ action: "path", prompt: "the dancer spins", path: { keys: orbit, duration: 8, preset: "orbit_360" } });
     const done = await settle(items[0].id);
     expect(done).toMatchObject({ status: "succeeded", kind: "video" });
+  }, 40_000);
+
+  it("an API caller's path that starts away from the photo is filmed (and remembered) from the photo's pose", async () => {
+    const p = cinema.createProject({ name: "API path" });
+    const still = upload("still-api.png");
+    const sent = [
+      { t: 0, azimuth: 90, elevation: 0, distance: 1 },
+      { t: 1, azimuth: 180, elevation: 0, distance: 1 },
+    ];
+    const res = await generateRoute.POST(json({ input: film("cloud", { source: { url: still, kind: "image" }, path: { keys: sent, duration: 5 } }) }), params(p.id));
+    expect(res.status).toBe(201);
+    const { items } = await res.json();
+    expect(items[0].request.params.cameraPath).toEqual([PHOTO_KEY, sent[1]]);
+    const take = cinema.listItems(p.id).find((g) => g.id === items[0].id)!.take!;
+    expect(take.path?.keys).toEqual([PHOTO_KEY, sent[1]]);
+    await settle(items[0].id);
   }, 40_000);
 
   it("refuses a path out of range, a render not uploaded here, and an open run without its render", async () => {

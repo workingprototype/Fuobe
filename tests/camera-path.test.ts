@@ -10,6 +10,7 @@ import {
   flyPoseOf,
   framePoses,
   fromScenePose,
+  isPhotoPose,
   keyAt,
   keyLabel,
   normalizeKeys,
@@ -128,6 +129,26 @@ describe("editing a path", () => {
     expect(k.map((x) => x.t)).toEqual([0, 0.5, 1]);
     expect(k[0]).toEqual(PHOTO_KEY);
     expect(k[1]).toMatchObject({ elevation: 90, distance: 4 });
+  });
+
+  it("always starts at the photo's pose: a key at time 0 anywhere else is replaced by it", () => {
+    const k = normalizeKeys([
+      { t: 0, azimuth: 90, elevation: 10, distance: 2 },
+      { t: 1, azimuth: 180, elevation: 0, distance: 1 },
+    ]);
+    expect(k).toEqual([PHOTO_KEY, { t: 1, azimuth: 180, elevation: 0, distance: 1 }]);
+    // Two keys at time 0: the photo's pose stays, the other goes.
+    const two = normalizeKeys([{ t: 0, azimuth: 45, elevation: 0, distance: 1 }, PHOTO_KEY, { t: 0.5, azimuth: 90, elevation: 0, distance: 1 }]);
+    expect(two.map((x) => [x.t, x.azimuth])).toEqual([
+      [0, 0],
+      [0.5, 90],
+    ]);
+    // A slide's start (the photo's pose, no slide yet) is kept as it is; a start already slid is not the photo's pose.
+    expect(normalizeKeys(keys("truck_left"))).toEqual(keys("truck_left"));
+    expect(isPhotoPose({ t: 0, azimuth: 0, elevation: 0, distance: 1, truck: 0.5 })).toBe(false);
+    // H3 Max and the per-frame cameras get the corrected start too.
+    const cam = toH3MaxTrajectory([{ t: 0, azimuth: 90, elevation: 0, distance: 1 }, { t: 1, azimuth: 180, elevation: 0, distance: 1 }]);
+    expect("trajectory" in cam && cam.trajectory[0]).toMatchObject({ time: 0, azimuth: 0, elevation: 0, distance: 1 });
   });
 
   it("labels a chip with seconds, round, height and distance", () => {

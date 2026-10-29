@@ -1421,7 +1421,13 @@ const open: ModelDef[] = [
     badges: ["new"],
     hidden: true,
     routes: [comfy("camera-path", "wan21-i2v-uni3c-path", "your browser's render of the path guides Wan 2.1 I2V 720P through core Uni3C")],
-    options: { resolutions: ["480p", "720p"], aspectRatios: ["auto", ...VID_AR], seed: true, maxImages: 1 },
+    options: {
+      resolutions: ["480p", "720p"],
+      aspectRatios: ["auto", ...VID_AR],
+      seed: true,
+      maxImages: 1,
+      requires: { images: 1, video: true, msg: "Add the still and the render of the path (Cinema's 3D scene records it when you film a path)" },
+    },
     defaults: { resolution: "480p", aspectRatio: "auto" },
   }),
   o({
