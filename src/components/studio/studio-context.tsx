@@ -51,7 +51,7 @@ export interface StudioConfig {
   anyOf?: SlotKey[][];
   /** Color signature + Moodboard chips (Image studio): a saved palette and a style, routed per model (src/lib/catalog/palettes.ts). */
   signature?: boolean;
-  /** Models the studio can be moved to (by the signature chips) beyond its picker list and defaults: kept in its model slice. */
+  /** Models the studio can be moved to (by the signature chips), or runs as a later step, beyond its picker list and defaults: kept in its model slice. */
   extraModels?: string[];
   /**
    * Read the attached clip's header (length, size, frame rate): prices count its seconds and the composer

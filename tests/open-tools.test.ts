@@ -306,4 +306,18 @@ describe("Soul's face mosaic", () => {
     expect(estimateCost(getModel("oss-face-mosaic")!, {})).toBe(0);
     expect(previewGeneration({ feature: "image", modelId: "oss-face-mosaic", op: "face-mosaic", inputs: { images: ["/a.png"] } }).op).toBe("face-mosaic");
   });
+
+  it("the Image studio knows the mosaic step's models before the full catalog loads, so its price counts the step", async () => {
+    const { studioCatalog } = await import("@/lib/studio-catalog");
+    const { IMAGE_STUDIO } = await import("@/lib/studios");
+    const { postStepCost } = await import("@/lib/composer");
+    const slice = studioCatalog(IMAGE_STUDIO);
+    const known = new Map([...slice.models, ...(slice.lookup ?? [])].map((m) => [m.id, m]));
+    for (const id of Object.values(tools.FACE_MOSAIC_MODELS)) expect(known.has(id)).toBe(true);
+    // The composer's lookup is that slice (the browser has nothing else until the model menu opens).
+    const lookup = (engine: "open" | "cloud") => (id: string) => (known.get(id) ? onEngine(known.get(id)!, engine) : undefined);
+    expect(postStepCost("fuobe-soul", "v1-pixeletedface", "cloud", 2, lookup("cloud"))).toBeCloseTo(0.02, 5);
+    expect(postStepCost("fuobe-soul", "v1-pixeletedface", "open", 2, lookup("open"))).toBe(0);
+    expect(postStepCost("fuobe-soul", undefined, "cloud", 2, lookup("cloud"))).toBe(0);
+  });
 });
