@@ -41,7 +41,7 @@ import {
   type SplitQuality,
   type StemId,
 } from "@/lib/av/split";
-import type { Engine, OutputFile } from "@/lib/catalog/types";
+import type { Engine, Generation, OutputFile } from "@/lib/catalog/types";
 import { downloadHref } from "@/lib/library";
 import { cn } from "@/lib/utils";
 import { useAudioToolPreview, useAudioToolRun, useSettled, type AudioToolBody } from "./hooks";
@@ -730,21 +730,41 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
         )}
         {source && stems.length > 0 && <Mixer key={g!.id} stems={stems} source={source} engine={engine} />}
       </div>
-      <Results />
+      <Results
+        open={resultId}
+        onOpen={(r) => {
+          const media = r.request.inputs?.video ?? r.request.inputs?.audio;
+          if (!media) return;
+          setSource({ ref: media, preview: media, kind: r.request.inputs?.video ? "video" : "audio", id: r.id, name: r.request.title?.replace(/^Split · /, "") });
+          setResultId(r.id);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
+      />
     </ToolShell>
   );
 }
 
-function Results() {
+/** Earlier splits, and a way back into the mixer for the finished ones (their stems are kept in the Library). */
+function Results({ onOpen, open }: { onOpen: (g: Generation) => void; open: string | null }) {
   const splits = useGenerations({ features: [SPLIT_FEATURE], limit: 12 });
   const remuxes = useGenerations({ features: [REMUX_FEATURE], limit: 12 });
   const items = [...(remuxes.data ?? []), ...(splits.data ?? [])].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  const reopen = (splits.data ?? []).filter((g) => g.status === "succeeded" && g.id !== open && stemsOf(g.outputs).length > 0).slice(0, 4);
   if (!items.length) return null;
   return (
     <section className="mx-auto mt-10 max-w-[1040px]" aria-labelledby="split-results">
       <h3 id="split-results" className="mb-3 font-heading text-[22px]">
         Your splits
       </h3>
+      {reopen.length > 0 && (
+        <div className="mb-4 flex min-w-0 flex-wrap gap-2">
+          {reopen.map((g) => (
+            <Button key={g.id} variant="outline" size="sm" className="max-w-full rounded-full" onClick={() => onOpen(g)}>
+              <SlidersVertical className="size-3.5 shrink-0" /> <span className="truncate">Open {g.request.title?.replace(/^Split · /, "") ?? "split"} in the mixer</span>
+            </Button>
+          ))}
+        </div>
+      )}
       <Feed items={items} />
     </section>
   );

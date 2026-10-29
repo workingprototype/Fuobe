@@ -110,6 +110,7 @@ describe("outputActions", () => {
       "menu:lipsync",
       "menu:upscale",
       "menu:add-sound",
+      "menu:split-soundtrack",
       "menu:grade",
       "menu:genjutsu",
       "menu:finalize",
