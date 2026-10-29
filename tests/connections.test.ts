@@ -258,7 +258,8 @@ describe("POST /api/providers/test with unsaved values", () => {
     expect(all.result.body).toEqual({ ok: true, detail: "AI-Toolkit · 1 training running" });
     // AI_TOOLKIT_AUTH set on the trainer: it wants the token.
     const locked = await withFetch({ "http://10.0.0.7:8675/api/jobs": [401, { error: "Unauthorized" }] }, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675" }));
-    expect(locked.result.body).toEqual({ ok: false, detail: "AI-Toolkit wants its auth token (AI_TOOLKIT_AUTH on the trainer): add it under Auth token" });
+    // Settings tests one field at a time, so the way there is the address saved anyway, then the token tested on it.
+    expect(locked.result.body).toEqual({ ok: false, detail: "AI-Toolkit wants its auth token (AI_TOOLKIT_AUTH on the trainer): Save anyway, then add the token under Auth token and test it there" });
     const typed = await withFetch({ "http://10.0.0.7:8675/api/jobs": [401, { error: "Unauthorized" }] }, () =>
       post({ provider: "ai-toolkit", values: { aiToolkitUrl: "http://10.0.0.7:8675", aiToolkitToken: "wrong" } }),
     );
@@ -282,7 +283,17 @@ describe("POST /api/providers/test with unsaved values", () => {
     // A new address gets no token unless one is typed with it, and says so when the trainer wants one.
     const other = await withFetch(answers, () => post({ provider: "ai-toolkit", value: "http://10.0.0.9:8675" }));
     expect(other.seen.map((r) => r.auth)).toEqual([undefined]);
-    expect(other.result.body.detail).toBe("AI-Toolkit wants its auth token: type it with the new address (the saved one stays with http://10.0.0.7:8675)");
+    // Settings can't send a token with a new address (each field tests on its own): saved anyway, the token is tested there.
+    expect(other.result.body.detail).toBe(
+      "AI-Toolkit wants its auth token, and the saved one isn't sent to a new address (it stays with http://10.0.0.7:8675): Save anyway, then test the token under Auth token (type this trainer's there if it differs)",
+    );
+    setSetting("aiToolkitUrl", "http://10.0.0.9:8675");
+    const after = await withFetch({ "http://10.0.0.9:8675/api/jobs": [200, { jobs: [] }] }, () => post({ provider: "ai-toolkit", field: "aiToolkitToken" }));
+    expect(after.result.body).toEqual({ ok: true, detail: "AI-Toolkit · ready, no training running" });
+    expect(after.seen.map((r) => r.auth)).toEqual(["Bearer saved-aitk-token"]);
+    const retyped = await withFetch({ "http://10.0.0.9:8675/api/jobs": [200, { jobs: [] }] }, () => post({ provider: "ai-toolkit", values: { aiToolkitToken: "new-token" }, field: "aiToolkitToken" }));
+    expect(retyped.seen.map((r) => r.auth)).toEqual(["Bearer new-token"]);
+    setSetting("aiToolkitUrl", "http://10.0.0.7:8675");
     const same = await withFetch(answers, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675/" }));
     expect(same.seen.map((r) => r.auth)).toEqual(["Bearer saved-aitk-token"]);
     setSetting("aiToolkitUrl", "");

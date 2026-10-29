@@ -324,11 +324,22 @@ export async function testAiToolkit(opts?: { focus?: string }): Promise<{ ok: bo
     const why = (e as Error).name === "TimeoutError" ? "no answer in 10 s" : (e as Error).message;
     return { ok: false, detail: `Can't reach AI-Toolkit at ${base} (${why}). Is its UI running? (in ai-toolkit/ui: npm run build_and_start)` };
   }
+  // Settings tests one field at a time: a new address is tested without a token, and a token with the saved address.
+  // So the way to a trainer that wants one is its address saved anyway, then the token tested under Auth token.
   if (res.status === 401) {
     if (aitkTokenWithheld() && getSetting("aiToolkitToken")) {
-      return { ok: false, detail: `AI-Toolkit wants its auth token: type it with the new address (the saved one stays with ${savedSetting("aiToolkitUrl").replace(/\/+$/, "")})` };
+      return {
+        ok: false,
+        detail: `AI-Toolkit wants its auth token, and the saved one isn't sent to a new address (it stays with ${savedSetting("aiToolkitUrl").replace(/\/+$/, "")}): Save anyway, then test the token under Auth token (type this trainer's there if it differs)`,
+      };
     }
-    return { ok: false, detail: getSetting("aiToolkitToken") ? "AI-Toolkit rejected the auth token (401)" : "AI-Toolkit wants its auth token (AI_TOOLKIT_AUTH on the trainer): add it under Auth token" };
+    if (getSetting("aiToolkitToken")) return { ok: false, detail: "AI-Toolkit rejected the auth token (401)" };
+    return {
+      ok: false,
+      detail: isCandidate("aiToolkitUrl")
+        ? "AI-Toolkit wants its auth token (AI_TOOLKIT_AUTH on the trainer): Save anyway, then add the token under Auth token and test it there"
+        : "AI-Toolkit wants its auth token (AI_TOOLKIT_AUTH on the trainer): add it under Auth token",
+    };
   }
   if (!res.ok) return { ok: false, detail: `AI-Toolkit answered HTTP ${res.status}` };
   const jobs = ((await res.json().catch(() => null)) as { jobs?: unknown } | null)?.jobs;
