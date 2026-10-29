@@ -77,6 +77,11 @@ async function finish(url: string, steps: FinishSteps, when: Date): Promise<Blob
   return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't encode the picture"))), "image/png"));
 }
 
+/** The browser stopped trying to finish this result (no WebGL, a picture that won't load): it stays as it was made. */
+export function finishGaveUp(g: Generation): boolean {
+  return outputsToFinish(g).some((i) => (failed.get(`${g.id}:${i}`)?.tries ?? 0) >= MAX_TRIES);
+}
+
 /**
  * Finish every Soul result in `items` that still needs it (once per output, in the background). `queryKey`: the cache
  * that shows them, refetched once the finished picture is kept (Cinema keeps its takes under ["cinema"]).

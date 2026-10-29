@@ -2,7 +2,7 @@
  "$schema": "./case.schema.json",
  "suite": "popcorn",
  "title": "Popcorn · storyboards in Fuobe Soul's looks",
- "description": "Runs the Storyboard (POST /api/storyboards, priced by /api/storyboards/estimate) with a Fuobe Soul look (build plan O13): frame 1 on Fuobe Soul with the look's LoRAs and words, the next frames from the frame before (Nano Banana Pro edits in the cloud, Qwen-Image-Edit 2509 + the next-scene LoRA on your GPU) with the look's words; the look's grade and overlay are applied in the browser after, so scores are of the raw frames. Continuity is how well the frames hold together; the no-look case is the board as it was before.",
+ "description": "Runs the Storyboard (POST /api/storyboards, priced by /api/storyboards/estimate) with a Fuobe Soul look (build plan O13): frame 1 on Fuobe Soul with the look's LoRAs and words, the next frames from the frame before (Qwen-Image-Edit 2509 + the next-scene LoRA on both engines: your GPU's graph, or fal's hosted Qwen-Image-Edit 2509 with the LoRA sent as a URL) with the look's words; the look's grade and overlay are applied in the browser after, so scores are of the raw frames. Continuity is how well the frames hold together; the no-look case is the board as it was before.",
  "original": [
   "fuobe-soul"
  ],

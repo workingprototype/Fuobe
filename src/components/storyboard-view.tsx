@@ -14,12 +14,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useDebounced } from "@/components/faceless/hooks";
 import { costText } from "@/components/shorts/ui";
 import { EngineSwitch } from "@/components/studio/engine-switch";
-import { useSoulFinish } from "@/components/studio/soul-finish";
+import { finishGaveUp, useSoulFinish } from "@/components/studio/soul-finish";
 import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { fileToSlot, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { Viewer } from "@/components/studio/viewer";
 import { useCreateGeneration, useEngine, useGenerationActions, useGenerations } from "@/lib/api";
-import { MAX_FRAMES, STORYBOARD_ASPECTS, STORYBOARD_LOOK_MODEL, STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
+import { MAX_FRAMES, STORYBOARD_ASPECTS, STORYBOARD_LOOK_MODEL, STORYBOARD_PARTNER_IDS, storyboardModels, type StoryboardPartner } from "@/lib/catalog/storyboard";
 import { lookCard } from "@/lib/catalog/soul-cards";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
@@ -85,6 +85,31 @@ function RatioPill({ value, onChange }: { value: string; onChange: (v: string) =
           className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap text-muted-foreground transition", value === a && "bg-background text-foreground shadow-soft")}
         >
           {a}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** What a cloud board's frames are made on: Fuobe's open recipe, or a partner model for every frame. */
+function PartnerPill({ value, onChange, names }: { value?: StoryboardPartner; onChange: (v?: StoryboardPartner) => void; names: Record<string, string> }) {
+  const options: { v?: StoryboardPartner; label: string; title: string }[] = [
+    { label: "Fuobe", title: "Fuobe's open recipe: hosted Qwen-Image-Edit with the next-scene LoRA" },
+    ...STORYBOARD_PARTNER_IDS.map((p) => ({ v: p, label: names[p] ?? p, title: `The frames on ${names[p] ?? p}, a partner model (frame 1 stays on Fuobe Soul in a look)` })),
+  ];
+  return (
+    <div role="radiogroup" aria-label="Frames made on" className="flex flex-wrap gap-1 rounded-full bg-muted p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.v ?? "fuobe"}
+          type="button"
+          role="radio"
+          aria-checked={value === o.v}
+          title={o.title}
+          onClick={() => onChange(o.v)}
+          className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap text-muted-foreground transition", value === o.v && "bg-background text-foreground shadow-soft")}
+        >
+          {o.label}
         </button>
       ))}
     </div>
@@ -179,7 +204,8 @@ function Board({
   const qc = useQueryClient();
   const first = frames[0];
   const done = frames.filter((f) => f.status === "succeeded").length;
-  const ready = filmReady(frames);
+  // A look board's frames are graded (and cropped) here first: the film starts from them as they look.
+  const ready = filmReady(frames, finishGaveUp);
   const ratio = tileRatio(first);
   const makeFilm = useMutation({
     mutationFn: async () => {
@@ -254,6 +280,8 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
   const [refs, setRefs] = useState<SlotValue[]>([]);
   const [look, setLook] = useState<string | undefined>();
   const [lookStrength, setLookStrength] = useState(1);
+  // Cloud only: a partner model for every frame instead of Fuobe's open recipe.
+  const [partner, setPartner] = useState<StoryboardPartner | undefined>();
   const [open, setOpen] = useState<Generation | null>(null);
   const feed = useGenerations({ features: ["storyboard", "storyboard-film"], limit: 240 });
   const titles = useBoardTitles();
@@ -280,11 +308,14 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
   const flat = boards.flatMap((b) => [...b, ...(films.get(b[0].batchId ?? "") ?? [])].filter((g) => g.status === "succeeded" && g.outputs[0]));
   const pos = open ? flat.findIndex((g) => g.id === open.id) : -1;
 
-  const m = STORYBOARD_MODELS[engine as Engine];
+  const boardPartner = engine === "cloud" ? partner : undefined;
+  const m = storyboardModels(engine as Engine, boardPartner);
+  const nextName = `${modelNames[m.next] ?? m.next}${m.nextLoras?.length ? " with the next-scene LoRA" : ""}`;
   const lookName = look ? lookCard(look)?.name : undefined;
   const filled = scenes.filter((s) => s.trim());
   const boardBody = {
     engine,
+    ...(boardPartner && { partner: boardPartner }),
     ...(mode === "auto" ? { story, frames: count } : { scenes: filled }),
     references: refs.filter((r) => r.ref && !r.uploading).map((r) => r.ref),
     style: style || undefined,
@@ -353,11 +384,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
           <h2 className="font-heading text-display text-balance">Tell it frame by frame</h2>
           <p className="mt-2 text-[13px] text-muted-foreground">
             Up to {MAX_FRAMES} consistent frames — each one is made from the previous frame, so faces, wardrobe and light carry through.
-            {lookName && !refs.length
-              ? ` Frame 1 on ${modelNames[STORYBOARD_LOOK_MODEL] ?? "Fuobe Soul"} in the ${lookName} look, then ${modelNames[m.next] ?? m.next}.`
-              : modelNames[m.next]
-                ? ` Runs on ${modelNames[m.next]}.`
-                : ""}
+            {lookName && !refs.length ? ` Frame 1 on ${modelNames[STORYBOARD_LOOK_MODEL] ?? "Fuobe Soul"} in the ${lookName} look, then ${nextName}.` : ` Runs on ${nextName}.`}
           </p>
           <div className="mt-6 rounded-[20px] border bg-background p-3 text-left shadow-soft focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
             <div role="radiogroup" aria-label="How to write it" className="mb-2 flex items-center gap-1 rounded-full bg-muted p-0.5 text-[13px] font-medium sm:w-fit">
@@ -452,6 +479,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
               )}
               <LookChip value={look} strength={lookStrength} onChange={(id) => setLook(id)} onStrength={setLookStrength} none="No look" />
               <RatioPill value={aspect} onChange={setAspect} />
+              {engine === "cloud" && <PartnerPill value={partner} onChange={setPartner} names={modelNames} />}
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 <span className="text-right text-[12px] leading-tight tabular-nums text-muted-foreground" aria-live="polite">
                   {estimate.isError ? (

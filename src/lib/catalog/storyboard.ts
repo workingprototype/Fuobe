@@ -8,17 +8,47 @@
  * model, with the look's words), the next frames carry the look's words, and every frame gets the
  * look's grade and overlay after it is made (each next frame is made from the previous one as it
  * came out, so the grade is applied once).
+ *
+ * The board is Fuobe's open recipe on both engines: Qwen-Image-Edit 2509 + the next-scene LoRA makes each next frame
+ * on your GPU (a graph that loads it) and on fal's hosted Qwen-Image-Edit 2509 (the LoRA sent as a URL). Nano Banana
+ * Pro stays a separate choice in the cloud (`partner`), every frame on it as boards ran before.
  */
-import type { ChainSlot, Engine, GenerationRequest } from "./types";
+import { loraEntry, loraRef } from "./loras";
+import type { ChainSlot, Engine, GenerationRequest, LoraRef } from "./types";
 
 export const MAX_FRAMES = 8;
 
-/** Which models make the first frame and the follow-ups on each engine. */
-export const STORYBOARD_MODELS: Record<Engine, { first: string; firstWithRefs: string; next: string; chainFrom: "first" | "last" }> = {
-  cloud: { first: "nano-banana-pro", firstWithRefs: "nano-banana-pro", next: "nano-banana-pro", chainFrom: "last" },
+export interface StoryboardModels {
+  first: string;
+  firstWithRefs: string;
+  next: string;
+  chainFrom: "first" | "last";
+  /** LoRAs each next frame carries (the cloud's next-scene LoRA; the GPU graph loads its own). */
+  nextLoras?: LoraRef[];
+}
+
+/** The next-scene LoRA (research adapterLoras): the one the GPU graph loads, at its strength. */
+const NEXT_SCENE = loraEntry("next-scene-qwen-edit-2509");
+
+/** Which models make the first frame and the follow-ups on each engine (Fuobe's recipe). */
+export const STORYBOARD_MODELS: Record<Engine, StoryboardModels> = {
+  // Hosted open weights: Z-Image Turbo, Qwen-Image-Edit 2511 with references, then Qwen-Image-Edit 2509 + next-scene.
+  cloud: { first: "z-image-turbo-cloud", firstWithRefs: "qwen-image-edit-2511-cloud", next: "qwen-image-edit-2509-cloud", chainFrom: "first", ...(NEXT_SCENE && { nextLoras: [loraRef(NEXT_SCENE)] }) },
   // Qwen-Image-Edit + the next-scene LoRA takes the previous panel as image 1 and the character as image 2.
   open: { first: "oss-z-image-turbo", firstWithRefs: "oss-qwen-edit", next: "oss-qwen-next-scene", chainFrom: "first" },
 };
+
+/** Partner models a cloud board can run on instead (a separate choice): every frame on it, each from the last one. */
+export const STORYBOARD_PARTNERS = {
+  "nano-banana-pro": { first: "nano-banana-pro", firstWithRefs: "nano-banana-pro", next: "nano-banana-pro", chainFrom: "last" },
+} as const satisfies Record<string, StoryboardModels>;
+export type StoryboardPartner = keyof typeof STORYBOARD_PARTNERS;
+export const STORYBOARD_PARTNER_IDS = Object.keys(STORYBOARD_PARTNERS) as [StoryboardPartner, ...StoryboardPartner[]];
+
+/** The models a board runs on: the partner when one is picked in the cloud, else Fuobe's recipe for the engine. */
+export function storyboardModels(engine: Engine, partner?: StoryboardPartner): StoryboardModels {
+  return engine === "cloud" && partner ? STORYBOARD_PARTNERS[partner] : STORYBOARD_MODELS[engine];
+}
 
 /** The model a board with a Soul look makes its first frame on (no references): the look's LoRAs, words and grade. */
 export const STORYBOARD_LOOK_MODEL = "fuobe-soul";
@@ -90,6 +120,8 @@ export interface StoryboardLook {
 
 export interface StoryboardPlanInput {
   engine: Engine;
+  /** A partner model for the whole board (cloud only). */
+  partner?: StoryboardPartner;
   scenes: string[];
   references?: string[];
   style?: string;
@@ -106,7 +138,7 @@ export type FrameRequest = GenerationRequest & { batchTitle?: string };
  * picture as it came out (`raw`: before a look's grade, which every frame gets on its own).
  */
 export function planStoryboard(input: StoryboardPlanInput): FrameRequest[] {
-  const m = STORYBOARD_MODELS[input.engine];
+  const m = storyboardModels(input.engine, input.partner);
   const refs = (input.references ?? []).slice(0, 4);
   const look = input.look;
   const cropped = !!look && input.aspectRatio === LOOK_CROPPED;
@@ -128,6 +160,7 @@ export function planStoryboard(input: StoryboardPlanInput): FrameRequest[] {
       prompt: framePrompt(scene, i, { refs: frameRefs.length, chainFrom: m.chainFrom, style: onSoul ? input.style : style }),
       inputs: frameRefs.length ? { images: frameRefs } : undefined,
       params,
+      ...(!first && m.nextLoras?.length && { loras: m.nextLoras }),
       ...(chain ? { chain } : !first && { chainFrom: m.chainFrom }),
       frame: { scene, index: i, of: input.scenes.length, ...(look && { look: look.id }), ...(cropped && { crop: LOOK_CROPPED }) },
       ...(input.batchTitle && { batchTitle: input.batchTitle }),

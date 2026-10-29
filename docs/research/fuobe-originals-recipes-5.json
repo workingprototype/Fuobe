@@ -18010,8 +18010,10 @@
    "original": {
     "added": "2026-10-29 (build plan O13)",
     "looks": "a board can take one of Fuobe Soul's 139 looks: frame 1 is made on Fuobe Soul with the look (its LoRAs, words and grade) on either engine, the next frames continue from it with the look's words, and every frame gets the look's grade and overlay after it is made (the browser's Soul finish); each next frame is made from the previous frame as it came out, before its finish, so the grade is applied once",
-    "references": "with references, frame 1 stays on the reference model (Nano Banana Pro in the cloud, Qwen-Image-Edit on the GPU) with the look's words, and the look's grade",
-    "next": "unchanged: Nano Banana Pro edits in the cloud, Qwen-Image-Edit 2509 + next-scene LoRA on the GPU; the hosted next-scene route (fal-ai/qwen-image-edit-plus-lora-gallery/next-scene) is not schema-read yet"
+    "references": "with references, frame 1 stays on the reference model (Qwen-Image-Edit 2511 on either engine, or the partner model when it is picked) with the look's words, and the look's grade",
+    "next": "Fuobe's recipe on both engines (corrected 2026-10-29): the next frames are Qwen-Image-Edit 2509 + the next-scene LoRA (adapterLoras next-scene-qwen-edit-2509, MIT, at 0.75), on your GPU (storyboard-qwen-edit-2509-next-scene) and in the cloud on fal-ai/qwen-image-edit-plus-lora (hostedBaseEndpoints, schema read; the LoRA rides along as a URL), the previous frame as image 1 and the first reference as image 2. The gallery route fal-ai/qwen-image-edit-plus-lora-gallery/next-scene isn't needed.",
+    "first": "frame 1 without a look: Z-Image Turbo (oss-z-image-turbo on the GPU, z-image-turbo-cloud = fal-ai/z-image/turbo in the cloud); with references: Qwen-Image-Edit 2511 (oss-qwen-edit, qwen-image-edit-2511-cloud); with a look and no references: Fuobe Soul",
+    "partner": "Nano Banana Pro stays a separate choice in the cloud (the Storyboard's Frames chip; API partner: \"nano-banana-pro\"): every frame on it, each next frame from the last one with the references, as boards ran before"
    }
   },
   {
@@ -22589,6 +22591,30 @@
    ],
    "hostedEndpoint": "fal-ai/flux-2/klein/4b/edit/lora",
    "notes": "Rank-32 edit LoRA trained by xocialize with ai-toolkit on FLUX.2-klein-base-4B (Apache-2.0); card licence apache-2.0, so fal may host it (build plan O10's check). Three ordered inputs: person, top (or a dress / whole outfit), bottom; trigger TRYON. Trained on clothing-agnostic people: the open graph greys the old outfit out first (ClothesSegment), the hosted route sends the photo as it is (quality unmeasured until the eval harness runs the fashion suite)."
+  },
+  {
+   "key": "next-scene-qwen-edit-2509",
+   "name": "Next Scene for Qwen-Image-Edit 2509 (lovis93)",
+   "url": "https://huggingface.co/lovis93/next-scene-qwen-image-lora-2509/resolve/main/next-scene_lora-v2-3000.safetensors",
+   "page": "https://huggingface.co/lovis93/next-scene-qwen-image-lora-2509",
+   "file": "next-scene_lora-v2-3000.safetensors",
+   "trigger": "Next Scene:",
+   "strength": 0.75,
+   "base": "qwen-image-edit-2509",
+   "licence": "MIT",
+   "commercial": true,
+   "hostedOk": true,
+   "download": "direct",
+   "released": "2025-10-21",
+   "revision": "9b9da698b8a5370efd875f18b1727cc1119f3863",
+   "sha256": "8abf2306649a62282f89968515097650acaf7b040687c9b6c56e37558e6df9e1",
+   "sizeBytes": 295146176,
+   "checked": "2026-10-29",
+   "usedBy": [
+    "storyboard (Popcorn) next frames in the cloud"
+   ],
+   "hostedEndpoint": "fal-ai/qwen-image-edit-plus-lora",
+   "notes": "The v2 next-scene LoRA the GPU's storyboard-qwen-edit-2509-next-scene graph loads (at 0.75), so a cloud board's next frames run the same recipe on fal's hosted Qwen-Image-Edit 2509 (loras: [{path, scale}], up to 3; $0.035 per megapixel). Card licence MIT, base Qwen/Qwen-Image-Edit-2509 (Apache-2.0); a prompt starting \"Next Scene:\" continues the previous panel (image 1) with a new shot. Pinned 2026-10-29 from the Hugging Face API (repo head, the file's LFS SHA256 and size)."
   }
  ]
 }

@@ -1,5 +1,6 @@
 /** Storyboard board helpers (pure): the title the user recognises and when a film can be made. */
 import type { Generation } from "./catalog/types";
+import { finishSteps } from "./soul-post";
 
 /** Where the browser remembers the idea each board was made from (batchId → idea). */
 export const BOARD_TITLES_KEY = "fuobe:storyboard-titles";
@@ -34,9 +35,13 @@ export function storyboardName(story: string | undefined, scenes: string[]): str
   return (story?.trim() || scenes.find((s) => s.trim()) || "Storyboard").trim().replace(/\s+/g, " ").slice(0, 200);
 }
 
-/** A film needs every frame finished (and at least two of them). */
-export function filmReady(frames: Generation[]): boolean {
-  return frames.length > 1 && frames.every((f) => f.status === "succeeded" && !!f.outputs[0]);
+/**
+ * A film needs every frame finished (and at least two of them), and a look board's frames finished in the browser too
+ * (graded, cropped to 21:9): the film's shots start from the frames as they are then. `gaveUp`: a frame the browser
+ * couldn't finish (no WebGL), which goes in as it was made rather than holding the film back for good.
+ */
+export function filmReady(frames: Generation[], gaveUp: (g: Generation) => boolean = () => false): boolean {
+  return frames.length > 1 && frames.every((f) => f.status === "succeeded" && !!f.outputs[0] && (!finishSteps(f.outputs[0]) || gaveUp(f)));
 }
 
 /** Keep the newest `max` remembered titles. */

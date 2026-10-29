@@ -1,7 +1,7 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { heuristicScenes, MAX_FRAMES, parseScenes, planStoryboard, SPLIT_SYSTEM, type StoryboardLook } from "@/lib/catalog/storyboard";
+import { heuristicScenes, MAX_FRAMES, parseScenes, planStoryboard, SPLIT_SYSTEM, STORYBOARD_PARTNER_IDS, type StoryboardLook, type StoryboardPartner } from "@/lib/catalog/storyboard";
 import { soulLook } from "@/lib/catalog/soul";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { storyboardName } from "@/lib/storyboard-board";
@@ -13,6 +13,8 @@ import { createGenerations, listGenerations, previewChained } from "./generation
 /** The body of POST /api/storyboards and /api/storyboards/estimate. */
 export const StoryboardBodySchema = z.object({
   engine: z.enum(["cloud", "open"]),
+  /** A partner model for every frame instead of Fuobe's open recipe (cloud only): "nano-banana-pro". */
+  partner: z.enum(STORYBOARD_PARTNER_IDS).optional(),
   scenes: z.array(z.string().max(1000)).max(8).optional(),
   story: z.string().max(4000).optional(),
   frames: z.number().int().min(1).max(8).optional(),
@@ -27,6 +29,8 @@ export const StoryboardBodySchema = z.object({
 
 export interface StoryboardRequest {
   engine: Engine;
+  /** A partner model for the whole board (cloud only); unset: Fuobe's open recipe (Qwen-Image-Edit + next-scene). */
+  partner?: StoryboardPartner;
   /** Manual: one prompt per frame. */
   scenes?: string[];
   /** Auto: one story, split into `frames`. */
@@ -59,7 +63,7 @@ function boardLook(r: Pick<StoryboardRequest, "look" | "lookStrength">): Storybo
 export function estimateStoryboard(r: StoryboardRequest): { costUsd: number | null; demo: boolean; frames: number; models: string[] } {
   const n = Math.max(1, Math.min(MAX_FRAMES, r.scenes?.filter((s) => s.trim()).length || r.frames || 4));
   const scenes = Array.from({ length: n }, (_, i) => r.scenes?.[i]?.trim() || `scene ${i + 1}`);
-  const frames = planStoryboard({ engine: r.engine, scenes, references: r.references, style: r.style, look: boardLook(r), aspectRatio: r.aspectRatio, resolution: r.resolution });
+  const frames = planStoryboard({ engine: r.engine, partner: r.partner, scenes, references: r.references, style: r.style, look: boardLook(r), aspectRatio: r.aspectRatio, resolution: r.resolution });
   let cost: number | null = 0;
   let demo = false;
   const models: string[] = [];
@@ -80,7 +84,7 @@ export async function createStoryboard(r: StoryboardRequest): Promise<{ batchId:
   const batchId = nanoid(10);
   // The board is named after the user's idea on every device (the Library's stack title too).
   const batchTitle = storyboardName(r.scenes?.length ? undefined : r.story, scenes);
-  const frames = planStoryboard({ engine: r.engine, scenes, references: r.references, style: r.style, look, aspectRatio: r.aspectRatio, resolution: r.resolution, batchTitle });
+  const frames = planStoryboard({ engine: r.engine, partner: r.partner, scenes, references: r.references, style: r.style, look, aspectRatio: r.aspectRatio, resolution: r.resolution, batchTitle });
   const items: Generation[] = [];
   let previous: string | undefined;
   for (const request of frames) {
@@ -106,7 +110,8 @@ export function createStoryboardFilm(batchId: string, opts: { modelId?: string }
   const filmBatch = `${batchId}-film`;
   // Boards made before the server stored a name fall back to the first scene.
   const batchTitle = (frames[0].request as { batchTitle?: string }).batchTitle?.trim() || frames[0].request.frame?.scene || "Storyboard film";
-  const aspectRatio = frames[0].request.params?.aspectRatio;
+  // A 21:9 board in a look is made at 16:9 and cropped after (frame.crop): its film is 21:9, like its frames.
+  const aspectRatio = frames[0].request.frame?.crop ?? frames[0].request.params?.aspectRatio;
   const n = frames.length;
   const clips = frames.map((f, i) => {
     const next = flf ? frames[i + 1] : undefined;
