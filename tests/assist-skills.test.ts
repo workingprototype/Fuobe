@@ -3,7 +3,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   contextUpdate,
   factMap,
@@ -21,6 +21,9 @@ import {
   type ContextFact,
 } from "@/lib/assist";
 
+// Route handlers call connection() (no request scope in a test).
+vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
+
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-assist-skills-"));
 process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
@@ -34,6 +37,8 @@ const { createElement } = await import("@/server/elements");
 const { saveFile } = await import("@/server/storage");
 const agent = await import("@/server/assist/agent");
 const { db } = await import("@/server/db");
+const tools = await import("@/server/assist/tools");
+const downloadRoute = await import("@/app/api/assist/skills/[name]/download/route");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -342,6 +347,61 @@ describe("skills on the server", () => {
     ).toThrow(/more than one skill/);
     expect(() => skills.importSkill({ name: "k.zip", data: zipStored([{ name: "SKILL.md", data: Buffer.from(md("name: katana\ndescription: mine")) }]) })).toThrow(/built-in/);
     expect(() => skills.importSkill({ name: "x.exe", data: Buffer.from("MZ") })).toThrow(/Upload a \.zip/);
+  });
+
+  it("exports a skill with its files as a .zip that imports back, recipe examples left out by default", async () => {
+    skills.createSkill({ name: "lamp-turntable", title: "Lamp turntable", description: "A turntable from a product photo.", body: "# Turntable\n\n1. Spin it." });
+    const recipe = {
+      fuobeRecipe: 1,
+      params: [{ id: "product", label: "Product photo", type: "image", required: true, example: "/api/files/uploads/2026-10-20/lamp.png" }],
+      steps: [
+        {
+          key: "spin",
+          kind: "generate",
+          request: { feature: "skill", modelId: "kling-3", op: "i2v", prompt: "slow turntable", inputs: { images: ["{{product}}"], audio: "/api/files/uploads/2026-10-20/bed.mp3" } },
+        },
+      ],
+      verified: { cloud: { plan: "2026-10-29", dryRun: "2026-10-29", real: null, catalog: "sha256:abc" } },
+      source: { from: "library", generations: ["V1StGXR8_Z5j"], at: "2026-10-29" },
+    };
+    skills.setSkillFile("lamp-turntable", "recipe.json", JSON.stringify(recipe));
+    skills.setSkillFile("lamp-turntable", "notes.md", "Keep it under 5 seconds.");
+    expect(skills.getSkill("lamp-turntable")).toMatchObject({ recipe: true });
+    const entries = unzip(skills.skillArchive("lamp-turntable")!);
+    expect(entries.map((e) => e.name).sort()).toEqual(["lamp-turntable/SKILL.md", "lamp-turntable/notes.md", "lamp-turntable/recipe.json"]);
+    const shared = JSON.parse(entries.find((e) => e.name.endsWith("recipe.json"))!.data.toString("utf8"));
+    expect(shared.source).toBeUndefined();
+    expect(shared.verified).toBeUndefined();
+    expect(shared.params[0].example).toBeUndefined();
+    // The fixed music bed is a file of this install: it becomes an input the other one asks for.
+    expect(shared.params[1]).toEqual({ id: "file_1", label: "Audio for “spin”", type: "audio", required: true });
+    expect(shared.steps[0].request.inputs.audio).toBe("{{file_1}}");
+    // &examples=1 keeps them (and the source), but never this install's checks.
+    const full = JSON.parse(unzip(skills.skillArchive("lamp-turntable", { examples: true })!).find((e) => e.name.endsWith("recipe.json"))!.data.toString("utf8"));
+    expect(full).toMatchObject({ params: [{ example: "/api/files/uploads/2026-10-20/lamp.png" }], source: { from: "library" } });
+    // Round trip: Upload reads the zip back, with its recipe (an uploaded recipe is never "checked" here).
+    const back = skills.importSkill({ name: "lamp-turntable.zip", data: skills.skillArchive("lamp-turntable", { examples: true })! }, { replace: true });
+    expect(back.skill).toMatchObject({ name: "lamp-turntable", recipe: true, files: expect.arrayContaining([expect.objectContaining({ path: "recipe.json" }), expect.objectContaining({ path: "notes.md" })]) });
+    const stored = JSON.parse(skills.skillFile("lamp-turntable", "recipe.json")!);
+    expect(stored.verified).toBeUndefined();
+    expect(stored.params[0].example).toBe("/api/files/uploads/2026-10-20/lamp.png");
+    // The download route serves the zip.
+    const res = await downloadRoute.GET(new Request("http://x/api/assist/skills/lamp-turntable/download?format=zip"), { params: Promise.resolve({ name: "lamp-turntable" }) } as never);
+    expect(res.headers.get("Content-Type")).toBe("application/zip");
+    expect(unzip(Buffer.from(await res.arrayBuffer())).map((e) => e.name)).toContain("lamp-turntable/recipe.json");
+    expect((await downloadRoute.GET(new Request("http://x/api/assist/skills/lamp-turntable/download"), { params: Promise.resolve({ name: "lamp-turntable" }) } as never)).headers.get("Content-Type")).toMatch(/markdown/);
+  });
+
+  it("load_skill on a skill with a recipe adds its Run it section", async () => {
+    const out = await tools.executeTool("load_skill", { name: "lamp-turntable" }, { engine: "cloud" });
+    expect(out.isError).toBeFalsy();
+    expect(out.content).toContain("# Lamp turntable (/lamp-turntable)");
+    expect(out.content).toContain("## Run it");
+    expect(out.content).toContain("`product` — Product photo: an image; required");
+    expect(out.content).toContain("run_skill");
+    // A skill without one is unchanged.
+    expect((await tools.executeTool("load_skill", { name: "katana" }, { engine: "cloud" })).content).not.toContain("## Run it");
+    skills.deleteSkill("lamp-turntable");
   });
 
   it("caps what an archive may unpack to", () => {

@@ -1,7 +1,8 @@
 import "server-only";
 import { z } from "zod";
 import { guessCategory, MEMORY_CATEGORIES, MEMORY_MAX_CHARS, toCategory, type MemoryCategory } from "@/lib/assist";
-import { getSkill, skillFile } from "../skills";
+import { recipeMarkdown } from "@/lib/recipe";
+import { getSkill, skillFile, skillRecipe } from "../skills";
 import { canUseSkill, skillsFor } from "./context";
 import { defineTool } from "./define";
 import { addMemory, deleteMemory } from "./memory";
@@ -53,13 +54,16 @@ const loadSkill = defineTool({
       return { content: text.length > 40_000 ? `${text.slice(0, 40_000)}\n… (cut at 40,000 characters)` : text, items: [{ id: "", role: "tool", text: `Read ${file} from ${s.title}` }] };
     }
     const item = { id: "", role: "tool" as const, text: `Using the ${s.title} skill`, href: `/assist/skills?skill=${s.name}` };
+    // A skill with a recipe also runs by itself: its "Run it" section follows the instructions.
+    const recipe = skillRecipe(n);
+    const runs = recipe ? `\n\n${recipeMarkdown(recipe, { name: n })}` : "";
     if (ctx.thread) {
       if (ctx.thread.skills.includes(n)) return { content: `/${n} is already loaded — its instructions are in your context. Follow them.` };
       ctx.thread.loadSkill(n);
-      return { content: `Loaded /${n} (${s.title}). Its instructions are added to your context right after this result — read them, then follow them for this job.`, items: [item] };
+      return { content: `Loaded /${n} (${s.title}). Its instructions are added to your context right after this result — read them, then follow them for this job.${recipe ? " It also runs by itself with new inputs (see its Run it section)." : ""}`, items: [item] };
     }
     // Over MCP there's no chat context to add to: the instructions come back as the result.
-    return { content: `# ${s.title} (/${s.name})\n\n${s.body}`, items: [item] };
+    return { content: `# ${s.title} (/${s.name})\n\n${s.body}${runs}`, items: [item] };
   },
 });
 
