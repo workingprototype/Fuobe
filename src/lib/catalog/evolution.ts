@@ -1,0 +1,366 @@
+/**
+ * Fuobe Evolution (build plan O13): Higgsfield Evolution's Original. One clip and up to 40 references are taken
+ * further in a creative direction an LLM writes from the references (or you write); the change intensity sets how
+ * much of the clip stays. Research: docs/research/fuobe-originals-recipes-5.md §8 evolution and its JSON twin
+ * (studios[evolution].original); what Higgsfield's does: higgsfield-originals-5.md §3.20.
+ *
+ * - On your GPU: per ≤81-frame segment at 16 fps, Qwen-Image-Edit takes the segment's first frame toward the direction
+ *   (the first references as images 2–3), then Wan 2.2 Fun VACE re-renders the segment from the segment itself, noised
+ *   to the intensity's denoise, with depth control and that frame as its reference (video-evolution-wan22-fun-vace).
+ * - In the cloud: LTX-2.3 22B video to video on fal, video_strength = 1 − denoise, the direction as the scene; a clip
+ *   over 20 s runs as equal pieces. The endpoint takes no images: there the references shape the direction only.
+ * - Then the pieces are joined and the clip's own sound put back.
+ *
+ * Pure module, shared by the page, the server (src/server/evolution.ts) and the tests.
+ */
+import { planCloudSegments, planOpenSegments, planStitch, SHORTS, SHORTS_TOOLS, wholeClip, type PlanStep, type ShortsPlanInput, type ShortsRange } from "./shorts";
+import type { Engine, GenerationRequest } from "./types";
+
+export const EVOLUTION = {
+  model: "fuobe-evolution",
+  feature: "evolution",
+  /** Cuts, direction frames, segments and joins: kept apart from the finished videos. */
+  stepFeature: "evolution-step",
+  /** Higgsfield's limits: one video of 4–30 s, up to 40 references, a direction of up to 10,000 characters. */
+  minSeconds: 4,
+  maxSeconds: 30,
+  maxReferences: 40,
+  maxDirectionChars: 10_000,
+  /** What reaches the models: the direction's first sentences, up to this many characters. */
+  promptChars: 1500,
+  /** LTX-2.3 makes at most 481 frames a call: 20 s at 24 fps. */
+  cloudPieceSeconds: 20,
+  /** Qwen-Image-Edit takes the frame plus two references. */
+  openReferences: 2,
+  /** The LLM sees this many references (Claude reads up to 20 images a turn; a local vision model fewer). */
+  llmReferences: { cloud: 8, open: 4 } as Record<Engine, number>,
+  /** Helper on the GPU: the segment's first frame taken toward the direction. */
+  frameModel: "oss-qwen-edit",
+  maxBytes: 500 * 1024 * 1024,
+  accept: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm",
+} as const;
+
+export type Intensity = "low" | "medium" | "high";
+
+/**
+ * Build plan O13's change intensity: the denoise the open graph starts from (the share of each frame redrawn), and in the
+ * cloud LTX-2.3's video_strength = 1 − denoise (lower gives the model more freedom). The same numbers are in the research
+ * (studios[evolution].original.intensity); tests/evolution.test.ts holds them together.
+ */
+export const INTENSITIES: { id: Intensity; label: string; denoise: number; hint: string }[] = [
+  { id: "low", label: "Low", denoise: 0.45, hint: "Same scene and people, a new finish" },
+  { id: "medium", label: "Medium", denoise: 0.65, hint: "The action stays, the world around it changes" },
+  { id: "high", label: "High", denoise: 0.85, hint: "Only the motion and timing stay" },
+];
+
+const intensity = (i: Intensity) => INTENSITIES.find((x) => x.id === i) ?? INTENSITIES[1];
+export const denoiseFor = (i: Intensity): number => intensity(i).denoise;
+export const videoStrengthFor = (i: Intensity): number => Math.round((1 - intensity(i).denoise) * 100) / 100;
+
+/** Resolutions per engine (the GPU graph tops out at 1280 px; LTX-2.3 has a 1080p tier) and the default. */
+export const EVOLUTION_RESOLUTIONS: Record<Engine, string[]> = { open: ["480p", "720p"], cloud: ["480p", "720p", "1080p"] };
+export const EVOLUTION_DEFAULT_RESOLUTION: Record<Engine, string> = { open: "480p", cloud: "720p" };
+
+/** LTX-2.3's shapes (Fuobe Cinema's size table): the clip is made in the one nearest its own. */
+export const CLOUD_SHAPES = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as const;
+
+export function nearestShape(width?: number, height?: number): (typeof CLOUD_SHAPES)[number] {
+  if (!width || !height) return "16:9";
+  const r = Math.log(width / height);
+  let best: (typeof CLOUD_SHAPES)[number] = "16:9";
+  let gap = Infinity;
+  for (const s of CLOUD_SHAPES) {
+    const [a, b] = s.split(":").map(Number);
+    const d = Math.abs(Math.log(a / b) - r);
+    if (d < gap) {
+      gap = d;
+      best = s;
+    }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// Checks
+
+export interface EvolutionSource {
+  url: string;
+  duration?: number;
+  fps?: number;
+  width?: number;
+  height?: number;
+  hasAudio?: boolean;
+}
+
+/** What's wrong with a selection, or null. */
+export function evolutionRangeProblem(range: ShortsRange, duration?: number): string | null {
+  const len = range.end - range.start;
+  if (!(len > 0) || range.start < 0) return "Pick a part of the clip";
+  if (duration !== undefined && range.end > duration + 0.05) return "The selection runs past the end of the clip";
+  if (len < EVOLUTION.minSeconds - 0.05) return `Select at least ${EVOLUTION.minSeconds} seconds`;
+  if (len > EVOLUTION.maxSeconds + 0.05) return `Select up to ${EVOLUTION.maxSeconds} seconds`;
+  return null;
+}
+
+/** Why this run can't start, or null. */
+export function evolutionProblem(o: { engine: Engine; source: Pick<EvolutionSource, "duration">; range: ShortsRange; references: number; direction?: string; resolution?: string }): string | null {
+  const r = evolutionRangeProblem(o.range, o.source.duration);
+  if (r) return r;
+  if (o.references > EVOLUTION.maxReferences) return `Use up to ${EVOLUTION.maxReferences} references`;
+  if ((o.direction?.length ?? 0) > EVOLUTION.maxDirectionChars) return `Keep the direction under ${EVOLUTION.maxDirectionChars.toLocaleString("en")} characters`;
+  if (o.resolution && !EVOLUTION_RESOLUTIONS[o.engine].includes(o.resolution)) return `${o.resolution} isn't offered ${o.engine === "open" ? "on your GPU" : "in the cloud"} — pick ${EVOLUTION_RESOLUTIONS[o.engine].join(" or ")}`;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// The creative direction
+
+const tidy = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/** The prompt the models get: the direction, cut after a sentence once it passes EVOLUTION.promptChars. */
+export function directionPrompt(direction: string): { text: string; cut: boolean } {
+  const t = tidy(direction);
+  if (t.length <= EVOLUTION.promptChars) return { text: t, cut: false };
+  const head = t.slice(0, EVOLUTION.promptChars);
+  const end = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "));
+  return { text: end > EVOLUTION.promptChars / 2 ? head.slice(0, end + 1) : head.replace(/\s+\S*$/, ""), cut: true };
+}
+
+const FRAME_VERB: Record<Intensity, string> = {
+  low: "Refine image 1 gently toward this direction",
+  medium: "Change image 1 toward this direction",
+  high: "Reimagine image 1 boldly in this direction",
+};
+
+/** On the GPU: Qwen-Image-Edit's instruction for the segment's first frame (references are images 2 and 3). */
+export function directionFramePrompt(direction: string, i: Intensity, refs: number): string {
+  const d = directionPrompt(direction).text.replace(/[.\s]+$/, "");
+  const keep = i === "high" ? "Keep the composition and the poses of image 1." : "Keep the composition, the people, their faces and poses, and the framing of image 1.";
+  const match = refs ? ` Use the characters, objects and style of ${refs > 1 ? "images 2 and 3" : "image 2"} where they fit.` : "";
+  return `${FRAME_VERB[i]}: ${d}. ${keep}${match}`;
+}
+
+/** The LLM's brief (Fuobe's own words). */
+export const DIRECTION_SYSTEM = `You write the creative direction for a video-to-video model that re-renders the user's clip. The clip's motion, timing and camera stay; how much else changes depends on the change intensity:
+- low: keep the scene, the people and the setting; refine the look (light, colour, texture, small wardrobe details).
+- medium: keep what the people do and how the camera moves; change the setting, wardrobe, light and style.
+- high: keep only the motion and timing; reinvent the world, how the characters look and the style.
+Use the reference images: take their characters, objects, places, colours and style where they fit. If the user gave an idea, build on it.
+Write a description of the finished video, what we see, in the present tense: one paragraph of 50 to 120 words. Not instructions, no camera moves the clip doesn't have, no on-screen text, no lists, no preamble or quotes. Reply with the paragraph only.`;
+
+/** The LLM's question: the intensity, the user's words and what is attached. */
+export function directionRequest(o: { intensity: Intensity; idea?: string; references: number; sent: number; frame: boolean; seconds?: number }): string {
+  const lines = [`Change intensity: ${o.intensity}.`];
+  lines.push(o.idea?.trim() ? `The user's idea: ${tidy(o.idea).slice(0, 2000)}` : "The user gave no idea: propose one that fits the references and the clip.");
+  if (o.seconds) lines.push(`The clip is ${Math.round(o.seconds)} s long.`);
+  const parts: string[] = [];
+  if (o.frame) parts.push("the first image is a frame of the clip");
+  if (o.sent) parts.push(`${o.frame ? "the others are" : "the images are"} ${o.sent === o.references ? `the ${o.sent} reference${o.sent > 1 ? "s" : ""}` : `${o.sent} of the ${o.references} references`}`);
+  else if (o.references) parts.push(`the user has ${o.references} reference image${o.references > 1 ? "s" : ""} you can't see`);
+  if (parts.length) lines.push(`Attached: ${parts.join("; ")}.`);
+  return lines.join("\n");
+}
+
+const LEAD: Record<Intensity, string> = {
+  low: "The same scene, the same people and the same camera,",
+  medium: "The same action and the same camera move, now in a new world:",
+  high: "The same motion and timing, reimagined from the ground up:",
+};
+const IDEA: Record<Intensity, string> = {
+  low: "with richer light, deeper colour and finer texture, like a high-end film grade",
+  medium: "a dreamlike version of the place with new wardrobe and set dressing, soft volumetric light",
+  high: "a bold stylised world where the characters take on a new look, vivid colour and dramatic light",
+};
+
+/** Fuobe's offline writer: the direction without an LLM (no Claude key or Ollama, demo mode, or the text model off). */
+export function offlineDirection(o: { intensity: Intensity; idea?: string; references: number }): string {
+  const idea = o.idea?.trim() ? tidy(o.idea).replace(/[.\s]+$/, "") : IDEA[o.intensity];
+  const lead = o.intensity === "low" && o.idea?.trim() ? `${LEAD.low} now ${idea[0].toLowerCase()}${idea.slice(1)}` : `${LEAD[o.intensity]} ${idea}`;
+  const refs = o.references ? ` It takes the characters, objects, colours and style of the ${o.references === 1 ? "reference image" : `${o.references} reference images`}.` : "";
+  return `${lead}.${refs} Smooth, natural motion, consistent from the first frame to the last.`.slice(0, EVOLUTION.maxDirectionChars);
+}
+
+/** An LLM's answer as a direction: quotes, labels and lists taken off; null when nothing usable came back. */
+export function tidyDirection(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const t = text
+    .replace(/^\s*(creative direction|direction)\s*:\s*/i, "")
+    .split("\n")
+    .map((l) => l.replace(/^\s*([-*•]|\d+[.)])\s+/, "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/^["“'\s]+|["”'\s]+$/g, "");
+  const out = tidy(t).slice(0, EVOLUTION.maxDirectionChars);
+  return out.length >= 12 ? out : null;
+}
+
+// ---------------------------------------------------------------------------
+// The pipeline: steps for createPipeline (src/server/chains.ts)
+
+export interface EvolutionPlanInput {
+  engine: Engine;
+  title: string;
+  source: EvolutionSource;
+  range: ShortsRange;
+  intensity: Intensity;
+  /** The creative direction (written by you, an LLM or the offline writer). */
+  direction: string;
+  references: string[];
+  resolution?: string;
+  seed?: number;
+}
+
+export interface EvolutionPlan {
+  steps: PlanStep[];
+  /** The finished video's step. */
+  final: string;
+  /** Pieces (cloud) or segments (GPU). */
+  pieces: number;
+  /** The clip's own sound is put back. */
+  sound: boolean;
+  /** The direction was longer than the models take: only its first sentences go. */
+  cut: boolean;
+  /** References that reach a model (the GPU's direction frames); the rest only shape the direction. */
+  referencesUsed: number;
+}
+
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
+const pieceLabel = (i: number, n: number, what: string) => ({ label: n > 1 ? `Piece ${i + 1} of ${n} · ${what}` : what[0].toUpperCase() + what.slice(1), index: i, of: n });
+
+/**
+ * The whole job. GPU: per segment, cut it (16 fps), take its first frame toward the direction, evolve it from itself
+ * at the intensity's denoise. Cloud: per piece of up to 20 s, cut it (unless it is the whole clip) and evolve it on
+ * LTX-2.3 at video_strength 1 − denoise, in the tier's size for the clip's shape. Then join and put the sound back.
+ */
+export function planEvolution(input: EvolutionPlanInput): EvolutionPlan {
+  const { engine } = input;
+  const base = { feature: EVOLUTION.feature, batchTitle: input.title };
+  const helper = { feature: EVOLUTION.stepFeature, batchTitle: input.title };
+  const seed = input.seed !== undefined ? { seed: input.seed } : {};
+  const resolution = input.resolution && EVOLUTION_RESOLUTIONS[engine].includes(input.resolution) ? input.resolution : EVOLUTION_DEFAULT_RESOLUTION[engine];
+  const { text: prompt, cut } = directionPrompt(input.direction);
+  const sound = !!input.source.hasAudio;
+  const steps: PlanStep[] = [];
+  const keys: string[] = [];
+  let referencesUsed = 0;
+  let n: number;
+
+  if (engine === "open") {
+    const t = SHORTS_TOOLS.open;
+    const segs = planOpenSegments(input.range);
+    n = segs.length;
+    const refs = input.references.slice(0, EVOLUTION.openReferences);
+    referencesUsed = refs.length;
+    segs.forEach((s, i) => {
+      const own = n === 1 && !sound;
+      steps.push({
+        key: `cut${i}`,
+        request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: s.start, endTime: s.end, fps: SHORTS.openFps, aspectRatio: "auto", resolution }, step: pieceLabel(i, n, "cut") },
+      });
+      steps.push({
+        key: `frame${i}`,
+        request: {
+          ...helper,
+          modelId: EVOLUTION.frameModel,
+          op: "edit",
+          prompt: directionFramePrompt(input.direction, input.intensity, refs.length),
+          ...(refs.length ? { inputs: { images: refs } } : {}),
+          params: { ...seed },
+          step: pieceLabel(i, n, "direction frame"),
+        },
+        after: [`cut${i}`],
+        chain: [{ slot: "images", position: "first" }],
+      });
+      steps.push({
+        key: `evolve${i}`,
+        request: {
+          ...(own ? { ...base, title: input.title } : helper),
+          modelId: EVOLUTION.model,
+          engine: "open",
+          op: "v2v",
+          prompt,
+          params: { aspectRatio: "auto", resolution, duration: r3((s.frames ?? Math.round((s.end - s.start) * SHORTS.openFps)) / SHORTS.openFps), extra: { denoise: denoiseFor(input.intensity) }, ...seed },
+          step: pieceLabel(i, n, "evolve"),
+        },
+        after: [`cut${i}`, `frame${i}`],
+        chain: [{ slot: "video" }, { slot: "images" }],
+      });
+      keys.push(`evolve${i}`);
+    });
+  } else {
+    const pieces = planCloudSegments(input.range, EVOLUTION.cloudPieceSeconds);
+    n = pieces.length;
+    const whole = n === 1 && wholeClip(input.range, input.source.duration);
+    const shape = nearestShape(input.source.width, input.source.height);
+    pieces.forEach((p, i) => {
+      const own = n === 1 && !sound;
+      if (!whole) {
+        steps.push({
+          key: `cut${i}`,
+          request: { ...helper, modelId: SHORTS_TOOLS.cloud.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: p.start, endTime: p.end }, step: pieceLabel(i, n, "cut") },
+        });
+      }
+      steps.push({
+        key: `evolve${i}`,
+        request: {
+          ...(own ? { ...base, title: input.title } : helper),
+          modelId: EVOLUTION.model,
+          engine: "cloud",
+          op: "v2v",
+          prompt,
+          ...(whole ? { inputs: { video: input.source.url } } : {}),
+          params: { aspectRatio: shape, resolution, duration: r3(p.end - p.start), extra: { video_strength: videoStrengthFor(input.intensity) }, ...seed },
+          step: pieceLabel(i, n, "evolve"),
+        },
+        ...(whole ? {} : { after: [`cut${i}`], chain: [{ slot: "video" as const }] }),
+      });
+      keys.push(`evolve${i}`);
+    });
+  }
+
+  // Join and put the sound back with Shorts' stitch (folding joins, the selection's own sound), then name the steps ours.
+  const stitchInput: ShortsPlanInput = {
+    engine,
+    title: input.title,
+    source: input.source,
+    range: input.range,
+    look: { presetId: "evolution", name: "Evolution", look: prompt },
+    aspectRatio: "16:9",
+    keepShape: true,
+    language: "auto",
+    modelId: EVOLUTION.model,
+    maxRefs: 0,
+  };
+  const stitch = planStitch(
+    stitchInput,
+    keys.map((key) => ({ key })),
+  );
+  const final = stitch.final ?? keys[0];
+  for (const s of stitch.steps) {
+    const own = s.key === final;
+    const request: GenerationRequest = { ...s.request, ...(own ? { ...base, title: input.title } : helper) };
+    // The GPU's joins keep the segments' size (Shorts joins at 480p).
+    if (engine === "open" && request.op === "concat") request.params = { ...request.params, resolution };
+    steps.push({ ...s, request });
+  }
+  return { steps, final, pieces: n, sound, cut, referencesUsed };
+}
+
+/** A short name for the run: the direction's first words. */
+export function evolutionTitle(direction: string, clipName?: string): string {
+  let d = tidy(direction);
+  // The offline writer's lead ("The same action …: a sunken temple") says nothing about this run: what follows does.
+  const colon = d.indexOf(":");
+  if (colon > 0 && colon < 100) d = d.slice(colon + 1).trim();
+  while (/^the same [^,.:]*,\s*/i.test(d)) d = d.replace(/^the same [^,.:]*,\s*/i, "");
+  const words = d
+    .replace(/^now\s+/i, "")
+    .split(/(?<=[.!?])\s/)[0]
+    .split(" ")
+    .slice(0, 6)
+    .join(" ")
+    .replace(/[,.;:!?]+$/, "");
+  const head = words ? `Evolution · ${words[0].toUpperCase()}${words.slice(1)}` : "Evolution";
+  const name = clipName?.replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, 40);
+  return name ? `${head} · ${name}` : head;
+}
