@@ -1,6 +1,7 @@
 import "server-only";
 import fs from "node:fs";
 import { getModel } from "@/lib/catalog";
+import { inferOperation } from "@/lib/catalog/plan";
 import { OPERATION_LABELS, type ChainSlot, type Generation, type GenerationRequest, type OutputFile } from "@/lib/catalog/types";
 import { dubLanguageFor } from "@/lib/assist-studios";
 import { isHelperFeature } from "@/lib/library";
@@ -59,6 +60,30 @@ function batchRows(batch: string | null): Generation[] {
   return ids.map((id) => getGeneration(id, { includeDeleted: true })).filter((g): g is Generation => !!g);
 }
 
+/**
+ * The other rows of the request a row was made by, when the run split it into jobs (a route that can't batch, such as a
+ * ComfyUI graph or Replicate without num_outputs, makes one row per result; a count over a route's maximum makes
+ * several): the same batch, the same stored request and the same dependencies. Oldest first.
+ */
+function jobsOf(id: string): string[] {
+  const r = db().prepare("SELECT batch_id, request_json, depends_on FROM generations WHERE id = ?").get(id) as { batch_id: string | null; request_json: string; depends_on: string | null } | undefined;
+  if (!r?.batch_id) return [];
+  const rows = db()
+    .prepare("SELECT id FROM generations WHERE batch_id = ? AND request_json = ? AND depends_on IS ? AND id != ? ORDER BY created_at, id")
+    .all(r.batch_id, r.request_json, r.depends_on, id) as { id: string }[];
+  return rows.map((x) => x.id);
+}
+
+/** A request with what differs between the pictures of one PixeletedFace run (createMosaicRun) left out. */
+function mosaicShape(req: GenerationRequest): string {
+  const rest: GenerationRequest = { ...req };
+  delete rest.step;
+  const params = { ...rest.params };
+  delete params.seed;
+  delete params.numOutputs;
+  return JSON.stringify({ ...rest, params });
+}
+
 /** Request fields a step keeps (GenerationRequestSchema's, less the server's own): everything else is dropped. */
 const KEEP: (keyof GenerationRequest)[] = ["feature", "presetId", "modelId", "op", "prompt", "negativePrompt", "inputs", "params", "presetOptions", "presetStrength", "mix", "loras", "engine", "signature"];
 
@@ -81,8 +106,10 @@ interface Node {
   key: string;
   /** The result the step stands for (its thumbnail, its checks). */
   gen: Generation;
-  /** Every row the step covers (an expansion's rows, a face mosaic's picture). */
+  /** Every row the step covers (an expansion's rows, a face mosaic's picture, the jobs of one request). */
   rows: string[];
+  /** The request ran as this many jobs (a route that can't batch makes one row per result): no count is checked. */
+  jobs?: number;
   step: RecipeStep;
   label: string;
   modelName: string;
@@ -156,7 +183,11 @@ class Walk {
     if (known) return known;
     const moved = currentRequest(head.request.asked!);
     const rows = [head.id, ...this.batchAncestors(head)];
-    const node = this.add(head, rows, { request: moved.request }, this.moved(moved.note));
+    // The step is named by what was asked (a multi-shot film asked without an operation is text to video, not the
+    // join its first row is).
+    const m = getModel(moved.request.modelId);
+    const op = moved.request.op ?? (m ? inferOperation(m, moved.request) : undefined);
+    const node = this.add(head, rows, { request: moved.request, op }, this.moved(moved.note));
     node.notes.push(`Rebuilt as the one request it was asked as (it ran as ${rows.length} steps)`);
     return node;
   }
@@ -181,33 +212,63 @@ class Walk {
     const deps = given ?? depIds(rowOf(source.id)?.depends_on).map((id) => getGeneration(id, { includeDeleted: true }));
     const moved = currentRequest(source.request);
     const notes = this.moved(moved.note);
-    const rows = picture ? [g.id, picture.id] : [g.id];
+    let rows = picture ? [g.id, picture.id] : [g.id];
+    let jobs = 1;
     if (picture) {
       const req = { ...moved.request };
       delete req.postMade;
+      // The other pictures of the same PixeletedFace run, each with its mosaic: one request for that many.
+      const shape = mosaicShape(picture.request);
+      const pictures = batchRows(rowOf(picture.id)?.batch_id ?? null)
+        .filter((b) => b.request.postMade && mosaicShape(b.request) === shape)
+        .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+      if (pictures.length > 1) {
+        const ids = new Set(pictures.map((p) => p.id));
+        const mosaics = batchRows(rowOf(picture.id)?.batch_id ?? null).filter((b) => depIds(rowOf(b.id)?.depends_on).some((d) => ids.has(d)));
+        rows = [...new Set([g.id, picture.id, ...pictures.map((p) => p.id), ...mosaics.map((x) => x.id)])];
+        jobs = pictures.length;
+        const seeds = pictures.map((p) => p.request.params?.seed);
+        const seed = seeds.every((x): x is number => typeof x === "number") ? Math.min(...seeds) : undefined;
+        req.params = { ...req.params, numOutputs: pictures.length, ...(seed !== undefined && { seed }) };
+        if (seed === undefined && req.params) delete req.params.seed;
+        notes.push(`Rebuilt as the one request it was asked as (${pictures.length} pictures, each with its face mosaic)`);
+      }
       moved.request = req;
+    } else {
+      // A Library stack whose request ran as one job per result: one step, as it was asked.
+      const others = jobsOf(g.id);
+      if (others.length) {
+        rows = [g.id, ...others];
+        jobs = rows.length;
+        notes.push(`Ran as ${jobs} jobs of one request: one step here`);
+      }
     }
-    if (!deps.length) return this.add(g, rows, { request: moved.request }, notes);
-    if (deps.some((d) => !d)) {
-      // A step it waited for is gone: what it gave this one stays as a fixed input.
-      notes.push("A step before it is gone, so what it gave this step is used as it is");
-      const filled = { ...moved.request };
-      delete filled.chain;
-      delete filled.chainFrom;
-      return this.add(g, rows, { request: filled }, notes);
-    }
-    const before = deps.map((d) => this.visit(d!, new Set(path)));
-    const chain = chainOf(moved.request, deps.length);
-    const request = unfilledRequest(moved.request, deps.length);
-    return this.add(g, rows, { request, after: before.map((n) => n.key), chain }, notes);
+    const node = (() => {
+      if (!deps.length) return this.add(g, rows, { request: moved.request }, notes);
+      if (deps.some((d) => !d)) {
+        // A step it waited for is gone: what it gave this one stays as a fixed input.
+        notes.push("A step before it is gone, so what it gave this step is used as it is");
+        const filled = { ...moved.request };
+        delete filled.chain;
+        delete filled.chainFrom;
+        return this.add(g, rows, { request: filled }, notes);
+      }
+      const before = deps.map((d) => this.visit(d!, new Set(path)));
+      const chain = chainOf(moved.request, deps.length);
+      const request = unfilledRequest(moved.request, deps.length);
+      return this.add(g, rows, { request, after: before.map((n) => n.key), chain }, notes);
+    })();
+    if (jobs > 1) node.jobs = jobs;
+    return node;
   }
 
-  add(gen: Generation, rows: string[], s: { request: GenerationRequest; after?: string[]; chain?: ChainSlot[] }, notes: string[]): Node {
+  add(gen: Generation, rows: string[], s: { request: GenerationRequest; after?: string[]; chain?: ChainSlot[]; op?: string }, notes: string[]): Node {
     const req = s.request;
     const m = getModel(req.modelId);
-    const label = opLabel(req.op ?? gen.op);
+    const op = s.op ?? req.op ?? gen.op;
+    const label = opLabel(op);
     const step: RecipeStep = {
-      key: this.key(req.op ?? gen.op ?? "step"),
+      key: this.key(op ?? "step"),
       kind: "generate",
       label,
       ...(s.after?.length && { after: s.after.length === 1 ? s.after[0] : s.after }),
@@ -245,9 +306,9 @@ function linkByFile(walk: Walk): void {
       const src = typeof url === "string" ? made.get(url) : undefined;
       return src && src !== n && src.gen.createdAt <= n.gen.createdAt && !after.includes(src.key) ? src : undefined;
     };
-    const link = (src: Node, slot: ChainSlot) => {
-      after.push(src.key);
-      chain.push(slot);
+    const link = (src: Node, slot: ChainSlot, at = chain.length) => {
+      after.splice(at, 0, src.key);
+      chain.splice(at, 0, slot);
       const p = (src.step as Extract<RecipeStep, { kind: "generate" }>).request.params as Record<string, unknown> | undefined;
       if (typeof p?.numOutputs === "number" && p.numOutputs > 1) {
         p.numOutputs = 1;
@@ -257,12 +318,33 @@ function linkByFile(walk: Walk): void {
     for (const k of ["images", "videos", "audios"] as const) {
       const list = inputs[k];
       if (!list?.length) continue;
-      const keep: string[] = [];
-      list.forEach((url, i) => {
+      // Which items another picked step made (each step once: a second use of the same file stays a file).
+      const taken = new Set<string>();
+      const srcs = list.map((url) => {
         const src = from(url);
-        if (!src) return void keep.push(url);
-        link(src, { slot: k, ...(k === "images" && { position: i === 0 ? ("first" as const) : ("last" as const) }) });
+        if (!src || taken.has(src.key)) return undefined;
+        taken.add(src.key);
+        return src;
       });
+      if (!taken.size) continue;
+      // A run puts the chained items before ("first") or after ("last") the step's own, in chain order
+      // (withChainInputs): the ones before its first own item go first, the rest last, and a new "last" goes ahead of
+      // the step's earlier "last" slots, which came after every item it has here. An item between two of its own
+      // can't stay there: it goes last, and the step says so.
+      const own = srcs.flatMap((src, i) => (src ? [] : [i]));
+      const firstOwn = own[0] ?? list.length;
+      const lastOwn = own.at(-1) ?? -1;
+      srcs.forEach((src, i) => src && i < firstOwn && link(src, { slot: k, position: "first" }));
+      let lastAt = chain.findIndex((c) => c.slot === k && (c.position ?? "last") === "last");
+      if (lastAt < 0) lastAt = chain.length;
+      let moved = false;
+      srcs.forEach((src, i) => {
+        if (!src || i < firstOwn) return;
+        if (i < lastOwn) moved = true;
+        link(src, { slot: k, position: "last" }, lastAt++);
+      });
+      if (moved) n.notes.push(`Its ${k === "images" ? "pictures" : k === "videos" ? "clips" : "audio files"} come in another order: the ones earlier steps make go after yours`);
+      const keep = list.filter((_, i) => !srcs[i]);
       if (keep.length) inputs[k] = keep;
       else delete inputs[k];
     }
@@ -365,8 +447,23 @@ function liftStudio(g: Generation, tool: string, studio: string): Lifted | null 
     const burn = g.op === "captions" ? g : batchRows(rowOf(g.id)?.batch_id ?? null).find((b) => b.op === "captions" && b.feature === g.feature);
     const video = burn?.request.inputs?.video;
     if (!burn || !video) return null;
-    const p = burn.request.params ?? {};
-    const input = { video, ...(langName(p.sourceLanguage) && { spoken_language: langName(p.sourceLanguage) }), ...(p.targetLanguage && { translate_to: langName(p.targetLanguage) ?? p.targetLanguage }) };
+    // The languages: on the burn itself (VEED transcribes and translates in one job), else on the steps it waited for
+    // (the open engine's transcript, then its translation).
+    let { sourceLanguage: spoken, targetLanguage: target } = burn.request.params ?? {};
+    const todo = depIds(rowOf(burn.id)?.depends_on);
+    const seen = new Set<string>();
+    while (todo.length && seen.size < 8) {
+      const id = todo.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const d = getGeneration(id, { includeDeleted: true });
+      if (!d) continue;
+      const dp = d.request.params ?? {};
+      if (target === undefined && d.op === "translate" && dp.targetLanguage) target = dp.targetLanguage;
+      if (spoken === undefined && dp.sourceLanguage) spoken = dp.sourceLanguage;
+      todo.push(...depIds(rowOf(id)?.depends_on));
+    }
+    const input = { video, ...(langName(spoken) && { spoken_language: langName(spoken) }), ...(target && { translate_to: langName(target) ?? target }) };
     return { tool, studio, record: `captions:${burn.id}`, input, inputs: [{ path: ["video"], type: "video", label: "Video to caption" }], texts: [] };
   }
   return null;
@@ -553,7 +650,8 @@ function proposeCheck(n: Node): RecipeCheck {
   const g = n.gen;
   const main = g.outputs.filter((o) => o.kind === g.kind);
   const check: RecipeCheck = { kind: g.kind as RecipeCheck["kind"] };
-  if (main.length) check.count = main.length;
+  // A request that ran as several jobs makes as many rows as its route splits it into: its count isn't checked.
+  if (main.length && !(n.jobs && n.jobs > 1)) check.count = main.length;
   const asked = (n.step.kind === "generate" ? (n.step.request.params as Record<string, unknown> | undefined)?.aspectRatio : undefined) ?? undefined;
   // The demo provider's stand-ins say nothing about a real result's shape or length: only what was asked.
   if (g.provider === "mock") {

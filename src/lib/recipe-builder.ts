@@ -113,6 +113,9 @@ const STUDIOS: [RegExp, StudioInfo][] = [
   [/^layers$/, { name: "Layers", tool: "split_layers" }],
   [/^shorts$/, { name: "Shorts Studio", tool: "restyle_footage" }],
   [/^faceless/, { name: "Faceless Studio", tool: "faceless_episode" }],
+  // An Explainer episode is Faceless's graph (scene stills, narration, Ken Burns, joins), but faceless_episode makes
+  // channel episodes only.
+  [/^explainer$/, { name: "Explainer" }],
   [/^ads$/, { name: "Ads Studio", tool: "create_ads" }],
   [/^ad-multiplier$/, { name: "Ad Multiplier" }],
   [/^click-to-ad$/, { name: "Click to Ad" }],
@@ -136,12 +139,20 @@ const STUDIOS: [RegExp, StudioInfo][] = [
 ];
 
 /**
+ * Studios whose own results are plain requests (a Marketing Studio picture replays as it was asked) but whose helper
+ * steps (`<feature>-step`: a UGC video's shots, a text-to-3D's still) are their planner's, named when refused.
+ */
+const HELPER_STUDIOS: Record<string, string> = { marketing: "Marketing Studio", "image-to-3d": "Image to 3D" };
+
+/**
  * The studio a feature belongs to when that studio plans its own steps (a helper step `<feature>-step` belongs to its
  * feature's studio), or undefined for a plain request (Image, Video, Edit, Assist, an app…).
  */
 export function studioOf(feature: string): StudioInfo | undefined {
   const base = feature.replace(/(-frame)?-step$/, "").replace(/-(preview|avatar|voice)$/, "");
-  return STUDIOS.find(([re]) => re.test(base))?.[1] ?? (base !== feature ? { name: "another studio" } : undefined);
+  const found = STUDIOS.find(([re]) => re.test(base))?.[1];
+  if (found || base === feature) return found;
+  return { name: HELPER_STUDIOS[base] ?? "another studio" };
 }
 
 export const notSupported = (studio: string) => `Made in ${studio}: making a skill from it isn't supported yet`;
@@ -308,7 +319,7 @@ const idOf = (c: DraftCandidate, choices: BuilderChoices) => choices.ids?.[c.id]
  * The recipe the choices make: each candidate that varies becomes an input and `{{id}}` where its value was (an element
  * is put in for its @handle in the words), each accepted slot replaces its words in every prompt that still has them,
  * and the checks follow (a count or a shape that varies is checked against the input; a length that varies isn't
- * checked). An element or slot that ends up nowhere (its prompt varies as a whole) adds no input.
+ * checked). An element or slot that ends up nowhere (every prompt naming it varies as a whole) adds no input.
  */
 export function buildRecipe(draft: Pick<SkillDraft, "recipe" | "candidates">, choices: BuilderChoices): Recipe {
   const recipe = clone(draft.recipe);
@@ -316,8 +327,9 @@ export function buildRecipe(draft: Pick<SkillDraft, "recipe" | "candidates">, ch
   const byKey = new Map(recipe.steps.map((s) => [s.key, s]));
   const checks = recipe.checks ?? {};
   const varying = draft.candidates.filter((c) => choices.varies[c.id] && !c.locked);
-  // Elements first: their @handles are put in before a prompt that varies as a whole replaces the words.
-  const order = [...varying.filter((c) => c.kind === "element"), ...varying.filter((c) => c.kind !== "element")];
+  // Elements last: a prompt that varies as a whole has replaced its words by then, so an element named only there
+  // finds no @handle and adds no input (the whole prompt's input carries it).
+  const order = [...varying.filter((c) => c.kind !== "element"), ...varying.filter((c) => c.kind === "element")];
   const placed: RecipeParam[] = [];
   for (const c of order) {
     const id = idOf(c, choices);
@@ -339,12 +351,13 @@ export function buildRecipe(draft: Pick<SkillDraft, "recipe" | "candidates">, ch
       }
       setAt(body, spot.path, `{{${id}}}`);
       used++;
-      // A count that varies is checked against the input when one job made every result (else it isn't checked).
-      if (c.setting === "numOutputs") {
-        const cur = checks[spot.step]?.count;
+      // A count that varies is checked against the input when one job made every result (else it isn't checked: a
+      // step whose results came as several jobs has no count check to follow).
+      if (c.setting === "numOutputs" && checks[spot.step]) {
+        const cur = checks[spot.step].count;
         const rest = { ...checks[spot.step] };
         delete rest.count;
-        checks[spot.step] = cur === undefined || cur === c.example ? { ...rest, count: `{{${id}}}` } : rest;
+        checks[spot.step] = cur === c.example ? { ...rest, count: `{{${id}}}` } : rest;
       }
       if (c.setting === "aspectRatio" && checks[spot.step]) checks[spot.step] = { ...checks[spot.step], aspect: `{{${id}}}` };
       if (c.setting === "duration" && checks[spot.step]) {

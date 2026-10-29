@@ -18,6 +18,7 @@ const gens = await import("@/server/generations");
 const { createPipeline } = await import("@/server/chains");
 const { db } = await import("@/server/db");
 const { saveFile } = await import("@/server/storage");
+const { createElement } = await import("@/server/elements");
 const { encodePng } = await import("@/server/png");
 const builder = await import("@/server/recipe-builder");
 const recipes = await import("@/server/recipes");
@@ -174,6 +175,13 @@ describe("draftFromGenerations", () => {
     // A shot of the same film stands for the film too.
     const shot = gens.listGenerations({ batchId: film.batchId! }).find((g) => g.request.step?.label === "Shot 1 of 2")!;
     expect(builder.draftFromGenerations([shot.id]).draft!.recipe.steps).toHaveLength(1);
+    // Asked without an operation (Assist, MCP, the API), the step is named by what was asked, not by the join it ran as.
+    const [bare] = gens.createGenerations({ feature: "video", modelId: "oss-wan22-14b-fast", prompt: "a heron in the reeds", params: { shots: [{ prompt: "it waits", duration: 3 }, { prompt: "it strikes", duration: 3 }] } });
+    await settle([bare.id]);
+    const named = builder.draftFromGenerations([bare.id]).draft!;
+    expect(named.steps[0].label).toBe("Text to video");
+    expect(named.recipe.steps[0].key).toBe("t2v");
+    expect(named.recipe.steps[0].kind === "generate" && named.recipe.steps[0].request.op).toBeUndefined();
 
     // The same film made before W2: the rows, labelled, and no `asked`.
     row({ id: "old-shot-1", batch: "oldfilm", feature: "video", kind: "video", request: { feature: "video", modelId: "oss-wan22-14b-fast", op: "t2v", prompt: "a fox. it sniffs", step: { label: "Shot 1 of 2", index: 0, of: 3 } } });
@@ -237,6 +245,13 @@ describe("draftFromGenerations", () => {
     row({ id: "cap-burn", feature: "captions", kind: "video", op: "captions", request: { feature: "captions", modelId: "veed-subtitles", op: "captions", inputs: { video: clip }, params: { sourceLanguage: "en", targetLanguage: "Spanish" } }, outputs: [{ url: clip, kind: "video" }] });
     const cap = builder.draftFromGenerations(["cap-burn"]).draft!;
     expect(cap.recipe.steps).toEqual([expect.objectContaining({ kind: "tool", tool: "add_captions", input: { video: clip, spoken_language: "English", translate_to: "Spanish" } })]);
+
+    // On the open engine the languages are on the transcript and the translation the burn waited for.
+    row({ id: "cap-words", batch: "capopen", feature: "captions", kind: "text", op: "transcribe", request: { feature: "captions", modelId: "oss-qwen3-asr", op: "transcribe", inputs: { video: clip }, params: { sourceLanguage: "es" } } });
+    row({ id: "cap-tr", batch: "capopen", feature: "captions", kind: "text", op: "translate", request: { feature: "captions", modelId: "oss-text-llm", op: "translate", params: { targetLanguage: "French" }, chain: [{ slot: "prompt" }] }, dependsOn: "cap-words" });
+    row({ id: "cap-open", batch: "capopen", feature: "captions", kind: "video", op: "captions", request: { feature: "captions", modelId: "oss-captions-burnin", op: "captions", inputs: { video: clip }, params: { extra: { fontSize: 48 } }, chain: [{ slot: "prompt" }] }, dependsOn: "cap-tr", outputs: [{ url: clip, kind: "video" }] });
+    const open = builder.draftFromGenerations(["cap-open"]).draft!;
+    expect(open.recipe.steps).toEqual([expect.objectContaining({ kind: "tool", tool: "add_captions", input: { video: clip, spoken_language: "Spanish", translate_to: "French" } })]);
   });
 
   it("links results handed on by hand (the composer's Animate) into a chain", async () => {
@@ -268,6 +283,86 @@ describe("draftFromGenerations", () => {
     expect(draft!.recipe.steps.every((s) => s.kind === "generate" && s.after === undefined)).toBe(true);
     expect(draft!.steps.every((s) => s.leaf)).toBe(true);
     expect(Object.keys(draft!.recipe.checks ?? {})).toHaveLength(2);
+  });
+
+  it("makes a Library stack whose request ran as one job per result one step, as it was asked", () => {
+    // A route that can't batch (a ComfyUI graph, Replicate without num_outputs) stores one row per result, each with the request.
+    const req = { feature: "image", modelId: "nano-banana-pro", op: "t2i", prompt: "a teal armchair", params: { numOutputs: 4, aspectRatio: "1:1" } };
+    const ids = [1, 2, 3, 4].map((i) => row({ id: `stack-${i}`, batch: "stackbatch", request: req, outputs: [{ url: `/api/files/outputs/stack-${i}.png`, kind: "image", width: 64, height: 64 }] }));
+    for (const pick of [ids, [ids[2]]]) {
+      const { draft, refusals } = builder.draftFromGenerations(pick);
+      expect(refusals).toEqual([]);
+      expect(draft!.recipe.steps).toHaveLength(1);
+      const step = draft!.recipe.steps[0] as { key: string; request: { params?: { numOutputs?: number } } };
+      // Four results, as asked: not four steps of four.
+      expect(step.request.params?.numOutputs).toBe(4);
+      expect(draft!.steps[0].notes).toContain("Ran as 4 jobs of one request: one step here");
+      // How many rows a run makes depends on the route: the count isn't checked, even when it varies.
+      expect(draft!.recipe.checks?.[step.key]).toEqual({ kind: "image", aspect: "1:1" });
+      const takes = draft!.candidates.find((c) => c.setting === "numOutputs")!;
+      expect(takes.example).toBe(4);
+      const recipe = lib.buildRecipe(draft!, { varies: { [takes.id]: true } });
+      expect(recipe.checks?.[step.key]?.count).toBeUndefined();
+      expect(recipeProblems(recipe)).toEqual([]);
+    }
+  });
+
+  it("makes a PixeletedFace run of several pictures one step", async () => {
+    const made = gens.createGenerations({ feature: "image", modelId: "fuobe-soul", prompt: "a skater", engine: "cloud", presetId: "v1-pixeletedface", params: { numOutputs: 2, seed: 42 } });
+    await settle(made.map((g) => g.id));
+    const mosaics = made.filter((g) => !g.request.postMade);
+    expect(mosaics).toHaveLength(2);
+    const { draft, refusals } = builder.draftFromGenerations(mosaics.map((g) => g.id));
+    expect(refusals).toEqual([]);
+    expect(draft!.recipe.steps).toHaveLength(1);
+    const step = draft!.recipe.steps[0] as { request: Record<string, unknown> & { params?: { numOutputs?: number; seed?: number } } };
+    expect(step.request).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-pixeletedface", engine: "cloud" });
+    expect(step.request).not.toHaveProperty("postMade");
+    expect(step.request.params).toMatchObject({ numOutputs: 2, seed: 42 });
+  });
+
+  it("refuses an Explainer episode and a Marketing Studio video's steps by name, and replays a Marketing picture", () => {
+    row({ id: "ex-a", feature: "explainer", request: { feature: "explainer", modelId: "nano-banana-pro", op: "t2i", prompt: "scene 1" } });
+    row({ id: "ex-b", feature: "explainer", kind: "video", request: { feature: "explainer", modelId: "kling-3", op: "i2v", prompt: "scene 1 moves", chain: [{ slot: "images" }] }, dependsOn: "ex-a" });
+    row({ id: "mk-shot", feature: "marketing-step", kind: "video", request: { feature: "marketing-step", modelId: "kling-3", op: "t2v", prompt: "shot 1" } });
+    row({ id: "mk-video", feature: "marketing", kind: "video", op: "concat", request: { feature: "marketing", modelId: "join-clips", op: "concat", chain: [{ slot: "videos" }] }, dependsOn: "mk-shot" });
+    row({ id: "mk-photo", feature: "marketing", request: { feature: "marketing", modelId: "nano-banana-pro", op: "t2i", prompt: "Commercial product photograph of a lamp", params: { aspectRatio: "1:1" } } });
+    const { draft, refusals } = builder.draftFromGenerations(["ex-b", "mk-video", "mk-photo"]);
+    const why = Object.fromEntries(refusals.map((r) => [r.id, r.reason]));
+    expect(why["ex-b"]).toBe(lib.notSupported("Explainer"));
+    expect(why["mk-video"]).toBe(lib.notSupported("Marketing Studio"));
+    expect(draft!.recipe.steps).toHaveLength(1);
+    expect(draft!.steps[0].generation).toBe("mk-photo");
+  });
+
+  it("keeps the order of a list whose items earlier steps made, and says when it can't", () => {
+    const out = (id: string, kind = "video") => [{ url: `/api/files/outputs/${id}.${kind === "video" ? "mp4" : "png"}`, kind }];
+    const t = Date.now() - 60_000;
+    const at = (id: string, ms: number) => db().prepare("UPDATE generations SET created_at = ? WHERE id = ?").run(t + ms, id);
+    // A clip made first, then joined with an upload after it: the clip goes first, as it did.
+    row({ id: "ord-c1", feature: "video", kind: "video", request: { feature: "video", modelId: "kling-3", op: "t2v", prompt: "a wave" }, outputs: out("ord-c1") });
+    row({ id: "ord-join", feature: "video", kind: "video", op: "concat", request: { feature: "video", modelId: "join-clips", op: "concat", inputs: { videos: [out("ord-c1")[0].url, clip] } }, outputs: out("ord-join") });
+    at("ord-c1", 0);
+    at("ord-join", 1000);
+    const join = builder.draftFromGenerations(["ord-join", "ord-c1"]).draft!;
+    const j = join.recipe.steps.find((s) => s.kind === "generate" && s.request.op === "concat") as Extract<(typeof join.recipe.steps)[number], { kind: "generate" }>;
+    expect(j.chain).toEqual([{ slot: "videos", position: "first" }]);
+    expect(j.request.inputs).toEqual({ videos: [clip] });
+    // A picture between two of the step's own goes last, and the step says so.
+    row({ id: "ord-p", feature: "image", request: { feature: "image", modelId: "nano-banana-pro", op: "t2i", prompt: "a lamp" }, outputs: out("ord-p", "image") });
+    row({ id: "ord-edit", feature: "edit", request: { feature: "edit", modelId: "nano-banana-pro", op: "edit", prompt: "together", inputs: { images: [photo, out("ord-p", "image")[0].url, "/api/files/uploads/other.png"] } }, outputs: out("ord-edit", "image") });
+    at("ord-p", 2000);
+    at("ord-edit", 3000);
+    const edit = builder.draftFromGenerations(["ord-edit", "ord-p"]).draft!;
+    const e = edit.recipe.steps.find((s) => s.kind === "generate" && s.request.op === "edit") as Extract<(typeof edit.recipe.steps)[number], { kind: "generate" }>;
+    expect(e.chain).toEqual([{ slot: "images", position: "last" }]);
+    expect(e.request.inputs).toEqual({ images: [photo, "/api/files/uploads/other.png"] });
+    expect(edit.steps.find((s) => s.key === e.key)!.notes.some((n) => /another order/.test(n))).toBe(true);
+  });
+
+  it("keeps the engine an Original ran on in the request as asked", () => {
+    const [clip0] = gens.createGenerations({ feature: "motion", modelId: "fuobe-dop", presetId: "effect-window", prompt: "a woman reading", inputs: { images: [photo] } });
+    expect(clip0.request.asked?.engine).toBe(clip0.engine);
   });
 
   it("answers over the API, refusing what isn't there", async () => {
@@ -334,6 +429,24 @@ describe("choices, body, check and save", () => {
     expect(body).toContain("**Product photo** (`product`)");
     expect(body).toContain("## Steps");
     expect(body).toContain("## Using Fuobe from an agent");
+  });
+
+  it("puts an element in for its @handle, and asks only for the prompt when the whole prompt varies too", () => {
+    createElement({ name: "Maya", kind: "character", references: [photo] });
+    row({ id: "el-shot", feature: "image", request: { feature: "image", modelId: "nano-banana-pro", op: "t2i", prompt: "@Maya walks on the beach" } });
+    const { draft } = builder.draftFromGenerations(["el-shot"]);
+    const el = draft!.candidates.find((c) => c.kind === "element")!;
+    const words = draft!.candidates.find((c) => c.kind === "text")!;
+    expect(el).toMatchObject({ type: "element", example: "@Maya" });
+    const alone = lib.buildRecipe(draft!, { varies: { [el.id]: true } });
+    expect(alone.params.map((p) => [p.id, p.type])).toEqual([[el.id, "element"]]);
+    expect((alone.steps[0] as { request: { prompt: string } }).request.prompt).toBe(`{{${el.id}}} walks on the beach`);
+    expect(recipeProblems(alone)).toEqual([]);
+    // Both: the whole prompt carries the element, and there is no input left that nothing uses.
+    const both = lib.buildRecipe(draft!, { varies: { [el.id]: true, [words.id]: true } });
+    expect(both.params.map((p) => p.id)).toEqual([words.id]);
+    expect((both.steps[0] as { request: { prompt: string } }).request.prompt).toBe(`{{${words.id}}}`);
+    expect(recipeProblems(both)).toEqual([]);
   });
 
   it("checks a draft for free with Demo mode off and no keys, saves it with what passed, and runs it", async () => {

@@ -4,7 +4,7 @@ import { getModel, supportsOp } from "@/lib/catalog";
 import { MODEL3D_STEP_FEATURE, stillPromptFor3d } from "@/lib/av/model3d";
 import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
 import { faceMosaicStep } from "@/lib/catalog/open-tools";
-import { onEngine } from "@/lib/catalog/engines";
+import { dualEngine, onEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
 import type { ChainSlot, Engine, GenParams, Generation, GenerationRequest, LoraRef, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
 import { db } from "./db";
@@ -58,10 +58,11 @@ export function assertOneMode(steps: ModeStep[]): void {
  * the result (src/server/recipe-builder.ts) rebuilds that one request, not the rows it expanded into, whose number
  * changes with the input (a film of 3 shots is 4 rows, of 5 shots 6).
  */
-function withAsked(made: Generation[], asked: GenerationRequest): Generation[] {
+function withAsked(made: Generation[], asked: GenerationRequest, engine: Engine): Generation[] {
   const [first, ...rest] = made;
   if (!first) return made;
-  const request = { ...asked };
+  // A Fuobe Original keeps the engine it ran on, as a plain row's request does (createGenerations).
+  const request = { ...asked, ...(dualEngine(getModel(asked.modelId)) && { engine }) };
   for (const k of ["asked", "chainFilled", "chainSkipped", "notice"] as const) delete request[k];
   const stored: GenerationRequest = { ...first.request, asked: request };
   db().prepare("UPDATE generations SET request_json = ? WHERE id = ?").run(JSON.stringify(stored), first.id);
@@ -200,7 +201,7 @@ export function createShotFilm(original: GenerationRequest, model: ModelDef): Ge
         step: { label: `Film · ${n} shots`, index: n, of: n + 1 },
       },
     );
-    return withAsked([film, ...clips], original);
+    return withAsked([film, ...clips], original, model.engine);
   } catch (e) {
     // Don't leave shots rendering for a film that can't be made.
     for (const g of clips) void cancelGeneration(g.id);
@@ -255,7 +256,7 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
       };
       made.push(createGenerations(request, { batchId })[0]);
     }
-    if (n === 1) return withAsked(made, original);
+    if (n === 1) return withAsked(made, original, model.engine);
     const film = joinClips(
       made.map((c) => c.id),
       {
@@ -269,7 +270,7 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
         step: { label: `Film · ${images.length} frames`, index: n, of: n + 1 },
       },
     );
-    return withAsked([film, ...made], original);
+    return withAsked([film, ...made], original, model.engine);
   } catch (e) {
     // Don't leave half a film rendering.
     for (const g of made) void cancelGeneration(g.id);
@@ -320,7 +321,7 @@ export function createExtendChain(original: GenerationRequest, model: ModelDef):
       before: [video],
       step: { label: "Extended video", index: 2, of: 3 },
     });
-    return withAsked([film, clip, frame], original);
+    return withAsked([film, clip, frame], original, model.engine);
   } catch (e) {
     for (const g of made) void cancelGeneration(g.id);
     throw e;
@@ -373,7 +374,7 @@ export function createStillTo3d(original: GenerationRequest, model: ModelDef, ro
       },
       { batchId, dependsOn: still.id },
     )[0];
-    return withAsked([built, still], original);
+    return withAsked([built, still], original, model.engine);
   } catch (e) {
     void cancelGeneration(still.id);
     throw e;
@@ -426,7 +427,7 @@ export function createRelitClip(
       },
       { batchId, dependsOn: relit.id },
     )[0];
-    return withAsked([clip, relit], original);
+    return withAsked([clip, relit], original, engine);
   } catch (e) {
     void cancelGeneration(relit.id);
     throw e;
