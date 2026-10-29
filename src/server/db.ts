@@ -716,8 +716,10 @@ const MIGRATIONS: string[] = [
   create index "auth_verification_identifier_idx" on "auth_verification" ("identifier");`,
 ];
 
+/** The index of the migration whose SQL contains `fragment` (-1 when none does): tests and the bootstrap name migrations by what they do. */
+export const migrationIndexOf = (fragment: string): number => MIGRATIONS.findIndex((sql) => sql.includes(fragment));
 /** The migration that creates the identity tables: the bootstrap snapshots an existing database before it runs (src/server/identity/bootstrap.ts). */
-export const IDENTITY_MIGRATION = MIGRATIONS.findIndex((sql) => sql.includes("CREATE TABLE IF NOT EXISTS users ("));
+export const IDENTITY_MIGRATION = migrationIndexOf("CREATE TABLE IF NOT EXISTS users (");
 /** How many migrations this build has (a snapshot's manifest records it). */
 export const MIGRATION_COUNT = MIGRATIONS.length;
 
