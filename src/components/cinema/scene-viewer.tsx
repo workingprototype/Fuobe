@@ -335,7 +335,8 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
       setQueued((n) => n + 1);
       toast.success("Filming this path — it lands next to the scene as a new take", { duration: 3000 });
     } catch (e) {
-      toast.error((e as Error).message || "Couldn't film this path");
+      // Closing the viewer stops a recording: nothing to report then.
+      if ((e as Error).name !== "AbortError") toast.error((e as Error).message || "Couldn't film this path");
     } finally {
       setFilming(null);
     }
@@ -493,7 +494,7 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
     <PathKeys
       keys={keys}
       seconds={seconds}
-      disabled={status !== "ready" || !!filming || (previewing && tone === "panel")}
+      disabled={status !== "ready" || pathBusy}
       previewing={previewing}
       onAdd={addKeyframe}
       onRemove={(i) => {
