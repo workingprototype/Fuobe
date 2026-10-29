@@ -326,6 +326,8 @@ export const ASSET_REFS: AssetRef[] = [
   { table: "swap_projects", cols: ["data_json"], what: "Character Swap project", name: "name" },
   // A user skill's bundled text files: its recipe.json names the files a run starts from (an example, a fixed logo).
   { table: "skills", cols: ["files_json"], what: "skill", key: "name", name: "title" },
+  // Accounts (o/acc-1): a person's picture is an uploaded asset.
+  { table: "users", cols: ["avatar_asset_id"], what: "account picture", name: "provisioned_name" },
 ];
 
 /**
@@ -356,6 +358,7 @@ export const ASSET_FREE: Record<string, string> = {
   "assist_schedules.mode_json": "the Assist mode a scheduled run starts in",
   "assist_connectors.url": "a remote MCP server Claude connects to, never one of ours",
   "assist_connectors.tools_json": "the tool names a connector is limited to",
+  "audit_log.meta_json": "what an audit entry is about: ids, setting names and masked prefixes, never files",
 };
 
 /** The query that finds the rows of one ASSET_REFS table naming a file (@id), except the purged generation's own (@g). */

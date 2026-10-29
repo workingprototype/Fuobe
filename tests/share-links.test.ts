@@ -34,6 +34,7 @@ const auth = await import("@/server/auth");
 const { saveFile } = await import("@/server/storage");
 const { db } = await import("@/server/db");
 const { proxy } = await import("@/proxy");
+const { setOwnerPassword, ownerCookie } = await import("./helpers/identity");
 const fileRoute = await import("@/app/s/[token]/f/[...path]/route");
 const listRoute = await import("@/app/api/shares/route");
 const idRoute = await import("@/app/api/shares/[id]/route");
@@ -484,108 +485,108 @@ describe("renewing", () => {
   });
 });
 
-describe("the sign-in proxy", () => {
-  it("lets exactly a live share's page and files through without a session, and nothing else", () => {
+describe("the sign-in proxy", async () => {
+  it("lets exactly a live share's page and files through without a session, and nothing else", async () => {
     const { g, rel, input } = made("proxy pier");
     const S = shares.createShare({ kind: "result", targetId: g.id });
-    auth.setPassword("correct horse battery");
+    await setOwnerPassword("correct horse battery");
     try {
-      const page = proxy(req(`http://localhost:3000/s/${S.token}`));
+      const page = (await proxy(req(`http://localhost:3000/s/${S.token}`)));
       expect(passed(page)).toBe(true);
       expect(page.headers.get("x-robots-tag")).toMatch(/noindex/);
       expect(page.headers.get("referrer-policy")).toBe("no-referrer");
-      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}/f/${rel}`)))).toBe(true);
-      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`, { method: "HEAD" })))).toBe(true);
+      expect(passed((await proxy(req(`http://localhost:3000/s/${S.token}/f/${rel}`))))).toBe(true);
+      expect(passed((await proxy(req(`http://localhost:3000/s/${S.token}`, { method: "HEAD" }))))).toBe(true);
       // The files route itself decides which files (the proxy passes the shape; see "what a token serves").
-      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}/f/${input}`)))).toBe(true);
+      expect(passed((await proxy(req(`http://localhost:3000/s/${S.token}/f/${input}`))))).toBe(true);
 
       // Everything else still needs a session.
-      expect(proxy(req(`http://localhost:3000/api/files/${rel}`)).status).toBe(401);
-      expect(proxy(req("http://localhost:3000/api/shares")).status).toBe(401);
-      expect(proxy(req(`http://localhost:3000/api/shares/${S.share.id}`, { method: "POST", headers: { origin: "http://localhost:3000" } })).status).toBe(401);
+      expect((await proxy(req(`http://localhost:3000/api/files/${rel}`))).status).toBe(401);
+      expect((await proxy(req("http://localhost:3000/api/shares"))).status).toBe(401);
+      expect((await proxy(req(`http://localhost:3000/api/shares/${S.share.id}`, { method: "POST", headers: { origin: "http://localhost:3000" } }))).status).toBe(401);
       for (const p of [`/s/${S.token}/other`, `/s/${S.token}/f/../../library`, "/s/gone", "/library", `/s/${S.token}x`]) {
-        const r = proxy(req(`http://localhost:3000${p}`));
+        const r = (await proxy(req(`http://localhost:3000${p}`)));
         expect(r.status, p).toBe(307);
         expect(r.headers.get("location"), p).toMatch(/\/login/);
       }
       // A share path written to (a server action, a form post) is not opened.
-      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`, { method: "POST", headers: { origin: "http://localhost:3000" } })))).toBe(false);
+      expect(passed((await proxy(req(`http://localhost:3000/s/${S.token}`, { method: "POST", headers: { origin: "http://localhost:3000" } }))))).toBe(false);
 
       // Revoked or unknown: a real 404 (the "link unavailable" page), not a sign-in redirect.
-      expect(gone(proxy(req(`http://localhost:3000/s/${"Q".repeat(44)}`)))).toBe(true);
+      expect(gone((await proxy(req(`http://localhost:3000/s/${"Q".repeat(44)}`))))).toBe(true);
       shares.revokeShare(S.share.id);
-      expect(gone(proxy(req(`http://localhost:3000/s/${S.token}`)))).toBe(true);
-      expect(gone(proxy(req(`http://localhost:3000/s/${S.token}/f/${rel}`)))).toBe(true);
+      expect(gone((await proxy(req(`http://localhost:3000/s/${S.token}`))))).toBe(true);
+      expect(gone((await proxy(req(`http://localhost:3000/s/${S.token}/f/${rel}`))))).toBe(true);
     } finally {
-      auth.setPassword(null);
+      await setOwnerPassword(null);
     }
   });
 
-  it("keeps the host allowlist and the cross-site check when no password is set", () => {
+  it("keeps the host allowlist and the cross-site check when no password is set", async () => {
     const { g } = made("rebound pier");
     const S = shares.createShare({ kind: "result", targetId: g.id });
     expect(auth.authEnabled()).toBe(false);
-    const rebound = proxy(new NextRequest(`http://rebind.attacker.example/s/${S.token}`, { headers: { host: "rebind.attacker.example" } }));
+    const rebound = (await proxy(new NextRequest(`http://rebind.attacker.example/s/${S.token}`, { headers: { host: "rebind.attacker.example" } })));
     expect(rebound.status).toBe(403);
-    expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`)))).toBe(true);
-    expect(proxy(req(`http://localhost:3000/s/${S.token}`, { method: "POST", headers: { origin: "http://evil.example" } })).status).toBe(403);
+    expect(passed((await proxy(req(`http://localhost:3000/s/${S.token}`))))).toBe(true);
+    expect((await proxy(req(`http://localhost:3000/s/${S.token}`, { method: "POST", headers: { origin: "http://evil.example" } }))).status).toBe(403);
   });
 
-  it("rate-limits wrong tokens without ever blocking a live link, and never the signed-in owner", () => {
+  it("rate-limits wrong tokens without ever blocking a live link, and never the signed-in owner", async () => {
     const { g } = made("guessed pier");
     const S = shares.createShare({ kind: "result", targetId: g.id });
     globalThis.__fuobeShareGuard = new access.ShareGuard({ perClient: 3, global: 5, windowMs: 60_000, lockMs: 60_000, maxClients: 100 });
-    auth.setPassword("correct horse battery");
+    await setOwnerPassword("correct horse battery");
     try {
-      for (let i = 0; i < 5; i++) expect(gone(proxy(req(`http://localhost:3000/s/${String(i).repeat(44)}`)))).toBe(true);
+      for (let i = 0; i < 5; i++) expect(gone((await proxy(req(`http://localhost:3000/s/${String(i).repeat(44)}`))))).toBe(true);
       // Past the global budget a wrong token answers 429…
-      const blocked = proxy(req(`http://localhost:3000/s/${"7".repeat(44)}`));
+      const blocked = (await proxy(req(`http://localhost:3000/s/${"7".repeat(44)}`)));
       expect(blocked.status).toBe(429);
       expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
       // …but anyone else's misses never take a working link down.
-      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`)))).toBe(true);
-      const cookie = `${auth.SESSION_COOKIE}=${auth.createSession().value}`;
-      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`, { headers: { cookie } })))).toBe(true);
+      expect(passed((await proxy(req(`http://localhost:3000/s/${S.token}`))))).toBe(true);
+      const cookie = await ownerCookie("correct horse battery");
+      expect(passed((await proxy(req(`http://localhost:3000/s/${S.token}`, { headers: { cookie } }))))).toBe(true);
     } finally {
-      auth.setPassword(null);
+      await setOwnerPassword(null);
     }
   });
 
-  it("counts one miss per dead token, so a revoked page full of files doesn't trip the limit", () => {
+  it("counts one miss per dead token, so a revoked page full of files doesn't trip the limit", async () => {
     const { g, rel } = made("revoked gallery pier");
     const S = shares.createShare({ kind: "result", targetId: g.id });
     const other = shares.createShare({ kind: "result", targetId: made("other live pier").g.id });
     globalThis.__fuobeShareGuard = new access.ShareGuard({ perClient: 3, global: 5, windowMs: 60_000, lockMs: 60_000, maxClients: 100 });
     shares.revokeShare(S.share.id);
     // A page left open after its link was revoked: the page and 120 lazy-loaded files.
-    for (let i = 0; i < 120; i++) expect(gone(proxy(req(`http://localhost:3000/s/${S.token}${i ? `/f/${rel}` : ""}`)))).toBe(true);
+    for (let i = 0; i < 120; i++) expect(gone((await proxy(req(`http://localhost:3000/s/${S.token}${i ? `/f/${rel}` : ""}`))))).toBe(true);
     expect(globalThis.__fuobeShareGuard.saturated()).toBe(false);
-    expect(passed(proxy(req(`http://localhost:3000/s/${other.token}`)))).toBe(true);
+    expect(passed((await proxy(req(`http://localhost:3000/s/${other.token}`))))).toBe(true);
   });
 
-  it("locks out a client it can tell apart (behind a trusted proxy), working links included, and nobody else", () => {
+  it("locks out a client it can tell apart (behind a trusted proxy), working links included, and nobody else", async () => {
     const { g } = made("trusted proxy pier");
     const S = shares.createShare({ kind: "result", targetId: g.id });
     globalThis.__fuobeShareGuard = new access.ShareGuard({ perClient: 3, global: 50, windowMs: 60_000, lockMs: 60_000, maxClients: 100 });
     vi.stubEnv("FUOBE_TRUST_PROXY", "1");
     try {
       const from = (ip: string) => ({ headers: { "x-forwarded-for": ip } });
-      for (let i = 0; i < 3; i++) expect(gone(proxy(req(`http://localhost:3000/s/${String(i).repeat(44)}`, from("203.0.113.9"))))).toBe(true);
+      for (let i = 0; i < 3; i++) expect(gone((await proxy(req(`http://localhost:3000/s/${String(i).repeat(44)}`, from("203.0.113.9")))))).toBe(true);
       // That client can't tell a hit from a miss for a minute…
-      expect(proxy(req(`http://localhost:3000/s/${S.token}`, from("203.0.113.9"))).status).toBe(429);
+      expect((await proxy(req(`http://localhost:3000/s/${S.token}`, from("203.0.113.9")))).status).toBe(429);
       // …while everyone else opens the link.
-      expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`, from("198.51.100.4"))))).toBe(true);
+      expect(passed((await proxy(req(`http://localhost:3000/s/${S.token}`, from("198.51.100.4")))))).toBe(true);
     } finally {
       vi.unstubAllEnvs();
     }
   });
 });
 
-describe("views", () => {
+describe("views", async () => {
   const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
   const viewHeader = (r: Response) => r.headers.get(`x-middleware-request-${share.SHARE_VIEW_HEADER}`);
 
-  it("counts a browser opening the page, not a HEAD, a prefetch, a script or a link-preview bot", () => {
+  it("counts a browser opening the page, not a HEAD, a prefetch, a script or a link-preview bot", async () => {
     const h = (o: Record<string, string>) => new Headers(o);
     expect(share.countsAsView("GET", h({ "user-agent": CHROME, "sec-fetch-dest": "document" }))).toBe(true);
     expect(share.countsAsView("GET", h({ "user-agent": CHROME }))).toBe(true); // older browsers send no Sec-Fetch-*
@@ -608,25 +609,25 @@ describe("views", () => {
     }
   });
 
-  it("is told to the page by the proxy only, for a visitor's page request", () => {
+  it("is told to the page by the proxy only, for a visitor's page request", async () => {
     const { g, rel } = made("viewed pier");
     const S = shares.createShare({ kind: "result", targetId: g.id });
     const page = `http://localhost:3000/s/${S.token}`;
-    expect(viewHeader(proxy(req(page, { headers: { "user-agent": CHROME } })))).toBe("1");
-    expect(viewHeader(proxy(req(page, { method: "HEAD", headers: { "user-agent": CHROME } })))).toBeNull();
-    expect(viewHeader(proxy(req(`${page}/f/${rel}`, { headers: { "user-agent": CHROME } })))).toBeNull();
+    expect(viewHeader((await proxy(req(page, { headers: { "user-agent": CHROME } }))))).toBe("1");
+    expect(viewHeader((await proxy(req(page, { method: "HEAD", headers: { "user-agent": CHROME } }))))).toBeNull();
+    expect(viewHeader((await proxy(req(`${page}/f/${rel}`, { headers: { "user-agent": CHROME } }))))).toBeNull();
     // A visitor can't count views by sending the header themselves.
-    const forged = proxy(req(page, { headers: { "user-agent": "Slackbot 1.0", [share.SHARE_VIEW_HEADER]: "1" } }));
+    const forged = (await proxy(req(page, { headers: { "user-agent": "Slackbot 1.0", [share.SHARE_VIEW_HEADER]: "1" } })));
     expect(viewHeader(forged)).toBeNull();
     expect(forged.headers.get("x-middleware-override-headers") ?? "").not.toContain(share.SHARE_VIEW_HEADER);
     // The signed-in owner checking their own link isn't a view.
-    auth.setPassword("correct horse battery");
+    await setOwnerPassword("correct horse battery");
     try {
-      const cookie = `${auth.SESSION_COOKIE}=${auth.createSession().value}`;
-      expect(viewHeader(proxy(req(page, { headers: { "user-agent": CHROME, cookie } })))).toBeNull();
-      expect(viewHeader(proxy(req(page, { headers: { "user-agent": CHROME } })))).toBe("1");
+      const cookie = await ownerCookie("correct horse battery");
+      expect(viewHeader((await proxy(req(page, { headers: { "user-agent": CHROME, cookie } }))))).toBeNull();
+      expect(viewHeader((await proxy(req(page, { headers: { "user-agent": CHROME } }))))).toBe("1");
     } finally {
-      auth.setPassword(null);
+      await setOwnerPassword(null);
     }
   });
 });

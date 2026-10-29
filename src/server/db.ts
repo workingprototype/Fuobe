@@ -564,7 +564,162 @@ const MIGRATIONS: string[] = [
   UPDATE ad_batches SET route = 'baked' WHERE route = 'higgsfield';
   UPDATE ad_creatives SET meta_json = json_set(meta_json, '$.route', 'baked')
     WHERE json_valid(meta_json) AND json_extract(meta_json, '$.route') = 'higgsfield';`,
+  // originals (o/acc-1): accounts, part 1 (docs/research/accounts-8.md §7.1). Fuobe's identity tables — people
+  // (`users`: u_owner or u_<nanoid>, linked to a Better Auth user), workspaces and their members, invites, grants,
+  // per-viewer marks, API tokens (they move out of auth.json), the append-only audit log with its hash chain,
+  // per-person and per-workspace settings and step-up marks — seeded with the owner (unclaimed until the bootstrap
+  // or a first password links it), the owner's personal workspace and the install catalog. Then Better Auth's own
+  // tables, frozen exactly as `node scripts/auth-schema.mjs` printed them for better-auth 1.7.10 (the schema-guard
+  // test fails when a library upgrade would want a change). No foreign keys, and no CHECKs on roles, statuses or
+  // sources: their registries live in code, so later packages add values without rebuilding tables.
+  `CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    auth_user_id TEXT UNIQUE,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    pending_reason TEXT,
+    dormant INTEGER NOT NULL DEFAULT 0,
+    personal_workspace_id TEXT,
+    source TEXT NOT NULL DEFAULT 'unknown',
+    external_id TEXT,
+    provisioned_email TEXT,
+    provisioned_name TEXT,
+    invited_by TEXT,
+    approved_by TEXT,
+    avatar_asset_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS users_one_owner ON users(role) WHERE role = 'owner';
+  CREATE UNIQUE INDEX IF NOT EXISTS users_provisioned_email ON users(lower(provisioned_email)) WHERE auth_user_id IS NULL AND provisioned_email IS NOT NULL;
+  CREATE TABLE IF NOT EXISTS workspaces (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    color TEXT,
+    created_by TEXT,
+    archived_at INTEGER,
+    delete_after INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS workspace_members (
+    workspace_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    added_by TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS workspace_members_user ON workspace_members(user_id);
+  CREATE TABLE IF NOT EXISTS invites (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    email TEXT,
+    role TEXT NOT NULL,
+    workspace_id TEXT,
+    inviter_id TEXT NOT NULL,
+    used_by TEXT,
+    used_at INTEGER,
+    revoked_at INTEGER,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS grants (
+    id TEXT PRIMARY KEY,
+    resource_kind TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    grantee_kind TEXT NOT NULL,
+    grantee_id TEXT NOT NULL,
+    level TEXT NOT NULL,
+    granted_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (resource_kind, resource_id, grantee_kind, grantee_id)
+  );
+  CREATE INDEX IF NOT EXISTS grants_grantee ON grants(grantee_kind, grantee_id);
+  CREATE TABLE IF NOT EXISTS item_marks (
+    user_id TEXT NOT NULL,
+    item_kind TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    favorite INTEGER NOT NULL DEFAULT 0,
+    pinned_at INTEGER,
+    PRIMARY KEY (user_id, item_kind, item_id)
+  );
+  CREATE TABLE IF NOT EXISTS api_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    workspace_id TEXT,
+    name TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    hash TEXT NOT NULL UNIQUE,
+    scopes TEXT NOT NULL DEFAULT 'full',
+    legacy INTEGER NOT NULL DEFAULT 0,
+    expires_at INTEGER,
+    last_used_at INTEGER,
+    revoked_at INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS api_tokens_user ON api_tokens(user_id);
+  CREATE TABLE IF NOT EXISTS audit_log (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    actor_id TEXT,
+    actor_via TEXT,
+    action TEXT NOT NULL,
+    target_kind TEXT,
+    target_id TEXT,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    ip TEXT,
+    user_agent TEXT,
+    prev_hash TEXT NOT NULL,
+    hash TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS audit_log_at ON audit_log(at);
+  CREATE TRIGGER IF NOT EXISTS audit_log_append_only BEFORE UPDATE ON audit_log
+    BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+  CREATE TABLE IF NOT EXISTS user_settings (
+    user_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, key)
+  );
+  CREATE TABLE IF NOT EXISTS workspace_settings (
+    workspace_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, key)
+  );
+  CREATE TABLE IF NOT EXISTS session_step_up (
+    session_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    confirmed_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  INSERT OR IGNORE INTO workspaces (id, kind, name, slug, created_by, created_at, updated_at) VALUES
+    ('w_owner', 'personal', 'Personal', 'personal', 'u_owner', CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+    ('w_install', 'install', 'Install', 'install', NULL, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+  INSERT OR IGNORE INTO users (id, role, status, personal_workspace_id, source, created_at, updated_at) VALUES
+    ('u_owner', 'owner', 'active', 'w_owner', 'setup', CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+  INSERT OR IGNORE INTO workspace_members (workspace_id, user_id, role, source, created_at) VALUES
+    ('w_owner', 'u_owner', 'owner', 'manual', CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+  create table "auth_user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null);
+  create table "auth_session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "auth_user" ("id") on delete cascade);
+  create table "auth_account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "auth_user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
+  create table "auth_verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
+  create table "auth_rate_limit" ("id" text not null primary key, "key" text not null unique, "count" integer not null, "lastRequest" bigint not null);
+  create index "auth_session_userId_idx" on "auth_session" ("userId");
+  create index "auth_account_userId_idx" on "auth_account" ("userId");
+  create index "auth_verification_identifier_idx" on "auth_verification" ("identifier");`,
 ];
+
+/** The migration that creates the identity tables: the bootstrap snapshots an existing database before it runs (src/server/identity/bootstrap.ts). */
+export const IDENTITY_MIGRATION = MIGRATIONS.findIndex((sql) => sql.includes("CREATE TABLE IF NOT EXISTS users ("));
+/** How many migrations this build has (a snapshot's manifest records it). */
+export const MIGRATION_COUNT = MIGRATIONS.length;
 
 declare global {
   var __fuobeDb: Database.Database | undefined;
