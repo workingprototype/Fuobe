@@ -1,5 +1,4 @@
 import "server-only";
-import { Worker } from "node:worker_threads";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { getModel } from "@/lib/catalog";
@@ -8,6 +7,7 @@ import type { GenInput, ModelRoute, Operation } from "@/lib/catalog/types";
 import { engineMode, getSetting } from "../settings";
 import { toDataUri } from "../storage";
 import { comfyProvider } from "./comfyui";
+import { ask, checkReach, reachSync, sharedCheck, type Reach } from "./reach";
 import type { PollResult, ProviderAdapter, RemoteOutput } from "./types";
 
 /**
@@ -39,44 +39,42 @@ export function textOutput(text: string, cues?: Cue[] | null, meta: Record<strin
 // Which LLM
 
 declare global {
-  var __fuobeOllamaReach: { ok: boolean; at: number; url: string } | undefined;
+  /** Reachability of Ollama: when it last answered, and when a longer look last went unanswered (./reach). */
+  var __fuobeOllamaReach: Reach | undefined;
   var __fuobeLlmJobs: Map<string, LlmJob> | undefined;
 }
 
 const ollamaUrl = () => getSetting("ollamaUrl").replace(/\/+$/, "");
 const PROBE_MS = 15_000;
 
-/** Is Ollama answering? Cached for 15 s; routing reads the cached answer (see llmBackends). */
+/**
+ * Is Ollama answering GET /api/tags? By the busy-vs-down rules ComfyUI has (./reach): a refused port or an HTTP
+ * error is down at once; no answer in time is busy when it answered lately, else it gets the longer look when its
+ * port takes a connection. Cached for 15 s (`force` checks now); one check runs at a time. Routing reads the cached
+ * answer (see llmBackends).
+ */
 export async function probeOllama(force = false): Promise<boolean> {
   const cur = globalThis.__fuobeOllamaReach;
   const url = ollamaUrl();
   if (!force && cur && cur.url === url && Date.now() - cur.at < PROBE_MS) return cur.ok;
-  const ok = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(1500) })
-    .then((r) => r.ok)
-    .catch(() => false);
-  globalThis.__fuobeOllamaReach = { ok, at: Date.now(), url };
-  return ok;
+  return sharedCheck("ollama", url, async () => {
+    const { reach } = await checkReach(url, globalThis.__fuobeOllamaReach, (ms) => ask(`${url}/api/tags`, ms));
+    // The address may have changed while this ran: the new one's check speaks for it.
+    if (url === ollamaUrl()) globalThis.__fuobeOllamaReach = reach;
+    return reach.ok;
+  });
 }
 
-const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
-const flag = new Int32Array(workerData.sab);
-fetch(workerData.url, { signal: AbortSignal.timeout(workerData.timeout) })
-  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), () => Atomics.store(flag, 0, 2))
-  .finally(() => Atomics.notify(flag, 0));`;
-
-/** Blocking check (a few ms for a refused port, at most `timeoutMs` for a host that doesn't answer). */
+/**
+ * Blocking check (reachSync): a few ms for an Ollama that answers or a refused port, at most `timeoutMs` otherwise.
+ * One that takes the connection but doesn't answer in time is busy for now, and probeOllama goes on in the background
+ * to say for sure.
+ */
 function probeOllamaSync(url: string, timeoutMs = 1500): boolean {
-  let ok = false;
-  try {
-    const sab = new SharedArrayBuffer(4);
-    const flag = new Int32Array(sab);
-    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/api/tags`, timeout: timeoutMs } });
-    Atomics.wait(flag, 0, 0, timeoutMs + 1000);
-    ok = Atomics.load(flag, 0) === 1;
-    void worker.terminate();
-  } catch {}
-  globalThis.__fuobeOllamaReach = { ok, at: Date.now(), url };
-  return ok;
+  const { reach, sure } = reachSync(url, `${url}/api/tags`, timeoutMs);
+  globalThis.__fuobeOllamaReach = reach;
+  if (!sure) void probeOllama(true).catch(() => false);
+  return reach.ok;
 }
 
 /**
@@ -88,7 +86,7 @@ function ollamaReady(): boolean {
   const cur = globalThis.__fuobeOllamaReach;
   const url = ollamaUrl();
   if (!cur || cur.url !== url) return probeOllamaSync(url);
-  if (Date.now() - cur.at > PROBE_MS) void probeOllama();
+  if (Date.now() - cur.at > PROBE_MS) void probeOllama().catch(() => false);
   return cur.ok;
 }
 
