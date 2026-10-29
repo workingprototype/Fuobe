@@ -1,5 +1,6 @@
 import "server-only";
 import { isAPIError } from "better-auth/api";
+import { REFUSAL_COPY } from "@/lib/sign-in-refusals";
 import { db } from "../db";
 import { bumpIdentityConfig, envOwnerPassword, INSTALL, setInstallValue } from "../mode";
 import * as ops from "./admin-ops";
@@ -55,8 +56,9 @@ export async function signInOwner(password: string, headers: Headers): Promise<S
     return { ok: true, setCookies: res.headers?.getSetCookie() ?? [] };
   } catch (e) {
     if (isAPIError(e)) {
+      // A refusal with its own copy (pending, turned off, dormant…); anything else reads as a wrong password.
       const code = (e.body as { code?: string } | undefined)?.code;
-      if (code && code !== "INVALID_EMAIL_OR_PASSWORD") return { ok: false, code, message: e.message };
+      if (code && code in REFUSAL_COPY) return { ok: false, code, message: e.message };
       return { ok: false };
     }
     throw e;

@@ -9,15 +9,8 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.NEXT_PHASE === "phase-production-build") return;
-  const { bootstrapIdentity, StartupError } = await import("./server/identity/bootstrap");
-  try {
-    const report = await bootstrapIdentity();
-    if (report.snapshot) console.log(`Fuobe saved a copy of the database before accounts: ${report.snapshot.db}`);
-    if (report.importedPassword) console.log("Fuobe moved the password to accounts: sign in once more in each browser.");
-  } catch (e) {
-    console.error(e instanceof StartupError ? `Fuobe can't start: ${e.message}` : e);
-    process.exit(1);
-  }
+  const { startIdentity } = await import("./server/identity/bootstrap");
+  await startIdentity();
   const { ensureRunner } = await import("./server/generations");
   ensureRunner();
   const { ensureTrashPurge } = await import("./server/library");

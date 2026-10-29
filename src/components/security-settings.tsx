@@ -2,7 +2,6 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, Loader2, LogOut, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -196,7 +195,6 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
 
 export function SecuritySettings() {
   const qc = useQueryClient();
-  const router = useRouter();
   const status = useQuery({ queryKey: ["auth"], queryFn: () => call<AuthStatus>("/api/auth/password", "GET") });
   const refresh = () => void qc.invalidateQueries({ queryKey: ["auth"] });
   if (!status.data) return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
@@ -213,7 +211,8 @@ export function SecuritySettings() {
             className="-my-1 h-7"
             onClick={async () => {
               await fetch("/api/auth/logout", { method: "POST" });
-              router.replace("/login");
+              // A full load (the proxy sends it to sign in): nothing from the signed-in session stays in memory.
+              window.location.reload();
             }}
           >
             <LogOut /> Sign out

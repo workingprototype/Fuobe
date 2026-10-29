@@ -133,3 +133,15 @@ export async function bootstrapIdentity(): Promise<BootstrapReport> {
   report.signin = installValue(INSTALL.signin) === "on" ? "on" : "off";
   return report;
 }
+
+/** The bootstrap as the server runs it (instrumentation.ts): a few lines for the terminal, or one line and exit. */
+export async function startIdentity(): Promise<void> {
+  try {
+    const report = await bootstrapIdentity();
+    if (report.snapshot) console.log(`Fuobe saved a copy of the database before accounts: ${report.snapshot.db}`);
+    if (report.importedPassword) console.log("Fuobe moved the password to accounts: sign in once more in each browser.");
+  } catch (e) {
+    console.error(e instanceof StartupError ? `Fuobe can't start: ${e.message}` : e);
+    process.exit(1);
+  }
+}
