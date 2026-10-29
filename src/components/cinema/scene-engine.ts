@@ -225,10 +225,10 @@ async function vp8Supported(width: number, height: number, fps: number): Promise
  * `count` frames of two streams (`draw(i)` gives frame i of each) encoded with WebCodecs and written as two WebM files:
  * every frame kept, frame i at i / fps, a keyframe each second.
  */
-async function encodeVp8(count: number, width: number, height: number, fps: number, draw: (i: number) => [ImageData, ImageData]): Promise<[Uint8Array, Uint8Array]> {
-  const chunks: EncodedFrame[][] = [[], []];
+async function encodeVp8(count: number, width: number, height: number, fps: number, outputs: number, draw: (i: number) => ImageData[]): Promise<Uint8Array[]> {
+  const chunks: EncodedFrame[][] = Array.from({ length: outputs }, () => []);
   let failure: unknown;
-  const encoders = [0, 1].map((k) => {
+  const encoders = chunks.map((_, k) => {
     const e = new VideoEncoder({
       output: (chunk) => {
         const data = new Uint8Array(chunk.byteLength);
@@ -261,17 +261,17 @@ async function encodeVp8(count: number, width: number, height: number, fps: numb
   }
   if (chunks.some((c) => c.length !== count)) throw new Error(`The path render lost frames (${chunks[0].length} of ${count})`);
   const track = { codec: "V_VP8" as const, width, height, fps };
-  return [muxWebM(track, chunks[0]), muxWebM(track, chunks[1])];
+  return chunks.map((c) => muxWebM(track, c));
 }
 
-/** The fallback: two canvases recorded with MediaRecorder, each frame handed over 1/fps apart. */
-async function recordWithMediaRecorder(type: string, count: number, width: number, height: number, fps: number, draw: (i: number) => [ImageData, ImageData]): Promise<[Blob, Blob]> {
-  const canvases = [0, 1].map(() => Object.assign(document.createElement("canvas"), { width, height }));
+/** The fallback: a canvas per stream recorded with MediaRecorder, each frame handed over 1/fps apart. */
+async function recordWithMediaRecorder(type: string, count: number, width: number, height: number, fps: number, outputs: number, draw: (i: number) => ImageData[]): Promise<Blob[]> {
+  const canvases = Array.from({ length: outputs }, () => Object.assign(document.createElement("canvas"), { width, height }));
   const ctxs = canvases.map((c) => c.getContext("2d")!);
   const streams = canvases.map((c) => c.captureStream(0));
   const tracks = streams.map((s) => s.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void });
   const recorders = streams.map((s) => new MediaRecorder(s, { mimeType: type, videoBitsPerSecond: 8_000_000 }));
-  const chunks: Blob[][] = [[], []];
+  const chunks: Blob[][] = recorders.map(() => []);
   const stopped = recorders.map((r, i) => {
     r.ondataavailable = (e) => e.data.size && chunks[i].push(e.data);
     return new Promise<void>((resolve) => (r.onstop = () => resolve()));
@@ -294,7 +294,7 @@ async function recordWithMediaRecorder(type: string, count: number, width: numbe
     streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
   }
   const base = type.split(";")[0];
-  return [new Blob(chunks[0], { type: base }), new Blob(chunks[1], { type: base })];
+  return chunks.map((c) => new Blob(c, { type: base }));
 }
 
 export class SceneEngine {
@@ -658,11 +658,15 @@ export class SceneEngine {
   /**
    * Record the scene along a path (build plan N7-5): every frame of `path` (OpenCV camera-to-world poses and a pixel
    * intrinsic, src/lib/camera-path.ts framePoses) rendered at its size with nothing behind the scene, as two videos at
-   * `fps`: `render` (black where nothing was seen: Uni3C's render_video) and `mask` (white = a hole; core's Uni3C node has
-   * no mask input, so it is kept for WorldCast). With WebCodecs every frame is encoded (VP8) and written to WebM at its
-   * exact time; without it MediaRecorder records the frames handed over 1/fps apart, which may drop one.
+   * `fps`: `render` (black where nothing was seen: Uni3C's render_video) and, when `mask` is asked for, the hole mask
+   * (white = a hole; core's Uni3C node has no mask input, so only WorldCast will ask, and Film doesn't pay for a second
+   * encode). With WebCodecs every frame is encoded (VP8) and written to WebM at its exact time; without it MediaRecorder
+   * records the frames handed over 1/fps apart, which may drop one.
    */
-  async recordPath(path: FramePoses, o: { fps: number; onProgress?: (p: number) => void; signal?: AbortSignal }): Promise<{ render: Blob; mask: Blob; type: string; frames: number }> {
+  async recordPath(
+    path: FramePoses,
+    o: { fps: number; mask?: boolean; onProgress?: (p: number) => void; signal?: AbortSignal },
+  ): Promise<{ render: Blob; mask?: Blob; type: string; frames: number }> {
     if (!this.view || !this.info) throw new Error("The scene isn't ready yet");
     const { width, height, poses, intrinsic } = path;
     const exact = await vp8Supported(width, height, o.fps);
@@ -673,8 +677,9 @@ export class SceneEngine {
     const out = new THREE.WebGLRenderTarget(width, height);
     const buf = new Uint8Array(width * height * 4);
     const render = new ImageData(width, height);
-    const mask = new ImageData(width, height);
-    /** Frame i into `render` and `mask`: WebGL reads bottom-up, and a pixel nothing covered is transparent black. */
+    const mask = o.mask ? new ImageData(width, height) : null;
+    const images = mask ? [render, mask] : [render];
+    /** Frame i into `render` (and `mask`): WebGL reads bottom-up, and a pixel nothing covered is transparent black. */
     const frame = (i: number) => {
       this.draw(out, width, height, width, height, color, { pose: flyPoseOf(poses[i]), vFov });
       this.renderer.readRenderTargetPixels(out, 0, 0, width, height, buf);
@@ -687,6 +692,7 @@ export class SceneEngine {
           render.data[dst + x + 1] = hole ? 0 : buf[src + x + 1];
           render.data[dst + x + 2] = hole ? 0 : buf[src + x + 2];
           render.data[dst + x + 3] = 255;
+          if (!mask) continue;
           const m = hole ? 255 : 0;
           mask.data[dst + x] = m;
           mask.data[dst + x + 1] = m;
@@ -701,21 +707,21 @@ export class SceneEngine {
     this.playing = true;
     try {
       if (exact) {
-        const [a, b] = await encodeVp8(poses.length, width, height, o.fps, (i) => {
+        const [a, b] = await encodeVp8(poses.length, width, height, o.fps, images.length, (i) => {
           stop();
           frame(i);
           o.onProgress?.((i + 1) / poses.length);
-          return [render, mask];
+          return images;
         });
-        return { render: new Blob([a as BlobPart], { type }), mask: new Blob([b as BlobPart], { type }), type, frames: poses.length };
+        return { render: new Blob([a as BlobPart], { type }), ...(b ? { mask: new Blob([b as BlobPart], { type }) } : {}), type, frames: poses.length };
       }
-      const [r, m] = await recordWithMediaRecorder(type, poses.length, width, height, o.fps, (i) => {
+      const [r, m] = await recordWithMediaRecorder(type, poses.length, width, height, o.fps, images.length, (i) => {
         stop();
         frame(i);
         o.onProgress?.((i + 1) / poses.length);
-        return [render, mask];
+        return images;
       });
-      return { render: r, mask: m, type: type.split(";")[0], frames: poses.length };
+      return { render: r, ...(m ? { mask: m } : {}), type: type.split(";")[0], frames: poses.length };
     } finally {
       color.depthTexture?.dispose();
       color.dispose();

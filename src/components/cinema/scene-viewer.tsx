@@ -12,11 +12,12 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { EngineSwitch } from "@/components/studio/engine-switch";
-import { uploadFile } from "@/lib/api";
+import { uploadFile, useDeleteUpload, useModelAccess, useStatus } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
 import { IMAGE_ASPECTS, PATH_MODELS, PATH_RENDER_FIRST, RECOMPOSE_MODELS, planCinema, type CinemaGenerateInput, type DirectorSettings } from "@/lib/catalog/cinema";
 import { PATH_FPS, PATH_FRAMES, PHOTO_KEY, addKey, flyPoseOf, framePoses, fromScenePose, keyAt, keyPose, presetKeys, removeKey, renderSize, type CameraKey } from "@/lib/camera-path";
 import type { Engine } from "@/lib/catalog/types";
+import { ACCESS_PLACE, offered } from "@/lib/model-access";
 import { APERTURE, FLY_KEYS, F_STOPS, LENS, LENS_STOPS, captureSize, formatStop, frameRect, ratioOf, scenePose, twoFinger, type Rect } from "@/lib/scene3d";
 import { cn } from "@/lib/utils";
 import { useCinemaGenerate } from "./hooks";
@@ -160,6 +161,20 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
   );
   const pathPrice = usePlanPrice(pathPlan);
   const pathBusy = previewing || !!filming;
+  const appStatus = useStatus().data;
+  const access = useModelAccess();
+  const deleteUpload = useDeleteUpload();
+
+  /**
+   * What would refuse an open run anyway, asked before the browser renders every frame and uploads them: the model
+   * switched off, or (demo mode off) no ComfyUI to run it on. The server checks again when the run is sent.
+   */
+  const openRefusal = (): string | undefined => {
+    const m = pathPlan.model;
+    if (!offered(access, m.id, "open")) return `${m.name} is turned off in ${ACCESS_PLACE}. Turn it back on there, or film on the cloud engine`;
+    if (appStatus && !pathPrice.demo && !m.routes.some((r) => appStatus.providers[r.provider]?.configured)) return "Connect ComfyUI in Settings to film a path on your GPU";
+    return undefined;
+  };
 
   // The frame: the ratio's largest rectangle, centred, leaving room for the bars over the view.
   const frame: Rect | null = useMemo(() => {
@@ -313,12 +328,13 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
   const filmPath = async () => {
     const eng = engineRef.current;
     if (!eng || !info || filming || previewing) return;
-    const blocker = pathPlan.blocker && pathPlan.blocker !== PATH_RENDER_FIRST ? pathPlan.blocker : undefined;
+    const blocker = (pathPlan.blocker && pathPlan.blocker !== PATH_RENDER_FIRST ? pathPlan.blocker : undefined) ?? (engine === "open" ? openRefusal() : undefined);
     if (blocker) {
       toast.error(blocker);
       return;
     }
     setPathOpen(false);
+    let uploaded: string | undefined;
     try {
       let render: string | undefined;
       if (engine === "open") {
@@ -329,12 +345,16 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
         const rec = await eng.recordPath(poses, { fps: PATH_FPS, onProgress: setProgress });
         const ext = rec.type.includes("mp4") ? "mp4" : "webm";
         setFilming("send");
-        render = (await uploadFile(new File([rec.render], `path-render.${ext}`, { type: rec.type }))).url;
+        const asset = await uploadFile(new File([rec.render], `path-render.${ext}`, { type: rec.type }));
+        uploaded = asset.id;
+        render = asset.url;
       } else setFilming("send");
       await generate.mutateAsync({ input: { ...pathInput, path: { ...pathInput.path!, ...(render ? { render } : {}) } }, folderId: take.generation.folderId });
       setQueued((n) => n + 1);
       toast.success("Filming this path — it lands next to the scene as a new take", { duration: 3000 });
     } catch (e) {
+      // A render the run didn't take isn't left in Uploads (the server refuses to delete one that is used).
+      if (uploaded) deleteUpload.mutate(uploaded);
       // Closing the viewer stops a recording: nothing to report then.
       if ((e as Error).name !== "AbortError") toast.error((e as Error).message || "Couldn't film this path");
     } finally {

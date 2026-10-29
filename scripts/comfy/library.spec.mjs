@@ -278,10 +278,11 @@ export const KNOWN_MODELS = {
   'seedvr2_ema_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors' },
   // N7-5 (Fly path, docs/research/new-models-7.md §3.4 / §3.6): Uni3C's ControlNet for core ModelPatchLoader and the Wan 2.1 I2V
   // 720P it was trained on, at the revisions the research read (1,997,314,376 B and 16,401,356,938 B); the 480P fp8 file
-  // InfiniteTalk's native graph already uses is the drop-in to try on a smaller GPU (`checkpoint`).
+  // InfiniteTalk's native graph already uses is the drop-in to try on a smaller GPU (`checkpoint`), pinned at the commit
+  // that uploaded it (16,643,349,018 B, SHA-256 2ff92228…; InfiniteTalk's own entry keeps its template's URL).
   'Wan21_Uni3C_controlnet_fp16.safetensors': { folder: 'model_patches', url: 'https://huggingface.co/Kijai/WanVideo_comfy/resolve/8260d429d19fd7a72304cad059160b95d843913f/Wan21_Uni3C_controlnet_fp16.safetensors' },
   'wan2.1_i2v_720p_14B_fp8_scaled.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Wan-2.1/resolve/123acf1cc74bccbb9bfff8ac1ee72edc08c2341d/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors' },
-  'Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors' },
+  'Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/4d02bd37ce7d852ae45a4c2841956db727b480b4/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors' },
   // DBS (docs/research/dbs-separation-7.md §3.1): DBSLoader reads models/dbs/<model>/{config.json, model.safetensors}, so the
   // keys are paths under the folder (what GET /models/dbs lists). Pinned revisions; install-comfyui.sh checks the SHA-256.
   'DBS-BSRNN-DnR/model.safetensors': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/model.safetensors' },

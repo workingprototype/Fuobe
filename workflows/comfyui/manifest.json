@@ -15723,7 +15723,7 @@
         {
           "file": "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
           "folder": "diffusion_models",
-          "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/4d02bd37ce7d852ae45a4c2841956db727b480b4/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
           "sizeGb": 16.64,
           "optional": true
         }
