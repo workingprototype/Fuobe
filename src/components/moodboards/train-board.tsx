@@ -6,7 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { licenceNote, type TrainingTarget } from "@/lib/catalog/training";
+import { licenceNote, trainingSettingsHref, type TrainingTarget } from "@/lib/catalog/training";
 import { cn } from "@/lib/utils";
 import { useMoodboardActions } from "./hooks";
 import type { Moodboard } from "./logic";
@@ -81,7 +81,7 @@ export function TrainBoardDialog({ board, open, onOpenChange }: { board: Moodboa
               {(t.blocker || t.demo) && (
                 <p className="mt-2 text-[12px] text-muted-foreground">
                   {t.blocker ?? (t.provider === "fal" ? "No fal.ai key yet: this runs as a demo and trains nothing." : "No AI-Toolkit set up yet: this runs as a demo and trains nothing.")}{" "}
-                  <Link href={t.provider === "fal" ? "/settings#fal" : "/settings#training"} className="text-brand-text underline underline-offset-2">
+                  <Link href={trainingSettingsHref(t)} className="text-brand-text underline underline-offset-2">
                     Open Settings
                   </Link>
                 </p>

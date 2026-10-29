@@ -6,6 +6,7 @@ import type { ElementLora, StudioElement } from "@/lib/catalog/elements";
 import {
   aiToolkitJob,
   datasetName,
+  ENGINE_MODE_PLACE,
   falTrainingInput,
   familyLead,
   familyLicence,
@@ -132,20 +133,19 @@ export function listTrainings(elementId?: string): Training[] {
   return (rows as Row[]).map(toTraining);
 }
 
-const ENGINE_MODE = "Engine mode";
 
 /** Why this target can't train for real here right now (a key, a trainer, the engine mode), or null. */
 export function trainingBlocker(t: TrainingTarget): string | null {
   const mode = engineMode();
   if (mode !== "both" && mode !== t.engine) {
     return mode === "open"
-      ? `This install is set to open source only (Settings → ${ENGINE_MODE}): train on your GPU`
-      : `This install is set to paid cloud APIs only (Settings → ${ENGINE_MODE}): train in the cloud`;
+      ? `This install is set to open source only (${ENGINE_MODE_PLACE}): train on your GPU`
+      : `This install is set to paid cloud APIs only (${ENGINE_MODE_PLACE}): train in the cloud`;
   }
   // A LoRA nothing here could run: its family's models are all on the engine this install turned off.
   const fam = TRAINING_FAMILIES[t.family];
   if (mode !== "both" && !fam.lead[mode]) {
-    return `${fam.name} runs only ${mode === "open" ? "in the cloud" : "on your GPU"}, which this install turned off (Settings → ${ENGINE_MODE})`;
+    return `${fam.name} runs only ${mode === "open" ? "in the cloud" : "on your GPU"}, which this install turned off (${ENGINE_MODE_PLACE})`;
   }
   if (t.provider === "fal" && !getSetting("falKey")) return "Add a fal.ai key in Settings";
   if (t.provider === "ai-toolkit" && !getSetting("aiToolkitUrl")) return "Set your AI-Toolkit URL in Settings → Training (or download the training kit)";
@@ -158,7 +158,7 @@ export function trainingBlocker(t: TrainingTarget): string | null {
  */
 export function demoTraining(t: TrainingTarget): boolean {
   const why = trainingBlocker(t);
-  if (why?.includes(ENGINE_MODE)) return false;
+  if (why?.includes(ENGINE_MODE_PLACE)) return false;
   const demo = getSetting("demoMode");
   return demo === "on" || (!!why && demo !== "off");
 }
