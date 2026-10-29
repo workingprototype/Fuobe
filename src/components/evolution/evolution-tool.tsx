@@ -131,7 +131,8 @@ export function EvolutionTool({ tabs }: { tabs?: React.ReactNode }) {
       .then((r) => {
         if (!r) return;
         const ratio = size.width && size.height ? size.width / size.height : undefined;
-        setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before: clip!.preview, start: range!.startTime, ratio, direction: r.direction, by: r.by });
+        // A direction the writer filled in and you sent as it was is still the writer's.
+        setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before: clip!.preview, start: range!.startTime, ratio, direction: r.direction, by: body.direction ? (by ?? "you") : r.by });
         if (!direction.trim()) {
           setDirection(r.direction);
           setBy(r.by);
@@ -232,8 +233,11 @@ export function EvolutionTool({ tabs }: { tabs?: React.ReactNode }) {
             </div>
 
             <Panel className="space-y-4 lg:sticky lg:top-[112px]">
-              <Field label="How much should change?" hint={INTENSITIES.find((i) => i.id === intensity)?.hint}>
+              <Field label="How much should change?">
                 <Segmented label="How much should change?" value={intensity} onChange={setIntensity} options={INTENSITIES.map((i) => ({ value: i.id, label: i.label }))} />
+                <p className="text-[12px] text-muted-foreground" aria-live="polite">
+                  {INTENSITIES.find((i) => i.id === intensity)?.hint}
+                </p>
               </Field>
 
               <Field label="Creative direction" htmlFor="evolution-direction" hint={by ? BY[by] : "Optional: left empty, it's written for you when you start"}>

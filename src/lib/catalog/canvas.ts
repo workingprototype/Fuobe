@@ -1997,7 +1997,8 @@ function effectChainTemplate(c: (typeof EFFECT_CHAINS)[number]): CanvasTemplate 
   return {
     id: `effect-chain-${slugOf(c.effect)}`,
     name: c.effect,
-    description: "A photo, its scene set by an image edit, then animated with the effect",
+    // What the effect does, in the catalog's words (the section's note says how the chain works).
+    description: getPreset(`effect-${slugOf(c.effect)}`)?.description ?? "A photo, its scene set by an image edit, then animated with the effect",
     icon: c.icon,
     hue: c.hue,
     group: EFFECT_CHAIN_GROUP,
