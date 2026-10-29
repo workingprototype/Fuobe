@@ -36,6 +36,8 @@ const genjutsu = await import("@/app/api/genjutsu/route");
 const genjutsuEstimate = await import("@/app/api/genjutsu/estimate/route");
 const mixedEstimate = await import("@/app/api/mixed-media/estimate/route");
 const paletteLock = await import("@/app/api/palettes/lock/route");
+const evolution = await import("@/app/api/evolution/route");
+const evolutionEstimate = await import("@/app/api/evolution/estimate/route");
 
 // The harness is plain ESM JavaScript (it runs with node, no build step).
 const evalCli = (await import("../scripts/eval/eval.mjs")) as { main: (argv: string[], io?: object) => Promise<number> };
@@ -72,6 +74,8 @@ const ROUTES: [string, RegExp, (req: Request, m: RegExpExecArray) => Promise<Res
   ["POST", /^\/api\/genjutsu\/estimate$/, (r) => genjutsuEstimate.POST(r)],
   ["POST", /^\/api\/mixed-media\/estimate$/, (r) => mixedEstimate.POST(r)],
   ["POST", /^\/api\/palettes\/lock$/, (r) => paletteLock.POST(r)],
+  ["POST", /^\/api\/evolution$/, (r) => evolution.POST(r)],
+  ["POST", /^\/api\/evolution\/estimate$/, (r) => evolutionEstimate.POST(r)],
 ];
 
 let server: http.Server;
@@ -157,6 +161,26 @@ describe("case files", () => {
     expect(message).toMatch(/duplicate case id a/);
     expect(message).toMatch(/a look needs "recipe": "soul-look"/);
   });
+
+  it("refuses a route body that names an input the case's inputs or demo inputs don't have", () => {
+    const bad = path.join(dir, "bad-inputs.json");
+    const kase = (demo: string[]) => ({
+      id: `x/${demo.length}`,
+      title: "x",
+      inputs: { images: ["local/x/a.png", "local/x/b.png"] },
+      demoInputs: { images: demo },
+      submit: { route: "/api/x", body: { refs: ["{{inputs.images.0}}", "{{inputs.images.1}}"], video: "{{source:inputs.video}}" } },
+    });
+    fs.writeFileSync(bad, JSON.stringify({ suite: "bad-inputs", title: "x", description: "x", original: "x", kind: "video", targets: { demo: { models: ["x"] } }, cases: [kase(["fixtures/a.png"])] }));
+    let message = "";
+    try {
+      cases.loadSuite(bad);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/cases\[0\]\.demoInputs: the route body names \{\{inputs\.images\.1\}\}, which demoInputs doesn't have/);
+    expect(message).toMatch(/cases\[0\]\.inputs: the route body names \{\{source:inputs\.video\}\}, which inputs doesn't have/);
+  });
 });
 
 describe("the runner on the demo provider", () => {
@@ -235,6 +259,22 @@ describe("the runner on the demo provider", () => {
     expect((body.source as { url: string }).url).toMatch(/^\/api\/files\//);
     if (fs.existsSync("/usr/bin/ffprobe")) expect(body.source).toMatchObject({ fps: 24, width: 432, height: 768, duration: 4 });
     expect(row.outputs?.[0]?.kind).toBe("video");
+  });
+
+  it("runs Fuobe Evolution's suite on the demo provider: two references a case, three for the written direction", async () => {
+    const r = await cli(["run", "--suite", "evolution", "--engine", "demo", "--cases", "evolution/low,evolution/written", "--no-metrics"]);
+    expect(r.code, r.stderr).toBe(0);
+    const rows = store.latestJobs(path.join(results, runIdFrom(r.stderr)));
+    expect(rows.map((x) => [x.caseId, x.status]).sort()).toEqual([
+      ["evolution/low", "succeeded"],
+      ["evolution/written", "succeeded"],
+    ]);
+    const body = (id: string) => (rows.find((x) => x.caseId === id)!.request as { body: Record<string, unknown> }).body;
+    expect(body("evolution/low")).toMatchObject({ engine: "open", intensity: "low" });
+    expect(body("evolution/low").references).toHaveLength(2);
+    expect(body("evolution/written").references).toHaveLength(3);
+    expect(body("evolution/written").direction).toBeUndefined();
+    expect(rows.every((x) => x.outputs?.[0]?.kind === "video")).toBe(true);
   });
 
   it("runs Genjutsu's Character swap on the 6 s fixture clip: the part, the character, who to swap", async () => {

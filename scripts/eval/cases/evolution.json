@@ -54,7 +54,8 @@
    "demoInputs": {
     "video": "fixtures/walk-6s.mp4",
     "images": [
-     "fixtures/references/warm-1.png"
+     "fixtures/references/warm-1.png",
+     "fixtures/references/warm-2.png"
     ]
    },
    "prompts": [
@@ -97,7 +98,8 @@
    "demoInputs": {
     "video": "fixtures/walk-6s.mp4",
     "images": [
-     "fixtures/references/warm-1.png"
+     "fixtures/references/warm-1.png",
+     "fixtures/references/warm-2.png"
     ]
    },
    "prompts": [
@@ -140,7 +142,8 @@
    "demoInputs": {
     "video": "fixtures/walk-6s.mp4",
     "images": [
-     "fixtures/references/warm-1.png"
+     "fixtures/references/warm-1.png",
+     "fixtures/references/warm-2.png"
     ]
    },
    "prompts": [
@@ -184,7 +187,9 @@
    "demoInputs": {
     "video": "fixtures/walk-6s.mp4",
     "images": [
-     "fixtures/references/warm-1.png"
+     "fixtures/references/warm-1.png",
+     "fixtures/references/warm-2.png",
+     "fixtures/palette.png"
     ]
    },
    "prompts": [
