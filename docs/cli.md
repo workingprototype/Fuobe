@@ -295,7 +295,9 @@ server too (`fuobe mcp`).
 
 For script writers who'd rather call the API directly: `GET /api/models` (`kind`, `engine`, `op`,
 `q`, `hidden=1`; it answers with the studios' `defaults` per engine, `demoMode`, and per model
-`connected` and `runs`), `POST /api/generations` (with `?preview=1` to price), `GET /api/generations[/<id>]`,
+`connected` and `runs`), `POST /api/generations` (with `?preview=1` to price; a model id Fuobe has
+retired runs on the model that replaced it, and the answer gives that `modelId` with `notes` saying so),
+`GET /api/generations[/<id>]`,
 `POST /api/generations/<id>/cancel`, `POST /api/uploads` (multipart `file`), `GET /api/files/…`,
 `GET /api/status`, `GET|PATCH /api/assist/skills[/<name>]`, `POST /api/assist/skills/upload`
 (`?replace=1`) and `POST /api/mcp` (JSON-RPC). Every call carries `Authorization: Bearer <token>`
