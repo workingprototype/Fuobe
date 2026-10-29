@@ -430,7 +430,9 @@ export interface FieldMap {
   numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number; multiple?: number; fromDuration?: boolean };
   /**
    * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
-   * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
+   * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max` nor below `min`
+   * (fal's MOSS-Image takes 512–2048). A size the request asks for (params.extra[key] {width, height}: a layout's
+   * canvas) is kept on the same grid and within the same limits, as the API would.
    */
   size?: {
     width?: string;
@@ -439,6 +441,7 @@ export interface FieldMap {
     key?: string;
     multiple: number;
     max?: number;
+    min?: number;
     base?: number;
     /** Exact sizes per resolution tier and aspect ratio (Fuobe Soul's table); the computed size where it has none. */
     table?: Record<string, Record<string, [number, number]>>;
@@ -451,6 +454,11 @@ export interface FieldMap {
   ranges?: Record<string, { min?: number; max?: number; integer?: boolean }>;
   /** The most images this route's image list takes, when fewer than the model's options.maxImages (another route takes more). */
   maxImages?: number;
+  /**
+   * The API's own prompt expansion switch (fal's enable_prompt_expansion): sent false whenever the request carries a
+   * layout (params.extra.layout), which expansion would rewrite; a plain prompt leaves the API's default.
+   */
+  promptExpansion?: string;
   /** An empty prompt is left out rather than sent as "" (APIs that read a missing prompt as "no words": Bria Expand). */
   omitEmptyPrompt?: boolean;
   /** params.extra keys this route has no field for (a model-wide control only its other routes read): left out. */
@@ -534,8 +542,19 @@ export interface ModelOptions {
   languages?: string[];
   /** Numeric settings sent as-is (stability, similarity, speed, exaggeration…). */
   sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
-  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…); `labels` names values that read badly (FLUX Upscale's creativity 0 / 1). */
-  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number; labels?: Record<string, string> }[];
+  /**
+   * Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…); `labels` names values that read badly
+   * (FLUX Upscale's creativity 0 / 1). `sets`: a value that stands for several settings (MOSS-Image's Quality: 50 steps, CFG 3,
+   * euler), which the plan writes into params.extra in its place; a setting the request gives itself wins.
+   */
+  controls?: {
+    param: string;
+    label: string;
+    values: (string | number)[];
+    default?: string | number;
+    labels?: Record<string, string>;
+    sets?: Record<string, Record<string, string | number>>;
+  }[];
   /** Images it needs before it can run (try-on: the person and the garment). */
   minImages?: number;
   /** What each image is, in order ("person photo", "garment"): blockers and slot labels. */
@@ -581,7 +600,15 @@ export interface ModelOptions {
   fpsTargets?: number[];
   /** Slow-motion factors it takes (params.slowdown; 1 = the clip's speed). */
   slowdowns?: number[];
+  /**
+   * How it reads a layout (src/lib/layout-prompt.ts): MOSS-Image's JSON boxes, FLUX.3's layout table, Ideogram 4's JSON
+   * prompt or Bria FIBO 2's VGL location words. Unset: the layout goes in as plain sentences.
+   */
+  layout?: LayoutFormat;
 }
+
+/** The layout forms models read (ModelOptions.layout). */
+export type LayoutFormat = "moss" | "flux3" | "ideogram" | "vgl";
 
 export interface Pricing {
   unit: "image" | "second" | "video" | "request" | "megapixel" | "minute";
@@ -601,6 +628,8 @@ export interface Pricing {
   factors?: { param: string; values: Record<string, number> }[];
   /** The price per unit when the run carries LoRAs and goes to the route's LoRA endpoint (fal's /lora variants cost more). */
   withLoras?: number;
+  /** The LoRA endpoint publishes no price yet (fal's MOSS-Image /lora): a run with LoRAs is priced as unknown, never as free. */
+  lorasUnknown?: true;
   /** withLoras at each resolution, when it differs (Fuobe Cinema's LTX-2.3 bills per megapixel of video). */
   withLorasByResolution?: Record<string, number>;
   /**
