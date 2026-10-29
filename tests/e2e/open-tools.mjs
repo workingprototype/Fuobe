@@ -1,8 +1,9 @@
-// Build plan O11 in the browser (demo mode, no GPU run): Fuobe Angles' camera controls and price on both engines (the
-// GPU's LoRA words in the plan, a camera at rest refused, a cloud demo run), Fuobe Speak and Fuobe Speak · Motion in the
-// Lipsync studio, Video Depth Anything Large's non-commercial note in the Depth map tool, Fuobe Soul's PixeletedFace look
-// as two steps (the picture, then the face mosaic), and the new LoRAs in Settings → Models & licences. Then each page at
-// 1440 and 390 px, light and dark, without sideways scroll.
+// Build plan O11 in the browser (demo mode, no GPU run): the Angles app on its 2511 recipe (results made before O11 plan
+// again) and the Fuobe Angles app next to it with its camera controls and price on both engines (the GPU's LoRA words in
+// the plan, a camera at rest refused, a cloud demo run), Fuobe Speak and Fuobe Speak · Motion in the Lipsync studio (priced
+// for the voice's length), Video Depth Anything Large's non-commercial note in the Depth map tool, Fuobe Soul's PixeletedFace
+// look as two steps (the picture, then the face mosaic), and the new LoRAs in Settings → Models & licences. Then each page
+// at 1440 and 390 px, light and dark, without sideways scroll.
 // Usage: node tests/e2e/open-tools.mjs [appUrl] [--shots <dir>]   (the app in demo mode; no run reaches a GPU or fal:
 // open-engine plans are previewed only). Exits 1 on a failed check.
 import fs from "node:fs";
@@ -48,6 +49,31 @@ const status = (await api("/api/status")).body ?? {};
 const fal = !!status.providers?.fal?.configured;
 if (!fal) console.log("note: no fal key on this server: cloud runs are demo runs and show \"Demo · free\" (start it with FAL_KEY=anything for hosted prices; nothing is sent)");
 const photo = await upload("scripts/eval/fixtures/start-frame.png", "image/png", "angles.png");
+/** A silent 16-bit mono WAV `seconds` long (a voice track whose length the Lipsync composer reads from its header). */
+function wav(seconds, rate = 8000) {
+  const data = Buffer.alloc(rate * seconds * 2);
+  const head = Buffer.alloc(44);
+  head.write("RIFF", 0);
+  head.writeUInt32LE(36 + data.length, 4);
+  head.write("WAVEfmt ", 8);
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20);
+  head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(rate, 24);
+  head.writeUInt32LE(rate * 2, 28);
+  head.writeUInt16LE(2, 32);
+  head.writeUInt16LE(16, 34);
+  head.write("data", 36);
+  head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+async function uploadBytes(bytes, type, name) {
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type }), name);
+  const res = await fetch(`${app}/api/uploads`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+  return (await res.json()).url;
+}
 
 const browser = await launch();
 const contextFor = async (engine, viewport = { width: 1440, height: 900 }, colorScheme = "light") => {
@@ -86,13 +112,30 @@ async function pickModel(page, search, id) {
 
 try {
   // ---------------------------------------------------------------------------
-  // 1. Fuobe Angles: the Angles app's camera controls, on both engines.
+  // 1. The Angles app keeps its 2511 recipe (until the angles eval suite promotes Fuobe Angles); results made before O11
+  //    plan again.
+  for (const [engine, model] of [["open", "Qwen-Image-Edit 2511"], ["cloud", "Qwen Multiple Angles"]]) {
+    const { context, page } = await contextFor(engine);
+    await open(page, `/apps/app-angles?image=${encodeURIComponent(photo)}`);
+    await priced(page);
+    const t = await composerText(page);
+    check(`${engine}: the Angles app stays on ${model}`, t.includes(model), t.slice(0, 120));
+    check(`${engine}: with its angle, height and distance controls`, ["Angle", "Height", "Distance", "Back left", "High angle", "Close-up"].every((w) => t.includes(w)));
+    await context.close();
+  }
+  for (const [engine, modelId] of [["cloud", "qwen-multiple-angles"], ["open", "oss-qwen-edit"]]) {
+    const old = { feature: "app:app-angles", presetId: "app-angles", modelId, op: "edit", engine, inputs: { images: [photo] }, presetOptions: { angle: "back-left", height: "high-angle", distance: "close-up" } };
+    const { status: s, body } = await api("/api/generations?preview=1", old);
+    check(`${engine}: an Angles request made before O11 plans again (Retry, Reuse, API)`, s === 200 && body?.modelId === modelId, body?.error ?? body?.modelId);
+  }
+
+  // 2. Fuobe Angles, its own app next to it: the camera controls, on both engines.
   {
     const { context, page } = await contextFor("open");
-    await open(page, `/apps/app-angles?image=${encodeURIComponent(photo)}`);
+    await open(page, `/apps/app-fuobe-angles?image=${encodeURIComponent(photo)}`);
     await priced(page, /\bFree\b/);
     const t = await composerText(page);
-    check("open: the Angles app runs on Fuobe Angles", /Fuobe Angles/.test(t), t.slice(0, 120));
+    check("open: the Fuobe Angles app runs on Fuobe Angles", /Fuobe Angles/.test(t), t.slice(0, 120));
     check("open: rotate, camera height, distance and lens controls", ["Rotate", "Camera height", "Distance", "Lens", "45° left", "From above", "Close-up", "Wide-angle"].every((w) => t.includes(w)));
     check("open: its price before the run says Free", /\bFree\b/.test(t), (t.match(/(Demo · )?[Ff]ree|\$[\d.]+/) ?? ["no price"])[0]);
     await shoot(page, "angles-open-1440.png");
@@ -106,8 +149,8 @@ try {
   // The GPU plan: the LoRA's own words for the picked camera (previewed: nothing runs on a GPU here).
   {
     const req = {
-      feature: "app:app-angles",
-      presetId: "app-angles",
+      feature: "app:app-fuobe-angles",
+      presetId: "app-fuobe-angles",
       modelId: "fuobe-angles",
       engine: "open",
       inputs: { images: [photo] },
@@ -124,20 +167,21 @@ try {
     check("open: and costs nothing", body?.costUsd === 0, String(body?.costUsd));
     const cloud = await api("/api/generations?preview=1", { ...req, engine: "cloud" });
     check("cloud: the plan runs fal's 2509 multiple-angles route", /qwen-image-edit-2509-lora-gallery\/multiple-angles/.test(cloud.body?.route?.endpoint ?? "") || cloud.body?.demo === true, `${cloud.body?.route?.endpoint ?? cloud.body?.error} demo=${cloud.body?.demo}`);
+    if (fal) check("cloud: priced for the 1 MP picture fal is asked for", Math.abs((cloud.body?.costUsd ?? 0) - 0.035) < 0.002, String(cloud.body?.costUsd));
   }
   {
     const { context, page } = await contextFor("cloud");
-    await open(page, `/apps/app-angles?image=${encodeURIComponent(photo)}`);
+    await open(page, `/apps/app-fuobe-angles?image=${encodeURIComponent(photo)}`);
     await priced(page);
     const t = await composerText(page);
-    check("cloud: the Angles app runs on Fuobe Angles", /Fuobe Angles/.test(t));
+    check("cloud: the Fuobe Angles app runs on Fuobe Angles", /Fuobe Angles/.test(t));
     check(`cloud: its price shows before the run (${fal ? "fal's per-megapixel price" : "Demo · free"})`, fal ? /\$0\.0[34]/.test(t) : /Demo · free/.test(t), (t.match(/Demo · free|\$[\d.]+/) ?? ["no price"])[0]);
     await shoot(page, "angles-cloud-1440.png");
     if (!fal) {
       // A demo run: the hosted route's own fields go with it.
       await composer(page).getByRole("radio", { name: "90° right" }).click();
       await page.getByRole("button", { name: /^Generate$/ }).first().click();
-      const [g] = await settled("features=app:app-angles", 1);
+      const [g] = await settled("features=app:app-fuobe-angles", 1);
       check("cloud demo: Generate makes a Fuobe Angles picture", g?.modelId === "fuobe-angles" && g?.status === "succeeded", `${g?.modelId} ${g?.status}`);
       check("cloud demo: with the camera picked (the route's fields come from it)", g?.request?.presetOptions?.rotate === "90-right", JSON.stringify(g?.request?.presetOptions ?? {}));
     }
@@ -145,7 +189,7 @@ try {
   }
 
   // ---------------------------------------------------------------------------
-  // 2. Fuobe Speak and Fuobe Speak · Motion in the Lipsync studio.
+  // 3. Fuobe Speak and Fuobe Speak · Motion in the Lipsync studio.
   for (const engine of ["open", "cloud"]) {
     const { context, page } = await contextFor(engine);
     await open(page, "/lipsync");
@@ -158,6 +202,21 @@ try {
     await shoot(page, `speak-${engine}-1440.png`);
     await context.close();
   }
+  // Priced for the voice: a talking avatar is as long as its voice track (the composer reads its header).
+  {
+    const voice12 = await uploadBytes(wav(12), "audio/wav", "voice-12s.wav");
+    const { context, page } = await contextFor("cloud");
+    await open(page, `/lipsync?model=fuobe-speak&image=${encodeURIComponent(photo)}&audio=${encodeURIComponent(voice12)}`);
+    await priced(page);
+    await page.waitForTimeout(1500);
+    const t = await composerText(page);
+    const shown = (t.match(/Demo · free|\$[\d.]+/) ?? ["no price"])[0];
+    check(`cloud: Fuobe Speak with a 12 s voice is priced for 12 s (${fal ? "$2.40" : "Demo · free"})`, fal ? /\$2\.40?\b/.test(t) : /Demo · free/.test(t), shown);
+    await shoot(page, "speak-voice-cloud-1440.png");
+    await context.close();
+    const { body } = await api("/api/generations?preview=1", { feature: "lipsync", modelId: "fuobe-speak", engine: "cloud", inputs: { images: [photo], audio: voice12 }, params: { sourceDuration: 40 } });
+    if (fal) check("cloud: a 40 s voice is priced for fal's 721 frames and says where it stops", Math.abs((body?.costUsd ?? 0) - 5.768) < 0.01 && (body?.notes ?? []).some((n) => /stops 29 s into the 40 s voice/.test(n)), `${body?.costUsd} ${(body?.notes ?? []).join(" | ").slice(0, 160)}`);
+  }
   // The GPU plan: InfiniteTalk's wrapper graph with the FusioniX LoRA.
   {
     const voice = await upload("scripts/eval/fixtures/voice.wav", "audio/wav", "voice.wav").catch(() => undefined);
@@ -169,7 +228,7 @@ try {
   }
 
   // ---------------------------------------------------------------------------
-  // 3. The Depth map tool: Video Depth Anything Large, with its non-commercial licence as information.
+  // 4. The Depth map tool: Video Depth Anything Large, with its non-commercial licence as information.
   {
     const { context, page } = await contextFor("open");
     await open(page, "/video-tools/depth");
@@ -184,7 +243,7 @@ try {
   }
 
   // ---------------------------------------------------------------------------
-  // 4. Fuobe Soul's PixeletedFace look: the picture, then the face mosaic.
+  // 5. Fuobe Soul's PixeletedFace look: the picture, then the face mosaic.
   {
     const { context, page } = await contextFor("cloud");
     await open(page, "/image?model=fuobe-soul&preset=v1-pixeletedface");
@@ -229,7 +288,7 @@ try {
   }
 
   // ---------------------------------------------------------------------------
-  // 5. Settings → Models & licences: the new LoRAs and Video Depth Anything Large's licence.
+  // 6. Settings → Models & licences: the new LoRAs and Video Depth Anything Large's licence.
   {
     const { context, page } = await contextFor("cloud");
     await page.goto(`${app}/settings/models`, { waitUntil: "load" });
@@ -257,7 +316,7 @@ try {
 
   // ---------------------------------------------------------------------------
   // Every touched page at 1440 and 390 px, light and dark: nothing scrolls sideways.
-  const pages = [`/apps/app-angles?image=${encodeURIComponent(photo)}`, "/lipsync", "/video-tools/depth", "/image?model=fuobe-soul&preset=v1-pixeletedface", "/settings/models"];
+  const pages = [`/apps/app-angles?image=${encodeURIComponent(photo)}`, `/apps/app-fuobe-angles?image=${encodeURIComponent(photo)}`, "/lipsync", "/video-tools/depth", "/image?model=fuobe-soul&preset=v1-pixeletedface", "/settings/models"];
   for (const [width, height] of [
     [1440, 900],
     [390, 844],
