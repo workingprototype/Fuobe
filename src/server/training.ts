@@ -333,7 +333,9 @@ export async function testAiToolkit(opts?: { focus?: string }): Promise<{ ok: bo
   if (!res.ok) return { ok: false, detail: `AI-Toolkit answered HTTP ${res.status}` };
   const jobs = ((await res.json().catch(() => null)) as { jobs?: unknown } | null)?.jobs;
   if (!Array.isArray(jobs)) return { ok: false, detail: `Something answers at ${base}, but it isn't AI-Toolkit's UI (port 8675 by default)` };
-  return { ok: true, detail: jobs.length ? `AI-Toolkit · ${jobs.length} training${jobs.length > 1 ? "s" : ""} running` : "AI-Toolkit · ready, no training running" };
+  // An older UI that ignores only_active lists every job: count the ones still going.
+  const active = jobs.filter((j) => ["running", "queued", "stopping"].includes(String((j as { status?: unknown } | null)?.status))).length;
+  return { ok: true, detail: active ? `AI-Toolkit · ${active} training${active > 1 ? "s" : ""} running` : "AI-Toolkit · ready, no training running" };
 }
 
 /** Whether Fuobe can write the training photos to the folder (its nearest existing folder, when it isn't made yet). */

@@ -251,6 +251,11 @@ describe("POST /api/providers/test with unsaved values", () => {
     expect(getSetting("aiToolkitUrl")).toBe("");
     const busy = await withFetch({ "http://10.0.0.7:8675/api/jobs": [200, jobs(2)] }, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675" }));
     expect(busy.result.body).toEqual({ ok: true, detail: "AI-Toolkit · 2 trainings running" });
+    // An older UI that lists every job: only the ones still going count.
+    const all = await withFetch({ "http://10.0.0.7:8675/api/jobs": [200, { jobs: [{ status: "completed" }, { status: "queued" }, { status: "error" }] }] }, () =>
+      post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675" }),
+    );
+    expect(all.result.body).toEqual({ ok: true, detail: "AI-Toolkit · 1 training running" });
     // AI_TOOLKIT_AUTH set on the trainer: it wants the token.
     const locked = await withFetch({ "http://10.0.0.7:8675/api/jobs": [401, { error: "Unauthorized" }] }, () => post({ provider: "ai-toolkit", value: "http://10.0.0.7:8675" }));
     expect(locked.result.body).toEqual({ ok: false, detail: "AI-Toolkit wants its auth token (AI_TOOLKIT_AUTH on the trainer): add it under Auth token" });
