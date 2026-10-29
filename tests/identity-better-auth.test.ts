@@ -8,7 +8,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+
+// Real scrypt hashes (N=2^15) and fresh module loads per case: slow under a parallel run.
+vi.setConfig({ testTimeout: 60_000 });
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-ba-"));
 process.env.FUOBE_DATA_DIR = dir;
@@ -113,14 +116,55 @@ describe("the router allowlist (§7.1)", () => {
 
   it("carries Fuobe's request scope into database hooks: a create under an intent goes through, and its session check still runs", async () => {
     const before = authUsers();
-    // The owner is already linked, so the new user gets a pending person of its own (never active), and the
-    // sign-in that sign-up attempts is refused with that code. Better Auth's transactions are off: the user stays.
-    await expect(
-      identity.withCreateIntent("claim-owner", () => identity.getAuth().api.signUpEmail({ body: { email: "scope-check@example.com", password: "another long password", name: "Scope" } })),
-    ).rejects.toMatchObject({ body: { code: "ACCOUNT_PENDING" } });
+    // A package's own intent (as invites will register one). Its user isn't the owner, so it gets a pending person
+    // of its own (never active), and the sign-in that sign-up attempts is refused with that code. Better Auth's
+    // transactions are off: the user stays.
+    identity.registerCreateIntent("test-scope", () => null);
+    try {
+      await expect(
+        identity.withCreateIntent("test-scope", () => identity.getAuth().api.signUpEmail({ body: { email: "scope-check@example.com", password: "another long password", name: "Scope" } })),
+      ).rejects.toMatchObject({ body: { code: "ACCOUNT_PENDING" } });
+    } finally {
+      identity.CREATE_INTENTS.delete("test-scope");
+    }
     expect(authUsers()).toBe(before + 1);
     const person = db().prepare("SELECT u.status, u.source FROM users u JOIN auth_user a ON a.id = u.auth_user_id WHERE a.email = ?").get("scope-check@example.com");
     expect(person).toEqual({ status: "pending", source: "unknown" });
+  });
+
+  it("refuses the owner's intents once the owner has a live sign-in account, so they never make a second user", async () => {
+    expect(identity.ownerClaimable()).toBe(false);
+    const before = authUsers();
+    for (const intent of ["claim-owner", "bootstrap-import"]) {
+      await expect(
+        identity.withCreateIntent(intent, () => identity.getAuth().api.signUpEmail({ body: { email: `${intent}@example.com`, password: "another long password", name: "Again" } })),
+        intent,
+      ).rejects.toMatchObject({ body: { code: "OWNER_CLAIMED" } });
+    }
+    // multi_user (the meter package) doesn't loosen them either.
+    db().prepare("INSERT INTO settings (key, value) VALUES ('accounts.multi_user', '1')").run();
+    try {
+      await expect(
+        identity.withCreateIntent("claim-owner", () => identity.getAuth().api.signUpEmail({ body: { email: "claim-again@example.com", password: "another long password", name: "Again" } })),
+      ).rejects.toMatchObject({ body: { code: "OWNER_CLAIMED" } });
+    } finally {
+      db().prepare("DELETE FROM settings WHERE key = 'accounts.multi_user'").run();
+    }
+    expect(authUsers()).toBe(before);
+  });
+
+  it("keeps new passwords to 128 characters on every path, while Better Auth's own limit is the sign-in one (500)", async () => {
+    identity.registerCreateIntent("test-long", () => null);
+    try {
+      await expect(
+        identity.withCreateIntent("test-long", () => identity.getAuth().api.signUpEmail({ body: { email: "long@example.com", password: "x".repeat(129), name: "Long" } })),
+      ).rejects.toMatchObject({ body: { code: "PASSWORD_TOO_LONG", message: "Use at most 128 characters." } });
+    } finally {
+      identity.CREATE_INTENTS.delete("test-long");
+    }
+    expect(db().prepare("SELECT 1 FROM auth_user WHERE email = 'long@example.com'").get()).toBeUndefined();
+    expect((await identity.getAuth().$context).password.config.maxPasswordLength).toBe(500);
+    for (const p of Object.keys(identity.NEW_PASSWORD_FIELDS)) expect(p.startsWith("/"), p).toBe(true);
   });
 
   it("refuses a session for a pending person with its code", async () => {

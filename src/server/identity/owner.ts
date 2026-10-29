@@ -2,7 +2,7 @@ import "server-only";
 import { isAPIError } from "better-auth/api";
 import { REFUSAL_COPY } from "@/lib/sign-in-refusals";
 import { db } from "../db";
-import { bumpIdentityConfig, envOwnerPassword, INSTALL, setInstallValue } from "../mode";
+import { bumpIdentityConfig, envOwnerPassword, envOwnerPasswordName, envSignIn, INSTALL, setInstallValue } from "../mode";
 import * as ops from "./admin-ops";
 import { appendAudit } from "./audit-log";
 import { getAuth } from "./auth";
@@ -75,9 +75,12 @@ export async function signOut(headers: Headers): Promise<string[]> {
   }
 }
 
-/** Settings → Security's view: whether a password is required, and whether the server sets it. */
-export function ownerPasswordStatus(): { fromEnv: boolean } {
-  return { fromEnv: !!envOwnerPassword() };
+/**
+ * Settings → Security's view of what the server sets: the password (FUOBE_PASSWORD) and whether sign-in is on
+ * (FUOBE_SIGNIN, null when unset). Either one locks its control ("Set by the server", §7.9).
+ */
+export function ownerPasswordStatus(): { fromEnv: boolean; signinFromEnv: boolean | null } {
+  return { fromEnv: !!envOwnerPassword(), signinFromEnv: envSignIn() };
 }
 
 /**
@@ -85,7 +88,12 @@ export function ownerPasswordStatus(): { fromEnv: boolean } {
  * in. Setting one turns sign-in on; removing it turns sign-in off.
  */
 export async function changeOwnerPassword(next: string | null, by: ops.By): Promise<void> {
-  if (envOwnerPassword()) throw new Error("The password is set by FUOBE_PASSWORD on the server");
+  if (envOwnerPassword()) throw new Error(`The password is set by ${envOwnerPasswordName()} on the server`);
+  // FUOBE_SIGNIN wins over the stored switch: refuse what it would silently undo (an install nobody can sign in to,
+  // or "sign-in is now required" on one that stays open).
+  const pinned = envSignIn();
+  if (pinned === true && next === null) throw new Error("Sign-in is required by FUOBE_SIGNIN on the server, so the password can't be removed. Change it instead.");
+  if (pinned === false && next !== null) throw new Error("Sign-in is turned off by FUOBE_SIGNIN on the server. Restart without it to require a password.");
   if (next !== null) {
     const problem = passwordProblem(next);
     if (problem) throw new Error(problem);

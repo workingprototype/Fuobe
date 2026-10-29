@@ -14,7 +14,14 @@ import { promisify } from "node:util";
 const scrypt = promisify(crypto.scrypt) as (pw: crypto.BinaryLike, salt: crypto.BinaryLike, len: number, opts: crypto.ScryptOptions) => Promise<Buffer>;
 
 export const PASSWORD_MIN = 8;
+/** The longest new password (§7.2): Settings, sign-up, resets and changes. */
 export const PASSWORD_MAX = 128;
+/**
+ * The longest password that may still sign in: what Fuobe accepted before accounts (Settings and the sign-in form
+ * took up to 500 characters, FUOBE_PASSWORD had to fit the same form). Imported and FUOBE_PASSWORD passwords up to
+ * this length keep working; the bootstrap refuses a longer FUOBE_PASSWORD with one line.
+ */
+export const PASSWORD_SIGN_IN_MAX = 500;
 
 const V2 = { N: 2 ** 15, r: 8, p: 3, keyLength: 64 } as const;
 const LEGACY = { N: 2 ** 14, r: 8, p: 1, keyLength: 32 } as const;

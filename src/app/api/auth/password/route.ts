@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { checkOwnerPassword, changeOwnerPassword, ownerPasswordStatus, signInOwner } from "@/server/identity/owner";
+import { PASSWORD_SIGN_IN_MAX } from "@/server/identity/password";
 import { resolvePrincipal } from "@/server/identity/principal";
 import { listTokens } from "@/server/identity/tokens";
 import { signInRequired } from "@/server/mode";
@@ -11,7 +12,7 @@ import { signInRequired } from "@/server/mode";
  * every other browser out and keeps this one signed in.
  */
 
-const Body = z.object({ current: z.string().max(500).optional(), password: z.string().max(500).nullable() });
+const Body = z.object({ current: z.string().max(PASSWORD_SIGN_IN_MAX).optional(), password: z.string().max(PASSWORD_SIGN_IN_MAX).nullable() });
 
 async function status(request: Request) {
   const { actor } = await resolvePrincipal(request);

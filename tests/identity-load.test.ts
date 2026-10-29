@@ -7,7 +7,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { monitorEventLoopDelay } from "node:perf_hooks";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+
+// Real scrypt hashes (N=2^15) and fresh module loads per case: slow under a parallel run.
+vi.setConfig({ testTimeout: 60_000 });
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-load-"));
 process.env.FUOBE_DATA_DIR = dir;

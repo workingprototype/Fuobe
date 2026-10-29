@@ -9,6 +9,9 @@ import path from "node:path";
 import { NextRequest } from "next/server";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
+// Real scrypt hashes (N=2^15) and fresh module loads per case: slow under a parallel run.
+vi.setConfig({ testTimeout: 60_000 });
+
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-proxy-"));
 process.env.FUOBE_DATA_DIR = dir;
 for (const k of ["FUOBE_PASSWORD", "FUOBE_OWNER_PASSWORD", "FUOBE_SIGNIN", "FUOBE_MODE", "FUOBE_SECRET", "FUOBE_TRUST_PROXY", "FUOBE_TRUSTED_PROXIES", "FUOBE_SITE_URL"]) delete process.env[k];

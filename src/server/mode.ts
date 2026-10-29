@@ -77,6 +77,11 @@ export function envOwnerPassword(): string {
   return process.env.FUOBE_OWNER_PASSWORD || process.env.FUOBE_PASSWORD || "";
 }
 
+/** Which variable the break-glass password came from, for messages. */
+export function envOwnerPasswordName(): "FUOBE_OWNER_PASSWORD" | "FUOBE_PASSWORD" {
+  return process.env.FUOBE_OWNER_PASSWORD ? "FUOBE_OWNER_PASSWORD" : "FUOBE_PASSWORD";
+}
+
 /** A password in the pre-accounts auth.json: the install had sign-in before this build. */
 export function legacyPasswordSet(): boolean {
   try {

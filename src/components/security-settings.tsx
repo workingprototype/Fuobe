@@ -19,7 +19,10 @@ interface TokenInfo {
 }
 interface AuthStatus {
   enabled: boolean;
+  /** FUOBE_PASSWORD sets the password. */
   fromEnv: boolean;
+  /** FUOBE_SIGNIN pins sign-in on or off (null when unset). */
+  signinFromEnv?: boolean | null;
   tokens: TokenInfo[];
 }
 
@@ -77,7 +80,7 @@ function PasswordForm({ status, onDone }: { status: AuthStatus; onDone: () => vo
           {busy && <Loader2 className="animate-spin" />}
           {status.enabled ? "Change password" : "Require a password"}
         </Button>
-        {status.enabled && (
+        {status.enabled && status.signinFromEnv !== true && (
           <Button size="sm" variant="ghost" className="text-destructive" disabled={busy || !current} onClick={() => void run(null)}>
             Remove password
           </Button>
@@ -204,7 +207,10 @@ export function SecuritySettings() {
       {s.enabled ? (
         <div className="flex items-start gap-2.5 rounded-xl bg-brand-faint px-3 py-2.5 text-[13px]">
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand-text" />
-          <p className="flex-1">Sign-in is required for every page and API call.{s.fromEnv && " The password is set by FUOBE_PASSWORD on the server."}</p>
+          <p className="flex-1">
+            Sign-in is required for every page and API call.{s.fromEnv && " The password is set by FUOBE_PASSWORD on the server."}
+            {s.signinFromEnv === true && " Set by the server (FUOBE_SIGNIN=on), so the password can be changed but not removed."}
+          </p>
           <Button
             size="sm"
             variant="ghost"
@@ -221,10 +227,14 @@ export function SecuritySettings() {
       ) : (
         <div className="flex items-start gap-2.5 rounded-xl bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-300">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-          <p>No password: anyone who can reach this server can use your keys and GPU. Fine on your own computer — set a password before you open it to a network.</p>
+          <p>
+            {s.signinFromEnv === false
+              ? "Sign-in is off: set by the server (FUOBE_SIGNIN=off). Anyone who can reach this server can use your keys and GPU. Restart without it to require a password."
+              : "No password: anyone who can reach this server can use your keys and GPU. Fine on your own computer — set a password before you open it to a network."}
+          </p>
         </div>
       )}
-      {!s.fromEnv && <PasswordForm status={s} onDone={refresh} />}
+      {!s.fromEnv && s.signinFromEnv !== false && <PasswordForm status={s} onDone={refresh} />}
       <Tokens status={s} onChange={refresh} />
     </div>
   );

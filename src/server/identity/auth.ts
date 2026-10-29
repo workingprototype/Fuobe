@@ -10,7 +10,7 @@ import { hostAllowed, trustedProxies } from "../auth";
 import { DATA_DIR, db } from "../db";
 import { INSTALL, installMode, installValue, siteUrl } from "../mode";
 import { appendAudit } from "./audit-log";
-import { hashPassword, needsRehash, PASSWORD_MAX, PASSWORD_MIN, verifyPassword } from "./password";
+import { hashPassword, needsRehash, PASSWORD_MAX, PASSWORD_MIN, PASSWORD_SIGN_IN_MAX, verifyPassword } from "./password";
 import { refusal } from "./refusals";
 import { AUTH_TABLES } from "./schema";
 import { deriveKey } from "./secret";
@@ -38,7 +38,10 @@ import { deriveKey } from "./secret";
  * - Router traffic (/api/identity/*) may reach only the allowlisted endpoints; Fuobe's own auth.api calls pass.
  *   Sign-up and social sign-in are off the list until the sign-in package adds them with their policy.
  * - A new Better Auth user needs a Fuobe intent (claiming the owner, the auth.json import) until the meter
- *   package sets accounts.multi_user, so no second account can exist before isolation and limits do.
+ *   package sets accounts.multi_user, so no second account can exist before isolation and limits do. Each intent
+ *   has its own check: the owner's two refuse once the owner has a live sign-in account.
+ * - Passwords: new ones are 8 to 128 characters on every path; sign-in takes up to 500, so a longer password from
+ *   before accounts (or FUOBE_PASSWORD) still works.
  */
 
 declare global {
@@ -104,8 +107,20 @@ export const ROUTER_BLOCKED: PathRule[] = [
 
 export const routerAllows = (p: string): boolean => !ROUTER_BLOCKED.some((r) => matches(r, p)) && ROUTER_ALLOWED.some((r) => matches(r, p));
 
-/** Why Fuobe is creating a Better Auth user. Packages add theirs (invite, sso, scim, admin). */
-export const CREATE_INTENTS = new Set<string>(["claim-owner", "bootstrap-import"]);
+/**
+ * Why Fuobe is creating a Better Auth user, each with its own check (a refusal code, or null to go ahead). The two
+ * core intents only ever make the owner's sign-in account, so they refuse once the owner has a live one. Packages
+ * add theirs (invite, sso, scim, admin) with registerCreateIntent.
+ */
+export type CreateIntentCheck = () => string | null;
+export const CREATE_INTENTS = new Map<string, CreateIntentCheck>([
+  ["claim-owner", () => (ownerClaimable() ? null : "OWNER_CLAIMED")],
+  ["bootstrap-import", () => (ownerClaimable() ? null : "OWNER_CLAIMED")],
+]);
+
+export function registerCreateIntent(intent: string, check: CreateIntentCheck): void {
+  CREATE_INTENTS.set(intent, check);
+}
 
 const createIntent = new AsyncLocalStorage<string>();
 
@@ -142,6 +157,20 @@ export const SESSION_AFTER: SessionAfter[] = [
   (p, s) => appendAudit({ action: "auth.sign_in", actorId: p.id, via: "session", targetKind: "session", targetId: s.id, ip: s.ipAddress, userAgent: s.userAgent }),
 ];
 
+/**
+ * Endpoints that set a new password, and the body field that holds it. New passwords keep the 8 to 128 rule
+ * (§7.2) on every path, Fuobe's own calls included; Better Auth's own limit is the higher sign-in one, so passwords
+ * from before accounts (and FUOBE_PASSWORD) still sign in. Packages that load a plugin with its own path add it.
+ */
+export const NEW_PASSWORD_FIELDS: Record<string, string> = {
+  "/sign-up/email": "password",
+  "/reset-password": "newPassword",
+  "/change-password": "newPassword",
+  "/set-password": "newPassword",
+  "/admin/create-user": "password",
+  "/admin/set-user-password": "newPassword",
+};
+
 /** Better Auth cookies Fuobe renames (and makes __Host- on https). Plugins add theirs (two_factor, passkey…). */
 export const AUTH_COOKIES = ["session_token", "session_data", "dont_remember", "account_data"];
 
@@ -169,6 +198,14 @@ export function ensurePendingPerson(authUserId: string): PersonRow {
     .run(id, authUserId, t, t);
   if (made.changes) appendAudit({ action: "people.link_pending", targetKind: "user", targetId: id, meta: { reason: "a sign-in account had no Fuobe person" } });
   return personFor(authUserId)!;
+}
+
+/** Whether the owner can still be given a sign-in account: none linked, or the linked one is gone. */
+export function ownerClaimable(): boolean {
+  const row = db()
+    .prepare(`SELECT u.auth_user_id AS linked, EXISTS (SELECT 1 FROM "${AUTH_TABLES.user}" a WHERE a.id = u.auth_user_id) AS live FROM users u WHERE u.id = 'u_owner'`)
+    .get() as { linked: string | null; live: number } | undefined;
+  return !!row && (!row.linked || !row.live);
 }
 
 /** Link a new Better Auth user to the Fuobe person its intent names. */
@@ -275,7 +312,9 @@ export function buildAuthOptions(site: AuthSite) {
     emailAndPassword: {
       enabled: true,
       minPasswordLength: PASSWORD_MIN,
-      maxPasswordLength: PASSWORD_MAX,
+      // The sign-in limit, not the new-password one: Better Auth checks it before verifying, and a longer password
+      // from before accounts must still sign in. New passwords meet PASSWORD_MAX in the before hook.
+      maxPasswordLength: PASSWORD_SIGN_IN_MAX,
       revokeSessionsOnPasswordReset: true,
       password: { hash: hashPassword, verify: verifyPassword },
     },
@@ -290,10 +329,14 @@ export function buildAuthOptions(site: AuthSite) {
         create: {
           before: async () => {
             const intent = currentCreateIntent();
-            if (installValue(INSTALL.multiUser) === "1") return;
-            if (!intent || !CREATE_INTENTS.has(intent)) {
-              throw new APIError("FORBIDDEN", { message: "New accounts can't be created on this Fuobe.", code: "SIGN_UP_CLOSED" });
+            const check = intent ? CREATE_INTENTS.get(intent) : undefined;
+            if (check) {
+              const code = check();
+              if (code) throw new APIError("FORBIDDEN", { message: "This Fuobe's owner already has a sign-in account.", code });
+              return;
             }
+            if (installValue(INSTALL.multiUser) === "1") return;
+            throw new APIError("FORBIDDEN", { message: "New accounts can't be created on this Fuobe.", code: "SIGN_UP_CLOSED" });
           },
           after: async (user: { id: string }) => linkPerson(user.id, currentCreateIntent()),
         },
@@ -318,8 +361,14 @@ export function buildAuthOptions(site: AuthSite) {
       },
     },
     hooks: {
-      // The router allowlist: only browser traffic carries ctx.request; Fuobe's auth.api calls pass.
+      // New passwords stay within 8 to 128 characters; then the router allowlist.
       before: createAuthMiddleware(async (ctx) => {
+        const field = NEW_PASSWORD_FIELDS[ctx.path];
+        const next = field && ctx.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>)[field] : undefined;
+        if (typeof next === "string" && next.length > PASSWORD_MAX) {
+          throw new APIError("BAD_REQUEST", { message: `Use at most ${PASSWORD_MAX} characters.`, code: "PASSWORD_TOO_LONG" });
+        }
+        // The router allowlist: only browser traffic carries ctx.request; Fuobe's auth.api calls pass.
         if (!ctx.request) return;
         if (!routerAllows(ctx.path)) throw new APIError("FORBIDDEN", { message: "That isn't available on this Fuobe.", code: "ENDPOINT_BLOCKED" });
         if (ctx.path === "/update-user" && ctx.body && typeof ctx.body === "object") {

@@ -11,6 +11,9 @@ import Database from "better-sqlite3";
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
+// Real scrypt hashes (N=2^15) and fresh module loads per case: slow under a parallel run.
+vi.setConfig({ testTimeout: 60_000 });
+
 const ENV = ["FUOBE_PASSWORD", "FUOBE_OWNER_PASSWORD", "FUOBE_SIGNIN", "FUOBE_MODE", "FUOBE_SECRET", "FUOBE_ACCEPT_NEW_SECRET", "FUOBE_DEV_PLATFORM", "FUOBE_SITE_URL", "FUOBE_TRUST_PROXY", "FUOBE_TRUSTED_PROXIES"];
 for (const k of ENV) delete process.env[k];
 const dirs: string[] = [];
@@ -50,6 +53,7 @@ async function load(dir: string) {
     principal: await import("@/server/identity/principal"),
     proxy: (await import("@/proxy")).proxy,
     login: await import("@/app/api/auth/login/route"),
+    password: await import("@/app/api/auth/password/route"),
   };
 }
 
@@ -91,6 +95,16 @@ function writeAuthJson(dir: string, opts: { password?: string; tokens?: boolean 
   fs.writeFileSync(path.join(dir, "auth.json"), JSON.stringify(data), { mode: 0o600 });
   return data;
 }
+
+const BY = { actorId: "u_owner", via: "local" };
+/** A password of exactly `n` characters. */
+const longPassword = (n: number) => "correct horse battery staple ".repeat(Math.ceil(n / 29)).slice(0, n);
+/** Set-Cookie lines → the Cookie header a browser would send next. */
+const cookieOf = (setCookies: string[]) =>
+  setCookies
+    .filter((c) => !/max-age=0/i.test(c))
+    .map((c) => c.split(";")[0])
+    .join("; ");
 
 const req = (url: string, headers: Record<string, string> = {}) => new NextRequest(url, { headers: { host: new URL(url).host, ...headers } });
 const loginPost = (password: string) =>
@@ -246,10 +260,11 @@ describe("the secret key's fingerprint (§7.15)", () => {
     expect((await boot(dir)).report.signin).toBe("on");
   });
 
-  it("refuses a FUOBE_SECRET that is too short", async () => {
+  it("refuses a FUOBE_SECRET that is too short, as a start-up error", async () => {
     process.env.FUOBE_SECRET = "short";
     const m = await load(newDir());
     await expect(m.bootstrap.bootstrapIdentity()).rejects.toThrow(/FUOBE_SECRET is too short/);
+    await expect(m.bootstrap.bootstrapIdentity()).rejects.toBeInstanceOf(m.bootstrap.StartupError);
   });
 });
 
@@ -263,5 +278,154 @@ describe("FUOBE_MODE", () => {
     await expect((await load(newDir())).bootstrap.bootstrapIdentity()).rejects.toThrow(/FUOBE_DEV_PLATFORM=1/);
     process.env.FUOBE_MODE = "public";
     await expect((await load(newDir())).bootstrap.bootstrapIdentity()).rejects.toThrow(/isn't a mode/);
+  });
+});
+
+describe("long passwords (they signed in before accounts, so they still do)", () => {
+  it("an auth.json password over 128 characters signs in, and is rewritten", async () => {
+    const dir = newDir();
+    await preAccountsDb(dir);
+    const pw = longPassword(150);
+    writeAuthJson(dir, { password: pw });
+    const m = await boot(dir);
+    expect(m.report).toMatchObject({ importedPassword: true, signin: "on" });
+    expect((await m.login.POST(loginPost(pw))).status).toBe(200);
+    const id = m.owner.ownerAuthUserId()!;
+    expect(await m.ops.passwordNeedsRehash(id)).toBe(false);
+    expect((await m.owner.signInOwner(pw, new Headers())).ok).toBe(true);
+  });
+
+  it("FUOBE_PASSWORD up to 500 characters signs in; a longer one stops the start with one line", async () => {
+    process.env.FUOBE_PASSWORD = longPassword(129);
+    const m = await boot(newDir());
+    expect(m.report).toMatchObject({ syncedEnvPassword: true, signin: "on" });
+    expect((await m.login.POST(loginPost(longPassword(129)))).status).toBe(200);
+
+    process.env.FUOBE_PASSWORD = longPassword(500);
+    expect((await (await boot(newDir())).owner.signInOwner(longPassword(500), new Headers())).ok).toBe(true);
+
+    // Nor was there a shortest one: a short FUOBE_PASSWORD still signs in (Better Auth checks no minimum at sign-in).
+    process.env.FUOBE_PASSWORD = "pw1";
+    expect((await (await boot(newDir())).login.POST(loginPost("pw1"))).status).toBe(200);
+
+    process.env.FUOBE_PASSWORD = longPassword(501);
+    const tooLong = await load(newDir());
+    await expect(tooLong.bootstrap.bootstrapIdentity()).rejects.toThrow(/^FUOBE_PASSWORD is longer than 500 characters/);
+    await expect(tooLong.bootstrap.bootstrapIdentity()).rejects.toBeInstanceOf(tooLong.bootstrap.StartupError);
+    delete process.env.FUOBE_PASSWORD;
+    process.env.FUOBE_OWNER_PASSWORD = longPassword(501);
+    await expect((await load(newDir())).bootstrap.bootstrapIdentity()).rejects.toThrow(/^FUOBE_OWNER_PASSWORD is longer/);
+  });
+
+  it("a new password still stops at 128 characters", async () => {
+    const m = await boot(newDir());
+    await expect(m.owner.changeOwnerPassword(longPassword(129), BY)).rejects.toThrow(/at most 128/);
+    await m.owner.changeOwnerPassword(longPassword(128), BY);
+    expect(await m.owner.checkOwnerPassword(longPassword(128))).toBe(true);
+  });
+});
+
+describe("FUOBE_SIGNIN locks the switch (§7.9)", () => {
+  it("on, with no password to sign in with, stops the start with one line", async () => {
+    process.env.FUOBE_SIGNIN = "on";
+    const m = await load(newDir());
+    await expect(m.bootstrap.bootstrapIdentity()).rejects.toThrow(/^FUOBE_SIGNIN=on needs the owner's password/);
+    await expect(m.bootstrap.bootstrapIdentity()).rejects.toBeInstanceOf(m.bootstrap.StartupError);
+    // With FUOBE_PASSWORD (or an auth.json password) it starts.
+    process.env.FUOBE_PASSWORD = "break glass pw";
+    expect((await boot(newDir())).report.signin).toBe("on");
+    delete process.env.FUOBE_PASSWORD;
+    const dir = newDir();
+    await preAccountsDb(dir);
+    writeAuthJson(dir, { password: "the old password" });
+    expect((await boot(dir)).report.signin).toBe("on");
+  });
+
+  it("on: the Settings password can be changed but not removed (no install nobody can sign in to)", async () => {
+    const dir = newDir();
+    await (await boot(dir)).owner.changeOwnerPassword("settings password", BY);
+    process.env.FUOBE_SIGNIN = "on";
+    const m = await boot(dir);
+    expect(m.owner.ownerPasswordStatus()).toEqual({ fromEnv: false, signinFromEnv: true });
+    await expect(m.owner.changeOwnerPassword(null, BY)).rejects.toThrow(/FUOBE_SIGNIN/);
+    expect(m.mode.signInRequired()).toBe(true);
+    expect(await m.owner.checkOwnerPassword("settings password")).toBe(true);
+
+    // As Settings → Security sends it, from the signed-in browser: refused, and the password still works.
+    const signedIn = await m.owner.signInOwner("settings password", new Headers());
+    expect(signedIn.ok).toBe(true);
+    const cookie = cookieOf(signedIn.ok ? signedIn.setCookies : []);
+    const remove = await m.password.POST(
+      new Request("http://localhost:3000/api/auth/password", {
+        method: "POST",
+        headers: { "content-type": "application/json", host: "localhost:3000", origin: "http://localhost:3000", cookie },
+        body: JSON.stringify({ current: "settings password", password: null }),
+      }),
+    );
+    expect(remove.status).toBe(400);
+    expect(((await remove.json()) as { error: string }).error).toMatch(/FUOBE_SIGNIN/);
+    expect((await m.login.POST(loginPost("settings password"))).status).toBe(200);
+
+    // Changing it still works.
+    await m.owner.changeOwnerPassword("another settings pw", BY);
+    expect(await m.owner.checkOwnerPassword("another settings pw")).toBe(true);
+  });
+
+  it("off: the install stays open, and Settings can't claim to require a password", async () => {
+    process.env.FUOBE_SIGNIN = "off";
+    const m = await boot(newDir());
+    expect(m.mode.signInRequired()).toBe(false);
+    expect(m.owner.ownerPasswordStatus()).toEqual({ fromEnv: false, signinFromEnv: false });
+    await expect(m.owner.changeOwnerPassword("a new password", BY)).rejects.toThrow(/FUOBE_SIGNIN/);
+    expect(m.owner.ownerAuthUserId()).toBeNull();
+    expect(m.mode.signInRequired()).toBe(false);
+  });
+});
+
+describe("FUOBE_PASSWORD after it is unset", () => {
+  it("stays the owner's password with sign-in on, and Settings can then change or remove it", async () => {
+    const dir = newDir();
+    process.env.FUOBE_PASSWORD = "temporary env pw";
+    await boot(dir);
+    delete process.env.FUOBE_PASSWORD;
+    const m = await boot(dir);
+    expect(m.report).toMatchObject({ syncedEnvPassword: false, signin: "on" });
+    expect(await m.owner.checkOwnerPassword("temporary env pw")).toBe(true);
+    expect(m.owner.ownerPasswordStatus().fromEnv).toBe(false);
+    await m.owner.changeOwnerPassword(null, BY);
+    expect(m.mode.signInRequired()).toBe(false);
+  });
+});
+
+describe("start-up errors", () => {
+  it("are one line naming the problem, never a stack trace", async () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      process.env.FUOBE_SECRET = "short";
+      await (await load(newDir())).bootstrap.startIdentity();
+      delete process.env.FUOBE_SECRET;
+      const damaged = newDir();
+      fs.writeFileSync(path.join(damaged, "secret.key"), Buffer.alloc(10), { mode: 0o600 });
+      await (await load(damaged)).bootstrap.startIdentity();
+      process.env.FUOBE_SIGNIN = "on";
+      await (await load(newDir())).bootstrap.startIdentity();
+
+      expect(exit.mock.calls).toEqual([[1], [1], [1]]);
+      expect(err.mock.calls.map((c) => c.length)).toEqual([1, 1, 1]);
+      const lines = err.mock.calls.map((c) => c[0] as unknown);
+      for (const line of lines) {
+        expect(typeof line).toBe("string");
+        expect(line as string).toMatch(/^Fuobe can't start: /);
+        // No stack trace: a single line.
+        expect(line as string).not.toMatch(/\n/);
+      }
+      expect(lines[0]).toMatch(/FUOBE_SECRET is too short/);
+      expect(lines[1]).toMatch(/secret\.key is damaged/);
+      expect(lines[2]).toMatch(/FUOBE_SIGNIN=on needs/);
+    } finally {
+      exit.mockRestore();
+      err.mockRestore();
+    }
   });
 });

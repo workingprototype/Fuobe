@@ -5,10 +5,11 @@ import Database from "better-sqlite3";
 import { readLegacyAuth } from "../auth";
 import { snapshotDatabase, type Snapshot } from "../backup/snapshot";
 import { DATA_DIR, db, IDENTITY_MIGRATION } from "../db";
-import { envMode, envOwnerPassword, INSTALL, installValue, legacyPasswordSet, setInstallValue } from "../mode";
+import { envMode, envOwnerPassword, envOwnerPasswordName, envSignIn, INSTALL, installValue, legacyPasswordSet, setInstallValue } from "../mode";
 import * as ops from "./admin-ops";
 import { appendAudit } from "./audit-log";
 import { ensureOwnerAuthUser, ownerAuthUserId } from "./owner";
+import { PASSWORD_SIGN_IN_MAX } from "./password";
 import { resetSecretCache, secretFingerprint } from "./secret";
 import { importLegacyToken } from "./tokens";
 
@@ -27,7 +28,11 @@ import { importLegacyToken } from "./tokens";
  *    The file stays in place, unread, for one release as a rollback aid. Old session cookies are not accepted:
  *    password installs sign in once more.
  * 5. FUOBE_PASSWORD (or FUOBE_OWNER_PASSWORD), at every start: the owner's break-glass password. A changed value
- *    replaces the old one and signs every browser out.
+ *    replaces the old one and signs every browser out. It stays the owner's password after the variable is unset
+ *    (sign-in stays on), and can then be changed or removed in Settings → Security.
+ * 6. FUOBE_SIGNIN=on needs a password to sign in with: without one the server doesn't start.
+ *
+ * A bad value stops the server with one line naming it (StartupError), never a stack trace.
  */
 
 export class StartupError extends Error {}
@@ -69,9 +74,23 @@ function checkModeEnv(): void {
   }
 }
 
+/** FUOBE_PASSWORD must fit the sign-in form (it did before accounts too), or nobody could ever type it in. */
+function checkEnvPassword(): void {
+  const pw = envOwnerPassword();
+  if (pw.length > PASSWORD_SIGN_IN_MAX) {
+    throw new StartupError(`${envOwnerPasswordName()} is longer than ${PASSWORD_SIGN_IN_MAX} characters, so it could never be typed in to sign in. Use a shorter one.`);
+  }
+}
+
 function checkSecret(): void {
   resetSecretCache();
-  const fingerprint = secretFingerprint();
+  let fingerprint: string;
+  try {
+    fingerprint = secretFingerprint();
+  } catch (e) {
+    // A FUOBE_SECRET that is too short, or a damaged data/secret.key: one line naming it.
+    throw new StartupError((e as Error).message);
+  }
   const stored = installValue(INSTALL.secretCheck);
   if (stored === fingerprint) return;
   if (stored && process.env.FUOBE_ACCEPT_NEW_SECRET !== "1") {
@@ -90,6 +109,7 @@ function checkSecret(): void {
 /** Run the bootstrap. Throws StartupError when the server must not start. */
 export async function bootstrapIdentity(): Promise<BootstrapReport> {
   checkModeEnv();
+  checkEnvPassword();
   const snapshot = preAccountsSnapshot();
   db();
   checkSecret();
@@ -130,6 +150,14 @@ export async function bootstrapIdentity(): Promise<BootstrapReport> {
     setInstallValue(INSTALL.signin, "on");
   }
 
+  // FUOBE_SIGNIN=on with nothing to sign in with would turn every visitor away, the owner too.
+  if (envSignIn() === true) {
+    const id = ownerAuthUserId();
+    if (!id || !(await ops.hasPassword(id))) {
+      throw new StartupError("FUOBE_SIGNIN=on needs the owner's password: set FUOBE_PASSWORD as well, or set a password in Settings → Security before turning FUOBE_SIGNIN on.");
+    }
+  }
+
   report.signin = installValue(INSTALL.signin) === "on" ? "on" : "off";
   return report;
 }
@@ -140,6 +168,9 @@ export async function startIdentity(): Promise<void> {
     const report = await bootstrapIdentity();
     if (report.snapshot) console.log(`Fuobe saved a copy of the database before accounts: ${report.snapshot.db}`);
     if (report.importedPassword) console.log("Fuobe moved the password to accounts: sign in once more in each browser.");
+    if (report.syncedEnvPassword) {
+      console.log(`Fuobe set the owner's password from ${envOwnerPasswordName()}. It stays the password if you unset the variable: change or remove it in Settings → Security.`);
+    }
   } catch (e) {
     console.error(e instanceof StartupError ? `Fuobe can't start: ${e.message}` : e);
     process.exit(1);
