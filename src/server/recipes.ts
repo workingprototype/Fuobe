@@ -47,7 +47,7 @@ import { trashGenerations } from "./library";
 import { isOffered, modelLicence } from "./model-access";
 import { GenerationRequestSchema } from "./request-schema";
 import { engineMode } from "./settings";
-import { getSkill, setSkillFile, skillFile, SkillError } from "./skills";
+import { createSkill, deleteSkill, getSkill, setSkillFile, skillFile, SkillError } from "./skills";
 import { absolutePath, readRef, saveFile } from "./storage";
 
 /**
@@ -589,7 +589,7 @@ const DRY_RUN_MS = 120_000;
 const REAL_RUN_MS = 15 * 60_000;
 
 /** The free dry run: one run on the demo provider, its rows hidden (skill-check) and moved to the Trash at the end. */
-async function dryRun(skill: Skill, recipe: Recipe, engine: Engine): Promise<NonNullable<EngineCheck["dryRun"]>> {
+async function dryRun(skill: { name: string; title: string }, recipe: Recipe, engine: Engine): Promise<NonNullable<EngineCheck["dryRun"]>> {
   const c = compileRun(skill, recipe, valuesForCheck(recipe, true), engine, { run: nanoid(10), demo: true });
   // A studio step would make a record the user sees (a demo dub, a Layers project): its plan is its check in W1.
   if (c.kind === "tool") return { ok: true, problems: [], skipped: `A studio step (${c.tool}) is checked by its plan only` };
@@ -660,7 +660,7 @@ async function frameOf(video: string, engine: Engine): Promise<{ url?: string; i
 }
 
 /** The optional real test: the examples run for real, then each checked step's outputs are measured. */
-async function realRun(skill: Skill, recipe: Recipe, engine: Engine): Promise<NonNullable<EngineCheck["real"]>> {
+async function realRun(skill: { name: string; title: string }, recipe: Recipe, engine: Engine): Promise<NonNullable<EngineCheck["real"]>> {
   const notes: string[] = [];
   const problems: string[] = [];
   const c = compileRun(skill, recipe, valuesForCheck(recipe, true), engine, { run: nanoid(10) });
@@ -709,34 +709,16 @@ async function realRun(skill: Skill, recipe: Recipe, engine: Engine): Promise<No
 }
 
 /**
- * Check a recipe and write what passed into its `verified`:
- * - `plan`: compile with the examples (a stand-in file for a media input with none) and price it on each engine its
- *   steps allow (or the one asked). Free.
- * - `demo`: the plan, then one dry run per engine on the demo provider, with or without keys and whatever Settings →
- *   Demo mode says. Free; its rows are hidden and go to the Trash.
- * - `real`: the above, then the examples for real (asks first: `confirm`), each checked step measured.
+ * Check a recipe on each engine given, whether or not it is saved yet (a draft from the Library, W2): the plan, then at
+ * `demo` the free dry run, at `real` the real test. Returns what each check found and the `verified` it earns, built on
+ * `prev` (checks made against the same plan hash are kept). Writes nothing.
  */
-export async function verifyRecipe(name: string, level: VerifyLevel, asked?: Engine, o: { confirm?: boolean } = {}): Promise<VerifyResult> {
-  const found = getRecipe(name);
-  const { skill } = found;
-  if (skill.source === "builtin") throw new SkillError("Built-in skills can't be changed — Duplicate it first, then check your copy", 403);
-  // A step that names a model Fuobe retired runs on what replaced it (as every run does): the re-check writes that down.
-  const recipe: Recipe = {
-    ...found.recipe,
-    steps: found.recipe.steps.map((s) => (s.kind === "generate" ? { ...s, request: currentRequest(s.request).request as typeof s.request } : s)),
-  };
-  const problems = allProblems(recipe);
-  if (problems.length) throw new RecipeError(problems);
-  const all = recipeEngines(recipe);
-  if (!all.length) throw new SkillError(noEngine(recipe), 422);
-  if (asked && !all.includes(asked)) throw new SkillError(`This skill doesn't run on ${ENGINE_NAME[asked]}`, 422);
-  if (level === "real" && !o.confirm) throw new SkillError("A real test spends money or GPU time: confirm it with its price first", 409);
-  const engines = asked ? [asked] : all;
-  const verified: NonNullable<Recipe["verified"]> = { ...recipe.verified };
+async function checkEngines(skill: { name: string; title: string }, recipe: Recipe, level: VerifyLevel, engines: Engine[], prev: Recipe["verified"] = {}): Promise<{ checks: EngineCheck[]; verified: NonNullable<Recipe["verified"]> }> {
+  const verified: NonNullable<Recipe["verified"]> = { ...prev };
   const day = today();
   const checks: EngineCheck[] = [];
   for (const e of engines) {
-    const prev = recipe.verified?.[e] ?? null;
+    const before = prev?.[e] ?? null;
     let check: EngineCheck;
     let hash: string | undefined;
     try {
@@ -753,8 +735,8 @@ export async function verifyRecipe(name: string, level: VerifyLevel, asked?: Eng
       continue;
     }
     // Checks made against another plan don't count for this one.
-    const same = prev?.catalog === hash;
-    const next: VerifiedEngine = { plan: day, dryRun: same ? (prev?.dryRun ?? null) : null, real: same ? (prev?.real ?? null) : null, catalog: hash, ...(same && prev?.notes && { notes: prev.notes }) };
+    const same = before?.catalog === hash;
+    const next: VerifiedEngine = { plan: day, dryRun: same ? (before?.dryRun ?? null) : null, real: same ? (before?.real ?? null) : null, catalog: hash, ...(same && before?.notes && { notes: before.notes }) };
     if (check.plan.notes.length) next.notes = check.plan.notes.slice(0, 12);
     if (level !== "plan") {
       check.dryRun = await dryRun(skill, recipe, e).catch((err) => ({ ok: false, problems: [(err as Error).message] }));
@@ -769,12 +751,177 @@ export async function verifyRecipe(name: string, level: VerifyLevel, asked?: Eng
     verified[e] = next;
     checks.push(check);
   }
+  return { checks, verified };
+}
+
+/** A recipe as every run reads it: a step naming a model Fuobe retired runs on what replaced it. */
+const asRunsNow = (recipe: Recipe): Recipe => ({
+  ...recipe,
+  steps: recipe.steps.map((s) => (s.kind === "generate" ? { ...s, request: currentRequest(s.request).request as typeof s.request } : s)),
+});
+
+/** Whether checks passed: every plan, and every dry run and real test that ran. */
+const allPassed = (checks: EngineCheck[]) => checks.every((c) => c.plan.ok && (c.dryRun?.ok ?? true) && (c.real?.ok ?? true));
+
+/**
+ * Check a recipe and write what passed into its `verified`:
+ * - `plan`: compile with the examples (a stand-in file for a media input with none) and price it on each engine its
+ *   steps allow (or the one asked). Free.
+ * - `demo`: the plan, then one dry run per engine on the demo provider, with or without keys and whatever Settings →
+ *   Demo mode says. Free; its rows are hidden and go to the Trash.
+ * - `real`: the above, then the examples for real (asks first: `confirm`), each checked step measured.
+ */
+export async function verifyRecipe(name: string, level: VerifyLevel, asked?: Engine, o: { confirm?: boolean } = {}): Promise<VerifyResult> {
+  const found = getRecipe(name);
+  const { skill } = found;
+  if (skill.source === "builtin") throw new SkillError("Built-in skills can't be changed — Duplicate it first, then check your copy", 403);
+  // A step that names a model Fuobe retired runs on what replaced it (as every run does): the re-check writes that down.
+  const recipe = asRunsNow(found.recipe);
+  const problems = allProblems(recipe);
+  if (problems.length) throw new RecipeError(problems);
+  const all = recipeEngines(recipe);
+  if (!all.length) throw new SkillError(noEngine(recipe), 422);
+  if (asked && !all.includes(asked)) throw new SkillError(`This skill doesn't run on ${ENGINE_NAME[asked]}`, 422);
+  if (level === "real" && !o.confirm) throw new SkillError("A real test spends money or GPU time: confirm it with its price first", 409);
+  const engines = asked ? [asked] : all;
+  const { checks, verified } = await checkEngines(skill, recipe, level, engines, recipe.verified);
   // A check takes a while (a dry run, a real test): a recipe saved or uploaded meanwhile is never overwritten, and what
   // was checked is never written onto it. Checks of other engines that finished meanwhile are kept.
   const now = getRecipe(name).recipe;
   if (!sameRecipe(now, found.recipe)) throw new SkillError("The recipe changed while it was being checked — check it again", 409);
   const merged: NonNullable<Recipe["verified"]> = { ...now.verified, ...Object.fromEntries(engines.map((e) => [e, verified[e] ?? null])) };
   saveRecipe(name, { ...recipe, verified: merged }, { keepVerified: true });
-  const ok = checks.every((c) => c.plan.ok && (c.dryRun?.ok ?? true) && (c.real?.ok ?? true));
-  return { ok, engines: checks, view: recipeView(name) };
+  return { ok: allPassed(checks), engines: checks, view: recipeView(name) };
+}
+
+// ---------------------------------------------------------------------------
+// A skill made from results (W2): its recipe is checked before it is saved
+
+interface DraftChecks {
+  verified: NonNullable<Recipe["verified"]>;
+  at: number;
+  /** The skill it was saved as, while its dry run was still going (that run's result is written into it). */
+  saved?: string;
+}
+
+declare global {
+  var __fuobeDraftChecks: Map<string, DraftChecks> | undefined;
+}
+
+const DRAFT_TTL_MS = 6 * 60 * 60_000;
+const DRAFT_MAX = 200;
+
+/** What drafts' checks found, by recipe (the newest few hundred for a few hours, in memory: the server's own word, never the browser's). */
+function draftChecks(): Map<string, DraftChecks> {
+  const m = (globalThis.__fuobeDraftChecks ??= new Map());
+  for (const [k, v] of m) if (Date.now() - v.at > DRAFT_TTL_MS) m.delete(k);
+  // Oldest first (a Map keeps insertion order; a check of the same recipe is set again, so it moves to the end).
+  while (m.size > DRAFT_MAX) m.delete(m.keys().next().value!);
+  return m;
+}
+
+/** A recipe's identity for its checks: its JSON with sorted keys, without what was checked. */
+export function draftKey(recipe: Recipe): string {
+  const stable = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(stable)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.entries(v)
+              .filter(([, x]) => x !== undefined)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([k, x]) => [k, stable(x)]),
+          )
+        : v;
+  return crypto.createHash("sha256").update(JSON.stringify(stable({ ...recipe, verified: undefined }))).digest("hex");
+}
+
+/** A draft's recipe as it would be saved: its shape, then everything a save refuses. */
+function draftRecipe(input: unknown): Recipe {
+  const parsed = RecipeSchema.safeParse(input);
+  if (!parsed.success) throw new RecipeError(parsed.error.issues.map((i) => (i.path.length ? `${i.path.map(String).join(".")}: ${i.message}` : i.message)));
+  const recipe: Recipe = { ...parsed.data };
+  delete recipe.verified;
+  const problems = allProblems(recipe);
+  if (problems.length) throw new RecipeError(problems);
+  return recipe;
+}
+
+export interface DraftCheck {
+  ok: boolean;
+  engines: EngineCheck[];
+  /** Engines whose plan check passed: the skill runs there once saved. */
+  ready: Engine[];
+  /** Why it runs on no engine of this install. */
+  why?: string;
+}
+
+/** Write a draft's finished checks into the skill it was saved as, when that skill still holds the same recipe. */
+function adoptChecks(name: string, recipe: Recipe, verified: NonNullable<Recipe["verified"]>): void {
+  try {
+    const now = getRecipe(name).recipe;
+    if (draftKey(now) !== draftKey(recipe)) return;
+    const merged: NonNullable<Recipe["verified"]> = { ...now.verified };
+    for (const e of ENGINES) {
+      const v = verified[e];
+      const cur = now.verified?.[e];
+      // Only what was checked against the plan it holds (a later re-check stands).
+      if (v?.catalog && (!cur || cur.catalog === v.catalog)) merged[e] = { ...cur, ...v };
+    }
+    saveRecipe(name, { ...now, verified: merged }, { keepVerified: true });
+  } catch {
+    // Deleted or changed meanwhile: it is checked again from the Skills page.
+  }
+}
+
+/**
+ * Check a draft's recipe before it is saved (the review screen's Check it): `plan` prices it on each engine its steps
+ * allow (free, quick); `demo` adds the free dry run on the demo provider. What passed is kept for the save; a draft saved
+ * while its dry run was going gets the result when it ends.
+ */
+export async function checkDraft(input: unknown, level: "plan" | "demo", title = "Skill check"): Promise<DraftCheck> {
+  const recipe = draftRecipe(input);
+  const engines = recipeEngines(recipe);
+  if (!engines.length) return { ok: false, engines: [], ready: [], why: noEngine(recipe) };
+  const key = draftKey(recipe);
+  const { checks, verified } = await checkEngines({ name: "draft", title }, recipe, level, engines, draftChecks().get(key)?.verified);
+  const entry = draftChecks().get(key);
+  draftChecks().delete(key);
+  draftChecks().set(key, { verified: { ...entry?.verified, ...verified }, at: Date.now(), ...(entry?.saved && { saved: entry.saved }) });
+  if (entry?.saved) adoptChecks(entry.saved, recipe, verified);
+  return { ok: allPassed(checks), engines: checks, ready: engines.filter((e) => !!verified[e]?.plan) };
+}
+
+export interface DraftSave {
+  name: string;
+  title: string;
+  description: string;
+  whenToUse?: string;
+  body: string;
+  icon?: string;
+  recipe: unknown;
+}
+
+/**
+ * Save a draft as a user skill: SKILL.md (createSkill) with its recipe.json (saveRecipe), once its plan passes on an
+ * engine (checked again here: free). The draft's checks of this same recipe come with it; anything else starts unchecked.
+ */
+export async function saveDraft(input: DraftSave): Promise<RecipeView> {
+  const recipe = draftRecipe(input.recipe);
+  const engines = recipeEngines(recipe);
+  if (!engines.length) throw new SkillError(noEngine(recipe), 422);
+  const key = draftKey(recipe);
+  const known = draftChecks().get(key)?.verified;
+  const { checks, verified } = await checkEngines({ name: input.name, title: input.title }, recipe, "plan", engines, known);
+  if (!checks.some((c) => c.plan.ok)) throw new RecipeError([...new Set(checks.flatMap((c) => c.plan.errors))]);
+  createSkill({ name: input.name, title: input.title, description: input.description, whenToUse: input.whenToUse, body: input.body, ...(input.icon && { icon: input.icon }) });
+  try {
+    saveRecipe(input.name, { ...recipe, verified }, { keepVerified: true });
+  } catch (e) {
+    deleteSkill(input.name);
+    throw e;
+  }
+  draftChecks().delete(key);
+  draftChecks().set(key, { verified: { ...known, ...verified }, at: Date.now(), saved: input.name });
+  return recipeView(input.name);
 }

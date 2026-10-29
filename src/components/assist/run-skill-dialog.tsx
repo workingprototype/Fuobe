@@ -21,6 +21,7 @@ import { useElements } from "@/lib/api";
 import type { Engine } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { checkValues, isMediaType, parseRows, RECIPE_LIMITS, type RecipeEstimate, type RecipeParam, type RecipeView } from "@/lib/recipe";
+import { DEMO_NOTE } from "@/lib/recipe-builder";
 import { cn } from "@/lib/utils";
 import { useRecipe, useRecipeActions, useSkillActions, type RecipeFailure } from "./hooks";
 import { PlanJobs } from "./plan-jobs";
@@ -30,19 +31,20 @@ import { SkillIcon } from "./skill-icon";
  * Run a skill with new inputs (package W1): a form made from its recipe's inputs, priced live before it runs, one
  * run or many from a pasted CSV, on an engine where the recipe was checked. No LLM: the server compiles the recipe.
  */
-export function RunSkillDialog({ name, onClose }: { name: string | null; onClose: () => void }) {
+export function RunSkillDialog({ name, onClose, examples, intro }: { name: string | null; onClose: () => void; examples?: boolean; intro?: string }) {
   return (
     <Dialog open={!!name} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="flex max-h-[min(94svh,900px)] flex-col gap-0 overflow-hidden p-0 max-sm:h-svh max-sm:max-h-svh max-sm:max-w-full max-sm:rounded-none max-sm:ring-0 sm:max-w-[680px]">
-        {name && <RunForm key={name} name={name} onClose={onClose} />}
+        {name && <RunForm key={name} name={name} onClose={onClose} examples={examples} intro={intro} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function RunForm({ name, onClose }: { name: string; onClose: () => void }) {
+/** `examples`: the form starts filled with the values the skill was made from (a skill just made: "Try it with new inputs"). */
+function RunForm({ name, onClose, examples, intro }: { name: string; onClose: () => void; examples?: boolean; intro?: string }) {
   const view = useRecipe(name);
-  if (view.data) return <Loaded view={view.data} onClose={onClose} />;
+  if (view.data) return <Loaded view={view.data} onClose={onClose} examples={examples} intro={intro} />;
   return (
     <div className="space-y-3 p-6">
       <DialogTitle className="sr-only">Run a skill</DialogTitle>
@@ -79,15 +81,19 @@ function priceLine(e: RecipeEstimate | undefined, runs: number): string {
   return runs > 1 ? `${formatCost(e.total)} for ${runs} runs ${where}` : `${formatCost(e.total)} ${where}`;
 }
 
-function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
+function Loaded({ view, onClose, examples, intro }: { view: RecipeView; onClose: () => void; examples?: boolean; intro?: string }) {
   const { recipe, name } = view;
   const actions = useRecipeActions();
   const skillActions = useSkillActions();
   const qc = useQueryClient();
   const router = useRouter();
   const [tab, setTab] = useState<"one" | "many">("one");
-  const [values, setValues] = useState<Record<string, string | number | undefined>>(() => Object.fromEntries(recipe.params.map((p) => [p.id, p.default])));
-  const [slots, setSlots] = useState<Record<string, SlotValue | null>>({});
+  const [values, setValues] = useState<Record<string, string | number | undefined>>(() =>
+    Object.fromEntries(recipe.params.map((p) => [p.id, examples && !isMediaType(p.type) && p.example !== undefined && p.example !== null ? p.example : p.default])),
+  );
+  const [slots, setSlots] = useState<Record<string, SlotValue | null>>(() =>
+    examples ? Object.fromEntries(recipe.params.flatMap((p) => (isMediaType(p.type) && typeof p.example === "string" && p.example ? [[p.id, { ref: p.example, preview: p.example, kind: p.type }]] : []))) : {},
+  );
   const [csv, setCsv] = useState("");
   const [engine, setEngine] = useState<Engine>(view.ready[0] ?? view.engines[0] ?? "cloud");
   const [tried, setTried] = useState(false);
@@ -188,7 +194,7 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
         <SkillIcon name={name} icon={view.icon} size="lg" />
         <div className="min-w-0 flex-1 pr-6">
           <DialogTitle className="font-heading text-[24px] leading-tight font-normal">Run {view.title}</DialogTitle>
-          <DialogDescription className="mt-1">Same steps, new inputs. Priced before anything starts; no chat needed.</DialogDescription>
+          <DialogDescription className="mt-1">{intro ?? "Same steps, new inputs. Priced before anything starts; no chat needed."}</DialogDescription>
         </div>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
@@ -220,6 +226,7 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
             Needs a re-check: {recheck[0]}
           </Notice>
         ) : null}
+        {recipe.source?.demo && !Object.values(recipe.verified ?? {}).some((v) => v?.real) && <Notice tone="info">{DEMO_NOTE}.</Notice>}
         {problems.length > 0 && (
           <div role="alert" className="space-y-1 rounded-xl bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
             {problems.slice(0, 6).map((p, i) => (

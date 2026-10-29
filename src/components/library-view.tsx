@@ -1,6 +1,6 @@
 "use client";
 
-import { ArchiveRestore, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Globe, Heart, Loader2, MoreHorizontal, Pin, PinOff, Search, Trash2, X } from "lucide-react";
+import { ArchiveRestore, BookmarkPlus, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Globe, Heart, Loader2, MoreHorizontal, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +14,7 @@ import { useViewPrefs, ViewOptions, type ViewPrefs } from "@/components/library/
 import { PageShell } from "@/components/page-shell";
 import { useShare } from "@/components/share/share-provider";
 import { SharedLinks } from "@/components/share/shared-links";
+import { useSkillBuilder } from "@/components/skills/skill-builder-provider";
 import { downloadUrl, ForeverConfirmProvider, useConfirmForever } from "@/components/studio/result-actions";
 import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { Viewer } from "@/components/studio/viewer";
@@ -264,6 +265,7 @@ function Inner() {
   const lib = useLibrary(useMemo(() => (trash || uploadsTab ? filter : { ...filter, pinned: filters.pinned }), [filter, trash, uploadsTab, filters.pinned]), { enabled: !sharedTab });
   const shares = useShares();
   const share = useShare();
+  const skillBuilder = useSkillBuilder();
   const uploads = useUploads();
   const pinnedItems = useMemo(() => (split ? (pinnedLib.data?.pages.flat() ?? []) : []), [split, pinnedLib.data]);
   const mainItems = useMemo(() => {
@@ -771,6 +773,15 @@ function Inner() {
                     if (done.length > BULK_MAX) toast(`The zip has the first ${BULK_MAX} of ${done.length}`, { description: "Select the rest and download them as a second zip." });
                   }}
                 />
+                {/* The steps behind the selected results as a skill (a whole stack when its batch is selected). Stays on phones. */}
+                {skillBuilder && (
+                  <BarButton
+                    icon={BookmarkPlus}
+                    label="Make a skill"
+                    disabled={!selectedGens.some((g) => g.status === "succeeded")}
+                    onClick={() => skillBuilder.open(selectedGens.filter((g) => g.status === "succeeded").map((g) => g.id))}
+                  />
+                )}
                 {/* Like, Pin and Review fold into ⋯ on phones, so the bar fits 390 px with Publish. */}
                 <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selectedGens.length} onClick={like} className="max-sm:hidden" />
                 <BarButton icon={allPinned ? PinOff : Pin} label={allPinned ? "Unpin" : "Pin"} disabled={!selectedGens.length} onClick={pinAll} className="max-sm:hidden" />
