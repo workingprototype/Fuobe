@@ -92,6 +92,8 @@ const NUMERIC_DEFAULT_KEYS = [
   'every', 'slowdown', 'shortSide',
   // Fuobe Soul (Originals O2)
   'megapixels',
+  // Originals O11
+  'motionFrame', 'audioCfg', 'threshold', 'mosaicScale',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -126,6 +128,8 @@ export const BINDING_KEYS = new Set([
   'quality', 'selection', 'subjectIndex', 'positiveCoords', 'negativeCoords', 'audioGuide', 'useMask', 'windowFrames', 'historyFrames',
   // Character Swap Studio (o/h3-studio): continuation history from the previous take's master, masks on any frame spliced into a version
   'historyVideo', 'historyStart', 'historyLength', 'keyFrame', 'spanFrames', 'tailStart', 'tailFrames', 'prevMask',
+  // Originals O11: Fuobe Speak's InfiniteTalk recipe on kijai's wrapper, the face mosaic
+  'scheduler', 'motionFrame', 'colormatch', 'audioCfg', 'threshold', 'mosaicScale',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);

@@ -155,6 +155,12 @@
     "error": null,
     "at": "2026-10-16T20:57:25.685Z"
   },
+  "image-face-mosaic-sam3": {
+    "sha256": "4493ff975bbb3d81188837a2f7de3e20d8c485fcc92a96b4b9fc3401cb6fa03b",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-29T01:47:28.189Z"
+  },
   "image-to-3d-hunyuan3d-21": {
     "sha256": "275a30c4184a8728e919166e72d88913abcf61a85b051a897ecb7249db849a08",
     "validated": true,
@@ -195,7 +201,7 @@
     "sha256": "9c6d9405cde952f4ae1cc0833969959685d7f8b19a39d24aed5da3428d2ee4ff",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T20:57:26.816Z"
+    "at": "2026-10-29T01:47:21.661Z"
   },
   "interpolate-film": {
     "sha256": "457d686f8e58bc08982a0f881c90a5402c9ee888960de935b139be253e1d5fc2",
@@ -352,6 +358,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:16.936Z"
+  },
+  "qwen-image-edit-2509-angles": {
+    "sha256": "3df30ed4ed4bc677eb8ba8ad82e6cf4ec93c98a139e7e0067b8750a118d272b1",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-29T01:47:22.895Z"
   },
   "qwen-image-edit-2511": {
     "sha256": "5deec4e50d093dabcdd74b6a97e794bcb0069a987f573ce65e8d966909c6de26",
@@ -658,6 +670,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-23T16:47:54.176Z"
+  },
+  "video-depth-vda-large": {
+    "sha256": "384221d37f4b75435455bf46e66a5ec1a5cae9d410a02f0edeb848c81e808525",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-29T01:47:27.517Z"
   },
   "video-depth-vda-small": {
     "sha256": "dc83a7795e72cde121a462cc9b3cc684e9619711521d3935fee015209f932dfe",

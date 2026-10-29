@@ -100,6 +100,12 @@
 //   positiveCoords*, negativeCoords*      (SAM3_Detect clicks: JSON [{"x","y"}] in the prepared first frame's pixels: params.points)
 //   audioGuide, useMask                   (H3 audio guide; masked regeneration off = the whole frame)
 //   windowFrames, historyFrames           (H3 window plan: "124" / "18", strings of the pack's combos)
+// Keys added with the rebranded open tools and Speak (Originals O11). Model settings (params.extra) or a route's own graph
+// defaults (ModelRoute.extra), except * which the provider fills:
+//   scheduler, motionFrame, colormatch    (kijai's InfiniteTalk: WanVideoSampler solver, motion frames, colour match method)
+//   audioCfg                              (MultiTalkWav2VecEmbeds audio guidance)
+//   threshold, mosaicScale                (face mosaic: SAM3_Detect threshold; the mosaic's scale, 0.04 = blocks of 25 px)
+//   prompt*                               (face mosaic: what SAM 3.1 pixelates, "face" when the run gives no words)
 
 import fs from 'node:fs';
 
@@ -175,6 +181,10 @@ export const KNOWN_MODELS = {
   'qwen_2.5_vl_7b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors' },
   'qwen_image_vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors' },
   'Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors' },
+  // Originals O11: dx8152's Multiple-angles LoRA for Qwen-Image-Edit 2509 (镜头转换.safetensors upstream, kept under an ASCII name; the
+  // LoRA library pins the same commit and SHA256) and FusioniX for Wan 2.1 I2V 14B (Fuobe Speak's InfiniteTalk recipe). Fuobe downloads both.
+  'qwen-edit-2509-multiple-angles-dx8152.safetensors': { folder: 'loras', url: 'https://huggingface.co/dx8152/Qwen-Edit-2509-Multiple-angles/resolve/c342b0e746c3a3275af1a4a0c6ae78e0e4802531/%E9%95%9C%E5%A4%B4%E8%BD%AC%E6%8D%A2.safetensors' },
+  'Wan2.1_I2V_14B_FusionX_LoRA.safetensors': { folder: 'loras', url: 'https://huggingface.co/vrgamedevgirl84/Wan14BT2VFusioniX/resolve/b9793a1f84727f2f69bdffecc2f50f0abfa746a6/FusionX_LoRa/Wan2.1_I2V_14B_FusionX_LoRA.safetensors' },
   'Qwen-Image-Edit-2509-Relight.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Relight.safetensors' },
   // av-tools (Wave B): Product shot's open route
   'Qwen-Image-Edit-2509-White_to_Scene.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-White_to_Scene.safetensors' },
@@ -1228,25 +1238,11 @@ export const SPEC = [
     id: 'infinitetalk-wanwrapper',
     title: 'InfiniteTalk Lip-sync (WanVideoWrapper, long audio)',
     capability: 'lipsync',
-    export: 'custom_nodes/ComfyUI-WanVideoWrapper/example_workflows/wanvideo_2_1_14B_I2V_InfiniteTalk_example_03.json',
-    transforms: [
-      // MelBandRoFormer vocal separation needs another custom pack (ComfyUI-MelBandRoFormer); feed audio directly.
-      { op: 'removeNodes', ids: ['301', '302'] },
-      { op: 'set', node: '194', input: 'audio_1', value: ['125', 0] },
-      { op: 'removeOutputs', ids: ['293'] },
-      { op: 'set', node: '131', input: 'save_output', value: true },
-      { op: 'set', node: '122', input: 'attention_mode', value: 'sdpa' },
-      { op: 'set', node: '241', input: 'positive_prompt', value: 'A person is talking to the camera.' },
-      {
-        op: 'rename',
-        map: {
-          'WanVideo\\InfiniteTalk\\Wan2_1-InfiniteTalk_Single_Q8.gguf': 'Wan2_1-InfiniteTalk_Single_Q8.gguf',
-          'WanVideo\\wan2.1-i2v-14b-480p-Q8_0.gguf': 'wan2.1-i2v-14b-480p-Q8_0.gguf',
-          'wanvideo\\Wan2_1_VAE_bf16.safetensors': 'Wan2_1_VAE_bf16.safetensors',
-          'WanVideo\\Lightx2v\\lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors': 'lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors',
-        },
-      },
-    ],
+    // Hand-built since O11 from the graph the export below produced (kijai's example 03 at 088128b with these transforms
+    // applied: MelBandRoFormer 301/302 removed and the audio fed to 194 directly, preview 293 dropped, save_output on,
+    // sdpa attention, the prompt "A person is talking to the camera.", Windows sub-paths flattened), so it builds and
+    // validates without a frontend export: 'custom_nodes/ComfyUI-WanVideoWrapper/example_workflows/wanvideo_2_1_14B_I2V_InfiniteTalk_example_03.json'.
+    handBuilt: 'hand-built/infinitetalk-wanwrapper.json',
     bindings: {
       prompt: [b('241', 'positive_prompt')],
       negativePrompt: [b('241', 'negative_prompt')],
@@ -1257,12 +1253,30 @@ export const SPEC = [
       frames: [b('270', 'value')],
       seed: [b('128', 'seed')],
       steps: [b('128', 'steps')],
+      // Exposed for Fuobe Speak's InfiniteTalk recipe (Originals O11): the LoRA (FusioniX in place of lightx2v), the sampler's
+      // text guidance, shift and solver, InfiniteTalk's motion frames and colour match, and the audio guidance.
+      lora: [b('138', 'lora')],
+      loraStrength: [b('138', 'strength')],
+      cfg: [b('128', 'cfg')],
+      shift: [b('128', 'shift')],
+      scheduler: [b('128', 'scheduler')],
+      motionFrame: [b('192', 'motion_frame')],
+      colormatch: [b('192', 'colormatch')],
+      audioCfg: [b('194', 'audio_cfg_scale')],
     },
     outputs: [{ node: '131', kind: 'video' }],
+    // The graph's own solver and colour match (the fast lightx2v pass); fps = the wrapper's 25 (MultiTalkWav2VecEmbeds).
+    defaults: { fps: 25, scheduler: 'dpm++_sde', colormatch: 'disabled' },
     limits: { maxWidth: 1280, maxHeight: 1280, dimensionMultiple: 16, maxFrames: 1000 },
     vramGb: 16,
+    optionalModels: ['Wan2.1_I2V_14B_FusionX_LoRA.safetensors'],
+    license: 'Apache-2.0 (InfiniteTalk, Wan 2.1, lightx2v; FusioniX: Apache-2.0 card, the LoRAs it merges unchecked)',
     autoDownloads: ['DownloadAndLoadWav2VecModel downloads TencentGameMate/chinese-wav2vec2-base into models/transformers on first run'],
-    notes: 'kijai WanVideoWrapper example 03 (GGUF Q8 Wan2.1-I2V-480p + InfiniteTalk single, lightx2v LoRA, 6 steps). Generates in 81-frame windows until the audio ends; `frames` is a MAX frame cap @25 fps (default 500 = 20 s). Changes vs example: MelBandRoFormer vocal separation removed (use clean speech audio), attention sdpa instead of sageattn, save_output=true, Windows sub-paths flattened. Output is a VHS_VideoCombine node: look in history outputs[node].gifs[], not .images[].',
+    notes:
+      'kijai WanVideoWrapper example 03 (GGUF Q8 Wan2.1-I2V-480p + InfiniteTalk single, lightx2v LoRA, 6 steps). Generates in 81-frame windows until the audio ends; `frames` is a MAX frame cap @25 fps (default 500 = 20 s). Changes vs example: MelBandRoFormer vocal separation removed (use clean speech audio), attention sdpa instead of sageattn, save_output=true, Windows sub-paths flattened. Output is a VHS_VideoCombine node: look in history outputs[node].gifs[], not .images[]. ' +
+      'Originals O11 (Fuobe Speak): the graph is unchanged and its defaults stay the fast lightx2v pass (6 steps, cfg 1, shift 11, motion_frame 9, dpm++_sde); Fuobe Speak sends Higgsfield\'s Infinite Talk settings through the new bindings: ' +
+      'lora Wan2.1_I2V_14B_FusionX_LoRA.safetensors at 1 (the run\'s LoRA goes into WanVideoLoraSelect, which this wrapper graph loads itself), steps 25, cfg 5 (text guidance), audioCfg 5 (audio guidance; the wrapper runs the extra audio-free pass when cfg > 1), ' +
+      'shift 10, scheduler unipc (InfiniteTalk\'s solver), motionFrame 15 and colormatch reinhard for InfiniteTalk\'s colour correction (a Lab mean / spread match to the portrait; the wrapper has no strength, so on = 1). About 25 / 6 × 3 passes the time of the fast pass.',
   },
   {
     id: 'upscale-video-seedvr2',
@@ -1580,6 +1594,30 @@ export const SPEC = [
       'prompt = the light to apply, e.g. "relight with neon magenta and cyan rim lights" (Chinese prompts follow the LoRA captions best). Output size follows the input (~1 MP). 4 steps, cfg 1.',
   },
   {
+    id: 'qwen-image-edit-2509-angles',
+    title: 'Qwen-Image-Edit 2509 Multiple Angles (Fuobe Angles: dx8152 LoRA + Qwen-Image-Lightning)',
+    capability: 'edit',
+    handBuilt: 'hand-built/qwen-image-edit-2509-angles.json',
+    bindings: {
+      prompt: [b('433:111', 'prompt')],
+      negativePrompt: [b('433:110', 'prompt')],
+      image: [b('78', 'image')],
+      seed: [b('433:3', 'seed')],
+      steps: [b('433:436', 'value')],
+      cfg: [b('433:437', 'value')],
+      loraStrength: [b('1001', 'strength_model')],
+    },
+    outputs: [{ node: '469', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Qwen-Image-Edit 2509, dx8152 Multiple-angles LoRA, Qwen-Image-Lightning)',
+    notes:
+      'Higgsfield Angles\' recipe on the GPU (Originals O11; research studios[angles]): library qwen-image-edit-2509 (Qwen-Image-Edit 2509 fp8 + the Lightning 4-step LoRA, FluxKontextImageScale to ~1 MP, ModelSamplingAuraFlow 3, CFGNorm, euler / simple, cfg 1) ' +
+      'with dx8152\'s Multiple-angles LoRA after the Lightning LoRA at 1.25 (as fal\'s hosted route and the public HF Space fuse it) and 6 steps (fal\'s default for this LoRA; the Lightning LoRA is distilled for 4, so 6 is a guess until measured). ' +
+      'prompt = the LoRA\'s camera instructions in Chinese with English ("将镜头向左旋转45度 Rotate the camera 45 degrees to the left." / move forward / close-up / bird\'s-eye / worm\'s-eye / wide-angle), which src/lib/catalog/open-tools.ts writes from Fuobe Angles\' controls. ' +
+      'The LoRA file is renamed from 镜头转换.safetensors to qwen-edit-2509-multiple-angles-dx8152.safetensors; Fuobe downloads it into ComfyUI\'s loras folder before a run. Output size follows the input (~1 MP).',
+  },
+  {
     id: 'relight-qwen-edit-2509-reference',
     title: 'Qwen-Image-Edit 2509 Relight from Reference (light migration)',
     capability: 'edit',
@@ -1807,6 +1845,46 @@ export const SPEC = [
       'VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped. ' +
       'colormap = gray | inferno (the only two VideoDepthAnythingOutput offers; turbo / magma / viridis would need a LUT step). sideBySide true = the original clip on the left, ' +
       'the depth map scaled to the clip\'s size on the right (ImageStitch; an even width for the encoder), through a lazy ComfySwitchNode (remove-object package).',
+  },
+
+  {
+    id: 'video-depth-vda-large',
+    title: 'Video Depth Map (Video Depth Anything Large: Higgsfield Depth Map\'s model, non-commercial weights)',
+    capability: 'depth-video',
+    handBuilt: 'hand-built/video-depth-vda-small.json',
+    transforms: [{ op: 'set', node: '3', input: 'model', value: 'video_depth_anything_vitl.pth' }],
+    bindings: { video: [b('1', 'file')], colormap: [b('5', 'colormap')], sideBySide: [b('9', 'value')] },
+    defaults: { colormap: 'gray', sideBySide: false },
+    outputs: [{ node: '7', kind: 'video' }],
+    limits: { maxWidth: 2048, maxHeight: 2048 },
+    vramGb: 8,
+    license: 'CC-BY-NC-4.0 (Video-Depth-Anything-Large weights: non-commercial)',
+    autoDownloads: ['LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Large video_depth_anything_vitl.pth (about 1.5 GB) into models/videodepthanything on first run'],
+    notes:
+      'video-depth-vda-small with the Large model (Originals O11): the model Higgsfield\'s Depth Map runs (higgsfield-originals-5.md §3.22). Its weights are CC-BY-NC-4.0: the licence is information (Settings → Models & licences ' +
+      'lists it as Non-commercial with a switch), the Depth map defaults stay VDA-Small (Apache-2.0) on the GPU. Same graph otherwise: gray or inferno, side by side through the lazy switch, audio dropped.',
+  },
+  {
+    id: 'image-face-mosaic-sam3',
+    title: 'Pixelate faces (SAM 3.1 face mask + mosaic, core nodes)',
+    capability: 'face-mosaic',
+    handBuilt: 'hand-built/image-face-mosaic-sam3.json',
+    bindings: {
+      image: [b('1', 'image')],
+      prompt: [b('3', 'text')],
+      threshold: [b('4', 'threshold')],
+      maskGrow: [b('5', 'expand')],
+      mosaicScale: [b('7', 'scale_by')],
+    },
+    outputs: [{ node: '10', kind: 'image' }],
+    limits: { maxWidth: 4096, maxHeight: 4096 },
+    vramGb: 4,
+    license: 'Meta SAM License (SAM 3.1: royalty-free, commercial use allowed; attribution + acceptable-use terms)',
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    notes:
+      'Fuobe Soul\'s PixeletedFace look (Originals O11; research presets[PixeletedFace].post): SAM3_Detect with the words (prompt, "face" by default: every face, one merged mask, threshold 0.4), GrowMask 12 px so the hair line and jaw are covered, ' +
+      'then the picture shrunk by mosaicScale with area averaging (0.04: blocks of 25 px) and blown back up with nearest-exact to its own size, composited only under the mask (ImageCompositeMasked). ' +
+      'No face found: the picture comes back unchanged. Core nodes and the SAM 3.1 checkpoint only.',
   },
 
   // ---- palette / colour lock ----------------------------------------------
