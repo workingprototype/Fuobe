@@ -481,8 +481,11 @@ export async function runRecipe(name: string, input: RunInput, asked?: Engine): 
       const out = await executeTool(c.tool, c.input, { engine });
       const text = typeof out.content === "string" ? out.content : "";
       if (out.isError) {
-        if (!runs.length) throw new SkillError(text.replace(/^\{"error":"(.*)"\}$/, "$1") || "The tool couldn't start", 422);
-        break;
+        const error = text.replace(/^\{"error":"(.*)"\}$/, "$1") || "The tool couldn't start";
+        if (compiled.length === 1) throw new SkillError(error, 422);
+        // Each tool call stands alone: the other rows still run, and this one says why it didn't.
+        runs.push({ ids: [], error });
+        continue;
       }
       let href: string | undefined;
       try {
@@ -494,6 +497,7 @@ export async function runRecipe(name: string, input: RunInput, asked?: Engine): 
       demo &&= ids.every((id) => getGeneration(id)?.provider === "mock");
       runs.push({ ids, ...(href && { href }) });
     }
+    if (!runs.some((r) => !r.error)) throw new SkillError(runs[0]?.error ?? "Nothing could start", 422);
     return { engine, runs, demo };
   }
   const made: Generation[] = [];

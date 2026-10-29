@@ -144,10 +144,13 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
     setBusy("run");
     try {
       const r = await actions.run(name, body);
-      const href = r.runs[0]?.href ?? "/library";
+      const started = r.runs.filter((x) => !x.error);
+      const failed = r.runs.filter((x) => x.error);
+      const href = started[0]?.href ?? "/library";
       const studio = href.startsWith("/library") ? "Library" : href.startsWith("/video-tools/captions") ? "Captions" : "the studio";
-      toast.success(r.runs.length > 1 ? `Started ${r.runs.length} runs` : "Started the run", {
-        description: r.demo ? "A demo run — no provider connected" : `${view.title}: same steps, new take`,
+      const title = failed.length ? `Started ${started.length} of ${r.runs.length} runs` : started.length > 1 ? `Started ${started.length} runs` : "Started the run";
+      (failed.length ? toast.warning : toast.success)(title, {
+        description: failed.length ? failed[0].error : r.demo ? "A demo run — no provider connected" : `${view.title}: same steps, new take`,
         action: { label: `Open in ${studio}`, onClick: () => router.push(href) },
       });
       onClose();

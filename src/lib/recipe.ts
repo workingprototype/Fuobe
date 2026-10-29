@@ -856,6 +856,8 @@ export interface RecipeRun {
   batchId?: string;
   ids: string[];
   href?: string;
+  /** A tool run that couldn't start after the rows before it had (each tool call stands alone). */
+  error?: string;
 }
 
 export interface EngineCheck {
