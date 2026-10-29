@@ -25,6 +25,7 @@ import {
   type TrainingFamily,
   type TrainingTarget,
 } from "@/lib/catalog/training";
+import { TRAINING_REPLACED_BY } from "@/lib/catalog/replaced";
 import { DATA_DIR, db } from "./db";
 import { getElement, updateElement } from "./elements";
 import { keepTrainedLora, lorasPath, ownCopy, recordTrainedMirror } from "./loras";
@@ -45,7 +46,8 @@ export interface Training {
   id: string;
   elementId: string;
   target: string;
-  provider: TrainingTarget["provider"] | "demo" | "higgsfield";
+  /** fal, AI-Toolkit or a demo; a training stored by a trainer Fuobe has retired keeps that trainer's id. */
+  provider: TrainingTarget["provider"] | "demo" | (string & {});
   family: TrainingFamily | null;
   status: "queued" | "running" | "succeeded" | "failed";
   progress: number | null;
@@ -345,8 +347,11 @@ async function submit(id: string, el: StudioElement, t: TrainingTarget, trigger:
 /** A provider answer that won't change by asking again: the job failed or is gone (not auth, timeouts or rate limits). */
 const permanent = (e: unknown) => e instanceof ProviderError && e.status !== undefined && e.status >= 400 && e.status < 500 && ![401, 403, 408, 429].includes(e.status);
 
-/** Higgsfield's Soul ID training ended with build plan O3. */
-export const RETIRED_SOUL_ID = "Higgsfield Soul ID training was retired: train this character for Fuobe Soul instead (same photos)";
+/** Why a training stored with a retired target (an older Soul ID, src/lib/catalog/replaced.ts) can't finish, and what to do. */
+export const retiredTraining = (target: string): string | undefined => {
+  const r = TRAINING_REPLACED_BY[target];
+  return r && `${r.was} was retired: ${r.note.charAt(0).toLowerCase()}${r.note.slice(1)}`;
+};
 
 export async function pollTrainings(): Promise<void> {
   // Trainings a restart cut off mid-upload never reach the trainer: fail them so the element can retrain.
@@ -354,7 +359,10 @@ export async function pollTrainings(): Promise<void> {
     .prepare("SELECT * FROM trainings WHERE status = 'queued' AND external_id IS NULL AND created_at < ?")
     .all(Date.now() - STALE_TRAINING_MS) as Row[];
   for (const r of stale) if (!submittingTrainings().has(r.id)) fail(r.id, r.element_id, "Interrupted before it reached the trainer — start it again");
-  for (const r of db().prepare("SELECT * FROM trainings WHERE provider = 'higgsfield' AND status IN ('queued','running')").all() as Row[]) fail(r.id, r.element_id, RETIRED_SOUL_ID);
+  // A training on a target Fuobe retired (an older Soul ID) can't finish: fail it with what replaced it.
+  const retired = Object.keys(TRAINING_REPLACED_BY);
+  const sql = `SELECT * FROM trainings WHERE status IN ('queued','running') AND target IN (${retired.map(() => "?").join(", ")})`;
+  for (const r of db().prepare(sql).all(...retired) as Row[]) fail(r.id, r.element_id, retiredTraining(r.target)!);
   // Copies of hosted LoRAs a restart cut off: start them again.
   for (const r of db().prepare(`SELECT * FROM trainings WHERE status = 'succeeded' AND meta_json LIKE '%"keep":"pending"%'`).all() as Row[]) keepInBackground(r);
   const rows = db().prepare("SELECT * FROM trainings WHERE status = 'running' AND external_id IS NOT NULL").all() as Row[];
@@ -426,7 +434,7 @@ function trainedLora(r: Row, t: TrainingTarget, file: string, fields: Partial<El
 
 async function pollOne(r: Row) {
   const t = getTrainingTarget(r.target);
-  if (!t) return fail(r.id, r.element_id, `Unknown training target ${r.target}`);
+  if (!t) return fail(r.id, r.element_id, retiredTraining(r.target) ?? `Unknown training target ${r.target}`);
   if (Date.now() - r.created_at > MAX_TRAINING_MS) return fail(r.id, r.element_id, `Training didn't finish within ${MAX_TRAINING_MS / 3_600_000} hours`);
   const meta = metaOf(r);
   const el = getElement(r.element_id);
@@ -569,7 +577,7 @@ export async function attachLora(elementId: string, input: { file: string; trigg
     } catch {
       src = "";
     }
-    if (src && fs.existsSync(src)) {
+    if (src && fs.existsSync(/*turbopackIgnore: true*/ src)) {
       await keepTrainedLora(file, { path: src });
       own = true;
     }

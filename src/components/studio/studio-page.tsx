@@ -13,6 +13,7 @@ import { useEngine, useGenerations } from "@/lib/api";
 import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
 import { positionsFrom } from "@/lib/catalog/keyframes";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
+import { currentModelId, migrateRequest } from "@/lib/catalog/replaced";
 import { matchSpokenLanguage } from "@/lib/speech-languages";
 import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
 import type { StudioCatalog } from "@/lib/studio-catalog";
@@ -41,7 +42,8 @@ function initialDraft(
   lookup: { getModel: (id: string) => ModelDef | undefined; getPreset: (id: string) => Preset | undefined },
 ): Draft {
   const preset = sp.get("preset") ? lookup.getPreset(sp.get("preset")!) : config.preset;
-  const requested = sp.get("model");
+  // A link or Assist hand-off that names a model Fuobe retired opens on the one that replaced it (replaced.ts).
+  const requested = sp.get("model") && currentModelId(sp.get("model")!);
   // An app opened on one of its own models (?model=, from ⌘K) takes that model's route and params.
   const presetRoute = preset
     ? ([preset.cloud, preset.open].find((r) => !!requested && r?.modelId === requested) ?? (engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open)
@@ -86,7 +88,10 @@ function draftFromGeneration(g: Generation, config: StudioConfig, getModel: (id:
   // A run styled by the Color signature / Moodboard chips comes back as it was before they routed it,
   // with the picks on the chips (studios without the chips get the styled prompt instead).
   const signed = config.signature ? reuseSignature(g.request) : null;
-  const r = signed ? { ...g.request, modelId: signed.modelId, params: signed.params } : config.signature ? g.request : withSignatureWords(g.request);
+  const asked = signed ? { ...g.request, modelId: signed.modelId, params: signed.params } : config.signature ? g.request : withSignatureWords(g.request);
+  // A run on a model Fuobe retired comes back on the one that replaced it (src/lib/catalog/replaced.ts): a Soul style
+  // becomes its Fuobe look, the retired API's own settings are dropped.
+  const r = migrateRequest(asked).request;
   const imgs = signed ? signed.images : (r.inputs?.images ?? []);
   const imageKeys = config.slots.filter((s) => s.accept === "image" && s.key !== "endImage" && s.key !== "mask").map((s) => s.key);
   const slots: Draft["slots"] = {};
@@ -261,6 +266,9 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
   const reuse = useCallback(
     (g: Generation) => {
       setDraft(draftFromGeneration(g, config, catalog.getModel));
+      // A run on a model (or an operation) Fuobe retired comes back on what replaced it: say what changed.
+      const moved = migrateRequest(g.request).note;
+      if (moved) toast(moved);
       if (g.engine !== engine) setEngine(g.engine);
       requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
     },

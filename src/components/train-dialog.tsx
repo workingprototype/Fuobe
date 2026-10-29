@@ -141,7 +141,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
   const originals = families.filter((f) => TRAINING_FAMILIES[f].original);
   const more = families.filter((f) => !TRAINING_FAMILIES[f].original);
   const busyAny = q.data?.items.some((t) => t.status === "queued" || t.status === "running");
-  // "Retrain for Fuobe Soul" on a Higgsfield Soul ID: the first option that can run now. Once a real Fuobe Soul LoRA
+  // "Retrain for Fuobe Soul" on an older Soul ID: the first option that can run now. Once a real Fuobe Soul LoRA
   // is trained, the old Soul ID is only there to remove.
   const retrainTarget = targets.find((t) => t.family === "z-image-turbo" && !t.blocker && !t.demo) ?? targets.find((t) => t.family === "z-image-turbo" && !t.blocker);
   const replaced = hasFamily("z-image-turbo");
@@ -304,7 +304,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                 {replaced ? <CircleCheck className="size-4 shrink-0 text-muted-foreground" /> : <AlertTriangle className="size-4 shrink-0 text-warning" />}
                 {/* Wide enough to read on a phone: the buttons wrap under it there. */}
                 <span className="min-w-0 flex-1 basis-48">
-                  <span className="block font-medium">Higgsfield Soul ID</span>
+                  <span className="block font-medium">Older Soul ID</span>
                   <span className="block text-[12px] text-muted-foreground">
                     {replaced ? "Your Fuobe Soul ID replaces it: remove it when you no longer need it." : "It can't be exported. Retrain on the same photos for Fuobe Soul."}
                   </span>
@@ -319,7 +319,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                     <RotateCcw /> Retrain for Fuobe Soul
                   </Button>
                 )}
-                <button onClick={() => void remove(l)} className="shrink-0 p-1 text-muted-foreground hover:text-destructive" aria-label="Remove the Higgsfield Soul ID">
+                <button onClick={() => void remove(l)} className="shrink-0 p-1 text-muted-foreground hover:text-destructive" aria-label="Remove the older Soul ID">
                   <Trash2 className="size-3.5" />
                 </button>
               </div>

@@ -101,8 +101,8 @@ export const TURBO_LORA: LoraRef = {
   licence: { commercial: true, hostedOk: true, snapshotDate: "2026-10-27", name: "Apache-2.0" },
 };
 
-/** The ComfyUI workflows of the Character swap. */
-export const H3_WORKFLOWS = ["video-character-swap-h3", "video-character-swap-h3-relay"] as const;
+/** The ComfyUI workflows of the Character swap (and Character Swap Studio's one-pass segment, on H3 Relay). */
+export const H3_WORKFLOWS = ["video-character-swap-h3", "video-character-swap-h3-relay", "video-character-swap-h3-segment"] as const;
 
 /** Remove object's "Remove a person (H3)": H3 Relay's Person Removal graph (docs/research/openjutsu-6.md §4.4). */
 export const H3_REMOVAL_WORKFLOW = "video-person-remove-h3-relay";

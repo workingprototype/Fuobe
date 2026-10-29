@@ -433,7 +433,6 @@ describe("round-4 models on the canvas", () => {
     expect(ports("kling-o3", "video-swap")).toEqual(["prompt", "elements", "images", "video"]);
     expect(ports("bria-video-erase")).toEqual(["prompt", "video"]);
     expect(ports("p-video-replace")).toEqual(["prompt", "elements", "images", "video"]);
-    expect(ports("genjutsu-lite-object-swap")).toEqual(["prompt", "elements", "images", "video"]);
     expect(ports("florence-2-ocr")).toEqual(["images"]);
     expect(ports("topaz-sdr-to-hdr")).toEqual(["video"]);
     expect(ports("triposplat")).toEqual(["images"]);

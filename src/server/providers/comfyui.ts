@@ -1,5 +1,6 @@
 import "server-only";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { tracksFor, type MotionPaths } from "@/lib/motion-paths";
@@ -43,6 +44,9 @@ import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSi
 import { guessKind } from "@/lib/catalog/payload";
 import { loraByFile, needsToken } from "@/lib/catalog/loras";
 import { CHARACTER_SWAP, packResolution, samCoords, swapPrompt, SWAP_LORAS, windowPlan } from "@/lib/catalog/character-swap";
+import { maskMemoryProblem } from "@/lib/catalog/swap-studio";
+import { STUDIO_WORKFLOWS } from "@/lib/catalog/swap-studio-plan";
+import { maskGraph, segmentGraph, type MaskGraphOptions, type SegmentGraphOptions } from "@/lib/swap-studio-graphs";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, ORIGINALS, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
@@ -51,6 +55,7 @@ import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { ocrText, parseOcrFrame, parseOcrLines, type OcrFrame } from "@/lib/ocr";
 import { getSetting, isCandidate, savedSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
+import { probeAvi } from "../avi-probe";
 import { probeWebm } from "../webm-probe";
 import { adoptFile, readRef, scratchDir } from "../storage";
 import { zipToFile } from "../zip";
@@ -411,27 +416,98 @@ async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promi
 // ---------------------------------------------------------------------------
 // Reachability. Routing (chooseRoute) is synchronous, so the first check for a server URL is a blocking probe
 // (a worker thread does the fetch); after that the cached result is refreshed in the background every 10 s.
+// A server that refuses the connection (or a name that doesn't resolve) is down at once. One that doesn't answer
+// GET /system_stats in time may only be busy: a CPU ComfyUI working on a job can take seconds to. So a late answer
+// keeps the server reachable when it answered lately. When it didn't, and its port takes a connection, it gets one
+// longer look (none again for a while once one goes unanswered): reachable if it answers then. A port that takes the
+// connection isn't enough on its own: an ssh tunnel or a proxy whose ComfyUI is gone (or a hung ComfyUI) takes it too.
 
 declare global {
-  /** Reachability of the ComfyUI server, and its RAM (bytes) when /system_stats said. */
-  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number } | undefined;
+  /** Reachability of the ComfyUI server, its RAM (bytes) when /system_stats said, when it last answered, and when a longer look last went unanswered. */
+  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number; seen?: number; silent?: number } | undefined;
+  /** The check under way: callers in the meantime share its answer. */
+  var __fuobeComfyProbe: { url: string; done: Promise<boolean> } | undefined;
 }
 
-export async function probeComfy(force = false): Promise<boolean> {
-  const cur = globalThis.__fuobeComfyReach;
-  if (!force && cur && cur.url === baseUrl() && Date.now() - cur.at < 10_000) return cur.ok;
-  let ok = false;
-  let ram: number | undefined;
+/**
+ * How long a check waits for /system_stats, then for the port to take a connection, then for the longer look; how long
+ * an answer (or an unanswered longer look) counts as recent.
+ */
+export const REACH = { answerMs: 2000, connectMs: 3000, lookMs: 10_000, answeredLatelyMs: 2 * 60_000 };
+
+/** Host and port of a server address, for the connection check (undefined when it isn't a URL). */
+function hostPort(url: string): { host: string; port: number } | undefined {
   try {
-    const r = await fetch(`${baseUrl()}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(2000) });
-    ok = r.ok;
-    if (ok) {
-      const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
-      if (typeof total === "number" && total > 0) ram = total;
-    }
-  } catch {}
-  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url: baseUrl(), ...(ram ? { ram } : {}) };
+    const u = new URL(url);
+    return { host: u.hostname.replace(/^\[|\]$/g, ""), port: Number(u.port) || (u.protocol === "https:" ? 443 : 80) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether the server's port takes a TCP connection within `timeoutMs` (a refusal says no at once). */
+function takesConnection(url: string, timeoutMs: number): Promise<boolean> {
+  const at = hostPort(url);
+  if (!at) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const socket = net.connect(at);
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    socket.once("connect", () => done(true)).once("error", () => done(false));
+  });
+}
+
+/** What GET /system_stats got: an answer (with the RAM it says), a no (an HTTP error, a refused connection), or nothing in time. */
+async function askComfy(url: string, timeoutMs = REACH.answerMs): Promise<{ answer: "yes"; ram?: number } | { answer: "no" | "late" }> {
+  try {
+    const r = await fetch(`${url}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) return { answer: "no" };
+    const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
+    return { answer: "yes", ...(typeof total === "number" && total > 0 ? { ram: total } : {}) };
+  } catch (e) {
+    return { answer: (e as Error)?.name === "TimeoutError" ? "late" : "no" };
+  }
+}
+
+async function checkComfy(url: string): Promise<boolean> {
+  let asked = await askComfy(url);
+  const prev = globalThis.__fuobeComfyReach?.url === url ? globalThis.__fuobeComfyReach : undefined;
+  const lately = (t?: number) => !!t && Date.now() - t < REACH.answeredLatelyMs;
+  // Late is busy, not down, when it answered lately. Otherwise it gets the longer look, when its port takes a
+  // connection and no longer look went unanswered lately (a silent server isn't waited on at every check).
+  const busy = asked.answer === "late" && lately(prev?.seen);
+  let silent = prev?.silent;
+  if (asked.answer === "late" && !busy && !lately(silent) && (await takesConnection(url, REACH.connectMs))) {
+    asked = await askComfy(url, REACH.lookMs);
+    if (asked.answer !== "yes") silent = Date.now();
+  }
+  const at = Date.now();
+  // A busy server keeps the RAM and the time of its last answer; a down one, when it last went silent.
+  const ram = asked.answer === "yes" ? (asked.ram ?? prev?.ram) : prev?.ram;
+  const seen = asked.answer === "yes" ? at : prev?.seen;
+  const ok = asked.answer === "yes" || busy;
+  const reach = ok ? { ok, at, url, ...(ram ? { ram } : {}), ...(seen ? { seen } : {}) } : { ok, at, url, ...(silent ? { silent } : {}) };
+  // The address may have changed while this ran: the new one's check speaks for it.
+  if (url === baseUrl()) globalThis.__fuobeComfyReach = reach;
   return ok;
+}
+
+/** Is the ComfyUI server reachable? Cached for 10 s (`force` checks now); one check runs at a time. */
+export async function probeComfy(force = false): Promise<boolean> {
+  const url = baseUrl();
+  const cur = globalThis.__fuobeComfyReach;
+  if (!force && cur && cur.url === url && Date.now() - cur.at < 10_000) return cur.ok;
+  const running = globalThis.__fuobeComfyProbe;
+  if (running?.url === url) return running.done;
+  const done: Promise<boolean> = checkComfy(url).finally(() => {
+    if (globalThis.__fuobeComfyProbe?.done === done) globalThis.__fuobeComfyProbe = undefined;
+  });
+  globalThis.__fuobeComfyProbe = { url, done };
+  return done;
 }
 
 /** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
@@ -440,25 +516,40 @@ export function comfyRam(): number | undefined {
   return cur?.ok && cur.url === baseUrl() ? cur.ram : undefined;
 }
 
+// flag[0]: the answer (1 yes, 2 no or refused, 3 none in time); flag[1]: 1 once the port took the connection.
 const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
 const flag = new Int32Array(workerData.sab);
+if (workerData.at) {
+  const socket = require("node:net").connect(workerData.at);
+  socket.once("connect", () => (Atomics.store(flag, 1, 1), socket.destroy())).once("error", () => {});
+}
 fetch(workerData.url, { headers: workerData.headers, signal: AbortSignal.timeout(workerData.timeout) })
-  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), () => Atomics.store(flag, 0, 2))
+  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), (e) => Atomics.store(flag, 0, e && e.name === "TimeoutError" ? 3 : 2))
   .finally(() => Atomics.notify(flag, 0));`;
 
-/** Blocking reachability check (a few ms for a refused port, at most `timeoutMs` for a host that doesn't answer). */
+/**
+ * Blocking reachability check: a few ms for a server that answers or a refused port, at most `timeoutMs` otherwise.
+ * A server that takes the connection but doesn't answer in time is taken as busy, so reachable, for now; one that
+ * doesn't even take it as unreachable. Either way the unhurried check (probeComfy) goes on in the background to say
+ * for sure.
+ */
 export function probeComfySync(timeoutMs = 1500): boolean {
   const url = baseUrl();
-  let ok = false;
+  let answer = 0;
+  let connected = false;
   try {
-    const sab = new SharedArrayBuffer(4);
+    const sab = new SharedArrayBuffer(8);
     const flag = new Int32Array(sab);
-    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/system_stats`, headers: authHeaders(), timeout: timeoutMs } });
+    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/system_stats`, at: hostPort(url), headers: authHeaders(), timeout: timeoutMs } });
     Atomics.wait(flag, 0, 0, timeoutMs + 1000);
-    ok = Atomics.load(flag, 0) === 1;
+    answer = Atomics.load(flag, 0);
+    connected = Atomics.load(flag, 1) === 1;
     void worker.terminate();
   } catch {}
-  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url };
+  const at = Date.now();
+  const ok = answer === 1 || (answer !== 2 && connected);
+  globalThis.__fuobeComfyReach = { ok, at, url, ...(answer === 1 ? { seen: at } : {}) };
+  if (answer !== 1 && answer !== 2) void probeComfy(true).catch(() => false);
   return ok;
 }
 
@@ -487,6 +578,14 @@ function webmInfo(data: Buffer): MediaInfo | null {
   if (!w) return null;
   const frames = w.duration && w.fps ? Math.round(w.duration * w.fps) : undefined;
   return { container: "webm", duration: w.duration, videoDuration: w.hasVideo ? w.duration : undefined, width: w.width, height: w.height, fps: w.fps, frames, hasVideo: w.hasVideo, hasAudio: w.hasAudio };
+}
+
+/** An AVI clip's header facts in MediaInfo's shape (src/server/avi-probe.ts; Character Swap Studio takes AVI). */
+function aviInfo(data: Buffer): MediaInfo | null {
+  const a = probeAvi(data);
+  if (!a) return null;
+  const frames = a.duration && a.fps ? Math.round(a.duration * a.fps) : undefined;
+  return { container: "avi", duration: a.duration, videoDuration: a.hasVideo ? a.duration : undefined, width: a.width, height: a.height, fps: a.fps, frames, hasVideo: a.hasVideo, hasAudio: a.hasAudio };
 }
 
 /** The header facts of a file this server uploaded to ComfyUI (a still has only its size; undefined for unreadable containers). */
@@ -939,6 +1038,68 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     // No words: Openjutsu's instruction, with the anchor sentence only when the anchor goes in (the graph's own text names it).
     if (!(typeof values.prompt === "string" && values.prompt.trim())) values.prompt = swapPrompt({ engine: "open", anchor: !!b.image2 && !dropAnchor });
   }
+  // Character Swap Studio's segment (one H3 Relay pass): the previous take's master as history, the approved mask in
+  // place of SAM's, the anchor after the boundary, masked generation off. Branches it doesn't use go after binding.
+  // Media inputs a studio job leaves out on purpose (their branches go after binding).
+  const studioLeft: string[] = [];
+  let studioSegment: Omit<SegmentGraphOptions, "outputs"> | null = null;
+  if (manifest.id === STUDIO_WORKFLOWS.segment) {
+    const history = typeof extra.historyVideo === "string" && !!extra.historyVideo;
+    if (!history) {
+      studioLeft.push("historyVideo");
+      for (const k of ["historyVideo", "historyStart", "historyLength"]) delete extra[k];
+    } else {
+      const start = Number(extra.historyStart);
+      const length = Number(extra.historyLength);
+      if (!Number.isInteger(start) || start < 0 || !Number.isInteger(length) || length < 1) throw new ProviderError("The continuation history needs the previous take's frame count");
+    }
+    const maskFile = typeof extra.maskVideo === "string" && extra.maskVideo ? extra.maskVideo : null;
+    const span = input.endTime !== undefined ? Math.max(0, input.endTime - start) : Number(values.duration ?? 0);
+    // The master keeps the segment's last frames (the next segment's history), not the whole 16-bit segment.
+    const frames = Math.round(Number(extra.segmentFrames ?? 0));
+    const keep = Math.round(Number(extra.masterKeep ?? frames));
+    studioSegment = {
+      anchor: !dropAnchor,
+      history,
+      anchorAfterHistory: extra.anchorAfterHistory === true,
+      mask: maskFile ? { file: maskFile, start: Math.max(0, Number(extra.maskStart ?? 0)), duration: span } : null,
+      useMask: extra.useMask !== false,
+      masterTail: frames > 0 && keep > 0 && keep < frames ? { from: frames - keep, frames: keep } : null,
+    };
+    for (const k of ["maskVideo", "maskStart", "anchorAfterHistory", "useMask", "masterKeep", "segmentFrames"]) delete extra[k];
+  }
+  // Character Swap Studio's mask: who to swap on one frame of a shot (words, a selection or clicks moved into H3's
+  // canvas), followed for spanFrames, spliced into the version it corrects (prevMask).
+  let studioMask: Omit<MaskGraphOptions, "outputs"> | null = null;
+  if (manifest.id === STUDIO_WORKFLOWS.mask) {
+    values.quality = packResolution(input.resolution);
+    const words = (typeof extra.maskPrompt === "string" && extra.maskPrompt.trim()) || input.prompt?.trim() || "person";
+    values.maskPrompt = words.slice(0, 120);
+    delete extra.maskPrompt;
+    if (input.points?.length) {
+      if (!clip?.width || !clip.height) throw new ProviderError("Couldn't read the clip's size to place your clicks — pick who to swap instead");
+      const [pos, neg] = samCoords(input.points, { width: clip.width, height: clip.height }, input.resolution);
+      values.positiveCoords = pos;
+      values.negativeCoords = neg;
+      extra.selection = "index";
+      extra.subjectIndex = 0;
+    }
+    const keyFrame = Math.max(0, Math.round(Number(extra.keyFrame ?? 0)));
+    const shotFrames = Math.round(Number(extra.shotFrames ?? 0));
+    const spanFrames = Math.max(1, Math.round(Number(extra.spanFrames ?? shotFrames - keyFrame)));
+    if (!(shotFrames > 0) || keyFrame + spanFrames > shotFrames) throw new ProviderError("The mask's frames don't fit in the shot — reload and try again");
+    const prev = typeof extra.prevMask === "string" && !!extra.prevMask;
+    if (!prev) {
+      studioLeft.push("prevMask");
+      delete extra.prevMask;
+    }
+    Object.assign(extra, { keyFrame, spanFrames, tailStart: keyFrame + spanFrames, tailFrames: Math.max(1, shotFrames - keyFrame - spanFrames) });
+    delete extra.shotFrames;
+    studioMask = { head: keyFrame, tail: shotFrames - keyFrame - spanFrames, prev };
+    // The graph holds the whole shot as float frames: refuse what the server can't hold (before it runs out of memory).
+    const tooBig = maskMemoryProblem({ width: clip?.width, height: clip?.height, quality: input.resolution, shotFrames, correcting: prev }, await ctx.serverRam?.());
+    if (tooBig) throw new ProviderError(tooBig);
+  }
   // Genjutsu's Object swap: SAM 3.1 follows what goes (params.extra.maskPrompt, or the "replace … with" part of the prompt,
   // as Genjutsu sends it), the reference comes in, the prompt describes the result. Insert: the painted spot and the
   // reference, the prompt says what appears there. Neither graph takes clicked points.
@@ -988,7 +1149,7 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // Reference images the user left out: dropped from a FLUX.2 reference chain, else the previous image
   // again where that's harmless (style boards, multi-reference edits), else a clear "add …" message.
   let graph = workflow;
-  const left: string[] = [];
+  const left: string[] = [...studioLeft];
   // A side nobody photographed is left out (its cut-out and crop with it); the front is needed.
   if (rules.views) {
     for (const k of IMAGE_SLOTS.slice(1)) {
@@ -1041,6 +1202,8 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (dropAnchor) wf = withoutAnchor(wf, b.image2![0].node);
   // LoRA "none": the swap LoRA's loader is linked out (H3 runs with the Turbo LoRA alone).
   if (dropSwapLora && b.lora?.length === 1) wf = bypassNode(wf, b.lora[0].node, "model", outputIds);
+  if (studioSegment) wf = segmentGraph(wf, { ...studioSegment, outputs: outputIds });
+  if (studioMask) wf = maskGraph(wf, { ...studioMask, outputs: outputIds });
   // FPS Boost to a lower rate, or one the clip divides into: no interpolation, only every n-th frame.
   if (finish.bypassInterpolation) {
     const id = Object.keys(wf).find((k) => wf[k].class_type === "FrameInterpolate");
@@ -1171,6 +1334,11 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   form.append("type", "input");
   form.append("overwrite", "true");
   const res = await comfyFetch("/upload/image", { method: "POST", body: form }, worker);
+  if (res.status === 413) {
+    // ComfyUI's own limit (--max-upload-size, 100 MB unless it was started with more).
+    const mb = Math.ceil(data.length / 2 ** 20);
+    throw new ProviderError(`ComfyUI refused a ${mb} MB upload as too large (its --max-upload-size, 100 MB unless set) — start ComfyUI with a higher --max-upload-size, or send a smaller file`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw worker === "isolated" ? isolatedAnswer("an upload", res.status, reasonOf(text)) : new ProviderError(`ComfyUI upload failed: ${res.status} ${text}`);
@@ -1178,8 +1346,8 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   const j = (await res.json()) as { name: string; subfolder?: string };
   const uploaded = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
   // Remember a clip's / track's header facts (length, size, fps, audio) for prepareWorkflow.
-  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name) || /\.(webm|mkv)$/i.test(name)) {
-    const info = probeMedia(data) ?? webmInfo(data);
+  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name) || /\.(webm|mkv|avi)$/i.test(name)) {
+    const info = probeMedia(data) ?? webmInfo(data) ?? aviInfo(data);
     if (info) rememberMedia(uploaded, info);
   } else if (/^image\//.test(contentType)) {
     // A start frame's size: "auto" makes an image-to-video clip in the picture's own shape.
@@ -1228,7 +1396,7 @@ export const comfyProvider: ProviderAdapter = {
     const cur = globalThis.__fuobeComfyReach;
     // First check for this server: wait for the answer, so a request right after start isn't sent to demo.
     if (!cur || cur.url !== baseUrl()) return probeComfySync();
-    if (Date.now() - cur.at > 10_000) void probeComfy();
+    if (Date.now() - cur.at > 10_000) void probeComfy().catch(() => false);
     return cur.ok;
   },
 

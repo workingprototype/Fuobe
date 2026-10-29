@@ -71,20 +71,6 @@ describe("Cinema Studio data matches the research", () => {
     expect(LIGHT_DIRECTIONS).toContain("back-bottom-left");
   });
 
-  it("every native value is one cinema-studio-4 accepts", () => {
-    const cs4 = getModel("cinema-studio-4")!;
-    const values = (param: string) => cs4.options.controls!.find((c) => c.param === param)!.values;
-    expect(values("genre")).toEqual(expect.arrayContaining(GENRES.flatMap((g) => (g.slug ? [g.slug] : []))));
-    expect(values("era")).toEqual(expect.arrayContaining(ERAS.flatMap((g) => (g.slug ? [g.slug] : []))));
-    expect(values("pacing")).toEqual(expect.arrayContaining(TEMPOS.flatMap((g) => (g.slug ? [g.slug] : []))));
-    expect(values("camera_model")).toEqual(expect.arrayContaining(CAMERA_BODIES.flatMap((g) => (g.slug ? [g.slug] : []))));
-    expect(values("camera_lens")).toEqual(expect.arrayContaining(LENSES.flatMap((g) => (g.slug ? [g.slug] : []))));
-    expect(values("camera_aperture")).toEqual(expect.arrayContaining(APERTURES.flatMap((g) => (g.slug ? [g.slug] : []))));
-    expect(values("light")).toEqual(expect.arrayContaining(LIGHTING_PRESETS.flatMap((g) => (g.slug ? [g.slug] : []))));
-    expect(values("camera_movement")).toEqual(CAMERA_MOVES.map((m) => m.slug));
-    expect(values("color_palette")).toEqual(PALETTES.map((p) => p.slug));
-  });
-
   it("the 17 Soul Cast fields with their options and defaults", () => {
     expect(SOUL_CAST_FIELDS).toHaveLength(17);
     const f = imageResearch.characterSheet.soulCast.fields as Record<string, (string | number)[]>;

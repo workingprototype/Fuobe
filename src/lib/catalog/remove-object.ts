@@ -127,7 +127,7 @@ export const ERASERS: Eraser[] = [
     engine: "cloud",
     modes: ["type"],
     label: "Kling O3 Omni edit",
-    note: "Higgsfield's own route · 3–15 s per piece · sound kept",
+    note: "3–15 s per piece · sound kept",
     maxSeconds: 15,
     minSeconds: 3,
     keepsSound: true,

@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { useGenerationEvents, useStatus } from "@/lib/api";
+import { useGenerationEvents } from "@/lib/api";
 import type { AdCreative, BrandKit, BrandKitFields, MarketingRun, Product, RunEstimate, RunFeature } from "@/lib/catalog/marketing";
 import type { Generation } from "@/lib/catalog/types";
 
@@ -238,7 +238,7 @@ export function useCreativeActions(brandId: string) {
     retry: useMutation({ mutationFn: (id: string) => send<AdCreative>(`/api/ads/creatives/${id}/retry`, "POST"), onSuccess: done }),
     save: useMutation({ mutationFn: ({ id, url, ratio }: { id: string; url: string; ratio: string }) => send<{ generation: Generation }>(`/api/ads/creatives/${id}/save`, "POST", { url, ratio }) }),
     createBatch: useMutation({
-      mutationFn: (body: { brandId: string; engine: "cloud" | "open"; route?: "fuobe" | "higgsfield"; items: { productId: string; count: number }[]; direction?: string; ratio?: string }) =>
+      mutationFn: (body: { brandId: string; engine: "cloud" | "open"; items: { productId: string; count: number }[]; direction?: string }) =>
         send<{ batchId: string; creatives: AdCreative[] }>("/api/ads/batches", "POST", body),
       onSuccess: (r) => {
         qc.setQueryData<AdCreative[]>(key, (old) => [...r.creatives, ...(old ?? [])]);
@@ -272,7 +272,7 @@ export function useBrandChat(brandId: string) {
       onError: () => void qc.invalidateQueries({ queryKey: key }),
     }),
     confirm: useMutation({
-      mutationFn: (b: { messageId: string; engine: "cloud" | "open"; route?: "fuobe" | "higgsfield"; ratio?: string }) => send<{ batchId: string; messages: ChatMessage[] }>(`/api/brands/${brandId}/chat/confirm`, "POST", b),
+      mutationFn: (b: { messageId: string; engine: "cloud" | "open" }) => send<{ batchId: string; messages: ChatMessage[] }>(`/api/brands/${brandId}/chat/confirm`, "POST", b),
       onSuccess: (r) => {
         set(r.messages);
         void qc.invalidateQueries({ queryKey: ["ads", brandId] });
@@ -282,8 +282,3 @@ export function useBrandChat(brandId: string) {
   };
 }
 
-/** What's connected, for picking routes in the UI (Higgsfield's own Ads Studio / Seedance edit). */
-export function useStatusFlags() {
-  const s = useStatus().data;
-  return { higgsfield: !!s?.providers.higgsfield?.configured, demoMode: s?.demoMode };
-}

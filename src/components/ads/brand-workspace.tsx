@@ -15,7 +15,7 @@ import { useBrand, useBrandActions, useCreatives } from "@/components/marketing/
 import { MarketingHeader, useMarketingEngine } from "@/components/marketing/shell";
 import { AdChat } from "./ad-chat";
 import { CreativeGrid } from "./creative-grid";
-import { NewAds, useAdRoute } from "./new-ads";
+import { NewAds } from "./new-ads";
 
 type Step = "kit" | "new" | "ads";
 
@@ -45,7 +45,6 @@ export function BrandWorkspace({ brandId }: { brandId: string }) {
   const actions = useBrandActions(brandId);
   const [step, setStep] = useState<Step | null>(null);
   const [chat, setChat] = useState(false);
-  const choice = useAdRoute(engine);
   const brand = view.data?.brand;
   // The chat works for any kit that isn't being researched (a canceled or failed research keeps what it found).
   const chatReady = !!brand && brand.status !== "researching";
@@ -78,7 +77,7 @@ export function BrandWorkspace({ brandId }: { brandId: string }) {
   }
 
   const chatPanel = (inSheet: boolean) =>
-    brand && <AdChat brand={brand} products={products} engine={engine} choice={choice} onBatch={() => (setStep("ads"), setChat(false))} onClose={inSheet ? () => setChat(false) : undefined} className="h-full" />;
+    brand && <AdChat brand={brand} products={products} engine={engine} onBatch={() => (setStep("ads"), setChat(false))} onClose={inSheet ? () => setChat(false) : undefined} className="h-full" />;
 
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
@@ -150,7 +149,7 @@ export function BrandWorkspace({ brandId }: { brandId: string }) {
                     <BrandKitForm key={brand.id} brand={brand} />
                   </>
                 )}
-                {current === "new" && <NewAds brand={brand} products={products} engine={engine} choice={choice} onCreated={() => setStep("ads")} />}
+                {current === "new" && <NewAds brand={brand} products={products} engine={engine} onCreated={() => setStep("ads")} />}
                 {current === "ads" &&
                   (creatives.isLoading ? (
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

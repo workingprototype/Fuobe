@@ -11,7 +11,7 @@ export default function Page() {
     <PageShell wide>
       <PageHeader
         title="Models"
-        description="Every model Fuobe can drive. Cloud models run through your fal.ai, Replicate or Higgsfield key; open-source models run as ComfyUI workflows on your own GPU."
+        description="Every model Fuobe can drive. Cloud models run through your fal.ai or Replicate key; open-source models run as ComfyUI workflows on your own GPU."
       />
       {/* Slim rows only: the catalog (field maps, options, LoRAs) stays on the server. */}
       <ModelsTable models={MODELS.map(toModelRow)} />

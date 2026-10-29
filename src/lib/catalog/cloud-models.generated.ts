@@ -7583,6 +7583,103 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "happy-horse-1-1",
+    "name": "Happy Horse 1.1",
+    "vendor": "Alibaba",
+    "family": "happy-horse",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Alibaba's expressive character-animation video model",
+    "routes": [
+      {
+        "op": "t2v",
+        "provider": "fal",
+        "endpoint": "alibaba/happy-horse/v1.1/text-to-video",
+        "map": {
+          "seed": "seed",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          }
+        }
+      },
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "alibaba/happy-horse/v1.1/image-to-video",
+        "map": {
+          "image": "image_url",
+          "seed": "seed",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          }
+        }
+      },
+      {
+        "op": "ref2v",
+        "provider": "fal",
+        "endpoint": "alibaba/happy-horse/v1.1/reference-to-video",
+        "map": {
+          "images": "image_urls",
+          "seed": "seed",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          },
+          "maxImages": 9
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "4:3",
+        "3:4",
+        "21:9",
+        "9:21",
+        "5:4",
+        "4:5"
+      ],
+      "resolutions": [
+        "720p",
+        "1080p"
+      ],
+      "durations": [
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        15
+      ],
+      "maxImages": 9
+    },
+    "defaults": {
+      "aspectRatio": "16:9",
+      "duration": 5,
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.14,
+      "note": "720p; 1080p $0.18/s",
+      "byResolution": {
+        "720p": 0.14,
+        "1080p": 0.18
+      }
+    }
+  },
+  {
     "id": "lucy-edit-pro",
     "name": "Lucy Edit Pro",
     "vendor": "Decart",
@@ -11039,7 +11136,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "mirelo",
     "engine": "cloud",
     "kind": "audio",
-    "tagline": "Higgsfield's sound-effects model \u2014 layered, cinematic SFX up to 10 minutes",
+    "tagline": "Layered, cinematic sound effects for a clip or a prompt, up to 10 minutes",
     "routes": [
       {
         "op": "sfx",
@@ -11213,7 +11310,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "seed-audio",
     "engine": "cloud",
     "kind": "audio",
-    "tagline": "Higgsfield's Seed Audio: speech, ambience, music and Foley from one prompt",
+    "tagline": "Speech, ambience, music and Foley from one prompt",
     "routes": [
       {
         "op": "sfx",
@@ -11282,7 +11379,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "sonilo",
     "engine": "cloud",
     "kind": "audio",
-    "tagline": "Higgsfield's music model \u2014 full tracks up to 10 minutes",
+    "tagline": "Full music tracks up to 10 minutes",
     "routes": [
       {
         "op": "music",
@@ -11904,7 +12001,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "seedream",
     "engine": "cloud",
     "kind": "image",
-    "tagline": "The model Higgsfield Layers runs on: background + up to 16 named, positioned layers",
+    "tagline": "Splits a picture into a background and up to 16 named, positioned layers",
     "routes": [
       {
         "op": "layers",
@@ -16396,7 +16493,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "2k"
       ],
       "maxOutputs": 4,
-      "maxImages": 10
+      "maxImages": 5
     },
     "defaults": {
       "aspectRatio": "1:1",
@@ -16405,7 +16502,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "image",
       "usd": 0.06,
-      "note": "1K medium on fal; low $0.04; 2K $0.06\u20130.08; +$0.01 per input image; Higgsfield $0.04 (1K) / $0.08 (2K)",
+      "note": "1K medium on fal; low $0.04; 2K $0.06\u20130.08; +$0.01 per input image",
       "byResolution": {
         "1k": 0.06,
         "2k": 0.08

@@ -755,11 +755,11 @@ export interface AdCreative extends AdConcept {
   message?: string | null;
   error?: string | null;
   generationId?: string | null;
-  /** The rendered visual (or the whole ad on the Higgsfield route). */
+  /** The rendered visual (or, for a baked ad, the whole ad). */
   image?: string | null;
-  /** The visual already holds the text (Higgsfield Ads Studio): don't draw over it. */
+  /** The visual already holds the text (an ad drawn whole in one call before build plan O7): don't draw over it. */
   baked?: boolean;
-  /** A baked creative's one format (Higgsfield renders a single ratio per ad). */
+  /** A baked creative's one format. */
   ratio?: "1:1" | "4:5" | "9:16";
   layout?: string | null;
   engine: Engine;
@@ -826,12 +826,13 @@ export function mentionedImages(prompt: string): number[] {
 
 /**
  * The images a model gets, and the prompt rewritten for it: the mentioned images first (then the
- * rest) up to the model's limit, renumbered; Kling reads "@Image1", the others "image 1".
+ * rest) up to the model's limit, renumbered; Kling and Happy Horse bind "@Image1" (their prompt
+ * fields say so), the others read "image 1".
  */
 export function mentionsFor(prompt: string, images: string[], modelId: string, max: number): { prompt: string; images: string[]; dropped: number } {
   const order = [...mentionedImages(prompt).filter((n) => n <= images.length), ...images.map((_, i) => i + 1)].filter((n, i, a) => a.indexOf(n) === i);
   const used = order.slice(0, Math.max(0, max));
-  const kling = modelId.startsWith("kling");
+  const kling = modelId.startsWith("kling") || modelId.startsWith("happy-horse");
   const text = prompt.replace(/@image_(\d{1,2})\b/g, (all, d: string) => {
     const at = used.indexOf(Number(d));
     if (at < 0) return "the reference";
@@ -935,12 +936,12 @@ export function shotPlan(seconds: number, allowed: number[] | undefined): number
 
 export interface ModelChoice {
   id: string;
-  /** Why it's the pick ("exact text", "Higgsfield's own"). */
+  /** Why it's the pick ("exact text", "keeps the product pixel-exact"). */
   note?: string;
 }
 
 /** The models a Marketing Studio format can use on an engine, the default first. */
-export function formatModels(format: FormatDef, engine: Engine, has: { product: boolean; avatar: boolean; higgsfield: boolean }): ModelChoice[] {
+export function formatModels(format: FormatDef, engine: Engine, has: { product: boolean; avatar: boolean }): ModelChoice[] {
   if (engine === "open") {
     switch (format.pipeline) {
       case "motion":
@@ -952,15 +953,14 @@ export function formatModels(format: FormatDef, engine: Engine, has: { product: 
         return [{ id: "oss-qwen-edit", note: format.text ? "Qwen-Image-Edit; your text is set on top" : "Qwen-Image-Edit with your references" }];
     }
   }
-  const hf: ModelChoice[] = has.higgsfield ? [{ id: "marketing-studio-image", note: "Higgsfield's own" }] : [];
   switch (format.id) {
     case "product-standalone":
-      return [{ id: "bria-product-shot", note: "Keeps the product pixel-exact" }, { id: "nano-banana-pro" }, ...hf, { id: "gpt-image-2-5" }, { id: "product-photography", note: "One-tap studio shot" }];
+      return [{ id: "bria-product-shot", note: "Keeps the product pixel-exact" }, { id: "nano-banana-pro" }, { id: "gpt-image-2-5" }, { id: "product-photography", note: "One-tap studio shot" }];
     case "product-with-model":
-      return [{ id: "nano-banana-pro", note: "Product + person references" }, ...hf, { id: "gpt-image-2-5" }];
+      return [{ id: "nano-banana-pro", note: "Product + person references" }, { id: "gpt-image-2-5" }];
     case "ads":
     case "marketplace":
-      return [{ id: "gpt-image-2-5", note: "Exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }, ...hf];
+      return [{ id: "gpt-image-2-5", note: "Exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }];
     case "poster":
       return has.product
         ? [{ id: "gpt-image-2-5", note: "Exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }]
@@ -969,7 +969,7 @@ export function formatModels(format: FormatDef, engine: Engine, has: { product: 
     case "tiktok":
       return [{ id: "omnihuman-2", note: "Full-body presenter" }, { id: "kling-avatar" }];
     default:
-      return [{ id: "seedance-2-5", note: "Higgsfield's default video model" }, { id: "kling-o3" }, { id: "gemini-omni-flash" }];
+      return [{ id: "seedance-2-5", note: "Multi-shot with sound" }, { id: "kling-o3" }, { id: "gemini-omni-flash" }];
   }
 }
 
@@ -994,12 +994,19 @@ export const OPEN_SOUND_JOIN = { first: "oss-join-sound1", second: "oss-join-sou
 /** The models the Ad Multiplier can recreate with, per engine (the first that's usable is the default). */
 export const MULTIPLIER_MODELS: Record<Engine, ModelChoice[]> = {
   cloud: [
-    { id: "seedance-2-5", note: "Seedance 2.5 edit — what Higgsfield runs (needs a Higgsfield key)" },
-    { id: "kling-o3", note: "Kling O3 edit, up to 4 @images" },
+    { id: "kling-o3", note: "Kling O3 edit, up to 4 @images, keeps the sound · 15 s at most" },
+    { id: "happy-horse-video-edit", note: "Happy Horse video edit, up to 4 @images, keeps the sound · 15 s at most" },
     { id: "gemini-omni-flash", note: "Gemini Omni Flash edit, prompt only" },
   ],
   open: [{ id: "fuobe-genjutsu-motion", note: "Fuobe Genjutsu · Motion (Wan Animate 2): your @image_1 takes over the performance" }],
 };
+
+/**
+ * The longest part of the reference a cloud edit model recreates (docs/research/paid-model-apis-3/4.json): Kling O3's
+ * edit takes 3–15 s clips; Happy Horse's takes up to 60 s but returns at most the first 15 s (and bills the input
+ * seconds too). A longer selection is cut to its first seconds, and the run says so.
+ */
+export const MULTIPLIER_WINDOW: Readonly<Record<string, number>> = { "kling-o3": 15, "happy-horse-video-edit": 15 };
 
 /** Ad Multiplier quality → the resolution sent; open models top out at 720p. */
 export const multiplierResolution = (q: string, engine: Engine) => (engine === "open" && q === "1080p" ? "720p" : q);

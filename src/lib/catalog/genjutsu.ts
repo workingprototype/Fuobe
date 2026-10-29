@@ -57,6 +57,7 @@ import {
 } from "./remove-object";
 import { firstFramePrompt, getShortsPreset, lookFromPreset, planShorts, segmentPrompt, type PlanStep, type ShortsLook } from "./shorts";
 import { getModel } from "./index";
+import { REPLACED_BY } from "./replaced";
 import { soulLook } from "./soul";
 import type { ChainSlot, Engine, GenerationRequest, PixelPoint } from "./types";
 
@@ -576,15 +577,11 @@ export const MAKERS: Maker[] = [
 export const getMaker = (id: string | undefined, engine?: Engine) => MAKERS.find((m) => m.id === id && (!engine || m.engine === engine));
 
 /**
- * Setups and links made before the Originals name Higgsfield's Genjutsu or the round-4 open models: the Original that
- * replaced each (the look and tier are kept where they still mean something).
+ * Setups and links made before the Originals name a retired Genjutsu model (src/lib/catalog/replaced.ts) or the
+ * round-4 open models: the Original that replaced each (the look and tier are kept where they still mean something).
  */
 export const LEGACY_MAKERS: Record<string, string> = {
-  "genjutsu-motion-transfer": ORIGINALS.motion,
-  "genjutsu-lite-motion-transfer": ORIGINALS.motionLite,
-  "genjutsu-object-swap": ORIGINALS.swap,
-  "genjutsu-lite-object-swap": ORIGINALS.swapLite,
-  "genjutsu-restyle": ORIGINALS.restyle,
+  ...Object.fromEntries(Object.entries(REPLACED_BY).flatMap(([id, r]) => (Object.values(ORIGINALS).includes(r.id as never) ? [[id, r.id]] : []))),
   "oss-wan22-animate": ORIGINALS.motion,
   "oss-vace-swap": ORIGINALS.swap,
   "oss-wan22-vace-restyle": ORIGINALS.restyle,
@@ -1523,7 +1520,7 @@ export function decodeSetup(input: string): GenjutsuSetup | null {
   const out: GenjutsuSetup = { mode };
   if (o.e === "cloud" || o.e === "open") out.engine = o.e;
   const model = str(o.x, 80);
-  // Codes from before the Originals name Higgsfield's Genjutsu or the round-4 open models: the Original that replaced it.
+  // Codes from before the Originals name a retired Genjutsu model or the round-4 open models: the Original that replaced it.
   const current = model && (LEGACY_MAKERS[model] ?? model);
   if (current && getMaker(current)) out.model = current;
   if (o.t === "standard" || o.t === "high") out.tier = o.t;
@@ -1541,7 +1538,7 @@ export function decodeSetup(input: string): GenjutsuSetup | null {
       const images = files(l.i, GENJUTSU.maxLookImages);
       if (images.length) out.look = { kind: "custom", images, ...(str(l.w, 300) ? { words: str(l.w, 300) } : {}) };
     }
-    // Higgsfield's looks ("h") are gone: the code opens without a look.
+    // The retired provider's looks ("h") are gone: the code opens without a look.
   }
   const refs = files(o.r, GENJUTSU.maxReferences);
   if (refs.length) out.references = refs;

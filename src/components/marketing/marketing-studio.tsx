@@ -16,7 +16,7 @@ import { formatCost } from "@/lib/format";
 import { useModelAccess } from "@/lib/api";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
-import { addRuns, send, useBrands, useEstimate, useStatusFlags } from "./hooks";
+import { addRuns, send, useBrands, useEstimate } from "./hooks";
 import type { MarketingRun } from "@/lib/catalog/marketing";
 import type { ModelInfo } from "./model-info";
 import { AvatarSlot, HookPicker, ProductSlot, SettingPicker, VoiceControl, type ProductChoice } from "./pickers";
@@ -99,12 +99,12 @@ function withTemplate(d: Draft, t: MarketingTemplate | null, format?: FormatId):
   };
 }
 
-function SettingsPanel({ draft, set, models, higgsfield, engine }: { draft: Draft; set: (p: Partial<Draft>) => void; models: Record<string, ModelInfo>; higgsfield: boolean; engine: "cloud" | "open" }) {
+function SettingsPanel({ draft, set, models, engine }: { draft: Draft; set: (p: Partial<Draft>) => void; models: Record<string, ModelInfo>; engine: "cloud" | "open" }) {
   const [open, setOpen] = useState(false);
   const f = FORMATS[draft.format];
   // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
   const access = useModelAccess();
-  const choices = keepOffered(formatModels(f, engine, { product: !!draft.product, avatar: !!draft.avatar, higgsfield }), (c) => offered(access, c.id, engine));
+  const choices = keepOffered(formatModels(f, engine, { product: !!draft.product, avatar: !!draft.avatar }), (c) => offered(access, c.id, engine));
   const model = choices.find((c) => c.id === draft.modelId) ?? choices[0];
   const summary = [draft.aspectRatio, f.durations && `${draft.duration}s`, draft.batch > 1 && `×${draft.batch}`].filter(Boolean).join(" · ");
   const seg = (active: boolean) => cn("h-7 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground", active && "bg-background text-foreground shadow-soft");
@@ -274,7 +274,6 @@ function UrlParams({ onTemplate, onTab }: { onTemplate: (t: MarketingTemplate) =
 export function MarketingStudio({ models }: { models: Record<string, ModelInfo> }) {
   const qc = useQueryClient();
   const { engine, setEngine } = useMarketingEngine();
-  const { higgsfield } = useStatusFlags();
   const [tab, setTab] = useState<"templates" | "generations">("templates");
   const [category, setCategory] = useState<MarketingCategory | "all">("all");
   const [media, setMedia] = useState<MediaFilter>("all");
@@ -482,7 +481,7 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
               {f.text && <TextPanel draft={draft} set={set} template={template} />}
               {f.oneOf?.includes("website") && <WebsitePanel draft={draft} set={set} />}
               {f.brandKit && <BrandChip value={brandId} onChange={pickBrand} />}
-              <SettingsPanel draft={draft} set={set} models={models} higgsfield={higgsfield} engine={engine} />
+              <SettingsPanel draft={draft} set={set} models={models} engine={engine} />
             </div>
             <span className="hidden shrink-0 font-mono text-[12px] text-muted-foreground tabular-nums sm:inline">{est.isFetching && !est.data ? "…" : cost}</span>
             <Tooltip>

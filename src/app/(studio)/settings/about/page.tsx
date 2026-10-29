@@ -12,9 +12,10 @@ import { buildLicenceList } from "@/lib/licences";
 
 export const metadata: Metadata = { title: "About & licences" };
 
-async function readJson<T>(...parts: string[]): Promise<T | null> {
+/** A JSON file's contents, or null when it's missing or unreadable. */
+async function readJson<T>(text: Promise<string>): Promise<T | null> {
   try {
-    return JSON.parse(await fs.readFile(path.join(process.cwd(), ...parts), "utf8")) as T;
+    return JSON.parse(await text) as T;
   } catch {
     return null;
   }
@@ -23,7 +24,11 @@ async function readJson<T>(...parts: string[]): Promise<T | null> {
 /** Fuobe's version and every open model's licence, from package.json, the ComfyUI manifest and the catalog. */
 async function readAbout() {
   "use cache";
-  const [pkg, manifest] = await Promise.all([readJson<{ version?: string }>("package.json"), readJson<Manifest & { comfyuiVersion?: string }>("workflows", "comfyui", "manifest.json")]);
+  // Each path is spelled out, so the build traces these two files, not the whole project.
+  const [pkg, manifest] = await Promise.all([
+    readJson<{ version?: string }>(fs.readFile(path.join(process.cwd(), "package.json"), "utf8")),
+    readJson<Manifest & { comfyuiVersion?: string }>(fs.readFile(path.join(process.cwd(), "workflows", "comfyui", "manifest.json"), "utf8")),
+  ]);
   const workflows = manifest?.workflows ?? [];
   return {
     version: pkg?.version ?? "dev",
@@ -71,7 +76,7 @@ export default async function Page() {
           {about.workflowCount} ComfyUI workflows{about.comfyui ? `, built for ComfyUI ${about.comfyui}` : ""}
           {about.builtAt ? <span className="text-muted-foreground"> · {about.builtAt}</span> : null}
         </Fact>
-        <Fact label="Paid models">fal.ai, Replicate and Higgsfield with your key: their terms and prices apply</Fact>
+        <Fact label="Paid models">fal.ai and Replicate with your key: their terms and prices apply</Fact>
       </dl>
 
       {list.notices.length > 0 && (

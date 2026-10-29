@@ -254,7 +254,7 @@ describe("brand kits", () => {
   it("plans Marketing Studio runs per format and engine", () => {
     const b = brand.getBrand(brandId)!;
     const product = brand.listProducts(brandId)[0];
-    const ctx = { product, brand: b, higgsfield: false };
+    const ctx = { product, brand: b };
     const cloudAd = mk.planMarketing({ engine: "cloud", format: "ads", templateId: "ad-hero-headline" }, ctx);
     const r = cloudAd.steps[0].request;
     expect(r).toMatchObject({ modelId: "gpt-image-2-5", op: "edit", feature: "marketing", params: { aspectRatio: "4:5", numOutputs: 1 } });
@@ -294,7 +294,7 @@ describe("brand kits", () => {
     const b = brand.getBrand(brandId)!;
     const product = brand.listProducts(brandId)[0];
     const script = "Okay so I have to tell you about this granola. It is crunchy, not too sweet, and I eat it every single morning now. Try it.";
-    const cloud = mk.planMarketing({ engine: "cloud", format: "ugc-talking", hookId: "product-hit", settingId: "kitchen" }, { product, brand: b, higgsfield: false, script });
+    const cloud = mk.planMarketing({ engine: "cloud", format: "ugc-talking", hookId: "product-hit", settingId: "kitchen" }, { product, brand: b, script });
     expect(cloud.steps.map((s) => s.key)).toEqual(["voice", "still", "talk", "captions", "hook", "broll", "film"]);
     const step = (k: string) => cloud.steps.find((s) => s.key === k)!;
     expect(step("voice").request).toMatchObject({ modelId: "elevenlabs-v4", op: "tts", prompt: script });
@@ -306,8 +306,8 @@ describe("brand kits", () => {
     expect(cloud.finals).toEqual(["film"]);
     expect(cloud.meta.script).toBe(script);
 
-    expect(() => mk.planMarketing({ engine: "open", format: "ugc-talking" }, { product, brand: b, higgsfield: false, script })).toThrow(/voice sample/);
-    const open = mk.planMarketing({ engine: "open", format: "tiktok", hookId: null, voiceSample: upload("voice.png") }, { product, brand: b, higgsfield: false, script });
+    expect(() => mk.planMarketing({ engine: "open", format: "ugc-talking" }, { product, brand: b, script })).toThrow(/voice sample/);
+    const open = mk.planMarketing({ engine: "open", format: "tiktok", hookId: null, voiceSample: upload("voice.png") }, { product, brand: b, script });
     expect(open.steps.map((s) => s.key)).toEqual(["voice", "still", "talk", "captions", "broll", "film"]);
     expect(open.steps[0].request).toMatchObject({ modelId: "oss-chatterbox", inputs: { voiceAudio: expect.stringMatching(/^\/api\/files\//) } });
     expect(open.steps[2].request.modelId).toBe("oss-infinitetalk-long");
@@ -379,28 +379,60 @@ describe("Ad Multiplier", () => {
 
   it("recreates the whole ad: Kling with renumbered @images (keeps audio), Wan Animate + original sound on open", () => {
     const imgs = [upload("a.png"), upload("b.png")];
-    const cloud = mk.planMultiplier({ engine: "cloud", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "Swap the bottle for @image_2", quality: "1080p" }, { higgsfield: false });
+    const cloud = mk.planMultiplier({ engine: "cloud", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "Swap the bottle for @image_2", quality: "1080p" }, {});
     expect(cloud.steps).toHaveLength(1);
     expect(cloud.steps[0].request).toMatchObject({ modelId: "kling-o3", op: "v2v", prompt: "Swap the bottle for @Image1", inputs: { images: [imgs[1], imgs[0]] }, params: { extra: { keep_audio: true } } });
-    const open = mk.planMultiplier({ engine: "open", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "", quality: "1080p" }, { higgsfield: false });
+    const open = mk.planMultiplier({ engine: "open", video: video(), duration: 12, images: imgs, mode: "prompt", prompt: "", quality: "1080p" }, {});
     expect(open.steps.map((s) => [s.key, s.request.modelId])).toEqual([["edit", "fuobe-genjutsu-motion"], ["sound", "oss-mux"]]);
-    expect(() => mk.planMultiplier({ engine: "open", video: video(), duration: 12, mode: "prompt", quality: "720p" }, { higgsfield: false })).toThrow(/Add an image/);
+    expect(() => mk.planMultiplier({ engine: "open", video: video(), duration: 12, mode: "prompt", quality: "720p" }, {})).toThrow(/Add an image/);
+  });
+
+  it("binds Happy Horse's @images, keeps the sound, and recreates at most 15 s on Kling and Happy Horse, saying so", async () => {
+    const { buildPayload } = await import("@/lib/catalog/payload");
+    const { planGeneration, routesFor } = await import("@/lib/catalog/plan");
+    const imgs = [upload("a.png"), upload("b.png")];
+    const v = video();
+    const hh = mk.planMultiplier({ engine: "cloud", video: v, duration: 30, images: imgs, mode: "prompt", prompt: "Swap the bottle for @image_2", quality: "720p", modelId: "happy-horse-video-edit" }, {});
+    // The first 15 s are cut first (Happy Horse returns at most 15 s and bills the input seconds too).
+    expect(hh.steps.map((s) => s.key)).toEqual(["clip", "edit"]);
+    expect(hh.steps[0].request.params).toEqual({ startTime: 0, endTime: 15 });
+    expect(hh.notes.join(" ")).toMatch(/Happy Horse Video Edit recreates up to 15 s: the first 15 s of your selection are used/);
+    const edit = hh.steps[1].request;
+    expect(edit).toMatchObject({ modelId: "happy-horse-video-edit", op: "v2v", prompt: "Swap the bottle for @Image1", params: { resolution: "720p", duration: 15, extra: { audio_setting: "origin" } } });
+    const model = getModel("happy-horse-video-edit")!;
+    const plan = planGeneration({ ...edit, inputs: { video: v, images: edit.inputs!.images } }, getModel, () => undefined);
+    const payload = buildPayload(routesFor(model, "v2v")[0].map!, { ...plan.params, prompt: plan.prompt, video: v, images: edit.inputs!.images });
+    expect(payload).toMatchObject({ prompt: "Swap the bottle for @Image1", reference_image_urls: [imgs[1], imgs[0]], video_url: v, audio_setting: "origin" });
+    expect(payload).not.toHaveProperty("duration");
+    // Within the window nothing is cut; the selection's own start is kept.
+    const short = mk.planMultiplier({ engine: "cloud", video: v, duration: 40, start: 20, end: 32, images: imgs, mode: "prompt", prompt: "x", quality: "720p", modelId: "happy-horse-video-edit" }, {});
+    expect(short.steps[0].request.params).toEqual({ startTime: 20, endTime: 32 });
+    expect(short.notes).toEqual([]);
+    // Kling O3's edit takes 3–15 s clips: the same cut; Gemini Omni Flash takes the whole selection.
+    const kling = mk.planMultiplier({ engine: "cloud", video: v, duration: 30, images: imgs, mode: "prompt", prompt: "x", quality: "720p" }, {});
+    expect(kling.steps[0].request.params).toEqual({ startTime: 0, endTime: 15 });
+    expect(kling.steps[1].request.params).toMatchObject({ duration: 15, extra: { keep_audio: true } });
+    const gemini = mk.planMultiplier({ engine: "cloud", video: v, duration: 30, images: imgs, mode: "prompt", prompt: "x", quality: "720p", modelId: "gemini-omni-flash" }, {});
+    expect(gemini.steps.map((s) => s.key)).toEqual(["edit"]);
+    expect(gemini.steps[0].request).toMatchObject({ params: { resolution: "720p", duration: 30 }, inputs: { video: v } });
+    expect(gemini.steps[0].request.inputs).not.toHaveProperty("images");
+    expect(gemini.notes).toEqual(["Gemini Omni Flash 1.1 edits from the prompt alone; pick Kling O3 to use your images"]);
   });
 
   it("adds a hook and a CTA around the original (trimmed first), from the frames the browser grabbed", () => {
     const v = video();
-    const plain = mk.planMultiplier({ engine: "cloud", video: v, duration: 20, mode: "sections", hook: "Wait for it", cta: "Shop today", quality: "720p", firstFrame: upload("f.png"), lastFrame: upload("l.png") }, { higgsfield: false });
+    const plain = mk.planMultiplier({ engine: "cloud", video: v, duration: 20, mode: "sections", hook: "Wait for it", cta: "Shop today", quality: "720p", firstFrame: upload("f.png"), lastFrame: upload("l.png") }, {});
     expect(plain.steps.map((s) => s.key)).toEqual(["hook", "cta", "film"]);
     const film = plain.steps.at(-1)!;
     expect(film.request.inputs).toEqual({ videos: [v] });
     expect(film.request.chain).toEqual([{ slot: "videos", position: "first" }, { slot: "videos", position: "last" }]);
     expect(plain.steps[0].request.prompt).toContain("“Wait for it”");
 
-    const trimmed = mk.planMultiplier({ engine: "cloud", video: v, duration: 40, start: 5, end: 20, mode: "sections", cta: "Shop today", hook: null, quality: "720p" }, { higgsfield: false });
+    const trimmed = mk.planMultiplier({ engine: "cloud", video: v, duration: 40, start: 5, end: 20, mode: "sections", cta: "Shop today", hook: null, quality: "720p" }, {});
     expect(trimmed.steps.map((s) => s.key)).toEqual(["clip", "last", "cta", "film"]);
     expect(trimmed.steps[0].request).toMatchObject({ modelId: "trim-video", params: { startTime: 5, endTime: 20 } });
     expect(trimmed.steps.at(-1)).toMatchObject({ after: ["clip", "cta"], request: { inputs: undefined } });
-    expect(() => mk.planMultiplier({ engine: "cloud", video: v, duration: 3, mode: "prompt", quality: "720p" }, { higgsfield: false })).toThrow("Video duration: 4-30 seconds");
+    expect(() => mk.planMultiplier({ engine: "cloud", video: v, duration: 3, mode: "prompt", quality: "720p" }, {})).toThrow("Video duration: 4-30 seconds");
   });
 
   it("prices a version per second and says what blocks it", async () => {
@@ -470,7 +502,7 @@ describe("Ads Studio", () => {
       { productId: products[1].id, count: 2 },
     ];
     const est = await (await adsEstimate.POST(json("POST", { brandId, engine: "open", items }))).json();
-    expect(est).toMatchObject({ route: "fuobe", modelId: "oss-qwen-edit", total: 5, demo: true });
+    expect(est).toMatchObject({ modelId: "oss-qwen-edit", total: 5, demo: true });
     const { batchId, creatives, run } = ads.createBatch({ brandId, engine: "open", items });
     expect(creatives).toHaveLength(5);
     expect(creatives.every((c) => c.status === "writing")).toBe(true);

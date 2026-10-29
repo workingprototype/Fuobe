@@ -71,7 +71,7 @@ import { FramesStrip, type FramesNotice } from "./frames-strip";
 import { loadFullCatalog, useCatalog } from "./catalog";
 import { Chip, chipBase, chipIdle } from "./chip";
 import { MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
-import { ControlsChip, ProviderPresetChip } from "./model-controls";
+import { ControlsChip } from "./model-controls";
 import { ModelPicker } from "./model-picker";
 import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
 import { radioKeys, radioTab } from "./radio-keys";
@@ -505,8 +505,6 @@ export function Composer({ docked }: { docked: boolean }) {
       else extra[key] = v;
       return { params: { ...d.params, extra: Object.keys(extra).length ? extra : undefined } };
     });
-  // Studios with the Moodboard chip pick Soul's styles there (its Curated tab), not in a second Style chip.
-  const soulStyles = !!config.signature && (opts.presets?.source === "soul-v1" || opts.presets?.source === "soul-v2");
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
   // Booleans in, not the model's options object: the React Compiler keeps the memos above.
   const showPrompt = showsPrompt({ hidePrompt: config.hidePrompt, modelPrompt: config.modelPrompt }, { promptless: !!opts.promptless, promptOptional: !!opts.promptOptional }, preset?.userPrompt);
@@ -702,12 +700,8 @@ export function Composer({ docked }: { docked: boolean }) {
           onChange={(update) => setDraft((d) => ({ signature: update(d.signature) }))}
           engine={engine}
           lockByDefault={locksByDefault(model?.id)}
-          presetSource={opts.presets?.source}
-          styleId={soulStyles ? (p.extra?.[opts.presets!.param] as string | undefined) : undefined}
-          onStyleIdTaken={() => setExtra(opts.presets!.param, undefined)}
         />
       )}
-      {opts.presets && !soulStyles && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
       {opts.looks && (
         <LookChip
           value={draft.presetId}
@@ -730,7 +724,7 @@ export function Composer({ docked }: { docked: boolean }) {
   );
   const hasSecondary =
     !!config.frames ||
-    (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.presets || !!opts.controls || !!opts.looks)) ||
+    (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.controls || !!opts.looks)) ||
     !!config.presetPicker ||
     !!config.signature ||
     preset?.type === "motion" ||

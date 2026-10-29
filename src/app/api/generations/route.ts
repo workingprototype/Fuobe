@@ -154,13 +154,16 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
   }
+  // A retired model id (an older script, a saved CLI or MCP call) runs on the model that replaced it, and the notes say
+  // so: previewGeneration and createGenerations move it (generations.ts currentRequest, replaced.ts).
+  const req = parsed.data as Parameters<typeof createGenerations>[0];
   try {
     if (new URL(request.url).searchParams.get("preview") === "1") {
-      const { model, ...p } = previewGeneration(parsed.data as Parameters<typeof previewGeneration>[0]);
+      const { model, ...p } = previewGeneration(req);
       return Response.json({ ...p, modelId: model.id, modelName: model.name, engine: model.engine, kind: outputKind(p.op, model), opLabel: OPERATION_LABELS[p.op] ?? p.op });
     }
-    const items = createGenerations(parsed.data as Parameters<typeof createGenerations>[0]);
-    // What the run leaves out or changes (a LoRA that runs only on a GPU, a length the API rounds).
+    const items = createGenerations(req);
+    // What the run leaves out or changes (a model that replaced a retired one, a LoRA that runs only on a GPU, a length the API rounds).
     const notes = [...new Set(items.flatMap((g) => g.notes ?? []))];
     return Response.json({ items, ...(notes.length && { notes }) }, { status: 201 });
   } catch (e) {

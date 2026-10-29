@@ -1,7 +1,7 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
-import { castPrompt, type CastValues } from "@/lib/catalog/cinema";
+import { CAST_LOOK, castPrompt, SOUL_BUILDER_MODEL, type CastValues } from "@/lib/catalog/cinema";
 import {
   castSheetModel,
   customPack,
@@ -21,9 +21,8 @@ import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types"
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { getElement } from "./elements";
-import { createGenerations, getGeneration, pickOutput, previewGeneration } from "./generations";
+import { createGenerations, currentRequest, getGeneration, pickOutput, previewGeneration } from "./generations";
 import { trashGenerations } from "./library";
-import { higgsfieldKey } from "./providers/higgsfield";
 import { engineMode } from "./settings";
 import { isOffered } from "./model-access";
 
@@ -82,7 +81,7 @@ export function deleteUserPack(id: string): boolean {
 
 /** What this install can do, for the pure planners. */
 export function planCaps(): PlanCaps {
-  return { higgsfield: !!higgsfieldKey() && engineMode() !== "open", has: (id) => !!getModel(id) && isOffered(id) };
+  return { has: (id, engine) => !!getModel(id) && isOffered(id, engine) };
 }
 
 /** The engine a run uses: the one asked for, unless Settings locks the other. */
@@ -193,6 +192,9 @@ export function retryPhoto(id: string): Generation[] {
   if (!g) throw new Error("That photo is gone");
   if (!RETRY_FEATURES.has(g.feature)) throw new Error("This result isn't part of a photo run");
   if (g.status !== "failed" && g.status !== "canceled") throw new Error("Only a failed or canceled photo can be retried");
+  // A photo made on a model Fuobe retired (Soul 2.0 for a Cast sheet, the AI Influencer app's model) runs again on the
+  // one that replaced it (src/lib/catalog/replaced.ts), sized for that model.
+  const request = currentRequest(g.request).request;
   // A chained photo (the AI Influencer builder's face pass) whose earlier step failed never got that step's
   // image: both run again, chained as before.
   const deps = dependsOn(id);
@@ -202,8 +204,8 @@ export function retryPhoto(id: string): Generation[] {
     if (deps.length !== 1 || !step || dependsOn(step.id).length || (step.status !== "failed" && step.status !== "canceled")) throw new Error("The step before it didn't finish — press Generate to run both again");
     const { items } = createPipeline(
       [
-        { key: "before", request: step.request },
-        { key: "photo", request: g.request, after: "before" },
+        { key: "before", request: currentRequest(step.request).request },
+        { key: "photo", request, after: "before" },
       ],
       g.batchId ? { batchId: g.batchId } : {},
     );
@@ -213,11 +215,11 @@ export function retryPhoto(id: string): Generation[] {
   // Its earlier steps finished, but it never launched (it failed or was canceled while it waited): it waits
   // for them again, so the runner hands it their outputs (the sheet goes in as image 1) and launches it.
   if (deps.length && !gotChainInputs(g, before as Generation[])) {
-    const items = createGenerations(fitted(g.request), { ...(g.batchId && { batchId: g.batchId }), dependsOn: deps });
+    const items = createGenerations(fitted(request), { ...(g.batchId && { batchId: g.batchId }), dependsOn: deps });
     trashGenerations([id]);
     return items;
   }
-  const req = fitted(g.request);
+  const req = fitted(request);
   const p = previewGeneration(req);
   const per = p.jobs > 1 ? Math.max(1, Math.round(p.outputs / p.jobs)) : undefined;
   const items = createGenerations(per ? { ...req, params: { ...req.params, numOutputs: per } } : req, g.batchId ? { batchId: g.batchId } : {});
@@ -316,15 +318,25 @@ function sheetRequest(input: SheetRun): { request: GenerationRequest; notes: str
     const m = getModel(modelId);
     const aspect = m?.options.aspectRatios?.includes("16:9") ? "16:9" : undefined;
     const resolution = m?.options.resolutions?.includes("2K") ? "2K" : m?.options.resolutions?.includes("1080p") ? "1080p" : undefined;
+    // Fuobe Soul runs on both engines (the run's engine picks its half) and draws the cast in Cinema's casting look.
+    const soul = modelId === SOUL_BUILDER_MODEL;
     return {
-      request: { feature: "character-sheet", modelId, prompt: castPrompt(input.cast, input.details), params: { numOutputs: 1, ...(aspect && { aspectRatio: aspect }), ...(resolution && { resolution }) } },
-      notes: modelId === "nano-banana-pro" ? ["Soul 2.0 needs a Higgsfield key — Nano Banana Pro draws the sheet"] : [],
+      request: {
+        feature: "character-sheet",
+        modelId,
+        ...(soul && { engine, presetId: CAST_LOOK }),
+        prompt: castPrompt(input.cast, input.details),
+        params: { numOutputs: 1, ...(aspect && { aspectRatio: aspect }), ...(resolution && { resolution }) },
+      },
+      notes: modelId === "nano-banana-pro" ? ["Fuobe Soul is switched off in Settings → Models & licences — Nano Banana Pro draws the sheet"] : [],
     };
   }
-  // A description: the AI Influencer app (Higgsfield's character-sheet model, or Z-Image Turbo).
+  // A description: the AI Influencer app (Nano Banana Pro in the cloud, the Soul Cast sheet graph on your GPU).
   if (!input.prompt.trim()) throw new Error("Describe your character first");
+  const route = engine === "open" ? getPreset(AI_INFLUENCER)?.open : getPreset(AI_INFLUENCER)?.cloud;
+  const modelId = route?.modelId ?? (engine === "open" ? "oss-zimage-soul-cast" : "nano-banana-pro");
   return {
-    request: { feature: "app:app-ai-influencer", presetId: AI_INFLUENCER, modelId: (engine === "open" ? getPreset(AI_INFLUENCER)?.open : getPreset(AI_INFLUENCER)?.cloud)?.modelId ?? "ai-influencer", prompt: input.prompt.trim() },
+    request: { feature: "app:app-ai-influencer", presetId: AI_INFLUENCER, modelId, prompt: input.prompt.trim() },
     notes: [],
   };
 }

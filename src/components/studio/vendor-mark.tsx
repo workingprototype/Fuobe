@@ -12,7 +12,6 @@ const MARKS: [RegExp, string, number][] = [
   [/^bytedance/i, "B", 200],
   [/^black forest/i, "F", 250],
   [/^kuaishou/i, "K", 30],
-  [/^higgsfield/i, "H", 155],
   [/^google/i, "G", 230],
   [/^elevenlabs/i, "11", 0],
   [/^openai/i, "O", 160],

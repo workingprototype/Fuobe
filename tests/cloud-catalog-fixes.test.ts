@@ -116,25 +116,20 @@ describe("planning the new operations", () => {
   });
 });
 
-describe("reference clips (Cinema Studio, Seedance 2.5)", () => {
+describe("reference clips (Seedance 2.5, Wan 3.0)", () => {
   it("sends reference videos and audio as the API's clip lists", () => {
     const refs = { prompt: "@Video1 dances to @Audio1", images: ["face.png"], videos: ["moves.mp4", "cam.mp4"], audios: ["song.mp3"] };
     const clips = { video_urls: ["moves.mp4", "cam.mp4"], audio_urls: ["song.mp3"] };
     expect(buildPayload(route("seedance-2-5", "ref2v").map!, refs)).toMatchObject({ image_urls: ["face.png"], ...clips });
-    expect(buildPayload(route("cinema-studio-4", "ref2v", "higgsfield").map!, refs)).toMatchObject({ image_urls: ["face.png"], ...clips });
-    expect(buildPayload(route("seedance-2-5", "ref2v", "higgsfield").map!, refs)).toMatchObject(clips);
     expect(buildPayload(route("wan-3", "ref2v").map!, refs)).toMatchObject({ reference_video_urls: ["moves.mp4", "cam.mp4"], reference_audio_urls: ["song.mp3"] });
-    // Higgsfield's Seedance edit keeps the clip it edits apart from the reference clips.
-    expect(buildPayload(route("seedance-2-5", "v2v", "higgsfield").map!, { prompt: "p", video: "take.mp4", videos: ["ref.mp4"] })).toMatchObject({ video_url: "take.mp4", video_urls: ["ref.mp4"] });
     // The fal extend route sends the clip it continues as its one-item list.
     expect(buildPayload(route("seedance-2-5", "extend").map!, { prompt: "p", video: "take.mp4", audios: ["a.mp3"] })).toMatchObject({ video_urls: ["take.mp4"], audio_urls: ["a.mp3"], task: "extension" });
     // Text-to-video routes never carry clips.
-    expect(buildPayload(route("cinema-studio-4", "t2v", "higgsfield").map!, refs)).not.toHaveProperty("video_urls");
+    expect(buildPayload(route("seedance-2-5", "t2v").map!, refs)).not.toHaveProperty("video_urls");
   });
 
   it("says how many clips each model takes", () => {
     expect(getModel("seedance-2-5")!.options).toMatchObject({ maxVideos: 10, maxAudios: 10 });
-    expect(getModel("cinema-studio-4")!.options).toMatchObject({ maxVideos: 10, maxAudios: 10 });
     expect(getModel("wan-3")!.options).toMatchObject({ maxVideos: 5, maxAudios: 5 });
     expect(getModel("seedance-2-0")!.options).toMatchObject({ maxVideos: 3, maxAudios: 3 });
     expect(getModel("kling-3")!.options.maxVideos).toBeUndefined();
@@ -142,7 +137,7 @@ describe("reference clips (Cinema Studio, Seedance 2.5)", () => {
 
   it("plans clips as reference-to-video, and turns them away where they can't go", () => {
     expect(plan({ modelId: "seedance-2-5", prompt: "x", inputs: { videos: ["/v.mp4"] } }).op).toBe("ref2v");
-    expect(plan({ modelId: "cinema-studio-4", prompt: "x", inputs: { audios: ["/a.mp3"] } }).op).toBe("ref2v");
+    expect(plan({ modelId: "seedance-2-5", prompt: "x", inputs: { audios: ["/a.mp3"] } }).op).toBe("ref2v");
     expect(plan({ modelId: "seedance-2-5", prompt: "x", inputs: { images: ["/a.png"], videos: ["/v.mp4"] } }).op).toBe("ref2v");
     // One image and no clips is still a start frame.
     expect(plan({ modelId: "seedance-2-5", prompt: "x", inputs: { images: ["/a.png"] } }).op).toBe("i2v");

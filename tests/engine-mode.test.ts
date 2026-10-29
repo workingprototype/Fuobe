@@ -55,24 +55,20 @@ describe("preferred cloud provider", () => {
 describe("routes that take fewer images or can't batch", () => {
   const edit = () => getModel("grok-imagine-image-2")!.routes.filter((r) => r.op === "edit");
 
-  it("sends more images than fal's Grok edit takes to Higgsfield, or says why it can't", () => {
+  it("says when a run sends more images than the model's only route takes", () => {
     setSetting("falKey", "fal_test_key_123456");
     expect(chooseRoute(edit(), 3).route.provider).toBe("fal");
-    expect(() => chooseRoute(edit(), 8)).toThrow("This model takes up to 5 images on fal.ai — remove some, or connect Higgsfield for more");
-    setSetting("higgsfieldKey", "key_id:key_secret");
-    expect(chooseRoute(edit(), 8).route.provider).toBe("higgsfield");
-    expect(chooseRoute(edit(), 3).route.provider).toBe("fal");
+    expect(() => chooseRoute(edit(), 8)).toThrow("This model takes up to 5 images on fal.ai — remove some");
     setSetting("falKey", "");
-    setSetting("higgsfieldKey", "");
   });
 
   it("runs one job per take on a route without a batch count", () => {
-    setSetting("higgsfieldKey", "key_id:key_secret");
-    const req = { feature: "image", modelId: "grok-imagine-image-2", prompt: "a fox", params: { numOutputs: 4 } };
-    expect(previewGeneration(req)).toMatchObject({ providerId: "higgsfield", jobs: 4, outputs: 4 });
+    setSetting("replicateToken", "r8_test_token_123456");
+    const req = { feature: "image", modelId: "nano-banana-pro", prompt: "a fox", params: { numOutputs: 4 } };
+    expect(previewGeneration(req)).toMatchObject({ providerId: "replicate", jobs: 4, outputs: 4 });
     setSetting("falKey", "fal_test_key_123456");
     expect(previewGeneration(req)).toMatchObject({ providerId: "fal", jobs: 1, outputs: 4 });
     setSetting("falKey", "");
-    setSetting("higgsfieldKey", "");
+    setSetting("replicateToken", "");
   });
 });

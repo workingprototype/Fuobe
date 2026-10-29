@@ -4,13 +4,12 @@
  * address looks like, when to offer the first-run guide, and each connection's one-line status.
  */
 
-export type TestProvider = "fal" | "replicate" | "higgsfield" | "comfyui" | "llm" | "civitai";
+export type TestProvider = "fal" | "replicate" | "comfyui" | "llm" | "civitai";
 
 /** The settings each provider's connection test reads; an unsaved value for one of them can be tested before it's saved. */
 export const PROVIDER_SETTINGS = {
   fal: ["falKey"],
   replicate: ["replicateToken"],
-  higgsfield: ["higgsfieldKey"],
   comfyui: ["comfyUrl", "comfyToken", "comfyIsolatedUrl"],
   llm: ["anthropicKey", "ollamaUrl", "ollamaModel", "enhanceProvider"],
   // Not a model provider: the key that downloads a recipe's civitai LoRAs (Settings → LoRAs).
@@ -70,9 +69,6 @@ export function settingProblem(name: string, raw: string): string | null {
     case "falKey":
       if (KEY_PAIR.test(v)) return null;
       return v.includes(":") ? "Both halves of key_id:key_secret are needed, without spaces — copy the key again" : "fal.ai keys look like key_id:key_secret — paste the whole key, with the part after the colon";
-    case "higgsfieldKey":
-      if (KEY_PAIR.test(v)) return null;
-      return "Higgsfield keys look like KEY_ID:KEY_SECRET (both parts from console.higgsfield.ai)";
     case "replicateToken":
       return /^r8_\S+$/.test(v) ? null : "Replicate tokens start with r8_";
     case "anthropicKey":
@@ -101,7 +97,7 @@ export interface ConnectionState {
   demoMode?: string;
 }
 
-const CLOUD_PROVIDERS = ["fal", "replicate", "higgsfield"] as const;
+const CLOUD_PROVIDERS = ["fal", "replicate"] as const;
 
 /** Whether a paid API and ComfyUI are connected. */
 export function connectedEngines(s: ConnectionState): { cloud: boolean; open: boolean } {
@@ -125,7 +121,7 @@ export interface StartQuote {
   open: { name: string; providers: string[] } | null;
 }
 
-const PROVIDER_LABEL: Record<string, string> = { fal: "fal.ai", replicate: "Replicate", higgsfield: "Higgsfield", comfyui: "ComfyUI" };
+const PROVIDER_LABEL: Record<string, string> = { fal: "fal.ai", replicate: "Replicate", comfyui: "ComfyUI" };
 
 /**
  * The line under Home's composer, before Start is pressed: the model it runs and its price, or why
@@ -164,7 +160,7 @@ export const FIRST_RUN_SCRIPT = `(function(){try{if(localStorage.getItem("${FIRS
 export const ENGINE_MODE_LABEL: Record<EngineModeName, string> = { both: "Open source + paid", open: "Open source only", cloud: "Paid APIs only" };
 
 export interface ConnectionItem {
-  id: "fal" | "replicate" | "higgsfield" | "comfyui" | "llm";
+  id: "fal" | "replicate" | "comfyui" | "llm";
   label: string;
   ok: boolean;
   /** "Key set", "Online", "Off"… */
@@ -177,7 +173,7 @@ export interface ConnectionItem {
 
 /** One line per connection for Settings' status strip, in the order the page lists them. */
 export function connectionSummary(s: ConnectionState): ConnectionItem[] {
-  const key = (id: "fal" | "replicate" | "higgsfield", label: string): ConnectionItem => {
+  const key = (id: "fal" | "replicate", label: string): ConnectionItem => {
     const ok = !!s.providers[id]?.configured;
     return { id, label, ok, text: ok ? "Key set" : "Not set", href: `#${id}`, unused: s.engineMode === "open" };
   };
@@ -186,7 +182,6 @@ export function connectionSummary(s: ConnectionState): ConnectionItem[] {
   return [
     key("fal", "fal.ai"),
     key("replicate", "Replicate"),
-    key("higgsfield", "Higgsfield"),
     { id: "comfyui", label: "ComfyUI", ok: comfy, text: comfy ? "Online" : "Offline", href: "#comfyui", unused: s.engineMode === "cloud" },
     { id: "llm", label: "Claude / Ollama", ok: llm, text: llm ? "On" : "Off", href: "#text-ai", unused: false },
   ];

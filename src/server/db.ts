@@ -538,6 +538,32 @@ const MIGRATIONS: string[] = [
   ALTER TABLE assist_thread_state ADD COLUMN spent_usd REAL NOT NULL DEFAULT 0;
   ALTER TABLE assist_thread_state ADD COLUMN connectors INTEGER NOT NULL DEFAULT 1;
   CREATE INDEX IF NOT EXISTS assist_thread_state_schedule ON assist_thread_state(schedule_id);`,
+  // originals (o/h3-studio): Character Swap Studio projects — the character (picture and description), the clips with
+  // their 24 fps copies, cuts and shots, transcripts and voices, masks and anchors, segments with their takes, review
+  // decisions and assemblies, as one document (data_json; revision counts saves, so an open page knows it changed).
+  // Every job is an ordinary generation the document names by id. `waiting`: takes queued behind the segments they
+  // continue from, which the studio's sweep launches once those are made.
+  `CREATE TABLE IF NOT EXISTS swap_projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    waiting INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS swap_projects_updated ON swap_projects(updated_at DESC);
+  CREATE INDEX IF NOT EXISTS swap_projects_waiting ON swap_projects(waiting) WHERE waiting > 0;`,
+  // originals (o/no-higgsfield): Fuobe no longer calls Higgsfield's API (build plan O7). Its saved key is deleted (a
+  // secret nothing reads any more), a "Higgsfield first" cloud provider becomes Automatic, and the ads its Ads Studio
+  // drew whole are marked baked, which is all the Ads Studio needs to show them as they are. Jobs and trainings still
+  // waiting on it fail on their next poll with a way forward (src/server/providers/index.ts, src/server/training.ts).
+  `DELETE FROM settings WHERE key = 'higgsfield.key';
+  UPDATE settings SET value = 'auto' WHERE key = 'cloud.provider' AND value = 'higgsfield';
+  UPDATE ad_batches SET route = 'baked' WHERE route = 'higgsfield';
+  UPDATE ad_creatives SET meta_json = json_set(meta_json, '$.route', 'baked')
+    WHERE json_valid(meta_json) AND json_extract(meta_json, '$.route') = 'higgsfield';`,
 ];
 
 declare global {

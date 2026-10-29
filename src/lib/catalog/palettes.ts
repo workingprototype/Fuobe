@@ -8,8 +8,8 @@
  *
  * Routing (docs/research/higgsfield-image-studios.md §4, §5):
  * - Palette → models with a palette field (Recraft V4.1 / Pro / Styles: ≤10 colours, Ideogram 3.0):
- *   `params.palette` (+ the background colour in its own field); Cinema Studio 4.0: the built-in
- *   palette's slug as `color_palette`; every other model: the hex list written into the prompt. Open
+ *   `params.palette` (+ the background colour in its own field); every other model: the hex list written into
+ *   the prompt (Fuobe Cinema too: a built-in palette's slug is no longer sent anywhere). Open
  *   engine: Z-Image Turbo becomes Z-Image Turbo · Palette (hex in the prompt + a ColorTransfer lock to
  *   a swatch); other open models can add a palette-transfer post-step (oss-palette-image, chained).
  * - Moodboard → curated: a Fuobe Soul look (Soul 2.0's 33, Soul's 106; src/lib/catalog/soul-cards.ts). On a model
@@ -401,9 +401,6 @@ export const SIGNATURE_MODELS = {
   /** A personal moodboard trained as a style LoRA runs here, the LoRA as its look (both engines). */
   soul: SOUL_MODEL_IDS.soul,
   paletteLock: "oss-palette-image",
-  soul2: "soul-2",
-  soul1: "soul-1",
-  cinema: "cinema-studio-4",
 } as const;
 
 const NOT_READY = "This moodboard is still training. Try again once it is ready.";
@@ -590,8 +587,6 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
       if (pal.background && nativeNow.background) r = setExtra(r, nativeNow.background, pal.background.toUpperCase());
     } else if (model.id === SIGNATURE_MODELS.openPalette) {
       r = { ...r, params: { ...r.params, palette: all } };
-    } else if (model.id === SIGNATURE_MODELS.cinema && pal.slug) {
-      r = setExtra(r, "color_palette", pal.slug);
     } else {
       words.push(palettePrompt(pal));
       r = { ...r, params: { ...r.params, palette: all.slice(0, 16) } };

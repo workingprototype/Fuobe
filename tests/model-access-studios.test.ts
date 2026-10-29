@@ -84,9 +84,9 @@ describe("a studio's default on the server", () => {
   });
 
   it("Ad Multiplier and Faceless fall back past a switched-off default", () => {
-    expect(multiplierModel({ engine: "cloud" }, false).id).toBe("kling-o3");
+    expect(multiplierModel({ engine: "cloud" }).id).toBe("kling-o3");
     changeAccess([{ kind: "model", id: "kling-o3", on: false }]);
-    expect(multiplierModel({ engine: "cloud" }, false).id).not.toBe("kling-o3");
+    expect(multiplierModel({ engine: "cloud" }).id).not.toBe("kling-o3");
 
     const settings = { engine: "cloud" as const, animation: "animated" } as Parameters<typeof withOfferedVideo>[0];
     expect(withOfferedVideo(settings)).toBe(settings);

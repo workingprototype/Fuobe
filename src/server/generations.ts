@@ -4,6 +4,8 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
+import { migrateRequest, replacedBy } from "@/lib/catalog/replaced";
+import { directorFieldWords } from "@/lib/catalog/cinema";
 import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
@@ -41,7 +43,7 @@ import { pollTrainings } from "./training";
 import { createExtendChain, createKeyframeFilm, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
-import { provider } from "./providers";
+import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
 import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
@@ -127,7 +129,8 @@ export function toGeneration(r: Row): Generation {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
-    modelName: model?.name ?? r.model_id,
+    // A run on a model Fuobe retired keeps the name it ran under (replaced.ts `was`); Reuse moves it to the replacement.
+    modelName: model?.name ?? replacedBy(r.model_id)?.was ?? r.model_id,
     // A Fuobe Soul look is named like a preset ("Look · Y2K" in the viewer).
     presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? (soulKind(r.model_id) ? (soulLook(r.preset_id)?.name ?? null) : null)) : null,
     aspectRatio: ar && ar !== "auto" ? ar : null,
@@ -295,6 +298,8 @@ export const ASSET_REFS: AssetRef[] = [
   { table: "content_series", cols: ["data_json"], what: "Content Factory series", name: "COALESCE(json_extract(data_json, '$.name'), json_extract(data_json, '$.reference.title'))" },
   // Assist's scheduled tasks: the files the prompt runs with.
   { table: "assist_schedules", cols: ["attachments_json"], what: "scheduled task", name: "title" },
+  // Character Swap Studio: the character picture, each clip and its 24 fps copy, masks, anchors, takes and their masters.
+  { table: "swap_projects", cols: ["data_json"], what: "Character Swap project", name: "name" },
 ];
 
 /**
@@ -384,7 +389,7 @@ export function deleteGeneration(id: string): void {
 /**
  * Pick the provider for a run: a configured real provider, else the demo provider (unless demo is off).
  * `images` is how many images the run sends: a route whose list takes fewer (FieldMap.maxImages: Grok
- * Imagine Image takes 5 on fal, 10 on Higgsfield) gives way to one that takes them all, or says so.
+ * Imagine Image takes 5 on fal) gives way to one that takes them all, or says so.
  * `loras` and `seconds` (the clip length asked for) prefer a route that carries every LoRA and makes that
  * length (Replicate's Wan 2.2 fast renders only 81–121 frames, fal's 17–161).
  */
@@ -437,6 +442,15 @@ setResolver((ids) =>
 
 // ---------------------------------------------------------------------------
 // Create
+
+/**
+ * A request as it runs now: one that names a model (or an operation) Fuobe retired when it stopped calling Higgsfield moves
+ * to what replaced it (src/lib/catalog/replaced.ts), with Cinema Studio's Director fields in words. Every way in goes
+ * through it (the API, a retry, a waiting step, a saved project's run); `note` says what changed.
+ */
+export function currentRequest(req: GenerationRequest): { request: GenerationRequest; note?: string } {
+  return migrateRequest(req, { directorWords: directorFieldWords });
+}
 
 /**
  * The engine a model runs a request on: a Fuobe Original runs on the engine asked for (the composer's switch), else
@@ -524,7 +538,7 @@ function prepare(original: GenerationRequest) {
     const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
     notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
   }
-  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images; a ComfyUI graph, which makes
+  // A route that can't batch (Replicate's Nano Banana Pro beside fal's num_images; a ComfyUI graph, which makes
   // one picture a run: Fuobe Soul on the open engine) runs one job per output.
   if (!demo && !route.map?.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
@@ -544,9 +558,12 @@ const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "ext
 
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
-export function previewGeneration(req: GenerationRequest) {
-  const { plan, route, demo, providerId, cost, notes, asked, unreachable, switchedOff } = prepare(req);
-  const fitted = routeLoras(route, asked.filter((l) => !unreachable.includes(l)));
+export function previewGeneration(asked: GenerationRequest) {
+  const moved = currentRequest(asked);
+  const prepared = prepare(moved.request);
+  const { plan, route, demo, providerId, cost, asked: askedLoras, unreachable, switchedOff } = prepared;
+  const notes = moved.note ? [moved.note, ...prepared.notes] : prepared.notes;
+  const fitted = routeLoras(route, askedLoras.filter((l) => !unreachable.includes(l)));
   const loras = {
     ...fitted,
     dropped: [...switchedOff, ...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped],
@@ -592,7 +609,10 @@ export interface CreateOptions {
 
 const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
 
-export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+export function createGenerations(asked: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+  // A retired model or operation (a retry, an old script, a saved project) runs on what replaced it, and says so.
+  const moved = currentRequest(asked);
+  const original = moved.request;
   // Open models make multi-shot films shot by shot, then join the clips. A Fuobe Original is taken on the engine it runs
   // on (Fuobe DoP's Frames mode is a GPU chain).
   // A model (or an Original's engine asked for) switched off in Settings → Models & licences is refused here, before a
@@ -620,7 +640,8 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
-  const { req, plan, route, demo, providerId, cost, notes } = p;
+  const { req, plan, route, demo, providerId, cost } = p;
+  const notes = moved.note ? [moved.note, ...p.notes] : p.notes;
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
   if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name, plan.op));
   const jobs = waits ? 1 : plan.jobs;
@@ -907,12 +928,24 @@ export function withoutSkipped(req: GenerationRequest, slots: ChainSlot[], skipp
 /** The chain slots a step fills: its own, less the optional ones left out (chainSkipped). */
 const filledSlots = (req: GenerationRequest, n: number): ChainSlot[] => slotsFor(req, n).filter((_, i) => !req.chainSkipped?.slots.includes(i));
 
+/** When a step after real ComfyUI steps first found ComfyUI not answering, by step id (shared across hot reloads). */
+declare global {
+  var __fuobeComfyWaits: Map<string, number> | undefined;
+}
+const comfyWaits = (): Map<string, number> => (globalThis.__fuobeComfyWaits ??= new Map<string, number>());
+/** How long such a step waits for ComfyUI to answer again before chainMode fails it. */
+export const COMFY_WAIT = { ms: 60_000 };
+
 /** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
 async function advanceDependents(): Promise<void> {
   const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
+  // A forced look at ComfyUI, at most one a sweep, for the steps that found it not answering.
+  let lookedAgain: Promise<boolean> | undefined;
   for (const r of rows) {
     if (submitting().has(r.id)) continue;
-    const stored = JSON.parse(r.request_json) as GenerationRequest;
+    // A step queued before its model was retired runs on what replaced it (and its row says so).
+    const moved = currentRequest(JSON.parse(r.request_json) as GenerationRequest);
+    const stored = moved.request;
     const allIds = depIds(r.depends_on);
     const allSlots = slotsFor(stored, allIds.length);
     const allDeps = allIds.map(
@@ -955,9 +988,24 @@ async function advanceDependents(): Promise<void> {
         fail(`${earlier} has no ${slotNoun(slots[missing])} to use`);
         continue;
       }
-      // Routing reads cached reachability: make sure it's fresh for local engines.
+      // Routing reads cached reachability: make sure it's fresh for local engines. An Original counts with the routes of
+      // the engine it runs on, ComfyUI taken as answering: one on the cloud doesn't use it, so doesn't wait for it.
       const model = getModel(request.modelId);
-      if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
+      const runs = model && dualEngine(model) ? onEngine(model, pickEngine(model, request.engine, engineMode(), () => true)) : model;
+      if (runs?.routes.some((x) => x.provider === "comfyui") && !(await probeComfy()) && deps.some((d) => d!.provider === "comfyui")) {
+        // The earlier steps ran for real on ComfyUI: one missed check (a server busy finishing them, or restarting)
+        // mustn't make this one a demo, which chainMode fails. Look again at once (one forced look a sweep), then wait
+        // for the next sweeps (COMFY_WAIT from the first miss) before chainMode has its say.
+        const first = comfyWaits().get(r.id);
+        const back = first === undefined && (await (lookedAgain ??= probeComfy(true)));
+        if (!back && first === undefined) {
+          comfyWaits().set(r.id, Date.now());
+          update(r.id, { message: "Waits for ComfyUI to answer" });
+          continue;
+        }
+        if (!back && Date.now() - first! < COMFY_WAIT.ms) continue;
+      }
+      comfyWaits().delete(r.id);
       if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
       // Filled with the slots that have an input; stored with its whole chain (and what was skipped) for a retry.
       const filled = withChainInputs({ ...request, chain: slots }, values as string[]);
@@ -967,6 +1015,7 @@ async function advanceDependents(): Promise<void> {
       if (mode.error) throw new Error(mode.error);
       const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
       update(r.id, {
+        ...(moved.note && { model_id: p.plan.model.id, engine: p.plan.model.engine }),
         provider: p.providerId,
         op: p.plan.op,
         kind: outputKind(p.plan.op, p.plan.model),
@@ -1245,7 +1294,9 @@ function pollContext(r: Row, model: NonNullable<ReturnType<typeof getModel>>): P
 async function pollOne(r: Row): Promise<void> {
   const model = getModel(r.model_id);
   if (!model) {
-    update(r.id, { status: "failed", error: `Model ${r.model_id} no longer exists`, completed_at: Date.now() });
+    // A job on a model Fuobe retired with its provider (replaced.ts) can't be collected: Reuse runs it on the replacement.
+    const retired = !!replacedBy(r.model_id) || !Object.hasOwn(PROVIDERS, r.provider);
+    update(r.id, { status: "failed", error: retired ? RETIRED_PROVIDER_ERROR : `Model ${r.model_id} no longer exists`, completed_at: Date.now(), message: null });
     return;
   }
   // The clock runs from when the provider got the job (and from when it started it), not from creation:

@@ -53,6 +53,10 @@ try {
       const shot = async (name) => shots && (await page.screenshot({ path: path.join(shots, `${name}-${width}-${scheme}.png`), fullPage: true }));
       const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       const text = () => page.evaluate(() => document.body.innerText);
+      // A list or dialog that is closing stays in the page (data-state="closed") until it has animated out, and holds
+      // the page's clicks meanwhile: let it go before the next click.
+      const settle = () =>
+        page.waitForFunction(() => !document.querySelector('[role="listbox"][data-state="closed"], [role="dialog"][data-state="closed"]'), null, { timeout: 5000 }).catch(() => {});
 
       await page.goto(`${app}/genjutsu?mode=character&video=${encodeURIComponent(clip)}&image=${encodeURIComponent(hero)}`, { waitUntil: "load", timeout: 180_000 });
       const tab = page.getByRole("tab", { name: "Character swap" });
@@ -142,12 +146,15 @@ try {
       // The History list stops below the window (the pack refuses a history as long as it).
       await page.locator("#gj-window").click();
       await page.getByRole("option", { name: "22 frames" }).click();
+      await settle();
       await page.locator("#gj-history").click();
       const histories = (await page.getByRole("option").allInnerTexts()).join("|");
       await page.keyboard.press("Escape");
+      await settle();
       check(`${tag}: open: History under a 22-frame window is 0, 1 or 18`, histories === "0 frames|1 frames|18 frames", histories);
       await page.locator("#gj-window").click();
       await page.getByRole("option", { name: "124 frames" }).click();
+      await settle();
       // H3 Relay has no switch for the whole frame.
       await page.getByRole("radiogroup", { name: "Model", exact: true }).getByRole("radio", { name: /H3 Relay/ }).click();
       await page.waitForTimeout(300);

@@ -130,11 +130,27 @@ async function session(width, height, scheme) {
     await page.getByRole("button", { name: "5s", exact: true }).click();
     await page.keyboard.press("Escape");
   }
+  // A dialog, sheet or menu that is closing stays in the page (data-state="closed") until it has animated out, and
+  // keeps the rest hidden from assistive tech meanwhile: let it go before looking for what's under it.
+  const settle = () =>
+    page.waitForFunction(() => !document.querySelector('[role="dialog"][data-state="closed"], [role="menu"][data-state="closed"]'), null, { timeout: 5000 }).catch(() => {});
+  // A Director's Panel chip: in its own row from sm up, in the folded Director sheet on a phone. The sheet re-renders
+  // while a dialog it opened closes, and can swap the chip out under the click: a short try, then open it and click again.
+  const directorChip = async (name) => {
+    const chip = page.getByRole("button", { name }).locator("visible=true").first();
+    const director = page.getByRole("button", { name: /^Director/ }).locator("visible=true").first();
+    const openSheet = async () => {
+      await settle();
+      if (!(await chip.count()) && (await director.count())) await director.click();
+    };
+    await openSheet();
+    if (await chip.click({ timeout: 3000 }).then(() => true, () => false)) return;
+    await openSheet();
+    await chip.click();
+  };
   // The Director panel's move list badges like the prompt bar's: none when a partner model gets the moves in words.
   const directorMoves = async () => {
-    const chip = page.getByRole("button", { name: "Camera settings" }).locator("visible=true");
-    if (!(await chip.count())) await page.getByRole("button", { name: /^Director/ }).locator("visible=true").first().click();
-    await chip.first().click();
+    await directorChip("Camera settings");
     await page.getByRole("tab", { name: /Movement/ }).click();
     const opt = page.getByRole("option", { name: /Dolly In/ }).locator("visible=true").first();
     await opt.waitFor();
@@ -143,6 +159,7 @@ async function session(width, height, scheme) {
     await page.waitForTimeout(300);
     // A phone's folded Director sheet closes too.
     if (await page.getByRole("dialog").locator("visible=true").count()) await page.keyboard.press("Escape");
+    await settle();
     return text;
   };
   check(`${tag}: the Director's move list badges Dolly In on Fuobe Cinema`, /Camera LoRA/.test(await directorMoves()));
@@ -198,11 +215,7 @@ async function session(width, height, scheme) {
 
   // Soul Cast and Soul Location name Fuobe Soul and the look (on a phone they sit in the folded Director sheet).
   const builder = async (name) => {
-    const visible = page.getByRole("button", { name }).locator("visible=true");
-    // A closing dialog keeps the page hidden from assistive tech for a moment: wait for the chip to come back.
-    await visible.first().waitFor({ timeout: 5000 }).catch(() => {});
-    if (!(await visible.count())) await page.getByRole("button", { name: /^Director/ }).locator("visible=true").first().click();
-    await visible.first().click();
+    await directorChip(name);
     const dialog = page.getByRole("dialog").filter({ hasText: /Build your cast|Create location/ });
     await dialog.waitFor();
     return dialog;

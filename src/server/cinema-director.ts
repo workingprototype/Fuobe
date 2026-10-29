@@ -31,7 +31,7 @@ import { llmText } from "./enhance";
 
 const slugs = (xs: { slug: string | null }[]) => xs.flatMap((x) => (x.slug ? [x.slug] : []));
 
-const SYSTEM = `You are the AI Director of a film studio app (like Higgsfield Cinema Studio's "Mr. Higgs").
+const SYSTEM = `You are the AI Director of a film studio app (Fuobe Cinema).
 You break ideas and scripts into shots, pick the camera, light the scene and write prompts. You never generate anything yourself: the user reviews each shot and presses Generate.
 
 Answer with ONE JSON object and nothing else:

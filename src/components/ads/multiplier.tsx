@@ -18,7 +18,7 @@ import { probeBlob, probeUrl } from "@/lib/media-probe";
 import { useModelAccess } from "@/lib/api";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
-import { addRuns, send, useEstimate, useStatusFlags } from "@/components/marketing/hooks";
+import { addRuns, send, useEstimate } from "@/components/marketing/hooks";
 import type { ModelInfo } from "@/components/marketing/model-info";
 import { RunsList } from "@/components/marketing/runs";
 import { EmptyIcon, MarketingHeader, useMarketingEngine } from "@/components/marketing/shell";
@@ -175,7 +175,6 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
   const qc = useQueryClient();
   const { engine, setEngine } = useMarketingEngine();
   const access = useModelAccess();
-  const { higgsfield } = useStatusFlags();
   const [video, setVideo] = useState<SlotValue | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [range, setRange] = useState<Range | null>(null);
@@ -195,8 +194,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
   const sections = hookOn || ctaOn;
   // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
   const choices = useMemo(() => keepOffered(MULTIPLIER_MODELS[engine], (c) => offered(access, c.id, engine)), [access, engine]);
-  const fallback = engine === "cloud" && !higgsfield && choices.some((c) => c.id === "kling-o3") ? "kling-o3" : choices[0].id;
-  const modelId = picked && choices.some((c) => c.id === picked) ? picked : fallback;
+  const modelId = picked && choices.some((c) => c.id === picked) ? picked : choices[0].id;
   const model = models[modelId];
   const maxImages = engine === "open" ? 1 : (model?.maxImages ?? 0);
   const cut = range ?? (duration ? initialClip(duration) : null);
@@ -430,7 +428,6 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
                       {choices.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
                           {models[c.id]?.name ?? c.id}
-                          {c.id === "seedance-2-5" && !higgsfield ? " · needs Higgsfield" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -496,7 +493,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
           />
         </div>
         <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-muted-foreground">
-          <Sparkles className="size-3" /> Cloud: Seedance 2.5 edit (Higgsfield), Kling O3 edit, Gemini Omni Flash · Open source: Wan 2.2 Animate, Wan 2.2 clips joined around your ad
+          <Sparkles className="size-3" /> Cloud: Kling O3 edit, Happy Horse edit, Gemini Omni Flash · Open source: Fuobe Genjutsu (Wan Animate), Wan 2.2 clips joined around your ad
         </p>
       </div>
     </div>

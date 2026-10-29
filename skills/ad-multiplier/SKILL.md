@@ -25,7 +25,7 @@ Prompt is exclusive with Hook/CTA; Hook and CTA can be combined.
 ## Whole-ad variants (Prompt)
 Op `v2v` with the ad in `video` and the change described precisely ("same shots and timing; the
 creator is now in a sunny kitchen; the product is the green bottle from the image"), product or
-subject photos in `images`. Cloud `seedance-2-5` (video edit with references), `kling-o3`,
+subject photos in `images`. Cloud `kling-o3` (video edit with up to 4 references), `happy-horse-video-edit`,
 `gemini-omni-flash`; open `oss-mixed-media` or `oss-wan22-vace-restyle`. Resolution 1080p by
 default (480p for quick tests). 3–5 variants per batch, each one `generate` job.
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { Brush, Download, Info, Loader2, RotateCcw, Sparkles, Undo2, Wand2 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { nanoid } from "nanoid";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -22,6 +23,7 @@ import { fileToList, MediaSlot, type SlotValue } from "@/components/studio/media
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { SketchEditor, type Stroke } from "@/components/studio/sketch-editor";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
+import { openInStudio } from "@/components/swap-studio/hooks";
 import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
 import { CHARACTER_SWAP, cutsInPart, cutWarning, partWords, seedProblem, type CharacterOptions, type CharacterQuality } from "@/lib/catalog/character-swap";
 import {
@@ -181,6 +183,25 @@ export function GenjutsuStudio() {
 
   // "Describe my character" (the engine's text model) and "Use the clip's words" (one transcription of the clip; any
   // part takes its own lines from it, so it is kept per clip).
+  const router = useRouter();
+  const [opening, setOpening] = useState(false);
+  // "Open in Character Swap Studio": the whole clip and the character go to a new studio project on this engine.
+  const openStudio = async () => {
+    setOpening(true);
+    try {
+      const r = await openInStudio({
+        engine,
+        clip: clip && !clip.uploading && clip.url ? { url: clip.url, name: clip.name, ...(clip.size ? { size: clip.size } : {}), duration: clip.info?.duration ?? clip.browserDuration, width: clip.info?.width ?? clip.browserWidth, height: clip.info?.height ?? clip.browserHeight } : null,
+        image: refs.find((x) => !x.uploading)?.ref ?? null,
+        description: character.description,
+      });
+      if (r.problem) toast.error(r.problem, { description: "The project is open: add the clip there." });
+      router.push(`/character-swap/${encodeURIComponent(r.id)}`);
+    } catch (e) {
+      toast.error((e as Error).message);
+      setOpening(false);
+    }
+  };
   const describeMutation = useDescribeCharacter();
   const transcribeMutation = useTranscribeClip();
   const [clipWords, setClipWords] = useState<{ url: string; g: Generation } | null>(null);
@@ -446,7 +467,15 @@ export function GenjutsuStudio() {
 
   return (
     <ToolShell title="Genjutsu" tabs={tabs} header={<SetupCode setup={setup} onPaste={apply} />} wide>
-      {!clip && <ToolHero title={modeInfo.label} subtitle={`${modeInfo.hint} Priced before it runs; free on your own ComfyUI.`} />}
+      {!clip && (
+        <ToolHero title={modeInfo.label} subtitle={`${modeInfo.hint} Priced before it runs; free on your own ComfyUI.`}>
+          {isCharacter && (
+            <Link href="/character-swap" className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-brand-text hover:underline">
+              Whole clips, shot by shot? Open in Character Swap Studio
+            </Link>
+          )}
+        </ToolHero>
+      )}
       <div className={cn("mx-auto", clip ? "pt-4" : "mt-8 max-w-[640px]")}>
         {!clip ? (
           <ClipDrop
@@ -727,7 +756,14 @@ export function GenjutsuStudio() {
                     ))}
                   </ul>
                 )}
-                {isCharacter && <CharacterFacts engine={engine} maker={maker} cut={cut} />}
+                {isCharacter && <CharacterFacts
+                    engine={engine}
+                    maker={maker}
+                    cut={cut}
+                    onOpenStudio={() => void openStudio()}
+                    opening={opening}
+                    waiting={clip?.uploading || refs.some((x) => x.uploading) ? "waiting for the upload" : null}
+                  />}
               </div>
             </Panel>
           </div>

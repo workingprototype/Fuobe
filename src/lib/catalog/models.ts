@@ -1,5 +1,4 @@
 import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
-import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
 import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
@@ -707,6 +706,31 @@ const open: ModelDef[] = [
     badges: ["new"],
     routes: [comfy("remove-object", "video-person-remove-h3-relay", "H3 Relay Person Removal: the person painted green, 22-frame windows with 18 of history from the clean first frame (image), 12 steps, silent")],
     options: { seed: true, maxImages: 1 },
+  }),
+  // Character Swap Studio (/character-swap, o/h3-studio): Akatz Labs' workbench for whole clips. A segment is one H3 Relay
+  // pass (its approved mask, anchor and the previous take's lossless master as history); a mask is SAM 3.1 on any frame
+  // of a shot, spliced into the version it corrects. Both run through the studio, not the composer.
+  o({
+    id: "oss-h3-swap-segment",
+    name: "H3 Character Swap · studio segment",
+    vendor: "MiniMax × Akatz Labs",
+    family: "minimax-h3",
+    kind: "video",
+    tagline: "One Character Swap Studio segment: a single H3 Relay pass with the approved mask, an anchor and the previous take's lossless master as history · 24 GB GPU with offloading, 48 GB+ advised",
+    routes: [comfy("video-swap", "video-character-swap-h3-segment", "H3 Relay segment schedule; saves the segment and its 16-bit FFV1 master")],
+    options: { seed: true, resolutions: ["480p", "768p"], maxImages: 2 },
+    hidden: true,
+  }),
+  o({
+    id: "oss-h3-person-mask",
+    name: "SAM 3.1 person mask · H3 Relay",
+    vendor: "Meta × Akatz Labs",
+    family: "sam",
+    kind: "video",
+    tagline: "Who to swap in a shot: SAM 3.1 finds them on any frame (words, largest / leftmost / rightmost / #n, or clicks) and follows them; corrections splice into the mask",
+    routes: [comfy("bg-remove-video", "video-mask-h3-relay", "a black-and-white mask video at H3's canvas size, 24 fps")],
+    options: { keepsNamed: true, matteOutputs: ["matte"] },
+    hidden: true,
   }),
   o({
     id: "oss-qwen-relight",
@@ -1496,39 +1520,11 @@ function withLastFrameExtend(m: ModelDef): ModelDef {
   return { ...m, routes: [...m.routes, { op: "extend", provider: "fal", endpoint: LAST_FRAME_CHAIN, note: "last frame → Kling image-to-video → joined" }] };
 }
 
-/**
- * Higgsfield's AI Influencer character sheet. Not in Higgsfield's docs catalog (console docs and
- * the pricing API only — docs/research/higgsfield-api.json), so it's defined here, not generated.
- */
-const AI_INFLUENCER: ModelDef = {
-  id: "ai-influencer",
-  name: "AI Influencer",
-  vendor: "Higgsfield",
-  family: "soul",
-  engine: "cloud",
-  kind: "image",
-  tagline: "An original character sheet from a short brief — human or creature",
-  badges: ["new"],
-  routes: [{ op: "t2i", provider: "higgsfield", endpoint: "higgsfield/ai-influencer", map: { prompt: "brief", seed: "seed", seedRange: [1, 1000000] } }],
-  options: {
-    seed: true,
-    controls: [{ param: "tier", label: "Look", values: ["normal", "freak", "total", "insects", "frogs", "cats", "dogs", "capybaras", "birds"], default: "normal" }],
-  },
-  pricing: { unit: "image", usd: 0.05 },
-};
-
 /** A launch price while it lasts, the list price after (FLUX 3 Max); read once, when the catalog loads. */
 const withCurrentPrice = (m: ModelDef): ModelDef => (m.pricing?.promo ? { ...m, pricing: pricingAt(m.pricing) } : m);
 
-/** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
-const cloud: ModelDef[] = [
-  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m))
-    .map(withLastFrameExtend)
-    .map(withCurrentPrice),
-  ...HIGGSFIELD_MODELS,
-  AI_INFLUENCER,
-  ...cloudTools,
-];
+/** Cloud models (fal and Replicate) and the cloud tools. */
+const cloud: ModelDef[] = [...CLOUD_MODELS.map(withLastFrameExtend).map(withCurrentPrice), ...cloudTools];
 
 // ---------------------------------------------------------------------------
 // Fuobe Originals: one model on both engines

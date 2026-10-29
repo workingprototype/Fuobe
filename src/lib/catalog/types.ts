@@ -235,6 +235,8 @@ export interface PixelPoint {
   x: number;
   y: number;
   label?: "positive" | "negative";
+  /** A video's frame the point is on (0, the first, when unset): SAM 3.1 video's `frame_index` on fal. */
+  frame?: number;
 }
 
 /** A position on a picture as fractions of its width and height (0–1 from the top left). */
@@ -244,7 +246,7 @@ export interface FocusPoint {
 }
 
 /** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
-export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local" | "llm";
+export type ProviderId = "fal" | "replicate" | "openai" | "google" | "comfyui" | "mock" | "local" | "llm";
 
 /** Duration encodings differ between APIs ("5" vs 5 vs "5s"). */
 export interface DurationField {
@@ -261,7 +263,7 @@ export interface EnumField {
   values?: Record<string, string | number | boolean>;
   /**
    * The canonical values this route takes, when they differ from the model's own list (a model on two
-   * APIs, e.g. Grok Imagine on fal and Higgsfield). Any other value is sent as the closest one it takes
+   * APIs that take different lists). Any other value is sent as the closest one it takes
    * (aspect ratios by shape, resolutions by size) and left out when none is close ("auto" on an API
    * without it), so the API's default applies.
    */
@@ -319,7 +321,7 @@ export interface FieldMap {
   fps?: string;
   /**
    * Colour palette: hex strings converted to the API's shape ("rgb-object" = Recraft on fal [{r,g,b}],
-   * "rgb-array" = Recraft on Higgsfield [{rgb:[r,g,b]}], "ideogram" = {members:[{rgb:{r,g,b}, color_weight}]}).
+   * "rgb-array" = [{rgb:[r,g,b]}], "ideogram" = {members:[{rgb:{r,g,b}, color_weight}]}).
    * `background` names the API's background-colour field: a hex string sent as params.extra[background]
    * is converted to the same shape.
    */
@@ -499,8 +501,6 @@ export interface ModelOptions {
   multiShot?: { mode: "native" | "prompt" | "concat"; maxShots: number };
   /** Draft mode (cheap preview, then a full render of the take you like). */
   draft?: boolean;
-  /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
-  presets?: { source: string; param: string; label: string; required?: boolean };
   /**
    * Takes a Fuobe Soul look (src/lib/catalog/soul.ts) as GenerationRequest.presetId, with presetStrength scaling
    * its LoRAs; `label` names the picker.
@@ -615,8 +615,6 @@ export interface ModelDef {
   options: ModelOptions;
   defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice" | "targetFps" | "format">>;
   pricing?: Pricing;
-  /** Trained identities this model accepts by id (Higgsfield Soul ID). */
-  identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
   /**
    * The licence of the open weights a hosted model runs (generated from the research), as information: nothing is
    * hidden or refused for it; the admin turns models on or off in Settings.

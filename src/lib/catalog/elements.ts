@@ -45,7 +45,7 @@ export interface ElementLora {
   trainedAt?: number;
   /** A demo training's stand-in (no key, no GPU): nothing was trained, so no run uses it. */
   demo?: true;
-  /** A Higgsfield Soul ID (before O3): a `custom_reference_id` only Higgsfield's Soul models take. Retrain for Fuobe Soul. */
+  /** An older Soul ID (Higgsfield's, before O3): a reference id no current model takes. Retrain for Fuobe Soul. */
   referenceId?: string;
 }
 
@@ -133,16 +133,9 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
   // LoRAs win over references for the model they were trained on.
   const loras: LoraRef[] = [...(req.loras ?? [])];
   const viaLora = new Set<string>();
-  let extra = req.params?.extra;
   for (const el of mentioned) {
-    // A Higgsfield Soul ID on Higgsfield's own Soul models (until build plan O7 removes them): one character per run.
-    const legacy = el.loras.find((x) => x.referenceId && x.modelId === model.id && x.engine === model.engine);
-    if (legacy?.referenceId && !extra?.custom_reference_id) {
-      extra = { ...extra, custom_reference_id: legacy.referenceId, custom_reference_strength: legacy.strength ?? 1 };
-      viaLora.add(el.id);
-      continue;
-    }
-    // A trained LoRA of this model's family, on the engine it runs on (Fuobe Soul ID).
+    // A trained LoRA of this model's family, on the engine it runs on (Fuobe Soul ID). An older Soul ID kept only by
+    // a reference id runs nowhere: the element is retrained on its photos.
     const l = identityFor(el.loras, model);
     if (!l) continue;
     loras.push({ file: l.file, ...(l.url && { url: l.url }), strength: l.strength ?? 1, trigger: l.trigger, ...(l.own && { own: true as const }) });
@@ -227,7 +220,7 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
       prompt,
       inputs: { ...req.inputs, images: images.length ? images : undefined },
       loras: loras.length ? loras : undefined,
-      params: extra !== req.params?.extra || newShots ? { ...req.params, extra, ...(newShots ? { shots: newShots } : {}) } : req.params,
+      params: newShots ? { ...req.params, shots: newShots } : req.params,
     },
     mentioned,
     notes,
