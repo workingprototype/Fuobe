@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-29T20:13:35.739Z",
+  "generatedAt": "2026-10-29T23:00:06.691Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -1197,6 +1197,133 @@
       "vramGb": 8,
       "validated": true,
       "notes": "Lightweight baseline (single 6.9 GB checkpoint). Native 1024x1024 class resolutions. Default negative prompt replaced with a generic one."
+    },
+    {
+      "id": "moss-image-t2i",
+      "title": "MOSS-Image SFT text to image (plain words or a layout of boxes; strong Chinese and English text)",
+      "capability": "t2i",
+      "file": "moss-image-t2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/moss-image-t2i.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "4",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "5",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "6",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "6",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "8",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "8",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "8",
+            "input": "cfg"
+          }
+        ],
+        "sampler": [
+          {
+            "node": "8",
+            "input": "sampler_name"
+          }
+        ],
+        "scheduler": [
+          {
+            "node": "8",
+            "input": "scheduler"
+          }
+        ],
+        "unet": [
+          {
+            "node": "1",
+            "input": "unet_name"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "10",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "10",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 25,
+        "cfg": 2.5,
+        "sampler": "er_sde",
+        "scheduler": "simple",
+        "unet": "moss_image_sft_int8_convrot.safetensors"
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "moss_image_sft_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_sft_int8_convrot.safetensors",
+          "sizeGb": 5.41
+        },
+        {
+          "file": "qwen3.5_9b_w4a8_gptq.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+          "sizeGb": 7.34
+        },
+        {
+          "file": "flux2-vae_small.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/vae/flux2-vae_small.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "moss_image_sft_8stepdmd_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/resolve/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors",
+          "sizeGb": 5.41,
+          "optional": true
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "license": "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder)",
+      "validated": true,
+      "notes": "Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org's template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; width / height are the layout's canvas (multiples of 16, up to 2048). Standard = the template: 25 steps, CFG 2.5, er_sde / simple, skip-layer guidance on layer 22 for the first half; Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic's SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested). vramGb 16 is a guess: there is no official figure; about 13 GB of files (DiT 5.4 + encoder 7.3 + VAE 0.25) and ComfyUI offloads. The int8 / w4a8 files run through comfy-kitchen's kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. Validated by /prompt on the CPU library server only: no render, speed or text accuracy measured here."
     },
     {
       "id": "qwen-image-edit-2509",

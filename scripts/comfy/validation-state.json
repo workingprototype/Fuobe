@@ -305,6 +305,12 @@
     "error": null,
     "at": "2026-10-17T21:02:01.881Z"
   },
+  "moss-image-t2i": {
+    "sha256": "e306a63bdc30998b0f1083662f906faae772de46d8f6a71c90e17ec299b2fae5",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-29T23:00:17.526Z"
+  },
   "music-ace-step-15": {
     "sha256": "a64cd8f69aaad6969b547e9c9b8354444cf938325c153ac7a253daae2d1b0ac7",
     "validated": true,
