@@ -113,8 +113,8 @@ describe("Vectorize app", () => {
     const download = outputActions(done, 0).find((a) => a.id === "download")!;
     expect(download.download).toMatch(/\.svg$/);
     expect(download.href).toContain(`${out.url}?download=`);
-    // No raster hand-offs (Animate, Edit, Upscale…): those models can't read an SVG.
-    expect(outputActions(done, 0).map((a) => `${a.placement}:${a.id}`)).toEqual(["bar:download", "bar:favorite", "menu:copy-prompt", "menu:share", "menu:pin", "menu:review", "menu:delete"]);
+    // No raster hand-offs (Animate, Edit, Upscale…): those models can't read an SVG. A skill can be made from it (W2).
+    expect(outputActions(done, 0).map((a) => `${a.placement}:${a.id}`)).toEqual(["bar:download", "bar:favorite", "menu:make-skill", "menu:copy-prompt", "menu:share", "menu:pin", "menu:review", "menu:delete"]);
     expect(download.label).toBe("Download .svg");
   });
 });
