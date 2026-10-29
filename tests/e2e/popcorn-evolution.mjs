@@ -1,8 +1,9 @@
 // Build plan O13, browser check: Video tools → Evolution, the Storyboard's Soul looks and the Canvas picker's
 // Effects 2.0 chains, at 1440 and 390 px, light and dark, in demo mode (no keys, ComfyUI and Ollama unreachable).
-// Evolution: a clip goes in, Low / Medium / High, the direction written by the offline writer, the price before it
-// runs (a demo), a run that finishes with a before / after; the open engine says "on your GPU". Storyboard: the look
-// chip starts at "No look", a look is picked, the board's price is shown, a board in that look is made. Canvas: the
+// Evolution: a clip goes in, Low / Medium / High, the direction written by the offline writer, a long direction said to
+// be cut, the price before it runs (a demo), a run that finishes with a before / after; the open engine says "on your
+// GPU". Storyboard: the cloud board runs on Fuobe's open recipe with Nano Banana Pro a partner choice, the look chip
+// starts at "No look", a look is picked, the board's price is shown, a board in that look is made. Canvas: the
 // Effects 2.0 chains have their own section and one opens as a canvas with the edit and the effect. Nothing scrolls
 // sideways. Usage: node tests/e2e/popcorn-evolution.mjs [appUrl] [--shots <dir>]. Exits 1 on a failed check.
 import fs from "node:fs";
@@ -56,8 +57,16 @@ try {
       // A reference, then the writer.
       await page.locator('input[type="file"][accept="image/*"][multiple]').setInputFiles(refFile);
       await page.waitForFunction(() => !document.body.innerText.includes("Uploading references"), null, { timeout: 30_000 }).catch(() => {});
-      await page.getByRole("button", { name: "Write it for me" }).click();
       const direction = page.getByRole("textbox", { name: "Creative direction" });
+      // A direction longer than the models take: the page says so as you type (the words stay out of the estimate).
+      await page.waitForFunction(() => /Demo · free|≈ \$|Free/.test(document.body.innerText), null, { timeout: 30_000 }).catch(() => {});
+      await direction.fill("A night market in the rain. ".repeat(80));
+      await page.waitForFunction(() => /Only the first 1,500 characters of the direction reach the model/.test(document.body.innerText), null, { timeout: 15_000 }).catch(() => {});
+      check(`${tag}: a long direction is said to be cut`, /Only the first 1,500 characters of the direction reach the model/.test(await text()));
+      await direction.fill("");
+      await page.waitForFunction(() => !/Only the first 1,500 characters/.test(document.body.innerText), null, { timeout: 15_000 }).catch(() => {});
+      check(`${tag}: an empty one isn't`, !/Only the first 1,500 characters/.test(await text()));
+      await page.getByRole("button", { name: "Write it for me" }).click();
       await page.waitForFunction(() => (document.querySelector("#evolution-direction")?.value ?? "").length > 40, null, { timeout: 30_000 }).catch(() => {});
       const written = await direction.inputValue();
       check(`${tag}: the offline writer wrote the direction`, /reimagined from the ground up/.test(written) && /Written by Fuobe's offline writer/.test(await text()), JSON.stringify(written.slice(0, 50)));
@@ -88,6 +97,14 @@ try {
       const chip = page.getByRole("button", { name: "Look: No look" });
       await chip.waitFor({ timeout: 30_000 });
       check(`${tag}: the look chip starts at No look`, (await chip.count()) === 1);
+      // The cloud board is Fuobe's open recipe; Nano Banana Pro is a partner choice.
+      const frames = page.getByRole("radiogroup", { name: "Frames made on" });
+      check(`${tag}: cloud frames on Fuobe first, Nano Banana Pro a choice`, (await frames.getByRole("radio", { name: "Fuobe" }).getAttribute("aria-checked")) === "true" && (await frames.getByRole("radio", { name: "Nano Banana Pro" }).count()) === 1);
+      check(`${tag}: it runs on hosted Qwen-Image-Edit with the next-scene LoRA`, /Runs on Qwen-Image-Edit 2509 \(hosted\) with the next-scene LoRA/.test(await text()));
+      await frames.getByRole("radio", { name: "Nano Banana Pro" }).click();
+      await page.waitForFunction(() => /Runs on Nano Banana Pro\./.test(document.body.innerText), null, { timeout: 15_000 }).catch(() => {});
+      check(`${tag}: the partner choice says so`, /Runs on Nano Banana Pro\./.test(await text()));
+      await frames.getByRole("radio", { name: "Fuobe" }).click();
       await page.getByRole("textbox", { name: "Your story" }).fill("a girl waits at a rainy bus stop, the bus arrives, she looks back");
       await chip.click();
       // DigitalCam is a Soul look (the picker opens on Soul 2.0): a search looks through both.
