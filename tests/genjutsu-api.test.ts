@@ -159,7 +159,7 @@ describe("Genjutsu: estimates", () => {
       setSetting("replicateToken", "r8_test");
       const whole = await (await estimateRoute.POST(json(body({ mode: "character", modelId: "p-video-replace", source: { url: clip, ...src } })))).json();
       expect(whole).toMatchObject({ modelId: "p-video-replace", source: "partner", steps: 1, demo: false, providers: ["replicate"] });
-      expect(await say(body({ mode: "character", modelId: "p-video-replace", source: { url: clip, ...src }, range: { start: 0, end: 10 } }))).toBe("Cutting the clip runs on fal.ai — add a fal.ai key in Settings → API keys");
+      expect(await say(body({ mode: "character", modelId: "p-video-replace", source: { url: clip, ...src }, range: { start: 0, end: 10 } }))).toBe("Cutting the clip runs on fal.ai — add a fal.ai key in Settings → Paid API configuration");
       // Starting it is refused the same way, and nothing is made.
       const before = (db().prepare("SELECT COUNT(*) AS n FROM generations").get() as { n: number }).n;
       expect(await say(body({ mode: "character", modelId: "p-video-replace", source: { url: clip }, range: { start: 0, end: 10 } }), createRoute)).toMatch(/^Cutting the clip runs on fal\.ai/);
@@ -169,7 +169,7 @@ describe("Genjutsu: estimates", () => {
 
     it("demo mode off and no keys: the key it needs, in words", async () => {
       setSetting("demoMode", "off");
-      expect(await say(body({ source: { url: clip, ...src } }))).toBe("Fuobe Genjutsu Lite · Motion runs on fal.ai, and putting the sound back runs on fal.ai — add a fal.ai key in Settings → API keys");
+      expect(await say(body({ source: { url: clip, ...src } }))).toBe("Fuobe Genjutsu Lite · Motion runs on fal.ai, and putting the sound back runs on fal.ai — add a fal.ai key in Settings → Paid API configuration");
       setSetting("demoMode", "auto");
     });
   });

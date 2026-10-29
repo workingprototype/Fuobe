@@ -432,7 +432,7 @@ export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<R
     const agent = await resolveAgent();
     return { mode: agent === "claude" ? "smart" : "free", agent, model: null, effort: null };
   }
-  const noKey = "Smart and Claude need an Anthropic API key (Settings → API keys) — using Free instead.";
+  const noKey = "Smart and Claude need an Anthropic API key (Settings → Prompt enhancement) — using Free instead.";
   if (choice.mode === "smart") return claudeAllowed() ? { mode: "smart", agent: "claude", model: DEFAULT_CLAUDE_MODEL, effort: DEFAULT_EFFORT } : free(noKey);
   if (choice.mode === "free") return free();
   // Manual
@@ -1325,7 +1325,7 @@ function refreshFlags(s: State): void {
 }
 
 function errorText(e: unknown): string {
-  if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → API keys.";
+  if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → Prompt enhancement.";
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limited right now. Try again in a minute.";
   if (e instanceof Anthropic.BadRequestError && /\bmcp\b|connector/i.test(e.message)) return `A connector didn't work: ${e.message}. Check it in Settings → Assist connectors, or switch it off.`;
   if (e instanceof Anthropic.APIError) return `Claude returned an error (${e.status ?? "network"}): ${e.message}`;

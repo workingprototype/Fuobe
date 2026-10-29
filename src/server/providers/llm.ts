@@ -184,7 +184,7 @@ async function viaClaude(system: string, user: string, signal: AbortSignal): Pro
       { signal },
     )) as Anthropic.Beta.BetaMessage;
   } catch (e) {
-    if (e instanceof Anthropic.AuthenticationError) throw new Error("Your Anthropic API key was rejected. Check it in Settings → API keys.");
+    if (e instanceof Anthropic.AuthenticationError) throw new Error("Your Anthropic API key was rejected. Check it in Settings → Prompt enhancement.");
     if (e instanceof Anthropic.RateLimitError) throw new Error("Claude is rate-limited right now. Try again in a minute.");
     if (e instanceof Anthropic.APIError) throw new Error(`Claude returned an error (${e.status ?? "network"}): ${e.message}`);
     throw e;

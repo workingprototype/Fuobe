@@ -17,6 +17,25 @@ describe("Settings deep links", () => {
     for (const l of links) expect(anchors.has(l.id), `${l.file} links to /settings#${l.id}`).toBe(true);
   });
 
+  it("every \"Settings → …\" the app tells people names a section or field Settings has", () => {
+    // Section titles ("Prompt enhancement · Claude or Ollama": the whole, or either side of the "·") and field labels.
+    const titles = [...form.matchAll(/\btitle="([^"]+)"/g)].map((m) => m[1]);
+    const labels = [...form.matchAll(/\blabel="([^"]+)"/g)].map((m) => m[1]);
+    const norm = (x: string) => x.replace(/&amp;/g, "&").replace(/\s*·\s*/g, " ").toLowerCase();
+    const names = [...titles, ...titles.flatMap((t) => t.split("·").map((x) => x.trim())), ...labels].map(norm);
+    const places = files(root).flatMap((f) =>
+      fs
+        .readFileSync(f, "utf8")
+        .split("\n")
+        // What people read, not the comments around it.
+        .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+        .flatMap((l) => [...l.replace(/&amp;/g, "&").matchAll(/Settings → ([^`"'.,;:()${}<]+)/g)].map((m) => ({ file: path.relative(root, f), place: m[1].trim() }))),
+    );
+    expect(places.length).toBeGreaterThan(20);
+    const unknown = places.filter((p) => p.place && !names.some((n) => norm(p.place) === n || norm(p.place).startsWith(`${n} `)));
+    expect(unknown.map((p) => `${p.file}: Settings → ${p.place}`)).toEqual([]);
+  });
+
   it("the AI-Toolkit URL the training messages ask for has its field, with Save & test", () => {
     const section = form.slice(form.indexOf('id="training"'), form.indexOf("</Section>", form.indexOf('id="training"')));
     expect(section).toMatch(/name="aiToolkitUrl"[\s\S]*provider="ai-toolkit"/);
