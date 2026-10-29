@@ -26,6 +26,8 @@ const recipeRoute = await import("@/app/api/assist/skills/[name]/recipe/route");
 const runRoute = await import("@/app/api/assist/skills/[name]/run/route");
 const estimateRoute = await import("@/app/api/assist/skills/[name]/estimate/route");
 const verifyRoute = await import("@/app/api/assist/skills/[name]/verify/route");
+const generationsRoute = await import("@/app/api/generations/route");
+const { handleMcp } = await import("@/server/mcp");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -305,6 +307,28 @@ describe("checking a recipe", () => {
     // No key: it ran as a demo, so it isn't recorded as a real test, and says so.
     expect(cloud.real).toMatchObject({ ok: true, demo: true, notes: [expect.stringContaining("ran as a demo")] });
     expect(r.view.recipe.verified?.cloud?.real).toBeNull();
+  });
+});
+
+describe("the server-set fields", () => {
+  it("strips skill and demo from API input, like chainFilled", async () => {
+    setSetting("demoMode", "off");
+    try {
+      const res = await generationsRoute.POST(json({ feature: "image", modelId: "nano-banana-pro", op: "t2i", prompt: "a lamp", demo: true, skill: { name: "lamp", run: "forged" }, chainFilled: true }));
+      // Without the flag, Demo mode off and no key: the API refuses, rather than running a free demo.
+      expect(res.status).toBe(422);
+      expect(((await res.json()) as { error: string }).error).toMatch(/Connect/);
+    } finally {
+      setSetting("demoMode", "auto");
+    }
+    const ok = (await (await generationsRoute.POST(json({ feature: "image", modelId: "nano-banana-pro", op: "t2i", prompt: "a lamp", demo: true, skill: { name: "lamp", run: "forged" } }))).json()) as { items: { request: Record<string, unknown> }[] };
+    expect(ok.items[0].request.skill).toBeUndefined();
+    expect(ok.items[0].request.demo).toBeUndefined();
+  });
+
+  it("serves a recipe skill's Run it section in its MCP prompt", async () => {
+    const r = (await handleMcp({ jsonrpc: "2.0", id: 1, method: "prompts/get", params: { name: "lamp" } })) as { result: { messages: { content: { text: string } }[] } };
+    expect(r.result.messages[0].content.text).toContain("## Run it");
   });
 });
 

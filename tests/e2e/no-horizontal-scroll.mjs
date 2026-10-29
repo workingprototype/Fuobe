@@ -11,7 +11,7 @@
 // asserts document.documentElement.scrollWidth === clientWidth once the page has rendered, and names
 // the widest elements when it isn't. Pages that don't load are reported apart from layout failures.
 import { launch, openRoute, PHONE, post, root } from "./_browser.mjs";
-import { dynamicSamples, studioRoutes } from "./_routes.mjs";
+import { dynamicSamples, querySamples, studioRoutes } from "./_routes.mjs";
 
 const args = process.argv.slice(2);
 const app = (args.find((a) => !a.startsWith("--")) ?? "http://localhost:3000").replace(/\/$/, "");
@@ -30,13 +30,43 @@ async function discoverRoutes() {
   const autoRun = await post(app, "/api/assist", { text: brief, engine: "cloud", autoApprove: true, mode: { mode: "free" } });
   const { urls, generated } = dynamicSamples(root, { cinema: project?.id, canvas: canvas?.id, assistProject: assistProject?.id });
   const chats = [askFirst?.id, autoRun?.id].filter(Boolean).map((id) => `/assist?c=${id}`);
-  const samples = [...urls, ...chats, "/library?tab=favorites", "/login", "/this-page-does-not-exist"];
+  // A skill with a recipe: its Run form opens from /assist/skills?run=<name>.
+  const recipeSkill = await recipeSkillSample();
+  const samples = [...urls, ...chats, ...querySamples({ recipeSkill }), "/library?tab=favorites", "/login", "/this-page-does-not-exist"];
+  if (!recipeSkill) console.log("note: couldn't create a sample skill with a recipe, only an unknown /assist/skills?run= is checked");
   if (!project?.id) console.log("note: couldn't create a sample cinema project, only an unknown /cinema/[id] is checked");
   if (!canvas?.id) console.log("note: couldn't create a sample canvas, only an unknown /canvas/[id] is checked");
   if (!assistProject?.id) console.log("note: couldn't create a sample Assist project, only an unknown /assist/projects/[id] is checked");
   if (chats.length < 2) console.log("note: couldn't start the sample Assist chats, so /assist?c=<id> isn't fully checked");
   for (const p of generated) console.log(`note: ${p} has no sample in tests/e2e/_routes.mjs: only its not-found page is checked`);
   return [...new Set([...out, ...samples])];
+}
+
+/** A user skill with a two-input recipe (a picture and a name), made for the check; its name, or null. */
+async function recipeSkillSample() {
+  const name = "layout-check-run";
+  try {
+    await fetch(`${app}/api/assist/skills/${name}`, { method: "DELETE" });
+    await post(app, "/api/assist/skills", { name, title: "Layout check", description: "A poster from a product photo.", body: "# Poster" });
+    const res = await fetch(`${app}/api/assist/skills/${name}/recipe`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fuobeRecipe: 1,
+        params: [
+          { id: "product", label: "Product photo", type: "image", required: true },
+          { id: "name", label: "Product name with a long label to wrap", type: "text", required: true, example: "Lumen desk lamp" },
+          { id: "shape", label: "Shape", type: "choice", options: ["1:1", "9:16", "16:9", "4:5", "3:4", "21:9"], default: "1:1" },
+        ],
+        steps: [{ key: "poster", kind: "generate", request: { feature: "skill", modelId: "nano-banana-pro", op: "edit", prompt: "{{name}} on a plinth", inputs: { images: ["{{product}}"] }, params: { aspectRatio: "{{shape}}" } } }],
+      }),
+    });
+    if (!res.ok) return null;
+    await post(app, `/api/assist/skills/${name}/verify`, { level: "plan" });
+    return name;
+  } catch {
+    return null;
+  }
 }
 
 const routes = only ?? (await discoverRoutes());

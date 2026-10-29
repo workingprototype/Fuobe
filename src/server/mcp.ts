@@ -4,7 +4,8 @@ import { z } from "zod";
 import "./assist/studio-routes";
 import { apiSchema, executeTool, getTool, planFor, TOOLS, type ToolContext } from "./assist/tools";
 import { engineMode } from "./settings";
-import { enabledSkills, getSkill } from "./skills";
+import { recipeMarkdown } from "@/lib/recipe";
+import { enabledSkills, getSkill, skillRecipe } from "./skills";
 
 /**
  * Fuobe as an MCP server (Model Context Protocol, streamable HTTP transport, stateless):
@@ -142,6 +143,9 @@ function promptGet(params: unknown) {
   const s = getSkill(p.data.name);
   if (!s || !s.enabled) return undefined;
   const request = p.data.arguments?.request?.trim();
+  // A skill that runs by itself says how (its "Run it" section), after its instructions.
+  const recipe = s.recipe ? skillRecipe(s.name) : null;
+  const runs = recipe ? `\n\n${recipeMarkdown(recipe, { name: s.name })}` : "";
   return {
     description: s.description,
     messages: [
@@ -149,7 +153,7 @@ function promptGet(params: unknown) {
         role: "user",
         content: {
           type: "text",
-          text: `Follow the “${s.title}” skill from Fuobe for this job, using Fuobe's tools (search_models, generate and the studio tools).\n\n${s.body}${request ? `\n\n---\n\nThe job: ${request}` : ""}`,
+          text: `Follow the “${s.title}” skill from Fuobe for this job, using Fuobe's tools (search_models, generate and the studio tools).\n\n${s.body}${runs}${request ? `\n\n---\n\nThe job: ${request}` : ""}`,
         },
       },
     ],

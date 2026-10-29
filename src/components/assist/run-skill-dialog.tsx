@@ -164,7 +164,7 @@ function Loaded({ view, onClose }: { view: RecipeView; onClose: () => void }) {
   return (
     <>
       <DialogHeader className="flex-row items-start gap-3 border-b px-5 pt-5 pb-4 text-left">
-        <SkillIcon name={name} size="lg" />
+        <SkillIcon name={name} icon={view.icon} size="lg" />
         <div className="min-w-0 flex-1 pr-6">
           <DialogTitle className="font-heading text-[24px] leading-tight font-normal">Run {view.title}</DialogTitle>
           <DialogDescription className="mt-1">Same steps, new inputs. Priced before anything starts; no chat needed.</DialogDescription>
@@ -352,7 +352,8 @@ function Field({
   }
   const example = typeof p.example === "string" || typeof p.example === "number" ? String(p.example) : undefined;
   if (p.type === "text") {
-    const long = (p.max ?? RECIPE_LIMITS.text) > 120;
+    // A name or a line fits one row; a description (no limit, or a long one) gets a box.
+    const long = (p.max ?? RECIPE_LIMITS.text) > 300;
     return (
       <div className="space-y-1.5">
         {label}
@@ -402,7 +403,7 @@ function Field({
         <p className="text-sm font-medium" id={id}>
           {p.label}
         </p>
-        <div role="radiogroup" aria-labelledby={id} onKeyDown={radioKeys} className="flex max-w-full flex-wrap gap-1 rounded-2xl bg-muted p-0.5">
+        <div role="radiogroup" aria-labelledby={id} onKeyDown={radioKeys} className="flex w-fit max-w-full flex-wrap gap-1 rounded-2xl bg-muted p-0.5">
           {options.map((o) => (
             <button
               key={o}

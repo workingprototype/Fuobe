@@ -331,6 +331,7 @@ export function recipeView(name: string): RecipeView {
   return {
     name: skill.name,
     title: skill.title,
+    ...(skill.icon && { icon: skill.icon }),
     builtin: skill.source === "builtin",
     recipe,
     engines,

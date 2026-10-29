@@ -5,7 +5,7 @@ import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { HUB_MODES } from "@/lib/hubs";
 // Plain .mjs helper shared with the Playwright scripts.
-import { dynamicSamples, hubModePaths, studioRoutes } from "./e2e/_routes.mjs";
+import { dynamicSamples, hubModePaths, querySamples, studioRoutes } from "./e2e/_routes.mjs";
 
 const root = process.cwd();
 // The proxy reads the sign-in settings from the data folder: use an empty one (no password).
@@ -37,6 +37,9 @@ describe("the 390 px sweep visits dynamic routes", () => {
     for (const p of patterns) expect(byPattern[p]?.length, p).toBeGreaterThan(0);
     expect(urls.filter((u) => /\[/.test(u))).toEqual([]);
     expect(urls).toEqual(expect.arrayContaining(["/cinema/c1", "/cinema/does-not-exist", "/canvas/v1", "/canvas/does-not-exist", "/assist/projects/p1", "/apps/does-not-exist"]));
+    // Dialogs a query opens: a skill's Run form.
+    expect(querySamples({ recipeSkill: "lamp" })).toEqual(["/assist/skills?run=lamp", "/assist/skills?run=does-not-exist"]);
+    expect(querySamples()).toEqual(["/assist/skills?run=does-not-exist"]);
   });
 
   it("gives a route added later (another branch's /faceless/[id]/[episode]) a not-found sample by itself", () => {

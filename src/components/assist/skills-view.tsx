@@ -370,7 +370,7 @@ function SkillDetail({ name, onClose, onEdit, onRun }: { name: string | null; on
                         <Download /> Download <ChevronDown className="opacity-60" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
+                    <DropdownMenuContent align="start" className="min-w-56">
                       <DropdownMenuItem asChild>
                         <a href={`/api/assist/skills/${s.name}/download`} download>
                           SKILL.md

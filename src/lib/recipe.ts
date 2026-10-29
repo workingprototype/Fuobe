@@ -817,6 +817,8 @@ export interface RecipePlace {
 export interface RecipeView {
   name: string;
   title: string;
+  /** The skill's icon (a lucide name from SKILL_ICONS). */
+  icon?: string;
   builtin: boolean;
   recipe: Recipe;
   /** Engines its steps allow on this install. */
