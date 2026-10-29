@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -222,6 +224,48 @@ describe("running a recipe", () => {
     expect(out.runs[0].href).toMatch(/^\/video-tools\/captions\?video=/);
     expect(out.runs[0].ids.length).toBeGreaterThan(0);
     expect(gens.getGeneration(out.runs[0].ids[0])).toMatchObject({ op: "captions" });
+    // The tool made its own requests: each one in its batch (the transcript too) carries the run's stamp and the
+    // skill's title, as a pipeline's do, so the Library groups the run and its history reads back.
+    const batch = out.runs[0].batchId!;
+    expect(batch).toBeTruthy();
+    const made = db().prepare("SELECT request_json FROM generations WHERE batch_id = ?").all(batch) as { request_json: string }[];
+    expect(made.length).toBeGreaterThanOrEqual(out.runs[0].ids.length);
+    for (const r of made) expect(JSON.parse(r.request_json)).toMatchObject({ skill: { name: "caption-it", run: batch }, batchTitle: "Caption it" });
+  });
+
+  it("a header with no rows is refused with the reason, not a crash", async () => {
+    const res = await runRoute.POST(json({ csv: "product,name\n" }), ctx("lamp"));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: "Add a row under the header: one row per run" });
+    expect(recipes.estimateRecipe("lamp", { csv: "product,name\n" })).toMatchObject({ runnable: false, errors: ["Add a row under the header: one row per run"] });
+    await expect(recipes.runRecipe("lamp", { rows: [] })).rejects.toThrow(/Add a row to run/);
+  });
+
+  it("without an engine, runs where it was checked", async () => {
+    makeSkill("gpu-only", soul(), "GPU only");
+    await recipes.verifyRecipe("gpu-only", "plan", "open");
+    expect(recipes.recipeView("gpu-only").ready).toEqual(["open"]);
+    expect(recipes.estimateRecipe("gpu-only", { values: { subject: "a potter" } }).engine).toBe("open");
+    const out = await recipes.runRecipe("gpu-only", { values: { subject: "a potter" } });
+    expect(out.engine).toBe("open");
+    expect(gens.getGeneration(out.runs[0].ids[0])).toMatchObject({ engine: "open" });
+    // Asked for the cloud, it still says to check it there first.
+    await expect(recipes.runRecipe("gpu-only", { values: { subject: "a potter" } }, "cloud")).rejects.toThrow(/Check this skill on the cloud first/);
+  });
+
+  it("a skill switched off doesn't run until it's switched on", async () => {
+    skills.setSkillEnabled("gpu-only", false);
+    try {
+      expect(recipes.recipeView("gpu-only").enabled).toBe(false);
+      const before = count();
+      await expect(recipes.runRecipe("gpu-only", { values: { subject: "a potter" } })).rejects.toThrow(/switched off — switch it on in Skills/);
+      expect(() => recipes.estimateRecipe("gpu-only", { values: { subject: "a potter" } })).toThrow(/switched off/);
+      expect((await runRoute.POST(json({ values: { subject: "a potter" } }), ctx("gpu-only"))).status).toBe(409);
+      expect(count()).toBe(before);
+    } finally {
+      skills.setSkillEnabled("gpu-only", true);
+    }
+    expect(recipes.recipeView("gpu-only").enabled).toBe(true);
   });
 });
 
@@ -298,6 +342,72 @@ describe("checking a recipe", () => {
     file.steps[1].request.modelId = "seedream-5-pro";
     skills.setSkillFile("lamp", "recipe.json", JSON.stringify(file));
     expect(recipes.recipeView("lamp").recheck.cloud).toEqual(["The models, routes or prices it uses changed since it was checked"]);
+  });
+
+  it("never writes a check over a recipe saved while it ran, and keeps checks that finished meanwhile", async () => {
+    makeSkill("race", soul(), "Race");
+    // The dry run waits for its rows: the recipe is edited (a PUT, an upload) before it ends.
+    const checking = recipes.verifyRecipe("race", "demo", "open");
+    const edited = { ...soul(), params: [{ ...soul().params[0], example: "a baker at dawn" }] };
+    recipes.saveRecipe("race", edited);
+    await expect(checking).rejects.toThrow(/changed while it was being checked/);
+    const stored = JSON.parse(skills.skillFile("race", "recipe.json")!);
+    expect(stored.params[0].example).toBe("a baker at dawn");
+    expect(stored.verified).toBeUndefined();
+    // A check of the other engine that ends meanwhile only adds what it checked: both are kept.
+    const open = recipes.verifyRecipe("race", "demo", "open");
+    await recipes.verifyRecipe("race", "plan", "cloud");
+    const r = await open;
+    expect(r.view.recipe.verified).toMatchObject({ cloud: { plan: today() }, open: { plan: today(), dryRun: today() } });
+  });
+
+  it("only falls back to the demo route when a provider to connect is all that stops a run", () => {
+    expect(recipes.onlyConnect(["Connect fal.ai or Replicate in Settings to run this model"])).toBe(true);
+    expect(recipes.onlyConnect(["Connect Ollama in Settings to run this model (open-source text runs on your own machine)"])).toBe(true);
+    expect(recipes.onlyConnect(["This model takes up to 3 images on fal.ai — remove some"])).toBe(false);
+    expect(recipes.onlyConnect(["Connect fal.ai in Settings to run this model", "Fuobe Try-On runs with the LoRA “Try-On”, which this run leaves out. Pick another model or engine"])).toBe(false);
+    expect(recipes.onlyConnect([])).toBe(false);
+  });
+
+  it("judges a look only with a model that sees images, and on the GPU never with a paid one", async () => {
+    let vision = false;
+    let asked = 0;
+    const ollama = http.createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.setHeader("Content-Type", "application/json");
+        if (req.url === "/api/show") return res.end(JSON.stringify({ capabilities: vision ? ["completion", "vision"] : ["completion"] }));
+        if (req.url === "/api/chat") {
+          asked++;
+          return res.end(JSON.stringify({ message: { content: "No — a grey square, no one at a wheel." } }));
+        }
+        res.statusCode = 404;
+        res.end("{}");
+      });
+    });
+    await new Promise<void>((r) => ollama.listen(0, "127.0.0.1", () => r()));
+    setSetting("ollamaUrl", `http://127.0.0.1:${(ollama.address() as AddressInfo).port}`);
+    setSetting("enhanceProvider", "ollama");
+    try {
+      makeSkill("looked", { ...soul(), checks: { portrait: { kind: "image", look: "a ceramicist at her wheel" } } }, "Looked");
+      // A text-only model would answer from the words alone: the look isn't judged, and the test doesn't fail on it.
+      let r = await recipes.verifyRecipe("looked", "real", "open", { confirm: true });
+      expect(asked).toBe(0);
+      expect(r.engines[0].real).toMatchObject({ ok: true, notes: expect.arrayContaining([expect.stringContaining("the look wasn't judged")]) });
+      // A model that sees images judges it; with a Claude key set and the helper on auto, the GPU still asks Ollama.
+      vision = true;
+      globalThis.__fuobeOllamaVision?.clear();
+      setSetting("enhanceProvider", "auto");
+      setSetting("anthropicKey", "sk-ant-test");
+      r = await recipes.verifyRecipe("looked", "real", "open", { confirm: true });
+      expect(asked).toBe(1);
+      expect(r.engines[0].real).toMatchObject({ ok: false, problems: ["Step “portrait” doesn't look like “a ceramicist at her wheel”"] });
+    } finally {
+      setSetting("anthropicKey", "");
+      setSetting("enhanceProvider", "none");
+      setSetting("ollamaUrl", "");
+      ollama.close();
+    }
   });
 
   it("a real test asks first, and measures what it made", async () => {

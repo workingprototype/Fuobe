@@ -41,8 +41,8 @@ import type { Skill } from "@/lib/assist";
 import { planSteps } from "./assist/studio-tools";
 import { executeTool, getTool, planFor, validateInput } from "./assist/tools";
 import { createPipeline } from "./chains";
-import { llmText, llmTextBackend } from "./enhance";
-import { cancelGeneration, createGenerations, currentRequest, getGeneration, previewChained } from "./generations";
+import { llmSeesImages, llmText } from "./enhance";
+import { cancelGeneration, createGenerations, currentRequest, getGeneration, previewChained, stampRequests } from "./generations";
 import { trashGenerations } from "./library";
 import { isOffered, modelLicence } from "./model-access";
 import { GenerationRequestSchema } from "./request-schema";
@@ -194,7 +194,15 @@ interface RunPlan {
   total: number | null;
   errors: string[];
   place?: RecipePlace;
+  /** Every error is only a provider to connect (with Settings → Demo mode off): this install's, not the recipe's. */
+  connectOnly?: boolean;
 }
+
+/**
+ * Whether a run's refusals are all "connect a provider" (chooseRoute's when nothing on a route is connected and Demo
+ * mode is off, and llmMissing's): what only this install lacks, which the demo route may stand in for.
+ */
+export const onlyConnect = (errors: string[]): boolean => errors.length > 0 && errors.every((e) => /^Connect\b/.test(e));
 
 /** Price one compiled run the way it would start (planSteps / planFor), with what stops it. */
 function planRun(c: Compiled, engine: Engine): RunPlan {
@@ -204,9 +212,10 @@ function planRun(c: Compiled, engine: Engine): RunPlan {
     return { jobs: p.jobs, total: p.total, errors, place: { ...(p.studio && { studio: p.studio }), ...(p.href && { href: p.href }), ...(p.fallback && { fallback: p.fallback }) } };
   }
   const jobs = planSteps("run_skill", c.steps);
-  const errors = jobs.filter((j) => j.error).map((j) => `${j.note && j.note !== j.modelName ? `${j.note} (${j.modelName})` : j.modelName}: ${j.error}`);
+  const failed = jobs.filter((j) => j.error);
+  const errors = failed.map((j) => `${j.note && j.note !== j.modelName ? `${j.note} (${j.modelName})` : j.modelName}: ${j.error}`);
   if (!errors.length && !planRunnable(jobs)) errors.push("Nothing to run");
-  return { jobs, total: totalCost(jobs), errors };
+  return { jobs, total: totalCost(jobs), errors, connectOnly: failed.length === errors.length && onlyConnect(failed.map((j) => j.error!)) };
 }
 
 /** The run with every request on the demo provider: valid and priced the same whether or not a provider is connected. */
@@ -215,14 +224,15 @@ function asDemo(c: Compiled): Compiled {
 }
 
 /**
- * The plan check: the run as it would start. When only this install stops it (no provider connected, with Settings →
+ * The plan check: the run as it would start. When the only thing stopping it is a provider to connect (with Settings →
  * Demo mode off), the recipe itself is fine: the same run on the demo provider passes it, and the reason is a note.
+ * Any other refusal (a route's image limit, a LoRA a route can't carry…) fails the check: the demo route skips those.
  */
 function planCheck(c: Compiled, engine: Engine): RunPlan & { notes: string[] } {
   const plan = planRun(c, engine);
-  if (!plan.errors.length || c.kind === "tool") return { ...plan, notes: [] };
+  if (!plan.errors.length || c.kind === "tool" || !plan.connectOnly) return { ...plan, notes: [] };
   const demo = planRun(asDemo(c), engine);
-  return demo.errors.length ? { ...plan, notes: [] } : { ...demo, notes: [...new Set(plan.errors.map((e) => e.replace(/^[^:]+: /, "")))] };
+  return demo.errors.length ? { ...plan, notes: [] } : { ...demo, notes: [...new Set(plan.jobs.flatMap((j) => (j.error ? [j.error] : [])))] };
 }
 
 /**
@@ -333,6 +343,7 @@ export function recipeView(name: string): RecipeView {
     title: skill.title,
     ...(skill.icon && { icon: skill.icon }),
     builtin: skill.source === "builtin",
+    enabled: skill.enabled,
     recipe,
     engines,
     ready,
@@ -412,11 +423,17 @@ function rowsOf(recipe: Recipe, input: RunInput): { rows: Row[]; errors: string[
   };
 }
 
+/** The engine asked for, else the first one its plan check passed on (else the first its steps allow). */
 function engineFor(recipe: Recipe, asked: Engine | undefined): Engine {
   const engines = recipeEngines(recipe);
   if (!engines.length) throw new SkillError(noEngine(recipe), 422);
   if (asked && !engines.includes(asked)) throw new SkillError(`This skill doesn't run on ${ENGINE_NAME[asked]}: its steps run on ${engines.map((e) => ENGINE_NAME[e]).join(" or ")}`, 422);
-  return asked ?? engines[0];
+  return asked ?? engines.find((e) => !!recipe.verified?.[e]?.plan) ?? engines[0];
+}
+
+/** A skill switched off on the Skills page doesn't run (by its form, a link or the API) until it's switched on. */
+function mustBeOn(skill: Skill): void {
+  if (!skill.enabled) throw new SkillError(`/${skill.name} is switched off — switch it on in Skills to run it`, 409);
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +442,7 @@ function engineFor(recipe: Recipe, asked: Engine | undefined): Engine {
 /** Price one run or many (rows priced together, with a total) on an engine, without starting anything. */
 export function estimateRecipe(name: string, input: RunInput, asked?: Engine): RecipeEstimate {
   const { skill, recipe } = getRecipe(name);
+  mustBeOn(skill);
   const engine = engineFor(recipe, asked);
   const { rows, errors } = rowsOf(recipe, input);
   let place: RecipePlace | undefined;
@@ -454,15 +472,30 @@ export function estimateRecipe(name: string, input: RunInput, asked?: Engine): R
 }
 
 /**
+ * A studio tool makes its own requests: once it has, they get the run's stamp and the skill's title as their batch's
+ * name, as a pipeline's are given when compiled. The run is the tool's batch (else `run`), which is returned.
+ */
+function stampToolRun(skill: { name: string; title: string }, ids: string[], run: string): string | undefined {
+  let batch: string | undefined;
+  stampRequests(ids, (batches) => {
+    batch = batches[0];
+    return { skill: { name: skill.name, run: batch ?? run }, batchTitle: skill.title.slice(0, 200) };
+  });
+  return batch;
+}
+
+/**
  * Run a recipe once or once per row on an engine whose plan check passed. Every row is validated and priced first:
  * one bad row starts nothing. A pipeline is one createPipeline per row; a tool recipe one executeTool call per row.
  */
 export async function runRecipe(name: string, input: RunInput, asked?: Engine): Promise<{ engine: Engine; runs: RecipeRun[]; demo: boolean }> {
   const { skill, recipe } = getRecipe(name);
+  mustBeOn(skill);
   const engine = engineFor(recipe, asked);
   if (!recipe.verified?.[engine]?.plan) throw new SkillError(`Check this skill on ${ENGINE_NAME[engine]} first — the check is free`, 409);
   const { rows, errors } = rowsOf(recipe, input);
   if (errors.length) throw new RecipeError(errors);
+  if (!rows.length) throw new RecipeError(["Add a row to run"]);
   const bad = rows.flatMap((r) => (r.errors.length ? [`${rows.length > 1 ? `Row ${r.line}: ` : ""}${r.errors.join("; ")}`] : []));
   if (bad.length) throw new RecipeError(bad);
   // Compile and price every row before anything starts.
@@ -476,7 +509,7 @@ export async function runRecipe(name: string, input: RunInput, asked?: Engine): 
   const runs: RecipeRun[] = [];
   let demo = true;
   if (compiled[0].c.kind === "tool") {
-    for (const { c } of compiled) {
+    for (const { run, c } of compiled) {
       if (c.kind !== "tool") continue;
       const out = await executeTool(c.tool, c.input, { engine });
       const text = typeof out.content === "string" ? out.content : "";
@@ -494,8 +527,9 @@ export async function runRecipe(name: string, input: RunInput, asked?: Engine): 
         href = undefined;
       }
       const ids = (out.items ?? []).flatMap((i) => (i.role === "generations" ? i.ids : []));
+      const batchId = stampToolRun(skill, ids, run);
       demo &&= ids.every((id) => getGeneration(id)?.provider === "mock");
-      runs.push({ ids, ...(href && { href }) });
+      runs.push({ ...(batchId && { batchId }), ids, ...(href && { href }) });
     }
     if (!runs.some((r) => !r.error)) throw new SkillError(runs[0]?.error ?? "Nothing could start", 422);
     return { engine, runs, demo };
@@ -521,6 +555,12 @@ export async function runRecipe(name: string, input: RunInput, asked?: Engine): 
 // Checks
 
 export type VerifyLevel = "plan" | "demo" | "real";
+
+/** Whether two recipes are the same but for what was checked (`verified`). */
+const sameRecipe = (a: Recipe, b: Recipe) => {
+  const bare = (r: Recipe) => JSON.stringify({ ...r, verified: undefined });
+  return bare(a) === bare(b);
+};
 
 const TERMINAL = new Set(["succeeded", "failed", "canceled"]);
 
@@ -584,15 +624,21 @@ async function infoOf(url: string, kind: MediaKind): Promise<MediaInfo | null> {
   }
 }
 
-/** Whether a picture shows a sentence, by a model that sees images; null when none answers. */
-async function judgeLook(look: string, image: string): Promise<boolean | null> {
-  if (!llmTextBackend()) return null;
+/**
+ * Whether a picture shows a sentence, judged only by a model that sees images (llmSeesImages): null when there is none
+ * (a text-only model would answer from the words alone) or it doesn't answer. On the open engine only a local model is
+ * asked, as everywhere the open engine runs: never a paid API.
+ */
+async function judgeLook(look: string, image: string, engine: Engine): Promise<boolean | null> {
+  const local = { ollamaOnly: engine === "open" };
+  if (!(await llmSeesImages(local))) return null;
   try {
     const f = await readRef(image);
     const answer = await llmText(
       "You check whether a picture matches a short description. Answer yes or no first, then one short reason.",
       `Description: ${look}`,
       [{ data: f.data, contentType: f.contentType }],
+      local,
     );
     if (!answer) return null;
     return /^\W*yes\b/i.test(answer) ? true : /^\W*no\b/i.test(answer) ? false : null;
@@ -625,6 +671,7 @@ async function realRun(skill: Skill, recipe: Recipe, engine: Engine): Promise<No
     const out = await executeTool(c.tool, c.input, { engine });
     if (out.isError) return { ok: false, problems: [typeof out.content === "string" ? out.content : "The tool couldn't start"], notes, demo: false };
     const ids = (out.items ?? []).flatMap((i) => (i.role === "generations" ? i.ids : []));
+    stampToolRun(skill, ids, nanoid(10));
     made = await settle(ids, REAL_RUN_MS);
     if (ids.length) byKey = { [c.key]: ids[0] };
   } else {
@@ -652,7 +699,7 @@ async function realRun(skill: Skill, recipe: Recipe, engine: Engine): Promise<No
       const clip = still ? undefined : g!.outputs.find((o) => o.kind === "video")?.url;
       const frame = clip ? await frameOf(clip, engine) : { url: still, ids: [] };
       helpers.push(...frame.ids);
-      const verdict = frame.url ? await judgeLook(check.look, frame.url) : null;
+      const verdict = frame.url ? await judgeLook(check.look, frame.url, engine) : null;
       if (verdict === false) problems.push(`Step “${key}” doesn't look like “${check.look}”`);
       else if (verdict === null) notes.push(`Step “${key}”: the look wasn't judged (no model that sees images${clip && engine === "open" ? ", and no frame extractor on your GPU" : ""})`);
     }
@@ -722,7 +769,12 @@ export async function verifyRecipe(name: string, level: VerifyLevel, asked?: Eng
     verified[e] = next;
     checks.push(check);
   }
-  saveRecipe(name, { ...recipe, verified }, { keepVerified: true });
+  // A check takes a while (a dry run, a real test): a recipe saved or uploaded meanwhile is never overwritten, and what
+  // was checked is never written onto it. Checks of other engines that finished meanwhile are kept.
+  const now = getRecipe(name).recipe;
+  if (!sameRecipe(now, found.recipe)) throw new SkillError("The recipe changed while it was being checked — check it again", 409);
+  const merged: NonNullable<Recipe["verified"]> = { ...now.verified, ...Object.fromEntries(engines.map((e) => [e, verified[e] ?? null])) };
+  saveRecipe(name, { ...recipe, verified: merged }, { keepVerified: true });
   const ok = checks.every((c) => c.plan.ok && (c.dryRun?.ok ?? true) && (c.real?.ok ?? true));
   return { ok, engines: checks, view: recipeView(name) };
 }

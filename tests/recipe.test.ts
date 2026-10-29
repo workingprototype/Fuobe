@@ -11,9 +11,11 @@ import {
   parseRecipe,
   parseRows,
   RECIPE_LIMITS,
+  RECIPE_MARKDOWN_MAX,
   recipeMarkdown,
   recipeProblems,
   RecipeSchema,
+  stripChecks,
   stripExamples,
   valuesSchema,
   verifiedLine,
@@ -159,6 +161,14 @@ describe("values", () => {
     expect(checkValues(r, { product: "https://example.com/a.jpg", name: "Lamp", takes: "0" }).errors.takes).toBe("Takes: at least 1");
   });
 
+  it("reads a number as it is being typed: “0.” and “.5” are numbers, words aren't", () => {
+    const strength = RecipeSchema.parse({ ...r, params: [{ id: "s", label: "Strength", type: "number", min: 0, max: 1, step: 0.1, default: 0.5 }], steps: [{ key: "a", kind: "generate", request: { feature: "skill", modelId: "m", prompt: "x", params: { extra: { s: "{{s}}" } } } }] });
+    expect(checkValues(strength, { s: "0." }).values).toEqual({ s: 0 });
+    expect(checkValues(strength, { s: ".5" }).values).toEqual({ s: 0.5 });
+    expect(checkValues(strength, { s: "0.75" }).values).toEqual({ s: 0.75 });
+    expect(checkValues(strength, { s: "a lot" }).errors.s).toBe("Strength: a number");
+  });
+
   it("reads text from a form or a CSV: numbers as numbers, choices without minding case, @handles", () => {
     const withEl = RecipeSchema.parse({ ...r, params: [...r.params, { id: "hero", label: "Hero", type: "element", required: true }] });
     const ok = checkValues(withEl, { product: "/api/files/a.png", name: "Lamp", takes: "3", aspect: "16:9", hero: "Maya_Lopez" });
@@ -274,6 +284,10 @@ describe("rows from a CSV", () => {
     expect(parseRows("name\nLamp", r).errors).toEqual(["No column for “Product photo”"]);
     expect(parseRows("", r).errors[0]).toMatch(/Paste a table/);
     expect(parseRows("foo,bar\n1,2", r).errors[0]).toMatch(/names no input/);
+    // A header and no rows: nothing to run, said as such (not "fix the rows").
+    const empty = parseRows("product,name\n\n", r);
+    expect(empty.rows).toEqual([]);
+    expect(empty.errors).toEqual(["Add a row under the header: one row per run"]);
   });
 
   it("takes at most 50 rows, as a Canvas table does", () => {
@@ -325,6 +339,11 @@ describe("sharing and reading", () => {
     expect(s.params.at(-1)).toEqual({ id: "file_1", label: "Audio for “Turntable”", type: "audio", required: true });
     expect(JSON.stringify(s.steps)).not.toContain("/api/files/");
     expect(recipeProblems(s)).toEqual([]);
+    // Kept with its examples (a backup): only this install's checks are left out.
+    const kept = stripChecks(withLogo);
+    expect(kept.verified).toBeUndefined();
+    expect(kept.params[0].example).toBe("/api/files/uploads/2026-10-20/lamp.png");
+    expect(kept.source).toEqual(withLogo.source);
   });
 
   it("writes a Run it section with the inputs, the steps and the equivalent generate call", () => {
@@ -336,6 +355,39 @@ describe("sharing and reading", () => {
     expect(md).toContain('"model_id": "kling-3"');
     expect(md).toContain('"after": 1');
     expect(md).toContain("run_skill");
+    expect(md).not.toContain("leaves out");
+  });
+
+  it("puts a look, a negative prompt and a voice into the generate call, and says what it can't carry", () => {
+    const soul = RecipeSchema.parse({
+      fuobeRecipe: 1,
+      params: [{ id: "subject", label: "Subject", type: "text", required: true }],
+      steps: [
+        {
+          key: "portrait",
+          kind: "generate",
+          request: { feature: "skill", modelId: "fuobe-soul", presetId: "v1-y2k", prompt: "{{subject}}", negativePrompt: "blurry", params: { aspectRatio: "4:5", seed: 7, generateAudio: false }, loras: [{ file: "maya.safetensors", strength: 0.8 }] },
+        },
+      ],
+    });
+    const md = recipeMarkdown(soul, { name: "soul" });
+    expect(md).toContain('"look": "v1-y2k"');
+    expect(md).toContain('"negative_prompt": "blurry"');
+    expect(md).toContain('"generate_audio": false');
+    expect(md).toContain("That call leaves out its LoRAs, `params.seed` (the `generate` tool has no field for them)");
+  });
+
+  it("keeps the Run it section to a few pages, whatever the recipe holds", () => {
+    const long = "word ".repeat(1900);
+    const big = RecipeSchema.parse({
+      fuobeRecipe: 1,
+      params: Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, label: `Input ${i}`, type: "choice", options: Array.from({ length: 24 }, (_, j) => `option ${j} ${"x".repeat(60)}`), hint: "h".repeat(200) })),
+      steps: Array.from({ length: 24 }, (_, i) => ({ key: `s${i}`, kind: "generate", request: { feature: "skill", modelId: "fuobe-soul", prompt: `${long} {{p${i % 12}}}` } })),
+    });
+    const md = recipeMarkdown(big, { name: "big" });
+    expect(md.length).toBeLessThanOrEqual(RECIPE_MARKDOWN_MAX);
+    expect(md).toContain("the call is too long to show here");
+    expect(md).toContain("**Steps**");
   });
 
   it("says when and where it was checked", () => {

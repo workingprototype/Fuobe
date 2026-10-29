@@ -2,7 +2,7 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 import { parseSkillMd, SKILL_LIMITS, SKILL_NAME_RE, toSkillMd, type Skill, type SkillMeta, type SkillSummary } from "@/lib/assist";
-import { parseRecipe, RECIPE_FILE, stripExamples, type Recipe } from "@/lib/recipe";
+import { parseRecipe, RECIPE_FILE, stripChecks, stripExamples, type Recipe } from "@/lib/recipe";
 import { unzip, ZipError } from "./assist/unzip";
 import { db } from "./db";
 import { zip } from "./zip";
@@ -207,17 +207,17 @@ export function setSkillFile(name: string, file: string, content: string | null)
 }
 
 /**
- * The skill with its files as a .zip (one folder, as importSkill reads it). A recipe's examples, source and checks
- * stay home unless `examples` (they name this install's files, faces and words); files fixed in its steps become
- * inputs the other install asks for (stripExamples).
+ * The skill with its files as a .zip (one folder, as importSkill reads it). A recipe's examples and source stay home
+ * unless `examples` (they name this install's files, faces and words), and files fixed in its steps become inputs the
+ * other install asks for (stripExamples). Its checks never travel: they were this install's (stripChecks).
  */
 export function skillArchive(name: string, o: { examples?: boolean } = {}): Buffer | null {
   const s = getSkill(name);
   if (!s) return null;
   const files = skillFiles(name).map((f) => {
-    if (f.path !== RECIPE_FILE || o.examples) return f;
+    if (f.path !== RECIPE_FILE) return f;
     const parsed = parseRecipe(f.content);
-    return parsed.ok ? { ...f, content: `${JSON.stringify(stripExamples(parsed.recipe), null, 2)}\n` } : f;
+    return parsed.ok ? { ...f, content: `${JSON.stringify(o.examples ? stripChecks(parsed.recipe) : stripExamples(parsed.recipe), null, 2)}\n` } : f;
   });
   return zip([{ name: `${name}/SKILL.md`, data: Buffer.from(toSkillMd(s)) }, ...files.map((f) => ({ name: `${name}/${f.path}`, data: Buffer.from(f.content) }))]);
 }
@@ -354,9 +354,7 @@ export function setSkillEnabled(name: string, enabled: boolean): Skill {
 function unverified(text: string): string {
   const parsed = parseRecipe(text);
   if (!parsed.ok || !parsed.recipe.verified) return text;
-  const r: Recipe = { ...parsed.recipe };
-  delete r.verified;
-  return `${JSON.stringify(r, null, 2)}\n`;
+  return `${JSON.stringify(stripChecks(parsed.recipe), null, 2)}\n`;
 }
 
 export interface ImportResult {

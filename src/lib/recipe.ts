@@ -214,7 +214,8 @@ function valueSchema(p: RecipeParam): z.ZodType<RecipeValue | undefined> {
       let n = z.number({ error: `${label}: a number` }).refine(Number.isFinite, `${label}: a number`);
       if (p.min !== undefined) n = n.refine((x) => x >= p.min!, `${label}: at least ${p.min}`);
       if (p.max !== undefined) n = n.refine((x) => x <= p.max!, `${label}: at most ${p.max}`);
-      base = z.union([z.number(), z.string().trim().regex(/^-?\d+(\.\d+)?$/, `${label}: a number`).transform(Number)]).pipe(n);
+      // Text (a form, a CSV) counts as it is being typed: "0." and ".5" are numbers; anything else isn't.
+      base = z.preprocess((v) => (typeof v === "string" && /^-?(\d+(\.\d*)?|\.\d+)$/.test(v.trim()) ? Number(v.trim()) : v), n) as z.ZodType<RecipeValue>;
       break;
     }
     case "choice": {
@@ -579,6 +580,7 @@ export function parseRows(csv: string, recipe: Pick<Recipe, "params">): ParsedRo
       if (p.required && p.default === undefined && !columns.includes(p.id)) errors.push(`No column for “${p.label}”`);
     }
   if (body.length > RECIPE_LIMITS.rows) errors.push(`At most ${RECIPE_LIMITS.rows} rows at a time — this has ${body.length}`);
+  if (!body.length && columns.some(Boolean)) errors.push("Add a row under the header: one row per run");
   const rows = body.slice(0, RECIPE_LIMITS.rows).map((r): RecipeRow => {
     const raw: Record<string, unknown> = {};
     columns.forEach((id, i) => {
@@ -695,7 +697,17 @@ export function stripExamples(recipe: Recipe): Recipe {
   return out;
 }
 
+/** The recipe as kept with its examples (a backup, a move between installs): only this install's checks are left out. */
+export function stripChecks(recipe: Recipe): Recipe {
+  const out: Recipe = { ...recipe };
+  delete out.verified;
+  return out;
+}
+
 const TYPE_WORDS: Record<ParamType, string> = { image: "an image", video: "a video", audio: "an audio file", text: "text", number: "a number", choice: "one of", element: "an element's @handle" };
+
+/** A line's text cut to `n` characters (the Run it section stays a few pages, whatever a recipe holds). */
+const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function paramLine(p: RecipeParam): string {
   const what = p.type === "choice" ? `${TYPE_WORDS.choice} ${(p.options ?? []).map((o) => `\`${o}\``).join(", ")}` : TYPE_WORDS[p.type];
@@ -704,80 +716,114 @@ function paramLine(p: RecipeParam): string {
     p.type === "number" && p.max !== undefined ? `to ${p.max}` : "",
     p.type === "text" && p.max !== undefined ? `up to ${p.max} characters` : "",
   ].filter(Boolean);
-  const need = p.required && p.default === undefined ? "required" : p.default !== undefined ? `default \`${p.default}\`` : "optional";
-  return `- \`${p.id}\` — ${p.label}: ${what}${limits.length ? ` (${limits.join(" ")})` : ""}; ${need}${p.hint ? `. ${p.hint}` : ""}`;
+  const need = p.required && p.default === undefined ? "required" : p.default !== undefined ? `default \`${cut(String(p.default), 120)}\`` : "optional";
+  return cut(`- \`${p.id}\` — ${p.label}: ${what}${limits.length ? ` (${limits.join(" ")})` : ""}; ${need}${p.hint ? `. ${p.hint}` : ""}`, 600);
 }
 
 /** A step as a line: its model and operation, its words with the inputs as {{id}}, what it waits for. */
 function stepLine(s: RecipeStep, i: number, keys: string[]): string {
-  if (s.kind === "tool") return `${i + 1}. \`${s.tool}\` with ${JSON.stringify(s.input)}`;
+  if (s.kind === "tool") return `${i + 1}. \`${s.tool}\` with ${cut(JSON.stringify(s.input), 400)}`;
   const r = s.request;
   const waits = asList(s.after).map((a) => `step ${keys.indexOf(a) + 1}`);
-  return `${i + 1}. ${s.label ? `${s.label}: ` : ""}\`${r.modelId}\`${r.op ? ` (${r.op})` : ""}${r.prompt ? ` — “${r.prompt}”` : ""}${waits.length ? `, from the result of ${waits.join(" and ")}` : ""}`;
+  return `${i + 1}. ${s.label ? `${s.label}: ` : ""}\`${r.modelId}\`${r.op ? ` (${r.op})` : ""}${r.prompt ? ` — “${cut(String(r.prompt), 240)}”` : ""}${waits.length ? `, from the result of ${waits.join(" and ")}` : ""}`;
 }
+
+/** Request fields the `generate` tool's job takes (src/server/assist/tools.ts Job → asRequest), by its name for each. */
+const JOB_INPUTS: Record<string, string> = { images: "images", endImage: "end_image", video: "video", audio: "audio", audio2: "background_audio", voiceAudio: "voice_audio" };
+const JOB_PARAMS: Record<string, string> = {
+  aspectRatio: "aspect_ratio",
+  resolution: "resolution",
+  duration: "duration",
+  numOutputs: "outputs",
+  generateAudio: "generate_audio",
+  voice: "voice",
+  targetLanguage: "target_language",
+  sourceLanguage: "source_language",
+  startTime: "start_time",
+  endTime: "end_time",
+  numLayers: "num_layers",
+};
+/** Request fields that don't change what is made (or that `after` stands for). */
+const JOB_IGNORED = new Set(["feature", "modelId", "op", "prompt", "negativePrompt", "presetId", "inputs", "params", "engine", "chain", "chainFrom", "title", "step"]);
+const LEFT_OUT_WORDS: Record<string, string> = { loras: "its LoRAs", presetOptions: "its preset options", presetStrength: "its preset strength", mix: "its second preset (mix)" };
 
 /**
  * The equivalent `generate` call, when every step waits for at most one earlier step (Assist's `after`), with the
- * inputs left as {{id}} for the agent to fill in.
+ * inputs left as {{id}} for the agent to fill in, and what it can't carry (the generate tool has no field for it).
  */
-function generateCall(recipe: Recipe): string | null {
+function generateCall(recipe: Recipe): { json: string; leftOut: string[] } | null {
   const steps = recipe.steps as GenerateStep[];
   if (steps.some((s) => s.kind !== "generate" || asList(s.after).length > 1)) return null;
   const keys = steps.map((s) => s.key);
+  const leftOut = new Set<string>();
   const jobs = steps.map((s) => {
-    const r = s.request;
+    const r = s.request as Record<string, unknown>;
     const p = (r.params ?? {}) as Record<string, unknown>;
     const inputs = (r.inputs ?? {}) as Record<string, unknown>;
+    const extra = (p.extra ?? {}) as Record<string, unknown>;
     const after = asList(s.after)[0];
+    for (const [k, v] of Object.entries(r)) if (v !== undefined && !JOB_IGNORED.has(k)) leftOut.add(LEFT_OUT_WORDS[k] ?? `\`${k}\``);
+    for (const [k, v] of Object.entries(inputs)) if (v !== undefined && !JOB_INPUTS[k]) leftOut.add(`the input \`${k}\``);
+    for (const [k, v] of Object.entries(p)) if (v !== undefined && !JOB_PARAMS[k] && k !== "extra") leftOut.add(`\`params.${k}\``);
+    for (const k of Object.keys(extra)) if (k !== "system") leftOut.add(`\`params.extra.${k}\``);
     return Object.fromEntries(
       Object.entries({
         model_id: r.modelId,
         op: r.op,
         prompt: r.prompt,
-        images: inputs.images,
-        end_image: inputs.endImage,
-        video: inputs.video,
-        audio: inputs.audio,
-        aspect_ratio: p.aspectRatio,
-        resolution: p.resolution,
-        duration: p.duration,
-        outputs: p.numOutputs,
+        negative_prompt: r.negativePrompt,
+        look: r.presetId,
+        ...Object.fromEntries(Object.entries(JOB_INPUTS).map(([k, name]) => [name, inputs[k]])),
+        ...Object.fromEntries(Object.entries(JOB_PARAMS).map(([k, name]) => [name, p[k]])),
+        system: extra.system,
         engine: r.engine,
         after: after === undefined ? undefined : keys.indexOf(after),
       }).filter(([, v]) => v !== undefined),
     );
   });
-  return JSON.stringify({ summary: "…", jobs }, null, 2);
+  return { json: JSON.stringify({ summary: "…", jobs }, null, 2), leftOut: [...leftOut] };
 }
+
+/** The longest Run it section (load_skill, the chat's context, MCP prompts): about the size of a long playbook. */
+export const RECIPE_MARKDOWN_MAX = 20_000;
 
 /**
  * The "Run it" section for agents (load_skill appends it): the inputs, the steps, and how another agent runs the
  * same job with Fuobe's tools: the `run_skill` call (Assist and MCP, W3), else the equivalent `generate` or studio
- * tool call.
+ * tool call. At most RECIPE_MARKDOWN_MAX characters: a call too long to show is left to run_skill.
  */
 export function recipeMarkdown(recipe: Recipe, skill?: { name: string }): string {
   const keys = recipe.steps.map((s) => s.key);
   const tool = recipe.steps.find((s): s is ToolStep => s.kind === "tool");
-  const call = tool ? JSON.stringify({ tool: tool.tool, input: tool.input }, null, 2) : generateCall(recipe);
+  const gen = tool ? null : generateCall(recipe);
+  const call = tool ? JSON.stringify({ tool: tool.tool, input: tool.input }, null, 2) : gen?.json;
   const values = Object.fromEntries(recipe.params.map((p) => [p.id, `{{${p.id}}}`]));
-  return [
-    "## Run it",
-    "",
-    `This skill runs by itself in Fuobe: the same steps with new inputs, priced first, no LLM needed (Skills → ${skill ? `/${skill.name}` : "this skill"} → Run…).`,
-    "",
-    recipe.params.length ? "**Inputs**" : "It takes no inputs.",
-    ...recipe.params.map(paramLine),
-    "",
-    "**Steps**",
-    ...recipe.steps.map((s, i) => stepLine(s, i, keys)),
-    "",
-    "**From an agent**",
-    "",
-    `With Fuobe's MCP server, \`run_skill\` runs it with values for the inputs${skill ? `: \`${JSON.stringify({ name: skill.name, values })}\`` : ""}. Where that tool isn't available, ${tool ? `call the studio tool \`${tool.tool}\` the same way` : call ? "make the same `generate` call" : "run the steps with `generate`, in order"}, with the inputs put in for {{id}}${call ? ":" : "."}`,
-    ...(call ? ["", "```json", call, "```"] : []),
-    "",
-    "Price it first with `estimate_cost` (or `estimate_job` for a studio tool) and confirm with the user.",
-  ].join("\n");
+  const build = (withCall: boolean) => {
+    const shown = withCall && !!call;
+    const how = tool ? `call the studio tool \`${tool.tool}\` the same way` : call ? "make the same `generate` call" : "run the steps with `generate`, in order";
+    return [
+      "## Run it",
+      "",
+      `This skill runs by itself in Fuobe: the same steps with new inputs, priced first, no LLM needed (Skills → ${skill ? `/${skill.name}` : "this skill"} → Run…).`,
+      "",
+      recipe.params.length ? "**Inputs**" : "It takes no inputs.",
+      ...recipe.params.map(paramLine),
+      "",
+      "**Steps**",
+      ...recipe.steps.map((s, i) => stepLine(s, i, keys)),
+      "",
+      "**From an agent**",
+      "",
+      `With Fuobe's MCP server, \`run_skill\` runs it with values for the inputs${skill ? `: \`${JSON.stringify({ name: skill.name, values })}\`` : ""}. Where that tool isn't available, ${how}, with the inputs put in for {{id}}${shown ? ":" : call ? " (the call is too long to show here)." : "."}`,
+      ...(shown ? ["", "```json", call, "```"] : []),
+      ...(gen?.leftOut.length ? ["", `That call leaves out ${gen.leftOut.join(", ")} (the \`generate\` tool has no field for ${gen.leftOut.length === 1 ? "it" : "them"}), so its result can differ: only \`run_skill\` makes the same thing.`] : []),
+      "",
+      "Price it first with `estimate_cost` (or `estimate_job` for a studio tool) and confirm with the user.",
+    ].join("\n");
+  };
+  const full = build(true);
+  if (full.length <= RECIPE_MARKDOWN_MAX) return full;
+  return cut(build(false), RECIPE_MARKDOWN_MAX);
 }
 
 /** "29 Oct" from a stored day. */
@@ -820,6 +866,8 @@ export interface RecipeView {
   /** The skill's icon (a lucide name from SKILL_ICONS). */
   icon?: string;
   builtin: boolean;
+  /** Switched on on the Skills page: a skill that's off doesn't run. */
+  enabled: boolean;
   recipe: Recipe;
   /** Engines its steps allow on this install. */
   engines: RecipeEngine[];

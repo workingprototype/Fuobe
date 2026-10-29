@@ -379,6 +379,8 @@ describe("skills on the server", () => {
     // &examples=1 keeps them (and the source), but never this install's checks.
     const full = JSON.parse(unzip(skills.skillArchive("lamp-turntable", { examples: true })!).find((e) => e.name.endsWith("recipe.json"))!.data.toString("utf8"));
     expect(full).toMatchObject({ params: [{ example: "/api/files/uploads/2026-10-20/lamp.png" }], source: { from: "library" } });
+    expect(full.verified).toBeUndefined();
+    expect(JSON.stringify(full)).not.toContain("sha256:abc");
     // Round trip: Upload reads the zip back, with its recipe (an uploaded recipe is never "checked" here).
     const back = skills.importSkill({ name: "lamp-turntable.zip", data: skills.skillArchive("lamp-turntable", { examples: true })! }, { replace: true });
     expect(back.skill).toMatchObject({ name: "lamp-turntable", recipe: true, files: expect.arrayContaining([expect.objectContaining({ path: "recipe.json" }), expect.objectContaining({ path: "notes.md" })]) });

@@ -152,6 +152,24 @@ function update(id: string, fields: Partial<Row>): void {
     .run({ ...fields, __now: Date.now(), __id: id });
 }
 
+/**
+ * Set server fields on rows a studio tool made, after it made them (a skill recipe's tool run: the `skill` stamp and the
+ * skill's `batchTitle`), and on every row of their batches (the tool's helper steps). Returns those batches.
+ */
+export function stampRequests(ids: string[], fields: (batches: string[]) => Pick<GenerationRequest, "skill" | "batchTitle">): string[] {
+  if (!ids.length) return [];
+  const marks = (n: number) => Array.from({ length: n }, () => "?").join(", ");
+  const batches = (db().prepare(`SELECT DISTINCT batch_id FROM generations WHERE id IN (${marks(ids.length)}) AND batch_id IS NOT NULL`).all(...ids) as { batch_id: string }[]).map((r) => r.batch_id);
+  const rows = db()
+    .prepare(`SELECT id, request_json FROM generations WHERE id IN (${marks(ids.length)})${batches.length ? ` OR batch_id IN (${marks(batches.length)})` : ""}`)
+    .all(...ids, ...batches) as Pick<Row, "id" | "request_json">[];
+  const set = fields(batches);
+  db().transaction(() => {
+    for (const r of rows) update(r.id, { request_json: JSON.stringify({ ...(JSON.parse(r.request_json) as GenerationRequest), ...set }) });
+  })();
+  return batches;
+}
+
 /** One generation; a row in the Trash reads as missing unless `includeDeleted`. */
 export function getGeneration(id: string, opts: { includeDeleted?: boolean } = {}): Generation | null {
   ensureRunner();
