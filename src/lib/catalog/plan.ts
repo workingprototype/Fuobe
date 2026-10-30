@@ -629,7 +629,7 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
  * price counts the clip's seconds (params.sourceDuration) when the caller knows them, and slow motion bills
  * the whole stretched result.
  */
-const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
+const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video", "restore-video"]);
 
 /**
  * The seconds a clip edit that keeps the clip's length is billed for (Happy Horse, Runway Aleph, Lucy Edit, Kling O3 4K

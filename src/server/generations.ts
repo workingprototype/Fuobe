@@ -52,7 +52,8 @@ import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
-import { graphLoras } from "@/lib/catalog/character-swap";
+import { graphLoras as h3GraphLoras } from "@/lib/catalog/character-swap";
+import { restoreGraphLoras } from "@/lib/restore-graph";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
 import { ACCESS_PLACE } from "@/lib/model-access";
 import { offeredLoras, offeredRoutes, requireOffered } from "./model-access";
@@ -635,6 +636,9 @@ function prepare(original: GenerationRequest) {
   const priced = made !== undefined && plan.params.duration !== undefined ? { ...plan.params, duration: Math.round(made * 2) / 2 } : plan.params;
   return { req, plan, route, demo, providerId, notes, asked, unreachable, switchedOff: access.dropped, cost: free ? 0 : estimateCost(plan.model, priced, 1, plan.op, withLoras) };
 }
+
+/** The LoRA files a graph loads itself (not injected), so a run downloads the ones ComfyUI lacks before it starts. */
+const graphLoras = (endpoint: string, extra: Record<string, unknown> | undefined) => [...h3GraphLoras(endpoint, extra), ...restoreGraphLoras(endpoint, extra)];
 
 /** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */
 const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "extend", "keyframes"]);
@@ -1273,7 +1277,8 @@ async function submit(
     if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
       input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
     } else if (providerId === "comfyui" && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
-      // A graph that loads its own LoRAs (Genjutsu's Character swap: the Turbo and swap LoRAs) gets them downloaded too.
+      // A graph that loads its own LoRAs (Genjutsu's Character swap: the Turbo and swap LoRAs; Restore & colourise: the
+      // gated Restore or Detail Refine IC-LoRA) gets them downloaded too.
       await ensureLorasOnComfy([...(input.loras ?? []), ...graphLoras(route.endpoint, input.extra)], await comfyLoraFiles(route), (message) => update(id, { message }));
     }
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });

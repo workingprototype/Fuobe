@@ -704,7 +704,7 @@ RESTORE_MP = per_megapixel(RESTORE_O["endpoint"])
 RESTORE_PER_SECOND = {t: round(s["4:3"][0] * s["4:3"][1] * 24 / 1e6 * RESTORE_MP, 4) for t, s in CINEMA_SIZES.items() if t != "480p"}
 model("fuobe-restore", "Fuobe Restore", "Fuobe Original", "fuobe-restore", "video",
       "Restore and colourise archive footage: Lightricks' Restore IC-LoRA on LTX-2.3, one untiled pass a piece",
-      [("restore-video", RESTORE_O["endpoint"], "fal", {"fixed": RESTORE_O["fixed"]})],
+      [("restore-video", RESTORE_O["endpoint"], "fal", {"fixed": RESTORE_O["fixed"], "defaults": RESTORE_O["defaults"]})],
       original=True, sizes={t: s for t, s in CINEMA_SIZES.items() if t != "480p"},
       pricing=("second", RESTORE_PER_SECOND["720p"],
                f"${RESTORE_MP} per megapixel of video (width × height × frames): about ${round(RESTORE_PER_SECOND['720p'] * 4, 2)} for 4 s of a 4:3 clip at 720p",

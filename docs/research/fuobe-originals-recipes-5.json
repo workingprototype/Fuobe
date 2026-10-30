@@ -19264,7 +19264,10 @@
      "stage2": "none: the Detail Refine IC-LoRA is an LTX-2.5 LoRA and no host serves LTX-2.5 with LoRAs (open engine only)",
      "lora": "the Restore IC-LoRA's mirror on fal storage (Fuobe downloads the gated file once with the user's HF token)",
      "unverified": "whether fal's IC-LoRA path treats a custom IC-LoRA exactly as the card's reference guide (no live call made); ic_lora_type none keeps fal's own union/detailer IC-LoRA out",
-     "steps": "the endpoint's own (40, acceleration regular): fal runs LTX-2.3 22B dev with its distill LoRA, not the 2.5 distilled transformer the card's 8 steps are for"
+     "steps": "the endpoint's own (40, acceleration regular): fal runs LTX-2.3 22B dev with its distill LoRA, not the 2.5 distilled transformer the card's 8 steps are for",
+     "defaults": {
+      "negative_prompt": "modern cars, modern buildings, shipping containers, mobile phones, logos, signage, lettering, graffiti, satellite dishes, plastic furniture, blocky compression, banding, mosquito noise, ringing, blurry, smeared, ghosting, low resolution"
+     }
     },
     "licence": {
      "weights": "LTX-2.x Community License (free under US$10M annual revenue)",

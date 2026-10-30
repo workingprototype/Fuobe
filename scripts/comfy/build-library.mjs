@@ -67,6 +67,8 @@ export const LOADER_FOLDERS = {
   // comfyui-oss-4 additions
   OpticalFlowLoader: { model_name: 'optical_flow' },
   LoadMoGeModel: { model_name: 'geometry_estimation' },
+  // archive-restore: Lightricks' IC-LoRA loader (ComfyUI-LTXVideo)
+  LTXICLoRALoaderModelOnly: { lora_name: 'loras' },
 };
 // Nodes that fetch their own weights at runtime (no manual download needed; listed in the entry's autoDownloads).
 const SELF_DOWNLOADING = new Set(['RIFE VFI', 'DownloadAndLoadWav2VecModel', 'RMBG', 'AILab_Qwen3ASRSubtitle', 'Apply Whisper', 'ClothesSegment', 'LatentSyncNode']);
@@ -94,6 +96,8 @@ const NUMERIC_DEFAULT_KEYS = [
   'megapixels',
   // Originals O11
   'motionFrame', 'audioCfg', 'threshold', 'mosaicScale',
+  // archive-restore
+  'windowStart', 'windowFrames', 'prefixFrames', 'canvasWidth', 'canvasHeight', 'tileWidth', 'tileHeight', 'tileFrames',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -134,6 +138,8 @@ export const BINDING_KEYS = new Set([
   'separationModel', 'channels',
   // MOSS-Image (docs/research/new-models-7.md §4.6): the KSampler's sampler and the UNET file its Quality / Fast settings pick
   'sampler', 'unet',
+  // archive-restore (Restore & colourise): the window, the canvas, the prefix hand-off, deinterlacing and the fusion tiles
+  'windowStart', 'canvasWidth', 'canvasHeight', 'fieldWidth', 'fieldHeight', 'prefixFrom', 'prefixFrames', 'tileWidth', 'tileHeight', 'streaming', 'tileFrames',
 ]);
 
 // Sizes in GB: two decimals, and three where two would read 0 (a 4 MB DBS model), so no other entry's size changes.
@@ -354,7 +360,7 @@ async function main() {
       const size = await hfSize(known.url, sizeCache);
       if (size && typeof size === 'object' && size.error) errs.push(`model ${file}: ${known.url} -> ${size.error}`);
       const bytes = typeof size === 'number' ? size : size?.size;
-      models.set(file, { file, folder: known.folder, url: known.url, sizeGb: bytes ? gb(bytes) : null, ...(optional && { optional: true }) });
+      models.set(file, { file, folder: known.folder, url: known.url, sizeGb: bytes ? gb(bytes) : null, ...(size?.gated && { gated: true }), ...(optional && { optional: true }) });
     }
 
     // ---- custom nodes

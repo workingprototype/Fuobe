@@ -19781,6 +19781,9 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
             "match_video_length": true,
             "match_input_fps": true
           },
+          "defaults": {
+            "negative_prompt": "modern cars, modern buildings, shipping containers, mobile phones, logos, signage, lettering, graffiti, satellite dishes, plastic furniture, blocky compression, banding, mosquito noise, ringing, blurry, smeared, ghosting, low resolution"
+          },
           "loras": {
             "shape": "items",
             "key": "loras",

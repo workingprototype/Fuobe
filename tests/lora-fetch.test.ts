@@ -306,6 +306,7 @@ describe("Before a cloud run", () => {
     const fitted = fitLoras([relight, fpv], ltx);
     expect(fitted.loras).toEqual([relight, fpv]);
     expect(fitted.notes).toEqual([]);
+    expect(lorasFit({ provider: "replicate", map: { loras: { shape: "single", weights: "w", scale: "s" } } }, [relight, fpv])).toBe(false);
     // No token: refused by name, with where to accept the licence and where the token goes; nothing is fetched.
     setSetting("hfToken", "");
     net = network({});
