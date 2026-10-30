@@ -30,7 +30,7 @@ function resetGuards() {
 }
 
 let ip = 0;
-/** A visitor's address, as Apache passes it on (the last X-Forwarded-For hop). */
+/** A visitor's address, as a trusted reverse proxy passes it on (the last X-Forwarded-For hop). */
 const nextIp = () => `198.51.100.${++ip % 250}`;
 const post = (url: string, body: unknown, from = nextIp(), cookie?: string, method = "POST") =>
   new Request(`http://localhost:3000${url}`, {
