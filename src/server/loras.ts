@@ -108,7 +108,7 @@ function recordCopy(c: Omit<LoraCopy, "createdAt">): void {
 const civitaiKey = () => getSetting("civitaiKey");
 
 /** The Hugging Face token (Settings or HF_TOKEN): used only to download gated Hugging Face files. */
-const hfToken = () => getSetting("hfToken");
+const hfToken = () => getSetting("huggingfaceToken");
 
 /** Whether a Hugging Face token is set (gated downloads need one). */
 export const hasHfToken = (): boolean => !!hfToken();

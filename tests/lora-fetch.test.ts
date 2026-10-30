@@ -308,14 +308,14 @@ describe("Before a cloud run", () => {
     expect(fitted.notes).toEqual([]);
     expect(lorasFit({ provider: "replicate", map: { loras: { shape: "single", weights: "w", scale: "s" } } }, [relight, fpv])).toBe(false);
     // No token: refused by name, with where to accept the licence and where the token goes; nothing is fetched.
-    setSetting("hfToken", "");
+    setSetting("huggingfaceToken", "");
     net = network({});
     await expect(prepareCloudLoras([relight], "fal", upload().fn)).rejects.toThrow(/gated Hugging Face repo: accept its licence on https:\/\/huggingface\.co\/Lightricks\/LTX-2\.3-22b-IC-LoRA-Relight .*Settings → LoRAs/);
     expect(net.calls).toEqual([]);
     net.restore();
     // With the token: downloaded once with it (Authorization to huggingface.co, never in a URL), copied to fal, recorded.
     const HF = "hf_secret0123456789abcdef";
-    setSetting("hfToken", HF);
+    setSetting("huggingfaceToken", HF);
     const body = Buffer.from("relight".repeat(64));
     const pinned = { ...relight, file: relight.file };
     net = network({ [loraEntry("ltx-2-3-22b-ic-lora-relight-1-0")!.url]: () => new Response(new Uint8Array(body), { status: 200, headers: { "content-length": String(body.length) } }) });
@@ -327,7 +327,7 @@ describe("Before a cloud run", () => {
     expect(get.url).not.toContain(HF);
     expect(up.sent).toEqual([]);
     expect(redact(`failed with ${HF}`)).toBe("failed with •••");
-    setSetting("hfToken", "");
+    setSetting("huggingfaceToken", "");
   });
 
   it("mirrors the pinned bytes, not a same-named file of other bytes in the LoRA folder", async () => {

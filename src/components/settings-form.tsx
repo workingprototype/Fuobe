@@ -339,7 +339,7 @@ export function SettingsForm({ prices }: { prices?: string }) {
         title="LoRAs · looks, motions, effects and adapters"
         description="Looks, camera moves and effects add LoRA files to open models, on your GPU and in the cloud; an adapter is the LoRA an Original always loads (Fuobe Try-On's). Fuobe fetches the pinned version a run needs and shows each file's licence; what may run where is your call in Models & licences."
       >
-        <LoraSettings folder={get("comfyLorasDir")} civitaiKey={get("civitaiKey")} hfToken={get("hfToken")} />
+        <LoraSettings folder={get("comfyLorasDir")} civitaiKey={get("civitaiKey")} hfToken={get("huggingfaceToken")} />
       </Section>
 
       <Section

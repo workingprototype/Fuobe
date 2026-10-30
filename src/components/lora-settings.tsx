@@ -242,7 +242,7 @@ export function LoraSettings({ folder, civitaiKey, hfToken }: { folder?: PublicS
       />
       <ConnectField
         id="huggingface"
-        name="hfToken"
+        name="huggingfaceToken"
         setting={hfToken}
         provider="huggingface"
         label="Hugging Face token"
