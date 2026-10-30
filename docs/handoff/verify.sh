@@ -3,18 +3,23 @@
 # cases, the production build, the browser checks in demo mode, hosted prices with a fake fal key, the live CPU ComfyUI
 # checks and the ComfyUI workflow library. docs/HANDOFF.md ("Cutting a PR") explains when to run it.
 # Usage: bash docs/handoff/verify.sh <branch> <out-dir>
-# Needs: origin/main fetched, the main checkout's scripts/comfy/node_modules (cd scripts/comfy && npm install) and a
-# ComfyUI at http://127.0.0.1:8188 (scripts/comfy/start-comfyui.sh). Results: <out-dir>/verify-summary.txt, logs in
-# <out-dir>/logs. Each step's exit code is recorded; a failing step doesn't stop the later ones.
+# Needs: origin/main fetched, the main checkout's scripts/comfy/node_modules (cd scripts/comfy && npm install), ffmpeg
+# and ffprobe, and a ComfyUI at http://127.0.0.1:8188 (scripts/comfy/start-comfyui.sh). It can run from any folder:
+# the throwaway worktree goes next to the main checkout (<repo>/../wt), whichever worktree holds this script. Results:
+# <out-dir>/verify-summary.txt, logs in <out-dir>/logs. Each step's exit code is recorded; a failing step doesn't stop
+# the later ones. comfy-validate exits 1 on a server that lacks some graphs' node packs: its log should list only the
+# graphs docs/HANDOFF.md names under "Known gaps".
 set -u
 BRANCH=${1:?branch}
 S=$(mkdir -p "${2:?out-dir}" && cd "$2" && pwd)
-REPO=$(git rev-parse --show-toplevel)
+# The main checkout: the parent of the shared git directory (a linked worktree's own top folder is not it).
+REPO=$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")
 WT=$REPO/../wt/verify-$(echo "$BRANCH" | tr '/' '-')
 L=$S/logs
 SUM=$S/verify-summary.txt
 mkdir -p "$L"
 : > "$SUM"
+[ -d "$REPO/scripts/comfy/node_modules" ] || echo "warn: $REPO/scripts/comfy/node_modules is missing (cd scripts/comfy && npm install): comfy-validate will fail" >> "$SUM"
 step() { local name=$1; shift; local t0=$(date +%s); ( "$@" ) > "$L/$name.log" 2>&1; local rc=$?; printf '%-34s exit=%-3s %5ss\n' "$name" "$rc" "$(( $(date +%s) - t0 ))" >> "$SUM"; return $rc; }
 # Next 16's server process is named next-server, so stop servers by port, not by name.
 stop_port() { local port=$1; for i in 1 2 3 4 5; do fuser -k -n tcp "$port" >/dev/null 2>&1 || break; sleep 1; done; sleep 1; }
@@ -66,6 +71,7 @@ FUOBE_DATA_DIR=$S/data-live NEXT_TELEMETRY_DISABLED=1 pnpm start -p 3400 > "$L/s
 wait_up http://localhost:3400/ && echo "live server up" >> "$SUM"
 step e2e-comfyui-selftest timeout 2400 node tests/e2e/comfyui-selftest.mjs http://localhost:3400
 step e2e-comfyui-canvas-concat timeout 2400 node tests/e2e/comfyui-canvas-concat.mjs http://localhost:3400
+step e2e-comfyui-faceless-plus timeout 2400 node tests/e2e/comfyui-faceless-plus.mjs http://localhost:3400
 stop_port 3400
 
 # Every workflow in the library posted to the live ComfyUI (never run); packs this server lacks show as failures.
