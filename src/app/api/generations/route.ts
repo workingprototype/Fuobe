@@ -139,6 +139,12 @@ export async function POST(request: Request) {
         return refuse(409, missingFilesMessage(fix), { code: "comfy_missing_model", fix });
       }
     }
+    // Counted again just before the run is stored, with nothing awaited in between: requests that arrived together all
+    // passed the first count while the checks above waited.
+    if (account && activeRuns(account.id) >= ACCOUNT_LIMITS.activeRuns) {
+      unhit(`run:${account.id}`);
+      return refuse(429, ACCOUNT_MESSAGES.activeRuns, {}, { "Retry-After": "30" });
+    }
     const items = onOwn(() => createGenerations(req));
     // What the run leaves out or changes (a model that replaced a retired one, a LoRA that runs only on a GPU, a length the API rounds).
     const all = [...new Set([...notes, ...items.flatMap((g) => g.notes ?? [])])];

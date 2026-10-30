@@ -1564,17 +1564,30 @@ async function pollGuarded(r: Row): Promise<void> {
   }
 }
 
+/**
+ * The jobs one tick polls (100 at most): the owner's first, then every account's in turn (each account's oldest job,
+ * then each one's second, and so on), so one account's long queue never hides another account's jobs.
+ */
+export function rowsToPoll(limit = 100): Row[] {
+  return db()
+    .prepare(
+      `SELECT g.* FROM generations g
+       JOIN (SELECT id, ROW_NUMBER() OVER (PARTITION BY json_extract(request_json, '$.account') ORDER BY created_at) AS turn
+             FROM generations WHERE status IN ('queued','running') AND external_id IS NOT NULL) t ON t.id = g.id
+       ORDER BY ${ACCOUNT_LAST.replace("request_json", "g.request_json")}, t.turn, g.created_at ASC LIMIT ?`,
+    )
+    .all(limit) as Row[];
+}
+
 async function tick(): Promise<void> {
   const state = globalThis.__fuobeRunner;
   if (!state || state.busy) return;
   state.busy = true;
   try {
     sweepInterrupted();
-    // The owner's jobs first. An account's ComfyUI may be slow to answer: its polls run on their own, so they never hold
-    // up the owner's (pollGuarded never polls one row twice at once).
-    const active = db()
-      .prepare(`SELECT * FROM generations WHERE status IN ('queued','running') AND external_id IS NOT NULL ORDER BY ${ACCOUNT_LAST}, created_at ASC LIMIT 100`)
-      .all() as Row[];
+    // The owner's jobs first, then the accounts' in turn. An account's ComfyUI may be slow to answer: its polls run on
+    // their own, so they never hold up the owner's (pollGuarded never polls one row twice at once).
+    const active = rowsToPoll();
     for (const r of active) if (accountOf(r)) void pollGuarded(r);
     await Promise.all([...active.filter((r) => !accountOf(r)).map(pollGuarded), pollTrainings().catch(() => {}), advanceDependents().catch(() => {})]);
   } finally {
