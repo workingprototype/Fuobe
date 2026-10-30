@@ -49,6 +49,7 @@ import { listElements } from "./elements";
 import { pollTrainings } from "./training";
 import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
+import { carriesLayout } from "@/lib/layout-prompt";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
@@ -1212,7 +1213,8 @@ async function submit(
       return adapter.prepareFile(data, f.contentType, f.name, route);
     };
     let prompt = plan.prompt;
-    if (req.params?.enhancePrompt && prompt) {
+    // A layout's prompt is compiled boxes (plan.layout): the enhancer would rewrite them, so it never runs on one.
+    if (req.params?.enhancePrompt && prompt && !plan.layout && !carriesLayout(req.params?.extra)) {
       update(id, { message: "Enhancing prompt" });
       const words = plan.soul?.words;
       const at = words ? prompt.indexOf(words) : -1;
