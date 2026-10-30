@@ -1,9 +1,17 @@
 import "server-only";
+import { SPLIT_MODEL } from "@/lib/av/split";
 import { getModel, getPreset, MODELS, modelsFor, PRESETS } from "@/lib/catalog";
 import { graphLoras } from "@/lib/catalog/character-swap";
+import { PATH_MODELS } from "@/lib/catalog/cinema";
 import { dualEngine, onEngine, runsOn } from "@/lib/catalog/engines";
+import { FRAMES_MODELS } from "@/lib/catalog/keyframes";
 import { libraryEntry, needsToken } from "@/lib/catalog/loras";
+import { ANGLES_2511_LORA } from "@/lib/catalog/open-tools";
 import { STUDIO_WORKFLOWS } from "@/lib/catalog/swap-studio-plan";
+import { FILL_MODELS } from "@/lib/catalog/turnaround";
+
+/** The open engine's Join clips (a turnaround's quarter turns become one film). */
+const JOIN_CLIPS_MODEL = "oss-join-clips";
 import type { LoraRef, ModelDef, Operation } from "@/lib/catalog/types";
 import type { LoraNeed } from "@/lib/gpu/readiness";
 import { basename } from "@/lib/gpu/requirements";
@@ -112,6 +120,11 @@ export interface StudioRowDef {
   config?: StudioConfig;
   /** A studio with graphs of its own (Character swap). */
   workflows?: string[];
+  /**
+   * A tool that runs open models' operations in steps (Split soundtrack, Cinema's fly path, the turnaround): their graphs
+   * and LoRAs together, with the LoRAs a step adds itself (the turnaround's Angles LoRA). The first names the tool.
+   */
+  steps?: { modelId: string; op: Operation; loras?: LoraRef[] }[];
 }
 
 /** The board's rows (src/lib/hubs.ts names the hub modes): each studio's open default. */
@@ -127,10 +140,26 @@ export const STUDIO_ROWS: StudioRowDef[] = [
   { href: "/reframe", label: "Reframe", group: "Video", config: S.REFRAME_STUDIO },
   { href: "/lipsync", label: "Lipsync", group: "Video", config: S.LIPSYNC_STUDIO },
   { href: "/character-swap", label: "Character swap", group: "Video", workflows: [STUDIO_WORKFLOWS.mask, STUDIO_WORKFLOWS.segment] },
+  // Cinema's 3D scene films a still along a keyframed camera path (N7-5).
+  { href: "/cinema", label: "Fly path", group: "Video", steps: [{ modelId: PATH_MODELS.open, op: "camera-path" }] },
+  // The turnaround (N7-6): Frames mode's start/end-frame clips joined into one film, with the sides it has no picture of
+  // drawn first by the Angles app (src/lib/catalog/turnaround.ts).
+  {
+    href: "/character-sheet",
+    label: "Turnaround",
+    group: "Video",
+    steps: [
+      { modelId: FRAMES_MODELS.open.id, op: "keyframes" },
+      { modelId: JOIN_CLIPS_MODEL, op: "concat" },
+      { modelId: FILL_MODELS.open, op: "edit", loras: [ANGLES_2511_LORA] },
+    ],
+  },
   { href: "/audio", label: "Voice", group: "Audio", config: S.AUDIO_STUDIO },
   { href: "/audio/dialogue", label: "Dialogue", group: "Audio", config: S.DIALOGUE_STUDIO },
   { href: "/audio/voice-change", label: "Voice change", group: "Audio", config: S.VOICE_CHANGE_STUDIO },
   { href: "/audio/transcribe", label: "Transcribe", group: "Audio", config: S.TRANSCRIBE_STUDIO },
+  // DBS soundtrack separation (D1): dialogue, music and effects.
+  { href: "/audio/split", label: "Split soundtrack", group: "Audio", steps: [{ modelId: SPLIT_MODEL, op: "separate-audio" }] },
   { href: "/audio/sfx", label: "Sound effects", group: "Audio", config: S.SFX_STUDIO },
   { href: "/audio/music", label: "Music", group: "Audio", config: S.MUSIC_STUDIO },
   { href: "/audio/video", label: "Sound for video", group: "Audio", config: S.FOLEY_STUDIO },
@@ -145,8 +174,24 @@ export const STUDIO_ROWS: StudioRowDef[] = [
   { href: "/video-tools/colors", label: "Match colors", group: "Video tools", config: S.VIDEO_COLOR_MATCH_STUDIO },
 ];
 
-/** A studio row's tool: its open default model on the studio's operations (or its own graphs). */
+/** A studio row's tool: its open default model on the studio's operations (or its own graphs, or its steps). */
 export function studioTool(row: StudioRowDef): Tool | null {
+  if (row.steps) {
+    const parts = row.steps.flatMap((s) => {
+      const t = modelTool(s.modelId, s.op);
+      return t ? [{ ...t, loras: [...t.loras, ...(s.loras ?? []).map(loraNeed)] }] : [];
+    });
+    if (parts.length !== row.steps.length) return null;
+    const loras = new Map(parts.flatMap((p) => p.loras).map((l) => [l.file, l]));
+    return {
+      ref: `studio:${row.href}`,
+      name: parts[0].name,
+      kind: parts[0].kind,
+      workflows: [...new Set(parts.flatMap((p) => p.workflows))],
+      loras: [...loras.values()],
+      ...(parts.every((p) => p.local) && { local: true }),
+    };
+  }
   if (row.workflows) {
     const segment = row.workflows[row.workflows.length - 1];
     return { ref: `studio:${row.href}`, name: row.label, kind: "video", workflows: row.workflows.filter((w) => !!loadIndex().workflows[w]), loras: graphLoras(segment, {}).map(loraNeed) };
