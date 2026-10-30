@@ -28,7 +28,7 @@ Written on 2026-10-30, when PR #15 wrapped up the work so far, and revised the s
 
 - **`main`** (after PR #15) holds:
   - all of round 4, the Fuobe Originals O1 to O11 and O13, and from PR #14 Skills W1 and W2, Fixes 5 and the research notes for DBS, new models, Work2Skill and accounts
-  - from PR #15: DBS soundtrack separation (D1), MOSS-Image (N7-1), the fly path (N7-5), the turnaround video (N7-6), the research for Idol (research 9) and this handoff. PR #15's own tools follow public sign-up (`tests/public-signup-tools.test.ts`), and the pre-flight index covers MOSS-Image, the fly path and Split soundtrack. PR #15 does **not** carry acc-1 and acc-2: the owner dropped them (below), and its branch reverts them.
+  - from PR #15: DBS soundtrack separation (D1), MOSS-Image (N7-1), the fly path (N7-5), the turnaround video (N7-6), the research for Idol (research 9) and this handoff. PR #15's own routes and tools follow public sign-up (`tests/public-signup-tools.test.ts`), and its graphs are in the pre-flight index, with board rows for Split soundtrack, Fly path and Turnaround. PR #15 does **not** carry acc-1 and acc-2: the owner dropped them (below), and its branch reverts them.
   - the owner's own work from 10-30 up to this handoff (20 commits; read their messages with `git log dc51169..a5f841f`):
     - **public sign-up** (`docs/public-signup.md`), described under "Accounts" below.
     - **local LLMs:** `src/server/llm` and `/api/llm` cover Ollama, LM Studio, Unsloth Studio and any OpenAI-compatible server (Settings → AI helper).
@@ -73,7 +73,7 @@ The owner's own words on engines, SAM Audio, accounts and the PR #14 calls are i
   - changes to the library or projects go in `LIBRARY_CHANGES` (403 `code: "library"` for an account). Settings, keys and tokens stay the owner's. The owner's lists come back empty for a visitor, and a visitor is never told whether one of the owner's records exists.
   - only the owner's runs reach the install's keys or GPU. An account's studio generations run on its own ComfyUI through `POST /api/generations`; other runs answer `connect-gpu`, then `own-gpu-tool`. An account's run reads only its own files (`src/server/tenant.ts`, `src/server/account-inputs.ts`).
   - a request body over 66 MB doesn't get through the sign-in proxy: a route that takes a large file takes an uploaded file's reference
-  - add new routes to those rules and to `tests/public-signup.test.ts`
+  - add new routes to those rules, and test them in the style of `tests/public-signup.test.ts`, `tests/public-signup-tools.test.ts` and `tests/account-*.test.ts`
   - new ComfyUI workflows and node packs go into the pre-flight's requirement index (`packs.json`, `model-pins.json`, then `node scripts/comfy/build-requirements.mjs`), and new studios and tools get a row on the `/connect` board (`STUDIO_ROWS` in `src/server/gpu/tools.ts`)
 
   The owner's earlier accounts answers of 10-29 (three modes, teams, plans, an admin panel, paid keys both ways, enterprise features) stay under the key `accounts`. They are background for the re-plan, to be confirmed with the owner.
@@ -196,7 +196,7 @@ mkdir -p /home/user/ext                              # the inputs folder below
 cd /home/user/Fuobe && git checkout claude/fuobe-parity-4 && git merge --ff-only origin/claude/fuobe-parity-4
 git log --first-parent --format='%h %s' claude/fuobe-parity-4..origin/main   # main's commits the base lacks: read them
 git merge --no-ff origin/main -m "Merge origin/main into claude/fuobe-parity-4" -m "$(cat /tmp/trailer.txt)"
-npx next typegen && pnpm typecheck && pnpm lint && pnpm vitest run --maxWorkers=2   # check each command's own exit code
+npx next typegen && pnpm typecheck && pnpm lint && FUOBE_ACCOUNT_DISK_FREE_GB=1 pnpm vitest run --maxWorkers=2   # check each command's own exit code
 git push origin claude/fuobe-parity-4
 ```
 
@@ -334,7 +334,9 @@ Only cut a PR when the owner asks for one. The steps that worked for PRs #12 to 
   - on a server installed before today's script: `captions-whisper-burnin`, `image-vectorize-vtracer`, `video-character-swap-h3` (h3_character_swap) and `separate-soundtrack-dbs` (ComfyUI-DBS)
 
   Never install packs or restart ComfyUI from a package agent. Say what's needed instead.
-- **After PR #15:** main's pre-flight board predated PR #15's studios, and PR #15's integration added them. Check that they reached main: `git grep -c '/audio/split' origin/main -- src/server/gpu/tools.ts` (Split soundtrack's row in `STUDIO_ROWS`) and `git grep -c separate-soundtrack-dbs origin/main -- workflows/comfyui/requirements.json` must each print a count. If not, add them (`node scripts/comfy/build-requirements.mjs` rewrites the index).
-- **Public sign-up** is off by default, and verify.sh's servers run without it. `tests/public-signup.test.ts` is where every new route's guest and account answers are pinned.
+- **The pre-flight index:** PR #15 put its graphs into `workflows/comfyui/requirements.json` (with ComfyUI-DBS in `packs.json`) and gave Split soundtrack, Fly path and Turnaround rows in `STUDIO_ROWS` (`src/server/gpu/tools.ts`). A package that adds a graph or a studio does the same. After PR #15, check that they reached main: `git grep -c '/audio/split' origin/main -- src/server/gpu/tools.ts` (Split soundtrack's row in `STUDIO_ROWS`) and `git grep -c separate-soundtrack-dbs origin/main -- workflows/comfyui/requirements.json` must each print a count. If not, add them (`node scripts/comfy/build-requirements.mjs` rewrites the index).
+- **Data folders that ran the old integration branch:** migrations are known by their place in `MIGRATIONS`, and on `claude/fuobe-parity-4` up to `f7c6d8e` places 23 and 24 were acc-1's identity tables and acc-2's audit-log trigger. On main they are the GPU pre-flight's tables and `assets.account_id`. PR #15's `open()` in `src/server/db.ts` forgets either place when main's work is missing and the dropped package's is there, so main's migration runs (`tests/dropped-branch-migrations.test.ts`). The dropped tables stay, unused. Never reuse a place in that list: only append.
+- **Public sign-up** is off by default, and verify.sh's servers run without it. `tests/public-signup.test.ts`, `tests/public-signup-tools.test.ts` and `tests/account-*.test.ts` pin the guest and account answers.
+- **Small free disk and Vitest:** accounts can't upload or run while the data disk has less free space than it keeps (`FUOBE_ACCOUNT_DISK_FREE_GB`, else 20 GB or a tenth of the disk, at least 2 GB). In a container with a few GB free, `POST /api/generations` then answers 503 where `tests/gpu-api.test.ts` expects 409, so run Vitest with `FUOBE_ACCOUNT_DISK_FREE_GB=1` (verify.sh and the build prompts do).
 - **What none of the checks cover:** no GPU and no paid key have been used. Every Original is checked in demo mode, on the CPU ComfyUI (graphs accepted, no weights run) and by unit tests, but not for image quality or real bills.
 - **The owner's workflow JSONs and downloaded repos:** never commit them, never run them.
