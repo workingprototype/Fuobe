@@ -5,7 +5,9 @@
 // look as two steps (the picture, then the face mosaic), and the new LoRAs in Settings → Models & licences. Then each page
 // at 1440 and 390 px, light and dark, without sideways scroll.
 // Usage: node tests/e2e/open-tools.mjs [appUrl] [--shots <dir>]   (the app in demo mode; no run reaches a GPU or fal:
-// open-engine plans are previewed only). Exits 1 on a failed check.
+// open-engine plans are previewed only). Exits 1 on a failed check. Open-engine prices say "Free" when the app reaches
+// a ComfyUI and "Demo · free" when it doesn't (each check reads which from the page's own /api/status answer); cloud
+// prices are fal's with a fal key (FAL_KEY=anything: nothing is sent) and "Demo · free" without.
 import fs from "node:fs";
 import path from "node:path";
 import { launch, root } from "./_browser.mjs";
@@ -48,6 +50,16 @@ async function settled(query, count, timeoutMs = 60_000) {
 const status = (await api("/api/status")).body ?? {};
 const fal = !!status.providers?.fal?.configured;
 if (!fal) console.log("note: no fal key on this server: cloud runs are demo runs and show \"Demo · free\" (start it with FAL_KEY=anything for hosted prices; nothing is sent)");
+/**
+ * What an open-engine price says, by the composer's rule, for an /api/status answer: "Free" when the app reaches its
+ * ComfyUI (or demo mode is off, so nothing runs as a demo), else "Demo · free" (a run would be a demo run).
+ */
+const gpuPrice = (s) => {
+  const label = s?.providers?.comfyui?.configured || s?.demoMode === "off" ? "Free" : "Demo · free";
+  return { label, re: label === "Free" ? /\bFree\b/ : /Demo · free/ };
+};
+if (gpuPrice(status).label !== "Free")
+  console.log("note: ComfyUI isn't reachable from this server: open-engine runs are demo runs and show \"Demo · free\" (with a ComfyUI it reaches they say \"Free\"; nothing is queued on it)");
 const photo = await upload("scripts/eval/fixtures/start-frame.png", "image/png", "angles.png");
 /** A silent 16-bit mono WAV `seconds` long (a voice track whose length the Lipsync composer reads from its header). */
 function wav(seconds, rate = 8000) {
@@ -89,10 +101,21 @@ const contextFor = async (engine, viewport = { width: 1440, height: 900 }, color
 };
 const composer = (page) => page.locator("[data-composer]").first();
 const composerText = async (page) => flat(await composer(page).innerText());
+/**
+ * Open a studio page and wait for its composer and for the page's own /api/status answer, which its prices are worked
+ * out from (until it arrives an open-engine price says "Free" whether ComfyUI is reachable or not). Gives that answer.
+ */
 const open = async (page, url) => {
+  const answered = page
+    .waitForResponse((r) => new URL(r.url()).pathname === "/api/status" && r.ok(), { timeout: 60_000 })
+    .then((r) => r.json())
+    .catch(() => undefined);
   await page.goto(`${app}${url}`, { waitUntil: "load" });
   await composer(page).waitFor({ timeout: 60_000 });
+  const seen = await answered;
   await page.waitForTimeout(1200);
+  if (!seen) console.log(`note: ${url.split("?")[0]} got no /api/status answer: its open-engine price is checked against the one read at the start`);
+  return seen ?? status;
 };
 /** Wait until the composer shows a price (a cold dev server compiles the page first, and the engine is read after hydration). */
 const priced = (page, re = /\bFree\b|Demo · free|\$\d/) =>
@@ -132,12 +155,12 @@ try {
   // 2. Fuobe Angles, its own app next to it: the camera controls, on both engines.
   {
     const { context, page } = await contextFor("open");
-    await open(page, `/apps/app-fuobe-angles?image=${encodeURIComponent(photo)}`);
-    await priced(page, /\bFree\b/);
+    const gpu = gpuPrice(await open(page, `/apps/app-fuobe-angles?image=${encodeURIComponent(photo)}`));
+    await priced(page, gpu.re);
     const t = await composerText(page);
     check("open: the Fuobe Angles app runs on Fuobe Angles", /Fuobe Angles/.test(t), t.slice(0, 120));
     check("open: rotate, camera height, distance and lens controls", ["Rotate", "Camera height", "Distance", "Lens", "45° left", "From above", "Close-up", "Wide-angle"].every((w) => t.includes(w)));
-    check("open: its price before the run says Free", /\bFree\b/.test(t), (t.match(/(Demo · )?[Ff]ree|\$[\d.]+/) ?? ["no price"])[0]);
+    check(`open: its price before the run says ${gpu.label}`, gpu.re.test(t), (t.match(/(Demo · )?[Ff]ree|\$[\d.]+/) ?? ["no price"])[0]);
     await shoot(page, "angles-open-1440.png");
     // A camera at rest (Front) and no words: nothing to do, and Generate says so.
     await composer(page).getByRole("radio", { name: "Front" }).click();
@@ -192,13 +215,17 @@ try {
   // 3. Fuobe Speak and Fuobe Speak · Motion in the Lipsync studio.
   for (const engine of ["open", "cloud"]) {
     const { context, page } = await contextFor(engine);
-    await open(page, "/lipsync");
+    const gpu = gpuPrice(await open(page, "/lipsync"));
     const listed = await pickModel(page, "Fuobe Speak");
     check(`${engine}: Lipsync's model menu lists Fuobe Speak and Fuobe Speak · Motion`, listed.some((l) => /Fuobe Speak(?! ·)/.test(l)) && listed.some((l) => /Fuobe Speak · Motion/.test(l)), listed.join(" | ").slice(0, 200));
     await pickModel(page, "Fuobe Speak", "fuobe-speak");
     await page.waitForTimeout(800);
     const t = await composerText(page);
-    check(`${engine}: Fuobe Speak picked, priced before the run`, /Fuobe Speak/.test(t) && (engine === "open" ? /\bFree\b/.test(t) : fal ? /\$0\.20/.test(t) || /\$\d/.test(t) : /Demo · free/.test(t)), (t.match(/Demo · free|\bFree\b|\$[\d.]+(\/s)?/) ?? ["no price"])[0]);
+    check(
+      `${engine}: Fuobe Speak picked, priced before the run (${engine === "open" ? gpu.label : fal ? "fal's price" : "Demo · free"})`,
+      /Fuobe Speak/.test(t) && (engine === "open" ? gpu.re.test(t) : fal ? /\$0\.20/.test(t) || /\$\d/.test(t) : /Demo · free/.test(t)),
+      (t.match(/Demo · free|\bFree\b|\$[\d.]+(\/s)?/) ?? ["no price"])[0],
+    );
     await shoot(page, `speak-${engine}-1440.png`);
     await context.close();
   }
@@ -278,12 +305,12 @@ try {
   }
   {
     const { context, page } = await contextFor("open");
-    await open(page, "/image?model=fuobe-soul&preset=v1-pixeletedface");
+    const gpu = gpuPrice(await open(page, "/image?model=fuobe-soul&preset=v1-pixeletedface"));
     // Fuobe Soul prices a run once it has words.
     await composer(page).locator("textarea, [contenteditable=true]").first().fill("A woman in a denim jacket on a rooftop at dusk");
-    await priced(page);
+    await priced(page, gpu.re);
     const t = await composerText(page);
-    check("open: PixeletedFace on your GPU says Free (the mosaic too)", /PixeletedFace/.test(t) && /\bFree\b/.test(t), (t.match(/Demo · free|\bFree\b|\$[\d.]+/) ?? ["no price"])[0]);
+    check(`open: PixeletedFace on your GPU says ${gpu.label} (the mosaic too)`, /PixeletedFace/.test(t) && gpu.re.test(t), (t.match(/Demo · free|\bFree\b|\$[\d.]+/) ?? ["no price"])[0]);
     await context.close();
   }
 
