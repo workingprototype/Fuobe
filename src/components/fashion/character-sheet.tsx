@@ -14,8 +14,10 @@ import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useRun, useRunPreview } from "@/components/photodump/hooks";
 import { ResultsGrid } from "@/components/photodump/results";
 import { RunLine } from "@/components/photodump/steps";
+import { TurnaroundButton } from "@/components/turnaround/turnaround-dialog";
 import { useElements, useEngine, useGenerations, useSaveElement } from "@/lib/api";
 import { castFieldVisible, castNameFor, randomCast, SHEET_MAX_REFS, type CastAnswers, type CastFieldData } from "@/lib/catalog/packs";
+import { sheetPictures } from "@/lib/catalog/turnaround";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 
@@ -305,12 +307,24 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
                 onRetried={(from, to) => setIds((xs) => (xs.length ? xs.flatMap((id) => (id === from ? to : [id])) : xs))}
               />
               {latest && (
-                <SaveCharacter
-                  key={latest.id}
-                  item={latest}
-                  extra={(latest.request.inputs?.images ?? []).filter((u) => u.startsWith("/api/files/"))}
-                  defaultName={mode === "cast" ? castNameFor(cast) : "My character"}
-                />
+                <>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border bg-background p-3">
+                    <p className="min-w-0 flex-1 text-[13px] text-muted-foreground">Film the character all the way round: front, right side, back, left side.</p>
+                    <TurnaroundButton
+                      key={latest.id}
+                      pictures={sheetPictures(latest)}
+                      name={mode === "cast" ? castNameFor(cast) : undefined}
+                      // Photos someone brought are of a real person: the consent line is asked for.
+                      realPerson={(latest.request.inputs?.images ?? []).some((u) => u.startsWith("/api/files/"))}
+                    />
+                  </div>
+                  <SaveCharacter
+                    key={`save-${latest.id}`}
+                    item={latest}
+                    extra={(latest.request.inputs?.images ?? []).filter((u) => u.startsWith("/api/files/"))}
+                    defaultName={mode === "cast" ? castNameFor(cast) : "My character"}
+                  />
+                </>
               )}
             </>
           ) : (

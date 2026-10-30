@@ -3,6 +3,7 @@ import { z } from "zod";
 import { DISTANCE, MAX_KEYS } from "@/lib/camera-path";
 import { APERTURE, LENS } from "@/lib/scene3d";
 import { CinemaError } from "./cinema";
+import { TurnaroundSchema } from "./turnaround";
 
 /** Request bodies of /api/cinema/** (zod drops unknown keys). */
 
@@ -80,7 +81,7 @@ export const GenerateBody = z.object({
   input: z.object({
     engine: z.enum(["cloud", "open"]),
     mode: z.enum(["video", "image"]),
-    action: z.enum(["generate", "extend-forward", "extend-backward", "edit", "grid", "cast", "location", "location-view", "scene", "recompose", "path"]).default("generate"),
+    action: z.enum(["generate", "extend-forward", "extend-backward", "edit", "grid", "cast", "location", "location-view", "scene", "recompose", "path", "turnaround"]).default("generate"),
     modelId: z.string().max(80).optional(),
     prompt: z.string().max(60_000).default(""),
     moves: z.array(z.string().max(40)).max(12).optional(),
@@ -138,6 +139,8 @@ export const GenerateBody = z.object({
         preset: z.string().max(40).optional(),
       })
       .optional(),
+    // Turnaround (N7-6): the Soul Cast result's pictures by side, the route and length (the engine is the run's).
+    turnaround: TurnaroundSchema.omit({ engine: true, realPerson: true, consent: true }).optional(),
   }),
 });
 

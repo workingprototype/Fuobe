@@ -2,7 +2,7 @@ import "server-only";
 import { nanoid } from "nanoid";
 import { getModel, supportsOp } from "@/lib/catalog";
 import { MODEL3D_STEP_FEATURE, stillPromptFor3d } from "@/lib/av/model3d";
-import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
+import { chainTiming, chainedWaitMessage, frameTimes, framesWait, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
 import { faceMosaicStep } from "@/lib/catalog/open-tools";
 import { dualEngine, onEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
@@ -214,11 +214,29 @@ export function createShotFilm(original: GenerationRequest, model: ModelDef): Ge
  * neighbouring frames, each as long as the gap between them in the workflow's own frame steps, then
  * the stretch after the last frame (from it alone) when it isn't at the end, then a join. Two frames
  * at the start and the end make one clip and no join. Returns the film first, then the clips.
+ *
+ * Frames can come from earlier steps (`waits.dependsOn`, one per chain slot, each an image with its place among the
+ * request's own: framesWait). Each clip then waits for the frames it starts or ends on (Turnaround video: the sides the
+ * Angles app draws), and the clips between the request's own frames start at once.
  */
-export function createKeyframeFilm(original: GenerationRequest, model: ModelDef, route: ModelRoute): Generation[] {
-  // The whole request is checked first (prompt, frame count, gaps), so no clip starts for a film that can't be made.
-  previewGeneration({ ...original, op: "keyframes" });
-  const images = original.inputs?.images ?? [];
+export function createKeyframeFilm(original: GenerationRequest, model: ModelDef, route: ModelRoute, waits: { batchId?: string; dependsOn?: string | string[] } = {}): Generation[] {
+  const deps = waits.dependsOn === undefined ? [] : Array.isArray(waits.dependsOn) ? waits.dependsOn : [waits.dependsOn];
+  const slots = original.chain ?? [];
+  if (deps.length && (!framesWait(original) || slots.length !== deps.length)) throw new Error(chainedWaitMessage(model.name, "keyframes"));
+  // A film whose frames came from earlier steps, asked again on its own (Run again): those steps are gone.
+  if (slots.length && !deps.length) throw new Error(`Some of this film's frames were made by earlier steps — make it again where it was made, so ${model.name} gets them`);
+  // The film's frames in order: the request's own, and the ones earlier steps make put in at their places.
+  type Frame = { url: string } | { dep: string };
+  const frames: Frame[] = (original.inputs?.images ?? []).map((url) => ({ url }));
+  slots
+    .map((s, i) => ({ at: s.at!, dep: deps[i] }))
+    .sort((a, b) => a.at - b.at)
+    .forEach((x) => frames.splice(Math.min(x.at, frames.length), 0, { dep: x.dep }));
+  // The whole request is checked first (prompt, frame count, gaps), so no clip starts for a film that can't be made; frames
+  // still to come are checked as placeholders.
+  const asChecked: GenerationRequest = { ...original, op: "keyframes", chain: undefined, inputs: { ...original.inputs, images: frames.map((f) => ("url" in f ? f.url : WAITING_FRAME)) } };
+  previewGeneration(asChecked);
+  const images = asChecked.inputs?.images ?? [];
   const duration = original.params?.duration ?? model.defaults?.duration ?? 5;
   const times = original.params?.keyframeTimes?.length ? original.params.keyframeTimes : frameTimes(spread(images.length), duration);
   const wf = loadManifest().workflows.find((w) => w.id === route.endpoint);
@@ -234,7 +252,7 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
     ...(tail ? [{ label: `${model.name} after the last frame`, modelId: model.id, op: "i2v" as const, engine: model.engine }] : []),
     ...(clips.length > 1 ? [{ label: "Joining the clips", modelId: joinModelId(model.engine), op: "concat" as const }] : []),
   ]);
-  const batchId = nanoid(10);
+  const batchId = waits.batchId ?? nanoid(10);
   const params = { ...original.params };
   delete params.keyframeTimes;
   delete params.shots;
@@ -247,14 +265,31 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
   try {
     for (const [i, c] of clips.entries()) {
       const label = c.to === null ? `After frame ${c.from + 1}` : `Frames ${c.from + 1} → ${c.to + 1}`;
+      // A frame an earlier step makes reaches the clip through its chain: the start as its image, the end as its end frame.
+      const inputs: GenerationRequest["inputs"] = { ...rest };
+      const chain: ChainSlot[] = [];
+      const after: string[] = [];
+      const start = frames[c.from];
+      if ("url" in start) inputs.images = [start.url];
+      else {
+        chain.push({ slot: "images" });
+        after.push(start.dep);
+      }
+      const end = c.to === null ? undefined : frames[c.to];
+      if (end && "url" in end) inputs.endImage = end.url;
+      else if (end) {
+        chain.push({ slot: "endImage" });
+        after.push(end.dep);
+      }
       const request: GenerationRequest = {
         ...original,
         op: c.to === null ? "i2v" : "flf2v",
-        inputs: { ...rest, images: [images[c.from]], ...(c.to !== null && { endImage: images[c.to] }) },
+        inputs: Object.keys(inputs).length ? inputs : undefined,
+        chain: chain.length ? chain : undefined,
         params: { ...params, duration: c.seconds, numOutputs: 1 },
         ...(n > 1 ? { step: { label, index: i, of: n + 1 } } : {}),
       };
-      made.push(createGenerations(request, { batchId })[0]);
+      made.push(createGenerations(request, { batchId, ...(after.length && { dependsOn: after }) })[0]);
     }
     if (n === 1) return withAsked(made, original, model.engine);
     const film = joinClips(
@@ -264,7 +299,7 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
         feature: original.feature,
         batchId,
         demo: original.demo,
-        title: tidy(original.prompt) || "Keyframe film",
+        title: original.title?.trim() || tidy(original.prompt) || "Keyframe film",
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
         step: { label: `Film · ${images.length} frames`, index: n, of: n + 1 },
@@ -277,6 +312,9 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
     throw e;
   }
 }
+
+/** Where a frame an earlier step makes sits while the film is checked (it is never sent). */
+const WAITING_FRAME = "/api/files/placeholder.png";
 
 /** Extend for models with no extend API (Kling): last frame → image-to-video on the same model → join. */
 export function createExtendChain(original: GenerationRequest, model: ModelDef): Generation[] {

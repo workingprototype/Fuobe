@@ -960,6 +960,11 @@ export interface GenerationRequest {
    * it was before the signature routed it (Reuse restores that). See src/lib/catalog/palettes.ts.
    */
   signature?: SignatureRecord;
+  /**
+   * Server-set: when someone confirmed Soul ID's consent line for the real person this run shows (Turnaround video's
+   * steps, src/server/turnaround.ts; a character trained with it carries its training's time). Stripped from API input.
+   */
+  consentAt?: number;
 }
 
 export interface ChainSlot {
@@ -976,6 +981,12 @@ export interface ChainSlot {
   slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "model3d" | "mask" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
+  /**
+   * For list slots: the place it takes in the finished list (0-based) among the request's own items, instead of before or
+   * after them. Slots with `at` go in after the others, in order of `at`, so each lands where it says: a keyframe film's
+   * frames that earlier steps make (Turnaround video: the sides the Angles app draws go between the photo's own views).
+   */
+  at?: number;
   /**
    * Audio slots: take the dependency's output whose `meta.stem` is this (separate-audio makes
    * "voice" and "background", DBS also "music" and "effects"; "voice" also matches vocals/speech/target,

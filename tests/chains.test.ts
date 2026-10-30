@@ -49,6 +49,23 @@ describe("chain inputs", () => {
     // The single-dependency form storyboards use.
     expect(gens.withChainInputs({ feature: "x", modelId: "m", chainFrom: "first", inputs: { images: ["ref.png"] } }, ["prev.png"]).inputs?.images).toEqual(["prev.png", "ref.png"]);
   });
+
+  it("puts a slot with a place where it says among the request's own items, and takes it out again for a retry", () => {
+    // A turnaround's frames: the photo's front and back are its own; the sides come from earlier steps, in either order.
+    const req = {
+      feature: "turnaround",
+      modelId: "flux-3-max",
+      inputs: { images: ["front.png", "back.png", "front.png"] },
+      chain: [{ slot: "images" as const, at: 3 }, { slot: "images" as const, at: 1 }, { slot: "images" as const, position: "first" as const }],
+    };
+    const filled = gens.withChainInputs(req, ["left.png", "right.png", "lead.png"]);
+    expect(gens.withChainInputs({ ...req, chain: req.chain.slice(0, 2) }, ["left.png", "right.png"]).inputs?.images).toEqual(["front.png", "right.png", "back.png", "left.png", "front.png"]);
+    const two = { ...req, chain: req.chain.slice(0, 2) };
+    expect(gens.unfilledRequest({ ...gens.withChainInputs(two, ["left.png", "right.png"]), chainFilled: true }, 2).inputs?.images).toEqual(["front.png", "back.png", "front.png"]);
+    // With an unplaced slot too: placed ones go in after it, at their places in the finished list.
+    expect(filled.inputs?.images).toEqual(["lead.png", "right.png", "front.png", "left.png", "back.png", "front.png"]);
+    expect(gens.unfilledRequest({ ...filled, chainFilled: true }, 3).inputs?.images).toEqual(["front.png", "back.png", "front.png"]);
+  });
 });
 
 describe("open multi-shot", () => {
@@ -205,6 +222,47 @@ describe("keyframe film (Frames mode on the open engine)", () => {
     // Another model's image-to-video waits as before.
     expect(gens.previewChained({ feature: "canvas", modelId: "oss-wan22-14b-fast", prompt: "x", chainFrom: "first" }, 1).op).toBe("i2v");
   });
+
+  it("waits for frames earlier steps make: each clip waits only for the frames it starts and ends on", async () => {
+    // A turnaround on the open engine: the photo's front and back, the sides drawn first by the Angles route.
+    const [front, back] = await frames(2);
+    const side = (words: string) =>
+      gens.createGenerations({ feature: "turnaround", modelId: "oss-qwen-edit", op: "edit", prompt: `<sks> ${words} eye-level shot medium shot.`, inputs: { images: [front] }, params: { numOutputs: 1 } })[0];
+    const right = side("right side view");
+    const left = side("left side view");
+    const film = {
+      feature: "turnaround",
+      modelId: "oss-wan22-14b",
+      op: "keyframes" as const,
+      prompt: "The camera orbits 360 degrees around the person at a constant height; the person stands naturally",
+      inputs: { images: [front, back, front] },
+      chain: [{ slot: "images" as const, at: 1 }, { slot: "images" as const, at: 3 }],
+      params: { aspectRatio: "16:9", resolution: "480p", duration: 8, keyframeTimes: [0, 2, 4, 6, 8] },
+    };
+    // Priced and checked like any waiting step, with the frames still to come as placeholders.
+    expect(gens.previewChained(film, 2)).toMatchObject({ op: "keyframes", costUsd: 0 });
+    const [joined, ...clips] = gens.createGenerations(film, { dependsOn: [right.id, left.id], batchId: "turn-1" });
+    expect(joined).toMatchObject({ modelId: "oss-join-clips", op: "concat", batchId: "turn-1" });
+    expect(clips.map((c) => c.request.step?.label)).toEqual(["Frames 1 → 2", "Frames 2 → 3", "Frames 3 → 4", "Frames 4 → 5"]);
+    expect(clips.map((c) => dependsOn(c.id))).toEqual([[right.id], [right.id], [left.id], [left.id]]);
+    expect(clips.map((c) => [c.request.inputs?.images, c.request.inputs?.endImage, c.request.chain?.map((x) => x.slot)])).toEqual([
+      [[front], undefined, ["endImage"]],
+      [undefined, back, ["images"]],
+      [[back], undefined, ["endImage"]],
+      [undefined, front, ["images"]],
+    ]);
+    // 2 s a quarter in Wan's 4n + 1 frame steps, each frame kept on its time across the joins (33, 33, 33 and 29 frames).
+    expect(clips.map((c) => c.request.params?.duration)).toEqual([2, 2, 2, 1.75]);
+    const done = await settle(joined.id, 60_000);
+    expect(done.status).toBe("succeeded");
+    // Each clip got its frames from the steps it waited for.
+    const second = gens.getGeneration(clips[1].id)!;
+    expect(second.request.inputs?.images?.[0]).toBe(gens.getGeneration(right.id)!.outputs[0].url);
+    // Asked again on its own, the film can't find those steps: it says so rather than making a film with gaps.
+    expect(() => gens.createGenerations(film)).toThrow(/made by earlier steps/);
+    // A film's other inputs still can't wait.
+    expect(() => gens.createGenerations({ ...film, chain: [{ slot: "images" as const }, { slot: "images" as const, at: 3 }] }, { dependsOn: [right.id, left.id] })).toThrow(/not another step's output/);
+  }, 70_000);
 
   it("keeps a start frame and a leftover reference an image-to-video clip, not a film", async () => {
     // A Seedance reference tile carried over to Wan when the engine switches: no times, no film.

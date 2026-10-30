@@ -7,6 +7,7 @@ import { localOnly, needsToken, triggerOf } from "./loras";
 import { ANGLES_2511_LORA } from "./open-tools";
 import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
 import { soulRecipe } from "./soul";
+import { planTurnaround, type TurnaroundInput } from "./turnaround";
 import { CAST_LOOK } from "./soul-cards";
 import type { Engine, GenerationRequest, GenParams, LoraRef, ModelDef, Operation } from "./types";
 
@@ -198,7 +199,7 @@ export interface DirectorMessage {
 }
 
 export type CinemaMode = "video" | "image";
-export type CinemaAction = "generate" | "extend-forward" | "extend-backward" | "edit" | "grid" | "cast" | "location" | "location-view" | "scene" | "recompose" | "path";
+export type CinemaAction = "generate" | "extend-forward" | "extend-backward" | "edit" | "grid" | "cast" | "location" | "location-view" | "scene" | "recompose" | "path" | "turnaround";
 export type GridSize = "2x2" | "3x3" | "4x4";
 export type GridType = "freeform" | "zooms" | "shots" | "next_shots" | "prev_shots";
 export type CastValues = Record<string, string | number | string[] | undefined>;
@@ -234,6 +235,8 @@ export interface CinemaGenerateInput {
   capture?: SceneCapture;
   /** "path": the camera path keyframed in the 3D scene (and, on the open engine, the browser's render along it). */
   path?: ScenePath;
+  /** "turnaround": a 360° turnaround of a Soul Cast result (build plan N7-6: src/lib/catalog/turnaround.ts). */
+  turnaround?: Omit<TurnaroundInput, "engine" | "feature" | "stepFeature">;
 }
 
 export interface ScenePath {
@@ -1212,12 +1215,20 @@ export function withPlaceholders(step: CinemaStep): GenerationRequest {
   const req = step.request;
   if (!req.chain?.length) return req;
   const inputs = { ...req.inputs };
+  // Images with a place (ChainSlot.at: a film's frames that earlier steps make) go in after the others, as the runner puts them.
+  const placed = req.chain.filter((c) => c.slot === "images" && c.at !== undefined && c.at >= 0).sort((a, b) => a.at! - b.at!);
   for (const c of req.chain) {
+    if (placed.includes(c)) continue;
     if (c.slot === "images") inputs.images = c.position === "first" ? [PLACEHOLDER.image, ...(inputs.images ?? [])] : [...(inputs.images ?? []), PLACEHOLDER.image];
     else if (c.slot === "videos") inputs.videos = [...(inputs.videos ?? []), PLACEHOLDER.video];
     else if (c.slot === "endImage") inputs.endImage = PLACEHOLDER.image;
     else if (c.slot === "video") inputs.video = PLACEHOLDER.video;
     else if (c.slot === "audio" || c.slot === "voiceAudio") inputs[c.slot] = PLACEHOLDER.audio;
+  }
+  for (const c of placed) {
+    const list = [...(inputs.images ?? [])];
+    list.splice(Math.min(c.at!, list.length), 0, PLACEHOLDER.image);
+    inputs.images = list;
   }
   return { ...req, inputs };
 }
@@ -1363,6 +1374,7 @@ const FEATURES: Partial<Record<CinemaAction, string>> = {
   scene: "cinema-scene",
   recompose: "cinema-recompose",
   path: "cinema-path",
+  turnaround: "cinema-turnaround",
 };
 const feature = (action: CinemaAction, mode: CinemaMode) => FEATURES[action] ?? (mode === "image" ? "cinema-image" : "cinema");
 
@@ -2028,6 +2040,15 @@ export function pathTake(input: Pick<CinemaGenerateInput, "engine" | "path">, pl
   return { keys: params?.cameraPath ?? normalizeKeys(input.path?.keys ?? []), duration, ...(input.path?.preset ? { preset: input.path.preset } : {}) };
 }
 
+// ---------------------------------------------------------------------------
+// Turnaround (build plan N7-6): a Soul Cast result filmed all the way round, as a new take in the project
+
+/** The turnaround's own steps (src/lib/catalog/turnaround.ts), filed as Cinema takes and priced as Cinema prices them. */
+function planTurnaroundTake(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
+  const plan = planTurnaround({ ...input.turnaround, engine: input.engine, feature: "cinema-turnaround", stepFeature: "cinema-turnaround" }, { has: ctx.has });
+  return finish(plan.model, plan.steps, plan.notes, plan.blocker);
+}
+
 /** Everything a Generate press would run, priced, without running it (the browser shows it live). */
 export function planCinema(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const i = { ...input, settings: input.settings ?? {}, prompt: input.prompt ?? "" };
@@ -2050,6 +2071,8 @@ export function planCinema(input: CinemaGenerateInput, ctx: CinemaContext): Cine
       return planRecompose(i);
     case "path":
       return planPath(i);
+    case "turnaround":
+      return planTurnaroundTake(i, ctx);
     default:
       return i.mode === "image" ? planStill(i) : planVideo(i, ctx);
   }
