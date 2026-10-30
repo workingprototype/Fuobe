@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useToday } from "@/hooks/use-today";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import type { Engine, GenerationRequest, MediaKind, ModelDef, Operation, Preset, VideoFormat } from "@/lib/catalog/types";
 import { dualEngine } from "@/lib/catalog/engines";
@@ -220,6 +221,8 @@ export function Composer({ docked }: { docked: boolean }) {
   const hydrated = useHydrated();
   const liveStatus = useStatus().data;
   const status = hydrated ? liveStatus : undefined;
+  // The day a launch price is read on: the browser's, once hydrated (none while the page prerenders: no price shown then).
+  const today = useToday();
   // Upscale hub: the attached clip's header (length, size, frame rate). Its length prices per-second tools and
   // travels with the request (params.sourceDuration); a clip swapped since a Reuse never keeps the old one's.
   const facts = useClipFacts(config.clipFacts && !typed.slots.video?.uploading ? typed.slots.video?.ref : undefined).data;
@@ -435,12 +438,12 @@ export function Composer({ docked }: { docked: boolean }) {
       op = plan.op;
       // A run with LoRAs (a Soul look) goes to the route's LoRA endpoint, which has its own price.
       const withLoras = plan.loras.length > 0 && routesFor(plan.model, plan.op).some((r) => !!r.loraEndpoint);
-      cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op, withLoras);
+      cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op, withLoras, today);
       loraPriceUnknown = withLoras && !!plan.model.pricing?.lorasUnknown;
       // A relight effect relights the start frame first (free on the GPU, about $0.04 in the cloud).
       if (cost !== null) cost += prestepCost(preset, plan.model.id, engine);
       // PixeletedFace pixelates each picture's faces afterwards ($0.01 a picture in the cloud, free on the GPU).
-      if (cost !== null) cost += postStepCost(plan.model.id, planned.presetId, engine, planned.params?.numOutputs ?? 1, catalog.getModel);
+      if (cost !== null) cost += postStepCost(plan.model.id, planned.presetId, engine, planned.params?.numOutputs ?? 1, catalog.getModel, today);
     } catch (e) {
       planError = (e as Error).message;
     }

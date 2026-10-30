@@ -75,6 +75,7 @@ import {
   type TopicIdea,
 } from "@/lib/catalog/faceless";
 import { routesFor } from "@/lib/catalog/plan";
+import { pricingAt } from "@/lib/catalog/promo";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { DocxError, docxText } from "./assist/docx";
 import { PdfError, pdfText } from "./assist/pdf";
@@ -1067,7 +1068,7 @@ function upscaleOffer(ep: FacelessEpisode, seconds: number): EpisodeView["upscal
   const model = modelId ? getModel(modelId) : undefined;
   if (!model) return null;
   const demo = runsAsDemo(model.id, "upscale-video");
-  const p = model.pricing;
+  const p = model.pricing && pricingAt(model.pricing);
   const costUsd = demo || model.engine === "open" ? 0 : p?.unit === "megapixel" ? Math.round(p.usd * UPSCALE_MP * UPSCALE_FPS * seconds * 100) / 100 : p?.unit === "second" ? Math.round(p.usd * seconds * 100) / 100 : null;
   return { costUsd, demo };
 }

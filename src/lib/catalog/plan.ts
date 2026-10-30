@@ -9,7 +9,6 @@ import type {
   Operation,
   Preset,
   PresetRoute,
-  Pricing,
 } from "./types";
 import { sourceSeconds } from "./clip-windows";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
@@ -17,6 +16,9 @@ import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeL
 import { anglesPrompt, anglesWords, ANGLES_ORIGINAL } from "./open-tools";
 import { askedSize, numFramesValue, sizeValue } from "./payload";
 import { characterScale, CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
+import { pricingOn, type PriceClock } from "./promo";
+
+export { pricingAt } from "./promo";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -613,14 +615,6 @@ function missingImages(model: ModelDef, req: Pick<GenerationRequest, "inputs">):
   return labels?.length === min ? `Add the ${labels.join(" and the ")}` : `${model.name} needs ${min} images`;
 }
 
-/** The price that holds at `now`: a launch promo to the end of its last day (UTC), then the list price. */
-export function pricingAt(p: Pricing, now = Date.now()): Pricing {
-  if (!p.promo) return p;
-  const { promo, ...list } = p;
-  if (!(now <= Date.parse(`${promo.until}T23:59:59.999Z`))) return list;
-  return { ...list, usd: promo.usd, ...(promo.byResolution ? { byResolution: promo.byResolution } : {}) };
-}
-
 /**
  * Operations whose result is as long as the clip they're given (upscale, FPS Boost, HDR, export): a per-second
  * price counts the clip's seconds (params.sourceDuration) when the caller knows them, and slow motion bills
@@ -723,10 +717,15 @@ function routeMegapixels(model: ModelDef, params: GenParams, op?: Operation): nu
   return (width * height) / (1024 * 1024);
 }
 
-/** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
-export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation, withLoras = false): number | null {
+/**
+ * Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. A launch price (Pricing.promo) is read
+ * at `now` (./promo): the clock when not given (the server planning a run, the browser after it hydrates); with null (a
+ * page prerendering, the browser before it hydrates) a launch-priced model's price isn't known yet (null).
+ */
+export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation, withLoras = false, now?: PriceClock): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
-  const p = model.pricing;
+  const p = pricingOn(model.pricing, now);
+  if (!p) return null;
   // A LoRA endpoint with no published price (fal's MOSS-Image /lora): unknown, never free.
   if (withLoras && p.lorasUnknown) return null;
   const n = params.numOutputs ?? 1;

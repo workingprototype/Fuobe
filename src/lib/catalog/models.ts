@@ -1,5 +1,4 @@
 import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
-import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
 import { loraEntry, loraRef } from "./loras";
@@ -1623,19 +1622,11 @@ function withLastFrameExtend(m: ModelDef): ModelDef {
 }
 
 /**
- * A launch price while it lasts, the list price after (FLUX 3 Max, H3 Max camera controls): read each time the price is,
- * so a run is priced at the rate of the day it runs, even on a server started before the launch price ended.
+ * Cloud models (fal and Replicate) and the cloud tools. A launch price (FLUX 3 Max, H3 Max camera controls) stays in
+ * Pricing.promo beside the list price: whoever prices reads the clock (./promo), never the catalog, so the studios'
+ * slices and the pages prerendered at build time carry both and the browser shows the one of the day it is.
  */
-const withCurrentPrice = (m: ModelDef): ModelDef => {
-  const raw = m.pricing;
-  if (!raw?.promo) return m;
-  const out = { ...m };
-  Object.defineProperty(out, "pricing", { get: () => pricingAt(raw), enumerable: true, configurable: true });
-  return out;
-};
-
-/** Cloud models (fal and Replicate) and the cloud tools. */
-const cloud: ModelDef[] = [...CLOUD_MODELS.map(withLastFrameExtend).map(withCurrentPrice), ...cloudTools];
+const cloud: ModelDef[] = [...CLOUD_MODELS.map(withLastFrameExtend), ...cloudTools];
 
 // ---------------------------------------------------------------------------
 // Fuobe Originals: one model on both engines
