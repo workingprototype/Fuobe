@@ -137,8 +137,7 @@ export function outputFetch(url: string, init: RequestInit = {}, o: { maxBytes?:
   return fetchPublic(url, init, { timeoutMs: 120_000, ...OWN_OUTPUT_LIMITS, maxBytes });
 }
 
-/** An account's ComfyUI: a layer read for its box (one at a time), and one EXR frame, at most. */
-export const OWN_LAYER_MAX_BYTES = 32 * 2 ** 20;
+/** An account's ComfyUI: one EXR frame, at most. */
 export const OWN_FRAME_MAX_BYTES = 100 * 2 ** 20;
 
 /**
@@ -463,15 +462,16 @@ function ocrOutput(answer: string, frame: OcrFrame | undefined): ComfyOutput {
 
 /**
  * Layers: download each RGBA layer once, add its bounding box (from alpha) and hand the bytes on as a data URL. On an
- * account's ComfyUI: only as many layers as the run keeps (16), one at a time, 32 MB each at most, and the layer stays a
- * link (saved later straight to disk), so a long list of layers can't fill the server's memory.
+ * account's ComfyUI nothing is downloaded or decoded here: decoding a big layer holds up the whole server (over a second
+ * for 40 megapixels), so its layers stay links, saved later straight to disk (16 at most), without a box, as a cloud
+ * provider's layers often are.
  */
 async function withLayerBoxes(outputs: ComfyOutput[]): Promise<ComfyOutput[]> {
-  const own = !!ownGpu();
+  if (ownGpu()) return outputs;
   const isLayer = (o: ComfyOutput) => o.kind === "image" && typeof o.meta?.z === "number" && !o.url.startsWith("data:");
   const box = async (o: ComfyOutput): Promise<ComfyOutput> => {
     try {
-      const res = await outputFetch(o.url, { headers: o.headers }, own ? { maxBytes: OWN_LAYER_MAX_BYTES } : {});
+      const res = await outputFetch(o.url, { headers: o.headers });
       if (!res.ok) {
         discardBody(res);
         return o;
@@ -480,16 +480,12 @@ async function withLayerBoxes(outputs: ComfyOutput[]): Promise<ComfyOutput[]> {
       const png = decodePng(data);
       const bbox = alphaBBox(png.data, png.width, png.height);
       const meta = { ...o.meta, bbox: bbox ?? [0, 0, 0, 0], width: png.width, height: png.height };
-      return own ? { ...o, contentType: "image/png", meta } : { ...o, url: dataUrl(data, "image/png"), contentType: "image/png", headers: undefined, meta };
+      return { ...o, url: dataUrl(data, "image/png"), contentType: "image/png", headers: undefined, meta };
     } catch {
       return o; // keep the layer without a box rather than failing the job
     }
   };
-  if (!own) return Promise.all(outputs.map((o) => (isLayer(o) ? box(o) : o)));
-  const out: ComfyOutput[] = [];
-  let layers = 0;
-  for (const o of outputs) out.push(isLayer(o) && layers++ < ACCOUNT_LIMITS.outputsPerJob ? await box(o) : o);
-  return out;
+  return Promise.all(outputs.map((o) => (isLayer(o) ? box(o) : o)));
 }
 
 /**
