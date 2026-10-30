@@ -47,6 +47,8 @@ export const ACCOUNT_LIMITS = {
   queueMs: 30 * 60_000,
   /** GPU address checks and saves, per minute. */
   gpuChecksPerMinute: 10,
+  /** Fuobe Soul's finished pictures (the look's grade made in the browser) stored per hour: a run's 4 outputs, 60 runs. */
+  finishesPerHour: 240,
 } as const;
 
 export const RETENTION_MS = { upload: ACCOUNT_LIMITS.uploadDays * DAY, run: ACCOUNT_LIMITS.runDays * DAY };
@@ -64,6 +66,7 @@ export const ACCOUNT_MESSAGES = {
   diskLow: "The studio is short of space right now. Try again later.",
   activeRuns: "You have 4 runs going. Start the next one when one finishes.",
   runRate: "That's a lot of runs this hour. Try again later.",
+  finishRate: "That's a lot of finished pictures this hour. Try again later.",
   outputsCapped: "Runs on your GPU make up to 4 at a time.",
   bodyTooBig: "That request is too large.",
   gpuChecks: "Too many checks. Wait a minute.",
