@@ -183,3 +183,26 @@ describe("L-4: the local deploy notes can't be committed by accident", () => {
     expect(ignore).toContain("/deploy/");
   });
 });
+
+describe("L-2: an unknown record or link answers 404 behind an HTTPS reverse proxy", () => {
+  it("makes the 404 page itself instead of a rewrite Next would send to another server", async () => {
+    const { proxy } = await import("@/proxy");
+    const { NextRequest } = await import("next/server");
+    process.env.FUOBE_PUBLIC_SIGNUP = "1";
+    const at = (url: string) => proxy(new NextRequest(url, { headers: { host: "fuobe.example", "x-forwarded-proto": "https" } }));
+    for (const p of ["/apps/does-not-exist", "/canvas/nope-nope-nope"]) {
+      const r = at(`https://fuobe.example${p}`);
+      expect(r.status, p).toBe(404);
+      expect(r.headers.get("x-middleware-rewrite"), p).toBeNull();
+      expect(r.headers.get("content-type")).toMatch(/text\/html/);
+      expect(await r.text()).toMatch(/Nothing here/);
+    }
+    const share = at(`https://fuobe.example/s/${"A".repeat(44)}`);
+    expect(share.status).toBe(404);
+    expect(share.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(share.headers.get("x-robots-tag")).toMatch(/noindex/);
+    expect(await share.text()).toMatch(/This link isn.t available/);
+    // A plain-HTTP install keeps the rewrite to the app's own 404 pages.
+    expect(proxy(new NextRequest("http://localhost:3000/apps/does-not-exist")).headers.get("x-middleware-rewrite")).toMatch(/_fuobe-not-found$/);
+  });
+});

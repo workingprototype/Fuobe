@@ -50,7 +50,35 @@ function pass(request: NextRequest): NextResponse {
   return NextResponse.next();
 }
 
-const notFound = (request: NextRequest) => NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+/**
+ * A 404 page made here, for a request that reached the server through an HTTPS reverse proxy. Next builds the
+ * proxy's request address from its own name for the server ("localhost") and the forwarded protocol, and the address
+ * it routes by from the host it listens on (`next start -H 127.0.0.1`): when they differ, a rewrite to the app's own
+ * 404 page goes out as a request to another server, which fails over HTTPS and answered 500. Plain HTTP (a local
+ * install) keeps the rewrite to the app's own pages.
+ */
+function plain404(title: string, text: string, home: boolean): NextResponse {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title} · Fuobe</title><style>
+:root{color-scheme:light dark;--bg:#fafafa;--fg:#111113;--muted:#6b6b73;--btn:#111113;--btn-fg:#fafafa}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0b0c;--fg:#ededef;--muted:#9a9aa2;--btn:#ededef;--btn-fg:#0b0b0c}}
+body{margin:0;min-height:100svh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center}
+main{max-width:460px;padding:24px 16px 10vh}h1{margin:0;font-size:30px;line-height:1.2;font-weight:600;text-wrap:balance}
+p{margin:10px 0 0;color:var(--muted);text-wrap:pretty}a{display:inline-block;margin-top:22px;padding:9px 16px;border-radius:10px;background:var(--btn);color:var(--btn-fg);text-decoration:none;font-weight:500}
+</style></head><body><main><h1>${title}</h1><p>${text}</p>${home ? '<a href="/">Back to Home</a>' : ""}</main></body></html>`;
+  return new NextResponse(html, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
+const behindHttps = (request: NextRequest) => request.nextUrl.protocol === "https:";
+
+const notFound = (request: NextRequest) =>
+  behindHttps(request)
+    ? plain404("Nothing here", "The page you’re looking for moved, or never existed. Everything you made is still in your library.", true)
+    : NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+
+const shareGone = (request: NextRequest) =>
+  behindHttps(request)
+    ? plain404("This link isn’t available", "It may have expired or been turned off, or what it shared was removed. Ask the person who sent it for a new link.", false)
+    : NextResponse.rewrite(new URL("/s/gone", request.url), { status: 404 });
 
 /** Share pages and their files: never indexed, and the token never leaks to another site in a Referer. */
 const SHARE_HEADERS = { "X-Robots-Tag": "noindex, nofollow, noarchive", "Referrer-Policy": "no-referrer" };
@@ -163,7 +191,7 @@ function openShare(request: NextRequest, token: string, file: boolean): NextResp
       guard.miss(key, token, key === LoginGuard.DIRECT);
       if (spent) return tooMany(60);
     }
-    res = NextResponse.rewrite(new URL("/s/gone", request.url), { status: 404 });
+    res = shareGone(request);
   } else {
     // Only the proxy says what counts as a view: a visitor can't send the header themselves.
     const headers = new Headers(request.headers);
