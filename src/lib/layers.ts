@@ -9,6 +9,7 @@
  * Full-canvas RGBA layers (Qwen-Image-Layered) are cropped to their alpha box, so selection handles
  * hug what you see.
  */
+import type { Pricing } from "./catalog/types";
 
 export type Box = [x: number, y: number, w: number, h: number];
 
@@ -341,7 +342,8 @@ export interface LayerModelInfo {
   name: string;
   engine: "cloud" | "open";
   tagline: string;
-  pricing?: { unit: string; usd: number; note?: string };
+  /** Its price; a launch price (Pricing.promo) holds through its last day (costLabel reads the browser's clock). */
+  pricing?: { unit: string; usd: number; note?: string; promo?: Pricing["promo"] };
   /** Providers its routes run on (demo detection: none of them connected). */
   providers: string[];
 }

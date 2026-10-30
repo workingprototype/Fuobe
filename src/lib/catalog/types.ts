@@ -630,7 +630,8 @@ export interface Pricing {
   byResolution?: Record<string, number>;
   /**
    * A launch price that runs to the end of `until` (UTC, YYYY-MM-DD); `usd` / `byResolution` are the list
-   * prices after it. The catalog applies whichever holds when it loads (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s).
+   * prices after it (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s). The catalog keeps both: whoever prices picks
+   * the one that holds when it reads its clock (./promo: the server when it plans a run, the browser when it shows one).
    */
   promo?: { until: string; usd: number; byResolution?: Record<string, number> };
   /**

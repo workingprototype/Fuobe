@@ -7,11 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useToday } from "@/hooks/use-today";
 import { type Engine, type ModelDef } from "@/lib/catalog/types";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { bestForStudio, groupModels, toggleIn } from "@/lib/composer";
-import { formatCost } from "@/lib/format";
-import { ISOLATED_NOTE } from "@/lib/model-rows";
+import { ISOLATED_NOTE, pickerPrice } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
 import { EngineSwitch } from "./engine-switch";
 import { ResponsivePanel } from "./responsive-panel";
@@ -53,13 +53,6 @@ export function ModelBadges({ model, max }: { model: ModelDef; max?: number }) {
   );
 }
 
-function priceHint(m: ModelDef): string {
-  if (m.engine === "open") return "Free";
-  if (!m.pricing) return "";
-  const unit = { image: "/image", second: "/sec", video: "/video", request: "/run", megapixel: "/MP", minute: "/min" }[m.pricing.unit];
-  return `${formatCost(m.pricing.usd)}${unit}`;
-}
-
 const STAR_KEY_HINT = "Alt+S";
 
 /**
@@ -80,12 +73,15 @@ function ModelRow({
   selected,
   starred,
   showEngine,
+  today,
   onStar,
 }: {
   m: ModelDef;
   selected: boolean;
   starred: boolean;
   showEngine: boolean;
+  /** The browser's day: a launch price holds through its last day (null until hydrated: no price shown for one). */
+  today: number | null;
   onStar: () => void;
 }) {
   return (
@@ -115,7 +111,7 @@ function ModelRow({
           </span>
         )}
       </span>
-      <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{priceHint(m)}</span>
+      <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{pickerPrice(m, today)}</span>
       {/* Pointer only: inside an option it would be a nested control. Keyboard: Alt+S on the highlighted row (starKey). */}
       <button
         type="button"
@@ -184,6 +180,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
   const mobile = useIsMobile();
   const [recent] = useStoredList(RECENT_MODELS);
   const [starred, setStarred] = useStoredList(STARRED_MODELS);
+  const today = useToday();
   const engines = useMemo<Engine[]>(() => (mode === "both" ? ["cloud", "open"] : [mode]), [mode]);
   // "Best" ranks models that do what the studio's default does first (its main operation), not single-purpose tools.
   const best = useMemo(() => {
@@ -239,7 +236,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
                 data-checked={value?.id === m.id}
                 className={cn("gap-2.5 rounded-lg px-2 py-1.5 [&>svg:last-child]:hidden", value?.id === m.id && "bg-brand-faint data-selected:bg-brand-faint-hover")}
               >
-                <ModelRow m={m} selected={value?.id === m.id} starred={starred.includes(m.id)} showEngine={!!q || m.engine !== engine} onStar={() => setStarred((s) => toggleIn(s, m.id))} />
+                <ModelRow m={m} selected={value?.id === m.id} starred={starred.includes(m.id)} showEngine={!!q || m.engine !== engine} today={today} onStar={() => setStarred((s) => toggleIn(s, m.id))} />
               </CommandItem>
             ))}
           </CommandGroup>

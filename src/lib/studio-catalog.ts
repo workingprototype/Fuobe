@@ -15,7 +15,11 @@ export interface StudioCatalog {
   lookup?: ModelDef[];
 }
 
-/** A model without its provider field maps (server-only detail), keeping what the composer previews results with. */
+/**
+ * A model without its provider field maps (server-only detail), keeping what the composer previews results with. Its
+ * pricing goes as it is, a launch price (Pricing.promo) and all: the page is prerendered at build time, so the browser
+ * picks the price of the day it is (useToday), and nothing here reads the clock.
+ */
 export function slimModel(m: ModelDef): ModelDef {
   return {
     ...m,

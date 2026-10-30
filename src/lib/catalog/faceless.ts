@@ -1,5 +1,6 @@
 import { describeMove, KEN_BURNS_FPS, sceneMoves } from "@/lib/av/ken-burns";
 import { estimateCost } from "./plan";
+import { pricingAt } from "./promo";
 import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef } from "./types";
 
 /*
@@ -1469,7 +1470,8 @@ export const CAMERA_WORDS: Record<Engine, { placeholder: string; hint: string; s
 export function stepCostUsd(model: ModelDef | undefined, request: GenerationRequest, seconds?: number): number | null {
   if (!model) return null;
   if (model.engine === "open") return 0;
-  const p = model.pricing;
+  // A launch price while it lasts (./promo): read when the episode is priced.
+  const p = model.pricing && pricingAt(model.pricing);
   if (!p) return null;
   const params = { ...model.defaults, ...request.params, ...(seconds !== undefined && (p.unit === "second" || p.unit === "minute") && { duration: seconds }) };
   if (p.unit === "request" && /per 1k char/i.test(p.note ?? "")) {
