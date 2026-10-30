@@ -248,6 +248,23 @@ describe("Edit layout", () => {
   });
 });
 
+describe("Reuse", () => {
+  it("round-trips: the request the composer sends comes back as the same boxes and words, and plans to the same prompt", () => {
+    const asked = sent(poster, "A candle sale poster", { aspectRatio: "16:9", seed: 12 });
+    const stored = JSON.parse(JSON.stringify(asked)) as typeof asked;
+    const back = withoutLayout(stored.params);
+    expect(back.params).toEqual({ aspectRatio: "16:9", seed: 12, extra: undefined });
+    expect(back.layout?.items).toEqual(poster.items);
+    // The composer sends it again from Layout mode: the same compiled prompt at the same size.
+    const again = sent({ ...back.layout!, summary: { ...back.layout!.summary, caption: "" } }, stored.prompt, back.params);
+    const a = plan("oss-moss-image", asked.params, asked.prompt);
+    const b = plan("oss-moss-image", again.params, again.prompt);
+    expect(b.prompt).toBe(a.prompt);
+    expect(b.params.extra).toMatchObject({ width: 1360, height: 768 });
+    expect(b.params.seed).toBe(12);
+  });
+});
+
 describe("the editor's box maths", () => {
   // Whole pixels at this size: boxes snap to the canvas's pixels.
   const W = 1000;

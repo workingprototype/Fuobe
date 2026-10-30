@@ -11,7 +11,7 @@
 //      line only while its tiles are folded away.
 //   7. Layout mode (Image studio, MOSS-Image in the cloud, demo mode): draw one box by mouse and one by touch at
 //      390 px, a Text box asks for its words, Generate sends the layout (compiled at the size fal renders, prompt
-//      expansion off) and the feed says "Layout · 1 box"; Edit layout from the tile reopens the boxes.
+//      expansion off) and the feed says "Layout · 1 box"; Reuse and Edit layout from the tile reopen the boxes.
 //
 // Playwright: the `playwright` (or `playwright-core`) package if it resolves, else the global install at
 // /opt/node22/lib/node_modules. Chromium: $CHROMIUM_PATH, else the newest /opt/pw-browsers/chromium-*.
@@ -269,6 +269,14 @@ async function ready(page, url) {
   check("layout: the feed says it's a layout", await tile.waitFor({ timeout: 30_000 }).then(() => true, () => false));
   const preview = await page.request.post(`${app}/api/generations?preview=1`, { data: body }).then((r) => r.json()).catch(() => ({}));
   check("layout: the run gets the compiled MOSS prompt", typeof preview.prompt === "string" && preview.prompt.includes('"bbox_coord_space":"abs_centralized"'), (preview.prompt ?? preview.error ?? "").slice(0, 80));
+  // Reuse: with Layout mode off and the prompt cleared, the run comes back as boxes with its caption.
+  await page.getByRole("button", { name: "Layout off" }).click();
+  await page.locator("[data-composer] textarea").fill("");
+  await tile.locator("header").hover();
+  await tile.getByRole("button", { name: "Reuse" }).click();
+  await page.locator("[data-layout-strip]").waitFor({ timeout: 10_000 }).catch(() => {});
+  const reused = await page.locator("[data-layout-strip]").innerText().catch(() => "");
+  check("layout: Reuse brings the boxes and the caption back", /1 box/.test(reused) && (await page.locator("[data-composer] textarea").inputValue()) === "A candle sale poster");
   await page.waitForFunction(() => document.querySelector("[data-gen-id] img, [data-gen-id] video"), null, { timeout: 60_000 }).catch(() => {});
   const t = tile.locator(".group\\/tile").first();
   await t.hover();
