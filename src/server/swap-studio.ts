@@ -49,6 +49,7 @@ import { createPipeline } from "./chains";
 import { asSystem, runAs, type Actor } from "./access/actor";
 import { AccountOffError, ownerActor, rowOwner } from "./access/permissions";
 import { db } from "./db";
+import { insertStamped } from "./access/scope";
 import { cancelGeneration, getGeneration, previewChained } from "./generations";
 import { isOffered, offeredLoras } from "./model-access";
 import { engineMode } from "./settings";
@@ -440,9 +441,7 @@ export function createProject(body: z.infer<typeof CreateSchema>): SwapProject {
     updatedAt: now,
     revision: 1,
   };
-  db()
-    .prepare("INSERT INTO swap_projects (id, name, engine, data_json, revision, waiting, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 0, ?, ?)")
-    .run(p.id, p.name, p.engine, JSON.stringify(p), now, now);
+  insertStamped("swap_projects", { id: p.id, name: p.name, engine: p.engine, data_json: JSON.stringify(p), revision: 1, waiting: 0, created_at: now, updated_at: now });
   return p;
 }
 

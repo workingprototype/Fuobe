@@ -21,6 +21,7 @@ import {
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { db } from "./db";
+import { insertStamped } from "./access/scope";
 import { getElement } from "./elements";
 import { createGenerations, currentRequest, getGeneration, pickOutput, previewGeneration } from "./generations";
 import { trashGenerations } from "./library";
@@ -69,7 +70,7 @@ export function createUserPack(input: { name: string; refs: string[] }): UserPac
   if (!refs.length) throw new Error("Upload your reference set up to 15 photos");
   if (refs.length > MAX_PACK_REFS) throw new Error(`A pack holds up to ${MAX_PACK_REFS} photos`);
   const row: PackRow = { id: `user-${nanoid(8)}`, name, refs_json: JSON.stringify(refs), created_at: Date.now() };
-  db().prepare("INSERT INTO photodump_packs (id, name, refs_json, created_at) VALUES (@id, @name, @refs_json, @created_at)").run(row);
+  insertStamped("photodump_packs", row);
   return toPack(row);
 }
 

@@ -4,6 +4,8 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { DATA_DIR, db } from "./db";
 import type { MediaKind } from "@/lib/catalog/types";
+import { currentActor } from "./access/actor";
+import { list as scopeList, personOf, stamp, type Stamp } from "./access/scope";
 import { fetchRemote } from "./remote-fetch";
 
 export const FILES_DIR = path.join(DATA_DIR, "files");
@@ -114,6 +116,8 @@ interface AssetRow {
   source: Asset["source"];
   generation_id: string | null;
   created_at: number;
+  workspace_id?: string;
+  created_by?: string | null;
 }
 
 export function fileUrl(relPath: string): string {
@@ -135,10 +139,25 @@ function toAsset(r: AssetRow): Asset {
   };
 }
 
-type NewAsset = { contentType: string; name?: string; source: Asset["source"]; generationId?: string };
+/**
+ * `workspaceId`: where the file belongs when the server chose it (the install catalog for the demo voice). Otherwise a
+ * generation's file follows its generation, and an upload or a derived render goes to the workspace the request works in.
+ */
+type NewAsset = { contentType: string; name?: string; source: Asset["source"]; generationId?: string; workspaceId?: string };
+
+/** The workspace and maker of a new file (see NewAsset). */
+function assetStamp(opts: NewAsset): Stamp {
+  if (!opts.workspaceId && opts.generationId) {
+    const g = db().prepare("SELECT workspace_id FROM generations WHERE id = ?").get(opts.generationId) as { workspace_id: string | null } | undefined;
+    // Outputs follow their generation, whoever saves them (the runner, as the person who started it).
+    if (g?.workspace_id) return { workspace_id: g.workspace_id, created_by: personOf(currentActor()) };
+  }
+  return stamp({ workspaceId: opts.workspaceId });
+}
 
 /** Store a file under files/<outputs|uploads>/<day>/<id>.<ext>: `put` writes it there, then its row is added. */
 function addAsset(opts: NewAsset, put: (abs: string) => void): Asset {
+  const scoped = assetStamp(opts);
   const id = nanoid(12);
   const ext = EXT_BY_TYPE[opts.contentType.split(";")[0].trim()] ?? opts.name?.split(".").pop()?.toLowerCase() ?? "bin";
   const day = new Date().toISOString().slice(0, 10);
@@ -156,11 +175,12 @@ function addAsset(opts: NewAsset, put: (abs: string) => void): Asset {
     source: opts.source,
     generation_id: opts.generationId ?? null,
     created_at: Date.now(),
+    ...scoped,
   };
   db()
     .prepare(
-      `INSERT INTO assets (id, kind, name, rel_path, content_type, size, source, generation_id, created_at)
-       VALUES (@id, @kind, @name, @rel_path, @content_type, @size, @source, @generation_id, @created_at)`,
+      `INSERT INTO assets (id, kind, name, rel_path, content_type, size, source, generation_id, created_at, workspace_id, created_by)
+       VALUES (@id, @kind, @name, @rel_path, @content_type, @size, @source, @generation_id, @created_at, @workspace_id, @created_by)`,
     )
     .run(row);
   return toAsset(row);
@@ -190,10 +210,14 @@ export function getAsset(id: string): Asset | null {
   return row ? toAsset(row) : null;
 }
 
-/** Newest first; page with `before` (+ `beforeId`): the last asset of the previous page. Derived renders only when asked for. */
-export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number; before?: number; beforeId?: string }): Asset[] {
-  const where: string[] = [];
-  const args: unknown[] = [];
+/**
+ * Newest first, in a space (the active workspace by default, "all" for everything the person can see); page with
+ * `before` (+ `beforeId`): the last asset of the previous page. Derived renders only when asked for.
+ */
+export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number; before?: number; beforeId?: string; space?: string | null }): Asset[] {
+  const scope = scopeList("asset", "assets", { space: opts.space });
+  const where: string[] = [scope.sql];
+  const args: unknown[] = [...scope.args];
   if (opts.source) {
     where.push("source = ?");
     args.push(opts.source);
@@ -206,7 +230,7 @@ export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; l
     where.push(opts.beforeId ? "(created_at < ? OR (created_at = ? AND id < ?))" : "created_at < ?");
     args.push(...(opts.beforeId ? [opts.before, opts.before, opts.beforeId] : [opts.before]));
   }
-  const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, id DESC LIMIT ?`;
+  const sql = `SELECT * FROM assets WHERE ${where.join(" AND ")} ORDER BY created_at DESC, id DESC LIMIT ?`;
   return (db().prepare(sql).all(...args, opts.limit ?? 100) as AssetRow[]).map(toAsset);
 }
 

@@ -7,6 +7,7 @@ import type { GenerationRequest } from "@/lib/catalog/types";
 import { z } from "zod";
 import { createPipeline } from "./chains";
 import { db } from "./db";
+import { insertStamped, INSTALL_WORKSPACE } from "./access/scope";
 
 const Hex = z.string().regex(/^#?[0-9a-fA-F]{6}$/);
 const Url = z.string().max(2000);
@@ -94,8 +95,8 @@ function ensureBuiltins(): void {
   if (globalThis.__fuobePalettesSeeded) return;
   const now = Date.now();
   const insert = db().prepare(
-    `INSERT OR IGNORE INTO palettes (id, name, colors_json, background, slug, source, thumb_url, position, created_at, updated_at)
-     VALUES (@id, @name, @colors_json, @background, @slug, 'builtin', NULL, @position, @now, @now)`,
+    `INSERT OR IGNORE INTO palettes (id, name, colors_json, background, slug, source, thumb_url, position, created_at, updated_at, workspace_id, created_by)
+     VALUES (@id, @name, @colors_json, @background, @slug, 'builtin', NULL, @position, @now, @now, '${INSTALL_WORKSPACE}', NULL)`,
   );
   db().transaction(() => {
     builtinPalettes().forEach((p, i) => insert.run({ id: p.id, name: p.name, colors_json: JSON.stringify(p.colors), background: p.background, slug: p.slug, position: i, now }));
@@ -135,12 +136,7 @@ export function createPalette(input: { name: string; colors: string[]; backgroun
     created_at: now,
     updated_at: now,
   };
-  db()
-    .prepare(
-      `INSERT INTO palettes (id, name, colors_json, background, slug, source, thumb_url, position, created_at, updated_at)
-       VALUES (@id, @name, @colors_json, @background, @slug, @source, @thumb_url, @position, @created_at, @updated_at)`,
-    )
-    .run(row);
+  insertStamped("palettes", row);
   return toPalette(row);
 }
 

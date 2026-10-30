@@ -43,6 +43,8 @@ import {
   type ProviderId,
 } from "@/lib/catalog/types";
 import { asSystem, runAs, type Actor } from "./access/actor";
+import { assertReadable, inWorkspace, INSTALL_WORKSPACE, list as scopeList, rootWorkspace, stamp } from "./access/scope";
+import { dropMarks, MARK_COLUMNS, markJoin, setMarks, viewerId } from "./marks";
 import { AccountOffError, ownerActor, rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { listElements } from "./elements";
@@ -85,36 +87,48 @@ interface Row {
   outputs_json: string;
   error: string | null;
   cost_usd: number | null;
+  /** Unread since favorites moved to item_marks (per viewer); inserts still fill it. */
   favorite: number;
   created_at: number;
   updated_at: number;
   completed_at: number | null;
   depends_on: string | null;
-  /** Library pin and review status (NULL until set; inserts leave them out). */
+  /** The workspace the row belongs to, and the person who started it and pays for it (src/server/access/scope.ts). */
+  workspace_id?: string;
+  created_by?: string | null;
+  paid_by?: string | null;
+  /** Review status (NULL until set; inserts leave it out). pinned_at is unread, as favorite. */
   pinned_at?: number | null;
   review?: string | null;
-  /** Joined by the library readers (generation_trash, folder_items); looked up when absent. */
+  /** Joined by the library readers (generation_trash, folder_items, the viewer's item_marks); looked up when absent. */
   deleted_at?: number | null;
   folder_id?: string | null;
+  m_favorite?: number | null;
+  m_pinned_at?: number | null;
 }
 
-/** Trash and folder columns, joined onto every library read. */
-const LIBRARY_COLUMNS = "g.*, t.deleted_at AS deleted_at, fi.folder_id AS folder_id";
-const LIBRARY_JOIN = "generations g LEFT JOIN generation_trash t ON t.generation_id = g.id LEFT JOIN folder_items fi ON fi.generation_id = g.id";
+/** Trash, folder and the viewer's marks, joined onto every library read (bind viewerId() first: markJoin's `?`). */
+const LIBRARY_COLUMNS = `g.*, t.deleted_at AS deleted_at, fi.folder_id AS folder_id, ${MARK_COLUMNS()}`;
+const LIBRARY_JOIN = `generations g LEFT JOIN generation_trash t ON t.generation_id = g.id LEFT JOIN folder_items fi ON fi.generation_id = g.id ${markJoin("generation", "g")}`;
+
+/** The library columns and join for other modules' queries (Cinema's takes): bind viewerId() first. */
+export const GENERATION_LIBRARY = { columns: LIBRARY_COLUMNS, from: LIBRARY_JOIN } as const;
 
 export function toGeneration(r: Row): Generation {
   const request = JSON.parse(r.request_json) as GenerationRequest;
   const model = getModel(r.model_id);
   const ar = request.params?.aspectRatio ?? model?.defaults?.aspectRatio;
-  // Rows read without the library join (the runner's own SELECTs) look the trash and folder up.
+  // Rows read without the library join (the runner's own SELECTs) look the trash, folder and the viewer's marks up.
   const lib =
-    r.deleted_at !== undefined && r.folder_id !== undefined
-      ? { deleted_at: r.deleted_at, folder_id: r.folder_id }
+    r.deleted_at !== undefined && r.folder_id !== undefined && r.m_favorite !== undefined
+      ? { deleted_at: r.deleted_at, folder_id: r.folder_id, m_favorite: r.m_favorite, m_pinned_at: r.m_pinned_at ?? null }
       : (db()
           .prepare(
-            "SELECT (SELECT deleted_at FROM generation_trash WHERE generation_id = ?) AS deleted_at, (SELECT folder_id FROM folder_items WHERE generation_id = ?) AS folder_id",
+            `SELECT (SELECT deleted_at FROM generation_trash WHERE generation_id = @id) AS deleted_at, (SELECT folder_id FROM folder_items WHERE generation_id = @id) AS folder_id,
+              (SELECT favorite FROM item_marks WHERE user_id = @viewer AND item_kind = 'generation' AND item_id = @id) AS m_favorite,
+              (SELECT pinned_at FROM item_marks WHERE user_id = @viewer AND item_kind = 'generation' AND item_id = @id) AS m_pinned_at`,
           )
-          .get(r.id, r.id) as { deleted_at: number | null; folder_id: string | null });
+          .get({ id: r.id, viewer: viewerId() }) as { deleted_at: number | null; folder_id: string | null; m_favorite: number | null; m_pinned_at: number | null });
   return {
     id: r.id,
     batchId: r.batch_id,
@@ -133,7 +147,7 @@ export function toGeneration(r: Row): Generation {
     outputs: JSON.parse(r.outputs_json) as OutputFile[],
     error: r.error,
     costUsd: r.cost_usd,
-    favorite: !!r.favorite,
+    favorite: !!lib.m_favorite,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
@@ -144,7 +158,7 @@ export function toGeneration(r: Row): Generation {
     aspectRatio: ar && ar !== "auto" ? ar : null,
     deletedAt: lib.deleted_at ?? null,
     folderId: lib.folder_id ?? null,
-    pinnedAt: r.pinned_at ?? null,
+    pinnedAt: lib.m_pinned_at ?? null,
     review: isReviewStatus(r.review) ? r.review : null,
   };
 }
@@ -178,12 +192,17 @@ export function stampRequests(ids: string[], fields: (batches: string[]) => Pick
 /** One generation; a row in the Trash reads as missing unless `includeDeleted`. */
 export function getGeneration(id: string, opts: { includeDeleted?: boolean } = {}): Generation | null {
   ensureRunner();
-  const r = db().prepare(`SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE g.id = ?`).get(id) as Row | undefined;
+  const r = db().prepare(`SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE g.id = ?`).get(viewerId(), id) as Row | undefined;
   if (!r || (r.deleted_at && !opts.includeDeleted)) return null;
   return toGeneration(r);
 }
 
 export interface ListOptions {
+  /**
+   * The space to list (src/server/access/scope.ts list): a workspace id or slug, "all" (everything the person can
+   * see), or unset for the workspace the request works in. A batch's steps are listed wherever they are visible.
+   */
+  space?: string | null;
   batchId?: string;
   feature?: string;
   features?: string[];
@@ -224,9 +243,14 @@ export interface ListOptions {
 
 const featureLike = (f: string) => (f.endsWith("*") ? `${f.slice(0, -1)}%` : f);
 
+/**
+ * Generations, newest first, in the space asked for (the active workspace by default; a batch wherever its rows are
+ * visible). Favorites and pins are the viewer's own.
+ */
 export function listGenerations(o: ListOptions = {}): Generation[] {
-  const where: string[] = [o.trashed ? "t.deleted_at IS NOT NULL" : "t.deleted_at IS NULL"];
-  const args: unknown[] = [];
+  const scope = scopeList("generation", "g", { space: o.space ?? (o.batchId ? "all" : undefined) });
+  const where: string[] = [o.trashed ? "t.deleted_at IS NOT NULL" : "t.deleted_at IS NULL", scope.sql];
+  const args: unknown[] = [...scope.args];
   const add = (sql: string, ...values: unknown[]) => {
     where.push(sql);
     args.push(...values);
@@ -238,12 +262,12 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
   if (o.kind) add("g.kind = ?", o.kind);
   if (o.kinds?.length) oneOf("g.kind", o.kinds);
   if (o.models?.length) oneOf("g.model_id", o.models);
-  if (o.favorites) add("g.favorite = 1");
+  if (o.favorites) add("m.favorite = 1");
   if (o.status) add("g.status = ?", o.status);
   if (o.statuses?.length) oneOf("g.status", o.statuses);
   if (o.folderId) add("fi.folder_id = ?", o.folderId);
   if (o.folderIds?.length) oneOf("fi.folder_id", o.folderIds);
-  if (o.pinned !== undefined) add(o.pinned ? "g.pinned_at IS NOT NULL" : "g.pinned_at IS NULL");
+  if (o.pinned !== undefined) add(o.pinned ? "m.pinned_at IS NOT NULL" : "m.pinned_at IS NULL");
   if (o.reviews?.length) {
     const set = o.reviews.filter((r) => r !== "none");
     const any = [set.length ? `g.review IN (${set.map(() => "?").join(", ")})` : "", o.reviews.includes("none") ? "g.review IS NULL" : ""].filter(Boolean);
@@ -253,7 +277,7 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
     add(`g.feature NOT LIKE ? AND g.feature NOT IN (${HELPER_FEATURES.map(() => "?").join(", ")})`, `%${HELPER_SUFFIX}`, ...HELPER_FEATURES);
   }
   // The cursor's order: the Trash by deletion, a pinned list by pin, the rest by creation (then id, all descending).
-  const col = o.trashed ? "t.deleted_at" : o.pinned ? "g.pinned_at" : "g.created_at";
+  const col = o.trashed ? "t.deleted_at" : o.pinned ? "m.pinned_at" : "g.created_at";
   if (o.before) {
     if (o.beforeId) add(`(${col} < ? OR (${col} = ? AND g.id < ?))`, o.before, o.before, o.beforeId);
     else add(`${col} < ?`, o.before);
@@ -264,11 +288,13 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
   // The user's own words (request.prompt) and what the model got (prompt, with suffixes and templates).
   if (q) add("(g.prompt LIKE ? OR json_extract(g.request_json, '$.prompt') LIKE ?)", `%${q}%`, `%${q}%`);
   const sql = `SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE ${where.join(" AND ")} ORDER BY ${col} DESC, g.id DESC LIMIT ?`;
-  return (db().prepare(sql).all(...args, Math.max(1, Math.min(o.limit ?? 60, 200))) as Row[]).map(toGeneration);
+  return (db().prepare(sql).all(viewerId(), ...args, Math.max(1, Math.min(o.limit ?? 60, 200))) as Row[]).map(toGeneration);
 }
 
+/** Favorite or unfavorite for the person asking (their own mark); touched so the live feed sees it. */
 export function setFavorite(id: string, favorite: boolean): void {
-  update(id, { favorite: favorite ? 1 : 0 });
+  setMarks("generation", [id], { favorite });
+  db().prepare("UPDATE generations SET updated_at = ? WHERE id = ?").run(Date.now(), id);
 }
 
 export interface AssetRef {
@@ -409,6 +435,7 @@ export function deleteGeneration(id: string): void {
     db().prepare("DELETE FROM generations WHERE id = ?").run(id);
     db().prepare("DELETE FROM generation_trash WHERE generation_id = ?").run(id);
     db().prepare("DELETE FROM folder_items WHERE generation_id = ?").run(id);
+    dropMarks("generation", [id]);
   })();
   for (const a of assets) if (!assetInUse(a.id, id)) deleteAsset(a.id);
 }
@@ -691,11 +718,33 @@ export interface CreateOptions {
    * `request.chain` (one slot per id), or `request.chainFrom` for a single image dependency.
    */
   dependsOn?: string | string[];
+  /**
+   * The workspace the rows go to when the server chose it (a project's, or the install catalog for a narrator sample
+   * everyone reuses). Otherwise: the workspace of what the rows start from (a dependency, the batch they join), with
+   * Editor there, else the request's active workspace (src/server/access/scope.ts).
+   */
+  workspaceId?: string;
 }
 
 const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
 
+/**
+ * Where new rows go and who they belong to: created_by and paid_by are always the person acting (a retry, Run again,
+ * a chain's next step), never the root's maker; the workspace is the root's only with Editor there (403 otherwise).
+ */
+function stampFor(opts: CreateOptions, deps: string[]): { workspace_id: string; created_by: string; paid_by: string } {
+  const batchRoot = !deps.length && opts.batchId ? (db().prepare("SELECT id FROM generations WHERE batch_id = ? ORDER BY created_at, id LIMIT 1").get(opts.batchId) as { id: string } | undefined)?.id : undefined;
+  const rootId = deps[0] ?? batchRoot;
+  const s = stamp({ workspaceId: opts.workspaceId ?? (rootId ? rootWorkspace("generation", rootId) : undefined) });
+  return { ...s, paid_by: s.created_by };
+}
+
 export function createGenerations(asked: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+  // A workspace the server chose holds every step a chain below starts, too.
+  if (opts.workspaceId && opts.workspaceId !== INSTALL_WORKSPACE && !opts.dependsOn) {
+    const { workspaceId, ...rest } = opts;
+    return inWorkspace(workspaceId, () => createGenerations(asked, rest));
+  }
   // A retired model or operation (a retry, an old script, a saved project) runs on what replaced it, and says so.
   const moved = currentRequest(asked);
   const original = moved.request;
@@ -740,6 +789,7 @@ export function createGenerations(asked: GenerationRequest, opts: CreateOptions 
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
   if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name, plan.op));
   const jobs = waits ? 1 : plan.jobs;
+  const scoped = stampFor(opts, deps);
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();
   const created: Generation[] = [];
@@ -773,6 +823,7 @@ export function createGenerations(asked: GenerationRequest, opts: CreateOptions 
       updated_at: now + i,
       completed_at: null,
       depends_on: !waits ? null : deps.length === 1 ? deps[0] : JSON.stringify(deps),
+      ...scoped,
     };
     db()
       .prepare(
@@ -1775,6 +1826,9 @@ export function recordLocalGeneration(input: {
 }): Generation {
   const model = getModel(input.modelId);
   if (!model || !model.routes.some((r) => r.provider === "local")) throw new Error("Not a browser tool");
+  // The picture was uploaded by this person first: a file they can't see can't become their result.
+  assertReadable(input.output.url);
+  const scoped = stamp();
   const now = Date.now();
   const req: GenerationRequest = { feature: input.feature, modelId: input.modelId, op: input.op, prompt: input.prompt, inputs: input.inputs, params: input.params };
   const row: Row = {
@@ -1803,6 +1857,8 @@ export function recordLocalGeneration(input: {
     updated_at: now,
     completed_at: now,
     depends_on: null,
+    ...scoped,
+    paid_by: scoped.created_by,
   };
   db()
     .prepare(`INSERT INTO generations (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)

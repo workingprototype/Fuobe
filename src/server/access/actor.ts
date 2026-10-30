@@ -24,6 +24,12 @@ export interface RequestScope {
   path?: string;
   /** The route's pattern (`/api/generations/[id]`): the path with each dynamic segment named, for rate-limited denials. */
   route?: string;
+  /**
+   * The workspace the request asked to work in (an id or a slug): the tab's X-Fuobe-Workspace header, or
+   * `?workspace=` where a header can't be sent (EventSource, downloads). The scoping layer checks it
+   * (src/server/access/scope.ts activeWorkspace); without one, a person works in their own library.
+   */
+  workspace?: string | null;
 }
 
 declare global {

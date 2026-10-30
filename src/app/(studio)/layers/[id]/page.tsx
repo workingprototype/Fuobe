@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { LayersEditor } from "@/components/layers/layers-editor";
 import { getModel } from "@/lib/catalog";
 import { CUTOUT_MODELS, TOOL_MODELS, type LayerModelInfo } from "@/lib/layers";
-import { recordExists } from "@/server/records";
+import { pageRecordVisible } from "@/server/record-page";
 
 export const metadata: Metadata = { title: "Layers" };
 
@@ -29,7 +29,7 @@ function toolModels(): Record<string, LayerModelInfo> {
 
 async function Editor({ params }: { params: PageProps<"/layers/[id]">["params"] }) {
   const { id } = await params;
-  if (!recordExists({ kind: "layers", ids: [id] })) notFound();
+  if (!(await pageRecordVisible({ kind: "layers", ids: [id] }))) notFound();
   return <LayersEditor id={id} models={toolModels()} />;
 }
 

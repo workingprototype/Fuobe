@@ -4,13 +4,13 @@ import { Suspense } from "react";
 import { EpisodeWizard } from "@/components/faceless/episode-wizard";
 import { getModel } from "@/lib/catalog";
 import { pickerData } from "@/lib/catalog/faceless";
-import { recordExists } from "@/server/records";
+import { pageRecordVisible } from "@/server/record-page";
 
 export const metadata: Metadata = { title: "New episode" };
 
 async function Wizard({ params }: { params: PageProps<"/faceless/[id]/new">["params"] }) {
   const { id } = await params;
-  if (!recordExists({ kind: "channel", ids: [id] })) notFound();
+  if (!(await pageRecordVisible({ kind: "channel", ids: [id] }))) notFound();
   return <EpisodeWizard channelId={id} picker={pickerData(getModel)} />;
 }
 

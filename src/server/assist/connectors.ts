@@ -14,6 +14,8 @@ import {
   type ConnectorView,
 } from "@/lib/assist-connectors";
 import { db } from "../db";
+import { personOf } from "../access/scope";
+import { currentActor } from "../access/actor";
 
 /**
  * Custom MCP connectors (Settings → Assist → Connectors). Claude chats that use connectors (every
@@ -153,11 +155,12 @@ export function createConnector(input: ConnectorInput, now = Date.now()): Connec
     created_at: now,
     updated_at: now,
   };
+  // A connector belongs to the person who added it (docs/research/accounts-8.md §7.4).
   db()
     .prepare(
-      "INSERT INTO assist_connectors (id, name, slug, url, token, tools_json, enabled, created_at, updated_at) VALUES (@id, @name, @slug, @url, @token, @tools_json, @enabled, @created_at, @updated_at)",
+      "INSERT INTO assist_connectors (id, owner_id, name, slug, url, token, tools_json, enabled, created_at, updated_at) VALUES (@id, @owner_id, @name, @slug, @url, @token, @tools_json, @enabled, @created_at, @updated_at)",
     )
-    .run(row);
+    .run({ ...row, owner_id: personOf(currentActor()) });
   return toView(row);
 }
 

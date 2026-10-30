@@ -2,6 +2,8 @@ import "server-only";
 import { nanoid } from "nanoid";
 import { MEMORY_CATEGORIES, MEMORY_MAX_CHARS, type AssistMemory, type MemoryCategory, type MemoryScope } from "@/lib/assist";
 import { db } from "../db";
+import { personOf } from "../access/scope";
+import { currentActor } from "../access/actor";
 
 /**
  * Assist memory: short typed notes about the user (Supercomputer's Memory). Personal memories
@@ -95,8 +97,8 @@ export function addMemory(input: { text: string; category: MemoryCategory; scope
   }
   const id = nanoid(10);
   db()
-    .prepare("INSERT INTO assist_memory (id, scope, project_id, category, text, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, scope, projectId, input.category, text, input.source ?? "user", now, now);
+    .prepare("INSERT INTO assist_memory (id, scope, project_id, category, text, source, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(id, scope, projectId, input.category, text, input.source ?? "user", now, now, personOf(currentActor()));
   return getMemory(id)!;
 }
 

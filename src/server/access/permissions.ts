@@ -179,12 +179,16 @@ export class AccountOffError extends Error {
   }
 }
 
-/** The person every row belongs to until rows record who made them (the scoping package adds created_by). */
+/** The person a row with no maker on record belongs to (rows from before accounts were backfilled to them). */
 export const INSTALL_OWNER_ID = "u_owner";
 
-/** Who started a stored row: its created_by once rows have one, else the install owner (everything is theirs today). */
+/**
+ * Who started a stored row: its created_by, or the person a per-person row belongs to (a chat's or a schedule's
+ * user_id, a training's started_by), else the install owner.
+ */
 export function rowOwner(row: object): string {
-  return (row as { created_by?: string | null }).created_by || INSTALL_OWNER_ID;
+  const r = row as { created_by?: string | null; user_id?: string | null; started_by?: string | null };
+  return r.created_by || r.user_id || r.started_by || INSTALL_OWNER_ID;
 }
 
 /**

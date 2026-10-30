@@ -29,6 +29,7 @@ import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { currentActor, runAs, type Actor } from "../access/actor";
 import { AccountOffError, ownerActor, rowOwner } from "../access/permissions";
 import { db } from "../db";
+import { stamp } from "../access/scope";
 import { getGeneration } from "../generations";
 import { offeredDefault } from "../model-access";
 import { ollamaModels, ollamaSoon } from "../providers/llm";
@@ -214,11 +215,13 @@ function load(id: string): State | null {
 function save(s: State): void {
   s.thread.updatedAt = Date.now();
   Object.assign(s.thread, withExt(s.thread, s.ext));
+  // A chat is its author's (docs/research/accounts-8.md §7.4): who and where are written once, when it is first saved.
+  const own = stamp({ personal: true });
   db().transaction(() => {
     db()
       .prepare(
-        `INSERT INTO assist_threads (id, title, status, agent, engine, auto_approve, messages_json, items_json, pending_json, created_at, updated_at)
-         VALUES (@id, @title, @status, @agent, @engine, @auto_approve, @messages_json, @items_json, @pending_json, @created_at, @updated_at)
+        `INSERT INTO assist_threads (id, title, status, agent, engine, auto_approve, messages_json, items_json, pending_json, created_at, updated_at, user_id, workspace_id)
+         VALUES (@id, @title, @status, @agent, @engine, @auto_approve, @messages_json, @items_json, @pending_json, @created_at, @updated_at, @user_id, @workspace_id)
          ON CONFLICT(id) DO UPDATE SET title = @title, status = @status, agent = @agent, auto_approve = @auto_approve, messages_json = @messages_json,
            items_json = @items_json, pending_json = @pending_json, updated_at = @updated_at`,
       )
@@ -234,6 +237,8 @@ function save(s: State): void {
         pending_json: s.pending ? JSON.stringify(s.pending) : null,
         created_at: s.thread.createdAt,
         updated_at: s.thread.updatedAt,
+        user_id: own.created_by,
+        workspace_id: own.workspace_id,
       });
     db()
       .prepare(

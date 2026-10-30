@@ -30,6 +30,8 @@ import { TRAINING_REPLACED_BY } from "@/lib/catalog/replaced";
 import { DEFAULT_AI_TOOLKIT_URL } from "@/lib/connections";
 import { AccountOffError, rowOwner, runAsOwner } from "./access/permissions";
 import { DATA_DIR, db } from "./db";
+import { currentActor } from "./access/actor";
+import { personOf } from "./access/scope";
 import { getElement, updateElement } from "./elements";
 import { keepTrainedLora, lorasPath, ownCopy, recordTrainedMirror } from "./loras";
 import { falFetch, falProvider } from "./providers/fal";
@@ -224,9 +226,11 @@ export function startTraining(elementId: string, targetId: string, opts: { conse
     updated_at: now,
     completed_at: null,
   };
+  // Who started it pays for it (docs/research/accounts-8.md §7.4): the person asking, never the element's maker.
+  const by = { started_by: personOf(currentActor()), paid_by: personOf(currentActor()) };
   db()
-    .prepare(`INSERT INTO trainings (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
-    .run(row);
+    .prepare(`INSERT INTO trainings (${[...Object.keys(row), ...Object.keys(by)].join(", ")}) VALUES (${[...Object.keys(row), ...Object.keys(by)].map((k) => `@${k}`).join(", ")})`)
+    .run({ ...row, ...by });
   updateElement(elementId, { status: "training" });
   if (!demo) {
     submittingTrainings().add(row.id);

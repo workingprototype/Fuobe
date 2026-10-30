@@ -17,6 +17,7 @@ import { formatCost } from "@/lib/format";
 import { asSystem } from "../access/actor";
 import { rowOwner, runAsOwner } from "../access/permissions";
 import { db } from "../db";
+import { stamp } from "../access/scope";
 import { addMessage, createThread, getThread, resolveMode, run, type ModelCall } from "./agent";
 import { getProject } from "./projects";
 
@@ -208,14 +209,16 @@ function checked(input: ScheduleInput, prev: Row | undefined, now: number): Omit
 
 export function createSchedule(input: ScheduleInput, now = Date.now()): ScheduleView {
   const row: Row = { id: nanoid(10), ...checked(input, undefined, now), last_run_at: null, last_thread_id: null, last_status: null, last_text: null, runs: 0, created_at: now };
+  // A scheduled task is its author's: it runs as them (docs/research/accounts-8.md §7.4, §7.11).
+  const own = stamp({ personal: true });
   db()
     .prepare(
       `INSERT INTO assist_schedules (id, title, prompt, attachments_json, project_id, rule_json, tz, approval, cap_usd, connectors, engine, mode_json, paused,
-         next_run_at, last_run_at, last_thread_id, last_status, last_text, runs, created_at, updated_at)
+         next_run_at, last_run_at, last_thread_id, last_status, last_text, runs, created_at, updated_at, user_id, workspace_id)
        VALUES (@id, @title, @prompt, @attachments_json, @project_id, @rule_json, @tz, @approval, @cap_usd, @connectors, @engine, @mode_json, @paused,
-         @next_run_at, @last_run_at, @last_thread_id, @last_status, @last_text, @runs, @created_at, @updated_at)`,
+         @next_run_at, @last_run_at, @last_thread_id, @last_status, @last_text, @runs, @created_at, @updated_at, @user_id, @workspace_id)`,
     )
-    .run(row);
+    .run({ ...row, user_id: own.created_by, workspace_id: own.workspace_id });
   ensureScheduleRunner();
   return toView(row);
 }

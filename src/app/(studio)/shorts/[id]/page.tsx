@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ShortsSessionView } from "@/components/shorts/session-view";
-import { recordExists } from "@/server/records";
+import { pageRecordVisible } from "@/server/record-page";
 
 export const metadata: Metadata = { title: "Your short" };
 
 async function Session({ params }: { params: PageProps<"/shorts/[id]">["params"] }) {
   const { id } = await params;
-  if (!recordExists({ kind: "shorts", ids: [id] })) notFound();
+  if (!(await pageRecordVisible({ kind: "shorts", ids: [id] }))) notFound();
   return <ShortsSessionView id={id} />;
 }
 

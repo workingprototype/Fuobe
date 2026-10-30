@@ -80,6 +80,7 @@ import { DocxError, docxText } from "./assist/docx";
 import { PdfError, pdfText } from "./assist/pdf";
 import { asSystem } from "./access/actor";
 import { rethrowAccess } from "./access/errors";
+import { insertStamped, workspaceOf } from "./access/scope";
 import { rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { listElements } from "./elements";
@@ -344,9 +345,7 @@ export async function createChannel(input: { idea: string; genre: FacelessGenre;
     created_at: now,
     updated_at: now,
   };
-  db()
-    .prepare(`INSERT INTO faceless_channels (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
-    .run(row);
+  insertStamped("faceless_channels", row);
   const job = (async () => {
     if (!given) {
       const answer = await askLlm(input.engine, NAME_SYSTEM, `Channel idea: ${idea}\nGenre: ${genreInfo(input.genre).label}`, { timeoutMs: NAME_TIMEOUT_MS });
@@ -507,9 +506,8 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
     updated_at: now,
   };
   const first = channel ? !(db().prepare("SELECT 1 FROM faceless_episodes WHERE channel_id = ? LIMIT 1").get(channel.id) as unknown) : false;
-  db()
-    .prepare(`INSERT INTO faceless_episodes (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
-    .run(row);
+  // An episode is made where its channel is (an Explainer, in the workspace the request works in).
+  insertStamped("faceless_episodes", row, { workspaceId: workspaceOf("channel", channel?.id) ?? undefined });
   if (channel && (input.saveLook ?? first)) {
     void updateChannel(channel.id, {
       settings: {

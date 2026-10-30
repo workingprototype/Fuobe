@@ -33,6 +33,7 @@ import {
   type ShareRequest,
 } from "@/lib/share";
 import { db } from "./db";
+import { stamp, workspaceOf } from "./access/scope";
 import { toGeneration } from "./generations";
 import { NOT_TRASHED, newToken, shareTargetExists, toShareInfo, type ShareRow } from "./share-access";
 
@@ -328,10 +329,13 @@ export function createShare(input: CreateShareInput, now = Date.now()): { share:
   const layout: ShareLayout = publish ? (input.layout && input.layout !== "grid" ? input.layout : "feature") : "grid";
   const title = clean(input.title, MAX_TITLE) || defaultTitle(input.kind, targetId);
   const { id, token, hash } = newToken();
+  // A link belongs to the person who made it, in the workspace of what it shows (Editor there).
+  const shown = input.kind === "result" ? workspaceOf("generation", targetId) : input.kind === "folder" ? workspaceOf("folder", targetId) : input.kind === "cinema" ? workspaceOf("cinema", targetId) : workspaceOf("generation", items[0]);
+  const owner = stamp({ workspaceId: shown ?? undefined });
   db()
     .prepare(
-      `INSERT INTO shares (id, token_hash, kind, target_id, title, description, tags_json, layout, items_json, cover_id, cover_index, show_prompts, expires_at, created_at, updated_at)
-       VALUES (@id, @hash, @kind, @target, @title, @description, @tags, @layout, @items, @coverId, @coverIndex, @prompts, @expires, @now, @now)`,
+      `INSERT INTO shares (id, token_hash, kind, target_id, title, description, tags_json, layout, items_json, cover_id, cover_index, show_prompts, expires_at, created_at, updated_at, workspace_id, created_by)
+       VALUES (@id, @hash, @kind, @target, @title, @description, @tags, @layout, @items, @coverId, @coverIndex, @prompts, @expires, @now, @now, @workspace_id, @created_by)`,
     )
     .run({
       id,
@@ -348,6 +352,7 @@ export function createShare(input: CreateShareInput, now = Date.now()): { share:
       prompts: input.showPrompts ? 1 : 0,
       expires: expiryFrom(input.expiresInDays, now),
       now,
+      ...owner,
     });
   return { share: getShare(id)!, token, path: sharePath(token) };
 }

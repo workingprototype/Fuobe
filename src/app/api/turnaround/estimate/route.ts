@@ -1,4 +1,5 @@
-import { recordExists } from "@/server/records";
+import { currentActor } from "@/server/access/actor";
+import { recordVisible } from "@/server/records";
 import { body, handle } from "@/server/shorts-schemas";
 import { previewTurnaround, TurnaroundBodySchema, turnaroundRun } from "@/server/turnaround";
 import { handler } from "@/server/access/route";
@@ -11,7 +12,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   return handle(async () => {
     const input = await body(request, TurnaroundBodySchema, "Pick the engine and the character's pictures");
     delete input.requestId;
-    if (input.elementId && !recordExists({ kind: "element", ids: [input.elementId] })) return Response.json({ error: "Character not found" }, { status: 404 });
+    if (input.elementId && !recordVisible({ kind: "element", ids: [input.elementId] }, currentActor())) return Response.json({ error: "Character not found" }, { status: 404 });
     const p = previewTurnaround(turnaroundRun(input));
     return Response.json({ ...p, modelId: p.model.id, modelName: p.model.name });
   });

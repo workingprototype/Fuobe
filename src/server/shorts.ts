@@ -37,6 +37,7 @@ import {
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { db } from "./db";
+import { insertStamped } from "./access/scope";
 import { getGeneration, previewChained } from "./generations";
 import { trashGenerations } from "./library";
 import { firstOn } from "./model-access";
@@ -174,9 +175,7 @@ export function createCustomPreset(input: { name?: string; description?: string;
   const name = input.name?.trim() || customPresetName(description, count);
   const now = Date.now();
   const id = `custom-${nanoid(10)}`;
-  db()
-    .prepare("INSERT INTO shorts_presets (id, name, description, references_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(id, name, description, JSON.stringify(refs), now, now);
+  insertStamped("shorts_presets", { id, name, description, references_json: JSON.stringify(refs), created_at: now, updated_at: now });
   return getCustomPreset(id)!;
 }
 
@@ -405,25 +404,20 @@ export async function createSession(body: ShortsBody, known?: SourceInfo): Promi
     createdAt: now,
     updatedAt: now,
   };
-  db()
-    .prepare(
-      `INSERT INTO shorts_sessions (id, title, engine, batch_id, look_json, source_json, range_json, settings_json, segments_json, stitches_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      session.id,
-      session.title,
-      session.engine,
-      session.batchId,
-      JSON.stringify(session.look),
-      JSON.stringify(session.source),
-      JSON.stringify(session.range),
-      JSON.stringify(session.settings),
-      JSON.stringify(session.segments),
-      JSON.stringify(session.stitches),
-      now,
-      now,
-    );
+  insertStamped("shorts_sessions", {
+    id: session.id,
+    title: session.title,
+    engine: session.engine,
+    batch_id: session.batchId,
+    look_json: JSON.stringify(session.look),
+    source_json: JSON.stringify(session.source),
+    range_json: JSON.stringify(session.range),
+    settings_json: JSON.stringify(session.settings),
+    segments_json: JSON.stringify(session.segments),
+    stitches_json: JSON.stringify(session.stitches),
+    created_at: now,
+    updated_at: now,
+  });
   return session;
 }
 

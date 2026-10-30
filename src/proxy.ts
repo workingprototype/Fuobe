@@ -3,10 +3,12 @@ import { APPS } from "@/lib/catalog/apps";
 import { recordForPath, unknownHubMode } from "@/lib/record-pages";
 import { countsAsView, SHARE_VIEW_HEADER, shareRoute } from "@/lib/share";
 import { clientIp, crossSite, hostAllowed, LoginGuard } from "@/server/auth";
+import { LOCAL_OWNER, withScope, type Actor } from "@/server/access/actor";
+import { auditHidden } from "@/server/access/audit";
 import { CLIENT_IP_HEADER, refreshSession, resolvePrincipal } from "@/server/identity/principal";
 import { refusal } from "@/server/identity/refusals";
 import { signInRequired } from "@/server/mode";
-import { recordExists } from "@/server/records";
+import { recordState } from "@/server/records";
 import { findShare, shareGuard, shareTargetExists } from "@/server/share-access";
 
 /**
@@ -58,17 +60,24 @@ const APP_IDS = new Set(APPS.map((a) => a.id));
 
 /**
  * Let the request through — except a page for something that doesn't exist (an unknown app or hub
- * mode, a project / canvas / channel… id that isn't stored), which gets a real 404. The page can't
+ * mode, a project / canvas / channel… id that isn't stored) or that this person can't see (another
+ * person's project: the same 404, audited as denied.hidden), which gets a real 404. The page can't
  * send one itself: the studio's loading.tsx streams the shell (with a 200) before the page knows
  * the id is unknown. (The proxy can't tell a client-side navigation from a page load, so a link to
  * a deleted id reloads into the same 404 page.)
  */
-function pass(request: NextRequest, headers: Headers | null): NextResponse {
+function pass(request: NextRequest, headers: Headers | null, actor: Actor | null): NextResponse {
   const { pathname } = request.nextUrl;
   const app = /^\/apps\/([^/]+)\/?$/.exec(pathname)?.[1];
   if ((app && !APP_IDS.has(safeDecode(app))) || unknownHubMode(pathname)) return notFound(request);
   const record = recordForPath(pathname);
-  if (record && !recordExists(record)) return notFound(request);
+  const state = record ? recordState(record, actor) : "visible";
+  if (state === "hidden") {
+    withScope({ actor, ip: headers?.get(CLIENT_IP_HEADER) ?? null, userAgent: request.headers.get("user-agent"), method: request.method, path: pathname, route: `/${pathname.split("/")[1]}/[id]` }, () =>
+      auditHidden({ kind: record!.kind, id: null }),
+    );
+  }
+  if (state !== "visible") return notFound(request);
   return next(headers);
 }
 
@@ -150,12 +159,12 @@ async function guard(request: NextRequest): Promise<NextResponse> {
   if (!signIn) {
     // Just me on this computer: there is nothing to sign in to.
     if (pathname === "/login") return NextResponse.redirect(new URL("/", request.url));
-    return pass(request, headers);
+    return pass(request, headers, LOCAL_OWNER);
   }
   if (isOpen(pathname)) return next(headers);
   const principal = await resolvePrincipal(request);
   if (principal.actor) {
-    const res = pass(request, headers);
+    const res = pass(request, headers, principal.actor);
     // Sessions roll forward once a day, on a POST (GET stays read-only).
     if (principal.needsRefresh && !SAFE_METHODS.has(request.method)) for (const c of await refreshSession(request)) res.headers.append("set-cookie", c);
     return res;

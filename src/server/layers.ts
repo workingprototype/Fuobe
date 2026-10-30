@@ -34,6 +34,8 @@ import {
 } from "@/lib/layers";
 import { createPipeline, type PipelineStep } from "./chains";
 import { db } from "./db";
+import { currentActor } from "./access/actor";
+import { insertStamped, personOf } from "./access/scope";
 import { cancelGeneration, getGeneration, previewGeneration } from "./generations";
 import { firstOn } from "./model-access";
 import { getAsset } from "./storage";
@@ -470,8 +472,8 @@ export function projectView(id: string): LayerProjectView | null {
 function insertVersion(projectId: string, label: string, doc: LayerDoc, now: number): string {
   const id = nanoid(10);
   db()
-    .prepare("INSERT INTO layer_versions (id, project_id, label, doc_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(id, projectId, label.slice(0, 80), JSON.stringify(doc), now, now);
+    .prepare("INSERT INTO layer_versions (id, project_id, label, doc_json, created_at, updated_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(id, projectId, label.slice(0, 80), JSON.stringify(doc), now, now, personOf(currentActor()));
   return id;
 }
 
@@ -504,9 +506,7 @@ export function createProject(input: { source: string; width: number; height: nu
   const id = nanoid(10);
   const name = input.name?.trim().slice(0, 80) || nameFor(input.source) || "Untitled project";
   db().transaction(() => {
-    db()
-      .prepare("INSERT INTO layer_projects (id, name, source_url, cover_url, width, height, head_version_id, jobs_json, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?)")
-      .run(id, name, input.source, width, height, JSON.stringify(jobs), now, now);
+    insertStamped("layer_projects", { id, name, source_url: input.source, cover_url: null, width, height, head_version_id: null, jobs_json: JSON.stringify(jobs), created_at: now, updated_at: now });
     const v = insertVersion(id, "Original", initialDoc(input.source, width, height, now), now);
     db().prepare("UPDATE layer_projects SET head_version_id = ? WHERE id = ?").run(v, id);
   })();

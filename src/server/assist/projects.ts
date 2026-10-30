@@ -2,6 +2,7 @@ import "server-only";
 import { nanoid } from "nanoid";
 import { MAX_PROJECT_SOURCES, PROJECT_COLORS, PROJECT_LIMITS, type AssistProject, type ProjectColor, type ProjectSource, type SourceKind } from "@/lib/assist";
 import { db } from "../db";
+import { insertStamped } from "../access/scope";
 import { getElement } from "../elements";
 import { PdfError, pdfText } from "./pdf";
 import { fetchRemote } from "../remote-fetch";
@@ -116,9 +117,16 @@ export function createProject(input: ProjectInput): AssistProject {
   if (!c.name) throw new ProjectError("Give the project a name");
   const id = nanoid(10);
   const now = Date.now();
-  db()
-    .prepare("INSERT INTO assist_projects (id, name, color, instructions, skills_json, use_personal_memory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, c.name, c.color ?? "iris", c.instructions?.trim() ?? "", JSON.stringify(c.skills ?? []), c.usePersonalMemory === false ? 0 : 1, now, now);
+  insertStamped("assist_projects", {
+    id,
+    name: c.name,
+    color: c.color ?? "iris",
+    instructions: c.instructions?.trim() ?? "",
+    skills_json: JSON.stringify(c.skills ?? []),
+    use_personal_memory: c.usePersonalMemory === false ? 0 : 1,
+    created_at: now,
+    updated_at: now,
+  });
   return getProject(id)!;
 }
 

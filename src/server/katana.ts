@@ -8,6 +8,7 @@ import type { Engine, Generation } from "@/lib/catalog/types";
 import { probeMedia } from "@/lib/media-probe";
 import { createPipeline } from "./chains";
 import { db } from "./db";
+import { insertStamped } from "./access/scope";
 import { cancelGeneration, createGenerations, getGeneration, previewChained } from "./generations";
 import { firstOn } from "./model-access";
 import { engineMode } from "./settings";
@@ -210,7 +211,7 @@ export function createKatana(body: KatanaRequest): KatanaJobView {
     updatedAt: now,
   };
   const { id, createdAt, updatedAt, ...data } = job;
-  db().prepare("INSERT INTO katana_jobs (id, data_json, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, JSON.stringify(data), createdAt, updatedAt);
+  insertStamped("katana_jobs", { id, data_json: JSON.stringify(data), created_at: createdAt, updated_at: updatedAt });
   return view(job);
 }
 

@@ -9,7 +9,9 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-records-"));
 process.env.FUOBE_DATA_DIR = dir;
 delete process.env.FUOBE_PASSWORD;
 const { db } = await import("@/server/db");
-const { recordExists } = await import("@/server/records");
+const { recordVisible } = await import("@/server/records");
+const { LOCAL_OWNER } = await import("@/server/access/actor");
+const recordExists = (ref: Parameters<typeof recordVisible>[0]) => recordVisible(ref, LOCAL_OWNER);
 const { proxy } = await import("@/proxy");
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -77,12 +79,12 @@ describe("record pages (real 404s)", () => {
 
   it("looks the record up in its table", () => {
     const now = Date.now();
-    db().prepare("INSERT INTO canvases (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run("cv1", "Board", now, now);
+    db().prepare("INSERT INTO canvases (id, name, created_at, updated_at, workspace_id) VALUES (?, ?, ?, ?, 'w_owner')").run("cv1", "Board", now, now);
     db()
-      .prepare("INSERT INTO faceless_channels (id, name, idea, genre, settings_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .prepare("INSERT INTO faceless_channels (id, name, idea, genre, settings_json, created_at, updated_at, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'w_owner')")
       .run("ch1", "Channel", "idea", "history", "{}", now, now);
     db()
-      .prepare("INSERT INTO faceless_episodes (id, channel_id, kind, title, topic, status, settings_json, script_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .prepare("INSERT INTO faceless_episodes (id, channel_id, kind, title, topic, status, settings_json, script_json, created_at, updated_at, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'w_owner')")
       .run("ep1", "ch1", "faceless", "Episode", "topic", "draft", "{}", "[]", now, now);
     expect(recordExists({ kind: "canvas", ids: ["cv1"] })).toBe(true);
     expect(recordExists({ kind: "canvas", ids: ["nope"] })).toBe(false);

@@ -3,13 +3,13 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ElementStudio } from "@/components/element-studio";
 import { StudioSkeleton } from "@/components/skeletons";
-import { recordExists } from "@/server/records";
+import { pageRecordVisible } from "@/server/record-page";
 
 export const metadata: Metadata = { title: "Element" };
 
 async function Studio({ params }: { params: PageProps<"/elements/[id]">["params"] }) {
   const { id } = await params;
-  if (!recordExists({ kind: "element", ids: [id] })) notFound();
+  if (!(await pageRecordVisible({ kind: "element", ids: [id] }))) notFound();
   return <ElementStudio id={id} />;
 }
 

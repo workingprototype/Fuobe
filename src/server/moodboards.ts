@@ -5,6 +5,7 @@ import { MAX_ELEMENT_PHOTOS } from "@/lib/catalog/elements";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { COVER_PROMPT, CURATED_SETS, MOODBOARD_LIMITS, moodboardStatus, moodboardError, type CuratedMoodboard, type Moodboard } from "@/components/moodboards/logic";
 import { db } from "./db";
+import { insertStamped } from "./access/scope";
 import { createElement, getElement } from "./elements";
 import { createGenerations, getGeneration } from "./generations";
 import { engineMode } from "./settings";
@@ -160,9 +161,7 @@ export function createMoodboard(input: { name: string; images: string[]; collage
     created_at: now,
     updated_at: now,
   };
-  db()
-    .prepare(`INSERT INTO moodboards (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
-    .run(row);
+  insertStamped("moodboards", row);
   startPrep(row.id, row.name, images, JSON.parse(row.collages_json), engine);
   return getMoodboard(row.id)!;
 }

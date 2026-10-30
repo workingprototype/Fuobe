@@ -17,6 +17,7 @@ import {
 } from "@/lib/catalog/marketing";
 import { currentActor, runAs } from "./access/actor";
 import { db } from "./db";
+import { insertStamped, workspaceOf } from "./access/scope";
 import { llmText } from "./enhance";
 import { fetchRemote } from "./remote-fetch";
 import { saveFile } from "./storage";
@@ -940,9 +941,7 @@ export function createBrandFromWebsite(website: string): { brand: BrandKit; run:
   const now = Date.now();
   const name = hostName(new URL(url).hostname.replace(/^www\./, ""));
   const kit: StoredKit = { ...emptyKit(name), website: url, source: "website" };
-  db()
-    .prepare("INSERT INTO brand_kits (id, name, website, status, progress_json, kit_json, chat_json, created_at, updated_at) VALUES (?, ?, ?, 'researching', ?, ?, '[]', ?, ?)")
-    .run(id, name, url, JSON.stringify(progressAt(0)), JSON.stringify(kit), now, now);
+  insertStamped("brand_kits", { id, name, website: url, status: "researching", progress_json: JSON.stringify(progressAt(0)), kit_json: JSON.stringify(kit), chat_json: "[]", created_at: now, updated_at: now });
   return { brand: getBrand(id)!, run: startResearch(id) };
 }
 
@@ -1137,9 +1136,7 @@ export async function createManualBrand(input: { description: string; name?: str
   };
   const id = nanoid(10);
   const now = Date.now();
-  db()
-    .prepare("INSERT INTO brand_kits (id, name, website, status, progress_json, kit_json, chat_json, created_at, updated_at) VALUES (?, ?, NULL, 'ready', NULL, ?, '[]', ?, ?)")
-    .run(id, kit.name.trim() || "My brand", JSON.stringify(kit), now, now);
+  insertStamped("brand_kits", { id, name: kit.name.trim() || "My brand", website: null, status: "ready", progress_json: null, kit_json: JSON.stringify(kit), chat_json: "[]", created_at: now, updated_at: now });
   return getBrand(id)!;
 }
 
@@ -1215,24 +1212,25 @@ export interface ProductInput {
 function insertProduct(p: Omit<ProductDraft, "images"> & { sellingPoints?: string[]; audience?: string }, brandId: string | null, images: string[]): Product {
   const id = nanoid(10);
   const now = Date.now();
-  db()
-    .prepare(
-      "INSERT INTO products (id, brand_id, name, description, price, currency, audience, selling_points_json, url, images_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .run(
+  // A product follows its brand kit; a loose one goes to the workspace the request works in.
+  insertStamped(
+    "products",
+    {
       id,
-      brandId,
-      clean(p.name, 140) || "Untitled product",
-      cleanLines(p.description, 2000) || null,
-      p.price ?? null,
-      p.currency ? clean(p.currency, 8) : null,
-      clean(p.audience, 300) || null,
-      JSON.stringify(list(p.sellingPoints ?? [], MAX_SELLING_POINTS, 120)),
-      p.url ?? null,
-      JSON.stringify(images.slice(0, MAX_PRODUCT_IMAGES)),
-      now,
-      now,
-    );
+      brand_id: brandId,
+      name: clean(p.name, 140) || "Untitled product",
+      description: cleanLines(p.description, 2000) || null,
+      price: p.price ?? null,
+      currency: p.currency ? clean(p.currency, 8) : null,
+      audience: clean(p.audience, 300) || null,
+      selling_points_json: JSON.stringify(list(p.sellingPoints ?? [], MAX_SELLING_POINTS, 120)),
+      url: p.url ?? null,
+      images_json: JSON.stringify(images.slice(0, MAX_PRODUCT_IMAGES)),
+      created_at: now,
+      updated_at: now,
+    },
+    { workspaceId: workspaceOf("brand", brandId) ?? undefined },
+  );
   return getProduct(id)!;
 }
 
@@ -1345,9 +1343,7 @@ export function kitForSite(pageUrl: string, bits: LinkRead["brand"]): BrandKit {
   };
   const id = nanoid(10);
   const now = Date.now();
-  db()
-    .prepare("INSERT INTO brand_kits (id, name, website, status, progress_json, kit_json, chat_json, created_at, updated_at) VALUES (?, ?, ?, 'ready', NULL, ?, '[]', ?, ?)")
-    .run(id, name, website, JSON.stringify(kit), now, now);
+  insertStamped("brand_kits", { id, name, website, status: "ready", progress_json: null, kit_json: JSON.stringify(kit), chat_json: "[]", created_at: now, updated_at: now });
   return getBrand(id)!;
 }
 

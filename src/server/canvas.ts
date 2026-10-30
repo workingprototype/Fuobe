@@ -46,6 +46,7 @@ import {
 import type { Engine, Generation, GenerationRequest, MediaKind } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { db } from "./db";
+import { insertStamped } from "./access/scope";
 import { listElements } from "./elements";
 import { createGenerations, getGeneration } from "./generations";
 import { silentWav } from "./marketing";
@@ -389,9 +390,7 @@ export function createCanvas(input: CreateCanvasInput = {}): Canvas {
     updated_at: now,
     edited_at: null,
   };
-  db()
-    .prepare(`INSERT INTO canvases (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
-    .run(row);
+  insertStamped("canvases", row);
   return toCanvas(row);
 }
 
@@ -450,9 +449,7 @@ export function duplicateCanvas(id: string): Canvas | null {
     updated_at: now,
     edited_at: c.editedAt,
   };
-  db()
-    .prepare(`INSERT INTO canvases (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
-    .run(row);
+  insertStamped("canvases", row);
   return toCanvas(row);
 }
 

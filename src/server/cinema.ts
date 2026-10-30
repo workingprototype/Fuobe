@@ -4,6 +4,7 @@ import { getModel } from "@/lib/catalog";
 import type { CinemaFolder, CinemaItem, CinemaProject, CinemaTakeInfo, CinemaTile, DirectorMessage, DirectorSettings } from "@/lib/catalog/cinema";
 import type { Generation, GenerationRequest } from "@/lib/catalog/types";
 import { db } from "./db";
+import { insertStamped } from "./access/scope";
 import { createGenerations, getGeneration, listGenerations, previewChained, previewGeneration, toGeneration } from "./generations";
 import { trashGenerations } from "./library";
 
@@ -219,9 +220,7 @@ export function createProject(input: { name: string; description?: string | null
     created_at: now,
     updated_at: now,
   };
-  db()
-    .prepare(`INSERT INTO cinema_projects (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
-    .run(row);
+  insertStamped("cinema_projects", row);
   return toProject(row);
 }
 

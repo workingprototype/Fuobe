@@ -5,6 +5,9 @@ import { parseSkillMd, SKILL_LIMITS, SKILL_NAME_RE, toSkillMd, type Skill, type 
 import { parseRecipe, RECIPE_FILE, stripChecks, stripExamples, type Recipe } from "@/lib/recipe";
 import { unzip, ZipError } from "./assist/unzip";
 import { db } from "./db";
+import { viewerId } from "./marks";
+import { currentActor } from "./access/actor";
+import { insertStamped, personOf } from "./access/scope";
 import { zip } from "./zip";
 
 /**
@@ -119,8 +122,9 @@ function fromRow(r: Row): Skill {
   };
 }
 
+/** The person's own switches on built-in skills (each person turns built-ins on and off for themselves). */
 function toggles(): Map<string, boolean> {
-  return new Map((db().prepare("SELECT name, enabled FROM skill_toggles").all() as { name: string; enabled: number }[]).map((r) => [r.name, !!r.enabled]));
+  return new Map((db().prepare("SELECT name, enabled FROM skill_toggles WHERE user_id = ?").all(viewerId()) as { name: string; enabled: number }[]).map((r) => [r.name, !!r.enabled]));
 }
 
 const summary = ({ body, ...s }: Skill): SkillSummary => ({ ...s, chars: body.length });
@@ -259,12 +263,18 @@ function taken(name: string): string | null {
 function insert(s: SkillMeta & { body: string }, files: StoredFile[] = []): Skill {
   const now = Date.now();
   const meta = { ...(s.icon && { icon: s.icon }), ...(s.studio && { studio: s.studio }), ...(s.tags?.length && { tags: s.tags }), ...(s.offline && { offline: s.offline }) };
-  db()
-    .prepare(
-      `INSERT INTO skills (name, title, description, when_to_use, body, meta_json, files_json, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-    )
-    .run(s.name, s.title, s.description, s.whenToUse, s.body, JSON.stringify(meta), JSON.stringify(files), now, now);
+  insertStamped("skills", {
+    name: s.name,
+    title: s.title,
+    description: s.description,
+    when_to_use: s.whenToUse,
+    body: s.body,
+    meta_json: JSON.stringify(meta),
+    files_json: JSON.stringify(files),
+    enabled: 1,
+    created_at: now,
+    updated_at: now,
+  });
   return getSkill(s.name)!;
 }
 
@@ -342,7 +352,11 @@ export function deleteSkill(name: string): void {
 export function setSkillEnabled(name: string, enabled: boolean): Skill {
   const cur = getSkill(name);
   if (!cur) throw new SkillError("No such skill", 404);
-  if (cur.source === "builtin") db().prepare("INSERT INTO skill_toggles (name, enabled) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET enabled = excluded.enabled").run(name, enabled ? 1 : 0);
+  if (cur.source === "builtin") {
+    db()
+      .prepare("INSERT INTO skill_toggles (user_id, name, enabled) VALUES (?, ?, ?) ON CONFLICT(user_id, name) DO UPDATE SET enabled = excluded.enabled")
+      .run(personOf(currentActor()), name, enabled ? 1 : 0);
+  }
   else db().prepare("UPDATE skills SET enabled = ?, updated_at = ? WHERE name = ?").run(enabled ? 1 : 0, Date.now(), name);
   return getSkill(name)!;
 }

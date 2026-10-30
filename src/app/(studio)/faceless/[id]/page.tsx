@@ -4,13 +4,13 @@ import { Suspense } from "react";
 import { ChannelView } from "@/components/faceless/channel-view";
 import { getModel } from "@/lib/catalog";
 import { pickerData } from "@/lib/catalog/faceless";
-import { recordExists } from "@/server/records";
+import { pageRecordVisible } from "@/server/record-page";
 
 export const metadata: Metadata = { title: "Faceless channel" };
 
 async function Channel({ params }: { params: PageProps<"/faceless/[id]">["params"] }) {
   const { id } = await params;
-  if (!recordExists({ kind: "channel", ids: [id] })) notFound();
+  if (!(await pageRecordVisible({ kind: "channel", ids: [id] }))) notFound();
   return <ChannelView id={id} picker={pickerData(getModel)} />;
 }
 

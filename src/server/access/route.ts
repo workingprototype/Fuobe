@@ -5,6 +5,7 @@ import { withScope, type Actor } from "./actor";
 import { auditDenied, auditHidden, auditRefused } from "./audit";
 import { AccessError, ForbiddenError, NotFoundError, UnauthenticatedError } from "./errors";
 import { can, permissionExists } from "./permissions";
+import { pinConflict, WORKSPACE_HEADER } from "./scope";
 
 /**
  * Every route handler goes through handler() (docs/research/accounts-8.md §7.1, §7.3, §7.18): it resolves who is
@@ -193,12 +194,16 @@ export function handler<Req extends Request = Request, C = unknown>(
       method,
       path: url.pathname,
       route: await routePattern(url.pathname, ctx),
+      // The workspace the tab works in (src/server/access/scope.ts): its header, or ?workspace= where no header goes.
+      workspace: request.headers.get(WORKSPACE_HEADER) ?? url.searchParams.get("workspace"),
     };
     return withScope(scope, async () => {
       if (!actor && access !== "public") return signedOut(principal);
       if (actor) {
         const refused = refusedFor(actor, opts, method);
         if (refused) return answer(refused);
+        // A token pinned to a workspace works there only: asking for another one is refused, not quietly narrowed.
+        if (pinConflict(actor, scope.workspace)) return answer(new ForbiddenError("This API token is pinned to another workspace.", "WORKSPACE_PIN"));
       }
       let res: Response;
       try {

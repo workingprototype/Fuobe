@@ -719,7 +719,136 @@ const MIGRATIONS: string[] = [
   // transaction and writes an entry of its own.
   `CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
     BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;`,
+  // originals (o/acc-3): accounts, part 3 — every row belongs to one workspace (docs/research/accounts-8.md §7.4,
+  // the plan's migrations 25 and 26 as one). Each top-level table gains workspace_id and created_by (paid_by on
+  // generations), backfilled to the owner's personal workspace and the owner, and triggers refuse a NULL workspace_id
+  // on insert and update, so a writer that forgets to stamp a row fails loudly instead of making a row nobody sees.
+  // Built-in palettes, the demo voice and narrator samples (and their files) belong to the install catalog (w_install):
+  // everyone reads them. Children follow their parents (cinema items, layer versions, ad creatives, chat state…);
+  // trainings record who started and pays, the Trash who trashed, chats, schedules and memories their author. Skills
+  // are keyed per workspace, built-in skill toggles and Assist connectors per person (rebuilt, rows kept). Favorites
+  // and pins move to item_marks, per viewer (the old columns stay, unread).
+  scopingMigration(),
 ];
+
+/**
+ * The scoping migration (o/acc-3). Its table list is frozen with it: tables made later carry their own columns and
+ * triggers. src/server/access/tables.ts classifies every table, and tests/table-classification.test.ts checks both.
+ */
+function scopingMigration(): string {
+  const owned = [
+    "generations",
+    "assets",
+    "folders",
+    "characters",
+    "cinema_projects",
+    "canvases",
+    "layer_projects",
+    "shorts_sessions",
+    "shorts_presets",
+    "brand_kits",
+    "products",
+    "marketing_runs",
+    "palettes",
+    "moodboards",
+    "photodump_packs",
+    "faceless_channels",
+    "faceless_episodes",
+    "content_series",
+    "dub_sessions",
+    "katana_jobs",
+    "swap_projects",
+    "assist_projects",
+    "shares",
+  ];
+  const guarded = [...owned, "assist_threads", "assist_schedules"];
+  const guard = (t: string) =>
+    `CREATE TRIGGER IF NOT EXISTS ${t}_workspace_insert BEFORE INSERT ON ${t} WHEN NEW.workspace_id IS NULL
+    BEGIN SELECT RAISE(ABORT, '${t}.workspace_id is required'); END;
+  CREATE TRIGGER IF NOT EXISTS ${t}_workspace_update BEFORE UPDATE OF workspace_id ON ${t} WHEN NEW.workspace_id IS NULL
+    BEGIN SELECT RAISE(ABORT, '${t}.workspace_id is required'); END;`;
+  return `${owned
+    .map(
+      (t) => `ALTER TABLE ${t} ADD COLUMN workspace_id TEXT;
+  ALTER TABLE ${t} ADD COLUMN created_by TEXT;
+  UPDATE ${t} SET workspace_id = 'w_owner', created_by = 'u_owner';
+  CREATE INDEX IF NOT EXISTS ${t}_workspace ON ${t}(workspace_id, created_at DESC);`,
+    )
+    .join("\n  ")}
+  ALTER TABLE generations ADD COLUMN paid_by TEXT;
+  UPDATE generations SET paid_by = 'u_owner';
+  CREATE INDEX IF NOT EXISTS assets_rel_path ON assets(rel_path);
+  ALTER TABLE assist_threads ADD COLUMN user_id TEXT;
+  ALTER TABLE assist_threads ADD COLUMN workspace_id TEXT;
+  UPDATE assist_threads SET user_id = 'u_owner', workspace_id = 'w_owner';
+  CREATE INDEX IF NOT EXISTS assist_threads_user ON assist_threads(user_id, updated_at DESC);
+  ALTER TABLE assist_schedules ADD COLUMN user_id TEXT;
+  ALTER TABLE assist_schedules ADD COLUMN workspace_id TEXT;
+  UPDATE assist_schedules SET user_id = 'u_owner', workspace_id = 'w_owner';
+  CREATE INDEX IF NOT EXISTS assist_schedules_user ON assist_schedules(user_id);
+  ALTER TABLE assist_memory ADD COLUMN user_id TEXT;
+  UPDATE assist_memory SET user_id = 'u_owner';
+  ALTER TABLE trainings ADD COLUMN started_by TEXT;
+  ALTER TABLE trainings ADD COLUMN paid_by TEXT;
+  UPDATE trainings SET started_by = 'u_owner', paid_by = 'u_owner';
+  ALTER TABLE generation_trash ADD COLUMN trashed_by TEXT;
+  UPDATE generation_trash SET trashed_by = 'u_owner';
+  ALTER TABLE ad_batches ADD COLUMN created_by TEXT;
+  UPDATE ad_batches SET created_by = 'u_owner';
+  ALTER TABLE layer_versions ADD COLUMN created_by TEXT;
+  UPDATE layer_versions SET created_by = 'u_owner';
+  UPDATE palettes SET workspace_id = 'w_install', created_by = NULL WHERE source = 'builtin';
+  UPDATE generations SET workspace_id = 'w_install' WHERE feature = 'faceless-voice';
+  UPDATE assets SET workspace_id = 'w_install'
+    WHERE name = 'fuobe-demo-voice.wav' OR generation_id IN (SELECT id FROM generations WHERE feature = 'faceless-voice');
+  ${guarded.map(guard).join("\n  ")}
+  CREATE TABLE skills_scoped (
+    workspace_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    when_to_use TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    files_json TEXT NOT NULL DEFAULT '[]',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, name)
+  );
+  INSERT INTO skills_scoped (workspace_id, name, title, description, when_to_use, body, meta_json, files_json, enabled, created_by, created_at, updated_at)
+    SELECT 'w_owner', name, title, description, when_to_use, body, meta_json, files_json, enabled, 'u_owner', created_at, updated_at FROM skills;
+  DROP TABLE skills;
+  ALTER TABLE skills_scoped RENAME TO skills;
+  CREATE INDEX IF NOT EXISTS skills_workspace ON skills(workspace_id, created_at DESC);
+  CREATE TABLE skill_toggles_scoped (user_id TEXT NOT NULL, name TEXT NOT NULL, enabled INTEGER NOT NULL, PRIMARY KEY (user_id, name));
+  INSERT INTO skill_toggles_scoped (user_id, name, enabled) SELECT 'u_owner', name, enabled FROM skill_toggles;
+  DROP TABLE skill_toggles;
+  ALTER TABLE skill_toggles_scoped RENAME TO skill_toggles;
+  CREATE TABLE assist_connectors_scoped (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    url TEXT NOT NULL,
+    token TEXT,
+    tools_json TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (owner_id, slug)
+  );
+  INSERT INTO assist_connectors_scoped (id, owner_id, name, slug, url, token, tools_json, enabled, created_at, updated_at)
+    SELECT id, 'u_owner', name, slug, url, token, tools_json, enabled, created_at, updated_at FROM assist_connectors;
+  DROP TABLE assist_connectors;
+  ALTER TABLE assist_connectors_scoped RENAME TO assist_connectors;
+  INSERT OR IGNORE INTO item_marks (user_id, item_kind, item_id, favorite, pinned_at)
+    SELECT 'u_owner', 'generation', id, favorite, pinned_at FROM generations WHERE favorite = 1 OR pinned_at IS NOT NULL;
+  INSERT OR IGNORE INTO item_marks (user_id, item_kind, item_id, favorite, pinned_at)
+    SELECT 'u_owner', 'folder', id, 0, pinned_at FROM folders WHERE pinned_at IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS item_marks_pinned ON item_marks(user_id, item_kind, pinned_at) WHERE pinned_at IS NOT NULL;`;
+}
 
 /** The index of the migration whose SQL contains `fragment` (-1 when none does): tests and the bootstrap name migrations by what they do. */
 export const migrationIndexOf = (fragment: string): number => MIGRATIONS.findIndex((sql) => sql.includes(fragment));
