@@ -342,15 +342,25 @@ function TurnaroundForm({ pictures, name, realPerson: realDefault = false, eleme
         </ul>
       )}
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 border-t pt-3">
-        {p?.blocker && (
-          <p role="status" className="mr-auto flex min-w-0 items-center gap-1.5 text-[12.5px] text-destructive">
-            <AlertTriangle className="size-3.5 shrink-0" aria-hidden /> {p.blocker}
+        {preview.isError && !preview.isFetching ? (
+          // The plan couldn't be priced (the server didn't answer): say so, and let it be asked again.
+          <p role="status" className="mr-auto flex min-w-0 flex-wrap items-center gap-1.5 text-[12.5px] text-destructive">
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden /> Couldn&apos;t price it: {(preview.error as Error).message}
+            <Button variant="link" size="sm" className="h-auto p-0" onClick={() => void preview.refetch()}>
+              Try again
+            </Button>
           </p>
+        ) : (
+          p?.blocker && (
+            <p role="status" className="mr-auto flex min-w-0 items-center gap-1.5 text-[12.5px] text-destructive">
+              <AlertTriangle className="size-3.5 shrink-0" aria-hidden /> {p.blocker}
+            </p>
+          )
         )}
         <span className="font-mono text-[12px] whitespace-nowrap text-muted-foreground" aria-live="polite">
           {preview.isFetching && !p ? "Pricing…" : price}
         </span>
-        <Button onClick={() => make.mutate(body)} disabled={!p || !!p.blocker || make.isPending || preview.isFetching}>
+        <Button onClick={() => make.mutate(body)} disabled={!p || !!p.blocker || preview.isError || make.isPending || preview.isFetching}>
           {make.isPending ? <Loader2 className="animate-spin" /> : <Rotate3d />} {flyAround ? "Fly around" : "Make turnaround"}
         </Button>
       </div>

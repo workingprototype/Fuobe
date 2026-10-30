@@ -933,7 +933,7 @@ Cloud engine.
 
 Consent. "Fly around this character" on a real person follows Soul ID's consent line (`SOUL_ID_COPY`, `src/lib/catalog/training.ts`); WorldCast's own ethics statement warns about impersonation.
 
-Tests: `viewAzimuth` and the ordering; the plan per engine and per view count (1-5 views, with and without fills); prices; the ref2v payload (`reference_image_urls` <= 12, the prompt names Image N); the keyframe-film request for the open engine.
+Tests: `viewAzimuth` and the ordering; the plan per engine and per view count (1-5 views, with and without fills); prices; the ref2v payload (`reference_image_urls` <= 9, fal's schema; 12 files in all with videos and audio; the prompt names Image N); the keyframe-film request for the open engine.
 
 Browser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the button on the Character Sheet result, on Soul Cast results and on an element's page; the price or GPU line; progress; the result in the feed.
 
@@ -1000,7 +1000,7 @@ Fuobe prepares the case (permissive models only; the paper's Depth Pro and VGGT-
 - Depth: MoGe 2 (MIT, the 3D scene's `oss-scene-moge`) or Depth Anything 3 metric-large (Apache-2.0, Comfy-Org/Depth-Anything-3 @ 8265be07).
 - Masks: core `SAM3_Detect` with the pinned `sam3.1_multiplex_fp16`.
 - Path: `framePoses` from N7-5's library; `render.mp4` / `render_mask.mp4` from N7-5's recorder (mask 0 = covered, 255 = hole).
-- Anchors: the element's or sheet's views with azimuths in WorldCast's convention (front 0°, right_side about 90°, back about 180°, left_side about 270°, `left_sign` -1); anchor poses on a ring at the subject distance (a guess), or leave `anchors_aligned_camera_info.json` out (the code then skips anchor Plücker rays; quality impact unknown).
+- Anchors: the element's or sheet's views with azimuths in WorldCast's convention (front 0°, right_side about 90°, back about 180°, left_side about 270°, `left_sign` -1; N7-6 converts Fuobe's sides once, in `worldcastAnchor`, `src/lib/catalog/turnaround.ts`); anchor poses on a ring at the subject distance (a guess), or leave `anchors_aligned_camera_info.json` out (the code then skips anchor Plücker rays; quality impact unknown).
 - The `no_padding_black/` crops are not documented: read them from `demo_case/` and `diffsynth/pipelines/worldcast_pipeline.py` L842-869 before building.
 
 Fuobe side.
