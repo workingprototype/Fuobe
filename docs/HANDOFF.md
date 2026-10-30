@@ -8,14 +8,18 @@ Written on 2026-10-30, when PR #15 wrapped up the work so far, for whoever conti
   - all of round 4 and the Fuobe Originals O1 to O11 and O13
   - DBS soundtrack separation (D1)
   - MOSS-Image (N7-1), the fly path (N7-5) and the turnaround video (N7-6)
-  - the first two accounts packages (acc-1, the identity base; acc-2, the actor context on every route)
   - the research for Idol (research 9)
-- **`claude/fuobe-parity-4`** is the integration branch. Packages are merged into it one at a time. A PR is cut from it as a snapshot branch when the owner asks for one. After PR #15 merges, bring `main` into it first (`git merge origin/main`). It should be a fast-forward or a no-op merge.
-- **93 packages are queued** in three lanes ([`handoff/queue.json`](handoff/queue.json)):
+  - the owner's public sign-up, Settings → Accounts and Your GPU with the GPU pre-flight
+    ([`public-signup.md`](public-signup.md)), which PR #15's tools follow (`tests/public-signup-tools.test.ts`)
+- **Accounts: main's public sign-up stands** (the owner's decision, 10-30). The accounts packages acc-1 (the Better Auth
+  identity base) and acc-2 (the actor context on every route) were reverted out of PR #15, and the accounts lane (acc-3 to
+  acc-57) left the queue. Accounts will be planned again from scratch around public sign-up by a later session;
+  [`research/accounts-8.md`](research/accounts-8.md) stays as background research only.
+- **`claude/fuobe-parity-4`** is the integration branch. Packages are merged into it one at a time. A PR is cut from it as a snapshot branch when the owner asks for one. After PR #15 merges, bring `main` into it first (`git merge origin/main`). The branch still has acc-1 and acc-2 merged; that merge brings in PR #15's reverts of both and the owner's public sign-up.
+- **38 packages are queued** in two lanes ([`handoff/queue.json`](handoff/queue.json)):
   - lane R: 17 packages, new models and DBS audio
   - lane O: 21 packages, the owner's calls, Originals, Idol, skills and the training kit
-  - lane A: 55 packages, accounts acc-3 to acc-57
-- **Three packages have work on pushed branches.** See "Work in progress" below.
+- **Two packages have work on pushed branches.** See "Work in progress" below.
 
 ## The owner's rules (binding)
 
@@ -27,16 +31,22 @@ The owner's own words are in [`handoff/owner-decisions.json`](handoff/owner-deci
   - The cloud only uses models that are hosted, with no substitute model, and only what the hosted endpoint supports.
   - The open engine keeps every capability it has: LoRAs, custom nodes, longer clips and references.
   - Say plainly in the UI what each engine does.
-- **Accounts come in three modes, chosen in the first-run setup:**
-  - Personal: single access, or "Just me on this computer"
-  - In-house studio: teams and enterprise features
-  - Platform: open sign-up, plans and an admin panel
-- **More accounts decisions:**
-  - Open public sign-up is first class; the other sign-up modes are settings.
-  - Everyone gets their own private library, plus teams for sharing.
-  - Paid keys work both ways (the owner's keys with limits, or each person's own), and setup decides which.
-  - Sign-up choices are asked during setup.
-  - The core lands first and the enterprise features after it. The full spec is [`research/accounts-8.md`](research/accounts-8.md).
+- **Public sign-up rules every package** (the owner's, on main; 10-30: main wins over the accounts lane). Read
+  [`public-signup.md`](public-signup.md), `src/lib/guest-access.ts` and `src/proxy.ts`. A new route or tool gets what main
+  gives the same kind of route:
+  - Price checks (estimate routes, `?preview=1` on run routes) go in `ESTIMATES` or `PREVIEWS` and run through `priceAs`
+    (`src/server/visitor.ts`), so guests and accounts are priced for their own GPU, never a demo.
+  - Changes to the library or projects go in `LIBRARY_CHANGES` (403 `code: "library"` for an account). Settings, keys
+    and tokens stay the owner's.
+  - Only the owner's runs reach the install's keys or GPU. An account's studio generations run on its own ComfyUI
+    through `POST /api/generations`; other runs answer `connect-gpu`, then `own-gpu-tool`.
+  - The owner's lists come back empty for a visitor, and a visitor is never told whether one of the owner's records
+    exists.
+  - New ComfyUI workflows and node packs go into the GPU pre-flight's requirement index (`workflows/comfyui/packs.json`,
+    `model-pins.json`, then `node scripts/comfy/build-requirements.mjs`), and new studios and tools get a row on its
+    board (`src/server/gpu/tools.ts` `STUDIO_ROWS`).
+  - The owner's 10-29 accounts answers (`accounts` in [`handoff/owner-decisions.json`](handoff/owner-decisions.json))
+    and accounts-8.md are inputs for the accounts re-plan, not rules for packages.
 - **The owner's calls from PR #14** are package `owner-calls-1`, first in lane O:
   - Evolution's cloud route moves onto fal's hosted Wan 2.2 Fun VACE.
   - "Fuobe Speak" keeps its name; the GPU runs FusioniX and the cloud runs without it, and the UI says so.
@@ -44,14 +54,8 @@ The owner's own words are in [`handoff/owner-decisions.json`](handoff/owner-deci
 
 ## Waiting on the owner
 
-- **Accounts open questions** (accounts-8.md §15). Packages use the assumed defaults until the owner answers:
-  1. A $25 default monthly limit per member, a 50% Platform markup and the §10.2 plan prices.
-  2. Studio sign-up open only to the owner's work domain.
-  3. Admins see own-key spend totals only.
-  4. Backup archives are not encrypted.
-  5. A free tier of 50 monthly credits.
-  6. View-only seats are free.
-  7. No community feed.
+- **The accounts re-plan.** Accounts are planned again from scratch around public sign-up. accounts-8.md §15's open
+  questions (member limits, studio sign-up domains, credits, seats) belong to that re-plan, not to any queued package.
 - **Two workflow files the owner shared.** The owner needs to share them again, because they were read in this session's container and not committed: their origin and licence are unknown.
   - `inbetweening/Animation5-In-Betweening.json`, Comfy's "Animation: Keyframes to Full Character Animation", for package `inbetweening`
   - `blockout/Horror_Scene_SD2.5.json`, Comfy's "Horror scene", for package `blockout-film`
@@ -86,23 +90,21 @@ Lanes run side by side. Inside a lane, packages run in this order, and each pack
 - `o12-training-kit`
 - More skills: `w2s-w5`, `w2s-w6`, `w2s-w7`
 
-**Lane A:**
-- acc-3 to acc-17: the core. Scoping and the data-access layer, the meter and paid keys, sign-in pages and sign-up policy, first-run setup, the mode switch, the admin console, teams and sharing. acc-3 is work in progress.
-- acc-18 to acc-23: Personal.
-- acc-24 to acc-36: In-house studio. Teams, queues, GPU pools, approvals, usage reports, then enterprise: policies, domains, OIDC and SAML, SCIM, audit, data lifecycle and seats.
-- acc-37 to acc-57: Platform. Credits, the price book, plans, the plan editor, payments and Stripe, the public site, abuse and safety, moderation, provenance, workers, storage, analytics and the launch checklist.
+**Lane A** (accounts acc-3 to acc-57) was dropped on 2026-10-30: see "Where things stand". Its branch `o/acc-3` (one
+WIP commit) is abandoned; don't build on it.
 
 Each package's full brief, with its research sections, owner rules and test plan, is in `queue.json` under `packages.<key>.brief`.
 
 ## Work in progress
 
-All three branches are pushed to `origin` and based on `claude/fuobe-parity-4` at `f7c6d8e`:
+Both branches are pushed to `origin` and based on `claude/fuobe-parity-4` at `f7c6d8e`, which still has acc-1 and acc-2.
+Rebase each onto the integration branch once it has PR #15 (or merge it in) and drop any use of acc-2's `handler()`,
+actor or scope helpers: those modules are gone.
 
 | Branch | State | What the next run does |
 |---|---|---|
 | `o/n7-2-layout-mode` | 5 commits. Implement and review are done; both reports are in `queue.json` under `done`. | The fix stage. The review found 2 majors (cloud layout runs don't keep fal's seed; a second Edit layout on the same picture does nothing), a weak e2e check, and minors on keyboard resize, contrast and an admin-disabled model. |
-| `o/archive-restore` | 6 commits from an implement stage that stopped before it reported. | Implement again: the agent resumes from the branch's commits. |
-| `o/acc-3` | 1 WIP commit. The implement stage was cut off; nothing is reviewed or checked. | Implement again, resuming from the commit. |
+| `o/archive-restore` | 6 commits from an implement stage that stopped before it reported. Its two routes (`/api/restore`, `/api/restore/prompt`) use acc-2's `handler()`. | Implement again: the agent resumes from the branch's commits, with plain route handlers under the public sign-up rules. |
 
 The build prompts tell an agent to start from `origin/o/<key>` when that branch exists.
 
@@ -114,7 +116,7 @@ The container starts fresh, so set up the following before building:
 cd /home/user/Fuobe                      # the repository
 git fetch origin
 git checkout claude/fuobe-parity-4 && git merge origin/main   # after PR #15 merged
-for b in o/n7-2-layout-mode o/archive-restore o/acc-3; do git branch -f "$b" "origin/$b"; done
+for b in o/n7-2-layout-mode o/archive-restore; do git branch -f "$b" "origin/$b"; done
 pnpm install --frozen-lockfile && npx next typegen   # typegen before every typecheck in a fresh checkout
 (cd scripts/comfy && npm install)                    # playwright-core: the ComfyUI pipeline and tests/comfy-dbs.test.ts
 bash scripts/comfy/install-comfyui.sh                # CPU ComfyUI 0.41 + the pinned node packs, outside the repo
@@ -144,10 +146,10 @@ node docs/handoff/make-workflow.mjs /tmp/fuobe-build.js --trailer-file /tmp/trai
 
 - **Options:**
   - `--skip key,key` leaves out packages already merged.
-  - `--only R,A` runs some of the lanes.
+  - `--only R` runs some of the lanes.
   - `--done results.json` reuses stages that finished since the queue was written.
   - `--remove-worktrees` lets the integrator delete merged worktrees. Pass it only if the owner agrees.
-- **Size limit.** Scripts must stay under 512 KB. The whole queue comes to about 430 KB.
+- **Size limit.** Scripts must stay under 512 KB. The whole queue comes to about 300 KB.
 - **Usage limits and restarts.** A lane stops at the first package that fails a stage, so a relaunch picks up there.
   - In the same session, resume with `resumeFromRunId`: finished agent calls are reused.
   - In a new session, regenerate the script with `--skip` for merged packages and `--done` for finished stages. Agents resume from what their branch already holds.
@@ -167,7 +169,7 @@ Only cut a PR when the owner asks for one. The steps that worked for PRs #12 to 
 
    It lists any `tests/e2e` script it doesn't run yet. Before fixing a failing check, reproduce it, then show it passing three times on fresh data.
 3. **Describe.** Write the PR description from the merged packages' reports: what each area does on each engine, verified vs built, and what needs a GPU or a key.
-4. **Docs pass.** Update `docs/STATUS.md`, `docs/ARCHITECTURE.md`, `README.md` (including "Upgrading", with new migrations and dependencies), `docs/research/README.md` and `scripts/comfy/README.md` (library counts) from the reports. Commit it to the snapshot branch.
+4. **Docs pass.** Update `docs/STATUS.md`, `docs/ARCHITECTURE.md`, `docs/FEATURES.md`, `docs/SELF-HOSTING.md`, `docs/DEVELOPMENT.md`, `README.md` (a short product page since the owner's rewrite; its "Upgrading" keeps new migrations and dependencies), `docs/research/README.md` and `scripts/comfy/README.md` (library counts) from the reports. Commit it to the snapshot branch.
 5. **Open the PR** against `main`, with the checks summary and what none of the checks cover (no GPU, no paid keys).
 
 ## Known gaps and gotchas

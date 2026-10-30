@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Writes the build workflow script from docs/handoff/queue.json and workflow.body.js (docs/HANDOFF.md explains it).
 // Usage: node docs/handoff/make-workflow.mjs <out.js> --trailer-file <file> [--repo <dir>] [--wt <dir>] [--ext <dir>]
-//          [--base <branch>] [--skip key,key] [--only R,O,A] [--journal <journal.jsonl>]… [--done <results.json>]
+//          [--base <branch>] [--skip key,key] [--only R,O] [--journal <journal.jsonl>]… [--done <results.json>]
 //          [--remove-worktrees]
 //   --trailer-file  the lines every commit message ends with (this session's attribution lines)
 //   --repo          the checkout the integrator merges in (default: this repository's top folder)
