@@ -1,21 +1,5 @@
 import type { NextConfig } from "next";
 
-/**
- * Security headers (docs/research/accounts-8.md §7.1): no page may be framed by another site (clickjacking a
- * signed-in owner), except share pages, which people embed. Sign-in pages and their APIs are never cached. The
- * proxy sets no-store on the same paths too (src/proxy.ts NO_STORE).
- */
-export const SECURITY_HEADERS = [
-  {
-    source: "/((?!s/).*)",
-    headers: [
-      { key: "X-Frame-Options", value: "DENY" },
-      { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
-    ],
-  },
-  ...["/login", "/api/auth/:path*", "/api/identity/:path*"].map((source) => ({ source, headers: [{ key: "Cache-Control", value: "no-store" }] })),
-];
-
 const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
@@ -23,9 +7,6 @@ const nextConfig: NextConfig = {
   experimental: {
     // The sign-in proxy buffers request bodies (10 MB by default): uploads take up to 200 MB plus the form overhead.
     proxyClientMaxBodySize: "210mb",
-  },
-  async headers() {
-    return SECURITY_HEADERS;
   },
   async redirects() {
     return [

@@ -470,39 +470,6 @@ export const ATTRIBUTIONS: Attribution[] = [
   { for: "DBS (vendored code)", text: "TIGER / Look2Hear, copyright (c) 2026 Kai Li", licence: "MIT", url: "https://github.com/JusperLee/TIGER" },
 ];
 
-// ---------------------------------------------------------------------------
-// Libraries pinned under the accounts plan's version rule (docs/research/accounts-8.md §5.2): the newest release at
-// least 14 days old and free of OSV advisories, pinned exact in package.json (a test keeps the two in step). Each
-// package that adds one records it here with its licence.
-
-export interface PinnedLibrary {
-  name: string;
-  /** The exact version in package.json. */
-  version: string;
-  /** What Fuobe uses it for. */
-  use: string;
-  /** When the rule was applied (the 14 days count back from here). */
-  pinnedOn: string;
-  licence: LicenceInfo;
-}
-
-export const PINNED_LIBRARIES: PinnedLibrary[] = [
-  {
-    name: "better-auth",
-    version: "1.7.10",
-    use: "Sign-in behind Fuobe: passwords and sessions (later passkeys, two-step, Google/GitHub/OIDC and company sign-in)",
-    pinnedOn: "2026-10-29",
-    licence: { name: "MIT", class: "commercial", url: "https://github.com/better-auth/better-auth/blob/main/LICENSE.md", note: "MIT; every @better-auth/* package it pulls in is the same version" },
-  },
-  {
-    name: "kysely",
-    version: "0.29.6",
-    use: "The SQL layer Better Auth runs on (Fuobe hands it the connection with transactions off)",
-    pinnedOn: "2026-10-29",
-    licence: { name: "MIT", class: "commercial", url: SPDX("MIT"), note: "MIT; already Better Auth's dependency, pinned so Fuobe and Better Auth share one copy" },
-  },
-];
-
 /** The parts of a LoRA's licence snapshot the class needs (src/lib/catalog/types.ts LoraLicence). */
 interface LoraLicenceLike {
   commercial: boolean;

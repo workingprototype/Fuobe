@@ -2,6 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, Loader2, LogOut, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -19,10 +20,7 @@ interface TokenInfo {
 }
 interface AuthStatus {
   enabled: boolean;
-  /** FUOBE_PASSWORD sets the password. */
   fromEnv: boolean;
-  /** FUOBE_SIGNIN pins sign-in on or off (null when unset). */
-  signinFromEnv?: boolean | null;
   tokens: TokenInfo[];
 }
 
@@ -80,7 +78,7 @@ function PasswordForm({ status, onDone }: { status: AuthStatus; onDone: () => vo
           {busy && <Loader2 className="animate-spin" />}
           {status.enabled ? "Change password" : "Require a password"}
         </Button>
-        {status.enabled && status.signinFromEnv !== true && (
+        {status.enabled && (
           <Button size="sm" variant="ghost" className="text-destructive" disabled={busy || !current} onClick={() => void run(null)}>
             Remove password
           </Button>
@@ -198,6 +196,7 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
 
 export function SecuritySettings() {
   const qc = useQueryClient();
+  const router = useRouter();
   const status = useQuery({ queryKey: ["auth"], queryFn: () => call<AuthStatus>("/api/auth/password", "GET") });
   const refresh = () => void qc.invalidateQueries({ queryKey: ["auth"] });
   if (!status.data) return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
@@ -207,18 +206,14 @@ export function SecuritySettings() {
       {s.enabled ? (
         <div className="flex items-start gap-2.5 rounded-xl bg-brand-faint px-3 py-2.5 text-[13px]">
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand-text" />
-          <p className="flex-1">
-            Sign-in is required for every page and API call.{s.fromEnv && " The password is set by FUOBE_PASSWORD on the server."}
-            {s.signinFromEnv === true && " Set by the server (FUOBE_SIGNIN=on), so the password can be changed but not removed."}
-          </p>
+          <p className="flex-1">Sign-in is required for every page and API call.{s.fromEnv && " The password is set by FUOBE_PASSWORD on the server."}</p>
           <Button
             size="sm"
             variant="ghost"
             className="-my-1 h-7"
             onClick={async () => {
               await fetch("/api/auth/logout", { method: "POST" });
-              // A full load (the proxy sends it to sign in): nothing from the signed-in session stays in memory.
-              window.location.reload();
+              router.replace("/login");
             }}
           >
             <LogOut /> Sign out
@@ -227,14 +222,10 @@ export function SecuritySettings() {
       ) : (
         <div className="flex items-start gap-2.5 rounded-xl bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-300">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-          <p>
-            {s.signinFromEnv === false
-              ? "Sign-in is off: set by the server (FUOBE_SIGNIN=off). Anyone who can reach this server can use your keys and GPU. Restart without it to require a password."
-              : "No password: anyone who can reach this server can use your keys and GPU. Fine on your own computer — set a password before you open it to a network."}
-          </p>
+          <p>No password: anyone who can reach this server can use your keys and GPU. Fine on your own computer — set a password before you open it to a network.</p>
         </div>
       )}
-      {!s.fromEnv && s.signinFromEnv !== false && <PasswordForm status={s} onDone={refresh} />}
+      {!s.fromEnv && <PasswordForm status={s} onDone={refresh} />}
       <Tokens status={s} onChange={refresh} />
     </div>
   );

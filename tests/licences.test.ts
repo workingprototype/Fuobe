@@ -84,16 +84,3 @@ describe("licences", () => {
     expect(without.notices.some((n) => n.text === "Built with DINOv3")).toBe(false);
   });
 });
-
-describe("pinned libraries (accounts plan §5.2)", () => {
-  it("record a licence for each, at the exact version package.json pins", async () => {
-    const { PINNED_LIBRARIES } = await import("@/lib/licences");
-    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as { dependencies: Record<string, string> };
-    expect(PINNED_LIBRARIES.map((l) => l.name)).toEqual(expect.arrayContaining(["better-auth", "kysely"]));
-    for (const l of PINNED_LIBRARIES) {
-      expect(pkg.dependencies[l.name], l.name).toBe(l.version);
-      expect(l.licence.name, l.name).toBeTruthy();
-      expect(l.licence.note, l.name).toBeTruthy();
-    }
-  });
-});

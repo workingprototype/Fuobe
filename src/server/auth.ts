@@ -1,47 +1,128 @@
 /**
- * The perimeter checks the proxy runs on every request, whoever is signed in: cross-site writes, DNS rebinding,
- * the client's address behind a trusted reverse proxy, and the wrong-password throttle. Who is signed in is
- * src/server/identity (Better Auth sessions, API tokens, "Just me on this computer"); whether sign-in is on is
- * src/server/mode.ts.
+ * Access protection. Off until a password is set (Settings → Security, or FUOBE_PASSWORD).
+ * Then every page and API call needs a session cookie (from /login) or an API token
+ * (`Authorization: Bearer fuobe_…`).
  *
- * Before accounts, the password, the session secret and the API tokens lived in data/auth.json. The identity
- * bootstrap imports them once (src/server/identity/bootstrap.ts) and leaves the file in place, unread, for one
- * release as a rollback aid: readLegacyAuth is the only reader left.
+ * Kept in a small JSON file next to the database, not in SQLite, so the proxy's sign-in check
+ * needs nothing but `fs` and `crypto`. (The proxy does open SQLite, for one primary-key lookup on
+ * record pages only, so an unknown id gets a real 404: src/server/records.ts.)
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { signInRequired } from "./mode";
 
 const DATA_DIR = path.resolve(/*turbopackIgnore: true*/ process.env.FUOBE_DATA_DIR ?? path.join(process.cwd(), "data"));
+const FILE = path.join(DATA_DIR, "auth.json");
 
-/** An API token as auth.json kept it. */
-export interface LegacyToken {
+export const SESSION_COOKIE = "fuobe_session";
+const SESSION_DAYS = 30;
+
+export interface ApiToken {
   id: string;
   name: string;
-  /** sha256 of the token, hex. */
+  /** sha256 of the token; the token itself is shown once. */
   hash: string;
   prefix: string;
   createdAt: number;
   lastUsedAt?: number;
 }
 
-/** The pre-accounts auth.json: a scrypt hash ("salt:hash", hex) and the API tokens. Null when there is none. */
-export function readLegacyAuth(): { password?: string; tokens: LegacyToken[] } | null {
+interface AuthFile {
+  /** scrypt hash of the UI-set password ("salt:hash", hex). */
+  password?: string;
+  /** Signs session cookies; replaced when the password changes, which signs everyone out. */
+  secret: string;
+  tokens: ApiToken[];
+}
+
+let cache: { mtime: number; data: AuthFile } | null = null;
+
+function read(): AuthFile {
   try {
-    const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "auth.json"), "utf8")) as { password?: unknown; tokens?: unknown };
-    const tokens = Array.isArray(data.tokens)
-      ? (data.tokens as LegacyToken[]).filter((t) => t && typeof t.hash === "string" && /^[0-9a-f]{64}$/i.test(t.hash) && typeof t.id === "string")
-      : [];
-    return { password: typeof data.password === "string" && data.password ? data.password : undefined, tokens };
+    const mtime = fs.statSync(FILE).mtimeMs;
+    if (cache?.mtime === mtime) return cache.data;
+    const data = JSON.parse(fs.readFileSync(FILE, "utf8")) as AuthFile;
+    cache = { mtime, data };
+    return data;
   } catch {
-    return null;
+    return { secret: "", tokens: [] };
   }
 }
 
-/** Whether every page and API call needs a session or a token (Personal with sign-in, Studio, Platform). */
-export const authEnabled = (): boolean => signInRequired();
+function write(data: AuthFile): void {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const tmp = `${FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, FILE);
+  cache = null;
+}
+
+function withSecret(data: AuthFile): AuthFile {
+  return data.secret ? data : { ...data, secret: crypto.randomBytes(32).toString("hex") };
+}
+
+const envPassword = () => process.env.FUOBE_PASSWORD || "";
+
+export function authStatus(): { enabled: boolean; fromEnv: boolean; tokens: Omit<ApiToken, "hash">[] } {
+  const d = read();
+  return { enabled: !!(envPassword() || d.password), fromEnv: !!envPassword(), tokens: d.tokens.map(publicToken) };
+}
+
+const publicToken = (t: ApiToken): Omit<ApiToken, "hash"> => ({ id: t.id, name: t.name, prefix: t.prefix, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt });
+
+export const authEnabled = () => !!(envPassword() || read().password);
+
+// ---------------------------------------------------------------------------
+// Passwords
+
+function hashPassword(pw: string): string {
+  const salt = crypto.randomBytes(16);
+  return `${salt.toString("hex")}:${crypto.scryptSync(pw, salt, 32).toString("hex")}`;
+}
+
+const same = (a: Buffer, b: Buffer) => a.length === b.length && crypto.timingSafeEqual(a, b);
+
+export function checkPassword(pw: string): boolean {
+  const env = envPassword();
+  if (env) return same(crypto.createHash("sha256").update(pw).digest(), crypto.createHash("sha256").update(env).digest());
+  const stored = read().password;
+  if (!stored) return false;
+  const [salt, hash] = stored.split(":");
+  return same(crypto.scryptSync(pw, Buffer.from(salt, "hex"), 32), Buffer.from(hash, "hex"));
+}
+
+/** Set, change or (with null) remove the UI password. Signs every browser out. */
+export function setPassword(pw: string | null): void {
+  if (envPassword()) throw new Error("The password is set by FUOBE_PASSWORD on the server");
+  if (pw !== null && pw.length < 8) throw new Error("Use at least 8 characters");
+  const d = read();
+  write({ ...d, password: pw === null ? undefined : hashPassword(pw), secret: crypto.randomBytes(32).toString("hex") });
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+
+const sign = (secret: string, payload: string) => crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+
+export function createSession(): { value: string; maxAge: number } {
+  let d = read();
+  if (!d.secret) {
+    d = withSecret(d);
+    write(d);
+  }
+  const exp = Date.now() + SESSION_DAYS * 86_400_000;
+  return { value: `${exp}.${sign(d.secret, String(exp))}`, maxAge: SESSION_DAYS * 86_400 };
+}
+
+export function validSession(value: string | undefined): boolean {
+  if (!value) return false;
+  const [exp, mac] = value.split(".");
+  const secret = read().secret;
+  if (!secret || !exp || !mac || Number(exp) < Date.now()) return false;
+  return same(Buffer.from(mac), Buffer.from(sign(secret, exp)));
+}
 
 // ---------------------------------------------------------------------------
 // Cross-site requests
@@ -124,7 +205,7 @@ export function hostAllowed(host: string | null): boolean {
 /**
  * Wrong-password limits. Route handlers can't see the socket address, and Next keeps any
  * X-Forwarded-For a client sends, so that header only identifies a client behind a reverse proxy
- * you trust (FUOBE_TRUSTED_PROXIES or FUOBE_TRUST_PROXY=1, see clientIp): such a client is locked
+ * you trust (FUOBE_TRUST_PROXY=1; the proxy's own entry is the last one): such a client is locked
  * out for a minute after 5 misses. Otherwise every client shares the "direct" key, and a lock
  * would let anyone keep the owner out, so a spent budget slows sign-in down to one attempt every
  * few seconds instead (about 15 guesses a minute). Past the global budget the same throttle
@@ -139,10 +220,11 @@ export class LoginGuard {
     private readonly o = { perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, throttleMs: 4_000, maxClients: 5000 },
   ) {}
 
-  /** Who is signing in: the client's address when a trusted proxy reports it (clientIp), else one shared key. */
-  static clientKey(headers: Headers, trust: boolean | TrustedProxies | null = trustedProxies()): string {
-    const t = trust === true ? { hops: 1 } : trust === false ? null : trust;
-    return clientIp(headers, t) ?? LoginGuard.DIRECT;
+  /** Who is signing in: the last X-Forwarded-For hop when a trusted proxy sets it, else one shared key. */
+  static clientKey(headers: Headers, trustProxy = process.env.FUOBE_TRUST_PROXY === "1"): string {
+    if (!trustProxy) return LoginGuard.DIRECT;
+    const hops = (headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    return hops.at(-1) ?? LoginGuard.DIRECT;
   }
 
   /** Milliseconds until this client may try again (0 = now). */
@@ -183,49 +265,36 @@ export class LoginGuard {
 }
 
 // ---------------------------------------------------------------------------
-// The client's address behind a trusted reverse proxy
+// API tokens
 
-/**
- * Which reverse proxies in front of Fuobe are trusted to tell the client's address (§7.2): FUOBE_TRUSTED_PROXIES
- * as a hop count ("1", "2": the address that many entries from the right of X-Forwarded-For) or a list of
- * addresses and CIDR ranges (entries from the right that fall inside them are skipped). FUOBE_TRUST_PROXY=1 keeps
- * meaning one hop. Null when nothing is trusted: X-Forwarded-For is then whatever the client wrote.
- */
-export type TrustedProxies = { hops: number } | { ranges: net.BlockList; list: string[] };
+const tokenHash = (t: string) => crypto.createHash("sha256").update(t).digest("hex");
 
-export function trustedProxies(): TrustedProxies | null {
-  const raw = (process.env.FUOBE_TRUSTED_PROXIES ?? "").trim();
-  if (raw) {
-    if (/^\d+$/.test(raw)) return Number(raw) > 0 ? { hops: Math.min(Number(raw), 10) } : null;
-    const ranges = new net.BlockList();
-    const list: string[] = [];
-    for (const entry of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
-      const [addr, bits] = entry.split("/");
-      const family = net.isIP(addr);
-      if (!family) continue;
-      const type = family === 6 ? "ipv6" : "ipv4";
-      if (bits === undefined) ranges.addAddress(addr, type);
-      else if (/^\d+$/.test(bits) && Number(bits) <= (family === 6 ? 128 : 32)) ranges.addSubnet(addr, Number(bits), type);
-      else continue;
-      list.push(entry);
-    }
-    return list.length ? { ranges, list } : null;
-  }
-  return process.env.FUOBE_TRUST_PROXY === "1" ? { hops: 1 } : null;
+export function createToken(name: string): { token: string; info: Omit<ApiToken, "hash"> } {
+  const token = `fuobe_${crypto.randomBytes(24).toString("base64url")}`;
+  const t: ApiToken = { id: crypto.randomBytes(6).toString("hex"), name: name.trim() || "API token", hash: tokenHash(token), prefix: token.slice(0, 12), createdAt: Date.now() };
+  const d = withSecret(read());
+  write({ ...d, tokens: [...d.tokens, t] });
+  return { token, info: publicToken(t) };
 }
 
-/** The client's address as a trusted proxy reported it; null without one (or when the header doesn't hold up). */
-export function clientIp(headers: Headers, trust: TrustedProxies | null = trustedProxies()): string | null {
-  if (!trust) return null;
-  const hops = (headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  if ("hops" in trust) {
-    const ip = hops[hops.length - trust.hops];
-    return ip && net.isIP(ip) ? ip : null;
+export function revokeToken(id: string): void {
+  const d = read();
+  write({ ...d, tokens: d.tokens.filter((t) => t.id !== id) });
+}
+
+const touched = new Map<string, number>();
+
+export function validToken(header: string | null): boolean {
+  const m = /^Bearer\s+(fuobe_[\w-]+)$/i.exec(header ?? "");
+  if (!m) return false;
+  const h = Buffer.from(tokenHash(m[1]));
+  const d = read();
+  const hit = d.tokens.find((t) => same(Buffer.from(t.hash), h));
+  if (!hit) return false;
+  // Record use at most once an hour per token (avoids a write per request).
+  if (Date.now() - (touched.get(hit.id) ?? 0) > 3_600_000) {
+    touched.set(hit.id, Date.now());
+    write({ ...d, tokens: d.tokens.map((t) => (t.id === hit.id ? { ...t, lastUsedAt: Date.now() } : t)) });
   }
-  for (let i = hops.length - 1; i >= 0; i--) {
-    const family = net.isIP(hops[i]);
-    if (!family) return null;
-    if (!trust.ranges.check(hops[i], family === 6 ? "ipv6" : "ipv4")) return hops[i];
-  }
-  return null;
+  return true;
 }
