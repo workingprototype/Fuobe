@@ -3,7 +3,8 @@
 //
 // 1. `/` opens the skill menu; picking Product Photographer shows its chip; sending starts a chat
 //    with the skill loaded and an approval card that runs demo generations.
-// 2. "Remember that …" asks first, then the memory is on the Memory page.
+// 2. "Remember that …" asks first (the card doesn't say it's saved until Remember), then the card and the
+//    assistant say it's saved, and the memory is on the Memory page.
 // 3. A project with instructions and a note source; a chat started there carries the project.
 // 4. A skill uploaded as a .zip shows up in My skills, opens, and can be deleted.
 // 5. Free / Smart / Manual: the mode picker offers Manual's models and effort.
@@ -112,9 +113,14 @@ await step("remember asks first, then shows on the Memory page", async () => {
   await box.fill("Remember that I always want vertical 9:16 videos");
   await box.press("Enter");
   await page.getByText("Remember this?").waitFor({ timeout: 30_000 });
+  // Asked first: before the yes, the card says what Remember does, not that it's done.
+  await page.getByText("Saves to memory for future chats", { exact: true }).waitFor({ timeout: 10_000 });
   await shot(page, "flow-remember");
   await page.getByRole("button", { name: "Remember", exact: true }).click();
-  await page.getByText(/Saved to memory/).waitFor({ timeout: 30_000 });
+  // Then the card says it's saved and the assistant says so too: two lines that both start "Saved to memory", so each
+  // is waited for by its own words (one pattern for both matches one or two of them, depending on how fast the reply is).
+  await page.getByText("Saved to memory for future chats", { exact: true }).waitFor({ timeout: 30_000 });
+  await page.getByText(/^Saved to memory — every chat will follow it/).waitFor({ timeout: 30_000 });
   await openRoute(page, `${app}/assist/memory`);
   await page.getByText("I always want vertical 9:16 videos.").waitFor({ timeout: 15_000 });
   await shot(page, "flow-memory");

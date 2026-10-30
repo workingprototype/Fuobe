@@ -366,10 +366,11 @@ function testDatasetDir(): { ok: boolean; detail: string } {
   const root = datasetRoot();
   if (!path.isAbsolute(root)) return { ok: false, detail: "Use a full path, like /mnt/shared/datasets" };
   let at = root;
-  while (!fs.existsSync(at) && path.dirname(at) !== at) at = path.dirname(at);
+  // A folder the person typed, not part of the app: keep Turbopack from tracing the whole project for it.
+  while (!fs.existsSync(/*turbopackIgnore: true*/ at) && path.dirname(at) !== at) at = path.dirname(at);
   try {
-    if (!fs.statSync(at).isDirectory()) throw new Error(`${at} is a file`);
-    fs.accessSync(at, fs.constants.W_OK);
+    if (!fs.statSync(/*turbopackIgnore: true*/ at).isDirectory()) throw new Error(`${at} is a file`);
+    fs.accessSync(/*turbopackIgnore: true*/ at, fs.constants.W_OK);
   } catch (e) {
     return { ok: false, detail: `Fuobe can't write to ${root} (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})` };
   }

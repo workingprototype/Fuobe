@@ -38,6 +38,16 @@ try {
           localStorage.setItem("fuobe.engine", "cloud");
         } catch {}
       });
+      // Every label a look chip shows on a page, from the server's HTML on (the Storyboard's must only ever say No look).
+      await context.addInitScript(() => {
+        window.__lookLabels = [];
+        new MutationObserver(() => {
+          for (const b of document.querySelectorAll('button[aria-label^="Look: "]')) {
+            const label = b.getAttribute("aria-label");
+            if (!window.__lookLabels.includes(label)) window.__lookLabels.push(label);
+          }
+        }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-label"] });
+      });
       const page = await context.newPage();
       const shot = async (name) => shots && (await page.screenshot({ path: path.join(shots, `${name}-${width}-${scheme}.png`), fullPage: true }));
       const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -96,7 +106,18 @@ try {
       await page.getByRole("heading", { name: "Tell it frame by frame" }).waitFor({ timeout: 120_000 });
       const chip = page.getByRole("button", { name: "Look: No look" });
       await chip.waitFor({ timeout: 30_000 });
-      check(`${tag}: the look chip starts at No look`, (await chip.count()) === 1);
+      // The chip is its own chunk: until that chunk is in, the server's chip can be swapped for a placeholder and back
+      // (for a moment, or most of a second on a busy server). So it's counted once the chip on screen is React's, and
+      // every label it showed on the way counts too.
+      const hydrated = await page
+        .waitForFunction(() => {
+          const b = document.querySelectorAll('button[aria-label^="Look: "]');
+          return b.length === 1 && Object.keys(b[0]).some((k) => k.startsWith("__react"));
+        }, null, { timeout: 30_000 })
+        .then(() => true)
+        .catch(() => false);
+      const labels = await page.evaluate(() => window.__lookLabels);
+      check(`${tag}: the look chip starts at No look`, hydrated && (await chip.count()) === 1 && labels.join("|") === "Look: No look", labels.join(", "));
       // The cloud board is Fuobe's open recipe; Nano Banana Pro is a partner choice.
       const frames = page.getByRole("radiogroup", { name: "Frames made on" });
       check(`${tag}: cloud frames on Fuobe first, Nano Banana Pro a choice`, (await frames.getByRole("radio", { name: "Fuobe" }).getAttribute("aria-checked")) === "true" && (await frames.getByRole("radio", { name: "Nano Banana Pro" }).count()) === 1);
