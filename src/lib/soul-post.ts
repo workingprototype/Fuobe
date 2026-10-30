@@ -5,6 +5,7 @@
  * outputs still need it. src/components/studio/soul-finish.ts draws it; the server keeps the finished picture
  * (POST /api/generations/<id>/finish) and the original beside it (meta.original).
  */
+import { MOSAIC_SCALE, mosaicGrid } from "@/lib/catalog/open-tools";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
 
 export type SoulOverlay = "date-stamp" | "cctv" | "photo-booth";
@@ -15,6 +16,11 @@ export interface FinishSteps {
   crop?: "21:9";
   grade?: string;
   overlay?: SoulOverlay;
+  /**
+   * The face mosaic's cloud step (O11): this output is SAM 3.1's mask of the faces; the finished picture is `source` with a
+   * block mosaic wherever one of `masks` is white (src/lib/catalog/open-tools.ts). `scale` sets the block size.
+   */
+  mosaic?: { source: string; masks: string[]; scale: number };
 }
 
 const OVERLAYS = new Set<SoulOverlay>(["date-stamp", "cctv", "photo-booth"]);
@@ -25,7 +31,67 @@ export function finishSteps(o: Pick<OutputFile, "kind" | "meta">): FinishSteps |
   const crop = o.meta.crop === "21:9" ? ("21:9" as const) : undefined;
   const grade = typeof o.meta.grade === "string" && o.meta.grade ? o.meta.grade : undefined;
   const overlay = OVERLAYS.has(o.meta.overlay as SoulOverlay) ? (o.meta.overlay as SoulOverlay) : undefined;
-  return crop || grade || overlay ? { ...(crop && { crop }), ...(grade && { grade }), ...(overlay && { overlay }) } : null;
+  const mosaic = mosaicOf(o.meta.mosaic);
+  return crop || grade || overlay || mosaic ? { ...(crop && { crop }), ...(grade && { grade }), ...(overlay && { overlay }), ...(mosaic && { mosaic }) } : null;
+}
+
+function mosaicOf(v: unknown): FinishSteps["mosaic"] {
+  if (!v || typeof v !== "object") return undefined;
+  const m = v as Record<string, unknown>;
+  const masks = Array.isArray(m.masks) ? m.masks.filter((u): u is string => typeof u === "string" && !!u) : [];
+  if (typeof m.source !== "string" || !m.source || !masks.length) return undefined;
+  const scale = typeof m.scale === "number" && m.scale > 0 && m.scale < 1 ? m.scale : MOSAIC_SCALE;
+  return { source: m.source, masks, scale };
+}
+
+/**
+ * The face mosaic in place on a `width` × `height` RGBA picture: every block of the grid that the mask touches (its red
+ * channel above half, white = a face) takes the block's average colour, so the faces turn into whole square blocks (the
+ * mask grows to the block edges, like the GPU graph's grown mask). `mask` is the same size as the picture.
+ */
+export function mosaicPixels(rgba: Uint8ClampedArray, mask: Uint8ClampedArray, width: number, height: number, scale = MOSAIC_SCALE): number {
+  const { cell, cols, rows } = mosaicGrid(width, height, scale);
+  let blocks = 0;
+  for (let by = 0; by < rows; by++) {
+    for (let bx = 0; bx < cols; bx++) {
+      const x0 = bx * cell;
+      const y0 = by * cell;
+      const x1 = Math.min(width, x0 + cell);
+      const y1 = Math.min(height, y0 + cell);
+      let hit = false;
+      for (let y = y0; y < y1 && !hit; y++) for (let x = x0; x < x1; x++) if (mask[(y * width + x) * 4] > 127) { hit = true; break; }
+      if (!hit) continue;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      const n = (x1 - x0) * (y1 - y0);
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const i = (y * width + x) * 4;
+          r += rgba[i];
+          g += rgba[i + 1];
+          b += rgba[i + 2];
+        }
+      }
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const i = (y * width + x) * 4;
+          rgba[i] = Math.round(r / n);
+          rgba[i + 1] = Math.round(g / n);
+          rgba[i + 2] = Math.round(b / n);
+        }
+      }
+      blocks++;
+    }
+  }
+  return blocks;
+}
+
+/** Several masks as one (the brightest red at each pixel), for {@link mosaicPixels}. */
+export function unionMasks(masks: Uint8ClampedArray[]): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(masks[0]?.length ?? 0);
+  for (const m of masks) for (let i = 0; i < out.length; i += 4) if (m[i] > out[i]) out[i] = m[i];
+  return out;
 }
 
 /** The crop of a `width` × `height` picture to an aspect ratio ("21:9"): the full width, the middle band (or the reverse). */

@@ -4,7 +4,7 @@
  * address looks like, when to offer the first-run guide, and each connection's one-line status.
  */
 
-export type TestProvider = "fal" | "replicate" | "comfyui" | "llm" | "civitai";
+export type TestProvider = "fal" | "replicate" | "comfyui" | "llm" | "civitai" | "ai-toolkit";
 
 /** The settings each provider's connection test reads; an unsaved value for one of them can be tested before it's saved. */
 export const PROVIDER_SETTINGS = {
@@ -31,6 +31,8 @@ export const PROVIDER_SETTINGS = {
   ],
   // Not a model provider: the key that downloads a recipe's civitai LoRAs (Settings → LoRAs).
   civitai: ["civitaiKey"],
+  // Not a model provider either: the trainer Soul IDs and Fuobe looks train on, on your GPU (Settings → Training).
+  "ai-toolkit": ["aiToolkitUrl", "aiToolkitToken", "aiToolkitDatasetDir"],
 } as const satisfies Record<TestProvider, readonly string[]>;
 
 export type ConnectionSetting = (typeof PROVIDER_SETTINGS)[TestProvider][number];
@@ -62,6 +64,9 @@ export const FUOBE_REPO = "https://github.com/workingprototype/fuobe";
 /** How to install ComfyUI with every node pack Fuobe's workflows use. */
 export const COMFY_INSTALL_DOCS = `${FUOBE_REPO}/blob/main/scripts/comfy/README.md`;
 export const COMFY_INSTALL_COMMAND = "bash scripts/comfy/install-comfyui.sh";
+/** The address AI-Toolkit's UI (ostris/ai-toolkit) listens on, and where to get it. */
+export const DEFAULT_AI_TOOLKIT_URL = "http://127.0.0.1:8675";
+export const AI_TOOLKIT_REPO = "https://github.com/ostris/ai-toolkit";
 
 /** key_id:key_secret, both halves present and no spaces. */
 const KEY_PAIR = /^[^\s:]+:[^\s:]+$/;
@@ -102,6 +107,10 @@ export function settingProblem(name: string, raw: string): string | null {
       return addressProblem(v, "http://127.0.0.1:8888");
     case "llmUrl":
       return addressProblem(v, "http://127.0.0.1:8080/v1");
+    case "aiToolkitUrl":
+      return addressProblem(v, DEFAULT_AI_TOOLKIT_URL);
+    case "aiToolkitDatasetDir":
+      return v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v) ? null : "Use a full path, like /mnt/shared/datasets";
   }
   return null;
 }

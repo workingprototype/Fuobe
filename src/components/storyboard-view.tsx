@@ -1,7 +1,8 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Clapperboard, Film, ImagePlus, Loader2, Minus, Plus, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { nanoid } from "nanoid";
@@ -10,18 +11,34 @@ import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useDebounced } from "@/components/faceless/hooks";
+import { costText } from "@/components/shorts/ui";
 import { EngineSwitch } from "@/components/studio/engine-switch";
+import { finishGaveUp, useSoulFinish } from "@/components/studio/soul-finish";
 import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { fileToSlot, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { Viewer } from "@/components/studio/viewer";
 import { useCreateGeneration, useEngine, useGenerationActions, useGenerations } from "@/lib/api";
-import { MAX_FRAMES, STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
+import { MAX_FRAMES, STORYBOARD_ASPECTS, STORYBOARD_LOOK_MODEL, STORYBOARD_PARTNER_IDS, storyboardModels, type StoryboardPartner } from "@/lib/catalog/storyboard";
+import { lookCard } from "@/lib/catalog/soul-cards";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { BOARD_TITLES_KEY, boardTitle, filmReady, rememberTitle } from "@/lib/storyboard-board";
 import { cn } from "@/lib/utils";
 
-const ASPECTS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+const ASPECTS: readonly string[] = STORYBOARD_ASPECTS;
+
+/** Fuobe Soul's look picker, in its own chunk (the board works without it). */
+const LookChip = dynamic(() => import("@/components/studio/look-chip"), {
+  loading: () => <span aria-hidden className="h-8 w-28 shrink-0 animate-pulse rounded-full bg-secondary" />,
+});
+
+interface BoardEstimate {
+  costUsd: number | null;
+  demo: boolean;
+  frames: number;
+  models: string[];
+}
 
 /* The idea each board was made from, remembered in this browser (the server keeps only the scenes). */
 const titleListeners = new Set<() => void>();
@@ -68,6 +85,31 @@ function RatioPill({ value, onChange }: { value: string; onChange: (v: string) =
           className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap text-muted-foreground transition", value === a && "bg-background text-foreground shadow-soft")}
         >
           {a}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** What a cloud board's frames are made on: Fuobe's open recipe, or a partner model for every frame. */
+function PartnerPill({ value, onChange, names }: { value?: StoryboardPartner; onChange: (v?: StoryboardPartner) => void; names: Record<string, string> }) {
+  const options: { v?: StoryboardPartner; label: string; title: string }[] = [
+    { label: "Fuobe", title: "Fuobe's open recipe: hosted Qwen-Image-Edit with the next-scene LoRA" },
+    ...STORYBOARD_PARTNER_IDS.map((p) => ({ v: p, label: names[p] ?? p, title: `The frames on ${names[p] ?? p}, a partner model (frame 1 stays on Fuobe Soul in a look)` })),
+  ];
+  return (
+    <div role="radiogroup" aria-label="Frames made on" className="flex flex-wrap gap-1 rounded-full bg-muted p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.v ?? "fuobe"}
+          type="button"
+          role="radio"
+          aria-checked={value === o.v}
+          title={o.title}
+          onClick={() => onChange(o.v)}
+          className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap text-muted-foreground transition", value === o.v && "bg-background text-foreground shadow-soft")}
+        >
+          {o.label}
         </button>
       ))}
     </div>
@@ -162,7 +204,8 @@ function Board({
   const qc = useQueryClient();
   const first = frames[0];
   const done = frames.filter((f) => f.status === "succeeded").length;
-  const ready = filmReady(frames);
+  // A look board's frames are graded (and cropped) here first: the film starts from them as they look.
+  const ready = filmReady(frames, finishGaveUp);
   const ratio = tileRatio(first);
   const makeFilm = useMutation({
     mutationFn: async () => {
@@ -235,9 +278,15 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
   const [style, setStyle] = useState("");
   const [aspect, setAspect] = useState("16:9");
   const [refs, setRefs] = useState<SlotValue[]>([]);
+  const [look, setLook] = useState<string | undefined>();
+  const [lookStrength, setLookStrength] = useState(1);
+  // Cloud only: a partner model for every frame instead of Fuobe's open recipe.
+  const [partner, setPartner] = useState<StoryboardPartner | undefined>();
   const [open, setOpen] = useState<Generation | null>(null);
   const feed = useGenerations({ features: ["storyboard", "storyboard-film"], limit: 240 });
   const titles = useBoardTitles();
+  // A board with a look: each frame gets the look's grade and overlay here, once it's made.
+  useSoulFinish(feed.data ?? []);
 
   const films = useMemo(() => {
     const by = new Map<string, Generation[]>();
@@ -259,19 +308,41 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
   const flat = boards.flatMap((b) => [...b, ...(films.get(b[0].batchId ?? "") ?? [])].filter((g) => g.status === "succeeded" && g.outputs[0]));
   const pos = open ? flat.findIndex((g) => g.id === open.id) : -1;
 
-  const m = STORYBOARD_MODELS[engine as Engine];
+  const boardPartner = engine === "cloud" ? partner : undefined;
+  const m = storyboardModels(engine as Engine, boardPartner);
+  const nextName = `${modelNames[m.next] ?? m.next}${m.nextLoras?.length ? " with the next-scene LoRA" : ""}`;
+  const lookName = look ? lookCard(look)?.name : undefined;
+  const filled = scenes.filter((s) => s.trim());
+  const boardBody = {
+    engine,
+    ...(boardPartner && { partner: boardPartner }),
+    ...(mode === "auto" ? { story, frames: count } : { scenes: filled }),
+    references: refs.filter((r) => r.ref && !r.uploading).map((r) => r.ref),
+    style: style || undefined,
+    ...(look && { look, lookStrength }),
+    aspectRatio: aspect,
+  };
+  // The price before it runs: the words don't change it, so typing doesn't ask again.
+  const priceKey = useDebounced(JSON.stringify({ ...boardBody, story: undefined, scenes: mode === "auto" ? undefined : filled.map(() => "·") }), 300);
+  const estimate = useQuery({
+    queryKey: ["storyboard-estimate", priceKey],
+    queryFn: async () => {
+      const res = await fetch("/api/storyboards/estimate", { method: "POST", headers: { "Content-Type": "application/json" }, body: priceKey });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error);
+      return body as BoardEstimate;
+    },
+    placeholderData: keepPreviousData,
+    retry: false,
+    staleTime: 30_000,
+  });
+  const est = estimate.data && !estimate.isError ? estimate.data : undefined;
   const submit = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/storyboards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          engine,
-          ...(mode === "auto" ? { story, frames: count } : { scenes: scenes.filter((s) => s.trim()) }),
-          references: refs.filter((r) => r.ref).map((r) => r.ref),
-          style: style || undefined,
-          aspectRatio: aspect,
-        }),
+        body: JSON.stringify({ ...boardBody, references: refs.filter((r) => r.ref).map((r) => r.ref) }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error);
@@ -313,7 +384,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
           <h2 className="font-heading text-display text-balance">Tell it frame by frame</h2>
           <p className="mt-2 text-[13px] text-muted-foreground">
             Up to {MAX_FRAMES} consistent frames — each one is made from the previous frame, so faces, wardrobe and light carry through.
-            {modelNames[m.next] ? ` Runs on ${modelNames[m.next]}.` : ""}
+            {lookName && !refs.length ? ` Frame 1 on ${modelNames[STORYBOARD_LOOK_MODEL] ?? "Fuobe Soul"} in the ${lookName} look, then ${nextName}.` : ` Runs on ${nextName}.`}
           </p>
           <div className="mt-6 rounded-[20px] border bg-background p-3 text-left shadow-soft focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
             <div role="radiogroup" aria-label="How to write it" className="mb-2 flex items-center gap-1 rounded-full bg-muted p-0.5 text-[13px] font-medium sm:w-fit">
@@ -406,14 +477,29 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
                   </button>
                 </div>
               )}
+              <LookChip value={look} strength={lookStrength} onChange={(id) => setLook(id)} onStrength={setLookStrength} none="No look" />
               <RatioPill value={aspect} onChange={setAspect} />
-              <Button size="icon" className="ml-auto size-10 shrink-0 rounded-full" disabled={!ready || submit.isPending} onClick={() => submit.mutate()} aria-label="Generate storyboard">
-                {submit.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-              </Button>
+              {engine === "cloud" && <PartnerPill value={partner} onChange={setPartner} names={modelNames} />}
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <span className="text-right text-[12px] leading-tight tabular-nums text-muted-foreground" aria-live="polite">
+                  {estimate.isError ? (
+                    <span className="text-destructive">{(estimate.error as Error).message}</span>
+                  ) : (
+                    <>
+                      <span className="block font-semibold text-foreground">{costText(est, engine as Engine)}</span>
+                      {est && `${est.frames} frame${est.frames === 1 ? "" : "s"}`}
+                    </>
+                  )}
+                </span>
+                <Button size="icon" className="size-10 shrink-0 rounded-full" disabled={!ready || submit.isPending || estimate.isError} onClick={() => submit.mutate()} aria-label="Generate storyboard">
+                  {submit.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+                </Button>
+              </div>
             </div>
             <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
               <Sparkles className="mt-px size-3 shrink-0" />
-              {mode === "auto" ? "Your story is split into frames by the prompt LLM (Settings → Prompt enhancement), or a shot list when none is set." : "One prompt per frame. References keep the cast consistent."}
+              {mode === "auto" ? "Your story is split into frames by the prompt LLM (Settings → AI helper), or a shot list when none is set." : "One prompt per frame. References keep the cast consistent."}
+              {lookName && ` Every frame gets the ${lookName} look's grade${aspect === "21:9" ? ", made at 16:9 and cropped to 21:9" : ""}.`}
             </p>
           </div>
         </div>

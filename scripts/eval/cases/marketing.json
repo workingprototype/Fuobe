@@ -1,0 +1,140 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "marketing",
+  "title": "Fuobe Marketing Image, Fuobe Try-On, the AI Influencer sheet and Instadump (O10)",
+  "description": "Measures the Originals build plan O10 made the defaults of Marketing Studio, Ads Studio, the AI Influencer builder, Instadump and Fashion Factory, on your own inputs in local/marketing/: product.png (a product photo on a plain background), person.png (a full-body photo of a consenting person), garment.png (a garment on its own or flat-lay), selfie.jpg (a consenting person's selfie). The original variant runs the Original as the studio does (Fuobe Marketing Image: Qwen-Image-Edit 2511 / Qwen-Image 2512, the product-shot graph on your GPU; Fuobe Try-On: FLUX.2 [klein] 4B with the try-on LoRA; the influencer sheet: Fuobe Soul in the cloud, the Soul Cast sheet graph on your GPU; Instadump: Qwen-Image-Edit 2511); the partner variant runs the partner model the studio offers next to it, on fal, for reference. Marketing pictures carry no words (the studio sets them in the browser), so the prompts ask for none. The prompts are Fuobe's own.",
+  "original": ["fuobe-marketing-image", "fuobe-tryon", "fuobe-soul"],
+  "kind": "image",
+  "targets": {
+    "open": { "models": ["fuobe-marketing-image"] },
+    "cloud": { "models": ["fuobe-marketing-image"] },
+    "demo": { "models": ["fuobe-marketing-image"] }
+  },
+  "defaults": { "seeds": [1001, 2002], "metrics": ["clip", "aesthetic"], "timeoutSeconds": 1800, "candidate": "original" },
+  "variants": {
+    "original": { "description": "The Original as the studio runs it" },
+    "partner": { "description": "The partner model the studio offers next to it, on fal (cases name it)", "engines": ["cloud"] }
+  },
+  "cases": [
+    {
+      "id": "marketing/product-plinth",
+      "title": "Marketing Studio · Standalone product shot (Sunlit Plinth) on your GPU, the product kept",
+      "op": "edit",
+      "engines": ["open", "demo"],
+      "inputs": { "images": ["local/marketing/product.png"] },
+      "demoInputs": { "images": ["fixtures/start-frame.png"] },
+      "references": "local/marketing/product.png",
+      "params": { "aspectRatio": "3:4", "extra": { "productShot": true } },
+      "prompts": [
+        {
+          "id": "plinth",
+          "text": "Commercial product photograph. The product stands on a travertine plinth against a warm plaster wall; low morning sun rakes across from the left and throws a long, crisp shadow; quiet, premium, lots of negative space. Keep the product exactly as in the reference photo: its shape, proportions, label, logo, text and colours."
+        }
+      ],
+      "metrics": ["clip", "aesthetic", "style"],
+      "note": "As Marketing Studio runs a Standalone shot of one product photo on your GPU: params.extra.productShot picks the product-shot graph (cut out, put on white, relit by the White_to_Scene LoRA). The flag is Fuobe's own, so the cloud case below runs without it."
+    },
+    {
+      "id": "marketing/product-plinth-cloud",
+      "title": "Marketing Studio · Standalone product shot (Sunlit Plinth) in the cloud, the product kept",
+      "op": "edit",
+      "engines": ["cloud"],
+      "inputs": { "images": ["local/marketing/product.png"] },
+      "references": "local/marketing/product.png",
+      "params": { "aspectRatio": "3:4" },
+      "variantModels": { "partner": { "cloud": ["gpt-image-2-5"] } },
+      "prompts": [
+        {
+          "id": "plinth",
+          "text": "Commercial product photograph. The product stands on a travertine plinth against a warm plaster wall; low morning sun rakes across from the left and throws a long, crisp shadow; quiet, premium, lots of negative space. Keep the product exactly as in the reference photo: its shape, proportions, label, logo, text and colours."
+        }
+      ],
+      "metrics": ["clip", "aesthetic", "style"],
+      "note": "The same words as on your GPU, to hosted Qwen-Image-Edit 2511 (and GPT Image 2.5 as the partner): the cloud has no product-shot graph."
+    },
+    {
+      "id": "marketing/ad-visual",
+      "title": "Ads Studio · an ad's picture from the product photo, room left for the words",
+      "op": "edit",
+      "inputs": { "images": ["local/marketing/product.png"] },
+      "demoInputs": { "images": ["fixtures/start-frame.png"] },
+      "references": "local/marketing/product.png",
+      "params": { "aspectRatio": "4:5" },
+      "variantModels": { "partner": { "cloud": ["nano-banana-pro"] } },
+      "prompts": [
+        {
+          "id": "kitchen",
+          "text": "Advertising photograph: the product on a sunlit kitchen counter beside a bowl of fresh berries, morning light. Keep the product exactly as in the reference photo: shape, label, logo, text and colours. No text, letters, words, logos or watermarks anywhere in the picture; leave calm space for a headline."
+        }
+      ],
+      "metrics": ["clip", "aesthetic", "style"]
+    },
+    {
+      "id": "marketing/poster",
+      "title": "Marketing Studio · a poster without a product (Qwen-Image 2512)",
+      "op": "t2i",
+      "params": { "aspectRatio": "3:4" },
+      "variantModels": { "partner": { "cloud": ["ideogram-3"] } },
+      "prompts": [
+        {
+          "id": "bloom",
+          "text": "A designed poster. Two-colour risograph poster with grain, overprint and blooming botanical shapes. No text, letters, words or logos anywhere in the image; the subject well composed with a little breathing room at the edges."
+        }
+      ]
+    },
+    {
+      "id": "marketing/try-on",
+      "title": "Fashion Factory · Fuobe Try-On dresses the person in the garment",
+      "models": { "open": ["fuobe-tryon"], "cloud": ["fuobe-tryon"], "demo": ["fuobe-tryon"] },
+      "variantModels": { "partner": { "cloud": ["fashn-tryon"] } },
+      "op": "edit",
+      "inputs": { "images": ["local/marketing/person.png", "local/marketing/garment.png"] },
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png", "fixtures/palette.png"] },
+      "references": "local/marketing/person.png",
+      "prompts": [
+        {
+          "id": "outfit",
+          "text": "a full-body photo of a person. Replace the outfit with the garment shown in the reference image, with its fabric, colour, pattern, logo and fit. The final image is a full body shot."
+        }
+      ],
+      "metrics": ["identity", "clip", "aesthetic"],
+      "note": "The try-on LoRA (xocialize, Apache-2.0) goes to fal by URL; on fal the person photo is sent as it is, while the open graph greys the old outfit out first, so compare the two engines here before calling the hosted route equal."
+    },
+    {
+      "id": "marketing/influencer-sheet",
+      "title": "AI Influencer · the builder's sheet from scratch",
+      "models": { "open": ["oss-zimage-soul-cast"], "cloud": ["fuobe-soul"], "demo": ["oss-zimage-soul-cast"] },
+      "variantModels": { "partner": { "cloud": ["nano-banana-pro"] } },
+      "prompts": [{ "id": "potter", "text": "A potter from Porto who films her studio" }],
+      "metrics": ["clip", "aesthetic"],
+      "submit": {
+        "route": "/api/influencer",
+        "body": {
+          "engine": "{{engine}}",
+          "state": { "tier": "normal", "picks": { "gender": ["female"], "hair": ["hs_beehive"], "aesthetic": ["goth"] }, "locked": [] },
+          "start": "scratch",
+          "direction": "{{prompt}}",
+          "modelId": "{{modelId}}"
+        }
+      }
+    },
+    {
+      "id": "marketing/instadump",
+      "title": "Instadump · one pack photo from a selfie (Qwen-Image-Edit 2511)",
+      "models": { "open": ["oss-qwen-edit"], "cloud": ["qwen-image-edit-2511-cloud"], "demo": ["oss-qwen-edit"] },
+      "variantModels": { "partner": { "cloud": ["nano-banana-pro"] } },
+      "op": "edit",
+      "inputs": { "images": ["local/marketing/selfie.jpg"] },
+      "demoInputs": { "images": ["fixtures/character/drawn-face-2.png"] },
+      "references": "local/marketing/selfie.jpg",
+      "params": { "aspectRatio": "3:4" },
+      "prompts": [
+        {
+          "id": "winter",
+          "text": "A photo of the person in image 1, holding a hot chocolate with marshmallows by a frosty window. Cosy winter photo with warm light against the cold. Keep their exact face, identity, skin tone and hair; a new photo, not a copy of the reference."
+        }
+      ],
+      "metrics": ["identity", "clip", "aesthetic"]
+    }
+  ]
+}

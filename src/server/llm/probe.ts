@@ -1,16 +1,23 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { MessageChannel, receiveMessageOnPort, Worker } from "node:worker_threads";
+import { hostPort, REACH, takesConnection } from "../providers/reach";
 import { keyMessage, START_HINT } from "./errors";
 import { authHeaders, cap, openaiBase } from "./servers";
 import type { LocalModel, LocalServer, LocalStatus } from "./types";
 
 /*
- * Is a local server usable, and with which model? Each server is asked with a few GETs sent at once
- * (1.5 s each); the answers are kept for 15 s per server and read into a LocalStatus with the
- * current Settings. Routing is synchronous, so the first look at a server (after boot, or after
- * its URL or key changes in Settings) asks from a worker thread and waits for it; later looks
- * refresh in the background.
+ * Is a local server usable, and with which model? Each server is asked with a few GETs sent at once;
+ * the answers are kept for 15 s per server and read into a LocalStatus with the current Settings.
+ * Routing is synchronous, so the first look at a server (after boot, or after its URL or key changes
+ * in Settings) asks from a worker thread and waits for it; later looks refresh in the background.
+ *
+ * A late answer isn't "down": the busy-vs-down rules ComfyUI and Ollama follow (../providers/reach)
+ * hold for every local server. A refused port or an HTTP answer is read at once. No answer in time is
+ * busy when the server answered lately (it keeps what it last said: a model loading, a long answer
+ * under way); else it gets one longer look when its port takes a connection (none again for a while
+ * once one goes unanswered). The blocking first look counts a taken connection as busy for now, and
+ * the unhurried check behind it says for sure.
  */
 
 /** One GET's answer: the status and the JSON body, or why there was none. */
@@ -28,7 +35,8 @@ interface ProbeRequest {
 }
 
 export const PROBE_MS = 15_000;
-const PROBE_TIMEOUT_MS = 1500;
+/** How long the blocking first look waits for each GET. */
+const SYNC_TIMEOUT_MS = 1500;
 const EMBEDDING = /embed|rerank/i;
 
 /**
@@ -64,7 +72,7 @@ const str = (v: unknown): string | null => (typeof v === "string" && v ? v : nul
 export const tokens = (n: number) => n.toLocaleString("en-US");
 
 function notRunning(s: LocalServer, r?: Raw): string {
-  if (r?.error === "TimeoutError") return `${cap(s.label)} didn't answer at ${s.url} within ${PROBE_TIMEOUT_MS / 1000} s. ${START_HINT[s.kind]}`;
+  if (r?.error === "TimeoutError") return `${cap(s.label)} didn't answer at ${s.url} in time. ${START_HINT[s.kind]}`;
   if (r?.status) return `${cap(s.label)} answered ${r.status} at ${s.url}. Check its URL in Settings → AI helper.`;
   return `${cap(s.label)} isn't running at ${s.url}. ${START_HINT[s.kind]}`;
 }
@@ -188,8 +196,21 @@ export function interpret(s: LocalServer, probe: Probe, need: number, at: number
 // ---------------------------------------------------------------------------
 // Asking, and the cache
 
+/**
+ * What a server's last check found: its answers (`probe`), when it last answered (`seen`), when a longer look last
+ * went unanswered (`silent`). `busy`: its port took the connection but no answer came yet, so it counts as up for
+ * now (no models known) until a check says for sure; any answer replaces it.
+ */
+export interface Entry {
+  at: number;
+  probe: Probe;
+  seen?: number;
+  silent?: number;
+  busy?: boolean;
+}
+
 declare global {
-  var __fuobeLocalProbes: Map<string, { at: number; probe: Probe }> | undefined;
+  var __fuobeLocalProbes: Map<string, Entry> | undefined;
   var __fuobeLocalProbing: Map<string, Promise<void>> | undefined;
 }
 const probes = () => (globalThis.__fuobeLocalProbes ??= new Map());
@@ -206,14 +227,38 @@ const parse = (text: string | undefined): unknown => {
   }
 };
 
-async function get(r: ProbeRequest): Promise<Raw> {
+async function get(r: ProbeRequest, timeoutMs: number): Promise<Raw> {
   try {
-    const res = await fetch(r.url, { headers: r.headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    const res = await fetch(r.url, { headers: r.headers, signal: AbortSignal.timeout(timeoutMs) });
     return { status: res.status, body: parse(await res.text()) };
   } catch (e) {
     const err = e as { name?: string; cause?: { code?: string } };
     return { error: err.name === "TimeoutError" ? "TimeoutError" : (err.cause?.code ?? err.name ?? "error") };
   }
+}
+
+/** The server answered one of its GETs (any HTTP status: interpret reads what it said). */
+const answered = (raws: Raw[]) => raws.some((r) => r.status !== undefined);
+/** None of its GETs got an answer in time (a refused port or a bad name is a no, not late). */
+const late = (raws: Raw[]) => raws.length > 0 && raws.every((r) => r.error === "TimeoutError");
+const lately = (t?: number) => !!t && Date.now() - t < REACH.answeredLatelyMs;
+
+/**
+ * One unhurried check of a server by the busy-vs-down rules (see the top of this file): its GETs within
+ * REACH.answerMs; late with a recent answer keeps the last answers (busy); late otherwise gets the longer look when
+ * the port takes a connection and no longer look went unanswered lately.
+ */
+async function check(s: LocalServer, prev: Entry | undefined): Promise<Omit<Entry, "at">> {
+  const reqs = probeRequests(s);
+  let raws = await Promise.all(reqs.map((r) => get(r, REACH.answerMs)));
+  if (prev && !prev.busy && late(raws) && lately(prev.seen)) return { probe: prev.probe, seen: prev.seen };
+  let silent = prev?.silent;
+  if (late(raws) && !lately(silent) && (await takesConnection(s.url, REACH.connectMs))) {
+    raws = await Promise.all(reqs.map((r) => get(r, REACH.lookMs)));
+    if (!answered(raws)) silent = Date.now();
+  }
+  const probe: Probe = Object.fromEntries(reqs.map((r, i) => [r.key, raws[i]]));
+  return answered(raws) ? { probe, seen: Date.now() } : { probe, ...(silent ? { silent } : {}) };
 }
 
 /** Ask the servers whose answers are older than 15 s (all of them with `force`), in parallel. */
@@ -228,11 +273,10 @@ export async function refresh(servers: LocalServer[], force = false): Promise<vo
       if (pending) return pending;
       const started = Date.now();
       const p: Promise<void> = (async () => {
-        const reqs = probeRequests(s);
-        const raws = await Promise.all(reqs.map(get));
-        // An older question that answers late doesn't overwrite a newer answer.
+        const found = await check(s, cur);
+        // An older question that answers late doesn't overwrite a newer answer (a "busy for now" guess it always does).
         const now = probes().get(sig);
-        if (!now || now.at <= started) probes().set(sig, { at: started, probe: Object.fromEntries(reqs.map((r, i) => [r.key, raws[i]])) });
+        if (!now || now.at <= started || now.busy) probes().set(sig, { at: started, ...found });
       })().finally(() => {
         if (probing().get(sig) === p) probing().delete(sig);
       });
@@ -243,15 +287,22 @@ export async function refresh(servers: LocalServer[], force = false): Promise<vo
 }
 
 const WORKER = `const { workerData } = require("node:worker_threads");
-const { port, sab, requests, timeout } = workerData;
+const { port, sab, requests, timeout, hosts } = workerData;
 const flag = new Int32Array(sab);
+// Whether each server's port takes a connection: one that does but doesn't answer in time is busy for now.
+const connected = hosts.map(() => false);
+hosts.forEach((at, i) => {
+  if (!at) return;
+  const socket = require("node:net").connect(at);
+  socket.once("connect", () => ((connected[i] = true), socket.destroy())).once("error", () => {});
+});
 const one = (r) =>
   fetch(r.url, { headers: r.headers, signal: AbortSignal.timeout(timeout) })
     .then(async (res) => ({ status: res.status, text: (await res.text()).slice(0, 4000000) }))
     .catch((e) => ({ error: e && e.name === "TimeoutError" ? "TimeoutError" : (e && e.cause && e.cause.code) || "error" }));
 Promise.all(requests.map(one))
-  .then((out) => port.postMessage(out))
-  .catch(() => port.postMessage([]))
+  .then((out) => port.postMessage({ out, connected }))
+  .catch(() => port.postMessage({ out: [], connected }))
   .finally(() => {
     Atomics.store(flag, 0, 1);
     Atomics.notify(flag, 0);
@@ -259,11 +310,14 @@ Promise.all(requests.map(one))
 
 /**
  * The blocking first look: every server's GETs in one worker thread, waited for (a few ms when
- * nothing listens, at most 1.5 s + 1 s for a host that doesn't answer).
+ * nothing listens, at most 1.5 s + 1 s for a host that doesn't answer). A server whose port took the
+ * connection but that didn't answer in time is busy for now; for any server that didn't answer in
+ * time, the unhurried check goes on behind it to say for sure.
  */
 export function refreshSync(servers: LocalServer[]): void {
   const reqs = servers.flatMap((s, i) => probeRequests(s).map((r) => ({ ...r, server: i })));
   const raws: Raw[] = reqs.map(() => ({ error: "TimeoutError" }));
+  let connected: boolean[] = [];
   if (reqs.length) {
     try {
       const sab = new SharedArrayBuffer(4);
@@ -271,22 +325,58 @@ export function refreshSync(servers: LocalServer[]): void {
       const { port1, port2 } = new MessageChannel();
       const worker = new Worker(WORKER, {
         eval: true,
-        workerData: { port: port2, sab, requests: reqs.map(({ url, headers }) => ({ url, headers })), timeout: PROBE_TIMEOUT_MS },
+        workerData: {
+          port: port2,
+          sab,
+          requests: reqs.map(({ url, headers }) => ({ url, headers })),
+          timeout: SYNC_TIMEOUT_MS,
+          hosts: servers.map((s) => hostPort(s.url) ?? null),
+        },
         transferList: [port2],
       });
-      Atomics.wait(flag, 0, 0, PROBE_TIMEOUT_MS + 1000);
-      const got = receiveMessageOnPort(port1)?.message as { status?: number; text?: string; error?: string }[] | undefined;
-      got?.forEach((g, i) => (raws[i] = g.status !== undefined ? { status: g.status, body: parse(g.text) } : { error: g.error }));
+      Atomics.wait(flag, 0, 0, SYNC_TIMEOUT_MS + 1000);
+      const got = receiveMessageOnPort(port1)?.message as { out: { status?: number; text?: string; error?: string }[]; connected: boolean[] } | undefined;
+      got?.out.forEach((g, i) => (raws[i] = g.status !== undefined ? { status: g.status, body: parse(g.text) } : { error: g.error }));
+      connected = got?.connected ?? [];
       port1.close();
       void worker.terminate();
     } catch {}
   }
   const at = Date.now();
-  servers.forEach((s, i) => probes().set(sigOf(s), { at, probe: Object.fromEntries(reqs.flatMap((r, k) => (r.server === i ? [[r.key, raws[k]]] : []))) }));
+  servers.forEach((s, i) => {
+    const mine = reqs.flatMap((r, k) => (r.server === i ? [[r.key, raws[k]] as const] : []));
+    const got = mine.map(([, raw]) => raw);
+    if (late(got) && connected[i]) probes().set(sigOf(s), { at, probe: {}, busy: true });
+    else probes().set(sigOf(s), { at, probe: Object.fromEntries(mine), ...(answered(got) ? { seen: at } : {}) });
+    if (late(got)) void refresh([s], true).catch(() => {});
+  });
+}
+
+/** A server no check has answered for yet, whose port took the connection: busy, so up, for now (a check says for sure). */
+export function assumeBusy(s: LocalServer): void {
+  if (!probes().has(sigOf(s))) probes().set(sigOf(s), { at: Date.now(), probe: {}, busy: true });
+}
+
+/** What a server whose port took the connection but that hasn't answered yet counts as: up, with no models known. */
+function busyStatus(s: LocalServer, at: number): LocalStatus {
+  return {
+    kind: s.kind,
+    label: s.label,
+    url: s.url,
+    up: true,
+    auth: s.key ? "ok" : "none",
+    models: [],
+    model: s.model || null,
+    loaded: null,
+    context: null,
+    problem: null,
+    warning: `${cap(s.label)} took the connection at ${s.url} but hasn't answered yet (busy loading a model?). Fuobe is still checking.`,
+    at,
+  };
 }
 
 /** The cached answers for a server (null: never asked), and whether they're older than 15 s. */
-export function cached(s: LocalServer): { at: number; probe: Probe; stale: boolean } | null {
+export function cached(s: LocalServer): (Entry & { stale: boolean }) | null {
   const c = probes().get(sigOf(s));
   return c ? { ...c, stale: Date.now() - c.at > PROBE_MS } : null;
 }
@@ -294,7 +384,7 @@ export function cached(s: LocalServer): { at: number; probe: Probe; stale: boole
 /** The server's status from its cached answers and the current Settings (null: never asked). */
 export function statusOf(s: LocalServer, need: number): LocalStatus | null {
   const c = probes().get(sigOf(s));
-  return c ? interpret(s, c.probe, need, c.at) : null;
+  return c ? (c.busy ? busyStatus(s, c.at) : interpret(s, c.probe, need, c.at)) : null;
 }
 
 /** Forget a server's answers (its next look asks again). */

@@ -417,6 +417,19 @@ export const TRAINING_TARGETS: TrainingTarget[] = [
 
 export const getTrainingTarget = (id: string) => TRAINING_TARGETS.find((t) => t.id === id);
 
+/** Where a training blocker that's about the install's engine mode sends people (src/server/training.ts says it). */
+export const ENGINE_MODE_PLACE = "Settings → Engine mode";
+
+/**
+ * The Settings section that lifts a target's blocker (the Train dialogs' "Open Settings"): the engine mode when the
+ * blocker names it (a trainer on an engine this install turned off), else the trainer's connection (fal.ai's key, or
+ * AI-Toolkit under Training).
+ */
+export function trainingSettingsHref(t: { provider: TrainingProvider; blocker?: string | null }): string {
+  if (t.blocker?.includes(ENGINE_MODE_PLACE)) return "/settings#engine";
+  return t.provider === "fal" ? "/settings#fal" : "/settings#training";
+}
+
 /** A style element trains as a style; characters, places and objects as subjects. */
 export const trainingKind = (kind: ElementKind): TrainingKind => (kind === "style" ? "style" : "subject");
 

@@ -18,6 +18,8 @@ export interface SoulLookCard {
   grade?: string;
   /** Drawn on the result in the browser: a date stamp, a CCTV caption, a photo-booth print. */
   overlay?: "date-stamp" | "cctv" | "photo-booth";
+  /** A step after the picture: "face-mosaic" pixelates the faces (SAM 3.1 + a mosaic; priced into the run). */
+  post?: "face-mosaic";
   /** Some of its LoRAs download from civitai (needs the user's free civitai key). */
   civitai: boolean;
   /** Made for Fuobe Soul HD (Qwen-Image 2512: lettering). */
@@ -35,6 +37,12 @@ export const DEFAULT_LOOK = "v1-general";
  * moodboard's style element, @mentioned), with no look words, LoRAs, tail or grade of Soul's around it.
  */
 export const OWN_LOOK = "own-style";
+
+/**
+ * The look a casting sheet is drawn in (natural, unretouched skin and fabric): Soul Cast, Character Sheet's Build from
+ * scratch, the AI Influencer builder and app.
+ */
+export const CAST_LOOK = "v1-realistic";
 
 const BY_ID = new Map(SOUL_LOOK_CARDS.map((c) => [c.id, c]));
 

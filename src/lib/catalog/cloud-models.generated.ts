@@ -1954,7 +1954,19 @@ export const CLOUD_MODELS: ModelDef[] = [
               "21:9": "landscape_16_9",
               "5:4": "landscape_4_3",
               "4:5": "portrait_4_3"
-            }
+            },
+            "accepts": [
+              "1:1",
+              "4:3",
+              "3:4",
+              "16:9",
+              "9:16",
+              "3:2",
+              "2:3",
+              "21:9",
+              "5:4",
+              "4:5"
+            ]
           },
           "loras": {
             "shape": "items",
@@ -2010,7 +2022,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "2:3",
         "21:9",
         "5:4",
-        "4:5"
+        "4:5",
+        "auto"
       ],
       "maxOutputs": 4,
       "maxImages": 10
@@ -7009,6 +7022,42 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "sam-3-1-face-mask",
+    "name": "SAM 3.1 face mask",
+    "vendor": "Meta",
+    "family": "sam",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Finds the faces (or what you name) in a picture; Fuobe pixelates them",
+    "routes": [
+      {
+        "op": "face-mosaic",
+        "provider": "fal",
+        "endpoint": "fal-ai/sam-3-1/image",
+        "map": {
+          "image": "image_url",
+          "fixed": {
+            "apply_mask": false,
+            "return_multiple_masks": true,
+            "max_masks": 16,
+            "output_format": "png"
+          },
+          "defaults": {
+            "prompt": "face"
+          }
+        }
+      }
+    ],
+    "options": {
+      "maxImages": 1
+    },
+    "pricing": {
+      "unit": "request",
+      "usd": 0.01
+    },
+    "hidden": true
+  },
+  {
     "id": "ltx-2-5",
     "name": "LTX 2.5 Pro",
     "vendor": "Lightricks",
@@ -7533,7 +7582,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "happy-horse",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Restyle or swap things in 3\u201360 s clips, with up to 5 reference images",
+    "tagline": "Restyle or swap things in 3\u201315 s clips, with up to 5 reference images",
     "routes": [
       {
         "op": "v2v",
@@ -7574,12 +7623,11 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "second",
       "usd": 0.28,
-      "note": "720p, input + output seconds; 1080p $0.56",
+      "note": "720p, input and output seconds together; 1080p $0.56",
       "byResolution": {
         "720p": 0.28,
         "1080p": 0.56
-      },
-      "inputSeconds": true
+      }
     }
   },
   {
@@ -8049,11 +8097,13 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "audio": "audio_url",
           "seed": "seed",
-          "resolution": "resolution",
-          "duration": {
+          "numFrames": {
             "key": "num_frames",
-            "type": "number"
-          }
+            "fps": 25,
+            "min": 41,
+            "max": 721
+          },
+          "resolution": "resolution"
         }
       }
     ],
@@ -14782,8 +14832,20 @@ export const CLOUD_MODELS: ModelDef[] = [
           },
           "defaults": {
             "prompt": "The same shot in high dynamic range: deeper shadows and brighter highlights, every detail and movement unchanged"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 2
+            },
+            "transformer": "both"
           }
-        }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-quality/hdr/lora"
       }
     ],
     "options": {
@@ -14794,6 +14856,12 @@ export const CLOUD_MODELS: ModelDef[] = [
       "formats": [
         "exr"
       ]
+    },
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1). Information, never a gate",
+      "checked": "2026-10-29"
     },
     "defaults": {
       "generateAudio": true
@@ -17611,6 +17679,223 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
     }
   },
   {
+    "id": "fuobe-marketing-image",
+    "name": "Fuobe Marketing Image",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-marketing",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Product shots, ads, posters and listings from your product photo: Qwen-Image-Edit 2511 with Fuobe's templates",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-edit-2511",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"
+      },
+      {
+        "op": "edit",
+        "provider": "replicate",
+        "endpoint": "qwen/qwen-image-edit-2511",
+        "map": {
+          "images": "image",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "1:1",
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4"
+            ]
+          },
+          "loras": {
+            "shape": "single",
+            "weights": "lora_weights",
+            "scale": "lora_scale",
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      },
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-2512",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/qwen-image-2512/lora"
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4,
+      "maxImages": 10
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Qwen-Image / 2512 / Edit 2509 / 2511 / Layered are Apache-2.0",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.03,
+      "note": "an edit; $0.02 per MP for a picture made without a product photo",
+      "withLoras": 0.035
+    }
+  },
+  {
+    "id": "fuobe-tryon",
+    "name": "Fuobe Try-On",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-tryon",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Dresses the person in image 1 in the garment in image 2 (a bottom in image 3): FLUX.2 [klein] 4B with a try-on LoRA",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-2/klein/4b/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/flux-2/klein/4b/edit/lora"
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4,
+      "maxImages": 10
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "FLUX.2 [klein] 4B is Apache-2.0 (HF black-forest-labs/FLUX.2-klein-4B)",
+      "checked": "2026-10-23"
+    },
+    "pricing": {
+      "unit": "image",
+      "usd": 0.03,
+      "note": "about 3 MP at $0.01: the photos in (each about 1 MP) and the picture out"
+    }
+  },
+  {
     "id": "fuobe-dop",
     "name": "Fuobe DoP",
     "vendor": "Fuobe Original",
@@ -18739,6 +19024,9 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
               "720p"
             ]
           },
+          "fixed": {
+            "preprocess": true
+          },
           "defaults": {
             "match_input_num_frames": true,
             "match_input_frames_per_second": true
@@ -18764,6 +19052,11 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
         "720p"
       ],
       "maxImages": 4
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.2 Fun VACE A14B weights are Apache-2.0 (the first frame's model has its own licence)"
     },
     "defaults": {
       "resolution": "720p"
@@ -18861,6 +19154,495 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "byResolution": {
         "768p": 0.075,
         "480p": 0.0625
+      }
+    }
+  },
+  {
+    "id": "fuobe-mixed-media",
+    "name": "Fuobe Mixed Media",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-mixed-media",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Every frame drawn again in the look under its own outlines, one seed: Z-Image Turbo + ControlNet with the look's LoRA",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/z-image/turbo/controlnet/lora",
+        "map": {
+          "image": "image_url",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "fixed": {
+            "preprocess": "canny",
+            "output_format": "jpeg",
+            "enable_prompt_expansion": false
+          },
+          "defaults": {
+            "num_inference_steps": 8
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "maxOutputs": 4,
+      "maxImages": 1
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Z-Image Turbo / base weights are Apache-2.0 (HF Tongyi-MAI/Z-Image-Turbo, Tongyi-MAI/Z-Image)",
+      "checked": "2026-10-23"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.01,
+      "note": "$0.01 per megapixel of each frame: a 1K frame (about 1 MP in the clip's shape) costs about $0.01, so 240 frames about $2.40; 2K (about 4 MP) about $0.04 a frame"
+    }
+  },
+  {
+    "id": "fuobe-shorts",
+    "name": "Fuobe Shorts",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-shorts",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Your footage in a new look, motion kept: a restyled first frame carried through every frame by depth (Wan 2.2 Fun VACE)",
+    "routes": [
+      {
+        "op": "v2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-22-vace-fun-a14b/depth",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "first_frame_url",
+          "video": "video_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "auto",
+              "240p",
+              "360p",
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "fixed": {
+            "preprocess": true
+          },
+          "defaults": {
+            "match_input_num_frames": true,
+            "match_input_frames_per_second": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "resolutions": [
+        "auto",
+        "240p",
+        "360p",
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1
+    },
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Wan 2.2 Fun VACE A14B (the restyle) and Qwen-Image-Edit 2511 (the first frame) are Apache-2.0; on the open engine Depth Anything 3 mono-large and lightx2v too"
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1,
+      "note": "720p; 580p $0.075, 480p $0.05 \u00b7 fal bills frames \u00f7 16 as video seconds: a 30 fps clip costs about 1.9\u00d7 its length; the first frame's Qwen edit is priced on its own",
+      "byResolution": {
+        "720p": 0.1,
+        "580p": 0.075,
+        "480p": 0.05
+      }
+    }
+  },
+  {
+    "id": "fuobe-evolution",
+    "name": "Fuobe Evolution",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-evolution",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Takes your clip further in a direction an LLM writes from your references: LTX-2.3 video to video at a change intensity",
+    "routes": [
+      {
+        "op": "v2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/video-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "size": {
+            "key": "video_size",
+            "multiple": 16,
+            "table": {
+              "480p": {
+                "21:9": [
+                  1120,
+                  480
+                ],
+                "16:9": [
+                  864,
+                  480
+                ],
+                "4:3": [
+                  640,
+                  480
+                ],
+                "1:1": [
+                  480,
+                  480
+                ],
+                "3:4": [
+                  480,
+                  640
+                ],
+                "9:16": [
+                  480,
+                  864
+                ]
+              },
+              "720p": {
+                "21:9": [
+                  1504,
+                  640
+                ],
+                "16:9": [
+                  1280,
+                  704
+                ],
+                "4:3": [
+                  1024,
+                  768
+                ],
+                "1:1": [
+                  960,
+                  960
+                ],
+                "3:4": [
+                  768,
+                  1024
+                ],
+                "9:16": [
+                  704,
+                  1280
+                ]
+              },
+              "1080p": {
+                "21:9": [
+                  2240,
+                  960
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ],
+                "4:3": [
+                  1440,
+                  1088
+                ],
+                "1:1": [
+                  1088,
+                  1088
+                ],
+                "3:4": [
+                  1088,
+                  1440
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "enable_prompt_expansion": false,
+            "generate_audio": false,
+            "match_video_length": false,
+            "match_input_fps": false,
+            "fps": 24
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/video-to-video/lora"
+      }
+    ],
+    "options": {
+      "durations": [
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        12,
+        15,
+        20
+      ],
+      "aspectRatios": [
+        "21:9",
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16"
+      ],
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "audio": true
+    },
+    "licence": {
+      "licence": "LTX-2 / LTX-2.x Community License",
+      "commercial": true,
+      "note": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1)",
+      "checked": "2026-10-23"
+    },
+    "defaults": {
+      "aspectRatio": "16:9",
+      "duration": 5,
+      "resolution": "720p",
+      "generateAudio": true
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.0347,
+      "note": "$0.001605 per megapixel of video (width \u00d7 height \u00d7 frames): about $0.17 for 5 s at 720p; $0.001805 with LoRAs",
+      "byResolution": {
+        "480p": 0.016,
+        "720p": 0.0347,
+        "1080p": 0.0805
+      },
+      "withLoras": 0.039,
+      "withLorasByResolution": {
+        "480p": 0.018,
+        "720p": 0.039,
+        "1080p": 0.0905
+      },
+      "videoMegapixel": {
+        "usd": 0.001605,
+        "withLoras": 0.001805
+      }
+    }
+  },
+  {
+    "id": "fuobe-angles",
+    "name": "Fuobe Angles",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-angles",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "The same shot from another camera: rotate, tilt, move closer, go wide \u00b7 Qwen-Image-Edit 2509 + Multiple-angles LoRA",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles",
+        "map": {
+          "prompt": false,
+          "negativePrompt": "negative_prompt",
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "defaults": {
+            "lora_scale": 1.25,
+            "num_inference_steps": 6
+          }
+        }
+      }
+    ],
+    "options": {
+      "sliders": [
+        {
+          "param": "rotate_right_left",
+          "label": "Rotate (\u00b0, + = left)",
+          "min": -90,
+          "max": 90,
+          "step": 1,
+          "default": 0
+        },
+        {
+          "param": "vertical_angle",
+          "label": "Tilt (\u22121 above, 1 below)",
+          "min": -1,
+          "max": 1,
+          "step": 0.05,
+          "default": 0
+        },
+        {
+          "param": "move_forward",
+          "label": "Move forward",
+          "min": 0,
+          "max": 10,
+          "step": 1,
+          "default": 0
+        }
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "maxOutputs": 4,
+      "maxImages": 10,
+      "promptless": true
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.035,
+      "note": "per megapixel of the picture made (the input's size)"
+    }
+  },
+  {
+    "id": "fuobe-speak",
+    "name": "Fuobe Speak",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-speak",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "A portrait speaks your voice track, lips, face and head in sync, long takes: InfiniteTalk",
+    "routes": [
+      {
+        "op": "avatar",
+        "provider": "fal",
+        "endpoint": "fal-ai/infinitalk",
+        "map": {
+          "image": "image_url",
+          "audio": "audio_url",
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 25,
+            "min": 41,
+            "max": 721
+          },
+          "resolution": "resolution"
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "720p"
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.2,
+      "note": "480p or 720p, as long as the voice"
+    }
+  },
+  {
+    "id": "fuobe-speak-motion",
+    "name": "Fuobe Speak \u00b7 Motion",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-speak",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Speech with the body and the scene moving: Wan 2.2 S2V",
+    "routes": [
+      {
+        "op": "avatar",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-14b/speech-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "audio": "audio_url",
+          "seed": "seed",
+          "fps": "frames_per_second",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 40,
+            "max": 120,
+            "multiple": 4
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "resolutions": [
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "resolution": "480p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1,
+      "note": "480p; 580p $0.15, 720p $0.20 a video second (frames \u00f7 16), up to 7.5 s a call",
+      "byResolution": {
+        "480p": 0.1,
+        "580p": 0.15,
+        "720p": 0.2
       }
     }
   }

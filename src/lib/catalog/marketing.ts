@@ -938,10 +938,32 @@ export interface ModelChoice {
   id: string;
   /** Why it's the pick ("exact text", "keeps the product pixel-exact"). */
   note?: string;
+  /** Its name, where the page has no model facts (Ads Studio's picture picker). */
+  name?: string;
 }
 
-/** The models a Marketing Studio format can use on an engine, the default first. */
+/**
+ * Marketing Studio Image's Original (build plan O10): Qwen-Image-Edit 2511 with Fuobe's template prompts on both engines
+ * (Qwen-Image 2512 without a product photo; a Standalone product shot relit by the White_to_Scene LoRA on the open
+ * engine). Its pictures carry no words: the headline and CTA are set over them in the browser, so they come out exact.
+ */
+export const MARKETING_IMAGE_MODEL = "fuobe-marketing-image";
+
+/** The Original's line in the model menus, per engine. */
+export const MARKETING_IMAGE_NOTE: Record<Engine, string> = {
+  open: "Fuobe Original · Qwen-Image-Edit 2511 on your GPU",
+  cloud: "Fuobe Original · Qwen-Image-Edit 2511, hosted",
+};
+
+/**
+ * Whether a run's words are set over the picture in the browser (an open model, or the Original on either engine), not
+ * drawn by the model (GPT Image 2.5, Ideogram, Recraft, Nano Banana Pro in the cloud).
+ */
+export const wordsOnTop = (engine: Engine, modelId: string): boolean => engine === "open" || modelId === MARKETING_IMAGE_MODEL;
+
+/** The models a Marketing Studio format can use on an engine, the default first: the Original for every image format. */
 export function formatModels(format: FormatDef, engine: Engine, has: { product: boolean; avatar: boolean }): ModelChoice[] {
+  const original: ModelChoice = { id: MARKETING_IMAGE_MODEL, note: MARKETING_IMAGE_NOTE[engine] };
   if (engine === "open") {
     switch (format.pipeline) {
       case "motion":
@@ -949,22 +971,21 @@ export function formatModels(format: FormatDef, engine: Engine, has: { product: 
       case "ugc":
         return [{ id: "oss-infinitetalk", note: "InfiniteTalk presenter" }];
       default:
-        if (format.id === "poster" && !has.product) return [{ id: "oss-qwen-image", note: "Qwen-Image; your text is set on top" }];
-        return [{ id: "oss-qwen-edit", note: format.text ? "Qwen-Image-Edit; your text is set on top" : "Qwen-Image-Edit with your references" }];
+        return [original];
     }
   }
   switch (format.id) {
     case "product-standalone":
-      return [{ id: "bria-product-shot", note: "Keeps the product pixel-exact" }, { id: "nano-banana-pro" }, { id: "gpt-image-2-5" }, { id: "product-photography", note: "One-tap studio shot" }];
+      return [original, { id: "bria-product-shot", note: "Keeps the product pixel-exact" }, { id: "nano-banana-pro" }, { id: "gpt-image-2-5" }, { id: "product-photography", note: "One-tap studio shot" }];
     case "product-with-model":
-      return [{ id: "nano-banana-pro", note: "Product + person references" }, { id: "gpt-image-2-5" }];
+      return [original, { id: "nano-banana-pro", note: "Product + person references" }, { id: "gpt-image-2-5" }];
     case "ads":
     case "marketplace":
-      return [{ id: "gpt-image-2-5", note: "Exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }];
+      return [original, { id: "gpt-image-2-5", note: "Draws the exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }];
     case "poster":
       return has.product
-        ? [{ id: "gpt-image-2-5", note: "Exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }]
-        : [{ id: "ideogram-3", note: "Exact text in your brand colours" }, { id: "ideogram-4-5" }, { id: "recraft-4-1" }, { id: "gpt-image-2-5" }];
+        ? [original, { id: "gpt-image-2-5", note: "Draws the exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }]
+        : [original, { id: "ideogram-3", note: "Exact text in your brand colours" }, { id: "ideogram-4-5" }, { id: "recraft-4-1" }, { id: "gpt-image-2-5" }];
     case "ugc-talking":
     case "tiktok":
       return [{ id: "omnihuman-2", note: "Full-body presenter" }, { id: "kling-avatar" }];
@@ -973,10 +994,22 @@ export function formatModels(format: FormatDef, engine: Engine, has: { product: 
   }
 }
 
-/** Ads Studio's visual model per engine (the copy and layout are Fuobe's; the picture has no text). */
-export function adVisualModel(engine: Engine, hasProductImage: boolean): string {
-  if (engine === "open") return hasProductImage ? "oss-qwen-edit" : "oss-qwen-image";
-  return "nano-banana-pro";
+/**
+ * Ads Studio's visual models (the copy and layout are Fuobe's; the picture has no text): Fuobe Marketing Image on both
+ * engines (the product photo as reference, else made from the concept), partner models as choices in the cloud.
+ */
+export const AD_VISUAL_MODELS: Record<Engine, ModelChoice[]> = {
+  open: [{ id: MARKETING_IMAGE_MODEL, name: "Fuobe Marketing Image", note: "Fuobe Original · Qwen-Image-Edit 2511 with your product photo, free on your GPU" }],
+  cloud: [
+    { id: MARKETING_IMAGE_MODEL, name: "Fuobe Marketing Image", note: "Fuobe Original · Qwen-Image-Edit 2511 with your product photo, hosted on fal" },
+    { id: "nano-banana-pro", name: "Nano Banana Pro", note: "Google's Gemini 3 Pro Image, through fal" },
+    { id: "gpt-image-2-5", name: "GPT Image 2.5", note: "OpenAI's GPT Image 2.5 Flare, through fal" },
+  ],
+};
+
+/** Ads Studio's visual model on an engine: the one asked for when this engine offers it, else the Original. */
+export function adVisualModel(engine: Engine, asked?: string | null): string {
+  return asked && AD_VISUAL_MODELS[engine].some((c) => c.id === asked) ? asked : AD_VISUAL_MODELS[engine][0].id;
 }
 
 /** Cloud talking-presenter / voice / caption models for UGC pipelines. */
@@ -1003,8 +1036,8 @@ export const MULTIPLIER_MODELS: Record<Engine, ModelChoice[]> = {
 
 /**
  * The longest part of the reference a cloud edit model recreates (docs/research/paid-model-apis-3/4.json): Kling O3's
- * edit takes 3–15 s clips; Happy Horse's takes up to 60 s but returns at most the first 15 s (and bills the input
- * seconds too). A longer selection is cut to its first seconds, and the run says so.
+ * edit takes 3–15 s clips; Happy Horse's takes up to 60 s but returns at most the first 15 s. A longer selection is
+ * cut to its first seconds (so no second is sent that doesn't come back), and the run says so.
  */
 export const MULTIPLIER_WINDOW: Readonly<Record<string, number>> = { "kling-o3": 15, "happy-horse-video-edit": 15 };
 

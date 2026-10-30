@@ -87,10 +87,14 @@ async function pool(items, n, fn) {
   await Promise.all(workers);
 }
 
-/** The model a studio route's answer names and its generations: {final, items}. */
-const routeResult = (answer, how) => {
-  const items = answer?.items ?? [];
-  const final = answer?.final ?? items.at(-1);
+/**
+ * The generations a studio route's answer names: {final, items}, or a Shorts session (POST /api/shorts/sessions), whose
+ * finished video is its latest stitch's final step and whose items are its segments' restyles.
+ */
+export const routeResult = (answer, how) => {
+  const stitch = Array.isArray(answer?.stitches) ? answer.stitches.at(-1) : undefined;
+  const items = answer?.items ?? (stitch ? (answer.segments ?? []).flatMap((s) => (s.takes ?? []).map((t) => ({ id: t.look }))) : []);
+  const final = answer?.final ?? (stitch?.final ? { id: stitch.final } : items.at(-1));
   if (how === "all") return items.length ? items : [final].filter(Boolean);
   if (how === "last") return [items.at(-1) ?? final].filter(Boolean);
   return [final].filter(Boolean);

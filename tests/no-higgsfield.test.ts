@@ -295,7 +295,10 @@ describe("REPLACED_BY", () => {
     expect(note).toMatch(/Fuobe Soul/);
     // An engine asked for stays.
     expect(migrateRequest({ ...old, engine: "open" as const }).request.engine).toBe("open");
-    expect(migrateRequest({ modelId: "marketing-studio-image", params: { extra: { template_id: "t" } } }).request).toEqual({ modelId: "gpt-image-2-5", params: {} });
+    // Marketing Studio Image runs on its Original (build plan O10), wherever the install runs Originals.
+    expect(migrateRequest({ modelId: "marketing-studio-image", params: { extra: { template_id: "t" } } }).request).toEqual({ modelId: "fuobe-marketing-image", params: {} });
+    expect(migrateRequest({ modelId: "ads-studio", op: "edit" as const }).request).toEqual({ modelId: "fuobe-marketing-image", op: "edit" });
+    expect(migrateRequest({ modelId: "ai-influencer", prompt: "a surfer" }).request).toEqual({ modelId: "fuobe-soul", prompt: "a surfer" });
     // A current model's request comes back as it was.
     const current = { modelId: "nano-banana-pro", params: { extra: { style_id: "x" } } };
     expect(migrateRequest(current)).toEqual({ request: current });
@@ -428,7 +431,7 @@ describe("stored ids resolve where they are read", () => {
     const [again] = retryPhoto(sheet);
     expect(again).toMatchObject({ modelId: "fuobe-soul", feature: "character-sheet", request: { modelId: "fuobe-soul" } });
     const app = storedRow({ feature: "app:app-ai-influencer", model: "ai-influencer", provider: "higgsfield", op: "t2i", status: "canceled", request: { feature: "app:app-ai-influencer", modelId: "ai-influencer", op: "t2i", prompt: "a character" } });
-    expect(retryPhoto(app)[0]).toMatchObject({ modelId: "nano-banana-pro" });
+    expect(retryPhoto(app)[0]).toMatchObject({ modelId: "fuobe-soul" });
   });
 
   it("fails a job still running on a retired model with the way forward, not 'no longer exists'", async () => {

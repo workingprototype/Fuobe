@@ -1,7 +1,8 @@
 import "server-only";
 import { errorDetail, httpError, keyMessage, rejectsJson, unreachableError } from "./errors";
 import { healToolCalls } from "./messages";
-import { cached, forget, refresh, refreshSync, statusOf, tokens } from "./probe";
+import { takesConnection, within } from "../providers/reach";
+import { assumeBusy, cached, forget, refresh, refreshSync, statusOf, tokens } from "./probe";
 import { allLocalServers, authHeaders, cap, LOCAL_LABELS, llmContext, localServer, localServers, openaiBase, pinnedKind } from "./servers";
 import type { ChatRequest, ChatResult, LocalKind, LocalServer, LocalStatus } from "./types";
 import { ollamaBody, openaiBody, parseOllama, parseOpenai } from "./wire";
@@ -42,6 +43,29 @@ export async function probeLocal(force = false): Promise<boolean> {
 export async function activeLocal(force = false): Promise<Ready | null> {
   await probeLocal(force);
   return pick(localServers());
+}
+
+/** How long a person's question (Assist) waits for what no check of the local servers has said yet. */
+const SOON_MS = 1500;
+
+/**
+ * The server a call would go to, for a person waiting on the answer (Assist's panel, a chat's mode): what the last
+ * checks found, as routing reads them (localReady): a stale answer is refreshed in the background, not waited on. It
+ * waits, at most `waitMs`, only for a server no check has answered for yet; one whose port took the connection by
+ * then counts as busy, so reachable, for now (as routing's blocking first look does), and its check goes on to say for
+ * sure. The awaited checks (a text step about to run, a chat's call) keep the full check (activeLocal).
+ */
+export async function localSoon(waitMs = SOON_MS): Promise<Ready | null> {
+  const servers = localServers();
+  const unknown = servers.filter((s) => !cached(s));
+  const stale = servers.filter((s) => cached(s)?.stale);
+  if (stale.length) void refresh(stale).catch(() => {});
+  if (unknown.length) {
+    const ports = unknown.map((s) => takesConnection(s.url, waitMs));
+    const done = await within(refresh(unknown).then(() => true, () => true), waitMs);
+    if (!done) (await Promise.all(ports)).forEach((took, i) => took && assumeBusy(unknown[i]));
+  }
+  return pick(servers);
 }
 
 /**

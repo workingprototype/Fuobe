@@ -30,7 +30,7 @@ import {
 import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
-import { activeLocal, aiHelper, chatLocal, emptyReply, localLabel, localProblem, pinnedKind, toChatMessages, type Ready } from "../llm";
+import { activeLocal, aiHelper, chatLocal, emptyReply, localLabel, localProblem, localSoon, pinnedKind, toChatMessages, type Ready } from "../llm";
 import { offeredDefault } from "../model-access";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
@@ -386,7 +386,7 @@ export async function resolveAgent(): Promise<AssistThread["agent"]> {
   if (choice === "anthropic") return key ? "claude" : "offline";
   if (choice === "local") return "local";
   if (key && engineMode() !== "open") return "claude";
-  return (await activeLocal()) ? "local" : "offline";
+  return (await localSoon()) ? "local" : "offline";
 }
 
 const claudeAllowed = () => !!getSetting("anthropicKey") && (engineMode() !== "open" || aiHelper() === "anthropic");
@@ -400,7 +400,7 @@ function localInfo(ready: Ready | null): AssistLocal {
 }
 
 export async function availability(): Promise<AssistAvailability> {
-  const ready = await activeLocal();
+  const ready = await localSoon();
   const aiOff = aiHelper() === "none";
   const claude = claudeAllowed();
   return {
@@ -430,7 +430,7 @@ const LOCAL_NAME = /^[\w.:/@+-]{1,200}$/;
  */
 export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<ResolvedMode> {
   const free = async (note?: string): Promise<ResolvedMode> =>
-    (await activeLocal()) ? { mode: "free", agent: "local", model: null, effort: null, note } : { mode: "free", agent: "offline", model: null, effort: null, note };
+    (await localSoon()) ? { mode: "free", agent: "local", model: null, effort: null, note } : { mode: "free", agent: "offline", model: null, effort: null, note };
   if (aiHelper() === "none") {
     return { mode: choice?.mode ?? "free", agent: "offline", model: null, effort: null, ...(choice?.mode && choice.mode !== "free" && { note: "The AI helper is off in Settings, so this chat uses the offline planner." }) };
   }
@@ -438,7 +438,7 @@ export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<R
     const agent = await resolveAgent();
     return { mode: agent === "claude" ? "smart" : "free", agent, model: null, effort: null };
   }
-  const noKey = "Smart and Claude need an Anthropic API key (Settings → API keys) — using Free instead.";
+  const noKey = "Smart and Claude need an Anthropic API key (Settings → AI helper) — using Free instead.";
   if (choice.mode === "smart") return claudeAllowed() ? { mode: "smart", agent: "claude", model: DEFAULT_CLAUDE_MODEL, effort: DEFAULT_EFFORT } : free(noKey);
   if (choice.mode === "free") return free();
   // Manual
@@ -451,7 +451,7 @@ export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<R
   }
   if (agent === "local") {
     const model = choice.model && LOCAL_NAME.test(choice.model) ? choice.model : null;
-    return { mode: "manual", agent: "local", model, effort: null, ...(!(await activeLocal()) && { note: localDownNote() }) };
+    return { mode: "manual", agent: "local", model, effort: null, ...(!(await localSoon()) && { note: localDownNote() }) };
   }
   return { mode: "manual", agent: "offline", model: null, effort: null };
 }
@@ -1287,7 +1287,7 @@ function refreshFlags(s: State): void {
 }
 
 function errorText(e: unknown): string {
-  if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → API keys.";
+  if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → AI helper.";
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limited right now. Try again in a minute.";
   if (e instanceof Anthropic.BadRequestError && /\bmcp\b|connector/i.test(e.message)) return `A connector didn't work: ${e.message}. Check it in Settings → Assist connectors, or switch it off.`;
   if (e instanceof Anthropic.APIError) return `Claude returned an error (${e.status ?? "network"}): ${e.message}`;

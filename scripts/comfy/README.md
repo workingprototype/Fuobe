@@ -360,6 +360,38 @@ node validate-workflows.mjs video-character-swap-h3-segment video-mask-h3-relay 
 - **Not run**: neither graph has loaded in a ComfyUI with H3 Relay, and nothing has run on a GPU.
   `tests/comfy-swap-studio.test.ts` checks the provider's rewrites on the library files.
 
+### Round 5: open tools and Evolution (Originals O11 and O13, 2026-10-29)
+
+Four hand-built entries and one rebuilt one, all `validated: true` (the library: 154 workflows, 149 validated). No new
+node pack and no new worker; ComfyUI stays at 0.41.0. Fuobe Mixed Media, Fuobe Shorts, Fuobe Marketing Image and
+Fuobe Try-On (O9 and O10) run graphs that were already in the library.
+
+```bash
+npm run build -- qwen-image-edit-2509-angles image-face-mosaic-sam3 video-depth-vda-large video-evolution-wan22-fun-vace infinitetalk-wanwrapper
+node validate-workflows.mjs qwen-image-edit-2509-angles image-face-mosaic-sam3 video-depth-vda-large video-evolution-wan22-fun-vace infinitetalk-wanwrapper --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `qwen-image-edit-2509-angles` | edit | Fuobe Angles on your GPU: the library's `qwen-image-edit-2509` (fp8, the Lightning 4-step LoRA) with dx8152's Multiple-angles LoRA after it at 1.25, 6 steps (fal's default for this LoRA; a guess until measured). The prompt is the LoRA's own camera words in Chinese with English, which `src/lib/catalog/open-tools.ts` writes from the app's controls. 24 GB | yes (/prompt only; no Qwen weights here) |
+| `image-face-mosaic-sam3` | face-mosaic | Fuobe Soul's PixeletedFace look: SAM 3.1 finds every face from the words ("face" by default, `threshold` 0.4), the mask grows 12 px, and the picture is shrunk by `mosaicScale` (0.04: blocks of about 25 px) and blown back up only under the mask. No face: the picture comes back unchanged. Core nodes and SAM 3.1 (1.75 GB); 4 GB | yes |
+| `video-depth-vda-large` | depth-video | `video-depth-vda-small` with Video Depth Anything's Large model. Its weights are CC-BY-NC-4.0 (information: Settings → Models & licences lists them as Non-commercial with a switch); Depth map's default stays the small model. It downloads about 1.5 GB on its first run (`autoDownloads`); 8 GB | yes |
+| `video-evolution-wan22-fun-vace` | v2v | Fuobe Evolution, one segment of up to 81 frames at 16 fps: Wan 2.2 Fun VACE starts from the segment itself, noised to `denoise` (Low 0.45, Medium 0.65, High 0.85), with Depth Anything 3 depth on every frame as control and the direction frame (`image`, from `qwen-image-edit-2511`) as the reference. Any clip loads: `VHS_LoadVideo` resamples it to 16 fps and cuts it to 4n+1 frames. The graph computes the schedule so that the last 4 steps (the Lightx2v 4-step LoRAs) start within a few hundredths of the asked `denoise`, and Wan 2.2's high-noise expert only takes steps above its switch point. Same 45.49 GB of weights as `video-restyle-wan22-fun-vace`; 24 GB | yes |
+| `infinitetalk-wanwrapper` (rebuilt) | lipsync | Now hand-built from the graph kijai's example 03 export gave, so it builds without a frontend export. New bindings `lora`, `loraStrength`, `cfg`, `shift`, `scheduler`, `motionFrame`, `colormatch` and `audioCfg` carry Fuobe Speak's settings (FusioniX at 1, 25 steps, cfg 5, audio cfg 5, shift 10, `unipc`, 15 motion frames, `reinhard` colour match); its defaults stay the fast lightx2v pass. FusioniX (0.37 GB) is an optional model; 16 GB | yes |
+
+- **Weights**: two new files, both LoRAs Fuobe downloads into the LoRA folder before a run: dx8152's Multiple-angles LoRA
+  (0.24 GB, renamed from `镜头转换.safetensors` to `qwen-edit-2509-multiple-angles-dx8152.safetensors`) and FusioniX
+  (0.37 GB, optional). Both are pinned to a Hugging Face commit in `KNOWN_MODELS`.
+- **Build**: `build-library.mjs` gains the binding keys `scheduler`, `motionFrame`, `colormatch`, `audioCfg`, `threshold`
+  and `mosaicScale`.
+- **Licences, as information**: Apache-2.0 (Qwen-Image-Edit 2509, the Multiple-angles and Lightning LoRAs, Wan 2.2 Fun
+  VACE, lightx2v, Depth Anything 3 mono-large, InfiniteTalk); FusioniX has an Apache-2.0 card, but the LoRAs it merges
+  weren't checked; Meta's SAM License; CC-BY-NC-4.0 (Video Depth Anything Large).
+- **Not run**: the validator posts each graph to `/prompt` on the CPU server and never lets it run, so none of these has
+  rendered anything. Nothing has run on a GPU: not the Lightning LoRA at 6 steps with the angles LoRA, not InfiniteTalk's
+  colour correction as `reinhard`, and not the Evolution intensities. `tests/open-tools.test.ts` and
+  `tests/evolution-comfy.test.ts` check the provider's bindings on the library files.
+
 ## Adding a workflow
 
 1. Find the template name in `$COMFYUI_DIR/.venv/lib/python3.*/site-packages/comfyui_workflow_templates_json/templates/index.json`

@@ -12,7 +12,10 @@ const { db } = await import("@/server/db");
 const gens = await import("@/server/generations");
 const { saveFile } = await import("@/server/storage");
 const route = await import("@/app/api/influencer/route");
+const estimateRoute = await import("@/app/api/influencer/estimate/route");
 const { compileCastPrompt } = await import("@/lib/influencer");
+const { soulRecipe } = await import("@/lib/catalog/soul");
+const { CAST_LOOK } = await import("@/lib/catalog/soul-cards");
 const { retryPhoto } = await import("@/server/photodump");
 
 beforeAll(() => {
@@ -40,10 +43,16 @@ async function settle(id: string, ms = 40_000) {
 }
 
 describe("/api/influencer", () => {
-  it("prices a cloud sheet on Nano Banana Pro (Seedream 5.0 Pro when asked); a retired model id runs the default", async () => {
+  it("prices a cloud sheet on Fuobe Soul (Nano Banana Pro or Seedream 5.0 Pro when asked); a retired model id runs the default", async () => {
     const cloud = await (await post({ engine: "cloud", state, start: "scratch" }, true)).json();
-    expect(cloud).toMatchObject({ modelId: "nano-banana-pro", modelName: "Nano Banana Pro", count: 1, steps: 1, demo: true });
-    expect((await (await post({ engine: "cloud", state, start: "scratch", modelId: "ai-influencer" }, true)).json()).modelId).toBe("nano-banana-pro");
+    expect(cloud).toMatchObject({ modelId: "fuobe-soul", modelName: "Fuobe Soul", count: 1, steps: 1, demo: true });
+    expect((await (await post({ engine: "cloud", state, start: "scratch", modelId: "ai-influencer" }, true)).json()).modelId).toBe("fuobe-soul");
+    const face = await (await post({ engine: "cloud", state, start: "face", photo: upload() }, true)).json();
+    expect(face).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", count: 1, steps: 2 });
+    expect((await (await post({ engine: "cloud", state, start: "scratch", modelId: "nano-banana-pro" }, true)).json()).modelId).toBe("nano-banana-pro");
+    // The same price at /api/influencer/estimate (where the evaluation harness prices studio routes).
+    const estimate = await (await estimateRoute.POST(new Request("http://x/api/influencer/estimate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ engine: "cloud", state, start: "scratch" }) }))).json();
+    expect(estimate).toMatchObject({ modelId: "fuobe-soul", count: 1, steps: 1, demo: true });
     const seedream = await (await post({ engine: "cloud", state, start: "scratch", modelId: "seedream-5-pro" }, true)).json();
     expect(seedream.modelId).toBe("seedream-5-pro");
   });
@@ -64,7 +73,10 @@ describe("/api/influencer", () => {
       ["influencer-step", "oss-zimage-soul-cast"],
       ["influencer", "oss-qwen-edit"],
     ]);
-    expect(run.items[0].prompt).toBe(compileCastPrompt({ state: state as never, direction: "A potter from Porto" }));
+    // The Soul Cast sheet graph runs in Fuobe Soul's casting look: its words and LoRAs around the compiled character.
+    expect(run.items[0].prompt).toContain(compileCastPrompt({ state: state as never, direction: "A potter from Porto" }));
+    expect(run.items[0].prompt).toBe(soulRecipe("soul", compileCastPrompt({ state: state as never, direction: "A potter from Porto" }), { look: CAST_LOOK }).prompt);
+    expect(run.items[0].request.presetId).toBeUndefined();
     expect(run.sheet.id).toBe(run.items[1].id);
     expect(run.items.map((g: { request: { step?: { label: string } } }) => g.request.step?.label)).toEqual(["Drawing the sheet", "With your face"]);
     expect(new Set(run.items.map((g: { batchId: string }) => g.batchId))).toEqual(new Set([run.batchId]));
@@ -144,6 +156,6 @@ describe("/api/influencer", () => {
     expect((await post({ engine: "cloud", state: conflict, start: "scratch" })).status).toBe(422);
     // Picks the tier doesn't show are dropped, not refused.
     const hidden = await (await post({ engine: "open", state: { tier: "normal", picks: { hair: ["hs_wings"] } }, start: "scratch" })).json();
-    expect(hidden.items[0].prompt).toBe(compileCastPrompt({ state: { tier: "normal", picks: {}, locked: [] } }));
+    expect(hidden.items[0].prompt).toContain(compileCastPrompt({ state: { tier: "normal", picks: {}, locked: [] } }));
   });
 });

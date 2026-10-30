@@ -38,6 +38,7 @@ export type OutputActionId =
   | "finalize"
   | "compare"
   | "reuse"
+  | "make-skill"
   | "copy-prompt"
   | "share"
   | "pin"
@@ -150,6 +151,8 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   if (o.draftId) out.push({ id: "finalize", label: "Render this draft in 1080p", placement: "menu" });
   if (ctx.compare) out.push({ id: "compare", label: "Compare with original", placement: "menu" });
   if (ctx.reuse) out.push({ id: "reuse", label: "Reuse settings", placement: "menu" });
+  // The steps behind a finished result, as a skill that runs again with new inputs (src/components/skills).
+  if (g.status === "succeeded") out.push({ id: "make-skill", label: "Make a skill from this…", placement: "menu" });
   if (g.prompt) out.push({ id: "copy-prompt", label: "Copy prompt", placement: "menu" });
   // A read-only link (src/lib/share.ts): finished results whose files Fuobe keeps.
   if (g.status === "succeeded" && g.outputs.some((x) => storedPath(x.url))) out.push({ id: "share", label: "Share link…", placement: "menu" });

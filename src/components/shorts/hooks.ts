@@ -22,7 +22,8 @@ export const send = async <T>(url: string, method: string, body?: unknown) =>
 export interface ShortsBody {
   engine: Engine;
   presetId: string;
-  source: { url: string; name?: string; duration?: number; width?: number; height?: number };
+  /** fps: the clip's own rate (Fuobe Shorts in the cloud cuts and bills on frames). */
+  source: { url: string; name?: string; duration?: number; width?: number; height?: number; fps?: number };
   range: ShortsRange;
   aspectRatio: ShortsRatio;
   language: string;

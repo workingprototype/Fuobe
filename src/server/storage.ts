@@ -225,6 +225,27 @@ export function absolutePath(relPath: string): string {
 }
 
 /**
+ * The first bytes of a file saved in Fuobe (an /api/files/ URL or an asset id), read at once: enough for a picture's
+ * size (src/lib/image-size.ts). Null for a link elsewhere, a data URI or a file that's gone.
+ */
+export function localHead(ref: string, maxBytes = 512 * 1024): Buffer | null {
+  try {
+    const rel = ref.startsWith("/api/files/") ? decodeURIComponent(ref.slice("/api/files/".length).split("?")[0]) : /^[\w-]{6,40}$/.test(ref) ? getAsset(ref)?.relPath : undefined;
+    if (!rel) return null;
+    const fd = fs.openSync(absolutePath(rel), "r");
+    try {
+      const buf = Buffer.alloc(Math.min(maxBytes, fs.fstatSync(fd).size));
+      fs.readSync(fd, buf, 0, buf.length, 0);
+      return buf;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolve an asset reference from the UI (asset id, /api/files/... URL, http(s) URL or data URI)
  * to bytes + content type.
  */

@@ -68,3 +68,11 @@ export function dynamicSamples(root, ids = {}) {
   }
   return { urls, byPattern, generated };
 }
+
+/**
+ * Pages a query opens a dialog on, with sample values: `ids.recipeSkill` names a skill with a recipe (its Run form,
+ * /assist/skills?run=…); an unknown one is visited too (the form says so in the dialog).
+ */
+export function querySamples(ids = {}) {
+  return [ids.recipeSkill && `/assist/skills?run=${ids.recipeSkill}`, "/assist/skills?run=does-not-exist"].filter(Boolean);
+}

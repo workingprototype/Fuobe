@@ -4,8 +4,14 @@
  * cloud models, ≤5 s = 81 frames at 16 fps on the open engine), each segment is restyled, and the
  * segments are stitched back together under the original sound.
  *
+ * Fuobe Shorts (build plan O9) is the default on both engines: each segment's first frame drawn in the look
+ * (Qwen-Image-Edit 2511), then Wan 2.2 Fun VACE carries it through every frame by depth, on your GPU (81 frames at
+ * 16 fps a segment) or on fal (pieces of up to 241 frames at the clip's own rate). Gemini Omni Flash (Higgsfield's
+ * Shorts engine) and the other partner models stay as choices.
+ *
  * Pure module (presets, limits, segment planning, prompts, the pipeline's steps), shared by the
- * page, the server (src/server/shorts.ts) and the tests. Research: docs/research/higgsfield-studios.md §2.
+ * page, the server (src/server/shorts.ts) and the tests. Research: docs/research/higgsfield-studios.md §2,
+ * docs/research/fuobe-originals-recipes-5.md (studios[shorts]).
  */
 import { scenePoster, type PresetPreview, type PreviewFx, type PreviewScene } from "../preset-cards";
 import type { ChainSlot, Engine, Generation, GenerationRequest } from "./types";
@@ -24,8 +30,13 @@ export const SHORTS = {
   openFps: 16,
   openMaxFrames: 81,
   maxReferences: 10,
-  /** Qwen-Image-Edit takes the frame plus two references. */
+  /** Qwen-Image-Edit takes the frame plus two references (the Original's first frame, on both engines). */
   openReferences: 2,
+  /**
+   * Fuobe Shorts in the cloud: fal's Wan 2.2 Fun VACE makes 17–241 frames at 5–30 fps, matching its input clip's count and
+   * rate. A clip above 30 fps is worked at half (a third…) its rate and brought back (temporal_downsample_factor).
+   */
+  original: { minFrames: 17, maxFrames: 240, minFps: 5, maxFps: 30, billFps: 16 },
   accept: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm",
 } as const;
 
@@ -72,15 +83,21 @@ export const SHORTS_LANGUAGES = [
   "Vietnamese",
 ] as const;
 
-/** Restyle models per engine; the first is the default (Gemini Omni Flash is Higgsfield's Shorts engine). */
+/** Shorts Studio's Original (O9): the open Shorts chain on both engines. */
+export const SHORTS_ORIGINAL = "fuobe-shorts";
+
+/**
+ * Restyle models per engine; the first is the default: Fuobe Shorts. Gemini Omni Flash (Higgsfield's Shorts engine) and
+ * the other partner models stay as choices in the cloud.
+ */
 export const SHORTS_MODELS: Record<Engine, string[]> = {
-  cloud: ["gemini-omni-flash", "kling-o3-4k-edit", "happy-horse-video-edit", "lucy-edit-pro", "runway-aleph-2", "ltx-2-3-restyle", "wan-2-7"],
-  open: ["oss-wan22-vace-restyle"],
+  cloud: [SHORTS_ORIGINAL, "gemini-omni-flash", "kling-o3-4k-edit", "happy-horse-video-edit", "lucy-edit-pro", "runway-aleph-2", "ltx-2-3-restyle", "wan-2-7"],
+  open: [SHORTS_ORIGINAL],
 };
 
-/** The helper models of the pipeline. */
+/** The helper models of the pipeline (the cloud Original's first frame: `still` takes it, `frame` restyles it). */
 export const SHORTS_TOOLS = {
-  cloud: { cut: "trim-video", trim: "trim-video", fit: "scale-video", join: "join-clips", mux: "merge-audio-video", joinMax: 24 },
+  cloud: { cut: "trim-video", trim: "trim-video", fit: "scale-video", still: "extract-frame", frame: "qwen-image-edit-2511-cloud", join: "join-clips", mux: "merge-audio-video", joinMax: 24 },
   open: { cut: "oss-segment", trim: "oss-trim", frame: "oss-qwen-edit", join: "oss-join-clips", mux: "oss-mux", joinMax: 4 },
 } as const;
 
@@ -343,8 +360,46 @@ export function planOpenSegments(range: ShortsRange, fps: number = SHORTS.openFp
   return out;
 }
 
-export function planSegments(range: ShortsRange, engine: Engine): ShortsSegment[] {
-  return engine === "open" ? planOpenSegments(range) : planCloudSegments(range);
+/**
+ * fal's Wan 2.2 Fun VACE works at up to 30 fps: a faster clip is worked at a whole fraction of its rate and brought back
+ * (its temporal_downsample_factor: 1 skips every other frame). 0 for 30 fps and below.
+ */
+export function vaceDownsample(fps: number | undefined): number {
+  return fps && fps > SHORTS.original.maxFps + 0.01 ? Math.ceil(fps / SHORTS.original.maxFps - 1e-6) - 1 : 0;
+}
+
+/**
+ * The longest segment Fuobe Shorts takes in the cloud: up to 241 frames as fal works them (240 here, so a rounded cut
+ * never tips over), at most 10 s. An unknown rate counts as 30 fps (8 s segments).
+ */
+export function originalSegmentSeconds(fps?: number): number {
+  const rate = fps && fps > 0 ? fps / (vaceDownsample(fps) + 1) : SHORTS.original.maxFps;
+  return Math.min(SHORTS.cloudSegmentSeconds, Math.floor((SHORTS.original.maxFrames / rate) * 100) / 100);
+}
+
+/** Segments for a model: the open engine's 81-frame windows, Fuobe Shorts' frame-limited pieces, or ≤10 s cuts. */
+export function planSegments(range: ShortsRange, engine: Engine, model?: { modelId?: string; fps?: number }): ShortsSegment[] {
+  if (engine === "open") return planOpenSegments(range);
+  return model?.modelId === SHORTS_ORIGINAL ? planCloudSegments(range, originalSegmentSeconds(model.fps)) : planCloudSegments(range);
+}
+
+/**
+ * What fal's Wan 2.2 Fun VACE won't take in a Fuobe Shorts cloud piece, if anything: fewer than 17 frames as it works them,
+ * or a clip under 5 fps. Said before anything runs (the cut, the first frame and its edit would be paid for, then refused).
+ * Null when the clip's rate isn't known.
+ */
+export function originalSegmentProblem(seconds: number, fps?: number): string | null {
+  if (!fps || !(fps > 0)) return null;
+  const o = SHORTS.original;
+  if (fps < o.minFps - 0.01) return `Wan 2.2 Fun VACE needs a clip of at least ${o.minFps} fps (this one is ${+fps.toFixed(2)} fps)`;
+  const rate = fps / (vaceDownsample(fps) + 1);
+  if (Math.floor(seconds * rate + 1e-6) < o.minFrames) return `Wan 2.2 Fun VACE needs at least ${o.minFrames} frames: select at least ${Math.ceil((o.minFrames / rate) * 10) / 10} s of this ${+fps.toFixed(2)} fps clip`;
+  return null;
+}
+
+/** The seconds fal bills for a Fuobe Shorts segment: its frames ÷ 16 ("video seconds"); an unknown rate counts as 30 fps. */
+export function originalBilledSeconds(seconds: number, fps?: number): number {
+  return Math.round(((seconds * (fps && fps > 0 ? fps : SHORTS.original.maxFps)) / SHORTS.original.billFps) * 1e6) / 1e6;
 }
 
 /** Groups of at most `max` consecutive items, as even as possible (5 by 4 → 3 + 2, never 4 + 1). */
@@ -378,7 +433,8 @@ export interface PlanStep {
 export interface ShortsPlanInput {
   engine: Engine;
   title: string;
-  source: { url: string; duration?: number; hasAudio?: boolean; width?: number; height?: number };
+  /** fps: the clip's own frame rate (Fuobe Shorts in the cloud: its pieces are frame-limited and billed on frames). */
+  source: { url: string; duration?: number; hasAudio?: boolean; width?: number; height?: number; fps?: number };
   range: ShortsRange;
   look: ShortsLook;
   aspectRatio: ShortsRatio;
@@ -390,7 +446,7 @@ export interface ShortsPlanInput {
    */
   keepShape?: boolean;
   language: string;
-  /** The restyle model (cloud: SHORTS_MODELS.cloud; open: oss-wan22-vace-restyle). */
+  /** The restyle model (SHORTS_MODELS; Fuobe Shorts runs as a chain of its own on both engines). */
   modelId: string;
   /** How many reference images the restyle model takes (0: it restyles from words only). */
   maxRefs: number;
@@ -409,6 +465,9 @@ export interface TakeKeys {
   cut: string;
   /** Cloud: the cut cropped to the output ratio. */
   fit?: string;
+  /** Fuobe Shorts in the cloud: the segment's first frame, taken out of the cut (the open cut makes it itself). */
+  still?: string;
+  /** The first frame in the new look (Fuobe Shorts, both engines). */
   frame?: string;
   look: string;
 }
@@ -419,12 +478,15 @@ const ratioParams = (input: Pick<ShortsPlanInput, "engine" | "aspectRatio" | "ke
 
 const segLabel = (s: ShortsSegment, n: number, what: string) => ({ label: `Segment ${s.index + 1} of ${n} · ${what}`, index: s.index, of: n });
 
-/** Which references go where: the cloud model's own reference slot, or images 2–3 of the open first-frame edit. */
-export function refsFor(input: Pick<ShortsPlanInput, "engine" | "look" | "maxRefs">): string[] {
+/** Which references go where: the cloud model's own reference slot, or images 2–3 of the first-frame edit (open, and Fuobe Shorts). */
+export function refsFor(input: Pick<ShortsPlanInput, "engine" | "look" | "maxRefs" | "modelId">): string[] {
   const refs = input.look.references ?? [];
-  if (input.engine === "open") return refs.slice(0, SHORTS.openReferences);
+  if (input.engine === "open" || input.modelId === SHORTS_ORIGINAL) return refs.slice(0, SHORTS.openReferences);
   return refs.slice(0, Math.max(0, input.maxRefs));
 }
+
+/** The engine an Original's step runs on (a model on one engine ignores it). */
+const originalEngine = (input: Pick<ShortsPlanInput, "engine" | "modelId">) => (input.modelId === SHORTS_ORIGINAL ? { engine: input.engine } : {});
 
 /** One take of one segment: cut it out, (open: restyle its first frame,) restyle it. */
 export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: number, suffix = ""): { steps: PlanStep[]; keys: TakeKeys } {
@@ -468,6 +530,7 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
           key: keys.look,
           request: {
             ...base,
+            ...originalEngine(input),
             modelId: input.modelId,
             op: "v2v",
             prompt: segmentPrompt(input.look),
@@ -481,6 +544,7 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
     };
   }
   const fit = !input.keepShape && !input.reframes && needsFit(input.source, input.aspectRatio);
+  if (input.modelId === SHORTS_ORIGINAL) return planOriginalTake(input, seg, total, k, fit, refs);
   const keys: TakeKeys = { cut: k("cut"), ...(fit ? { fit: k("fit") } : {}), look: k("look") };
   const seconds = seg.end - seg.start;
   return {
@@ -522,6 +586,89 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
         },
         after: [keys.fit ?? keys.cut],
         chain: [{ slot: "video" }],
+      },
+    ],
+  };
+}
+
+/**
+ * Fuobe Shorts in the cloud: cut the segment (cropped to the output ratio when it isn't), take its first frame, draw it in
+ * the look with Qwen-Image-Edit 2511 (the look's references as images 2 and 3), then fal's Wan 2.2 Fun VACE carries that
+ * frame through every frame of the cut by depth, keeping its frame count and rate (a clip above 30 fps is worked at a
+ * fraction of its rate and brought back). Billed on frames ÷ 16, like every fal Wan VACE route.
+ */
+function planOriginalTake(input: ShortsPlanInput, seg: ShortsSegment, total: number, k: (what: string) => string, fit: boolean, refs: string[]): { steps: PlanStep[]; keys: TakeKeys } {
+  const t = SHORTS_TOOLS.cloud;
+  const base = { feature: SHORTS_FEATURE, batchTitle: input.title };
+  const helper = { feature: SHORTS_STEP_FEATURE, batchTitle: input.title };
+  const seed = input.seed !== undefined ? { seed: input.seed } : {};
+  const keys: TakeKeys = { cut: k("cut"), ...(fit ? { fit: k("fit") } : {}), still: k("still"), frame: k("frame"), look: k("look") };
+  const clip = keys.fit ?? keys.cut;
+  const seconds = seg.end - seg.start;
+  const downsample = vaceDownsample(input.source.fps);
+  return {
+    keys,
+    steps: [
+      {
+        key: keys.cut,
+        request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: seg.start, endTime: seg.end }, step: segLabel(seg, total, "cut") },
+      },
+      ...(keys.fit
+        ? [
+            {
+              key: keys.fit,
+              request: {
+                ...helper,
+                modelId: t.fit,
+                op: "reframe" as const,
+                params: { aspectRatio: input.aspectRatio, extra: { ...fitSize(input.aspectRatio) } },
+                step: segLabel(seg, total, `crop to ${input.aspectRatio}`),
+              },
+              after: [keys.cut],
+              chain: [{ slot: "video" as const }],
+            },
+          ]
+        : []),
+      {
+        key: keys.still!,
+        request: { ...helper, modelId: t.still, op: "frame", params: { extra: { frame_type: "first" } }, step: segLabel(seg, total, "first frame") },
+        after: [clip],
+        chain: [{ slot: "video" }],
+      },
+      {
+        key: keys.frame!,
+        request: {
+          ...helper,
+          modelId: t.frame,
+          op: "edit",
+          prompt: firstFramePrompt(input.look, input.language, refs.length),
+          ...(refs.length ? { inputs: { images: refs } } : {}),
+          params: { ...seed },
+          step: segLabel(seg, total, "first frame in the look"),
+        },
+        after: [keys.still!],
+        chain: [{ slot: "images", position: "first" }],
+      },
+      {
+        key: keys.look,
+        request: {
+          ...base,
+          engine: "cloud",
+          modelId: input.modelId,
+          op: "v2v",
+          prompt: segmentPrompt(input.look),
+          // fal bills frames ÷ 16 as "video seconds" (duration); sourceDuration is the cut's own length.
+          params: {
+            duration: originalBilledSeconds(seconds, input.source.fps),
+            sourceDuration: r3(seconds),
+            ...(input.resolution ? { resolution: input.resolution } : {}),
+            ...seed,
+            ...(downsample ? { extra: { temporal_downsample_factor: downsample } } : {}),
+          },
+          step: segLabel(seg, total, "restyle"),
+        },
+        after: [clip, keys.frame!],
+        chain: [{ slot: "video" }, { slot: "images", position: "first" }],
       },
     ],
   };
@@ -622,7 +769,7 @@ export function planStitch(input: ShortsPlanInput, clips: ClipRef[], suffix = ""
 
 /** The whole session: every segment's first take, the stitch and the soundtrack. */
 export function planShorts(input: ShortsPlanInput): { segments: ShortsSegment[]; steps: PlanStep[]; takes: TakeKeys[]; final?: string } {
-  const segments = planSegments(input.range, input.engine);
+  const segments = planSegments(input.range, input.engine, { modelId: input.modelId, fps: input.source.fps });
   const takes = segments.map((s) => planTake(input, s, segments.length));
   const stitch = planStitch(
     input,
@@ -639,6 +786,8 @@ export interface ShortsTake {
   cut: string;
   /** Cloud: the cut cropped to the output ratio. */
   fit?: string;
+  /** Fuobe Shorts in the cloud: the segment's first frame. */
+  still?: string;
   frame?: string;
   look: string;
   createdAt: number;
@@ -666,7 +815,7 @@ export interface ShortsSession {
   engine: Engine;
   batchId: string;
   look: ShortsLook;
-  source: { url: string; name?: string; duration?: number; hasAudio?: boolean; width?: number; height?: number };
+  source: { url: string; name?: string; duration?: number; hasAudio?: boolean; width?: number; height?: number; fps?: number };
   range: ShortsRange;
   settings: { aspectRatio: ShortsRatio; language: string; modelId: string; resolution?: string; maxRefs: number; reframes?: boolean };
   segments: ShortsSessionSegment[];
@@ -747,10 +896,11 @@ export function chainState(steps: { g?: Generation; label: string }[]): ChainSta
 }
 
 /** A take's steps with their labels. */
-export function takeSteps(t: Pick<ShortsTake, "cut" | "fit" | "frame" | "look">, gens: Record<string, Generation>): { g?: Generation; label: string }[] {
+export function takeSteps(t: Pick<ShortsTake, "cut" | "fit" | "still" | "frame" | "look">, gens: Record<string, Generation>): { g?: Generation; label: string }[] {
   return [
     { g: gens[t.cut], label: "Cutting the segment" },
     ...(t.fit ? [{ g: gens[t.fit], label: "Cropping the segment" }] : []),
+    ...(t.still ? [{ g: gens[t.still], label: "Taking the first frame" }] : []),
     ...(t.frame ? [{ g: gens[t.frame], label: "Restyling the first frame" }] : []),
     { g: gens[t.look], label: "Restyling" },
   ];

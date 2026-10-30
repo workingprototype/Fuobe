@@ -8635,12 +8635,13 @@
    "price": "For every second of 720p video you generated, you will be charged $0.28/second ($0.14 per input second and 0.14 per output second). For 1080p video you will be charged $0.56/second.",
    "pricing": {
     "usd": 0.28,
-    "unit": "second (720p, input+output)",
-    "note": "For every second of 720p video you generated, you will be charged $0.28/second ($0.14 per input second and 0.14 per output second). For 1080p video you will be charged $0.56/second."
+    "unit": "second (720p, per second of the clip: $0.14 per input second + $0.14 per output second, already summed)",
+    "note": "For every second of 720p video you generated, you will be charged $0.28/second ($0.14 per input second and 0.14 per output second). For 1080p video you will be charged $0.56/second.",
+    "correction": "2026-10-29 (fixes-5): $0.28/s (720p) and $0.56/s (1080p) are the whole price per second of the clip, input and output halves together; an earlier reading billed the input seconds again on top (about twice the real price)."
    },
    "replicateEquivalent": null,
    "license": "commercial",
-   "notes": "Takes 3-60 s sources (the longest window of any edit model found), <=5 reference images (@Image1..), audio_setting auto|origin (keep the original track). $0.28/s at 720p (input+output seconds), $0.56/s at 1080p. Best fit for Shorts Studio's 'restyle your footage' without splitting.",
+   "notes": "Takes 3-60 s sources (the longest window of any edit model found), <=5 reference images (@Image1..), audio_setting auto|origin (keep the original track). $0.28/s at 720p, $0.56/s at 1080p, per second of the clip (fal's $0.14 per input second + $0.14 per output second, already summed; corrected 2026-10-29). The output matches the input but is capped at 15 s (longer inputs are cut to their first 15 s), so cut longer clips first. Best fit for Shorts Studio's 'restyle your footage' without splitting.",
    "verified": true,
    "sourceUrl": "https://fal.ai/models/alibaba/happy-horse/video-edit/api",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=alibaba/happy-horse/video-edit",

@@ -56,6 +56,7 @@ import {
   presetModel,
   presetOriginal,
   presetParams,
+  postStepCost,
   prestepCost,
   pushRecent,
   settingsShape,
@@ -222,9 +223,18 @@ export function Composer({ docked }: { docked: boolean }) {
   // Upscale hub: the attached clip's header (length, size, frame rate). Its length prices per-second tools and
   // travels with the request (params.sourceDuration); a clip swapped since a Reuse never keeps the old one's.
   const facts = useClipFacts(config.clipFacts && !typed.slots.video?.uploading ? typed.slots.video?.ref : undefined).data;
+  // Lipsync: a talking avatar is as long as its voice (the voice's header prices it and goes with the request); not while a
+  // video is attached (lip re-sync keeps the clip's length).
+  const voiceRef = config.voiceFacts && !typed.slots.video?.ref && !typed.slots.audio?.uploading ? typed.slots.audio?.ref : undefined;
+  const voice = useClipFacts(voiceRef).data;
   const draft = useMemo(
-    () => (config.clipFacts ? { ...typed, params: { ...typed.params, sourceDuration: typed.slots.video?.ref ? facts?.duration : undefined } } : typed),
-    [config.clipFacts, typed, facts?.duration],
+    () =>
+      config.clipFacts
+        ? { ...typed, params: { ...typed.params, sourceDuration: typed.slots.video?.ref ? facts?.duration : undefined } }
+        : config.voiceFacts
+          ? { ...typed, params: { ...typed.params, sourceDuration: voiceRef ? voice?.duration : undefined } }
+          : typed,
+    [config.clipFacts, config.voiceFacts, typed, facts?.duration, voiceRef, voice?.duration],
   );
   const liveElements = useElements().data;
   const elements = (hydrated && liveElements) || EMPTY;
@@ -425,6 +435,8 @@ export function Composer({ docked }: { docked: boolean }) {
       cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op, plan.loras.length > 0 && routesFor(plan.model, plan.op).some((r) => !!r.loraEndpoint));
       // A relight effect relights the start frame first (free on the GPU, about $0.04 in the cloud).
       if (cost !== null) cost += prestepCost(preset, plan.model.id, engine);
+      // PixeletedFace pixelates each picture's faces afterwards ($0.01 a picture in the cloud, free on the GPU).
+      if (cost !== null) cost += postStepCost(plan.model.id, planned.presetId, engine, planned.params?.numOutputs ?? 1, catalog.getModel);
     } catch (e) {
       planError = (e as Error).message;
     }

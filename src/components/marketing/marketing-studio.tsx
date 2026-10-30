@@ -179,7 +179,7 @@ function TextPanel({ draft, set, template }: { draft: Draft; set: (p: Partial<Dr
       open={open}
       onOpenChange={setOpen}
       title="Words on the image"
-      description="Set exactly, letter for letter: cloud models draw them; open-source results get them set on top in your brand fonts."
+      description="Set exactly, letter for letter: Fuobe Marketing Image and open-source results get them set on top in your brand fonts; GPT Image, Ideogram and Recraft draw them."
       trigger={
         <button type="button" className={cn(chipBase, has ? chipOn : chipIdle, "max-w-44")} aria-label="Headline and button text">
           <Type className="size-3.5" />
@@ -377,7 +377,7 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
         <div className="pt-6 pb-2 text-center sm:pt-10">
           <h2 className="font-heading text-display text-balance">Turn a product into ready-to-post content</h2>
           <p className="mx-auto mt-2 max-w-xl text-[15px] text-muted-foreground">
-            Product shots, motion, UGC presenters, ads, posters and listings — from Fuobe&apos;s templates, on {engine === "open" ? "your own GPU" : "cloud models"}.
+            Product shots, motion, UGC presenters, ads, posters and listings — from Fuobe&apos;s templates, on {engine === "open" ? "your own GPU, free" : "Fuobe Marketing Image or partner models in the cloud"}.
           </p>
         </div>
         <div role="tablist" aria-label="View" className="mx-auto mt-4 flex w-fit rounded-full bg-muted p-0.5">

@@ -49,6 +49,7 @@ const STARTS: [InfluencerStart, string][] = [
 ];
 
 const CLOUD_MODELS: { id: string; label: string; note: string }[] = [
+  { id: "fuobe-soul", label: "Fuobe Soul", note: "Fuobe Original: a wide sheet in Soul's Realistic look; your face or clothing then go on with Qwen-Image-Edit 2511" },
   { id: "nano-banana-pro", label: "Nano Banana Pro", note: "A wide 2K sheet from your picks, keeps a face and clothing closely" },
   { id: "seedream-5-pro", label: "Seedream 5.0 Pro", note: "Photoreal, from the same picks" },
 ];
@@ -394,7 +395,7 @@ export function InfluencerBuilder() {
               </div>
             ) : (
               <p className="text-[12.5px] text-muted-foreground">
-                Open source: Z-Image Turbo draws the sheet (the Soul Cast sheet workflow); with a photo or clothing, Qwen-Image-Edit 2511 then puts them on it. <span className="font-medium text-foreground">Free</span> on your GPU.
+                Fuobe Soul on your GPU: Z-Image Turbo draws the sheet in Soul&apos;s Realistic look (the Soul Cast sheet workflow); with a photo or clothing, Qwen-Image-Edit 2511 then puts them on it. <span className="font-medium text-foreground">Free</span> on your GPU.
               </p>
             )}
             <RunInfo preview={blocker ? undefined : (settled ? preview.data : undefined)} loading={preview.isFetching} blocker={blocker} />

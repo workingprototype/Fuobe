@@ -139,8 +139,15 @@ export interface TemplateCardData {
   description: string;
   icon: string;
   hue: number;
+  /** The picker's section (Effects 2.0 chains); none: the workflows. */
+  group?: string;
   byEngine: Record<Engine, { outline: Outline; models: string[] }>;
 }
+
+/** What each template section is, under its heading. */
+const GROUP_NOTES: Record<string, string> = {
+  "Effects 2.0 chains": "A photo, an image edit that sets the scene, then Fuobe DoP animates it with the effect. Open weights on both engines: free on your GPU.",
+};
 
 function TemplateCard({ t, engine, onUse, busy }: { t: TemplateCardData; engine: Engine; onUse: () => void; busy: boolean }) {
   const { outline, models } = t.byEngine[engine];
@@ -280,9 +287,25 @@ function ListInner({ templates }: { templates: TemplateCardData[] }) {
           </Empty>
         )
       ) : (
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {templates.map((t) => (
-            <TemplateCard key={t.id} t={t} engine={engine} busy={creating === t.id} onUse={() => void start(t.id, { templateId: t.id, engine })} />
+        <div className="mt-6 space-y-10">
+          {[...new Set(templates.map((t) => t.group ?? ""))].map((group) => (
+            <section key={group || "workflows"} aria-labelledby={group ? `tpl-${group.replace(/\W+/g, "-")}` : undefined}>
+              {group && (
+                <div className="mb-3">
+                  <h2 id={`tpl-${group.replace(/\W+/g, "-")}`} className="font-heading text-[22px] leading-tight">
+                    {group}
+                  </h2>
+                  {GROUP_NOTES[group] && <p className="mt-0.5 text-[13px] text-muted-foreground">{GROUP_NOTES[group]}</p>}
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {templates
+                  .filter((t) => (t.group ?? "") === group)
+                  .map((t) => (
+                    <TemplateCard key={t.id} t={t} engine={engine} busy={creating === t.id} onUse={() => void start(t.id, { templateId: t.id, engine })} />
+                  ))}
+              </div>
+            </section>
           ))}
         </div>
       )}

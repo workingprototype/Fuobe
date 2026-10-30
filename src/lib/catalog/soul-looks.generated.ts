@@ -785,6 +785,7 @@ export const SOUL_LOOK_CARDS: SoulLookCard[] = [
     "categories": [],
     "description": "Retro early-internet portrait with the face pixelated into large blocks.",
     "hue": 15,
+    "post": "face-mosaic",
     "civitai": false,
     "hd": false
   },

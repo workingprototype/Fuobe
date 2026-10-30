@@ -392,7 +392,7 @@ function mixProblem(modes: StepMode[], cannot: boolean, input: GenjutsuPlanInput
   const both = ownIds.filter((id) => helperIds.includes(id));
   const key = !own.length ? `a ${label(helperIds)} key` : !helpers.length ? `a ${label(ownIds)} key` : both.length ? `a ${label(both.slice(0, 1))} key` : `a ${label(helperIds)} key and a ${label(ownIds)} key`;
   const around = own.length ? otherModel(input) : undefined;
-  return `${parts.join(", and ")} — add ${key} in Settings → API keys${around ? `, or ${around}` : ""}`;
+  return `${parts.join(", and ")} — add ${key} in Settings → Paid API configuration${around ? `, or ${around}` : ""}`;
 }
 
 /** Another model for the same job that runs with the keys set now (the way around a missing key). */

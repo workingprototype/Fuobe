@@ -19,7 +19,7 @@ earlier research files. scripts/gen-cloud-models.py reads both lists.
 Run:  python3 scripts/fetch-hosted-schemas.py
       python3 scripts/fetch-hosted-schemas.py --only fal-ai/z-image/turbo/image-to-image/lora   (one endpoint, the rest kept)
       python3 scripts/fetch-hosted-schemas.py --trainers                                         (only the trainers' outputs)
-      python3 scripts/fetch-hosted-schemas.py --base-only [endpoint …]                           (Genjutsu's plain endpoints, the rest kept)
+      python3 scripts/fetch-hosted-schemas.py --base-only [endpoint …]                           (Genjutsu's plain endpoints, or O11's / BASE ones by id, the rest kept)
       python3 scripts/fetch-hosted-schemas.py --partner                                          (partner routes in partnerEndpoints, the rest kept)
 """
 import datetime
@@ -56,6 +56,9 @@ LORA = {
     "fal-ai/z-image/turbo/lora": {k: v for k, v in T2I.items() if k != "negativePrompt"},
     # Fuobe Soul's edit route (O2): image-to-image with the look's LoRAs; image_size "auto" keeps the picture's shape.
     "fal-ai/z-image/turbo/image-to-image/lora": {**{k: v for k, v in T2I.items() if k not in ("negativePrompt", "aspectRatio")}, "image": "image_url"},
+    # Fuobe Mixed Media's frames (O9): each frame drawn again under its own outlines (preprocess canny) with the look's
+    # LoRAs at a fixed seed; image_size is sent as {width, height} from the clip's shape and the tier.
+    "fal-ai/z-image/turbo/controlnet/lora": {**{k: v for k, v in T2I.items() if k not in ("negativePrompt", "aspectRatio")}, "image": "image_url"},
     "fal-ai/qwen-image-2512/lora": T2I,
     "prunaai/z-image-turbo-lora": {"prompt": "prompt", "width": "width", "height": "height", "seed": "seed"},
     # Soul ID on every base fal trains (O3, o/soul-id): the models a LoRA trained on FLUX.1 [dev], FLUX.1 Krea [dev],
@@ -70,6 +73,9 @@ LORA = {
     # Labs' Character Swap LoRA. The part of the clip goes as Video 1, the character (and the anchor frame) as Image 1, 2.
     "minimax/h3/reference-to-video/lora": {"prompt": "prompt", "images": "reference_image_urls", "video": "reference_video_urls",
                                            "duration": "duration", "resolution": "resolution", "seed": "seed", "loras": "loras"},
+    # Upscale's SDR to HDR with LoRAs (build plan O11): the LTX-2.3 quality HDR pass, its /lora twin taken when a LoRA rides along.
+    "fal-ai/ltx-2.3-quality/hdr/lora": {"prompt": "prompt", "video": "video_url", "resolution": "resolution", "numFrames": "num_frames", "fps": "frames_per_second",
+                                        "generateAudio": "generate_audio", "seed": "seed", "negativePrompt": "negative_prompt", "loras": "loras"},
 }
 # LoRA endpoints that join hostedLoraEndpoints with this script (the record is made when it isn't there yet).
 NEW_LORA = {
@@ -86,6 +92,20 @@ NEW_LORA = {
         "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3/reference-to-video/lora",
         "pageUrl": "https://fal.ai/models/minimax/h3/reference-to-video/lora",
         "pathAccepts": "URL or HuggingFace repo id (owner/repo) of the LoRA weights.",
+    },
+    "fal-ai/ltx-2.3-quality/hdr/lora": {
+        "provider": "fal", "id": "fal-ai/ltx-2.3-quality/hdr/lora", "family": "LTX-2.3 quality", "op": "sdr-to-hdr",
+        "roleForOriginals": "Upscale's SDR to HDR (build plan O11): the hosted LTX-2.3 HDR pass when LoRAs ride along (the plain fal-ai/ltx-2.3-quality/hdr otherwise)",
+        "lora": {"field": "loras", "required": True, "itemFields": "transformer:string default=\"both\" enum=[\"high\", \"low\", \"both\"]; path:string; scale:number default=1 minimum=0 maximum=2", "maxCount": 3},
+        "keyFieldsRequired": ["loras", "prompt", "video_url"],
+        "price": "Your request will cost $0.0027075 per megapixel of generated HDR video data (width × height × frames), rounded up. For example, if you generate 121 HDR frames at 1280 × 720, your total generated output is ≈112 MP, and your request will cost $0.3032.",
+        "baseLicence": "LTX-2 / LTX-2.x Community License",
+        "commercialWeights": True,
+        "licenceNote": "Free for companies under US$10M annual revenue; above that a paid licence (github.com/Lightricks/LTX-2 LICENSE-2, LICENSE-2_x, section 2.1). Information, never a gate",
+        "status": "active",
+        "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/ltx-2.3-quality/hdr/lora",
+        "pageUrl": "https://fal.ai/models/fal-ai/ltx-2.3-quality/hdr/lora",
+        "pathAccepts": "Direct HTTP(S) download URL of the LoRA file (.safetensors). Max size: 3 GB.",
     },
 }
 BASE = {
@@ -111,6 +131,17 @@ GENJUTSU = {
     "fal-ai/wan-vace-14b/inpainting": ("video-swap", {**VACE14, "mask": "mask_video_url"}),
     "fal-ai/wan-22-vace-fun-a14b/depth": ("v2v", {**VACE14, "image": "first_frame_url"}),
     "minimax/h3-max/recast": ("video-swap", {"prompt": "prompt", "video": "video_url", "images": "reference_image_urls", "resolution": "resolution", "seed": "seed"}),
+}
+
+# Build plan O11 (rebranded open tools, Speak and finishing). Fuobe Angles' hosted half is fal's LoRA-gallery route of
+# Qwen-Image-Edit 2509 with dx8152's Multiple-angles LoRA (camera fields, no prompt field); Fuobe Speak · Motion's is
+# Wan 2.2 Speech-to-Video; the face mosaic's hosted step is SAM 3.1's image mask (the browser pixelates under it).
+# Read with --base-only <ids> (added to hostedBaseEndpoints; the records above are kept as they are).
+O11 = {
+    "fal-ai/qwen-image-edit-2509-lora-gallery/multiple-angles": ("edit", {"images": "image_urls", "negativePrompt": "negative_prompt", "numOutputs": "num_images", "seed": "seed"}),
+    "fal-ai/wan/v2.2-14b/speech-to-video": ("avatar", {"prompt": "prompt", "image": "image_url", "audio": "audio_url", "negativePrompt": "negative_prompt",
+                                                      "resolution": "resolution", "numFrames": "num_frames", "fps": "frames_per_second", "seed": "seed"}),
+    "fal-ai/sam-3-1/image": ("face-mosaic", {"prompt": "prompt", "image": "image_url"}),
 }
 
 # Partner models' fal routes that take over a route Fuobe dropped with its third cloud provider (build plan O7: Happy
@@ -228,6 +259,10 @@ def fal_prices(endpoint):
     return "; ".join(dict.fromkeys(lines[:6])) or None
 
 
+# What an answer holds when it's neither pictures (t2i, edit) nor a video: SAM 3.1's face masks (the face mosaic).
+OUTPUT_OF = {"face-mosaic": "masks[].url"}
+
+
 def base_record(ep, op, kf, price=None):
     inputs = fal(ep)
     missing = [f for f in kf.values() if f not in inputs]
@@ -235,7 +270,7 @@ def base_record(ep, op, kf, price=None):
         sys.exit(f"{ep}: keyFields {missing} are not inputs")
     print(f"{ep}: {len(inputs)} inputs")
     return {"provider": "fal", "endpoint": ep, "operation": op, "status": "active", "inputs": inputs, "keyFields": kf,
-            "output": "images[].url" if op in ("t2i", "edit") else "video.url", "price": price if price is not None else fal_price(ep), "verified": True,
+            "output": OUTPUT_OF.get(op) or ("images[].url" if op in ("t2i", "edit") else "video.url"), "price": price if price is not None else fal_price(ep), "verified": True,
             "schemaUrl": f"https://fal.ai/api/openapi/queue/openapi.json?endpoint_id={ep}", "checked": TODAY}
 
 
@@ -280,10 +315,10 @@ def main():
         ids = sys.argv[sys.argv.index("--base-only") + 1:] or list(GENJUTSU)
         records = {e["endpoint"]: e for e in data.get("hostedBaseEndpoints") or []}
         for ep in ids:
-            op, kf = GENJUTSU.get(ep) or BASE.get(ep) or (None, None)
+            op, kf = GENJUTSU.get(ep) or O11.get(ep) or BASE.get(ep) or (None, None)
             if not op:
-                sys.exit(f"{ep} is in neither GENJUTSU nor BASE")
-            records[ep] = base_record(ep, op, kf, fal_prices(ep) if ep in GENJUTSU else None)
+                sys.exit(f"{ep} is in none of GENJUTSU, O11 and BASE")
+            records[ep] = base_record(ep, op, kf, fal_prices(ep) if ep in GENJUTSU or ep in O11 else None)
         data["hostedBaseEndpoints"] = list(records.values())
         FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         return
@@ -303,7 +338,8 @@ def main():
         if missing:
             sys.exit(f"{ep}: keyFields {missing} are not inputs")
         rec["keyFields"] = kf
-        rec["output"] = "images[].url" if rec["op"] in ("t2i", "edit") else "video.url"
+        # Image-to-image, controlled and inpainting routes return pictures too (only the video ops return video.url).
+        rec["output"] = "images[].url" if rec["op"] in ("t2i", "edit", "i2i", "i2i-control", "inpaint") else "video.url"
         if rec["provider"] == "replicate":
             rec["output"] = "output[]"
         rec["inputsChecked"] = TODAY

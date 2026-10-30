@@ -24,8 +24,8 @@ export interface LoraEntry extends LoraRef {
   base: string;
   /** direct = a public URL; civitai-token = civitai answers 401 without the user's key; hf-gated = accept the licence on Hugging Face first. */
   download: LoraDownload;
-  /** "look" (Soul looks) or the preset family it moves. */
-  group: "look" | "motion" | "effect";
+  /** "look" (Soul looks), the preset family it moves, or "adapter": a LoRA an Original's recipe always loads (Fuobe Try-On). */
+  group: "look" | "motion" | "effect" | "adapter";
   licence: LoraLicence;
   /** civitai model id (permissions are per model; the file is pinned by `version`). */
   civitaiModel?: string;

@@ -207,7 +207,7 @@ export function ModePicker({
         {smartOff && (
           <p className="mt-2 px-1 text-[12px] text-warning">
             Smart and the Claude models need an Anthropic API key —{" "}
-            <Link href="/settings#keys" className="underline underline-offset-2">
+            <Link href="/settings#text-ai" className="underline underline-offset-2">
               add one in Settings
             </Link>
             .

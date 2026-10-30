@@ -5,6 +5,7 @@ import type { PlannedJob } from "@/lib/assist";
 import { getModel } from "@/lib/catalog";
 import { routesFor } from "@/lib/catalog/plan";
 import { FACELESS_STYLE_IDS, STYLES } from "@/lib/catalog/faceless";
+import { FRAME_SEED, MIXED_ORIGINAL } from "@/lib/catalog/mixed-media";
 import { SHORTS_MODELS } from "@/lib/catalog/shorts";
 import type { ChainSlot, Engine, GenerationRequest, Operation } from "@/lib/catalog/types";
 import { TOOL_MODELS } from "@/lib/layers";
@@ -202,11 +203,21 @@ function layerSteps(i: LayersToolInput, ctx: ToolContext): PipelineStep[] {
 
 function restyleSteps(i: RestyleToolInput, ctx: ToolContext): PipelineStep[] {
   const refs = (i.references ?? []).slice(0, 4);
+  const modelId = pick(ctx, "kling-o3", MIXED_ORIGINAL, i.model_id);
+  // On your GPU: Fuobe Mixed Media's per-frame pass (every frame redrawn under its own outlines, one seed). Its graph
+  // reads no reference images; the style's words carry the look.
+  const original = modelId === MIXED_ORIGINAL;
   return labelled([
     {
       key: "restyle",
       label: "Restyled video",
-      request: req({ modelId: pick(ctx, "kling-o3", "oss-mixed-media", i.model_id), op: "v2v", prompt: i.style, inputs: { video: i.video, ...(refs.length && { images: refs }) } }),
+      request: req({
+        modelId,
+        op: "v2v",
+        prompt: i.style,
+        ...(original && { engine: "open" as const, params: { seed: FRAME_SEED } }),
+        inputs: { video: i.video, ...(refs.length && !original && { images: refs }) },
+      }),
     },
   ]);
 }

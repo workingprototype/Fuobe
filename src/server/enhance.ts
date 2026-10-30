@@ -116,6 +116,38 @@ export async function llmText(system: string, user: string, a: LlmImage[] | LlmT
   return null;
 }
 
+declare global {
+  var __fuobeOllamaVision: Map<string, { sees: boolean; at: number }> | undefined;
+}
+const VISION_TTL_MS = 10 * 60_000;
+
+/**
+ * Whether the LLM llmText would ask (with the same `ollamaOnly`) sees the pictures it is sent: Claude does; an Ollama
+ * model does when Ollama lists "vision" among its capabilities (qwen3-vl, gemma3…). A text-only model, an Ollama too
+ * old to say, or none answering: false, so nothing is judged by a model that only reads the words.
+ */
+export async function llmSeesImages(o: { ollamaOnly?: boolean } = {}): Promise<boolean> {
+  const backend = o.ollamaOnly && llmTextBackend() === "claude" ? "ollama" : llmTextBackend();
+  if (backend === "claude") return true;
+  if (backend !== "ollama") return false;
+  const url = getSetting("ollamaUrl").replace(/\/+$/, "");
+  const model = getSetting("ollamaModel");
+  const key = `${url} ${model}`;
+  const cache = (globalThis.__fuobeOllamaVision ??= new Map());
+  const known = cache.get(key);
+  if (known && Date.now() - known.at < VISION_TTL_MS) return known.sees;
+  try {
+    const res = await fetch(`${url}/api/show`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }), signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return false;
+    const j = (await res.json()) as { capabilities?: unknown };
+    const sees = Array.isArray(j.capabilities) && j.capabilities.includes("vision");
+    cache.set(key, { sees, at: Date.now() });
+    return sees;
+  } catch {
+    return false;
+  }
+}
+
 /** Deterministic fallback so the toggle always does something useful offline. */
 export function heuristicEnhance(prompt: string, kind: MediaKind, op: Operation): string {
   const p = prompt.trim().replace(/[.\s]+$/, "");

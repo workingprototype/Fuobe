@@ -89,4 +89,25 @@ describe("training jobs reach an end (S6)", () => {
     expect(getElement(t.elementId)?.status).toBe("ready");
     expect(state(fresh.id).status).toBe("queued");
   });
+  it("links a blocker to the Settings section that lifts it: the engine mode it names, else the trainer's connection", async () => {
+    const { describeTargets } = await import("@/server/training");
+    const { TRAINING_TARGETS, trainingSettingsHref } = await import("@/lib/catalog/training");
+    const fal = TRAINING_TARGETS.find((t) => t.provider === "fal" && t.engine === "cloud")!;
+    const gpu = TRAINING_TARGETS.find((t) => t.provider === "ai-toolkit")!;
+    setSetting("demoMode", "off");
+    try {
+      // "Paid APIs only": the GPU trainer says to change Settings → Engine mode, so the link goes there.
+      setSetting("engineMode", "cloud");
+      const [locked] = describeTargets([gpu]);
+      expect(locked.blocker).toMatch(/Settings → Engine mode/);
+      expect(trainingSettingsHref(locked)).toBe("/settings#engine");
+      setSetting("engineMode", "both");
+      const [aitk, falKey] = describeTargets([gpu, fal]);
+      expect(trainingSettingsHref(aitk)).toBe("/settings#training");
+      expect(trainingSettingsHref(falKey)).toBe("/settings#fal");
+    } finally {
+      setSetting("engineMode", "both");
+      setSetting("demoMode", "auto");
+    }
+  });
 });

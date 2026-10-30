@@ -2,7 +2,7 @@
   "$schema": "./case.schema.json",
   "suite": "speak",
   "title": "Fuobe Speak · talking portraits",
-  "description": "A portrait and a voice track you supply (local/speak/portrait.png of a consenting person, local/speak/voice.wav, 5–15 s of clear speech). Measures lip-sync (a mouth-motion / audio-envelope proxy; SyncNet when you install it, see the README), temporal consistency and identity against the portrait. O11 adds the InfiniteTalk 'Higgsfield-like defaults' preset and Wan 2.2 S2V route.",
+  "description": "A portrait and a voice track you supply (local/speak/portrait.png of a consenting person, local/speak/voice.wav, 5–15 s of clear speech). Measures lip-sync (a mouth-motion / audio-envelope proxy; SyncNet when you install it, see the README), temporal consistency and identity against the portrait. Fuobe Speak (O11) is InfiniteTalk with Higgsfield's Infinite Talk settings on the GPU (FusioniX, 15 motion frames, 25 steps, shift 10, guidance 5 / 5) and fal's InfiniteTalk in the cloud; the s2v variant is Fuobe Speak · Motion (Wan 2.2 S2V, a Speak v1-like route). The fast InfiniteTalk graphs stay the baseline until this suite promotes the recipe.",
   "original": "fuobe-speak",
   "kind": "video",
   "targets": {
@@ -12,8 +12,8 @@
   },
   "defaults": { "seeds": [1001], "metrics": ["lipsync", "temporal", "identity"], "timeoutSeconds": 3600 },
   "variants": {
-    "infinitetalk": { "description": "InfiniteTalk (open: native ComfyUI graph; cloud: fal-ai/infinitalk)" },
-    "s2v": { "description": "Wan 2.2 Speech-to-Video (Speak v1-like)", "models": { "open": ["oss-wan22-s2v"], "demo": ["oss-wan22-s2v"] } }
+    "infinitetalk": { "description": "Fuobe Speak: InfiniteTalk (open: kijai's wrapper with the FusioniX recipe; cloud: fal-ai/infinitalk), against the fast native graph and fal's own" },
+    "s2v": { "description": "Fuobe Speak · Motion: Wan 2.2 Speech-to-Video (a Speak v1-like route) on both engines", "models": { "open": ["fuobe-speak-motion", "oss-wan22-s2v"], "cloud": ["fuobe-speak-motion"], "demo": ["oss-wan22-s2v"] } }
   },
   "cases": [
     {

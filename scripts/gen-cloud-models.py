@@ -72,7 +72,7 @@ M = []
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
           sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
-          frame_step=None, original=False, sizes=None):
+          frame_step=None, original=False, sizes=None, keep_shape=False, licence=None, frame_fps=None, frame_multiple=None):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
@@ -85,16 +85,24 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     upscale_tiers: resolutions offered to an upscaler that takes a factor ("Original", "1080p", "4K"): FieldMap.upscaleFactor
     turns the tier into target ÷ the clip's shorter edge, within the factor field's limits.
     frame_step: video models whose length is a frame count (Wan 2.2: 4n+1, LTX: 8n+1): FieldMap.numFrames.step.
+    frame_fps: the frame rate a frame-count route renders at when its schema has no frame-rate field (InfiniteTalk: 25).
+    frame_multiple: a frame count that must be a multiple of n (Wan 2.2 S2V: 4n): FieldMap.numFrames.multiple.
     original: a Fuobe Original's cloud half (written to ORIGINAL_CLOUD; models.ts joins it to the ComfyUI routes).
     sizes: {tier: {aspect: [w, h]}}: exact sizes per resolution tier (Fuobe Soul's table): FieldMap.size.table, sent
     as width / height fields or as one {width, height} object field (fal's image_size); the tiers become the resolutions.
+    keep_shape: an edit model that also offers "auto" (keep image 1's shape and size): a route whose size field may be
+    left out for that (fal's nullable image_size) lists the shapes it takes (EnumField.accepts), so "auto" is left out
+    and the API follows the input image; a route whose own default matches the input (Replicate's match_input_image)
+    leaves it out the same way.
+    licence: the open weights' licence (ModelLicence) when no hosted LoRA endpoint the model runs on records it.
     A route's options dict may also set max_images (FieldMap.maxImages), note, loraEndpoint (the same model with LoRAs:
     FieldMap.loras comes from its research record) and pin (a Replicate model run by version: the research's version)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
                   ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or [],
-                  frame_step=frame_step, original=original, sizes=sizes))
+                  frame_step=frame_step, original=original, sizes=sizes, keep_shape=keep_shape, licence=licence, frame_fps=frame_fps,
+                  frame_multiple=frame_multiple))
 
 
 # ----- Image
@@ -192,7 +200,9 @@ model("qwen-image-edit-2511-cloud", "Qwen-Image-Edit 2511 (hosted)", "Alibaba Qw
       [("edit", "fal-ai/qwen-image-edit-2511", "fal", {"loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"}),
        ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]})], defaults={"aspectRatio": "1:1"},
       # Replicate's aspect_ratio has no 21:9, 3:2, 2:3, 5:4 or 4:5: each route lists what it takes (fit_values).
-      fit_values=True)
+      # "auto" keeps image 1's shape and size (the AI Influencer's sheet stays 16:9): fal's image_size and Replicate's
+      # aspect_ratio (match_input_image by default) are left out.
+      fit_values=True, keep_shape=True)
 # Qwen-Image-Edit 2509 with its LoRAs (O4): Fuobe DoP's relight effects relight the start frame with the 2509 Relight
 # LoRA before the clip is made. A helper step, not a picker model.
 model("qwen-image-edit-2509-cloud", "Qwen-Image-Edit 2509 (hosted)", "Alibaba Qwen", "qwen-image", "image",
@@ -254,6 +264,25 @@ model("fuobe-soul-cinema", "Fuobe Soul Cinema", "Fuobe Original", "fuobe-soul", 
       [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
        ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE})],
       original=True, sizes=SOUL_SIZES, defaults={"aspectRatio": "16:9", "resolution": "720p"})
+# ----- Originals (O10): Marketing Studio Image and Fashion Factory's try-on on hosted open weights
+# (docs/research/fuobe-originals-recipes-5.json studios[marketing]). models.ts joins each to its ComfyUI routes.
+# Fuobe Marketing Image: Qwen-Image-Edit 2511 with the product (and person, setting) as references, Qwen-Image 2512
+# without one; the format's template prompt is written by the Marketing plan, and the words of a headline are set
+# over the picture in the browser. The price is the edit's; a picture made without a product photo costs $0.02 per MP.
+model("fuobe-marketing-image", "Fuobe Marketing Image", "Fuobe Original", "fuobe-marketing", "image",
+      "Product shots, ads, posters and listings from your product photo: Qwen-Image-Edit 2511 with Fuobe's templates",
+      [("edit", "fal-ai/qwen-image-edit-2511", "fal", {"loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"}),
+       ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]}),
+       ("t2i", "fal-ai/qwen-image-2512", "fal", {"loraEndpoint": "fal-ai/qwen-image-2512/lora"})],
+      original=True, fit_values=True, defaults={"aspectRatio": "3:4"},
+      pricing=("megapixel", 0.03, "an edit; $0.02 per MP for a picture made without a product photo", {"withLoras": 0.035}))
+# Fuobe Try-On: FLUX.2 [klein] 4B edit with xocialize's try-on LoRA (adapterLoras tryon-klein-4b, Apache-2.0, so fal may
+# host it), the person image 1, the garment image 2, a bottom image 3. Every run carries the LoRA (ModelOptions.loras),
+# so it goes to the /lora endpoint: $0.01 per MP in and out, each photo resized to about 1 MP.
+model("fuobe-tryon", "Fuobe Try-On", "Fuobe Original", "fuobe-tryon", "image",
+      "Dresses the person in image 1 in the garment in image 2 (a bottom in image 3): FLUX.2 [klein] 4B with a try-on LoRA",
+      [("edit", "fal-ai/flux-2/klein/4b/edit", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/edit/lora"})],
+      original=True, pricing=("image", 0.03, "about 3 MP at $0.01: the photos in (each about 1 MP) and the picture out"))
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 
@@ -563,12 +592,17 @@ model("fuobe-genjutsu-swap-lite", "Fuobe Genjutsu Lite · Swap", "Fuobe Original
       [("video-swap", _VACE14, "fal", {"keys": {"mask": "mask_video_url"}, "fixed": {"resolution": "480p", "acceleration": "regular"}})],
       original=True, pricing=("second", 0.04, f"480p · {_FRAMES16}"), options={"resolutions": ["480p"]},
       api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "480p"})
+# fal's Wan 2.2 Fun VACE depth endpoint reads video_url as the depth control unless preprocess is on (its example input is
+# a precomputed depth-map video): Fuobe sends the RGB clip, so fal derives the depth itself (research
+# studios[shorts].original.cloud.fixedNote; unverified until the first live run).
+SHORTS_O = next(s for s in ORIGINALS["studios"] if s["id"] == "shorts")["original"]
 model("fuobe-genjutsu-restyle", "Fuobe Genjutsu · Restyle", "Fuobe Original", "fuobe-genjutsu", "video",
       "Every frame takes the look of a restyled first frame, motion kept by depth: Wan 2.2 Fun VACE",
-      [("v2v", "fal-ai/wan-22-vace-fun-a14b/depth")],
+      [("v2v", "fal-ai/wan-22-vace-fun-a14b/depth", "fal", {"fixed": SHORTS_O["cloud"]["fixed"]})],
       original=True, fit_values=True, pricing=("second", 0.1, f"720p; 580p $0.075, 480p $0.05 · {_FRAMES16}; the first frame's restyle is priced on its own",
                                                {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
-      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "720p"})
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "720p"},
+      licence={**SHORTS_O["licence"], "note": "Wan 2.2 Fun VACE A14B weights are Apache-2.0 (the first frame's model has its own licence)"})
 # Character swap (Openjutsu / Akatz Labs' H3 Character Swap): the part of the clip (5–15 s) is Video 1, the character
 # Image 1 and the anchor first frame Image 2. Prompt expansion off so H3's reference tags reach the model as written.
 model("fuobe-character-swap", "Fuobe Character swap", "Fuobe Original", "fuobe-character-swap", "video",
@@ -577,6 +611,77 @@ model("fuobe-character-swap", "Fuobe Character swap", "Fuobe Original", "fuobe-c
       original=True, fit_values=True, badges=["audio"],
       pricing=("second", 0.075, "768p; 480p $0.0625/s; whole seconds, 5–15 per call", {"byResolution": {"768p": 0.075, "480p": 0.0625}}),
       options={"resolutions": ["480p", "768p"]}, defaults={"resolution": "768p"})
+# ----- Originals (O9): Fuobe Mixed Media and Fuobe Shorts on hosted open weights (research §8 mixed-media →
+# studios[mixed-media].original, studios[shorts].original). Mixed Media's cloud half draws one frame: Z-Image Turbo
+# with its Fun ControlNet on the frame's own outlines (preprocess canny) and the look's LoRAs, at the render's one
+# seed; src/lib/catalog/mixed-media.ts fans it out over every frame (and frame 0 of Smooth), sending the frame's
+# size (image_size {width, height}: about 1 or 4 megapixels in the clip's shape) and the look's control scale.
+# Shorts' cloud half is Wan 2.2 Fun VACE by depth from a restyled first frame; its aspect ratio isn't asked of the
+# model (the cut is cropped to 9:16 or 16:9 first, as for any restyle model that keeps its input's shape).
+MIXED_O = next(s for s in ORIGINALS["studios"] if s["id"] == "mixed-media")["original"]["cloud"]
+model("fuobe-mixed-media", "Fuobe Mixed Media", "Fuobe Original", "fuobe-mixed-media", "video",
+      "Every frame drawn again in the look under its own outlines, one seed: Z-Image Turbo + ControlNet with the look's LoRA",
+      [("edit", MIXED_O["frame"], "fal", {"fixed": MIXED_O["fixed"], "defaults": MIXED_O["defaults"]})],
+      original=True, pricing=("megapixel", per_megapixel(MIXED_O["frame"]), MIXED_O["price"]))
+# The restyled first frame goes as first_frame_url only (the recipe sends no VACE subject references: `images` is dropped),
+# and fal derives the depth from the cut (preprocess, fixed).
+model("fuobe-shorts", "Fuobe Shorts", "Fuobe Original", "fuobe-shorts", "video",
+      "Your footage in a new look, motion kept: a restyled first frame carried through every frame by depth (Wan 2.2 Fun VACE)",
+      [("v2v", SHORTS_O["cloud"]["restyle"], "fal", {"drop": ["aspectRatio", "images"], "fixed": SHORTS_O["cloud"]["fixed"]})],
+      original=True, fit_values=True, pricing=("second", 0.1, f"720p; 580p $0.075, 480p $0.05 · {_FRAMES16}; the first frame's Qwen edit is priced on its own",
+                                               {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
+      api_defaults=SHORTS_O["cloud"]["defaults"], defaults={"resolution": "720p"}, licence=SHORTS_O["licence"])
+# ----- Originals (O13): Fuobe Evolution's cloud half (research §8 evolution → studios[evolution].original): Higgsfield
+# Evolution's change intensity as LTX-2.3 22B video-to-video's video_strength (1 − the denoise the open graph uses; set by
+# src/lib/catalog/evolution.ts through params.extra), the LLM-written direction as the prompt, prompt expansion off. Silent
+# (the clip's own sound goes back on), 24 fps, at most 481 frames a call (Evolution cuts longer clips into pieces); the
+# tier's size for the clip's shape from Fuobe Cinema's table. Priced per megapixel of video like Fuobe Cinema.
+EVOLUTION = next(s for s in ORIGINALS["studios"] if s["id"] == "evolution")["original"]["cloud"]
+EVOLUTION_MP = per_megapixel(EVOLUTION["endpoint"])
+EVOLUTION_MP_LORA = per_megapixel(EVOLUTION["loraEndpoint"])
+EVOLUTION_PER_SECOND = {t: round(s["16:9"][0] * s["16:9"][1] * EVOLUTION["fps"] / 1e6 * EVOLUTION_MP, 4) for t, s in CINEMA_SIZES.items()}
+EVOLUTION_PER_SECOND_LORA = {t: round(s["16:9"][0] * s["16:9"][1] * EVOLUTION["fps"] / 1e6 * EVOLUTION_MP_LORA, 4) for t, s in CINEMA_SIZES.items()}
+model("fuobe-evolution", "Fuobe Evolution", "Fuobe Original", "fuobe-evolution", "video",
+      "Takes your clip further in a direction an LLM writes from your references: LTX-2.3 video to video at a change intensity",
+      [("v2v", EVOLUTION["endpoint"], "fal", {"loraEndpoint": EVOLUTION["loraEndpoint"], "fixed": EVOLUTION["fixed"]})],
+      original=True, sizes=CINEMA_SIZES,
+      pricing=("second", EVOLUTION_PER_SECOND["720p"],
+               f"${EVOLUTION_MP} per megapixel of video (width × height × frames): about ${round(EVOLUTION_PER_SECOND['720p'] * 5, 2)} for 5 s at 720p; ${EVOLUTION_MP_LORA} with LoRAs",
+               {"byResolution": EVOLUTION_PER_SECOND, "withLoras": EVOLUTION_PER_SECOND_LORA["720p"], "withLorasByResolution": EVOLUTION_PER_SECOND_LORA,
+                "videoMegapixel": {"usd": EVOLUTION_MP, "withLoras": EVOLUTION_MP_LORA}}),
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=8)
+# ----- Originals (O11): the rebranded open tools and Speak on hosted open weights (research studios[angles].original,
+# studios[speak].original). Fuobe Angles is fal's LoRA-gallery route of Qwen-Image-Edit 2509 with dx8152's Multiple-angles
+# LoRA: Higgsfield Angles' controls are its fields (rotate −90…90°, positive = left; vertical −1…1, −1 = bird's-eye;
+# move forward 0–10; a wide-angle lens), at the LoRA scale and steps the research gives; it takes no words.
+ANGLES_O = next(s for s in ORIGINALS["studios"] if s["id"] == "angles")["original"]
+model("fuobe-angles", "Fuobe Angles", "Fuobe Original", "fuobe-angles", "image",
+      "The same shot from another camera: rotate, tilt, move closer, go wide · Qwen-Image-Edit 2509 + Multiple-angles LoRA",
+      [("edit", ANGLES_O["cloud"]["endpoint"], "fal")], original=True, api_defaults=ANGLES_O["cloud"]["defaults"],
+      sliders=[("rotate_right_left", "Rotate (°, + = left)"), ("vertical_angle", "Tilt (−1 above, 1 below)"), ("move_forward", "Move forward")],
+      pricing=("megapixel", 0.035, "per megapixel of the picture made (the input's size)"))
+# Fuobe Speak: InfiniteTalk. fal's endpoint has none of the recipe's knobs (the FusioniX LoRA, motion frames, shift,
+# guidance): the like-for-like copy runs on the GPU. num_frames (41–721) at 25 fps follows the voice.
+SPEAK_O = next(s for s in ORIGINALS["studios"] if s["id"] == "speak")["original"]
+model("fuobe-speak", "Fuobe Speak", "Fuobe Original", "fuobe-speak", "video",
+      "A portrait speaks your voice track, lips, face and head in sync, long takes: InfiniteTalk",
+      [("avatar", SPEAK_O["cloud"]["endpoint"], "fal")], original=True, frame_fps=SPEAK_O["cloud"]["fps"],
+      pricing=("second", 0.2, "480p or 720p, as long as the voice"), defaults={"resolution": "480p"})
+# Fuobe Speak · Motion (a Speak v1-like route): Wan 2.2 Speech-to-Video, the body and the scene move with the speech.
+# fal bills frames ÷ 16 as video seconds; num_frames 40–120, a multiple of 4 (2.5–7.5 s a call).
+SPEAK_M = SPEAK_O["motion"]
+model("fuobe-speak-motion", "Fuobe Speak · Motion", "Fuobe Original", "fuobe-speak", "video",
+      "Speech with the body and the scene moving: Wan 2.2 S2V",
+      [("avatar", SPEAK_M["cloud"]["endpoint"], "fal")], original=True, fit_values=True, frame_multiple=4,
+      pricing=("second", 0.1, "480p; 580p $0.15, 720p $0.20 a video second (frames ÷ 16), up to 7.5 s a call",
+               {"byResolution": {"480p": 0.1, "580p": 0.15, "720p": 0.2}}),
+      defaults={"resolution": "480p"})
+# The face mosaic's cloud step (Fuobe Soul's PixeletedFace look): SAM 3.1 finds every face and answers with their masks;
+# Fuobe pixelates under them (the server, or the browser for a picture it can't decode). A helper step, not a picker model.
+model("sam-3-1-face-mask", "SAM 3.1 face mask", "Meta", "sam", "image",
+      "Finds the faces (or what you name) in a picture; Fuobe pixelates them",
+      [("face-mosaic", "fal-ai/sam-3-1/image")], hidden=True, pricing=("request", 0.01),
+      fixed={"apply_mask": False, "return_multiple_masks": True, "max_masks": 16, "output_format": "png"}, api_defaults={"prompt": "face"})
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
@@ -605,10 +710,13 @@ model("wan-vace-reframe", "Wan VACE Reframe (hosted)", "Alibaba Wan", "wan", "vi
       [("reframe", "fal-ai/wan-vace-14b/reframe")], defaults={"aspectRatio": "9:16"})
 
 # ----- Video restyle / edit (research part 3; Shorts Studio, Mixed Media, Ad Multiplier)
+# fal: "$0.28/second ($0.14 per input second and 0.14 per output second)" at 720p, $0.56 at 1080p: the whole price
+# per second of the clip, both halves already summed (fixes-5: it was charged twice over, input seconds again on top).
+# The output matches the input, capped at 15 s.
 model("happy-horse-video-edit", "Happy Horse Video Edit", "Alibaba", "happy-horse", "video",
-      "Restyle or swap things in 3–60 s clips, with up to 5 reference images",
+      "Restyle or swap things in 3–15 s clips, with up to 5 reference images",
       [("v2v", "alibaba/happy-horse/video-edit")], badges=["new", "audio"], defaults={"resolution": "720p"},
-      pricing=("second", 0.28, "720p, input + output seconds; 1080p $0.56", {"byResolution": {"720p": 0.28, "1080p": 0.56}, "inputSeconds": True}),
+      pricing=("second", 0.28, "720p, input and output seconds together; 1080p $0.56", {"byResolution": {"720p": 0.28, "1080p": 0.56}}),
       controls=[("audio_setting", "Audio")])
 # Happy Horse 1.1 (build plan O7): fal hosts Alibaba's three endpoints (partnerEndpoints, read
 # 2026-10-27): $0.14/s at 720p, $0.18/s at 1080p; 3-15 s; up to 9 reference images.
@@ -648,8 +756,9 @@ model("omnihuman-2", "OmniHuman 2", "ByteDance", "omnihuman", "video", "Full-bod
       [("avatar", "bytedance/omnihuman/v2")], badges=["new"])
 model("omnihuman", "OmniHuman 1.5", "ByteDance", "omnihuman", "video", "Full-body talking avatars",
       [("avatar", "fal-ai/bytedance/omnihuman/v1.5")], pricing=("second", 0.16))
+# num_frames (41–721) at InfiniteTalk's 25 fps follows the voice's length (O11; it was sent the duration in seconds).
 model("infinitetalk-cloud", "InfiniteTalk (hosted)", "MeiGen", "infinitetalk", "video", "Long-form talking video from one photo",
-      [("avatar", "fal-ai/infinitalk")], pricing=("second", 0.2), defaults={"resolution": "480p"})
+      [("avatar", "fal-ai/infinitalk")], pricing=("second", 0.2), defaults={"resolution": "480p"}, frame_fps=25)
 model("sync-lipsync-3", "Sync Lipsync 3", "Sync Labs", "sync", "video", "Re-sync any video's lips to new audio",
       [("lipsync", "fal-ai/sync-lipsync/v3"), ("avatar", "fal-ai/sync-lipsync/v3/image-to-video")], badges=["new"])
 model("sync-lipsync-2-pro", "Sync Lipsync 2 Pro", "Sync Labs", "sync", "video", "Studio-grade lipsync for existing footage",
@@ -970,10 +1079,11 @@ model("topaz-sdr-to-hdr", "Topaz SDR to HDR", "Topaz Labs", "topaz", "video",
       "Hyperion 2.5: SDR footage to 10-bit HDR10 (H.265) or ProRes 422 HQ",
       [("sdr-to-hdr", "topaz/sdr-to-hdr/video")], badges=["new"], formats={"h265_10bit": "mp4", "prores_422_hq": "prores"},
       pricing=("second", 0.24, "up to 1080p at 30 fps; 4K $0.51"))
-# EXR frames only (a ZIP, kept as a link on the SDR preview); prompt = how to see the shot, defaulted.
+# EXR frames only (a ZIP, kept as a link on the SDR preview); prompt = how to see the shot, defaulted. Its /lora twin
+# (O11, research hostedLoraEndpoints) takes the run when a LoRA rides along.
 model("ltx-2-3-hdr", "LTX 2.3 HDR (EXR frames)", "Lightricks", "ltx", "video",
       "SDR to 16-bit EXR frames for compositing, with an SDR preview",
-      [("sdr-to-hdr", "fal-ai/ltx-2.3-quality/hdr", "fal", {"drop": ["prompt", "resolution"]})], options={"formats": ["exr"]},
+      [("sdr-to-hdr", "fal-ai/ltx-2.3-quality/hdr", "fal", {"drop": ["prompt", "resolution"], "loraEndpoint": "fal-ai/ltx-2.3-quality/hdr/lora"})], options={"formats": ["exr"]},
       api_defaults={"prompt": "The same shot in high dynamic range: deeper shadows and brighter highlights, every detail and movement unchanged"},
       pricing=("video", 0.3, "121 frames at 720p; billed per megapixel of HDR video"))
 
@@ -1606,17 +1716,20 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # Video models whose length is a frame count (Wan 2.2 num_frames at 16 fps, LTX-2.3 at 24): the duration picked
     # becomes frames (FieldMap.numFrames, 4n+1 / 8n+1 by model), and the durations offered are the ones that fit.
     nf = kf.get("numFrames") or (kf.get("duration") if kf.get("duration") in ("num_frames", "frames") else None)
-    if nf and op in ("t2v", "i2v", "flf2v", "extend", "v2v") and (inputs.get(nf) or {}).get("type") == "integer":
+    # A talking avatar's frame count (fal's InfiniteTalk, Wan 2.2 S2V) follows the voice's length (params.sourceDuration).
+    if nf and op in ("t2v", "i2v", "flf2v", "extend", "v2v", "avatar") and (inputs.get(nf) or {}).get("type") == "integer":
         kf.pop("duration", None)
         kf.pop("numFrames", None)
         spec = inputs.get(nf) or {}
         fps_key = kf.get("fps") or next((k for k in ("fps", "frames_per_second") if k in inputs), None)
-        fps = num((inputs.get(fps_key) or {}).get("default")) or 16
+        fps = m.get("frame_fps") or num((inputs.get(fps_key) or {}).get("default")) or 16
         lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
         # Extend's num_frames is the length to add (the picked duration), never the input clip's own length.
         fmap["numFrames"] = {"key": nf, "fps": fps, **({"min": lo} if lo is not None else {}), **({"max": hi} if hi is not None else {}),
-                             **({"step": m["frame_step"]} if m.get("frame_step") else {}), **({"fromDuration": True} if op == "extend" else {})}
-        opts["durations"] = union(opts.get("durations", []), [d for d in NICE_DURATIONS if (lo is None or d * fps >= lo) and (hi is None or d * fps <= hi + (m.get("frame_step") or 0))])
+                             **({"step": m["frame_step"]} if m.get("frame_step") else {}), **({"multiple": m["frame_multiple"]} if m.get("frame_multiple") else {}),
+                             **({"fromDuration": True} if op == "extend" else {})}
+        if op != "avatar":
+            opts["durations"] = union(opts.get("durations", []), [d for d in NICE_DURATIONS if (lo is None or d * fps >= lo) and (hi is None or d * fps <= hi + (m.get("frame_step") or 0))])
     # Width and height fields (Replicate's Z-Image LoRA model): computed from the aspect ratio (FieldMap.size).
     if "width" in kf and "height" in kf and "aspectRatio" not in kf:
         w, h = inputs.get(kf["width"]) or {}, inputs.get(kf["height"]) or {}
@@ -1705,8 +1818,10 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             # A model that asks for "auto" (Fuobe DoP · LTX: the start frame's shape) keeps it when the API takes it;
             # otherwise the default fallback below would make every clip square (1:1, the first size listed).
             auto = "auto" in enum and m["defaults"].get("aspectRatio") == "auto"
-            fmap["aspectRatio"] = {"key": key, "values": {**({"auto": "auto"} if auto else {}), **IMAGE_SIZE_MAP}}
-            opts["aspectRatios"] = union(opts.get("aspectRatios", []), (["auto"] if auto else []) + IMG_AR)
+            # keep_shape: "auto" leaves a nullable size out, so the API keeps the input image's shape and size.
+            keep = bool(m.get("keep_shape")) and not auto and bool(spec.get("nullable"))
+            fmap["aspectRatio"] = {"key": key, "values": {**({"auto": "auto"} if auto else {}), **IMAGE_SIZE_MAP}, **({"accepts": IMG_AR} if keep else {})}
+            opts["aspectRatios"] = union(opts.get("aspectRatios", []), (["auto"] if auto else []) + IMG_AR + (["auto"] if keep else []))
         else:
             fmap["aspectRatio"] = key
             ratios = [v for v in enum if RATIO.match(str(v)) or v == "auto"]
@@ -1884,7 +1999,7 @@ for m in M:
     pricing = None
     if m["pricing"]:
         u, usd, *rest = m["pricing"]
-        # Optional: a note, then extra Pricing fields (byResolution, inputSeconds).
+        # Optional: a note, then extra Pricing fields (byResolution, factors, …).
         note = [x for x in rest if isinstance(x, str)]
         extra = next((x for x in rest if isinstance(x, dict)), {})
         pricing = {"unit": u, "usd": usd, **({"note": note[0]} if note else {}), **extra}
@@ -1910,6 +2025,8 @@ for m in M:
         d["licence"] = {"licence": lic["baseLicence"], "commercial": lic.get("commercialWeights"),
                         **({"note": lic["licenceNote"]} if lic.get("licenceNote") else {}),
                         **({"checked": lic["checked"]} if lic.get("checked") else {})}
+    elif m["licence"]:
+        d["licence"] = m["licence"]
     defaults = {k: v for k, v in m["defaults"].items()}
     # Drop defaults the model can't take.
     if "aspectRatio" in defaults and defaults["aspectRatio"] not in opts.get("aspectRatios", [defaults["aspectRatio"]]):

@@ -8,6 +8,7 @@ import {
   MAX_ADS_PER_PRODUCT,
   MAX_PRODUCTS_PER_RUN,
   adVisualModel,
+  MARKETING_IMAGE_MODEL,
   type AdConcept,
   type AdCreative,
   type BrandKit,
@@ -41,6 +42,8 @@ export const BatchBody = z.object({
     .max(MAX_PRODUCTS_PER_RUN),
   /** What the user asked for in the chat ("holiday setting for our winter sale"). */
   direction: z.string().max(1000).optional(),
+  /** The visual model (AD_VISUAL_MODELS); Fuobe Marketing Image when left out or not offered on this engine. */
+  modelId: z.string().max(80).optional(),
 });
 export type BatchInput = z.infer<typeof BatchBody>;
 
@@ -154,14 +157,16 @@ export async function writeConcepts(brand: BrandKit, product: Product, count: nu
 
 const NO_TEXT = "No text, letters, words, logos or watermarks anywhere in the picture; leave calm space for a headline";
 
-export function visualRequest(c: Pick<AdConcept, "visual" | "headline">, product: Product | null, brand: BrandKit, engine: Engine): GenerationRequest {
+export function visualRequest(c: Pick<AdConcept, "visual" | "headline">, product: Product | null, brand: BrandKit, engine: Engine, asked?: string | null): GenerationRequest {
   const hero = product?.images[0];
-  const modelId = adVisualModel(engine, !!hero);
+  const modelId = adVisualModel(engine, asked);
   const model = getModel(modelId);
   const aspect = model?.options.aspectRatios?.includes("4:5") ? "4:5" : model?.options.aspectRatios?.includes("3:4") ? "3:4" : undefined;
   return {
     feature: "ads",
     modelId,
+    // Fuobe Marketing Image runs on both engines: the batch's engine picks its half.
+    ...(modelId === MARKETING_IMAGE_MODEL && { engine }),
     op: hero ? "edit" : "t2i",
     prompt: [
       `Advertising photograph: ${c.visual.replace(/[.\s]+$/, "")}`,
@@ -238,7 +243,7 @@ export function estimateBatch(input: BatchInput, draft?: { brand: BrandKit; prod
   if (!brand) throw new AdsError("That brand no longer exists");
   const total = input.items.reduce((n, i) => n + i.count, 0);
   const product = draft ? draft.product : getProduct(input.items[0].productId);
-  const p = previewGeneration(visualRequest({ visual: "the product", headline: "Ad" }, product, brand, input.engine));
+  const p = previewGeneration(visualRequest({ visual: "the product", headline: "Ad" }, product, brand, input.engine, input.modelId));
   let copy = 0;
   try {
     copy = previewGeneration({ feature: "ads", modelId: input.engine === "open" ? "oss-text-llm" : "text-llm", op: "write", prompt: "copy" }).costUsd ?? 0;
@@ -325,7 +330,7 @@ async function fillBatch(batchId: string, brand: BrandKit, ids: { id: string; pr
         .run(k.angle, k.headline, k.body, k.cta, k.visual, Date.now(), c.id).changes;
       if (!ok) return;
       try {
-        setGen(c.id, createGenerations(visualRequest(k, product, brand, input.engine), { batchId })[0]);
+        setGen(c.id, createGenerations(visualRequest(k, product, brand, input.engine, input.modelId), { batchId })[0]);
       } catch (e) {
         fail(c.id, (e as Error).message);
       }
@@ -453,7 +458,8 @@ export async function retryCreative(id: string): Promise<AdCreative> {
   // A baked ad (one drawn whole before build plan O7) is made again the Fuobe way: copy, a visual, your fonts.
   let concept: AdConcept = { angle: r.angle ?? "", headline: r.headline ?? "", body: r.body ?? "", cta: r.cta ?? "", visual: r.visual ?? "" };
   if (!concept.headline || !concept.visual) concept = (await writeConcepts(brand, product ?? fakeProduct(brand), 1, meta.direction, r.position))[0];
-  const g = createGenerations(visualRequest(concept, product, brand, meta.engine), { batchId: r.batch_id })[0];
+  // The batch's own visual model (a baked ad's one-shot model isn't one: Fuobe Marketing Image makes it).
+  const g = createGenerations(visualRequest(concept, product, brand, meta.engine, meta.modelId), { batchId: r.batch_id })[0];
   const fresh: CreativeMeta = { ...meta, route: "fuobe", ratio: undefined };
   db()
     .prepare("UPDATE ad_creatives SET angle = ?, headline = ?, body = ?, cta = ?, visual = ?, meta_json = ? WHERE id = ?")

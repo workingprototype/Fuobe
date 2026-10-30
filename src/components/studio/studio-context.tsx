@@ -51,13 +51,19 @@ export interface StudioConfig {
   anyOf?: SlotKey[][];
   /** Color signature + Moodboard chips (Image studio): a saved palette and a style, routed per model (src/lib/catalog/palettes.ts). */
   signature?: boolean;
-  /** Models the studio can be moved to (by the signature chips) beyond its picker list and defaults: kept in its model slice. */
+  /** Models the studio can be moved to (by the signature chips), or runs as a later step, beyond its picker list and defaults: kept in its model slice. */
   extraModels?: string[];
   /**
    * Read the attached clip's header (length, size, frame rate): prices count its seconds and the composer
-   * says what comes out ("24 → 60 fps", "1280×720 → 3840×2160"). Upscale hub video modes.
+   * says what comes out ("24 → 60 fps", "1280×720 → 3840×2160"). Upscale hub video modes, and Edit video (a clip
+   * edit that keeps the clip's length is billed on it, inside the model's window).
    */
   clipFacts?: boolean;
+  /**
+   * Read the voice track's length (Lipsync): a talking avatar is as long as its voice, so a per-second price counts its
+   * seconds and the request carries them (params.sourceDuration). Not while a video is attached (lip re-sync).
+   */
+  voiceFacts?: boolean;
   /** Offer every output format of the studio's models on this engine; picking one another model writes moves the request there (SDR to HDR, Export). */
   formatPicker?: boolean;
   /** The models' enum settings chip ("Director" by default; "Options" for a tool's settings such as Topaz's model). */
