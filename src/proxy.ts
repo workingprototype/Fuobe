@@ -3,6 +3,7 @@ import { APPS } from "@/lib/catalog/apps";
 import { recordForPath, unknownHubMode } from "@/lib/record-pages";
 import { countsAsView, SHARE_VIEW_HEADER, shareRoute } from "@/lib/share";
 import {
+  ACCOUNT_LIBRARY_MESSAGE,
   accountMayChange,
   CONNECT_GPU_HEADER,
   CONNECT_GPU_MESSAGE,
@@ -10,7 +11,9 @@ import {
   GUEST_LIBRARY_MESSAGE,
   GUEST_RUN_MESSAGE,
   guestRead,
+  isLibraryChange,
   isPriceCheck,
+  LIBRARY_MESSAGE,
   ownerOnly,
 } from "@/lib/guest-access";
 import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, SESSION_COOKIE, sessionViewer, validSession, validToken, type Viewer } from "@/server/auth";
@@ -64,36 +67,44 @@ const guestHeaders = { [GUEST_HEADER]: "1", "Cache-Control": "no-store" };
  */
 function guest(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
-  if (request.method === "GET" || request.method === "HEAD") {
-    const read = guestRead(pathname);
-    if (read.kind === "pass") return pass(request);
-    if (read.kind === "filtered") {
-      const headers = new Headers(request.headers);
-      headers.set(GUEST_HEADER, "1");
-      return NextResponse.next({ request: { headers } });
-    }
-    if (read.kind === "empty") return NextResponse.json(read.body, { headers: guestHeaders });
-    if (read.kind === "none") return NextResponse.json({ error: "Not for guests" }, { status: 404, headers: guestHeaders });
-    return NextResponse.json({ error: GUEST_LIBRARY_MESSAGE }, { status: 401, headers: guestHeaders });
-  }
+  if (request.method === "GET" || request.method === "HEAD") return readAsGuest(request, false);
   if (isPriceCheck(request.method, pathname, search)) return pass(request);
   return NextResponse.json({ error: GUEST_RUN_MESSAGE }, { status: 401, headers: guestHeaders });
 }
 
 /**
- * An account: browses the whole studio and keeps its own library and projects, but install-wide
- * settings, keys and tokens are the owner's, and anything that would reach a model is refused
- * ("Connect your GPU"): an account never runs on the owner's cloud keys or GPU.
+ * A read by a guest or an account: pages and catalog reads go through, the owner's lists come back
+ * empty, and the rest of the owner's library is refused (401 for a guest, who can sign up; 403 for an account).
+ */
+function readAsGuest(request: NextRequest, isAccount: boolean): NextResponse {
+  const read = guestRead(request.nextUrl.pathname);
+  if (read.kind === "pass") return pass(request);
+  if (read.kind === "filtered") {
+    const headers = new Headers(request.headers);
+    headers.set(GUEST_HEADER, "1");
+    return NextResponse.next({ request: { headers } });
+  }
+  if (read.kind === "empty") return NextResponse.json(read.body, { headers: guestHeaders });
+  if (read.kind === "none") return NextResponse.json({ error: "Not for guests" }, { status: 404, headers: guestHeaders });
+  if (isAccount) return NextResponse.json({ error: ACCOUNT_LIBRARY_MESSAGE }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ error: GUEST_LIBRARY_MESSAGE }, { status: 401, headers: guestHeaders });
+}
+
+/**
+ * An account sees the owner's studio as a guest does: every page, the catalog, and none of the
+ * owner's library or projects (hidden, and every change to them refused). Install-wide settings,
+ * keys and tokens are the owner's, and anything that would reach a model is refused ("Connect your
+ * GPU"): an account never runs on the owner's cloud keys or GPU.
  */
 function account(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
   if (ownerOnly(request.method, pathname)) {
     return NextResponse.json({ error: "Only the studio's owner can change settings, keys and tokens." }, { status: 403 });
   }
-  if (!accountMayChange(request.method, pathname, search)) {
-    return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
-  }
-  return pass(request);
+  if (request.method === "GET" || request.method === "HEAD") return readAsGuest(request, true);
+  if (accountMayChange(request.method, pathname, search)) return pass(request);
+  if (isLibraryChange(request.method, pathname)) return NextResponse.json({ error: LIBRARY_MESSAGE, code: "library" }, { status: 403 });
+  return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
 }
 
 const tooMany = (seconds: number) =>

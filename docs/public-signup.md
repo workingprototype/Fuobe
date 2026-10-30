@@ -44,19 +44,19 @@ studios can show prices.
 - Sign-up and log-in attempts are rate limited per visitor (set `FUOBE_TRUST_PROXY=1` behind a
   reverse proxy, so that each visitor gets their own limit).
 
-An account's session works across the studio, with two limits:
+An account is signed in, but it sees the owner's studio as a guest does:
 
+- **The owner's library stays the owner's.** An account opens every page and the catalog, but the
+  owner's results, files, uploads, folders, shares, projects (Layers, Cinema, Canvas, storyboards,
+  elements…) and Assist threads are hidden: the lists come back empty, and other reads answer 403.
+  Every change to them (create, rename, move, share, delete, upload) answers 403 with
+  `code: "library"`. Accounts don't have a library of their own yet.
 - **Settings, keys and tokens are the owner's.** Changing settings or model switches, the password,
   API tokens, Public sign-up, LoRA downloads, Assist connectors and the MCP endpoint answer 403 for
   an account.
 - **Accounts never run on the owner's keys or GPU.** Anything that would reach a model (a
   generation, an AI helper, a retry) answers 403 with `code: "connect-gpu"`, and the studio shows a
-  "Connect your GPU to run this" card. An account's own GPU connection comes in a later change. An
-  account can still upload, organise, share and delete in the library, and create and edit
-  projects.
-
-Accounts share the studio's one library: an account sees the owner's results and can change them.
-Use public sign-up on a studio whose library you are happy to show.
+  "Connect your GPU to run this" card. An account's own GPU connection comes in a later change.
 
 `GET /api/auth/me` (open to everyone) says who is looking: `{ signedIn, owner, publicSignup,
 account? }`.

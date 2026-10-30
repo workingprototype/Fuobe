@@ -147,12 +147,9 @@ describe("proxy with public sign-up on", () => {
     expect(passed(proxy(req("/api/shorts/estimate", { method: "POST" })))).toBe(true);
   });
 
-  it("lets an account use the studio, but not settings, keys or tokens", async () => {
+  it("lets an account open every page, but never settings, keys or tokens", async () => {
     process.env.FUOBE_PUBLIC_SIGNUP = "1";
-    expect(passed(proxy(req("/api/generations", { cookie: account })))).toBe(true);
-    expect(passed(proxy(req("/api/files/outputs/a.png", { cookie: account })))).toBe(true);
-    expect(passed(proxy(req("/api/uploads", { method: "POST", cookie: account })))).toBe(true);
-    expect(passed(proxy(req("/api/layers", { method: "POST", cookie: account })))).toBe(true);
+    for (const p of ["/", "/motions", "/layers", "/settings", "/api/status", "/api/models"]) expect(passed(proxy(req(p, { cookie: account }))), p).toBe(true);
     for (const [method, p] of [
       ["PUT", "/api/settings"],
       ["PUT", "/api/settings/models"],
@@ -231,23 +228,65 @@ describe("accounts never run on the owner's keys or GPU", () => {
     }
     // Owner-only routes say so (not "connect your GPU").
     expect(proxy(req("/api/mcp", { method: "POST", cookie })).headers.get(access.CONNECT_GPU_HEADER)).toBeNull();
-    // Its own library, price checks and reads are fine.
+    // Price checks and signing out are fine.
     for (const [method, p] of [
       ["POST", "/api/generations?preview=1"],
       ["POST", "/api/ads/estimate"],
       ["POST", "/api/assist/skills/s1/estimate"],
-      ["POST", "/api/folders"],
-      ["PATCH", "/api/folders/f1"],
-      ["POST", "/api/generations/bulk"],
-      ["DELETE", "/api/generations/g1"],
-      ["POST", "/api/shares"],
-      ["POST", "/api/cinema/projects"],
-      ["PATCH", "/api/layers/l1"],
       ["POST", "/api/auth/logout"],
-      ["GET", "/api/generations"],
     ]) {
       expect(passed(proxy(req(p, { method, cookie }))), `${method} ${p}`).toBe(true);
     }
+  });
+});
+
+describe("accounts never see or change the owner's library", () => {
+  const families: Record<string, { lists: string[]; records: string[]; changes: [string, string][] }> = {
+    generations: {
+      lists: ["/api/generations", "/api/generations/trash", "/api/generations/facets"],
+      records: ["/api/generations/g1", "/api/generations/zip?ids=g1"],
+      changes: [["PATCH", "/api/generations/g1"], ["DELETE", "/api/generations/g1"], ["POST", "/api/generations/bulk"], ["DELETE", "/api/generations/trash"], ["POST", "/api/generations/g1/cancel"]],
+    },
+    files: { lists: ["/api/assets"], records: ["/api/files/outputs/a.png", "/api/assets/a1", "/api/uploads"], changes: [["POST", "/api/uploads"], ["DELETE", "/api/assets/a1"]] },
+    folders: { lists: ["/api/folders"], records: ["/api/folders/f1", "/api/folders/f1/zip"], changes: [["POST", "/api/folders"], ["PATCH", "/api/folders/f1"], ["DELETE", "/api/folders/f1"]] },
+    shares: { lists: ["/api/shares"], records: ["/api/shares/s1"], changes: [["POST", "/api/shares"], ["PATCH", "/api/shares/s1"], ["DELETE", "/api/shares/s1"]] },
+    layers: { lists: ["/api/layers"], records: ["/api/layers/l1"], changes: [["POST", "/api/layers"], ["PATCH", "/api/layers/l1"], ["DELETE", "/api/layers/l1"], ["POST", "/api/layers/l1/versions"]] },
+    elements: { lists: ["/api/elements"], records: ["/api/elements/e1"], changes: [["POST", "/api/elements"], ["PATCH", "/api/elements/e1"], ["DELETE", "/api/elements/e1"]] },
+    canvases: { lists: ["/api/canvases"], records: ["/api/canvases/c1"], changes: [["POST", "/api/canvases"], ["PATCH", "/api/canvases/c1"], ["DELETE", "/api/canvases/c1"], ["POST", "/api/canvases/c1/duplicate"]] },
+    cinema: { lists: ["/api/cinema/projects"], records: ["/api/cinema/projects/p1", "/api/cinema/projects/p1/items"], changes: [["POST", "/api/cinema/projects"], ["PATCH", "/api/cinema/projects/p1"], ["DELETE", "/api/cinema/projects/p1"]] },
+    storyboards: { lists: [], records: ["/api/storyboards"], changes: [["POST", "/api/storyboards"]] },
+    assist: { lists: ["/api/assist/projects"], records: ["/api/assist", "/api/assist/t1", "/api/assist/memory"], changes: [["PATCH", "/api/assist/t1"], ["DELETE", "/api/assist/t1"], ["POST", "/api/assist/projects"]] },
+    brands: { lists: ["/api/brands", "/api/products"], records: ["/api/brands/b1"], changes: [["POST", "/api/brands"], ["DELETE", "/api/brands/b1"], ["POST", "/api/products"]] },
+  };
+
+  for (const [family, f] of Object.entries(families)) {
+    it(`hides and protects ${family}`, async () => {
+      process.env.FUOBE_PUBLIC_SIGNUP = "1";
+      const cookie = auth.createSession(auth.createAccount(`lib-${family}@example.com`, "long enough").id).value;
+      for (const p of f.lists) {
+        const r = proxy(req(p, { cookie }));
+        expect(r.status, p).toBe(200);
+        const body = (await r.json()) as { items?: unknown[]; total?: number };
+        expect(body.items ?? [], p).toEqual([]);
+        if ("total" in body) expect(body.total).toBe(0);
+      }
+      for (const p of f.records) expect(proxy(req(p, { cookie })).status, p).toBe(403);
+      for (const [method, p] of f.changes) {
+        const r = proxy(req(p, { method, cookie }));
+        expect(r.status, `${method} ${p}`).toBe(403);
+      }
+    });
+  }
+
+  it("says the library isn't theirs, not \"connect your GPU\", for a library change", async () => {
+    process.env.FUOBE_PUBLIC_SIGNUP = "1";
+    const cookie = auth.createSession(auth.createAccount("lib-message@example.com", "long enough").id).value;
+    const r = proxy(req("/api/folders", { method: "POST", cookie }));
+    expect(r.headers.get(access.CONNECT_GPU_HEADER)).toBeNull();
+    expect((await r.json()).code).toBe("library");
+    const read = proxy(req("/api/generations/g1", { cookie }));
+    expect(read.headers.get(access.GUEST_HEADER)).toBeNull();
+    expect((await read.json()).error).toMatch(/owner/);
   });
 
   it("keeps the owner's runs unchanged", () => {

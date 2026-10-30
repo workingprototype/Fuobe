@@ -5,9 +5,10 @@
  * - A guest opens every page and the catalog and status reads the pages need. The owner's library
  *   comes back empty (or 401 "Sign up to see your library"), and every change is a 401 that the
  *   client turns into "Create a free account" (src/components/guest-prompt.tsx).
- * - An account browses the whole studio and keeps its own library and projects (ACCOUNT_CHANGES),
- *   but never runs on the owner's cloud keys or GPU ("Connect your GPU"), and never changes
- *   install-wide settings, keys or tokens (owner only).
+ * - An account sees what a guest sees of the owner's studio: the owner's library and projects stay
+ *   hidden (empty lists, 403) and can't be changed (403, LIBRARY_CHANGES). It never runs on the
+ *   owner's cloud keys or GPU ("Connect your GPU"), and never changes install-wide settings, keys or
+ *   tokens (owner only).
  */
 
 /** Set by the proxy on a guest's request to a route that answers guests itself (GUEST_FILTERED), and on its 401s. */
@@ -97,13 +98,12 @@ export function isPriceCheck(method: string, pathname: string, search: string): 
 }
 
 /**
- * Changes an account may make: its own library and projects (create, rename, move, share, delete,
- * upload), never anything that reaches a model. Everything else an account sends (a run, an AI
- * helper, a connector, the MCP endpoint…) is refused with "Connect your GPU": an account never
- * spends the owner's cloud keys or GPU.
+ * Changes to the studio's library and projects (create, rename, move, share, delete, upload). The
+ * library is the owner's, and accounts don't have one of their own yet, so an account is refused
+ * them with LIBRARY_MESSAGE. Everything else an account sends (a run, an AI helper, a connector,
+ * the MCP endpoint…) is refused with "Connect your GPU": it never spends the owner's keys or GPU.
  */
-const ACCOUNT_CHANGES: [methods: string, path: RegExp][] = [
-  ["POST", /^\/api\/auth\/logout$/],
+const LIBRARY_CHANGES: [methods: string, path: RegExp][] = [
   ["POST", /^\/api\/uploads$/],
   ["POST", /^\/api\/media\/probe$/],
   ["POST", /^\/api\/folders$/],
@@ -132,11 +132,18 @@ const ACCOUNT_CHANGES: [methods: string, path: RegExp][] = [
   ["DELETE", /^\/api\/assist\/projects\/[^/]+\/sources\/[^/]+$/],
 ];
 
-/** May an account make this change itself? (Reads are always fine; price checks are free.) */
+/** A change an account may send: signing out, and price checks (reads go by guestRead, as a guest's). */
 export function accountMayChange(method: string, pathname: string, search: string): boolean {
-  if (method === "GET" || method === "HEAD" || isPriceCheck(method, pathname, search)) return true;
-  return ACCOUNT_CHANGES.some(([methods, path]) => methods.split(" ").includes(method) && path.test(pathname));
+  return (method === "POST" && pathname === "/api/auth/logout") || isPriceCheck(method, pathname, search);
 }
+
+/** A change to the studio's library or projects (refused for an account with LIBRARY_MESSAGE, not "Connect your GPU"). */
+export function isLibraryChange(method: string, pathname: string): boolean {
+  return LIBRARY_CHANGES.some(([methods, path]) => methods.split(" ").includes(method) && path.test(pathname));
+}
+
+export const ACCOUNT_LIBRARY_MESSAGE = "This studio's library is its owner's. Free accounts can't open or change it.";
+export const LIBRARY_MESSAGE = "Free accounts can't save to this studio's library yet.";
 
 /** Set on an account's refused run: the client shows "Connect your GPU to run this". */
 export const CONNECT_GPU_HEADER = "x-fuobe-connect-gpu";
