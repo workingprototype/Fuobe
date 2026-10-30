@@ -48,10 +48,33 @@ import { db } from "./db";
 import { llmText, llmTextBackend, type LlmImage } from "./enhance";
 import { askLlm, createChannel, createEpisode, deleteChannel, estimateEpisode, FacelessError, getChannel, handle as facelessHandle, listEpisodes, VoiceSchema } from "./faceless";
 import { cancelGeneration, createGenerations, getGeneration, previewGeneration } from "./generations";
+import type { JsonSpec } from "./llm";
 import { fetchRemote, RemoteFetchError } from "./remote-fetch";
 import { engineMode } from "./settings";
 import { readRef, saveFile } from "./storage";
 import { probeWebm } from "./webm-probe";
+
+/** BRIEF_SYSTEM's JSON as a schema, so a local model answers with a brief rather than prose (Claude reads the prompt). */
+const S = { type: "string" };
+const N = { type: "number" };
+const oneOf = (...values: string[]) => ({ type: "string", enum: values });
+const objectOf = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+const BRIEF_SCHEMA: JsonSpec = {
+  name: "style_brief",
+  schema: objectOf({
+    format: S,
+    hook: S,
+    pacing: objectOf({ average_shot_seconds: N, description: S }),
+    shots: { type: "array", items: S },
+    visual_style: objectOf({ medium: S, palette: S, lighting: S, texture: S }),
+    animation_style: oneOf("Fully animated", "Seamless motion video", "Scene by scene video", "Frame by frame"),
+    narration: objectOf({ tone: S, words_per_minute: N, language: S }),
+    music: objectOf({ genre: S, mood: S, energy: oneOf("low", "medium", "high") }),
+    captions: objectOf({ style: S, position: oneOf("top", "center", "bottom") }),
+    aspect_ratio: oneOf("9:16", "16:9"),
+    topic_ideas: { type: "array", items: S, minItems: 5, maxItems: 5 },
+  }),
+};
 
 /*
  * Content Factory on the server: a series (a reference clip, a preset or nothing; the style brief read
@@ -436,12 +459,13 @@ async function writeBrief(id: string): Promise<void> {
         : `The clip couldn't be read (${framesGen?.error ?? wordsGen?.error ?? "no frames or words came back"}). This brief comes from its shape and length — read it again to retry.`;
     } else if (!llmTextBackend()) {
       offline = true;
-      note = "No LLM is connected (Settings → Prompt enhancement), so this brief comes from the clip's shape, length and narration pace.";
+      note = "No LLM is connected (Settings → AI helper), so this brief comes from the clip's shape, length and narration pace.";
     } else {
       const transcript = cues.map((c) => `[${mmss(c.start)}] ${c.text.trim()}`).join("\n");
       const user = briefRequest({ seconds: ref.seconds, width: ref.width, height: ref.height, frames: frames.length, transcript, title: ref.title });
       // A text-only Ollama model can't take pictures: it answers from the words then.
-      const answer = (await llmText(BRIEF_SYSTEM, user, frames)) ?? (frames.length && llmTextBackend() === "ollama" ? await llmText(BRIEF_SYSTEM, user) : null);
+      const json = { json: BRIEF_SCHEMA };
+      const answer = (await llmText(BRIEF_SYSTEM, user, frames, json)) ?? (frames.length && llmTextBackend() === "ollama" ? await llmText(BRIEF_SYSTEM, user, json) : null);
       const parsed = answer ? parseBrief(answer, fallback) : null;
       if (parsed) brief = { ...parsed.brief, ...header };
       else {

@@ -57,7 +57,7 @@ function Message({ m, onLoad, onBrief }: { m: DirectorMessage; onLoad: (s: Direc
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap">{m.text}</p>
-          {m.source === "offline" && <p className="mt-0.5 text-[11px] text-muted-foreground">Offline breakdown — connect Claude or Ollama in Settings for a smarter Director.</p>}
+          {m.source === "offline" && <p className="mt-0.5 text-[11px] text-muted-foreground">Offline breakdown — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for a smarter Director.</p>}
         </div>
       </div>
       {m.brief && (

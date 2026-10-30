@@ -145,7 +145,8 @@ export default async function Page() {
         </h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-[13px] text-muted-foreground">
           <li>
-            Models you pull into Ollama for Assist and prompt enhancement carry their own licences: <code className="font-mono text-[12px]">ollama show &lt;model&gt; --license</code>.
+            Models you run in Ollama, LM Studio or Unsloth Studio for Assist and prompt enhancement carry their own licences: see each model&apos;s card, or{" "}
+            <code className="font-mono text-[12px]">ollama show &lt;model&gt; --license</code> in Ollama.
           </li>
           <li>The optional TRIBE v2 worker for the Virality page isn&apos;t bundled; its weights are CC BY-NC 4.0 (non-commercial).</li>
           <li>

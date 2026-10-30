@@ -74,6 +74,7 @@ harness measures what a user gets.
 | `pnpm eval:compare <runA> <runB>` | Wins, losses and mean gain per metric. Exits 1 when a guarded metric regresses |
 | `pnpm eval:promote <runId>` | Applies the promote rule. `--record` writes the verdicts into the research JSON; `--apply-strengths` also lowers over-cooked strengths there |
 | `pnpm eval:covers <runId>` | Turns each promoted case's best render into its preset's cover (`public/previews/`, `src/lib/preset-previews.generated.ts`) |
+| `pnpm eval:covers --from-masters <dir> --run <name>` | Turns rendered masters (one folder per preset id) into covers, merged into the same file |
 | `pnpm eval:history` | Lists runs, newest first, and the per-case scores of one case (`--case soul/v1-general`) |
 | `pnpm eval:validate` | Checks every case file, and that the generated suites match the research |
 | `pnpm eval:setup` | Creates the metrics venv with uv (`--identity`, `--download`, `--dinov2`, `--torch-backend`) |
@@ -459,6 +460,31 @@ instead of their procedural preview.
   becomes one with its licence noted (`licence` in the result); `--commercial-only` leaves it out. No
   Higgsfield preview is used anywhere.
 - It needs ffmpeg. Look at the media and the generated file's diff before committing them.
+
+### Covers from rendered masters
+
+Preview renders made outside a run (the gallery renders made in ComfyUI) become covers the same way:
+
+```sh
+pnpm eval:covers --from-masters <dir> --run comfyui-previews-2026-10 --engine comfyui --model ideogram4 --video-model minimax-h3 --variant lean-json
+```
+
+- `<dir>` has one folder per preset id (`effect-set-on-fire/`). A folder's `clip.mp4` becomes a clip
+  cover (first 4 seconds, its first frame as the poster). The cards play a clip in a loop, so its last 6
+  frames are crossfaded into its first ones and the loop has no jump (every clip cover is made this way,
+  also `eval:covers` from a run). A folder without a clip uses its `start.png` as a still cover (a 4:2:0
+  JPEG at most 768 px). A folder with neither is skipped.
+- The covers go to `public/previews/presets/` (`--suite` names another folder).
+- Each cover records the run, the engine, the model and the variant: `--model` for stills, `--video-model`
+  for clips. A folder's `meta.json` can name its own `model` and `variant`.
+- The manifest is merged. Covers that other runs wrote stay, and only the ids found in `<dir>` are
+  replaced. An id whose cover another run made in another folder (a measured `eval:covers` cover) is
+  skipped and listed, so re-running the masters never undoes a measured cover; `--replace` takes it over
+  and removes its old files. A manifest that can't be read stops the run instead of being overwritten.
+- Run it again as new masters land. A cover that is newer than its master is kept, so only new or
+  changed masters are encoded (`--force` encodes all of them). `--only id,id` limits the run to those
+  presets. A preset whose cover changes from a clip to a still loses its old clip.
+- `--dry-run` lists what it would make. Review the media and the manifest diff before committing them.
 
 ## Tests
 

@@ -1,15 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { APPS, EFFECTS, getPreset, MOTIONS } from "@/lib/catalog";
 
-// One measured cover (pnpm eval:covers writes this file), for a preset id the catalog doesn't have.
+// One measured cover (pnpm eval:covers writes this file) and one still cover (pnpm eval:covers --from-masters), for preset ids the catalog doesn't have.
 vi.mock("@/lib/preset-previews.generated", () => ({
-  PRESET_PREVIEWS: { "effect-measured-cover": { poster: "/previews/dop/effect-measured-cover.jpg", video: "/previews/dop/effect-measured-cover.mp4", run: "r", engine: "open", model: "oss-wan22-14b", variant: "research" } },
+  PRESET_PREVIEWS: {
+    "effect-measured-cover": { poster: "/previews/dop/effect-measured-cover.jpg", video: "/previews/dop/effect-measured-cover.mp4", run: "r", engine: "open", model: "oss-wan22-14b", variant: "research" },
+    "app-still-cover": { poster: "/previews/presets/app-still-cover.jpg", run: "comfyui-previews-2026-10", engine: "comfyui", model: "ideogram4", variant: "lean-json" },
+  },
 }));
 import {
   appFx,
   CAMERA_MOVES,
   effectFx,
   FX,
+  isCover,
   LAYER_BLEED,
   layerTransform,
   lookHue,
@@ -18,13 +22,13 @@ import {
   PREVIEW_LAYERS,
   presetHowTo,
   presetRouteLines,
-  previewFor,
+  previewFlip,
   searchText,
-  toPresetCard,
   type CameraMove,
   type MoveSpec,
   type PreviewLayer,
 } from "@/lib/preset-cards";
+import { previewFor, toPresetCard } from "@/lib/preset-card-data";
 import type { Preset } from "@/lib/catalog/types";
 
 const byName = (list: Preset[], name: string) => {
@@ -304,5 +308,20 @@ describe("real covers", () => {
     expect(measured.fx).toBeUndefined();
     // The others keep their procedural preview.
     expect(previewFor({ id: "effect-other", type: "effect", name: "Other", category: "Elements" }).video).toBeUndefined();
+  });
+
+  it("a still cover is the card's image: no clip, no move or treatment, never mirrored", () => {
+    const still = previewFor({ id: "app-still-cover", type: "app", name: "Still", category: "Identity" });
+    expect(still).toStrictEqual({ poster: "/previews/presets/app-still-cover.jpg", scene: "portrait" });
+    expect(isCover(still)).toBe(true);
+    // Whatever its id hashes to, a cover is shown as rendered.
+    for (const id of ["app-still-cover", "a", "b", "c", "d", "e", "f"]) expect(previewFlip({ id, preview: still })).toBe(false);
+  });
+
+  it("no procedural preview counts as a cover, and only treatments mirror", () => {
+    const all = [...APPS, ...MOTIONS, ...EFFECTS].map(toPresetCard);
+    for (const c of all) expect(isCover(c.preview), c.id).toBe(false);
+    expect(all.filter((c) => c.preview.move).some((c) => previewFlip(c))).toBe(false);
+    expect(all.filter((c) => c.preview.fx).some((c) => previewFlip(c))).toBe(true);
   });
 });

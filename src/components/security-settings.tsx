@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { copyWithToast } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 
@@ -194,11 +195,55 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
   );
 }
 
+interface PublicSignupStatus {
+  setting: boolean;
+  fromEnv: boolean | null;
+  active: boolean;
+}
+
+/** Public sign-up: guests browse read-only, and anyone can make an account (that runs on its own GPU). */
+function PublicSignup() {
+  const qc = useQueryClient();
+  const id = useId();
+  const q = useQuery({ queryKey: ["auth", "public"], queryFn: () => call<PublicSignupStatus>("/api/auth/public", "GET") });
+  const [busy, setBusy] = useState(false);
+  if (!q.data) return null;
+  const p = q.data;
+  const set = async (on: boolean) => {
+    setBusy(true);
+    try {
+      qc.setQueryData(["auth", "public"], await call<PublicSignupStatus>("/api/auth/public", "PUT", { on }));
+      void qc.invalidateQueries({ queryKey: ["viewer"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-1.5 sm:w-[36rem] sm:max-w-full">
+      <div className="flex items-center gap-3">
+        <Label htmlFor={`${id}-public`} className="flex-1 text-[13px] font-medium">
+          Public sign-up
+        </Label>
+        <Switch id={`${id}-public`} checked={p.fromEnv ?? p.setting} disabled={busy || p.fromEnv !== null} onCheckedChange={(on) => void set(on)} />
+      </div>
+      <p className="text-[12px] text-muted-foreground">
+        Guests can browse every page read-only (not your library), and anyone can sign up with an email and a password. Accounts never use your cloud keys or GPU, and
+        can&apos;t change settings, keys or tokens.
+        {p.fromEnv !== null && " Set by FUOBE_PUBLIC_SIGNUP on the server."}
+        {p.active && !(p.fromEnv ?? p.setting) && " On for this address (fuobe.com)."}
+      </p>
+    </div>
+  );
+}
+
 export function SecuritySettings() {
   const qc = useQueryClient();
   const router = useRouter();
   const status = useQuery({ queryKey: ["auth"], queryFn: () => call<AuthStatus>("/api/auth/password", "GET") });
   const refresh = () => void qc.invalidateQueries({ queryKey: ["auth"] });
+  if (status.isError) return <p className="text-[13px] text-muted-foreground">{status.error.message} Only the studio&apos;s owner sees these settings.</p>;
   if (!status.data) return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
   const s = status.data;
   return (
@@ -226,6 +271,7 @@ export function SecuritySettings() {
         </div>
       )}
       {!s.fromEnv && <PasswordForm status={s} onDone={refresh} />}
+      {s.enabled && <PublicSignup />}
       <Tokens status={s} onChange={refresh} />
     </div>
   );

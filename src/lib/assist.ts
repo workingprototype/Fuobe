@@ -50,13 +50,16 @@ export type AssistItem =
 
 export type AssistStatus = "idle" | "running" | "waiting";
 
-export type AssistAgent = "claude" | "ollama" | "offline";
+export type AssistAgent = "claude" | "local" | "offline";
+
+/** Chats saved before LM Studio and Unsloth Studio came along call the local model "ollama". */
+export const normalizeAgent = (a: string | null | undefined): AssistAgent | undefined => (a === "ollama" ? "local" : a === "claude" || a === "local" || a === "offline" ? a : undefined);
 
 export interface AssistThread {
   id: string;
   title: string;
   status: AssistStatus;
-  /** "claude" = Claude; "ollama" = a local model through Ollama; "offline" = a rule-based planner (no LLM). */
+  /** "claude" = Claude; "local" = a local model (Ollama, LM Studio, Unsloth Studio…); "offline" = a rule-based planner (no LLM). */
   agent: AssistAgent;
   engine: Engine;
   /** Run plans without the approval card. */
@@ -68,7 +71,7 @@ export interface AssistThread {
   projectId?: string | null;
   /** How the LLM was chosen (Free / Smart / Manual). */
   mode?: AssistMode;
-  /** Claude model id, or the Ollama model name (null: the default). */
+  /** Claude model id, or the local model's name (null: the default). */
   model?: string | null;
   effort?: AssistEffort | null;
   /** Skills loaded into this chat (by `/name` or by the agent). */
@@ -121,7 +124,7 @@ export type AssistEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export const ASSIST_MODES: { id: AssistMode; label: string; hint: string }[] = [
   { id: "smart", label: "Smart", hint: "Claude plans, picks models and checks results" },
-  { id: "free", label: "Free", hint: "A local model through Ollama, or the offline planner — no API cost" },
+  { id: "free", label: "Free", hint: "A local model (Ollama, LM Studio or Unsloth Studio), or the offline planner — no API cost" },
   { id: "manual", label: "Manual", hint: "Pick the model and how hard it thinks" },
 ];
 
@@ -151,14 +154,28 @@ export interface AssistModeChoice {
   effort?: AssistEffort | null;
 }
 
+/** The local model server behind Free and Manual's local models (Ollama, LM Studio, Unsloth Studio, or another OpenAI-compatible one). */
+export interface AssistLocal {
+  /** "ollama" | "lmstudio" | "unsloth" | "custom"; null: Automatic found none. */
+  kind: string | null;
+  /** "LM Studio"; "a local model" when Automatic found none. */
+  label: string;
+  /** It answers and has a model to use. */
+  ok: boolean;
+  /** Its chat models (Manual mode lists them). */
+  models: string[];
+  /** The model a chat uses by default. */
+  model: string | null;
+  /** Why it can't run (needs a key, no model loaded…). */
+  problem?: string;
+}
+
 /** What the server can run right now (GET /api/assist). */
 export interface AssistAvailability {
   /** An Anthropic key is set and Settings allows Claude here. */
   claude: boolean;
-  /** Ollama answered. */
-  ollama: boolean;
-  ollamaModels: string[];
-  ollamaModel: string;
+  /** The local model server Free and Manual use. */
+  local: AssistLocal;
   /** Settings → AI helper is "none": every chat runs the offline planner. */
   aiOff: boolean;
   /** Smart when Claude can run, else Free. */
@@ -167,7 +184,7 @@ export interface AssistAvailability {
 
 export function modeLabel(t: Pick<AssistThread, "mode" | "agent" | "model" | "effort">): string {
   if (t.agent === "offline") return "Offline planner";
-  if (t.agent === "ollama") return t.model ? `Local · ${t.model}` : "Local LLM";
+  if (t.agent === "local") return t.model ? `Local · ${t.model}` : "Local LLM";
   const m = CLAUDE_MODELS.find((x) => x.id === (t.model ?? DEFAULT_CLAUDE_MODEL));
   const effort = ASSIST_EFFORTS.find((e) => e.id === (t.effort ?? DEFAULT_EFFORT))?.label;
   if (t.mode === "manual") return `${m?.label.replace("Claude ", "") ?? t.model} · ${effort}`;

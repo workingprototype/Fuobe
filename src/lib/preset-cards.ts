@@ -6,9 +6,11 @@
  * the browser. A preset with a real cover (a measured render, see preset-previews.generated.ts) shows
  * it; the others get a procedural preview: a camera move over a bundled layered still for motions, a
  * per-category animated treatment for effects and apps. Pure module, safe on both sides.
+ *
+ * The covers manifest is read in preset-card-data.ts (previewFor, toPresetCard), not here: client
+ * components import this module, and would carry the whole manifest into every chunk they are in.
  */
 import type { Preset } from "./catalog/types";
-import { PRESET_PREVIEWS } from "./preset-previews.generated";
 
 /** Bundled sample stills (public/samples/previews, see scripts/gen-preview-scenes.mjs). */
 export type PreviewScene = "landscape" | "portrait" | "city" | "product";
@@ -175,7 +177,7 @@ export type PreviewFx = (typeof FX)[number];
 export interface PresetPreview {
   /** Still shown before (and under) the preview. */
   poster: string;
-  /** A real example clip, once one exists: played instead of the procedural preview. */
+  /** A real cover's clip (preset-previews.generated.ts), played instead of the procedural preview. */
   video?: string;
   scene: PreviewScene;
   move?: CameraMove;
@@ -380,11 +382,9 @@ export function previewScene(p: Pick<Preset, "type" | "name" | "category"> & { i
   return pick(p.id, ["portrait", "landscape", "city", "portrait"] as const);
 }
 
-export function previewFor(p: Pick<Preset, "id" | "type" | "name" | "category">): PresetPreview {
+/** The procedural preview (a preset without a real cover): a camera move for motions, a treatment for effects and apps. */
+export function proceduralPreview(p: Pick<Preset, "id" | "type" | "name" | "category">): PresetPreview {
   const scene = previewScene(p);
-  // A real cover, rendered and measured by the evaluation harness (pnpm eval:covers), replaces the procedural one.
-  const real = PRESET_PREVIEWS[p.id];
-  if (real) return { poster: real.poster, ...(real.video && { video: real.video }), scene };
   return {
     poster: scenePoster(scene),
     scene,
@@ -393,12 +393,18 @@ export function previewFor(p: Pick<Preset, "id" | "type" | "name" | "category">)
 }
 
 /**
- * Whether a card shows its still mirrored, so neighbouring treatments on the same still differ.
- * Never for camera moves (a pan left must still go left). Derived from the id on the client, so it
- * costs nothing in the gallery payload.
+ * Whether a preview is a real cover (preset-previews.generated.ts) rather than a procedural one: every
+ * procedural preview carries a camera move (motions) or a treatment (effects, apps), a cover neither.
  */
-export function previewFlip(c: { id: string; preview: Pick<PresetPreview, "move"> }): boolean {
-  return !c.preview.move && ((stableHash(c.id) >>> 3) & 1) === 1;
+export const isCover = (p: Pick<PresetPreview, "move" | "fx">) => !p.move && !p.fx;
+
+/**
+ * Whether a card shows its still mirrored, so neighbouring treatments on the same still differ.
+ * Never for camera moves (a pan left must still go left), nor for a real cover (shown as rendered).
+ * Derived from the id on the client, so it costs nothing in the gallery payload.
+ */
+export function previewFlip(c: { id: string; preview: Pick<PresetPreview, "move" | "fx"> }): boolean {
+  return !!c.preview.fx && ((stableHash(c.id) >>> 3) & 1) === 1;
 }
 
 /** The hue a preset's look was built from (`oklch(L C <hue>)`), for tinting its preview. */
@@ -414,8 +420,8 @@ export function clip(s: string, max: number): string {
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max * 0.6)).replace(/[\s,;:.–—-]+$/, "")}…`;
 }
 
-/** What a gallery card needs, and nothing else. */
-export function toPresetCard(p: Preset): PresetCardData {
+/** What a gallery card needs, and nothing else, with the preview it shows (toPresetCard in preset-card-data.ts picks it). */
+export function presetCard(p: Preset, preview: PresetPreview): PresetCardData {
   return {
     id: p.id,
     name: p.name,
@@ -426,7 +432,7 @@ export function toPresetCard(p: Preset): PresetCardData {
     ...(p.badges?.includes("top") ? { top: true as const } : {}),
     cloud: !!p.cloud,
     open: !!p.open,
-    preview: previewFor(p),
+    preview,
   };
 }
 

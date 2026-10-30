@@ -688,8 +688,8 @@ export const APPS: Preset[] = [
     inputs: [product],
     prompt: "",
     cloud: { modelId: "hunyuan-3d-3-1-pro", op: "image-to-3d" },
-    open: { modelId: "oss-trellis2", op: "image-to-3d" },
-    parity: "The open version (TRELLIS.2) also renders a turntable video; for cloud models the 3D page records one in your browser",
+    open: { modelId: "oss-pixal3d", op: "image-to-3d" },
+    parity: "The open version (Pixal3D) also gets a turntable video rendered on the server; for cloud models the 3D page records one in your browser",
   }),
   videoApp({
     name: "Billboard Ad",

@@ -149,7 +149,7 @@ Without `--wait` or `--out`, `generate` prints the job ids and returns at once.
 ### `fuobe status`, `fuobe wait`, `fuobe download`, `fuobe cancel`
 
 ```bash
-fuobe status                         # the server: engine mode, demo mode, providers, the token
+fuobe status                         # the server: engine mode, demo mode, providers, the local LLM, the token
 fuobe status V1StGXR8_Z5j            # one or more generations
 fuobe wait V1StGXR8_Z5j 3Kp9x2LmQa7c # until each is done; prints the output URLs (text results inline)
 fuobe wait V1StGXR8_Z5j --out renders/

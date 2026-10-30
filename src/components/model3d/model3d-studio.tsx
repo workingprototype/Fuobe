@@ -260,7 +260,7 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
           {!modelId ? (
             <div className="space-y-3 text-[13px]">
               <p className="text-muted-foreground">
-                Pick an object runs on SAM 3D Objects, a cloud model; no open model rebuilds one named object yet. On the open engine, crop the photo to the object and use From an image: TRELLIS.2 cuts it out for you.
+                Pick an object runs on SAM 3D Objects, a cloud model; no open model rebuilds one named object yet. On the open engine, crop the photo to the object and use From an image: Pixal3D cuts it out for you.
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {cloudAllowed && (
@@ -316,7 +316,7 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
                     ? "TripoSplat cuts the subject out and renders an orbit video of the splat on your GPU."
                     : "TripoSplat cuts the subject out and returns a .ply splat to download."
                   : engine === "open"
-                    ? "TRELLIS.2 also renders a turntable video on your GPU."
+                    ? "Open models also get a turntable video, rendered after the model is made."
                     : "Cloud models return the .glb; record a turntable right here in your browser."}
               </p>
             </>

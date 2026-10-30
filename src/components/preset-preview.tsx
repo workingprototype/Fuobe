@@ -3,6 +3,7 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   CAMERA_MOVES,
+  isCover,
   LAYER_DEPTH,
   LAYER_OFFSET,
   moveVars,
@@ -22,7 +23,8 @@ const store = createPlaybackStore(browserPlaybackEnv);
 
 /**
  * Wire a card element to the playback store. Returns whether its preview should play and the
- * handlers to spread on the card (hover and focus on desktop; touch devices use visibility).
+ * handlers to spread on the card (hover and keyboard focus on desktop, after a short rest; touch
+ * devices use visibility).
  */
 export function usePreviewPlayback<T extends HTMLElement>(id: string) {
   const ref = useRef<T | null>(null);
@@ -45,10 +47,21 @@ export function usePreviewPlayback<T extends HTMLElement>(id: string) {
     handlers: {
       onPointerEnter: (e: React.PointerEvent) => e.pointerType === "mouse" && on(),
       onPointerLeave: (e: React.PointerEvent) => e.pointerType === "mouse" && off(),
-      onFocus: on,
+      // Keyboard focus only: a tap (or click) focuses the card too, and would start (and download) its clip.
+      onFocus: (e: React.FocusEvent) => e.currentTarget.matches(":focus-visible") && on(),
       onBlur: off,
     },
   };
+}
+
+const noSubscribe = () => () => {};
+
+/**
+ * Save-Data or a 2G connection (lib/preview-playback.ts): a preview that would play without being
+ * asked (the preset header's loop) stays on its poster. True before hydration, so nothing starts early.
+ */
+export function useSaveData(): boolean {
+  return useSyncExternalStore(noSubscribe, store.saveData, () => true);
 }
 
 const layerVars = (l: PreviewLayer) => ({ "--d": LAYER_DEPTH[l], "--o": LAYER_OFFSET[l] }) as React.CSSProperties;
@@ -243,8 +256,8 @@ function Fx({ fx, scene }: { fx: NonNullable<Preview["fx"]>; scene: PreviewScene
 }
 
 /**
- * A preset's preview: a real clip when the catalog has one, otherwise the procedural version, a
- * camera move over a layered sample still (motions) or an animated treatment (effects, apps).
+ * A preset's preview: its real cover when it has one (a clip that plays, or a still), otherwise the
+ * procedural version, a camera move over a layered sample still (motions) or an animated treatment (effects, apps).
  * At rest it shows the poster frame (and the treatment's still frame); `playing` runs it. The depth
  * layers a camera move needs are only mounted once the card first plays.
  */
@@ -287,6 +300,12 @@ export const PresetPreview = memo(function PresetPreview({
         aria-hidden
       />
     );
+
+  // A real cover that is a still: the card's image as rendered, without the procedural preview's tint,
+  // bleed or mirroring (and no move glyph: the picture shows the preset itself).
+  if (isCover(preview))
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={preview.poster} alt="" draggable={false} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" aria-hidden />;
 
   const spec: MoveSpec | undefined = preview.move ? CAMERA_MOVES[preview.move] : undefined;
   const glyph = preview.move ? glyphFor(preview.move) : undefined;

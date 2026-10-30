@@ -128,7 +128,6 @@ export const CUSTOM_NODE_REPOS = {
   'ComfyUI-WanVideoWrapper': 'https://github.com/kijai/ComfyUI-WanVideoWrapper',
   'ComfyUI-VideoHelperSuite': 'https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite',
   'ComfyUI-KJNodes': 'https://github.com/kijai/ComfyUI-KJNodes',
-  'ComfyUI-SeedVR2_VideoUpscaler': 'https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler',
   'ComfyUI-Frame-Interpolation': 'https://github.com/Fannovel16/ComfyUI-Frame-Interpolation',
   'ComfyUI-RMBG': 'https://github.com/1038lab/ComfyUI-RMBG',
   'ComfyUI-ReActor': 'https://github.com/Gourieff/ComfyUI-ReActor',
@@ -2630,21 +2629,34 @@ export const SPEC = [
 
   // ---- Product 3D, try-on --------------------------------------------------------
   {
+    id: 'image-to-3d-pixal3d',
+    title: 'Image to textured 3D (Pixal3D, PBR GLB, ~250k triangles)',
+    capability: 'image-to-3d',
+    handBuilt: 'hand-built/image-to-3d-pixal3d.json',
+    bindings: {
+      image: [b('122', 'image')], seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')],
+    },
+    outputs: [{ node: '322', kind: 'model3d' }],
+    vramGb: 16,
+    license:
+      'MIT (Pixal3D weights by TencentARC, as the multi-view weights; TRELLIS.2 VAEs as repackaged by Comfy-Org, BiRefNet, microsoft/MoGe 2); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
+      '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
+    notes: 'Template 3d_pixal3d_trellis2_image_to_model, Pixal3D branch (the default image-to-3D route): MoGe-2 (geometry_estimation/moge_2_vitl_normal_fp16, resolution_level 9) estimates the camera from the cut-out, MoGeGeometryToFOV (horizontal, degrees) -> Pixal3DConditioning (camera_angle_x) with the DINOv3 encoder, UNet pixal3d_int8_convrot; ImageCropToMask pad_factor 1.1 (as the node asks for Pixal3D). BiRefNet cut-out -> ImageCropToMask 1024 -> structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> RemeshMesh (768, sign_mode solid, fill 20, band 1, smooth 20) -> DecimateMesh (250,000 faces, midpoint) -> smooth normals -> UV unwrap -> base colour / metallic / roughness baked at textureSize, normal map 2048 and AO 1024 baked from the dense remeshed mesh onto the decimated one -> GLB (Save3DAdvanced, history ui "3d"). No turntable in the graph: after the job the Fuobe server finishes the GLB (scripts/model3d/finish-glb.mjs: roughness floor by material, pivot at the bottom centre, meshopt + WebP 2048 web GLB as meta.web; the raw GLB stays the download) and renders a 96-frame 24 fps turntable on the CPU (scripts/model3d/render-turntable.mjs, model-viewer on SwiftShader) when Chromium and ffmpeg are available (src/server/model3d-finish.ts). GPU validation 2026-10-23 (RTX 5090, the same graph run end to end): 114-185 s per object, 25-35 MB raw GLB at ~250k triangles (was 8M triangles / 317 MB before the decimate step), web GLB 1.6-3.6 MB; more faithful to the photo than TRELLIS.2 (209-238 s). The origin is the camera-aligned volume centre, hence the pivot fix. Surfaces can show faint planar facets from the shape decode (no graph setting removes them).',
+  },
+  {
     id: 'image-to-3d-trellis2',
-    title: 'Image to textured 3D (TRELLIS.2, PBR GLB) + a 36-view turntable video',
+    title: 'Image to textured 3D (TRELLIS.2, PBR GLB, ~250k triangles; fallback to Pixal3D)',
     capability: 'image-to-3d',
     handBuilt: 'hand-built/image-to-3d-trellis2.json',
     bindings: {
-      image: [b('122', 'image')], seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')], turntableFps: [b('701', 'fps')],
+      image: [b('122', 'image')], seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')],
     },
-    outputs: [{ node: '322', kind: 'model3d' }, { node: '702', kind: 'video', role: 'turntable' }],
+    outputs: [{ node: '322', kind: 'model3d' }],
     vramGb: 16,
     license:
       'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
       '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
-    notes:
-      'Template 3d_pixal3d_trellis2_image_to_model: BiRefNet cut-out -> crop to mask -> TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> remesh -> UV unwrap -> ' +
-      'baked base colour / metallic / roughness / AO / normal at textureSize -> GLB (Save3DAdvanced, history ui "3d"). The graph adds a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps.',
+    notes: 'Template 3d_pixal3d_trellis2_image_to_model, TRELLIS.2 branch (the fallback image-to-3D route; Pixal3D is the default): Trellis2Conditioning with the DINOv3 encoder, UNet trellis_2_int8_convrot; ImageCropToMask pad_factor 1.0. BiRefNet cut-out -> ImageCropToMask 1024 -> structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> RemeshMesh (768, sign_mode solid, fill 20, band 1, smooth 20) -> DecimateMesh (250,000 faces, midpoint) -> smooth normals -> UV unwrap -> base colour / metallic / roughness baked at textureSize, normal map 2048 and AO 1024 baked from the dense remeshed mesh onto the decimated one -> GLB (Save3DAdvanced, history ui "3d"). No turntable in the graph: after the job the Fuobe server finishes the GLB (scripts/model3d/finish-glb.mjs: roughness floor by material, pivot at the bottom centre, meshopt + WebP 2048 web GLB as meta.web; the raw GLB stays the download) and renders a 96-frame 24 fps turntable on the CPU (scripts/model3d/render-turntable.mjs, model-viewer on SwiftShader) when Chromium and ffmpeg are available (src/server/model3d-finish.ts). GPU validation 2026-10-23: 209-238 s, 28-43 MB raw GLB at ~250k triangles. The 36-view RotateMesh + RenderMesh turntable (unlit, aliased, 12 fps) was removed.',
   },
   {
     id: 'image-to-3d-trellis2-multiview',
@@ -2665,7 +2677,7 @@ export const SPEC = [
       '(Pixal3DMultiViewConditioning, a fixed orbit rig 90 degrees apart, Z up: the left view is the object\'s own left, the camera at +90 degrees azimuth from the front, i.e. the photographer walks to their right; ' +
       'every side but the front is optional and the provider drops the branch of a side with no photo). ' +
       'Each side: BiRefNet cut-out -> crop to mask (1024, pad 1.1) -> the view. Then TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) on Pixal3D multi-view ' +
-      '-> decimate to 700k faces -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB. The same 36-view turntable as image-to-3d-trellis2. ' +
+      '-> decimate to 700k faces -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB, plus a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps; the Fuobe server then finishes the GLB (web GLB as meta.web) and, when Chromium and ffmpeg are there, replaces that turntable with its CPU render (src/server/model3d-finish.ts). ' +
       'The views\' horizontal field of view as framed (Pixal3DMultiViewConditioning.fov) is measured on the front crop: MoGe 2 (LoadMoGeModel -> MoGeInference -> MoGeGeometryToFOV, horizontal, degrees), ' +
       'as the node\'s tooltip says for photos and as the official single-view template 3d_pixal3d_trellis2_image_to_model feeds Pixal3DConditioning; the multi-view template keeps the rig value 20, ' +
       'which suits rendered turnaround sheets but not phone photos, whose crops are usually wider. fovX (degrees, 0 = estimate, the default) fixes MoGe\'s lens instead, ' +

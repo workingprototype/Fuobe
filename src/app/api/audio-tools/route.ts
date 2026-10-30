@@ -1,4 +1,5 @@
 import { AudioToolBody, AudioToolError, previewAudioTool, runAudioTool } from "@/server/audio-tools";
+import { priceAs } from "@/server/visitor";
 
 /** What a field that doesn't check out means, in words the page shows. */
 const MESSAGES: Record<string, string> = {
@@ -10,7 +11,7 @@ const MESSAGES: Record<string, string> = {
 };
 
 /** Audio → Loop / extend, Join and Split soundtrack (and a split's mix put back on its video): start a run; `?preview=1` only plans and prices it. */
-export async function POST(request: Request) {
+async function post(request: Request) {
   const raw: unknown = await request.json().catch(() => null);
   const parsed = AudioToolBody.safeParse(raw);
   if (!parsed.success) {
@@ -27,4 +28,9 @@ export async function POST(request: Request) {
     console.error("[audio-tools]", e);
     return Response.json({ error: (e as Error).message || "Something went wrong" }, { status: 500 });
   }
+}
+
+/** A visitor (public sign-up) gets the price of its run on its own GPU, never a demo (src/server/visitor.ts). */
+export async function POST(request: Request) {
+  return priceAs(request, () => post(request));
 }

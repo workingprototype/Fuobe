@@ -15,10 +15,13 @@ import { jobScores, loadRun } from "./report.mjs";
 export const COVERS_DIR = path.join(REPO_DIR, "public", "previews");
 export const MANIFEST_FILE = path.join(REPO_DIR, "src", "lib", "preset-previews.generated.ts");
 
-/** Longest side of a cover still, and of a cover clip (px); a clip's first seconds. */
+/** Longest side of a cover still, and of a cover clip (px); a clip's first seconds, at CLIP_FPS. */
 const STILL_PX = 768;
 const CLIP_PX = 512;
 const CLIP_SECONDS = 4;
+const CLIP_FPS = 24;
+/** Frames at a clip's end crossfaded into its first ones: the cards play clips with `loop`, and this hides the jump. */
+const LOOP_FADE = 6;
 
 const HEADER = `/**
  * Real preset covers: renders from measured runs of the evaluation harness (scripts/eval, pnpm eval:covers),
@@ -39,15 +42,26 @@ export interface PresetPreviewMedia {
 
 export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = `;
 
-/** The manifest's entries as they stand (the JSON literal after the header). */
+/**
+ * The manifest's entries as they stand (the JSON literal after the header); none when there is no file yet. A
+ * file that can't be read as a manifest throws: writing over it would drop every other run's entries.
+ */
 export function readManifest(file = MANIFEST_FILE) {
+  let text;
   try {
-    const text = fs.readFileSync(file, "utf8");
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    if (e?.code === "ENOENT") return {};
+    throw e;
+  }
+  try {
     const at = text.indexOf("export const PRESET_PREVIEWS");
-    const json = text.slice(text.indexOf("=", at) + 1).trim().replace(/;\s*$/, "");
-    return JSON.parse(json);
-  } catch {
-    return {};
+    if (at < 0) throw new Error("no PRESET_PREVIEWS");
+    const entries = JSON.parse(text.slice(text.indexOf("=", at) + 1).trim().replace(/;\s*$/, ""));
+    if (!entries || typeof entries !== "object" || Array.isArray(entries)) throw new Error("not an object");
+    return entries;
+  } catch (e) {
+    throw new Error(`${file} isn't a covers manifest pnpm eval:covers can read (${e.message}): fix or restore it before making covers`);
   }
 }
 
@@ -81,22 +95,94 @@ function bestJob(rows, metricsDoc, metric) {
   return best;
 }
 
-/** ffmpeg, or why there's none. */
-function run(args) {
-  const r = spawnSync(process.env.FUOBE_FFMPEG ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], { encoding: "utf8" });
-  if (r.error) throw new Error("eval:covers needs ffmpeg to make small covers (install it, or set FUOBE_FFMPEG)");
-  if (r.status !== 0) throw new Error(`ffmpeg failed: ${(r.stderr || "").trim().split("\n").at(-1)}`);
+/** ffmpeg, or why there's none. `input` goes to its stdin; its stdout comes back (a Buffer). */
+function run(args, input) {
+  const r = spawnSync(process.env.FUOBE_FFMPEG ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], { input, maxBuffer: 1 << 30 });
+  if (r.error?.code === "ENOENT") throw new Error("eval:covers needs ffmpeg to make small covers (install it, or set FUOBE_FFMPEG)");
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(`ffmpeg failed: ${String(r.stderr ?? "").trim().split("\n").at(-1)}`);
+  return r.stdout;
 }
 
-/** A still at most STILL_PX wide/tall, or a clip's first seconds at most CLIP_PX with its first frame as the poster. */
+/** A y4m stream (ffmpeg's yuv4mpegpipe, 4:2:0) as its header line and each frame's bytes. */
+function readY4m(buf) {
+  const nl = buf.indexOf(0x0a);
+  const header = buf.subarray(0, Math.max(nl, 0)).toString("latin1");
+  const w = Number(/ W(\d+)/.exec(header)?.[1]);
+  const h = Number(/ H(\d+)/.exec(header)?.[1]);
+  if (!header.startsWith("YUV4MPEG2") || !w || !h) throw new Error("ffmpeg didn't decode the clip");
+  const size = w * h + 2 * Math.ceil(w / 2) * Math.ceil(h / 2);
+  const frames = [];
+  for (let at = nl + 1; at < buf.length; ) {
+    // Each frame: "FRAME" (and any parameters) up to a newline, then its planes.
+    const start = buf.indexOf(0x0a, at) + 1;
+    if (start <= 0 || start + size > buf.length) break;
+    frames.push(buf.subarray(start, start + size));
+    at = start + size;
+  }
+  return { header, frames, luma: w * h };
+}
+
+/** How far apart two frames are: the mean difference of their luma (every 4th sample). */
+function lumaGap(a, b, luma) {
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < luma; i += 4, n++) sum += Math.abs(a[i] - b[i]);
+  return n ? sum / n : 0;
+}
+
+/**
+ * Whether a clip loops already: going from its last frame back to its first is no bigger a step than most
+ * of its own (an orbit that ends where it starts). Such a clip is cut, not crossfaded.
+ * @param {Buffer[]} frames
+ * @param {number} luma bytes of luma at the start of each frame
+ */
+export function loopsAlready(frames, luma) {
+  if (frames.length < 3) return false;
+  const steps = frames.slice(1).map((f, i) => lumaGap(frames[i], f, luma)).sort((a, b) => a - b);
+  return lumaGap(frames.at(-1), frames[0], luma) <= Math.max(steps[Math.floor((steps.length - 1) * 0.9)], 1);
+}
+
+/**
+ * A loop without a seam: the first `fade` frames are dropped from the start and blended into the last `fade`
+ * instead, so the clip's end runs into its new beginning (the cards play clip covers with `loop`).
+ * @param {Buffer[]} frames
+ * @param {number} fade
+ */
+export function seamless(frames, fade) {
+  const n = frames.length;
+  if (!fade || n < 2 * fade) return frames;
+  const out = frames.slice(fade);
+  for (let k = 0; k < fade; k++) {
+    const a = (k + 1) / (fade + 1);
+    const tail = frames[n - fade + k];
+    const head = frames[k];
+    const blend = Buffer.allocUnsafe(tail.length);
+    for (let i = 0; i < blend.length; i++) blend[i] = Math.round(tail[i] * (1 - a) + head[i] * a);
+    out[n - 2 * fade + k] = blend;
+  }
+  return out;
+}
+
+/**
+ * A still at most STILL_PX wide/tall (a 4:2:0 JPEG), or a clip's first seconds at most CLIP_PX that loops
+ * without a jump (crossfaded, unless it loops already), with its first frame as the poster.
+ */
 function encode(src, kind, destBase) {
   const fit = (px) => `scale='if(gt(iw,ih),min(${px},iw),-2)':'if(gt(iw,ih),-2,min(${px},ih))'`;
   if (kind === "video") {
-    run(["-i", src, "-t", String(CLIP_SECONDS), "-an", "-vf", `${fit(CLIP_PX)},fps=24`, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "28", "-movflags", "+faststart", `${destBase}.mp4`]);
-    run(["-i", `${destBase}.mp4`, "-frames:v", "1", "-q:v", "4", `${destBase}.jpg`]);
+    // Decoded at CLIP_FPS: CLIP_SECONDS, plus the frames the crossfade takes back from the start.
+    const y4m = run(["-i", src, "-t", String(CLIP_SECONDS + LOOP_FADE / CLIP_FPS), "-an", "-sn", "-dn", "-vf", `${fit(CLIP_PX)},fps=${CLIP_FPS},format=yuv420p`, "-f", "yuv4mpegpipe", "-"]);
+    const { header, frames, luma } = readY4m(y4m);
+    if (frames.length < 2) throw new Error(`${src} has no frames to make a clip of`);
+    const cut = frames.slice(0, CLIP_SECONDS * CLIP_FPS);
+    const looped = loopsAlready(cut, luma) ? cut : seamless(frames, Math.min(LOOP_FADE, Math.floor(frames.length / 4)));
+    const stream = Buffer.concat([Buffer.from(`${header}\n`, "latin1"), ...looped.flatMap((fr) => [Buffer.from("FRAME\n"), fr])]);
+    run(["-f", "yuv4mpegpipe", "-i", "-", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "28", "-map_metadata", "-1", "-movflags", "+faststart", `${destBase}.mp4`], stream);
+    run(["-i", `${destBase}.mp4`, "-frames:v", "1", "-vf", "format=yuvj420p", "-q:v", "4", `${destBase}.jpg`]);
     return { poster: `${destBase}.jpg`, video: `${destBase}.mp4` };
   }
-  run(["-i", src, "-vf", fit(STILL_PX), "-frames:v", "1", "-q:v", "3", `${destBase}.jpg`]);
+  run(["-i", src, "-vf", `${fit(STILL_PX)},format=yuvj420p`, "-frames:v", "1", "-q:v", "3", `${destBase}.jpg`]);
   return { poster: `${destBase}.jpg` };
 }
 
@@ -152,9 +238,118 @@ export function makeCovers(dir, opts = {}) {
     const out = mainOutput(p.row);
     const files = encode(path.join(dir, out.file), out.kind, path.join(outDir, safeName(p.key)));
     const web = (f) => `/${path.relative(publicDir, f).split(path.sep).join("/")}`;
+    const before = manifest[p.key];
     manifest[p.key] = { poster: web(files.poster), ...(files.video && { video: web(files.video) }), run: L.run.runId, engine: L.run.engine, model: p.row.model?.id ?? "", variant };
+    // A measured cover replaces any other (a masters cover in /previews/presets): its files go with it.
+    dropReplaced(before, manifest, publicDir);
     result.covers.push({ key: p.key, caseId: p.caseId, job: p.row.id, metric: p.metric, score: p.score, ...(p.licence && { licence: p.licence }), ...manifest[p.key] });
   }
   if (picked.length) writeManifest(manifest, opts.manifest);
+  return result;
+}
+
+/** Remove a replaced entry's files that no entry names any more (its cover now lives in another folder). */
+function dropReplaced(old, manifest, publicDir) {
+  if (!old) return;
+  const named = new Set(Object.values(manifest).flatMap((e) => [e.poster, e.video].filter(Boolean)));
+  for (const url of [old.poster, old.video]) {
+    const parts = typeof url === "string" ? url.split("/").filter(Boolean) : [];
+    if (named.has(url) || parts[0] !== "previews" || parts.includes("..")) continue;
+    fs.rmSync(path.join(publicDir, ...parts), { force: true });
+  }
+}
+
+/** What a masters folder holds for a preset: its rendered clip, else its start still. */
+const MASTER_CLIP = "clip.mp4";
+const MASTER_STILL = "start.png";
+
+const newer = (file, than) => {
+  try {
+    return fs.statSync(file).mtimeMs >= fs.statSync(than).mtimeMs;
+  } catch {
+    return false;
+  }
+};
+
+function readMeta(folder) {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(folder, "meta.json"), "utf8"));
+    return meta && typeof meta === "object" ? meta : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Covers from rendered masters that aren't a run's (pnpm eval:covers --from-masters <dir>), such as the
+ * preview renders made in ComfyUI for the gallery. One folder per preset id: its clip.mp4 becomes a clip
+ * cover (the first 4 s, the first frame as its poster), else its start.png a still cover; the encoding is
+ * makeCovers'. Each cover records the provenance it's given: the run, engine, model (`videoModel` for a
+ * clip) and variant; a folder's meta.json can name its own `model` and `variant`. The manifest is merged:
+ * entries other runs wrote stay, and only the ids found here are replaced. An id whose cover another run
+ * made elsewhere (a measured eval cover, another suite's) is skipped, so a later masters run never undoes it;
+ * `replace` takes it over (and removes its files). Run it again as masters land: a cover newer than its master
+ * is kept (force makes it again), and a preset whose cover was a clip and is now a still loses the old clip.
+ * @param {string} dir the masters folder
+ * @param {{ run: string, engine?: string, model?: string, videoModel?: string, variant?: string, suite?: string,
+ *   only?: string[], force?: boolean, replace?: boolean, dryRun?: boolean, publicDir?: string, manifest?: string }} opts
+ */
+export function coversFromMasters(dir, opts) {
+  if (!opts?.run) throw new Error("Covers from masters need a run name for their provenance (--run)");
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`No masters folder at ${dir}`);
+  const publicDir = opts.publicDir ?? path.dirname(COVERS_DIR);
+  const outDir = path.join(publicDir, "previews", safeName(opts.suite ?? "presets"));
+  const engine = opts.engine ?? "comfyui";
+  const variant = opts.variant ?? "";
+  const only = opts.only?.length ? new Set(opts.only) : null;
+  const picked = [];
+  const skipped = [];
+  for (const id of fs.readdirSync(dir).sort()) {
+    const folder = path.join(dir, id);
+    if ((only && !only.has(id)) || !fs.statSync(folder).isDirectory()) continue;
+    if (safeName(id) !== id || id.startsWith("_")) {
+      skipped.push({ id, why: "not a preset id (folders are named by preset id, such as effect-set-on-fire)" });
+      continue;
+    }
+    const clip = path.join(folder, MASTER_CLIP);
+    const kind = fs.existsSync(clip) ? "video" : fs.existsSync(path.join(folder, MASTER_STILL)) ? "image" : null;
+    if (!kind) {
+      skipped.push({ id, why: `no ${MASTER_CLIP} or ${MASTER_STILL} yet` });
+      continue;
+    }
+    const meta = readMeta(folder);
+    const model = typeof meta.model === "string" ? meta.model : ((kind === "video" ? opts.videoModel : opts.model) ?? "");
+    picked.push({ id, kind, src: kind === "video" ? clip : path.join(folder, MASTER_STILL), model, variant: typeof meta.variant === "string" ? meta.variant : variant });
+  }
+  for (const id of only ?? []) if (!picked.some((p) => p.id === id) && !skipped.some((s) => s.id === id)) skipped.push({ id, why: "no folder" });
+  const result = { run: opts.run, engine, covers: [], skipped, manifest: opts.manifest ?? MANIFEST_FILE, folder: outDir };
+  const web = (f) => `/${path.relative(publicDir, f).split(path.sep).join("/")}`;
+  const manifest = readManifest(opts.manifest);
+  // Another run's cover outside this suite's folder (a measured one, say) stays unless replace says otherwise.
+  const ours = picked.filter((p) => {
+    const cur = manifest[p.id];
+    if (!cur || opts.replace || String(cur.poster).startsWith(`${web(outDir)}/`)) return true;
+    skipped.push({ id: p.id, why: `its cover is ${cur.run || "another run"}'s (${cur.poster}): --replace takes it over` });
+    return false;
+  });
+  if (ours.length && !opts.dryRun) fs.mkdirSync(outDir, { recursive: true });
+  for (const p of ours) {
+    const base = path.join(outDir, safeName(p.id));
+    const files = { poster: `${base}.jpg`, ...(p.kind === "video" && { video: `${base}.mp4` }) };
+    // Up to date: the cover is newer than its master (and a clip's poster than the clip it's taken from).
+    const kept = !opts.force && (p.kind === "video" ? newer(files.video, p.src) && newer(files.poster, files.video) : newer(files.poster, p.src) && !fs.existsSync(`${base}.mp4`));
+    const entry = { poster: web(files.poster), ...(files.video && { video: web(files.video) }), run: opts.run, engine, model: p.model, variant: p.variant };
+    if (!opts.dryRun) {
+      if (!kept) {
+        encode(p.src, p.kind, base);
+        if (p.kind === "image") fs.rmSync(`${base}.mp4`, { force: true });
+      }
+      const before = manifest[p.id];
+      manifest[p.id] = entry;
+      dropReplaced(before, manifest, publicDir);
+    }
+    result.covers.push({ key: p.id, kind: p.kind, from: p.src, ...(kept && { kept: true }), ...entry });
+  }
+  if (ours.length && !opts.dryRun) writeManifest(manifest, opts.manifest);
   return result;
 }

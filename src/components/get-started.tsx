@@ -110,7 +110,7 @@ export function GetStarted({
             Get started
           </h2>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            {!status || nothingConnected(status)
+            {status && nothingConnected(status)
               ? "Nothing is connected yet, so every run is a free demo with placeholder results. Connect a model to make the real thing:"
               : "Three ways to make things with Fuobe. Connect another one, or check one you set up:"}
           </p>
@@ -171,6 +171,8 @@ export function GetStarted({
             />
           </GuideCard>
         )}
+        {/* The owner's demo: not in the first paint (a visitor of a public studio never sees it). */}
+        {status && !status.viewer && (
         <GuideCard icon={Sparkles} title="Just try it" cost="Free: no keys, no GPU">
           <p className="text-[13px] leading-relaxed text-muted-foreground">Click through every studio with clearly labelled placeholder results. You can connect a model later in Settings.</p>
           <Button
@@ -184,6 +186,7 @@ export function GetStarted({
             Try the demo
           </Button>
         </GuideCard>
+        )}
       </div>
 
       {intents && (

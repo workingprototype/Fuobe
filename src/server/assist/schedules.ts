@@ -1,6 +1,6 @@
 import "server-only";
 import { nanoid } from "nanoid";
-import { threadTitle, type AssistItem, type AssistModeChoice } from "@/lib/assist";
+import { normalizeAgent, threadTitle, type AssistItem, type AssistModeChoice } from "@/lib/assist";
 import {
   DEFAULT_SCHEDULE_CAP_USD,
   describeRule,
@@ -129,6 +129,12 @@ export function summarize(status: "idle" | "running" | "waiting", items: AssistI
   return { status: "done", text };
 }
 
+/** A task's stored mode choice. Tasks saved before LM Studio and Unsloth Studio support say agent "ollama": shown as "local", as runs read it. */
+function modeOf(json: string): ScheduleView["mode"] {
+  const m = JSON.parse(json) as NonNullable<ScheduleView["mode"]>;
+  return m.agent ? { ...m, agent: normalizeAgent(m.agent) ?? m.agent } : m;
+}
+
 function toView(r: Row): ScheduleView {
   return {
     id: r.id,
@@ -141,7 +147,7 @@ function toView(r: Row): ScheduleView {
     approval: r.approval,
     capUsd: r.cap_usd,
     engine: r.engine,
-    mode: r.mode_json ? (JSON.parse(r.mode_json) as ScheduleView["mode"]) : null,
+    mode: r.mode_json ? modeOf(r.mode_json) : null,
     connectors: !!r.connectors,
     paused: !!r.paused,
     nextRunAt: r.paused ? null : r.next_run_at,

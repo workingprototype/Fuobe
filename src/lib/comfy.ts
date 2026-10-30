@@ -50,6 +50,8 @@ export interface ManifestModel {
   folder: string;
   url?: string;
   sizeGb?: number;
+  /** A licence to accept on Hugging Face (and a token) before it downloads (the LTX-2.5 files). */
+  gated?: boolean;
   /** An alternative a model control can pick (FILM for RIFE): not needed for the workflow's defaults. */
   optional?: boolean;
 }

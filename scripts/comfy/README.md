@@ -270,7 +270,7 @@ node validate-workflows.mjs image-to-3d-trellis2-multiview image-to-3d-trellis2 
 
 | id | capability | what | ran for real here |
 |---|---|---|---|
-| `image-to-3d-trellis2-multiview` | image-to-3d | One upload per side (image = front, image2 = left, image3 = back, image4 = right) → BiRefNet cut-out and crop per side → `Pixal3DMultiViewConditioning` (a fixed orbit rig; its field of view measured on the front crop by MoGe 2) → TRELLIS.2 stages on `pixal3d_multiview_int8_convrot` (5.58 GB, MIT) → PBR GLB + the single-view graph's 36-view turntable | no (GPU); /prompt only (every side, and front + back / front + right pruned); the MoGe FOV subgraph ran on CPU |
+| `image-to-3d-trellis2-multiview` | image-to-3d | One upload per side (image = front, image2 = left, image3 = back, image4 = right) → BiRefNet cut-out and crop per side → `Pixal3DMultiViewConditioning` (a fixed orbit rig; its field of view measured on the front crop by MoGe 2) → TRELLIS.2 stages on `pixal3d_multiview_int8_convrot` (5.58 GB, MIT) → PBR GLB + a 36-view turntable (RotateMesh + RenderMesh, 12 fps), which the server replaces with its CPU turntable when it can | no (GPU); /prompt only (every side, and front + back / front + right pruned); the MoGe FOV subgraph ran on CPU |
 
 - **What the provider does**: `SLOT_RULES` gives the workflow its sides; each photo goes to the side
   `params.extra.views` names (in order when unnamed), and a side with no photo is cut out of the graph
@@ -281,8 +281,14 @@ node validate-workflows.mjs image-to-3d-trellis2-multiview image-to-3d-trellis2 
   instead (0 = estimate; 20 for a generated sheet). On the CPU server two runs of the subgraph (resolution level 9, one estimating,
   one given 20°) took 137 s in all, model load included: 40.0° estimated on a test image, 20° passed through.
 - **Sides**: the rig's left is the object's own left (camera at +90° azimuth): facing the front, walk to your right to photograph it.
-- **Licences**: the TRELLIS.2 graphs (single and multi-view) encode with DINOv3 ViT-L (`dino_v3_L_naf`), so their
-  licence now names the DINOv3 License and its "Built with DINOv3" notice, like TripoSplat's.
+- **Single view**: `image-to-3d-pixal3d` (Pixal3D with MoGe 2's camera, the default "From an image" route) and
+  `image-to-3d-trellis2` (the fallback) remesh with `sign_mode` solid (fill 20) and decimate to 250,000 faces, and have no
+  turntable in the graph: the Fuobe server finishes every open image-to-3D GLB (a meshopt + WebP web GLB as `meta.web`, the
+  pivot at the bottom) and renders a 96-frame turntable on the CPU (`src/server/model3d-finish.ts`, `scripts/model3d/`).
+  The multi-view graph still has the template's udf remesh, a 700,000-face decimate and its GPU turntable; moving it to the
+  single-view settings needs a new /prompt validation.
+- **Licences**: the TRELLIS.2 and Pixal3D graphs (single and multi-view) encode with DINOv3 ViT-L (`dino_v3_L_naf`), so their
+  licence names the DINOv3 License and its "Built with DINOv3" notice, like TripoSplat's.
 - **Not open**: rigging. UniRig (MIT) has no ComfyUI pack verified against v0.41, so Rig & animate is Meshy on fal only.
   SAM 3D Objects has no open route either (the core SAM 3D nodes are body only).
 

@@ -36,6 +36,7 @@ import {
   sceneSpans,
   sceneTiming,
   scriptBrief,
+  scriptSchema,
   scriptSystem,
   splitScript,
   spokenTimes,
@@ -43,9 +44,11 @@ import {
   styleRefLimit,
   TIMING_PARTS,
   topicsBrief,
+  topicsSchema,
   topicsSystem,
   totalSeconds,
   visualsBrief,
+  visualsSchema,
   visualsSystem,
   withTiming,
   wordsFor,
@@ -83,7 +86,8 @@ import { db } from "./db";
 import { listElements } from "./elements";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained } from "./generations";
 import { provider } from "./providers";
-import { llmBackends, probeOllama } from "./providers/llm";
+import type { JsonSpec } from "./llm";
+import { llmBackends, probeLocal } from "./providers/llm";
 import { fetchRemote } from "./remote-fetch";
 import { engineMode, getSetting } from "./settings";
 import { fileUrl, saveFile } from "./storage";
@@ -195,7 +199,7 @@ function mustEpisode(id: string): FacelessEpisode {
 }
 
 // ---------------------------------------------------------------------------
-// The LLM (the install's own: Claude or Ollama for the cloud engine, Ollama only for the open one)
+// The LLM (the install's own: Claude or a local model for the cloud engine, a local model only for the open one)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -206,6 +210,8 @@ export interface AskOptions {
   signal?: AbortSignal;
   /** How long to wait for the answer (default 8 minutes: a script on a slow local model). */
   timeoutMs?: number;
+  /** The JSON Schema the answer follows on a local model that supports it (the prompt asks for the same JSON). */
+  json?: JsonSpec;
 }
 
 /** Channel names and topic suggestions are waited for: a slow model gives way to the offline wording. */
@@ -220,11 +226,11 @@ export async function askLlm(engine: Engine, system: string, user: string, o: As
   const model = found && offeredModel(found);
   const route = model?.routes.find((r) => r.op === "write");
   if (!model || !route) return null;
-  await probeOllama();
+  await probeLocal();
   if (!llmBackends(route).length) return null;
   const llm = provider("llm");
   try {
-    const { externalId } = await llm.submit({ generationId: `faceless_${nanoid(6)}`, model, route, input: { prompt: user, extra: { system } } });
+    const { externalId } = await llm.submit({ generationId: `faceless_${nanoid(6)}`, model, route, input: { prompt: user, extra: { system, ...(o.json && { json: o.json }) } } });
     const ctx = { externalId, meta: {}, route, model, createdAt: Date.now() };
     const deadline = Date.now() + (o.timeoutMs ?? 8 * 60_000);
     while (Date.now() < deadline) {
@@ -424,7 +430,7 @@ export function makeAvatar(id: string): Generation {
 export async function suggestTopics(input: { idea: string; genre: FacelessGenre; engine: Engine; avoid?: string[]; count?: number; round?: number; reference?: string }): Promise<{ topics: TopicIdea[]; offline: boolean }> {
   const count = Math.max(4, Math.min(6, input.count ?? 5));
   const genre = genreInfo(input.genre);
-  const answer = await askLlm(input.engine, topicsSystem, topicsBrief({ idea: input.idea, genre, count, avoid: input.avoid, reference: input.reference }), { timeoutMs: TOPICS_TIMEOUT_MS });
+  const answer = await askLlm(input.engine, topicsSystem, topicsBrief({ idea: input.idea, genre, count, avoid: input.avoid, reference: input.reference }), { timeoutMs: TOPICS_TIMEOUT_MS, json: topicsSchema(count) });
   const topics = answer ? parseTopics(answer).slice(0, count) : [];
   if (topics.length >= 3) return { topics, offline: false };
   return { topics: offlineTopics(input.idea, genre.id, count, input.round ?? 0, input.avoid), offline: true };
@@ -585,12 +591,12 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
   let script: EpisodeScript;
   if (pasted) {
     const blocks = splitScript(pasted);
-    const answer = await askLlm(s.engine, visualsSystem, visualsBrief(blocks, style.name, ep.topic || pasted.slice(0, 200)), ask);
+    const answer = await askLlm(s.engine, visualsSystem, visualsBrief(blocks, style.name, ep.topic || pasted.slice(0, 200)), { ...ask, json: visualsSchema(blocks.length) });
     const visuals = answer ? parseVisuals(answer, blocks.length) : null;
     script = {
       source: "pasted",
       blocks: visuals ? blocks.map((b, i) => ({ ...b, visual: visuals[i].visual, motion: visuals[i].motion || b.motion })) : blocks,
-      ...(!visuals && { offline: true, note: failure ? `Pictures planned offline (${failure}).` : "Pictures planned from your words — connect Claude or Ollama in Settings for better scenes." }),
+      ...(!visuals && { offline: true, note: failure ? `Pictures planned offline (${failure}).` : "Pictures planned from your words — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for better scenes." }),
     };
   } else {
     const topic = ep.topic || textSources[0]?.slice(0, 300) || "this topic";
@@ -607,7 +613,7 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
       auto,
       style: s.brief?.script,
     });
-    const answer = await askLlm(s.engine, scriptSystem, brief, ask);
+    const answer = await askLlm(s.engine, scriptSystem, brief, { ...ask, json: scriptSchema(auto ? null : scenes) });
     const parsed = answer ? parseScript(answer) : null;
     if (parsed?.blocks.length) {
       script = { source: "ai", title: parsed.title ?? undefined, blocks: parsed.blocks };

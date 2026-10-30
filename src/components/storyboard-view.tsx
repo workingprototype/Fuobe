@@ -498,7 +498,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
             </div>
             <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
               <Sparkles className="mt-px size-3 shrink-0" />
-              {mode === "auto" ? "Your story is split into frames by the prompt LLM (Settings → Prompt enhancement), or a shot list when none is set." : "One prompt per frame. References keep the cast consistent."}
+              {mode === "auto" ? "Your story is split into frames by the prompt LLM (Settings → AI helper), or a shot list when none is set." : "One prompt per frame. References keep the cast consistent."}
               {lookName && ` Every frame gets the ${lookName} look's grade${aspect === "21:9" ? ", made at 16:9 and cropped to 21:9" : ""}.`}
             </p>
           </div>

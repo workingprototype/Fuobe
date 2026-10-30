@@ -2,12 +2,34 @@ import { NextResponse, type NextRequest } from "next/server";
 import { APPS } from "@/lib/catalog/apps";
 import { recordForPath, unknownHubMode } from "@/lib/record-pages";
 import { countsAsView, SHARE_VIEW_HEADER, shareRoute } from "@/lib/share";
-import { authEnabled, crossSite, hostAllowed, LoginGuard, SESSION_COOKIE, validSession, validToken } from "@/server/auth";
+import {
+  ACCOUNT_LIBRARY_MESSAGE,
+  accountGeneration,
+  accountMayChange,
+  accountOwnRead,
+  CONNECT_GPU_HEADER,
+  CONNECT_GPU_MESSAGE,
+  GUEST_HEADER,
+  GUEST_LIBRARY_MESSAGE,
+  GUEST_RUN_MESSAGE,
+  guestRead,
+  isLibraryChange,
+  isPriceCheck,
+  LIBRARY_MESSAGE,
+  OWN_GPU_TOOL_MESSAGE,
+  ownerOnly,
+  ownGpuRun,
+} from "@/lib/guest-access";
+import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, SESSION_COOKIE, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
+import { fileAccount, generationAccount } from "@/server/account-library";
 import { recordExists } from "@/server/records";
 import { findShare, shareGuard, shareTargetExists } from "@/server/share-access";
 
-/** Paths that work signed out: the login page and its API (and share links: openShare). */
-const OPEN = new Set(["/login", "/api/auth/login"]);
+/**
+ * Paths that work signed out: the login page and its API (and share links: openShare). Sign-up and
+ * "who am I" answer for themselves whether public sign-up is on.
+ */
+const OPEN = new Set(["/login", "/api/auth/login", "/api/auth/signup", "/api/auth/me"]);
 
 const APP_IDS = new Set(APPS.map((a) => a.id));
 
@@ -32,7 +54,74 @@ const notFound = (request: NextRequest) => NextResponse.rewrite(new URL("/_fuobe
 /** Share pages and their files: never indexed, and the token never leaks to another site in a Referer. */
 const SHARE_HEADERS = { "X-Robots-Tag": "noindex, nofollow, noarchive", "Referrer-Policy": "no-referrer" };
 
+/** The owner: the install password's session, or an API token. */
 const signedIn = (request: NextRequest) => validSession(request.cookies.get(SESSION_COOKIE)?.value) || validToken(request.headers.get("authorization"));
+
+/** The owner, an account (only while public sign-up is on), or null (a guest). */
+function viewerOf(request: NextRequest, open: boolean): Viewer | null {
+  const session = sessionViewer(request.cookies.get(SESSION_COOKIE)?.value);
+  if (session?.kind === "owner" || validToken(request.headers.get("authorization"))) return { kind: "owner" };
+  return open && session?.kind === "account" ? session : null;
+}
+
+const guestHeaders = { [GUEST_HEADER]: "1", "Cache-Control": "no-store" };
+
+/**
+ * A guest (public sign-up on, signed out): every page and the catalog reads, the owner's lists
+ * empty, the rest of the library 401, and every change 401 (the client offers to sign up).
+ */
+function guest(request: NextRequest): NextResponse {
+  const { pathname, search } = request.nextUrl;
+  if (request.method === "GET" || request.method === "HEAD") return readAsGuest(request, false);
+  if (isPriceCheck(request.method, pathname, search)) return pass(request);
+  return NextResponse.json({ error: GUEST_RUN_MESSAGE }, { status: 401, headers: guestHeaders });
+}
+
+/**
+ * A read by a guest or an account: pages and catalog reads go through, the owner's lists come back
+ * empty, and the rest of the owner's library is refused (401 for a guest, who can sign up; 403 for an account).
+ */
+function readAsGuest(request: NextRequest, isAccount: boolean): NextResponse {
+  const read = guestRead(request.nextUrl.pathname);
+  if (read.kind === "pass") return pass(request);
+  if (read.kind === "filtered") {
+    const headers = new Headers(request.headers);
+    headers.set(GUEST_HEADER, "1");
+    return NextResponse.next({ request: { headers } });
+  }
+  if (read.kind === "empty") return NextResponse.json(read.body, { headers: guestHeaders });
+  if (read.kind === "none") return NextResponse.json({ error: "Not for guests" }, { status: 404, headers: guestHeaders });
+  if (isAccount) return NextResponse.json({ error: ACCOUNT_LIBRARY_MESSAGE }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ error: GUEST_LIBRARY_MESSAGE }, { status: 401, headers: guestHeaders });
+}
+
+/**
+ * An account sees the owner's studio as a guest does: every page, the catalog, and none of the
+ * owner's library or projects (hidden, and every change to them refused). Its own runs are its own
+ * (accountGeneration, accountOwnRead: only what it made). Install-wide settings, keys and tokens are
+ * the owner's, and it never runs on the owner's cloud keys or GPU: with its own ComfyUI connected
+ * ("Your GPU") the studios' generations run there, and anything else that would reach a model is
+ * refused ("Connect your GPU" until it has one).
+ */
+const notYours = () => NextResponse.json({ error: ACCOUNT_LIBRARY_MESSAGE }, { status: 403, headers: { "Cache-Control": "no-store" } });
+
+function account(request: NextRequest, who: Account): NextResponse {
+  const { pathname, search } = request.nextUrl;
+  if (ownerOnly(request.method, pathname)) {
+    return NextResponse.json({ error: "Only the studio's owner can change settings, keys and tokens." }, { status: 403 });
+  }
+  // Its own runs and their files: only what it made.
+  const gen = accountGeneration(request.method, pathname);
+  if (gen !== undefined) return generationAccount(gen) === who.id ? pass(request) : notYours();
+  const file = request.method === "GET" || request.method === "HEAD" ? /^\/api\/files\/(.+)$/.exec(pathname)?.[1] : undefined;
+  if (file !== undefined) return fileAccount(safeDecode(file)) === who.id ? pass(request) : notYours();
+  if (request.method === "GET" || request.method === "HEAD") return accountOwnRead(pathname) ? pass(request) : readAsGuest(request, true);
+  if (accountMayChange(request.method, pathname, search)) return pass(request);
+  if (isLibraryChange(request.method, pathname)) return NextResponse.json({ error: LIBRARY_MESSAGE, code: "library" }, { status: 403 });
+  if (!who.gpu) return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
+  if (ownGpuRun(request.method, pathname)) return pass(request);
+  return NextResponse.json({ error: OWN_GPU_TOOL_MESSAGE, code: "own-gpu-tool" }, { status: 403 });
+}
 
 const tooMany = (seconds: number) =>
   new NextResponse("Too many wrong links. Try again in a minute.", { status: 429, headers: { ...SHARE_HEADERS, "Retry-After": String(seconds) } });
@@ -102,7 +191,11 @@ export function proxy(request: NextRequest) {
   if (share) return openShare(request, share.token, !!share.file);
   if (!authEnabled()) return pass(request);
   if (OPEN.has(pathname)) return NextResponse.next();
-  if (signedIn(request)) return pass(request);
+  const open = publicSignup(request.headers.get("host") ?? request.nextUrl.host);
+  const viewer = viewerOf(request, open);
+  if (viewer?.kind === "owner") return pass(request);
+  if (viewer?.kind === "account") return account(request, viewer.account);
+  if (open) return guest(request);
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Sign in, or send an API token as Authorization: Bearer fuobe_…" }, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="fuobe"' } });
   }
@@ -112,7 +205,8 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except build assets and the public folder's own files: the favicon, the demo
-  // samples and the SVGs at the root. Generated SVGs under /api/files stay behind sign-in.
-  matcher: ["/((?!_next/static|_next/image|favicon\\.ico$|samples/|[^/]+\\.svg$).*)"],
+  // Everything except build assets and the public folder's own files: the favicon and app icons,
+  // the demo samples, the preset covers, vendored scripts (the 3D viewer's meshopt decoder) and the
+  // SVGs at the root. Generated SVGs under /api/files stay behind sign-in.
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico$|apple-icon\\.png$|samples/|previews/|vendor/|[^/]+\\.svg$).*)"],
 };

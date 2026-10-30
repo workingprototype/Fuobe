@@ -201,7 +201,7 @@ describe("POST /api/providers/test with unsaved values", () => {
     const goodKey = { "https://api.anthropic.com/v1/models": [200, { data: [], has_more: false }], "http://127.0.0.1:9/api/tags": [200, tags] } as Record<string, [number, unknown]>;
     for (const [mode, enhancer, note] of [
       ["open", "auto", "Open source only mode keeps text steps on Ollama"],
-      ["both", "ollama", "text steps use Ollama (Enhancer)"],
+      ["both", "ollama", "text steps use Ollama (AI helper)"],
     ] as const) {
       setSetting("engineMode", mode);
       setSetting("enhanceProvider", enhancer);

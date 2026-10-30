@@ -16,7 +16,6 @@ declare -A NODES=(
   [ComfyUI-WanVideoWrapper]="https://github.com/kijai/ComfyUI-WanVideoWrapper 088128b224242e110d3906c6750e9a3a348a659b"
   [ComfyUI-VideoHelperSuite]="https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite 4d907bee61e92c2e65af3bd6383a4e4d356126d1"
   [ComfyUI-KJNodes]="https://github.com/kijai/ComfyUI-KJNodes 17195fcfa8a05f601b766a0f09c9733284f47416"
-  [ComfyUI-SeedVR2_VideoUpscaler]="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler 4490bd1f482e026674543386bb2a4d176da245b9"
   [ComfyUI-Frame-Interpolation]="https://github.com/Fannovel16/ComfyUI-Frame-Interpolation 26545cc2dd95bc3d27f056016300673bdeee78f5"
   [ComfyUI-RMBG]="https://github.com/1038lab/ComfyUI-RMBG 229529e0ea63fb7085848225d74f91f6dc164956"
   [ComfyUI-ReActor]="https://github.com/Gourieff/ComfyUI-ReActor 3be5f356fe5b120a7a274d2509c0ecef5d0a7498"

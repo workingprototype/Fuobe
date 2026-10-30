@@ -155,7 +155,12 @@ describe("proxy matcher (C13)", () => {
     expect(matches("/library")).toBe(true);
     expect(matches("/next.svg")).toBe(false);
     expect(matches("/samples/demo-model.glb")).toBe(false);
+    expect(matches("/vendor/meshopt_decoder.js")).toBe(false);
+    expect(matches("/previews/presets/effect-set-on-fire.jpg")).toBe(false);
+    expect(matches("/previews/presets/motion-fpv-drone.mp4")).toBe(false);
     expect(matches("/favicon.ico")).toBe(false);
+    expect(matches("/icon.svg")).toBe(false);
+    expect(matches("/apple-icon.png")).toBe(false);
     expect(matches("/_next/static/chunks/a.js")).toBe(false);
   });
 });

@@ -9,7 +9,8 @@ import { db } from "./db";
  */
 export interface SettingDef {
   key: string;
-  env?: string;
+  /** Env var(s) that give the value when Settings has none; the first one set wins. */
+  env?: string | readonly string[];
   secret?: boolean;
   default?: string;
   /** Allowed values (validated on save). */
@@ -44,14 +45,36 @@ export const SETTINGS = {
   aiToolkitDatasetDir: { key: "aitk.datasetDir", env: "AI_TOOLKIT_DATASET_DIR" },
   /** "auto" = demo outputs only when the chosen provider is not configured. */
   demoMode: { key: "demo.mode", env: "FUOBE_DEMO_MODE", default: "auto", options: ["auto", "on", "off"] },
-  enhanceProvider: { key: "enhance.provider", env: "FUOBE_ENHANCE_PROVIDER", default: "auto", options: ["auto", "anthropic", "ollama", "none"] },
+  /** Settings → AI helper: Claude, a local model, or offline. "ollama" is the old name of "local" and still means it. */
+  enhanceProvider: { key: "enhance.provider", env: "FUOBE_ENHANCE_PROVIDER", default: "auto", options: ["auto", "anthropic", "local", "ollama", "none"] },
+  /** Which local model server: "auto" uses the first that answers (Ollama, LM Studio, Unsloth Studio, then the custom URL). */
+  llmProvider: { key: "llm.provider", env: "FUOBE_LLM_PROVIDER", default: "auto", options: ["auto", "ollama", "lmstudio", "unsloth", "custom"] },
   ollamaUrl: { key: "ollama.url", env: "OLLAMA_URL", default: "http://127.0.0.1:11434" },
   ollamaModel: { key: "ollama.model", env: "OLLAMA_MODEL", default: "qwen3:8b" },
+  lmstudioUrl: { key: "lmstudio.url", env: "LMSTUDIO_URL", default: "http://127.0.0.1:1234" },
+  /** Empty: a loaded model, else one trained for tool use. */
+  lmstudioModel: { key: "lmstudio.model", env: "LMSTUDIO_MODEL" },
+  /** Only when LM Studio's "Require Authentication" is on (LM_API_TOKEN also works). */
+  lmstudioToken: { key: "lmstudio.token", env: ["LMSTUDIO_API_TOKEN", "LM_API_TOKEN"], secret: true },
+  unslothUrl: { key: "unsloth.url", env: "UNSLOTH_URL", default: "http://127.0.0.1:8888" },
+  /** Empty: the model loaded in Unsloth Studio. */
+  unslothModel: { key: "unsloth.model", env: "UNSLOTH_MODEL" },
+  /** An sk-unsloth-… key (UNSLOTH_STUDIO_AUTH_TOKEN also works); empty for keyless access. */
+  unslothKey: { key: "unsloth.key", env: ["UNSLOTH_API_KEY", "UNSLOTH_STUDIO_AUTH_TOKEN"], secret: true },
+  /** Any other OpenAI-compatible server (llama.cpp's llama-server, vLLM, Jan…): its base URL. */
+  llmUrl: { key: "llm.url", env: "FUOBE_LLM_URL" },
+  llmModel: { key: "llm.model", env: "FUOBE_LLM_MODEL" },
+  llmKey: { key: "llm.key", env: "FUOBE_LLM_API_KEY", secret: true },
+  /** Tokens of context the local model gets (Ollama's num_ctx; LM Studio loads models with it). 0 = the server's own setting. */
+  llmContext: { key: "llm.context", env: "FUOBE_LLM_CONTEXT", default: "16384" },
   /** "1" once the first-run guide was put away, or /api/status first saw something the engine mode generates with connected: Home stops offering it. */
   onboarded: { key: "onboarding.done", default: "0", options: ["0", "1"] },
 } satisfies Record<string, SettingDef>;
 
 export type SettingName = keyof typeof SETTINGS;
+
+/** The first of a setting's env vars that is set. */
+const envValue = (def: SettingDef): string | undefined => [def.env ?? []].flat().map((n) => process.env[n]).find((v) => !!v);
 
 /** Unsaved values a connection test runs with (withCandidates), in place of the saved ones. */
 const candidates = new AsyncLocalStorage<Partial<Record<SettingName, string>>>();
@@ -78,7 +101,7 @@ export function getSetting(name: SettingName): string {
   const def: SettingDef = SETTINGS[name];
   const candidate = candidates.getStore()?.[name];
   const row = candidate !== undefined ? { value: candidate.trim() } : (db().prepare("SELECT value FROM settings WHERE key = ?").get(def.key) as { value: string } | undefined);
-  const value = row && row.value !== "" ? row.value : def.env && process.env[def.env] ? process.env[def.env]! : (def.default ?? "");
+  const value = row && row.value !== "" ? row.value : (envValue(def) ?? def.default ?? "");
   // An invalid env/db value falls back to the default instead of breaking routing.
   if (def.options && !def.options.includes(value)) return def.default ?? "";
   return value;
@@ -90,11 +113,25 @@ export function engineMode(): EngineMode {
   return getSetting("engineMode") as EngineMode;
 }
 
+/**
+ * A context size as people write it: 16384, "16,384" or "16k" (k = 1024 tokens). 0 leaves it to the
+ * server. Null: not a size, or under 2048 tokens (too small for any step; "16" was meant as 16k).
+ */
+export function parseContext(value: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)(k?)$/i.exec(value.replace(/[,_\s]/g, ""));
+  if (!m) return null;
+  const n = Math.round(Number(m[1]) * (m[2] ? 1024 : 1));
+  return n === 0 ? 0 : n >= 2048 ? Math.min(n, 1_048_576) : null;
+}
+
 /** Throws a user-facing message if the setting value isn't allowed. */
 export function validateSetting(name: SettingName, value: string): void {
   const def: SettingDef = SETTINGS[name];
   if (value !== "" && def.options && !def.options.includes(value)) {
     throw new Error(`${name} must be one of: ${def.options.join(", ")}`);
+  }
+  if (name === "llmContext" && value !== "" && parseContext(value) === null) {
+    throw new Error("llmContext must be a number of tokens of at least 2048 (such as 16384 or 16k), or 0 to leave it to the server");
   }
 }
 
@@ -133,7 +170,7 @@ export function publicSettings(): PublicSetting[] {
       name,
       value: def.secret ? mask(value) : value,
       secret: !!def.secret,
-      fromEnv: !row && !!def.env && !!process.env[def.env],
+      fromEnv: !row && !!envValue(def),
       isSet: !!value && value !== def.default,
     };
   });

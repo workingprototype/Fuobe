@@ -30,8 +30,8 @@ const STARTER_SKILLS = ["product-photoshoot", "ugc-video", "thumbnail-generation
 
 const AGENT_HINT: Record<AssistThread["agent"], string> = {
   claude: "Claude plans the shoot, picks models and runs them with your approval.",
-  ollama: "Runs on your local model through Ollama. Smaller local models follow instructions less reliably than Claude.",
-  offline: "A simple rule-based planner. Add an Anthropic API key, or run Ollama, for the full assistant that picks models, chains steps and checks results.",
+  local: "Runs on your local model (Ollama, LM Studio or Unsloth Studio). Smaller local models follow instructions less reliably than Claude.",
+  offline: "A simple rule-based planner. Add an Anthropic API key, or run a local model (Ollama, LM Studio or Unsloth Studio), for the full assistant that picks models, chains steps and checks results.",
 };
 
 export function AskFirst({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {

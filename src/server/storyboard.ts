@@ -47,7 +47,9 @@ export interface StoryboardRequest {
 
 /** Split a story into scenes with the configured LLM, or a deterministic shot list offline. */
 export async function splitStory(story: string, n: number): Promise<string[]> {
-  const text = await llmText(SPLIT_SYSTEM, `Story: ${story}\nFrames: ${n}`);
+  // A local model that decodes to a schema gets exactly n strings (the prompt asks for the same array).
+  const json = { name: "frames", schema: { type: "array", items: { type: "string" }, minItems: n, maxItems: n } };
+  const text = await llmText(SPLIT_SYSTEM, `Story: ${story}\nFrames: ${n}`, { json });
   return (text && parseScenes(text, n)) || heuristicScenes(story, n);
 }
 

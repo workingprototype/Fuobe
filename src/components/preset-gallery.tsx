@@ -8,7 +8,9 @@ import { PRESET_ICONS } from "@/components/preset-icons";
 import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
 import { GALLERY_GRID } from "@/components/skeletons";
 import { useProgressive } from "@/components/use-progressive";
-import { useEngineMode } from "@/lib/api";
+import { CardChip, badgeKey, parseBadgeKey } from "@/components/gpu/readiness-chip";
+import { useGpuBadges } from "@/hooks/use-gpu";
+import { useEngineMode, useViewer } from "@/lib/api";
 import { interleaveByCategory, previewFlip, searchText, type PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
@@ -34,13 +36,19 @@ export const PresetCard = memo(function PresetCard({
   href,
   compact,
   engine,
+  gpu,
+  gpuName,
 }: {
   preset: PresetCardData;
   href: string;
   compact?: boolean;
   /** Settings → Engine mode: with one engine locked in, the other's chip would suggest a route the user turned off. */
   engine?: "cloud" | "open";
+  /** Its state on the viewer's GPU (a badge as one string, badgeKey), or none. */
+  gpu?: string;
+  gpuName?: string;
 }) {
+  const badge = engine !== "cloud" ? parseBadgeKey(gpu) : null;
   const Icon = PRESET_ICONS[preset.icon] ?? Sparkles;
   const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id);
   return (
@@ -64,11 +72,30 @@ export const PresetCard = memo(function PresetCard({
         {preset.top && (
           <span className="absolute top-1.5 left-1.5 rounded-[4px] bg-highlight px-1 text-[10px] font-semibold text-highlight-foreground">Popular</span>
         )}
+        {badge && (
+          <span className="pointer-events-none absolute top-1.5 right-1.5">
+            <CardChip badge={badge} gpu={gpuName} />
+          </span>
+        )}
         <CardPending />
       </div>
       <div className="min-w-0 px-0.5">
         <p className="truncate text-[13px] font-medium">{preset.name}</p>
-        {!compact && <p className="line-clamp-2 text-[12px] leading-snug text-muted-foreground">{preset.description}</p>}
+        {!compact && (
+          // Two lines hold the card's place in the grid; on hover or focus the full text shows in a panel that
+          // continues the card's hover background below it, over the next row, so nothing reflows.
+          <div className="relative">
+            <p className="line-clamp-2 text-[12px] leading-snug text-muted-foreground group-hover/card:invisible group-focus-visible/card:invisible">
+              {preset.description}
+            </p>
+            <p
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 top-0 z-10 -mx-2 hidden rounded-b-xl bg-accent px-2 pb-2 text-[12px] leading-snug text-muted-foreground shadow-md group-hover/card:block group-focus-visible/card:block"
+            >
+              {preset.description}
+            </p>
+          </div>
+        )}
       </div>
     </IntentLink>
   );
@@ -200,6 +227,10 @@ export function PresetGallery({
 
   const strip = useFadeEdges<HTMLDivElement>();
   const stale = q.trim().toLowerCase() !== query;
+  // One fetch of the viewer's chips (the GPU pre-flight); each card gets one string.
+  const badges = useGpuBadges().data;
+  const viewer = useViewer().data;
+  const visitor = !!viewer && viewer.publicSignup && !viewer.owner;
 
   return (
     <div className="space-y-4">
@@ -233,6 +264,14 @@ export function PresetGallery({
             <RunsOnControl value={runsOn} onChange={setRunsOn} locked={locked} />
           </div>
         </div>
+        {visitor && badges && !badges.connected && !badges.off && (
+          <p className="text-[13px] text-muted-foreground">
+            <Link href="/connect" className="font-medium text-brand-text underline-offset-2 hover:underline">
+              Connect your GPU
+            </Link>{" "}
+            to see what runs on it.
+          </p>
+        )}
         <div
           ref={strip}
           role="group"
@@ -262,7 +301,7 @@ export function PresetGallery({
         <>
           <div ref={grid} className={cn(GRID, "transition-opacity", stale && "opacity-70")}>
             {list.slice(0, shown).map((p) => (
-              <PresetCard key={p.id} preset={p} href={href.replace("{id}", p.id)} engine={locked} />
+              <PresetCard key={p.id} preset={p} href={href.replace("{id}", p.id)} engine={locked} gpu={p.open ? badgeKey(badges?.presets[p.id]) : undefined} gpuName={badges?.gpu} />
             ))}
           </div>
           {hasMore && (

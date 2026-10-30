@@ -37,7 +37,8 @@ interface Result extends ConnectionTest {
 /**
  * A key or address field with one button that does what it says: "Save & test" tests the typed value
  * first and saves it once it connects (a value that doesn't connect is offered "Save anyway"); with
- * nothing typed it tests the saved one. Used by Settings and by Home's first-run guide.
+ * nothing typed it tests the saved one. Used by Settings and by Home's first-run guide. `saveOnly` is for a
+ * value no server can test on its own (the local model's context): its button saves what was typed.
  */
 export function ConnectField({
   name,
@@ -49,7 +50,9 @@ export function ConnectField({
   id,
   idleLabel = "Test",
   onConnected,
+  options,
   className,
+  saveOnly = false,
 }: {
   name: string;
   setting?: PublicSetting;
@@ -63,7 +66,11 @@ export function ConnectField({
   idleLabel?: string;
   /** After a green test (the first-run guide closes itself). */
   onConnected?: (r: ConnectionTest) => void;
+  /** Suggestions to pick from (the models a local LLM server lists); any value can still be typed. */
+  options?: string[];
   className?: string;
+  /** Save the typed value without a test (nothing to connect to). */
+  saveOnly?: boolean;
 }) {
   const qc = useQueryClient();
   const inputId = useId();
@@ -75,17 +82,27 @@ export function ConnectField({
   const typed = draft !== null && draft.trim() !== saved.trim() ? draft.trim() : null;
   const shown = draft ?? saved;
   const problem = typed ? settingProblem(name, typed) : null;
-  const canTest = typed !== null || !!setting?.isSet || !!setting?.value;
+  const canTest = saveOnly ? typed !== null && !problem : typed !== null || !!setting?.isSet || !!setting?.value;
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["settings"] });
     void qc.invalidateQueries({ queryKey: ["status"] });
+    // Settings → AI helper lists what each local LLM server answers with its saved URL, model and key.
+    void qc.invalidateQueries({ queryKey: ["llm"] });
   };
 
   const run = async () => {
     if (busy || !canTest) return;
     setBusy(true);
     try {
+      if (saveOnly) {
+        await saveSettings({ [name]: typed ?? "" });
+        setDraft(null);
+        setResult(null);
+        refresh();
+        toast.success(`${label} saved`);
+        return;
+      }
       const values = typed !== null ? { [name]: typed } : undefined;
       const res = await testConnection(provider, values, name);
       if (res.ok) {
@@ -143,6 +160,7 @@ export function ConnectField({
           type={secret ? "password" : "text"}
           value={shown}
           placeholder={secret && setting?.isSet ? setting.value : placeholder}
+          list={options?.length ? `${inputId}-list` : undefined}
           onChange={(e) => {
             setDraft(e.target.value);
             setResult(null);
@@ -155,10 +173,17 @@ export function ConnectField({
           }}
           className="min-w-0 flex-1 basis-56 font-mono text-[13px]"
         />
+        {!!options?.length && (
+          <datalist id={`${inputId}-list`}>
+            {options.map((o) => (
+              <option key={o} value={o} />
+            ))}
+          </datalist>
+        )}
         <div className="flex shrink-0 gap-2">
-          <Button size="sm" className="h-9" disabled={busy || !canTest} onClick={() => void run()} aria-label={`${typed !== null ? "Save and test" : idleLabel} ${label}`}>
+          <Button size="sm" className="h-9" disabled={busy || !canTest} onClick={() => void run()} aria-label={`${saveOnly ? "Save" : typed !== null ? "Save and test" : idleLabel} ${label}`}>
             {busy && <Loader2 className="animate-spin" />}
-            {typed !== null ? "Save & test" : idleLabel}
+            {saveOnly ? "Save" : typed !== null ? "Save & test" : idleLabel}
           </Button>
           {setting?.isSet && !setting.fromEnv && secret && typed === null && (
             <Button size="sm" variant="ghost" className="h-9" aria-label={`Clear ${label}`} onClick={() => void clear()}>

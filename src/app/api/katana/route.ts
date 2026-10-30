@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { createKatana, KatanaBody, listKatana, previewKatana } from "@/server/katana";
+import { priceAs } from "@/server/visitor";
 
 /** Recent Katana runs with the state of every step. */
 export async function GET(request: Request) {
@@ -9,7 +10,7 @@ export async function GET(request: Request) {
 }
 
 /** Start a run; `?preview=1` only plans and prices it (segments, steps, cost). */
-export async function POST(request: Request) {
+async function post(request: Request) {
   const parsed = KatanaBody.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     const path = String(parsed.error.issues[0]?.path[0] ?? "");
@@ -22,4 +23,9 @@ export async function POST(request: Request) {
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
+}
+
+/** A visitor (public sign-up) gets the price of its run on its own GPU, never a demo (src/server/visitor.ts). */
+export async function POST(request: Request) {
+  return priceAs(request, () => post(request));
 }

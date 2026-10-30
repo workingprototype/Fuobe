@@ -82,7 +82,7 @@ describe("offline planner (U18)", () => {
     expect(said.text).not.toContain(agent.OFFLINE_NOTE);
     const at = v.thread.items.findIndex((i) => i.role === "approval");
     expect(v.thread.items[at + 1]).toMatchObject({ role: "notice", tone: "info", text: agent.OFFLINE_NOTE });
-    expect(agent.OFFLINE_NOTE).toBe("Offline planner — connect Claude or Ollama in Settings for better plans.");
+    expect(agent.OFFLINE_NOTE).toBe("Offline planner — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for better plans.");
     const card = v.thread.items.find((i) => i.role === "approval") as { jobs: { kind: string; op: string; error?: string }[] };
     expect(card.jobs.map((j) => [j.kind, j.op, j.error])).toEqual([
       ["image", "t2i", undefined],
@@ -169,7 +169,7 @@ describe("new kinds and operations in the tools", () => {
   it("finds text models and runs chained jobs, returning text inline", async () => {
     const found = await tools.executeTool("search_models", { kind: "text", task: "translate" }, { engine: "open" });
     const models = JSON.parse(found.content as string).models as { id: string; engine: string }[];
-    expect(models[0]).toMatchObject({ id: "oss-text-llm", engine: "open source (Ollama, on this machine)" });
+    expect(models[0]).toMatchObject({ id: "oss-text-llm", engine: "open source (a local model, on this machine)" });
     expect(models.map((m) => m.id)).toContain("text-llm");
 
     const out = await tools.executeTool(

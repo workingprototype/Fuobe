@@ -6,7 +6,7 @@
 //
 // Inputs:  build/raw/<key>.api.json + .meta.json (from export-templates.mjs),
 //          hand-built/*.json, a running ComfyUI (for /object_info), Hugging Face (model sizes).
-// Outputs: ../../workflows/comfyui/<id>.json, manifest.json
+// Outputs: ../../workflows/comfyui/<id>.json, manifest.json, requirements.json (build-requirements.mjs, no network)
 // The "validated" flag of each manifest entry is carried over from validation-state.json when the
 // workflow file content is unchanged; run validate-workflows.mjs afterwards to (re)validate.
 
@@ -14,10 +14,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SPEC, KNOWN_MODELS, CUSTOM_NODE_REPOS, PACK_CLASSES } from './library.spec.mjs';
 import * as G from './lib/graph.mjs';
 import { resolveSource } from './export-templates.mjs';
+import { writeIndex } from './build-requirements.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -423,6 +424,13 @@ async function main() {
   writeJson(path.join(OUT_DIR, 'manifest.json'), manifest);
   fs.mkdirSync(path.dirname(SIZE_CACHE), { recursive: true });
   writeJson(SIZE_CACHE, sizeCache);
+  // The GPU pre-flight's requirement index follows the manifest (pins come from the committed model-pins.json).
+  try {
+    const { index, bytes } = writeIndex(OUT_DIR);
+    console.log(`requirements.json: ${Object.keys(index.files).length} files, ${Object.keys(index.packs).length} packs, ${bytes} bytes`);
+  } catch (e) {
+    errors.push(`requirements.json: ${e.message}`);
+  }
   if (errors.length) {
     console.error(`\n${errors.length} problem(s):\n  ${errors.join('\n  ')}`);
     process.exitCode = 1;
@@ -430,7 +438,7 @@ async function main() {
   console.log(`\nWrote ${entries.length} workflows + manifest.json to ${path.relative(REPO, OUT_DIR)}/`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((e) => {
     console.error(e);
     process.exit(1);

@@ -11,11 +11,13 @@ import {
   DEFAULT_EFFORT,
   factMap,
   guessCategory,
+  normalizeAgent,
   renderContext,
   slashSkills,
   threadTitle,
   type AssistAgent,
   type AssistAvailability,
+  type AssistLocal,
   type AssistEffort,
   type AssistItem,
   type AssistMode,
@@ -28,8 +30,8 @@ import {
 import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
+import { activeLocal, aiHelper, chatLocal, emptyReply, localLabel, localProblem, localSoon, pinnedKind, toChatMessages, type Ready } from "../llm";
 import { offeredDefault } from "../model-access";
-import { ollamaModels, ollamaSoon } from "../providers/llm";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
 import { readRef } from "../storage";
@@ -61,7 +63,7 @@ export interface ModelRequest {
   messages: MessageParam[];
   tools: Anthropic.Beta.BetaTool[];
   ctx: ToolContext;
-  /** The chat's model choice (Manual mode): a Claude model id or an Ollama model name, and the effort. */
+  /** The chat's model choice (Manual mode): a Claude model id or a local model's name, and the effort. */
   settings?: { model?: string | null; effort?: AssistEffort | null };
   /** Skills loaded in the chat (the offline planner uses their hints). */
   skills?: SkillMeta[];
@@ -187,7 +189,8 @@ function load(id: string): State | null {
         id: r.id,
         title: r.title,
         status: r.status,
-        agent: r.agent,
+        // Chats from before LM Studio and Unsloth Studio support say "ollama".
+        agent: normalizeAgent(r.agent) ?? "offline",
         engine: r.engine,
         autoApprove: !!r.auto_approve,
         items: JSON.parse(r.items_json) as AssistItem[],
@@ -365,44 +368,46 @@ export async function updateThread(id: string, patch: ThreadPatch): Promise<Assi
 // ---------------------------------------------------------------------------
 // Which LLM runs a chat: modes
 
-/**
- * Whether Ollama answers, and the models it has: the check text steps use (providers/llm), so a busy Ollama (loading
- * a model, writing a long answer) keeps chats on it instead of the offline planner. Read as routing reads it, so
- * opening Assist doesn't wait on an Ollama that never answers (ollamaSoon).
- */
-async function probeOllama(): Promise<{ ok: boolean; models: string[] }> {
-  const ok = await ollamaSoon();
-  return { ok, models: ok ? ollamaModels() : [] };
+/** Why the local model can't take a chat, and what to do: the server's own reason, or which servers to start. */
+function localDownNote(): string {
+  const why = localProblem();
+  if (why) return `${why.replace(/\.$/, "")} — or pick another mode.`;
+  return `No local model server is answering (${pinnedKind() ? localLabel() : "Ollama, LM Studio or Unsloth Studio"}) — start one, or pick another mode.`;
 }
-const ollamaReachable = () => ollamaSoon();
 
 /**
  * Which LLM drives new chats by default: Claude when a key is set (on open-source-only installs only when
- * picked explicitly), else a reachable local Ollama, else the offline planner.
+ * picked explicitly), else a local model that answers (Ollama, LM Studio, Unsloth Studio…), else the offline planner.
  */
 export async function resolveAgent(): Promise<AssistThread["agent"]> {
-  const choice = getSetting("enhanceProvider");
+  const choice = aiHelper();
   const key = !!getSetting("anthropicKey");
   if (choice === "none") return "offline";
   if (choice === "anthropic") return key ? "claude" : "offline";
-  if (choice === "ollama") return "ollama";
+  if (choice === "local") return "local";
   if (key && engineMode() !== "open") return "claude";
-  return (await ollamaReachable()) ? "ollama" : "offline";
+  return (await localSoon()) ? "local" : "offline";
 }
 
-const claudeAllowed = () => !!getSetting("anthropicKey") && (engineMode() !== "open" || getSetting("enhanceProvider") === "anthropic");
+const claudeAllowed = () => !!getSetting("anthropicKey") && (engineMode() !== "open" || aiHelper() === "anthropic");
+
+/** The local server for the mode picker: its models (Unsloth only answers with the loaded one), or why it can't run. */
+function localInfo(ready: Ready | null): AssistLocal {
+  if (!ready) return { kind: pinnedKind(), label: localLabel(), ok: false, models: [], model: null, ...(localProblem() && { problem: localProblem()! }) };
+  const { server, status } = ready;
+  const models = status.models.filter((m) => server.kind !== "unsloth" || m.loaded || m.id === status.model).map((m) => m.id);
+  return { kind: server.kind, label: server.label, ok: true, models: models.slice(0, 50), model: status.model };
+}
 
 export async function availability(): Promise<AssistAvailability> {
-  const o = await probeOllama();
-  const aiOff = getSetting("enhanceProvider") === "none";
+  const ready = await localSoon();
+  const aiOff = aiHelper() === "none";
   const claude = claudeAllowed();
   return {
     claude,
-    ollama: o.ok,
-    ollamaModels: o.models,
-    ollamaModel: getSetting("ollamaModel"),
+    local: localInfo(ready),
     aiOff,
-    defaultMode: !aiOff && claude && getSetting("enhanceProvider") !== "ollama" ? "smart" : "free",
+    defaultMode: !aiOff && claude && aiHelper() !== "local" ? "smart" : "free",
   };
 }
 
@@ -415,37 +420,38 @@ export interface ResolvedMode {
   note?: string;
 }
 
-const OLLAMA_NAME = /^[\w.:/-]{1,100}$/;
+/** A local model's name: Ollama's "qwen3:8b", LM Studio's "qwen/qwen3-8b@q4_k_m", Unsloth's "unsloth/Qwen3-8B-GGUF:Q4_K_M". */
+const LOCAL_NAME = /^[\w.:/@+-]{1,200}$/;
 
 /**
- * Supercomputer's modes on Fuobe's agents: Smart = Claude Opus 5.5; Free = a local model through
- * Ollama (or the offline planner when none answers); Manual = the model and effort you pick.
- * Without a choice, the default from Settings (resolveAgent).
+ * Supercomputer's modes on Fuobe's agents: Smart = Claude Opus 5.5; Free = a local model (Ollama,
+ * LM Studio, Unsloth Studio…; the offline planner when none answers); Manual = the model and effort
+ * you pick. Without a choice, the default from Settings (resolveAgent).
  */
 export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<ResolvedMode> {
   const free = async (note?: string): Promise<ResolvedMode> =>
-    (await ollamaReachable()) ? { mode: "free", agent: "ollama", model: null, effort: null, note } : { mode: "free", agent: "offline", model: null, effort: null, note };
-  if (getSetting("enhanceProvider") === "none") {
+    (await localSoon()) ? { mode: "free", agent: "local", model: null, effort: null, note } : { mode: "free", agent: "offline", model: null, effort: null, note };
+  if (aiHelper() === "none") {
     return { mode: choice?.mode ?? "free", agent: "offline", model: null, effort: null, ...(choice?.mode && choice.mode !== "free" && { note: "The AI helper is off in Settings, so this chat uses the offline planner." }) };
   }
   if (!choice?.mode) {
     const agent = await resolveAgent();
     return { mode: agent === "claude" ? "smart" : "free", agent, model: null, effort: null };
   }
-  const noKey = "Smart and Claude need an Anthropic API key (Settings → Prompt enhancement) — using Free instead.";
+  const noKey = "Smart and Claude need an Anthropic API key (Settings → AI helper) — using Free instead.";
   if (choice.mode === "smart") return claudeAllowed() ? { mode: "smart", agent: "claude", model: DEFAULT_CLAUDE_MODEL, effort: DEFAULT_EFFORT } : free(noKey);
   if (choice.mode === "free") return free();
   // Manual
-  const agent = choice.agent ?? "claude";
+  const agent = normalizeAgent(choice.agent) ?? "claude";
   if (agent === "claude") {
     if (!getSetting("anthropicKey")) return free(noKey);
     const model = CLAUDE_MODELS.some((m) => m.id === choice.model) ? choice.model! : DEFAULT_CLAUDE_MODEL;
     const effort = ASSIST_EFFORTS.some((e) => e.id === choice.effort) ? choice.effort! : DEFAULT_EFFORT;
     return { mode: "manual", agent: "claude", model, effort };
   }
-  if (agent === "ollama") {
-    const model = choice.model && OLLAMA_NAME.test(choice.model) ? choice.model : null;
-    return { mode: "manual", agent: "ollama", model, effort: null, ...(!(await ollamaReachable()) && { note: `Ollama isn't answering at ${getSetting("ollamaUrl")} — start it, or pick another mode.` }) };
+  if (agent === "local") {
+    const model = choice.model && LOCAL_NAME.test(choice.model) ? choice.model : null;
+    return { mode: "manual", agent: "local", model, effort: null, ...(!(await localSoon()) && { note: localDownNote() }) };
   }
   return { mode: "manual", agent: "offline", model: null, effort: null };
 }
@@ -453,18 +459,19 @@ export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<R
 /** The connectors Claude gets in this chat: none on other agents, or in a scheduled run that leaves them off. */
 const chatConnectors = (s: State): Connector[] => (s.thread.agent === "claude" && s.ext.connectors ? activeConnectors() : []);
 
-/** Connectors need Claude: a chat on Ollama or the offline planner (that would otherwise use them) says so once. */
+/** Connectors need Claude: a chat on a local model or the offline planner (that would otherwise use them) says so once. */
 function connectorNote(s: State): void {
   if (s.thread.agent === "claude" || !s.ext.connectors || s.thread.items.some((i) => i.role === "notice" && i.text.startsWith(CONNECTOR_NOTE))) return;
   const names = activeConnectors().map((c) => c.name);
   if (!names.length) return;
-  push(s, { role: "notice", tone: "info", text: `${CONNECTOR_NOTE} (${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}); this chat runs on ${s.thread.agent === "ollama" ? "a local model" : "the offline planner"}, so it can't use them.` });
+  push(s, { role: "notice", tone: "info", text: `${CONNECTOR_NOTE} (${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}); this chat runs on ${s.thread.agent === "local" ? "a local model" : "the offline planner"}, so it can't use them.` });
 }
 const CONNECTOR_NOTE = "Connectors work in Claude chats";
 
 export function createThread(opts: {
   engine: Engine;
-  agent: AssistThread["agent"];
+  /** "ollama" is the local agent's old name. */
+  agent: AssistThread["agent"] | "ollama";
   autoApprove?: boolean;
   title?: string;
   projectId?: string | null;
@@ -482,7 +489,7 @@ export function createThread(opts: {
   const now = Date.now();
   if (opts.projectId && !getProject(opts.projectId)) throw new Error("That project doesn't exist anymore");
   const s: State = {
-    thread: { id: nanoid(12), title: opts.title ?? "New chat", status: "idle", agent: opts.agent, engine: opts.engine, autoApprove: !!opts.autoApprove, items: [], createdAt: now, updatedAt: now },
+    thread: { id: nanoid(12), title: opts.title ?? "New chat", status: "idle", agent: normalizeAgent(opts.agent) ?? "offline", engine: opts.engine, autoApprove: !!opts.autoApprove, items: [], createdAt: now, updatedAt: now },
     messages: [],
     pending: null,
     ext: {
@@ -642,77 +649,32 @@ export const claude: ModelCall = async ({ system, messages, tools, settings, con
   return stream.finalMessage();
 };
 
-type OllamaMessage = { role: "system" | "user" | "assistant" | "tool"; content: string; tool_calls?: { function: { name: string; arguments: unknown } }[]; tool_name?: string };
-
-const blockText = (c: ToolResult["content"]): string =>
-  typeof c === "string" ? c : (c ?? []).map((b) => (b.type === "text" ? b.text : b.type === "image" ? "[image omitted]" : "")).join("\n");
-
-/** The stored (Anthropic-shaped) history as Ollama chat messages. Images stay as their URLs in the text. */
-export function toOllamaMessages(system: ModelRequest["system"], messages: MessageParam[]): OllamaMessage[] {
-  const names = new Map<string, string>();
-  const out: OllamaMessage[] = [{ role: "system", content: `${system.stable}\n\n${system.turn}` }];
-  for (const m of messages) {
-    if (typeof m.content === "string") {
-      out.push({ role: m.role, content: m.content });
-      continue;
-    }
-    if (m.role === "system") {
-      out.push({ role: "system", content: m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n") });
-      continue;
-    }
-    if (m.role === "assistant") {
-      const text = m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
-      const calls = m.content.flatMap((b) => {
-        if (b.type !== "tool_use") return [];
-        names.set(b.id, b.name);
-        return [{ function: { name: b.name, arguments: b.input } }];
-      });
-      out.push({ role: "assistant", content: text, ...(calls.length && { tool_calls: calls }) });
-      continue;
-    }
-    for (const b of m.content) if (b.type === "tool_result") out.push({ role: "tool", tool_name: names.get(b.tool_use_id), content: `${b.is_error ? "Error: " : ""}${blockText(b.content)}` });
-    const text = m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
-    if (text) out.push({ role: "user", content: text });
-  }
-  return out;
-}
-
-/** A local model through Ollama's tool calling (qwen3, llama3.x, mistral…), answering in the same shape as Claude. */
-export const ollama: ModelCall = async ({ system, messages, tools, settings }) => {
-  const model = settings?.model || getSetting("ollamaModel");
-  const res = await fetch(`${getSetting("ollamaUrl").replace(/\/+$/, "")}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      messages: toOllamaMessages(system, messages),
-      tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } })),
-      options: { num_ctx: 16384 },
-    }),
-    signal: AbortSignal.timeout(300_000),
-  }).catch((e: Error) => {
-    throw new Error(`Couldn't reach Ollama at ${getSetting("ollamaUrl")} (${e.message}). Is it running?`);
+/**
+ * A local model through its server's tool calling (Ollama, LM Studio, Unsloth Studio or another
+ * OpenAI-compatible server; qwen3, llama3.x, mistral, gemma…), answering in the same shape as Claude.
+ * The history goes out as chat messages shaped for the server (src/server/llm/messages.ts).
+ */
+export const local: ModelCall = async ({ system, messages, tools, settings }) => {
+  const ready = await activeLocal();
+  if (!ready) throw new Error(localDownNote());
+  const { server, status } = ready;
+  // A model picked for this chat on another server gives way to this one's default.
+  const want = settings?.model;
+  const model = want && (!status.models.length || status.models.some((m) => m.id === want || m.id === `${want}:latest`)) ? want : null;
+  const r = await chatLocal(ready, {
+    messages: toChatMessages(system, messages, server.kind),
+    tools: tools.map((t) => ({ name: t.name, description: t.description, parameters: t.input_schema })),
+    model,
+    timeoutMs: 300_000,
   });
-  if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const j = (await res.json()) as { message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] }; done_reason?: string };
+  // A thinking model that ran out of room says so, rather than "the reply was cut short".
+  if (!r.text && !r.toolCalls.length && r.stop === "length") throw emptyReply(server, r);
   const content: Anthropic.Beta.BetaContentBlock[] = [];
-  const text = (j.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-  if (text) content.push({ type: "text", text, citations: null } as Anthropic.Beta.BetaTextBlock);
-  for (const c of j.message?.tool_calls ?? []) {
-    let input = c.function.arguments;
-    if (typeof input === "string") {
-      try {
-        input = JSON.parse(input);
-      } catch {
-        input = { INVALID_JSON: input };
-      }
-    }
-    content.push({ type: "tool_use", id: `toolu_ollama_${nanoid(10)}`, name: c.function.name, input } as unknown as Anthropic.Beta.BetaToolUseBlock);
-  }
-  const stop: Anthropic.Beta.BetaStopReason = j.message?.tool_calls?.length ? "tool_use" : j.done_reason === "length" ? "max_tokens" : "end_turn";
+  if (r.text) content.push({ type: "text", text: r.text, citations: null } as Anthropic.Beta.BetaTextBlock);
+  for (const c of r.toolCalls) content.push({ type: "tool_use", id: c.id, name: c.name, input: c.input } as unknown as Anthropic.Beta.BetaToolUseBlock);
+  const stop: Anthropic.Beta.BetaStopReason = r.toolCalls.length ? "tool_use" : r.stop === "length" ? "max_tokens" : "end_turn";
   if (!content.length) content.push({ type: "text", text: "…", citations: null } as Anthropic.Beta.BetaTextBlock);
-  return { id: `msg_ollama_${nanoid(8)}`, type: "message", role: "assistant", model, content, stop_reason: stop, stop_sequence: null, stop_details: null, usage: null } as unknown as Anthropic.Beta.BetaMessage;
+  return { id: `msg_local_${nanoid(8)}`, type: "message", role: "assistant", model: r.model, content, stop_reason: stop, stop_sequence: null, stop_details: null, usage: null } as unknown as Anthropic.Beta.BetaMessage;
 };
 
 /** A rule-based planner with the same shape as a model reply, for installs without an LLM. */
@@ -768,7 +730,7 @@ export const offline: ModelCall = async ({ messages, ctx, skills }) => {
 };
 
 /** Under every offline plan: the rule-based planner is a fallback, not the assistant. */
-export const OFFLINE_NOTE = "Offline planner — connect Claude or Ollama in Settings for better plans.";
+export const OFFLINE_NOTE = "Offline planner — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for better plans.";
 
 /** What to offer next, by what was just started. */
 const FOLLOW_UP: Record<MediaKind, string> = {
@@ -1280,7 +1242,7 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
   return "continue";
 }
 
-const MODELS: Record<AssistThread["agent"], ModelCall> = { claude, ollama, offline };
+const MODELS: Record<AssistThread["agent"], ModelCall> = { claude, local, offline };
 
 /**
  * Run the agent until it ends its turn or waits for approval. Call it right after addMessage or
@@ -1325,7 +1287,7 @@ function refreshFlags(s: State): void {
 }
 
 function errorText(e: unknown): string {
-  if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → Prompt enhancement.";
+  if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → AI helper.";
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limited right now. Try again in a minute.";
   if (e instanceof Anthropic.BadRequestError && /\bmcp\b|connector/i.test(e.message)) return `A connector didn't work: ${e.message}. Check it in Settings → Assist connectors, or switch it off.`;
   if (e instanceof Anthropic.APIError) return `Claude returned an error (${e.status ?? "network"}): ${e.message}`;

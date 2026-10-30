@@ -336,7 +336,7 @@ export const PROVIDER_NAME: Record<string, string> = {
   fal: "fal.ai",
   replicate: "Replicate",
   comfyui: "ComfyUI (your GPU)",
-  llm: "Claude or Ollama",
+  llm: "Claude or a local model",
   local: "Your browser",
   openai: "OpenAI",
   google: "Google",
@@ -356,14 +356,17 @@ export function paidApiLicence(vendor: string, routes: { provider: string; endpo
   };
 }
 
-/** Text steps: Claude through the Anthropic key, else the Ollama model; on the open engine, Ollama only. */
-export function llmLicence(endpoint: string, ollamaModel = "qwen3:8b"): LicenceInfo {
+/**
+ * Text steps: Claude through the Anthropic key, else the local model; on the open engine, the local model only.
+ * `model` is the one the local server in use runs ("" when it picks one later), `server` names that server.
+ */
+export function llmLicence(endpoint: string, model = "qwen3:8b", server = "Ollama"): LicenceInfo {
   if (endpoint !== "ollama") {
     return {
-      name: "Paid API · Anthropic (or Ollama)",
+      name: "Paid API · Anthropic (or a local model)",
       class: "paid-api",
       url: "https://www.anthropic.com/legal/commercial-terms",
-      note: "Claude through your Anthropic key, under Anthropic's commercial terms; with no key, the Ollama model on your machine",
+      note: "Claude through your Anthropic key, under Anthropic's commercial terms; with no key, the local model on your machine (Ollama, LM Studio or Unsloth Studio)",
     };
   }
   const known: [RegExp, string, LicenceClass, string?][] = [
@@ -373,8 +376,12 @@ export function llmLicence(endpoint: string, ollamaModel = "qwen3:8b"): LicenceI
     [/^gemma/i, "Gemma Terms of Use", "conditions", "https://ai.google.dev/gemma/terms"],
     [/^llama/i, "Llama Community License", "conditions", "https://www.llama.com/"],
   ];
-  const hit = known.find(([re]) => re.test(ollamaModel));
-  const note = `The Ollama model this install uses (${ollamaModel}); another model carries its own licence: ollama show <model> --license`;
+  // LM Studio and Unsloth name a model by publisher ("google/gemma-3-12b", "unsloth/Qwen3-8B-GGUF"): the last part names the family.
+  const family = model.split("/").pop() ?? "";
+  const hit = family ? known.find(([re]) => re.test(family)) : undefined;
+  const note = model
+    ? `The model this install's text steps use on ${server} (${model}); another model carries its own licence (its model card, or ollama show <model> --license)`
+    : `${server} hasn't said which model it runs yet; that model carries its own licence (its model card)`;
   return hit ? { name: hit[1], class: hit[2], note, ...(hit[3] && { url: hit[3] }) } : { name: "Not recorded", class: "unknown", note };
 }
 
@@ -407,7 +414,6 @@ export const NODE_PACKS: NodePack[] = [
   pack("ComfyUI-WanVideoWrapper", "https://github.com/kijai/ComfyUI-WanVideoWrapper", { name: "Apache-2.0", class: "commercial", url: SPDX("Apache-2.0"), note: "Code Apache-2.0; the Wan weights it loads are Apache-2.0" }),
   pack("ComfyUI-VideoHelperSuite", "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite", { ...GPL, note: "Video loading and saving; GPL-3.0 code, like ComfyUI" }),
   pack("ComfyUI-KJNodes", "https://github.com/kijai/ComfyUI-KJNodes", { ...GPL, note: "Utility nodes (GrowMaskWithBlur, resizing); GPL-3.0 code, like ComfyUI" }),
-  pack("ComfyUI-SeedVR2_VideoUpscaler", "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler", { name: "Apache-2.0", class: "commercial", url: SPDX("Apache-2.0"), note: "SeedVR2 upscaling; code and weights Apache-2.0" }),
   pack("ComfyUI-Frame-Interpolation", "https://github.com/Fannovel16/ComfyUI-Frame-Interpolation", { name: "MIT", class: "commercial", url: SPDX("MIT"), note: "RIFE and FILM frame interpolation; MIT code" }),
   pack("ComfyUI-RMBG", "https://github.com/1038lab/ComfyUI-RMBG", { ...GPL, note: "Background removal; GPL-3.0 code. Fuobe uses BEN2 (MIT); RMBG-2.0 in the same pack is CC BY-NC 4.0" }),
   pack("ComfyUI-ReActor", "https://github.com/Gourieff/ComfyUI-ReActor", { name: "MIT (per the research)", class: "commercial", note: "Face swap node; the inswapper_128 weights it loads are for non-commercial research only" }),

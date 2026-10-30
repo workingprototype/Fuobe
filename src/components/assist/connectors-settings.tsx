@@ -41,7 +41,7 @@ export function ConnectorSettings({ claudeReady }: { claudeReady: boolean }) {
         <div className="space-y-1.5">
           <p>
             Connectors work in Claude chats (Smart, or Manual with a Claude model){claudeReady ? "" : " — add an Anthropic API key above first"}. Claude reaches them from Anthropic&apos;s servers, so each needs a
-            public https address. Chats on Ollama or the offline planner can&apos;t use them. Tool calls cost Claude tokens; the chat lists each connector tool Claude used.
+            public https address. Chats on a local model (Ollama, LM Studio or Unsloth Studio) or the offline planner can&apos;t use them. Tool calls cost Claude tokens; the chat lists each connector tool Claude used.
           </p>
           <p>
             <span className="font-medium text-foreground">Connector tools run without asking.</span> Claude calls them inside its reply, so approval cards (Ask first) and auto-run&apos;s cost cap don&apos;t

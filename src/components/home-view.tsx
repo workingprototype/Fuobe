@@ -290,7 +290,7 @@ export function HomeView({
               }}
             />
           </>
-        ) : nothingConnected && (
+        ) : nothingConnected && !status?.viewer && (
           <p className="mt-4 text-[13px] text-muted-foreground">
             You’re in <span className="font-medium text-foreground">demo mode</span> — outputs are placeholders.{" "}
             <Link href="/settings#get-started" className="text-brand-text underline underline-offset-2">

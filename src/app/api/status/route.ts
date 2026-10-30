@@ -1,14 +1,22 @@
 import { connection } from "next/server";
+import { visitorStatus } from "@/server/account-gpu";
+import { requestViewer } from "@/server/auth";
+import { aiHelper, localSummary } from "@/server/llm";
 import { PROVIDERS } from "@/server/providers";
 import { comfyRam, probeComfy } from "@/server/providers/comfyui";
+import { llmBackends } from "@/server/providers/llm";
 import { nothingConnected, type EngineModeName } from "@/lib/connections";
 import { getSetting, setSetting } from "@/server/settings";
 import { offeredSummary } from "@/server/model-access";
 
 /** Which providers are usable right now — drives badges, the demo-mode notice and Home's first-run guide. */
-export async function GET() {
+export async function GET(request?: Request) {
   await connection();
-  const comfy = await probeComfy(true);
+  // A guest or an account (public sign-up) sees its own GPU, never the install's providers or servers.
+  const viewer = request ? requestViewer(request) : ({ kind: "owner" } as const);
+  if (viewer.kind !== "owner") return Response.json(await visitorStatus(viewer.kind === "account" ? viewer.account : null), { headers: { "Cache-Control": "no-store" } });
+  // Both asked first, so the llm provider's label and routing read fresh answers without waiting.
+  const [comfy, local] = await Promise.all([probeComfy(true), localSummary()]);
   const ram = comfy ? comfyRam() : undefined;
   const providers = Object.fromEntries(
     Object.values(PROVIDERS).map((p) => [
@@ -34,5 +42,7 @@ export async function GET() {
     onboarded,
     // Settings → Models & licences: the models switched off, so pickers leave them out (absent while everything is on).
     ...(access && { access }),
+    // The text LLM: the AI helper setting, whether Claude takes text steps, and the local server (no keys).
+    llm: { helper: aiHelper(), claude: llmBackends({ endpoint: "auto" })[0] === "claude", ...local },
   });
 }

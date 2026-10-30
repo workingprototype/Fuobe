@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { requestViewer } from "@/server/auth";
 import { getModel, MODELS } from "@/lib/catalog";
 import { onEngine, runsOn } from "@/lib/catalog/engines";
 import { ENGINE_MODELS } from "@/lib/catalog/faceless";
@@ -60,7 +61,9 @@ export async function GET(request: Request) {
   if (engine && engine !== "open" && engine !== "cloud") return Response.json({ error: "engine is open or cloud" }, { status: 400 });
   const op = p.get("op") || undefined;
   if (op && !(op in OPERATION_LABELS)) return Response.json({ error: `Unknown operation ${op}` }, { status: 400 });
-  const mode = engineMode();
+  // A guest or an account (public sign-up) runs open models on its own GPU: no cloud models, no demo.
+  const visitor = requestViewer(request).kind !== "owner";
+  const mode = visitor ? "open" : engineMode();
   // A Fuobe Original runs on both engines: on a list for one engine (asked for, or the install's only one) it is
   // that engine's model (its routes, its price), else it is listed once with both.
   const only = (engine as Engine | undefined) ?? (mode === "both" ? undefined : mode);
@@ -74,12 +77,12 @@ export async function GET(request: Request) {
   const defaults = Object.fromEntries(
     Object.entries(DEFAULTS).map(([k, ids]) => [k, { ...(mode !== "open" && ids.cloud && { cloud: pick(ids.cloud, "cloud") }), ...(mode !== "cloud" && ids.open && { open: pick(ids.open, "open") }) }]),
   );
-  const demoMode = getSetting("demoMode");
+  const demoMode = visitor ? "off" : getSetting("demoMode");
   // The price of the day asked (a launch price while it lasts); the row keeps the launch price and its last day too.
   const now = Date.now();
   const items = list.map((m) => {
     const info = toModelInfo(m);
-    return { ...info, price: rowPrice(info, now), connected: connected(m), runs: runsAs(m, demoMode) };
+    return { ...info, price: rowPrice(info, now), connected: visitor || connected(m), runs: visitor ? ("real" as const) : runsAs(m, demoMode) };
   });
   return Response.json({ engineMode: mode, demoMode, defaults, items });
 }

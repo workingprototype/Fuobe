@@ -5,10 +5,11 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { loadSuite, suiteFiles, validateAll } from "./lib/cases.mjs";
 import { compareRuns, compareText, promote, promoteText, researchRecords } from "./lib/compare.mjs";
-import { makeCovers } from "./lib/covers.mjs";
+import { coversFromMasters, makeCovers } from "./lib/covers.mjs";
 import { scoreRun } from "./lib/metrics.mjs";
 import { METRICS_DIR, REPO_DIR, resultsDir } from "./lib/paths.mjs";
 import { RECIPES_FILE } from "./lib/recipes.mjs";
@@ -67,7 +68,17 @@ const HELP = {
 
   The best render of each promoted case becomes its preset's cover: encoded small into public/previews/<suite>/
   and listed in src/lib/preset-previews.generated.ts, which the gallery cards show. --variant takes that
-  variant's renders for every case instead (catalog: what ships today). Demo runs never make covers.`,
+  variant's renders for every case instead (catalog: what ships today). Demo runs never make covers.
+
+pnpm eval:covers --from-masters <dir> --run <name> [--engine comfyui] [--model <id>] [--video-model <id>] [--variant <name>]
+                 [--suite presets] [--only id,id] [--force] [--replace] [--dry-run] [--public-dir public] [--manifest …]
+
+  Rendered masters outside a run, one folder per preset id: its clip.mp4 becomes a clip cover, else its
+  start.png a still cover, in public/previews/<suite>/ (presets by default). Each records --run, --engine,
+  --model (--video-model for clips) and --variant; a folder's meta.json can name its own model and variant.
+  The manifest is merged: other entries stay, and an id whose cover another run made elsewhere (a measured
+  cover) is skipped (--replace takes it over). Run again, it encodes only new or changed masters (--force: all).
+  Clips loop without a jump: their last frames are crossfaded into their first ones.`,
   history: "pnpm eval:history [--suite soul] [--case soul/v1-general] [--limit 20]",
   validate: "pnpm eval:validate [suite files…]   checks every case file and that the generated suites match the research",
   trash: "pnpm eval:trash <runId> [--dry-run]   moves the run's generations to that Fuobe's Trash (its results here stay)",
@@ -360,9 +371,10 @@ async function validate(args, ctx) {
   const { generated } = await import("./gen-cases.mjs");
   const gen = generated();
   const stale = ["soul.json", "dop.json", "dop-mix.json", "case.schema.json"].filter((name) => {
-    const file = path.join(path.dirname(new URL(import.meta.url).pathname), "cases", name);
+    const file = path.join(path.dirname(fileURLToPath(import.meta.url)), "cases", name);
     const want = `${JSON.stringify(gen[name], null, 2)}\n`;
-    return !fs.existsSync(file) || fs.readFileSync(file, "utf8") !== want;
+    // A Windows checkout may have CRLF line endings: the same content.
+    return !fs.existsSync(file) || fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n") !== want;
   });
   if (v.json) return ctx.print(JSON.stringify({ suites: results, stale }, null, 2)), bad || stale.length ? 1 : 0;
   for (const r of results) {
@@ -406,14 +418,65 @@ async function trash(args, ctx) {
 }
 
 async function covers(args, ctx) {
-  const { values: v, positionals } = parse(args, { variant: { type: "string" }, "dry-run": { type: "boolean" }, "public-dir": { type: "string" }, manifest: { type: "string" }, "commercial-only": { type: "boolean" } }, { positionals: true });
+  const { values: v, positionals } = parse(
+    args,
+    {
+      variant: { type: "string" },
+      "dry-run": { type: "boolean" },
+      "public-dir": { type: "string" },
+      manifest: { type: "string" },
+      "commercial-only": { type: "boolean" },
+      "from-masters": { type: "string" },
+      run: { type: "string" },
+      engine: { type: "string" },
+      model: { type: "string" },
+      "video-model": { type: "string" },
+      suite: { type: "string" },
+      only: { type: "string" },
+      force: { type: "boolean" },
+      replace: { type: "boolean" },
+    },
+    { positionals: true },
+  );
   if (v.help) return ctx.print(HELP.covers), 0;
+  if (v["from-masters"]) return coversFromMastersCmd(v, ctx);
   const { dir } = resolveRun(root(v, ctx.env), positionals[0] ?? "latest");
   const r = makeCovers(dir, { variant: v.variant, dryRun: v["dry-run"], publicDir: v["public-dir"] && path.resolve(v["public-dir"]), manifest: v.manifest && path.resolve(v.manifest), commercialOnly: v["commercial-only"] });
   if (v.json) return ctx.print(JSON.stringify(r, null, 2)), 0;
   ctx.print(`${r.covers.length} cover${r.covers.length === 1 ? "" : "s"} from ${r.runId} (${r.engine}, ${r.variant})${v["dry-run"] ? " would be made" : ""}`);
   for (const c of r.covers) ctx.print(`  ${c.key} ← ${c.job}${c.metric ? ` (best ${c.metric}${c.score != null ? ` ${Number(c.score).toFixed(3)}` : ""})` : ""}`);
   for (const sk of r.skipped.slice(0, 10)) ctx.print(`  · ${sk.caseId}: ${sk.why}`);
+  if (r.skipped.length > 10) ctx.print(`  · and ${r.skipped.length - 10} more`);
+  if (r.covers.length && !v["dry-run"]) ctx.note(`Look at the media in ${path.relative(REPO_DIR, r.folder) || r.folder} and the diff of ${path.relative(REPO_DIR, r.manifest) || r.manifest} before committing them.`);
+  return 0;
+}
+
+/** pnpm eval:covers --from-masters <dir>: covers from rendered masters, merged into the manifest. */
+function coversFromMastersCmd(v, ctx) {
+  if (!v.run) throw new Usage("--from-masters needs --run <name>: the provenance every cover it makes records");
+  const r = coversFromMasters(path.resolve(v["from-masters"]), {
+    run: v.run,
+    engine: v.engine,
+    model: v.model,
+    videoModel: v["video-model"],
+    variant: v.variant,
+    suite: v.suite,
+    only: v.only?.split(",").map((s) => s.trim()).filter(Boolean),
+    force: v.force,
+    replace: v.replace,
+    dryRun: v["dry-run"],
+    publicDir: v["public-dir"] && path.resolve(v["public-dir"]),
+    manifest: v.manifest && path.resolve(v.manifest),
+  });
+  if (v.json) return ctx.print(JSON.stringify(r, null, 2)), 0;
+  const n = (k, word) => `${k} ${word}${k === 1 ? "" : "s"}`;
+  const clips = r.covers.filter((c) => c.video).length;
+  const kept = r.covers.filter((c) => c.kept).length;
+  const tail = v["dry-run"] ? " would be made" : kept ? `, ${kept} already up to date` : "";
+  ctx.print(`${n(r.covers.length, "cover")} from masters (${n(clips, "clip")}, ${n(r.covers.length - clips, "still")}) as ${r.run} (${r.engine})${tail}`);
+  for (const c of r.covers.slice(0, 20)) ctx.print(`  ${c.key} ← ${path.basename(c.from)}${c.model ? ` (${c.model})` : ""}${c.kept ? " · up to date" : ""}`);
+  if (r.covers.length > 20) ctx.print(`  and ${r.covers.length - 20} more`);
+  for (const sk of r.skipped.slice(0, 10)) ctx.print(`  · ${sk.id}: ${sk.why}`);
   if (r.skipped.length > 10) ctx.print(`  · and ${r.skipped.length - 10} more`);
   if (r.covers.length && !v["dry-run"]) ctx.note(`Look at the media in ${path.relative(REPO_DIR, r.folder) || r.folder} and the diff of ${path.relative(REPO_DIR, r.manifest) || r.manifest} before committing them.`);
   return 0;
@@ -437,6 +500,7 @@ async function setup(args, ctx) {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run directly (not imported by the tests). Compared as URLs, so a Windows script path matches too.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   process.exitCode = await main(process.argv.slice(2));
 }

@@ -31,6 +31,7 @@ import {
   type ChainSlot,
   type Engine,
   type Generation,
+  type GenerationFix,
   type GenerationRequest,
   type MediaKind,
   type GenInput,
@@ -44,21 +45,25 @@ import {
 } from "@/lib/catalog/types";
 import { db } from "./db";
 import { listElements } from "./elements";
+import { markStale } from "./gpu/snapshots";
 import { pollTrainings } from "./training";
 import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
-import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { comfyLoraFiles, onOwnGpu, outputFetch, probeComfy } from "./providers/comfyui";
+import { accountGpu } from "./auth";
+import { CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
 import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
 import { ACCESS_PLACE } from "@/lib/model-access";
 import { offeredLoras, offeredRoutes, requireOffered } from "./model-access";
-import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
+import { llmBackends, llmLabel, llmMissing, llmUsesClaude, probeLocal } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
+import { modelToFinish, startModelFinish, startTurntable, stopModelFinish, type OutputStore } from "./model3d-finish";
 import { convertMask, decodePng, encodePng } from "./png";
-import { engineMode, getSetting } from "./settings";
+import { engineMode, getSetting, withCandidates } from "./settings";
 import { fetchRemoteToFile } from "./remote-fetch";
 import { adoptFile, contentTypeFor, deleteAsset, localHead, readRef, saveFile, scratchDir } from "./storage";
 
@@ -94,6 +99,8 @@ interface Row {
   /** Joined by the library readers (generation_trash, folder_items); looked up when absent. */
   deleted_at?: number | null;
   folder_id?: string | null;
+  /** What a failed ComfyUI run was missing (GenerationFix as JSON). */
+  fix_json?: string | null;
 }
 
 /** Trash and folder columns, joined onto every library read. */
@@ -144,7 +151,17 @@ export function toGeneration(r: Row): Generation {
     folderId: lib.folder_id ?? null,
     pinnedAt: r.pinned_at ?? null,
     review: isReviewStatus(r.review) ? r.review : null,
+    ...(r.status === "failed" && r.fix_json && { fix: parseFix(r.fix_json) }),
   };
+}
+
+function parseFix(json: string): GenerationFix | null {
+  try {
+    const f = JSON.parse(json) as GenerationFix;
+    return f && typeof f.code === "string" && Array.isArray(f.items) ? f : null;
+  } catch {
+    return null;
+  }
 }
 
 function update(id: string, fields: Partial<Row>): void {
@@ -214,6 +231,11 @@ export interface ListOptions {
    */
   before?: number;
   beforeId?: string;
+  /**
+   * Public sign-up: only this account's runs. Without it, only the owner's (an account's runs are its
+   * own: they stay out of the owner's lists).
+   */
+  account?: string;
   /** Date range on createdAt: since ≤ t < until. */
   since?: number;
   until?: number;
@@ -230,6 +252,8 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
     args.push(...values);
   };
   const oneOf = (col: string, values: unknown[]) => add(`${col} IN (${values.map(() => "?").join(", ")})`, ...values);
+  if (o.account) add("json_extract(g.request_json, '$.account') = ?", o.account);
+  else add("json_extract(g.request_json, '$.account') IS NULL");
   if (o.batchId) add("g.batch_id = ?", o.batchId);
   if (o.feature) add("g.feature = ?", o.feature);
   if (o.features?.length) add(`(${o.features.map(() => "g.feature LIKE ?").join(" OR ")})`, ...o.features.map(featureLike));
@@ -334,6 +358,9 @@ export const ASSET_REFS: AssetRef[] = [
  */
 export const ASSET_FREE: Record<string, string> = {
   "generations.provider_input_json": "what a provider was sent: its own upload URLs or file names, never ours",
+  "generations.fix_json": "what a failed ComfyUI run was missing: model file names, node classes and packs",
+  "gpu_snapshots.inventory_json": "what a GPU's ComfyUI has (class names, model file names and sizes), never a Fuobe file",
+  "gpu_snapshots.report_json": "readiness built from that inventory",
   "generations.external_meta_json": "the provider's job handles",
   "shorts_sessions.range_json": "start and end times",
   "shorts_sessions.settings_json": "ratio, language, model and resolution",
@@ -399,6 +426,8 @@ export function assetInUse(assetId: string, exceptGeneration = ""): boolean {
  * src/server/library.ts (they cancel running jobs first); moving to the Trash is trashGenerations.
  */
 export function deleteGeneration(id: string): void {
+  // A 3D job's finish or turntable render stops with it.
+  stopModelFinish(id);
   const assets = db().prepare("SELECT id FROM assets WHERE generation_id = ?").all(id) as { id: string }[];
   db().transaction(() => {
     db().prepare("DELETE FROM generations WHERE id = ?").run(id);
@@ -622,7 +651,7 @@ function prepare(original: GenerationRequest) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
   }
   const providerId: ProviderId = demo ? "mock" : route.provider;
-  // A text step that runs on Ollama is free; only Claude costs money.
+  // A text step that runs on a local model is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
   const withLoras = fitted.loras.length > 0 && !!route.loraEndpoint;
   const unreachable = asked.filter((l) => !reachable.loras.includes(l));
@@ -950,7 +979,7 @@ const submitting = (): Set<string> => (globalThis.__fuobeSubmitting ??= new Set<
 function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route: ModelRoute }, deps: Pick<Row, "provider">[], asked?: Pick<GenerationRequest, "demo">): { error?: string; forceDemo?: boolean } {
   const demoDeps = deps.filter((d) => d.provider === "mock").length;
   if (p.demo && demoDeps < deps.length) {
-    const needs = p.route.provider === "llm" ? "Claude or Ollama" : provider(p.route.provider).label;
+    const needs = p.route.provider === "llm" ? llmLabel(p.route) : provider(p.route.provider).label;
     return { error: `${p.plan.model.name} needs ${needs} to continue what the earlier steps made for real — connect it in Settings, then retry` };
   }
   if (!p.demo && demoDeps > 0) {
@@ -1112,11 +1141,14 @@ async function advanceDependents(): Promise<void> {
         if (!back && Date.now() - first! < COMFY_WAIT.ms) continue;
       }
       comfyWaits().delete(r.id);
-      if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
+      if (model?.routes.some((x) => x.provider === "llm")) await probeLocal();
       // Filled with the slots that have an input; stored with its whole chain (and what was skipped) for a retry.
       const filled = withChainInputs({ ...request, chain: slots }, values as string[]);
       const original: GenerationRequest = { ...filled, chain: request.chain, chainFilled: true };
-      const prepared = prepare(original);
+      // An account's step is planned as its run was: on its own ComfyUI.
+      const own = original.account ? accountRun(original.account, "comfyui") : undefined;
+      if (own && "error" in own) throw new Error(own.error);
+      const prepared = own ? own.run(() => prepare(original)) : prepare(original);
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[], original);
       if (mode.error) throw new Error(mode.error);
       const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
@@ -1150,7 +1182,50 @@ function recordSubmission(id: string, at: number): void {
     .run(id, at);
 }
 
-async function submit(
+// ---------------------------------------------------------------------------
+// Public sign-up: an account's runs go to its own ComfyUI ("Your GPU"), never the install's providers
+
+export const OWN_GPU_ONLY = "Free accounts run only on their own ComfyUI: pick an open-source model.";
+
+/**
+ * How an account's job reaches a provider: inside onOwnGpu (its own ComfyUI, the open engine, no demo
+ * outputs), or not at all: no GPU connected, or a provider other than ComfyUI (the install's cloud
+ * keys, its local LLM). An unreachable GPU fails the job; it never falls back to the install's.
+ */
+export function accountRun(accountId: string, providerId: string): { run: <T>(fn: () => T) => T } | { error: string } {
+  const gpu = accountGpu(accountId);
+  if (!gpu) return { error: CONNECT_GPU_MESSAGE };
+  if (providerId !== "comfyui") return { error: OWN_GPU_ONLY };
+  return { run: (fn) => onOwnGpu(gpu, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn)) };
+}
+
+/**
+ * Plan (and price) as a visitor's run would go: on its own ComfyUI (none yet: an empty address that
+ * reaches nothing), the open engine, no demo outputs. For previews; a run goes through accountRun.
+ */
+export function asVisitor<T>(gpu: { url: string; token?: string } | null, fn: () => T): T {
+  return onOwnGpu(gpu ?? { url: "" }, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn));
+}
+
+const accountOf = (r: Pick<Row, "request_json">): string | undefined => {
+  try {
+    return (JSON.parse(r.request_json) as GenerationRequest).account;
+  } catch {
+    return undefined;
+  }
+};
+
+function submit(id: string, route: ModelRoute, providerId: ProviderId, plan: ReturnType<typeof planGeneration>, req: GenerationRequest, index: number): Promise<void> {
+  if (!req.account) return submitNow(id, route, providerId, plan, req, index);
+  const own = accountRun(req.account, providerId);
+  if ("error" in own) {
+    update(id, { status: "failed", error: own.error, completed_at: Date.now(), message: null });
+    return Promise.resolve();
+  }
+  return own.run(() => submitNow(id, route, providerId, plan, req, index));
+}
+
+async function submitNow(
   id: string,
   route: ModelRoute,
   providerId: ProviderId,
@@ -1255,7 +1330,8 @@ async function submit(
     // file mirrored once to the provider's storage (the civitai key never leaves this server).
     if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
       input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
-    } else if (providerId === "comfyui" && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
+    } else if (providerId === "comfyui" && !req.account && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
+      // (Not for an account's own ComfyUI: the download writes to the install's LoRA folder.)
       // A graph that loads its own LoRAs (Genjutsu's Character swap: the Turbo and swap LoRAs) gets them downloaded too.
       await ensureLorasOnComfy([...(input.loras ?? []), ...graphLoras(route.endpoint, input.extra)], await comfyLoraFiles(route), (message) => update(id, { message }));
     }
@@ -1278,8 +1354,11 @@ async function submit(
       recordSubmission(id, now);
     })();
   } catch (e) {
-    // A cancel during the hand-over stays a cancel.
-    if (statusOf(id) !== "canceled") update(id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null });
+    // A cancel during the hand-over stays a cancel. What the GPU was missing (a model, a node class) is kept, so the
+    // tile offers "Fix it", and the account's GPU check counts as stale.
+    const fix = (e as { fix?: GenerationFix }).fix;
+    if (statusOf(id) !== "canceled") update(id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null, ...(fix && { fix_json: JSON.stringify(fix) }) });
+    if (fix) markStale(req.account ? `acct:${req.account}` : "install");
   } finally {
     submitting().delete(id);
   }
@@ -1343,8 +1422,9 @@ export function ensureRunner(): void {
   state.fastTimer?.unref?.();
   globalThis.__fuobeRunner = state;
   void probeComfy().catch(() => false);
-  void probeOllama().catch(() => false);
+  void probeLocal().catch(() => false);
   sweepInterrupted();
+  resumeTurntables();
 }
 
 /** Jobs that never got an external id (the server died mid-submit) can't be recovered. Runs every tick. */
@@ -1364,7 +1444,11 @@ async function pollGuarded(r: Row): Promise<void> {
   if (polling.has(r.id)) return;
   polling.add(r.id);
   try {
-    await pollOne(r);
+    const account = accountOf(r);
+    const own = account ? accountRun(account, r.provider) : undefined;
+    if (own && "error" in own) update(r.id, { status: "failed", error: own.error, completed_at: Date.now(), message: null });
+    else if (own) await own.run(() => pollOne(r));
+    else await pollOne(r);
   } catch (e) {
     update(r.id, { message: `Poll error: ${(e as Error).message}` });
   } finally {
@@ -1437,6 +1521,8 @@ async function pollOne(r: Row): Promise<void> {
     run = { submitted_at: now, started_at: null };
   }
   const ctx = pollContext(r, model);
+  // Its outputs are saved and the 3D finish runs (or ran until a restart): nothing more to ask the provider.
+  if (ctx.meta.finishing) return resumeFinish(r);
   // Poll first: a job that finished while the server was asleep or down is collected, not timed out.
   let res: PollResult | undefined;
   let pollError: unknown;
@@ -1505,6 +1591,14 @@ async function pollOne(r: Row): Promise<void> {
   // Fuobe DoP's colour-grade effects: the grade the browser applies to the clip (the result's "Apply the grade" step).
   const grade = isDop(r.model_id) && r.preset_id ? getPreset(r.preset_id)?.grade : undefined;
   if (grade) for (const [i, o] of outputs.entries()) if (o.kind === "video") outputs[i] = { ...o, meta: { ...o.meta, grade } };
+  // An image-to-3D GLB from ComfyUI gets the server's finish first (the web GLB, seconds): the outputs are
+  // stored now and the row stays running until it's done, so a restart resumes it from them. The turntable
+  // is rendered after the job has succeeded (src/server/model3d-finish.ts).
+  if (modelToFinish(r, outputs) >= 0) {
+    update(r.id, { outputs_json: JSON.stringify(outputs), external_meta_json: JSON.stringify({ ...ctx.meta, finishing: true }), message: "Finishing the 3D model" });
+    resumeFinish({ ...r, outputs_json: JSON.stringify(outputs) });
+    return;
+  }
   update(r.id, {
     status: "succeeded",
     outputs_json: JSON.stringify(outputs),
@@ -1512,6 +1606,47 @@ async function pollOne(r: Row): Promise<void> {
     message: null,
     completed_at: Date.now(),
   });
+}
+
+/** Start (or keep running) the 3D finish of a job whose outputs are stored; it marks the job done when it ends. */
+function resumeFinish(r: Row): void {
+  const outputs = JSON.parse(r.outputs_json || "[]") as OutputFile[];
+  startModelFinish(r.id, outputs, {
+    op: r.op,
+    provider: r.provider,
+    onMessage: (message) => update(r.id, { message }),
+    done: (finished) => {
+      const now = db().prepare("SELECT status, external_meta_json FROM generations WHERE id = ?").get(r.id) as Pick<Row, "status" | "external_meta_json"> | undefined;
+      // Canceled or deleted meanwhile: leave it be.
+      if (!now || now.status !== "running") return;
+      const meta = JSON.parse(now.external_meta_json ?? "{}") as Record<string, unknown>;
+      delete meta.finishing;
+      update(r.id, { status: "succeeded", outputs_json: JSON.stringify(finished), external_meta_json: JSON.stringify(meta), progress: 1, message: null, completed_at: Date.now() });
+      // The model can be opened and downloaded now; its turntable is rendered after and added to the result.
+      startTurntable(r.id, outputStore(r.id));
+    },
+  });
+}
+
+/** A finished job's outputs, for the turntable render that adds to them later. */
+function outputStore(id: string): OutputStore {
+  return {
+    read: () => {
+      const row = db().prepare("SELECT outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "outputs_json"> | undefined;
+      return row ? (JSON.parse(row.outputs_json || "[]") as OutputFile[]) : null;
+    },
+    write: (outputs) => update(id, { outputs_json: JSON.stringify(outputs) }),
+  };
+}
+
+/** Turntables the server stopped before rendering (meta.finish.turntable queued or rendering): render them now. */
+function resumeTurntables(): void {
+  const rows = db()
+    .prepare(
+      `SELECT id FROM generations WHERE status = 'succeeded' AND op = 'image-to-3d' AND provider = 'comfyui' AND (outputs_json LIKE '%"turntable":"queued"%' OR outputs_json LIKE '%"turntable":"rendering"%') ORDER BY created_at ASC`,
+    )
+    .all() as Pick<Row, "id">[];
+  for (const r of rows) startTurntable(r.id, outputStore(r.id));
 }
 
 /**
@@ -1646,7 +1781,7 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     data = f.data;
     contentType ??= f.contentType;
   } else {
-    const res = await fetch(o.url, { headers: o.headers });
+    const res = await outputFetch(o.url, { headers: o.headers });
     if (!res.ok) throw new Error(`download ${res.status}`);
     data = Buffer.from(await res.arrayBuffer());
     const header = res.headers.get("content-type")?.split(";")[0];
@@ -1669,13 +1804,23 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
 export async function cancelGeneration(id: string): Promise<void> {
   const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
   if (!r || (r.status !== "queued" && r.status !== "running")) return;
+  // Its outputs are in and the 3D finish runs: the provider's job is over. Stop the finish before anything
+  // awaits, so it can't mark the job done in between.
+  if ((JSON.parse(r.external_meta_json ?? "{}") as Record<string, unknown>).finishing) {
+    stopModelFinish(id);
+    update(id, { status: "canceled", completed_at: Date.now(), message: null });
+    return;
+  }
   const model = getModel(r.model_id);
   // Without an external id the job is still being handed over: submit() cancels it as soon as it lands.
   if (r.external_id && model) {
-    await provider(r.provider)
-      .cancel?.(pollContext(r, model))
-      .catch(() => {});
+    const account = accountOf(r);
+    const own = account ? accountRun(account, r.provider) : undefined;
+    const cancel = () => Promise.resolve(provider(r.provider).cancel?.(pollContext(r, model))).catch(() => {});
+    if (!own) await cancel();
+    else if ("run" in own) await own.run(cancel);
   }
+  stopModelFinish(id);
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
   // Steps waiting only to feed this one are dropped too (nothing was spent on them).
   dropUnused(depIds(r.depends_on));

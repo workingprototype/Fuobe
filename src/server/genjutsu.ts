@@ -47,6 +47,7 @@ import { silenceWriter } from "./canvas";
 import { createPipeline } from "./chains";
 import { llmText, llmTextBackend } from "./enhance";
 import { createGenerations, previewChained } from "./generations";
+import { localLabel } from "./llm";
 import { isOffered, offeredLoras, offeredModel } from "./model-access";
 import { provider } from "./providers";
 import { probeOllama } from "./providers/llm";
@@ -523,18 +524,19 @@ export const DescribeSchema = z.object({ engine: z.enum(["cloud", "open"]), imag
 
 /**
  * "Describe my character": the engine's text model looks at the character picture and writes the description the
- * prompt and the anchor brief carry (Akatz Labs found generic prompts weak). Cloud: Claude, else Ollama; your GPU:
- * Ollama with a vision model. A text model switched off in Settings → Models & licences doesn't answer.
+ * prompt and the anchor brief carry (Akatz Labs found generic prompts weak). Cloud: Claude, else a local model; your
+ * GPU: a local vision model (Ollama, LM Studio or Unsloth Studio). A text model switched off in Settings → Models &
+ * licences doesn't answer.
  */
 export async function describeCharacter(body: z.infer<typeof DescribeSchema>): Promise<{ description: string }> {
   mustMatchMode(body.engine);
   const textModel = getModel(body.engine === "open" ? "oss-text-llm" : "text-llm");
   if (!textModel || !offeredModel(textModel)) throw new ShortsError(`The text model is switched off in ${ACCESS_PLACE} — describe your character in your own words`, 422);
-  // Ollama is asked on your GPU's engine (and when no Anthropic key is set): it has to be running.
+  // A local model is asked on your GPU's engine (and when no Anthropic key is set): its server has to be running.
   const backend = llmTextBackend();
-  const ollama = backend === "ollama" || (backend === "claude" && body.engine === "open");
-  if (getSetting("demoMode") === "on" || !backend || (ollama && !(await probeOllama()))) {
-    throw new ShortsError("Describing needs a text model: add an Anthropic key, or run Ollama with a vision model (Settings → Prompt enhancement)", 422);
+  const local = backend === "ollama" || (backend === "claude" && body.engine === "open");
+  if (getSetting("demoMode") === "on" || !backend || (local && !(await probeOllama()))) {
+    throw new ShortsError("Describing needs a text model: add an Anthropic key, or run a vision model in Ollama, LM Studio or Unsloth Studio (Settings → AI helper)", 422);
   }
   let file: Awaited<ReturnType<typeof readRef>>;
   try {
@@ -549,7 +551,7 @@ export async function describeCharacter(body: z.infer<typeof DescribeSchema>): P
     .replace(/\s+/g, " ")
     .replace(/[.\s]+$/, "")
     .slice(0, CHARACTER_SWAP.maxDescriptionChars);
-  if (!description) throw new ShortsError(body.engine === "open" ? "Ollama didn't describe the picture — it needs a vision model (qwen3-vl, gemma3…)" : "The text model didn't answer — try again, or describe your character in your own words", 422);
+  if (!description) throw new ShortsError(body.engine === "open" ? `${cap(localLabel())} didn't describe the picture — it needs a vision model (qwen3-vl, gemma3…)` : "The text model didn't answer — try again, or describe your character in your own words", 422);
   return { description };
 }
 

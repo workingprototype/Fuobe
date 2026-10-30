@@ -1,6 +1,7 @@
 "use client";
 
-import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, Wrench, X } from "lucide-react";
+import { openGpuSetup } from "@/hooks/use-gpu";
 import Link from "next/link";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -50,7 +51,9 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   if (track.id !== g.id || pace !== track.pace) setTrack({ id: g.id, pace });
   const left = pace.first && pace.last ? timeLeft(pace.first, pace.last, now) : null;
   return (
-    <div className="relative h-full overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }}>
+    // max-w-full: in a grid row stretched by a taller neighbour (a card with a footer), h-full + aspect-ratio would
+    // otherwise make the tile wider than its column and spill over the next card.
+    <div className="relative h-full max-w-full overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }}>
       <div className="skeleton-sweep absolute inset-0 animate-skeleton" />
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3">
         <div className="min-w-0">
@@ -88,20 +91,34 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
 
 export function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number; onRetry: () => void }) {
   return (
-    <div className="flex h-full flex-col justify-between rounded-xl border border-dashed bg-background p-3" style={{ aspectRatio: Math.max(ratio, 0.8) }}>
+    <div className="flex h-full max-w-full flex-col justify-between rounded-xl border border-dashed bg-background p-3" style={{ aspectRatio: Math.max(ratio, 0.8) }}>
       <div className="min-h-0 space-y-1 overflow-hidden">
         <p className="text-[13px] font-medium">{g.status === "canceled" ? "Canceled" : "Couldn't generate this one"}</p>
         {g.error && <p className="line-clamp-5 text-[12px] leading-snug break-words whitespace-pre-line text-muted-foreground">{g.error}</p>}
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onRetry();
-        }}
-        className="mt-2 inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium hover:bg-accent"
-      >
-        <RotateCcw className="size-3" /> Retry
-      </button>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {g.status === "failed" && g.fix && (
+          // Something was missing on the GPU: the guided fix shows what, and how to add it.
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              openGpuSetup({ ref: g.presetId ? `preset:${g.presetId}` : `model:${g.modelId}#${g.op}`, name: g.presetName ?? g.modelName });
+            }}
+            className="inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-highlight px-2.5 text-[12px] font-medium text-highlight-foreground hover:opacity-90"
+          >
+            <Wrench className="size-3" /> Fix it
+          </button>
+        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+          className="inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium hover:bg-accent"
+        >
+          <RotateCcw className="size-3" /> Retry
+        </button>
+      </div>
     </div>
   );
 }

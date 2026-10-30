@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import { AccountsAdmin } from "@/components/accounts-admin";
+import { AccountGpuSection } from "@/components/gpu/account-gpu-section";
+import { OwnerSettings } from "@/components/owner-settings";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { SettingsForm } from "@/components/settings-form";
 import { starterPriceLine } from "@/lib/starter-prices";
@@ -9,7 +12,11 @@ export default function Page() {
   return (
     <PageShell>
       <PageHeader title="Settings" description="Choose open source, paid APIs or both, connect providers, point Fuobe at your ComfyUI server, and choose how prompts get enhanced. Keys stay on this server." />
-      <SettingsForm prices={starterPriceLine()} />
+      <AccountGpuSection />
+      <OwnerSettings>
+        <SettingsForm prices={starterPriceLine()} />
+      </OwnerSettings>
+      <AccountsAdmin />
     </PageShell>
   );
 }

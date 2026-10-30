@@ -375,6 +375,14 @@ async function status(ctx) {
   ctx.print(`Fuobe at ${t.url}${t.urlFrom === "default" ? "" : ` (from ${t.urlFrom})`}`);
   ctx.print(`Engine mode: ${s.engineMode} · Demo mode: ${s.demoMode} · Preferred cloud: ${s.cloudProvider}`);
   ctx.print(`Providers: ${providers.join(", ")}`);
+  // Older servers don't say which local model server they use.
+  const local = s.llm?.local;
+  if (s.llm) {
+    // The servers it looked at: the pinned one, or all of them in Automatic.
+    const names = (s.llm.detected ?? []).map((d) => d.label);
+    const tried = names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : (names[0] ?? "Ollama, LM Studio or Unsloth Studio");
+    ctx.print(`Local LLM: ${local ? `${local.label} at ${local.url}${local.model ? ` · ${local.model}` : ""}` : (s.llm.problem ?? `none answering (${tried})`)}`);
+  }
   ctx.print(
     t.token
       ? `API token: accepted (from ${t.tokenFrom})`

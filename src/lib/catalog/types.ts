@@ -254,7 +254,7 @@ export interface FocusPoint {
   y: number;
 }
 
-/** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
+/** "llm" runs text steps (translate, write) on the configured LLM (Claude or a local model) inside the server. */
 export type ProviderId = "fal" | "replicate" | "openai" | "google" | "comfyui" | "mock" | "local" | "llm";
 
 /** Duration encodings differ between APIs ("5" vs 5 vs "5s"). */
@@ -860,6 +860,11 @@ export type LoraField =
 
 /** What the UI posts to /api/generations. Asset references are local asset ids or URLs. */
 export interface GenerationRequest {
+  /**
+   * Public sign-up: the account whose own ComfyUI runs this ("Your GPU"), never the install's providers. Set by the
+   * server from the session only (the request schema drops it from what a client sends).
+   */
+  account?: string;
   feature: string;
   presetId?: string;
   modelId: string;
@@ -1109,10 +1114,22 @@ export interface Generation {
   /** Review status (null: none). */
   review?: ReviewStatus | null;
   /**
+   * A failed ComfyUI run that something missing on the GPU caused (a model file, a node class): its tile offers
+   * "Fix it", which opens the GPU pre-flight's guided fix.
+   */
+  fix?: GenerationFix | null;
+  /**
    * What the run leaves out or changes, said when it is created (LoRAs a cloud run can't carry, a clip length
    * the API rounds). Only on the answer that creates it; not stored.
    */
   notes?: string[];
+}
+
+/** Why a ComfyUI run failed, when the GPU was missing something (generations.fix_json). */
+export interface GenerationFix {
+  code: "comfy_missing_model" | "comfy_missing_node" | "comfy_oom";
+  workflowId?: string;
+  items: { folder?: string; file?: string; class?: string; pack?: string }[];
 }
 
 /** Input slot a preset asks the user for. */

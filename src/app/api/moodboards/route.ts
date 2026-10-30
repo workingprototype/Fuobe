@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { isGuest } from "@/lib/guest-access";
 import { z } from "zod";
 import { createMoodboard, curatedMoodboards, listMoodboards } from "@/server/moodboards";
 
@@ -10,9 +11,10 @@ const Body = z.object({
 });
 
 /** Your moodboards (each one's status follows its cover job) and Soul 2.0's curated looks. */
-export async function GET() {
+export async function GET(request: Request) {
   await connection();
-  return Response.json({ items: listMoodboards(), curated: curatedMoodboards() });
+  // A guest (public sign-up) sees the curated looks, not the owner's boards.
+  return Response.json({ items: isGuest(request) ? [] : listMoodboards(), curated: curatedMoodboards() });
 }
 
 export async function POST(request: Request) {

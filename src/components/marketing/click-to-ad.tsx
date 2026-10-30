@@ -225,7 +225,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
     try {
       const r = await send<{ script: string; by: "llm" | "rules" }>("/api/marketing/script", "POST", { engine, productId, styleId, presenter: withPresenter, instructions: mode === "custom" ? instructions : undefined });
       setScript(r.script);
-      if (r.by === "rules") toast("Written from your product's facts — connect Claude or Ollama in Settings for livelier scripts", { duration: 4000 });
+      if (r.by === "rules") toast("Written from your product's facts — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for livelier scripts", { duration: 4000 });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {

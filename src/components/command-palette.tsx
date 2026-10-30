@@ -60,7 +60,7 @@ const SETTINGS: { id: string; label: string; icon: LucideIcon; keywords: string;
     keywords: "licence license commercial non-commercial switch off turn on admin providers node packs allow block",
     href: "/settings/models",
   },
-  { id: "text-ai", label: "Prompt enhancement", icon: Sparkles, keywords: "claude ollama enhancer llm" },
+  { id: "text-ai", label: "AI helper", icon: Sparkles, keywords: "claude ollama lm studio unsloth local llm model enhancer prompt enhancement context" },
   { id: "assist-connectors", label: "Assist connectors", icon: Plug, keywords: "mcp connector claude tools notion linear slack server token" },
   { id: "notifications", label: "Notifications", icon: Bell, keywords: "browser done alerts" },
   { id: "security", label: "Password and API tokens", icon: ShieldCheck, keywords: "security sign in mcp token" },

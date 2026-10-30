@@ -11,7 +11,24 @@ export const PROVIDER_SETTINGS = {
   fal: ["falKey"],
   replicate: ["replicateToken"],
   comfyui: ["comfyUrl", "comfyToken", "comfyIsolatedUrl"],
-  llm: ["anthropicKey", "ollamaUrl", "ollamaModel", "enhanceProvider"],
+  // Claude, and the local model servers of Settings → AI helper (Ollama, LM Studio, Unsloth Studio, any OpenAI-compatible one).
+  llm: [
+    "anthropicKey",
+    "ollamaUrl",
+    "ollamaModel",
+    "enhanceProvider",
+    "llmProvider",
+    "lmstudioUrl",
+    "lmstudioModel",
+    "lmstudioToken",
+    "unslothUrl",
+    "unslothModel",
+    "unslothKey",
+    "llmUrl",
+    "llmModel",
+    "llmKey",
+    "llmContext",
+  ],
   // Not a model provider: the key that downloads a recipe's civitai LoRAs (Settings → LoRAs).
   civitai: ["civitaiKey"],
   // Not a model provider either: the trainer Soul IDs and Fuobe looks train on, on your GPU (Settings → Training).
@@ -84,6 +101,12 @@ export function settingProblem(name: string, raw: string): string | null {
       return addressProblem(v, "http://127.0.0.1:8189");
     case "ollamaUrl":
       return addressProblem(v, "http://127.0.0.1:11434");
+    case "lmstudioUrl":
+      return addressProblem(v, "http://127.0.0.1:1234");
+    case "unslothUrl":
+      return addressProblem(v, "http://127.0.0.1:8888");
+    case "llmUrl":
+      return addressProblem(v, "http://127.0.0.1:8080/v1");
     case "aiToolkitUrl":
       return addressProblem(v, DEFAULT_AI_TOOLKIT_URL);
     case "aiToolkitDatasetDir":
@@ -192,6 +215,6 @@ export function connectionSummary(s: ConnectionState): ConnectionItem[] {
     key("fal", "fal.ai"),
     key("replicate", "Replicate"),
     { id: "comfyui", label: "ComfyUI", ok: comfy, text: comfy ? "Online" : "Offline", href: "#comfyui", unused: s.engineMode === "cloud" },
-    { id: "llm", label: "Claude / Ollama", ok: llm, text: llm ? "On" : "Off", href: "#text-ai", unused: false },
+    { id: "llm", label: "AI helper", ok: llm, text: llm ? "On" : "Off", href: "#text-ai", unused: false },
   ];
 }

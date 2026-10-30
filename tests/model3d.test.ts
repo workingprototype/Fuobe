@@ -34,7 +34,7 @@ const views = { front: "/api/files/f.png", left: "/api/files/l.png", back: "/api
 describe("modes: which model and operation each runs, per engine", () => {
   const cases: [Model3dMode, "cloud" | "open", string, string][] = [
     ["image", "cloud", "hunyuan-3d-3-1-pro", "image-to-3d"],
-    ["image", "open", "oss-trellis2", "image-to-3d"],
+    ["image", "open", "oss-pixal3d", "image-to-3d"],
     ["multi", "cloud", "meshy-7-1-multi", "image-to-3d"],
     ["multi", "open", "oss-trellis2-multi", "image-to-3d"],
     ["text", "cloud", "tripo-h3-1-text", "text-to-3d"],

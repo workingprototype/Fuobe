@@ -1543,6 +1543,16 @@ Reply with JSON only: {"topics": [{"title": string, "hook": string}]}.
 - hook: one sentence on why someone would watch it.
 - Every topic fits the channel and its genre, and they differ from each other.`;
 
+/**
+ * The answers' JSON as JSON Schemas, for local models that decode to one (Ollama, LM Studio,
+ * Unsloth Studio); they match the prompts, which still ask for the same JSON.
+ */
+const objectOf = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+const listOf = (items: unknown, min: number, max: number) => ({ type: "array", items, minItems: min, maxItems: max });
+const STRING = { type: "string" };
+
+export const topicsSchema = (count: number) => ({ name: "topics", schema: objectOf({ topics: listOf(objectOf({ title: STRING, hook: STRING }), count, count) }) });
+
 export function topicsBrief(o: { idea: string; genre: GenreInfo; count: number; avoid?: string[]; reference?: string }): string {
   return [
     `Channel: ${o.idea}`,
@@ -1701,6 +1711,12 @@ Reply with JSON only: {"title": string, "scenes": [{"narration": string, "visual
 - Keep each scene's narration within its word limit, so the voice fits the scene.
 - Start with a hook in the first scene; end with a short, satisfying close.`;
 
+/** `scenes` null: the length decides itself (4 to 12 scenes, as the brief says). */
+export const scriptSchema = (scenes: number | null) => ({
+  name: "script",
+  schema: objectOf({ title: STRING, scenes: listOf(objectOf({ narration: STRING, visual: STRING, motion: STRING }), scenes ?? 4, scenes ?? 12) }),
+});
+
 export interface ScriptBrief {
   topic: string;
   genre: GenreInfo;
@@ -1746,6 +1762,8 @@ export const visualsSystem = `You plan the pictures for a narrated faceless vide
 Reply with JSON only: {"scenes": [{"n": number, "visual": string, "motion": string}]}, one per line, in order.
 - visual: one or two sentences describing the illustration for that line: subject, setting, composition. No text in the picture.
 - motion: a few words on what moves and how the camera moves.`;
+
+export const visualsSchema = (count: number) => ({ name: "visuals", schema: objectOf({ scenes: listOf(objectOf({ n: { type: "integer" }, visual: STRING, motion: STRING }), count, count) }) });
 
 export const visualsBrief = (blocks: Pick<ScriptBlock, "narration">[], styleName: string, topic: string) =>
   [`Topic: ${topic}`, `Style: ${styleName}`, ...blocks.map((b, i) => `[${i + 1}] ${b.narration}`)].join("\n");
@@ -1835,7 +1853,7 @@ export function offlineScript(topic: string, genre: FacelessGenre, scenes: numbe
   );
 }
 
-export const OFFLINE_NOTE = "Written offline — connect Claude or Ollama in Settings for a real script.";
+export const OFFLINE_NOTE = "Written offline — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for a real script.";
 
 // ---------------------------------------------------------------------------
 // Validation the wizard and the API share

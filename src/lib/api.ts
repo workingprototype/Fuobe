@@ -509,15 +509,21 @@ export function useCreateGeneration() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (req: GenerationRequest) => {
-      const { items, notes } = await json<{ items: Generation[]; notes?: string[] }>(
-        await fetch("/api/generations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(req),
-        }),
-      );
+      const res = await fetch("/api/generations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      // Stopped by the GPU pre-flight: the guided fix opens (watchGuestRefusals), so no error toast on top of it.
+      if (res.status === 409 && res.headers.get("x-fuobe-gpu-setup") === "1") {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        throw Object.assign(new Error(b.error ?? "This tool needs setting up on your GPU"), { gpuSetup: true });
+      }
+      const { items, notes, gpuWarning } = await json<{ items: Generation[]; notes?: string[]; gpuWarning?: string }>(res);
       // What the run leaves out or changes (a LoRA that runs only on your GPU, a length the API rounds) is said, not dropped silently.
       if (notes?.length) toast.warning(notes.length > 1 ? "This run changes a few things" : "This run changes one thing", { description: notes.join(". ") });
+      // The studio's own ComfyUI seems to miss something (the owner is warned, never stopped).
+      if (gpuWarning) toast.warning(gpuWarning, { action: { label: "See what", onClick: () => window.location.assign(new URL("/connect", window.location.origin).toString()) } });
       return items;
     },
     onSuccess: (items) => {
@@ -811,10 +817,27 @@ export interface StatusInfo {
   demoMode: string;
   engineMode: EngineMode;
   cloudProvider: string;
+  /** The text LLM: Settings → AI helper, whether Claude takes text steps, and the local model server in use. */
+  llm?: {
+    helper: "auto" | "anthropic" | "local" | "none";
+    claude: boolean;
+    /** Settings' local server: "auto" or the one pinned. */
+    provider: string;
+    context: number;
+    local: { kind: string; label: string; url: string; model: string | null; loaded: boolean | null; context: number | null; warning: string | null } | null;
+    /** Why no local server can run, when one says. */
+    problem: string | null;
+    detected: { kind: string; label: string; url: string; up: boolean; auth: string; models: number; model: string | null; problem: string | null }[];
+  };
   /** The first-run guide was put away, or something the engine mode generates with was connected once. */
   onboarded?: boolean;
   /** Settings → Models & licences: what is switched off (absent while everything is on). */
   access?: AccessSummary;
+  /**
+   * Public sign-up: a guest or an account is looking. Then everything else here is its own view
+   * (its own GPU as ComfyUI, the open engine, no Demo mode), never the install's (src/server/account-gpu.ts).
+   */
+  viewer?: { kind: "guest" | "account"; gpu: { connected: boolean; online?: boolean; device?: string; vramBytes?: number } };
 }
 
 /** A connection test's answer (POST /api/providers/test). */
@@ -1033,5 +1056,75 @@ export function useAssistActions() {
       qc.removeQueries({ queryKey: ["assist", id] });
       void qc.invalidateQueries({ queryKey: ["assist"], exact: true });
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Who is looking (public sign-up: GET /api/auth/me)
+
+export interface ViewerInfo {
+  signedIn: boolean;
+  /** The install password's session or an API token (also everyone while no password is set). */
+  owner: boolean;
+  /** Guests may browse and anyone may sign up. */
+  publicSignup: boolean;
+  account?: { email: string };
+}
+
+export function useViewer() {
+  return useQuery({
+    queryKey: ["viewer"],
+    queryFn: async () => json<ViewerInfo>(await fetch("/api/auth/me")),
+    staleTime: 60_000,
+  });
+}
+
+/** A guest browsing a public studio: signed out while sign-up is open. */
+export function useIsGuest(): boolean {
+  const v = useViewer().data;
+  return !!v && v.publicSignup && !v.signedIn;
+}
+
+/** "Sign up" / "Log in" with a way back here. */
+export function signInHref(mode: "signup" | "login", next?: string): string {
+  const p = new URLSearchParams();
+  if (mode === "signup") p.set("signup", "1");
+  if (next && next !== "/") p.set("next", next);
+  const q = p.toString();
+  return q ? `/login?${q}` : "/login";
+}
+
+export const GUEST_PROMPT_EVENT = "fuobe:guest-prompt";
+export const CONNECT_GPU_EVENT = "fuobe:connect-gpu";
+/** The guided fix (src/components/gpu/guided-fix.tsx): { ref, plan? }. */
+export const GPU_SETUP_EVENT = "fuobe:gpu-setup";
+
+/**
+ * A guest tried to change something (the proxy answers a guest's change with a 401 marked
+ * x-fuobe-guest): open "Create a free account" (GuestPrompt). An account tried to run something
+ * (a 403 marked x-fuobe-connect-gpu): open "Connect your GPU". Watches every fetch, so the studio's
+ * own helpers (json() here, and the components' own) all get it. Installed once.
+ */
+export function watchGuestRefusals(): void {
+  const w = window as typeof window & { __fuobeGuestFetch?: boolean };
+  if (w.__fuobeGuestFetch) return;
+  w.__fuobeGuestFetch = true;
+  const original = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const res = await original(input, init);
+    if (res.status === 401 && res.headers.get("x-fuobe-guest") === "1") {
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (method !== "GET" && method !== "HEAD") window.dispatchEvent(new Event(GUEST_PROMPT_EVENT));
+    }
+    if (res.status === 403 && res.headers.get("x-fuobe-connect-gpu") === "1") window.dispatchEvent(new Event(CONNECT_GPU_EVENT));
+    // A run the GPU pre-flight stopped (something missing on the viewer's ComfyUI): the guided fix opens with its plan.
+    if (res.status === 409 && res.headers.get("x-fuobe-gpu-setup") === "1") {
+      res
+        .clone()
+        .json()
+        .then((b: { ref?: string; plan?: unknown }) => b.ref && window.dispatchEvent(new CustomEvent(GPU_SETUP_EVENT, { detail: { ref: b.ref, plan: b.plan } })))
+        .catch(() => {});
+    }
+    return res;
   };
 }

@@ -6,8 +6,11 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { RowDot } from "@/components/gpu/readiness-chip";
+import { badgeFor, useGpuBadges } from "@/hooks/use-gpu";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useToday } from "@/hooks/use-today";
+import type { Badge as BadgeT } from "@/lib/gpu/types";
 import { type Engine, type ModelDef } from "@/lib/catalog/types";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { bestForStudio, groupModels, toggleIn } from "@/lib/composer";
@@ -75,6 +78,8 @@ function ModelRow({
   showEngine,
   today,
   onStar,
+  gpu,
+  gpuName,
 }: {
   m: ModelDef;
   selected: boolean;
@@ -83,6 +88,9 @@ function ModelRow({
   /** The browser's day: a launch price holds through its last day (null until hydrated: no price shown for one). */
   today: number | null;
   onStar: () => void;
+  /** Its state on the viewer's GPU (the GPU pre-flight). */
+  gpu?: BadgeT | null;
+  gpuName?: string;
 }) {
   return (
     <>
@@ -94,6 +102,7 @@ function ModelRow({
             {starred && <span className="sr-only">, starred</span>}
           </span>
           <ModelBadges model={m} max={2} />
+          {gpu && <RowDot badge={gpu} gpu={gpuName} />}
           {showEngine && (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] bg-muted px-1 text-[10px] leading-4 font-medium text-muted-foreground">
               {m.engine === "open" ? <Cpu className="size-2.5!" /> : <Cloud className="size-2.5!" />}
@@ -176,6 +185,7 @@ export function ModelPicker(props: PickerProps) {
 function PickerList({ models, value, onChange, engine, onEngineChange, defaultModels, onPicked }: PickerProps & { onPicked: () => void }) {
   const [q, setQ] = useState("");
   const status = useStatus().data;
+  const badges = useGpuBadges().data;
   const mode = useEngineMode();
   const mobile = useIsMobile();
   const [recent] = useStoredList(RECENT_MODELS);
@@ -236,7 +246,16 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
                 data-checked={value?.id === m.id}
                 className={cn("gap-2.5 rounded-lg px-2 py-1.5 [&>svg:last-child]:hidden", value?.id === m.id && "bg-brand-faint data-selected:bg-brand-faint-hover")}
               >
-                <ModelRow m={m} selected={value?.id === m.id} starred={starred.includes(m.id)} showEngine={!!q || m.engine !== engine} today={today} onStar={() => setStarred((s) => toggleIn(s, m.id))} />
+                <ModelRow
+                  m={m}
+                  selected={value?.id === m.id}
+                  starred={starred.includes(m.id)}
+                  showEngine={!!q || m.engine !== engine}
+                  today={today}
+                  onStar={() => setStarred((s) => toggleIn(s, m.id))}
+                  gpu={m.engine === "open" ? badgeFor(badges, { modelId: m.id }) : null}
+                  gpuName={badges?.gpu}
+                />
               </CommandItem>
             ))}
           </CommandGroup>

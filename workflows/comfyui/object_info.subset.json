@@ -12250,6 +12250,74 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "Pixal3DConditioning": {
+    "input": {
+      "required": {
+        "clip_vision_model": [
+          "CLIP_VISION",
+          {
+            "tooltip": "DINOv3 ViT-L/16 ClipVision."
+          }
+        ],
+        "image": [
+          "IMAGE",
+          {
+            "tooltip": "Preprocessed image from ImageCropToMask (pad_factor=1.1 for Pixal3D)."
+          }
+        ],
+        "camera_angle_x": [
+          "FLOAT",
+          {
+            "display_name": "fov",
+            "tooltip": "Horizontal FOV in degrees. Wire a MoGeGeometryToFOV (axis='horizontal', unit='degrees') for a per-image FoV (matches upstream default).",
+            "default": 49.13,
+            "min": 1,
+            "max": 170,
+            "step": 0.01
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "clip_vision_model",
+        "image",
+        "camera_angle_x"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "CONDITIONING",
+      "CONDITIONING"
+    ],
+    "output_is_list": [
+      false,
+      false
+    ],
+    "output_name": [
+      "positive",
+      "negative"
+    ],
+    "output_tooltips": [
+      null,
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "Pixal3DConditioning",
+    "display_name": "Pixal3D Conditioning",
+    "description": "",
+    "python_module": "comfy_extras.nodes_trellis2",
+    "category": "model/conditioning/trellis",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "Pixal3DMultiViewConditioning": {
     "input": {
       "required": {
@@ -13324,7 +13392,7 @@
           "COMFY_DYNAMICCOMBO_V3",
           {
             "display_name": "sign_mode",
-            "tooltip": "udf: robust to messy/non-manifold input. sdf: clean single surface with QEF (Quadratic Error Function) sharp-feature recovery, but needs consistent winding.",
+            "tooltip": "udf: robust to messy/non-manifold input. sdf: clean single surface with QEF (Quadratic Error Function) sharp-feature recovery, but needs consistent winding. solid: one watertight solid from messy input: a global inside/outside graph cut (CelloCut) removes double shells and closes small holes. Slower.",
             "options": [
               {
                 "key": "udf",
@@ -13333,7 +13401,7 @@
                     "qef": [
                       "BOOLEAN",
                       {
-                        "tooltip": "QEF (Quadratic Error Function) dual-vertex placement for sharper edges.",
+                        "tooltip": "QEF (Quadratic Error Function) vertex placement: sharp edges on hard-surface input, jagged creases on organic input.",
                         "advanced": true,
                         "default": false
                       }
@@ -13377,6 +13445,31 @@
                     ]
                   }
                 }
+              },
+              {
+                "key": "solid",
+                "inputs": {
+                  "required": {
+                    "fill": [
+                      "FLOAT",
+                      {
+                        "tooltip": "Cost of closing an opening relative to following the surface. Lower closes larger openings (0 puts a lid on a cup); higher only closes small holes and cracks.",
+                        "default": 20,
+                        "min": 0,
+                        "max": 1000,
+                        "step": 1
+                      }
+                    ],
+                    "qef": [
+                      "BOOLEAN",
+                      {
+                        "tooltip": "QEF (Quadratic Error Function) vertex placement: sharp edges on hard-surface input, jagged creases on organic input.",
+                        "advanced": true,
+                        "default": false
+                      }
+                    ]
+                  }
+                }
               }
             ]
           }
@@ -13384,7 +13477,7 @@
         "band": [
           "FLOAT",
           {
-            "tooltip": "Narrow-band width in voxel units. In UDF mode also offsets the surface.",
+            "tooltip": "Narrow-band width in voxel units. In udf mode also offsets the surface; in solid mode it is the closing radius: creases are filleted and gaps bridged at this size, the surface sits half a voxel out.",
             "advanced": true,
             "default": 1,
             "min": 0.5,

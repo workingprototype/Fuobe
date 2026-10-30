@@ -16,7 +16,7 @@ import { createPipeline } from "../chains";
 import { listElements } from "../elements";
 import { createGenerations, currentRequest, getGeneration, listGenerations, outputKind, previewChained } from "../generations";
 import { provider } from "../providers";
-import { llmBackends } from "../providers/llm";
+import { llmBackends, llmLabel } from "../providers/llm";
 import { engineMode } from "../settings";
 import { readRef } from "../storage";
 import { katanaTool } from "../katana";
@@ -51,10 +51,10 @@ function summarize(m: ModelDef) {
       ? "Fuobe Original: open source on your GPU (ComfyUI) or hosted open weights in the cloud (pass engine to pick one)"
       : m.engine === "open"
         ? local
-          ? "open source (Ollama, on this machine)"
+          ? `open source (${llmLabel({ endpoint: "ollama" })}, on this machine)`
           : "open source (ComfyUI)"
         : local
-          ? "Claude (or Ollama when no key is set)"
+          ? `Claude (or ${llmLabel({ endpoint: "ollama" })} when no key is set)`
           : "paid cloud API",
     about: m.tagline,
     does: [...new Set(m.routes.map((r) => r.op))].map((op) => `${op} (${OPERATION_LABELS[op]})`),

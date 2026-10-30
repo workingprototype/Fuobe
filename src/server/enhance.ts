@@ -1,11 +1,12 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { MediaKind, Operation } from "@/lib/catalog/types";
+import { activeLocal, aiHelper, chatLocal, type JsonSpec } from "./llm";
 import { engineMode, getSetting } from "./settings";
 
 /**
  * "Enhance prompt": rewrite a short idea into a rich, model-friendly prompt.
- * Order: Claude (if an Anthropic key is set) → local Ollama (open-source mode) → offline heuristic.
+ * Order: Claude (if an Anthropic key is set) → a local model (Ollama, LM Studio, Unsloth Studio…) → offline heuristic.
  */
 
 const SYSTEM = `You rewrite short creative ideas into prompts for image and video generation models.
@@ -60,45 +61,58 @@ async function viaClaude(system: string, user: string, images: LlmImage[] = []):
   return text || null;
 }
 
-async function viaOllama(system: string, user: string, images: LlmImage[] = []): Promise<string | null> {
-  const res = await fetch(`${getSetting("ollamaUrl").replace(/\/+$/, "")}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: getSetting("ollamaModel"),
-      stream: false,
-      think: false,
-      messages: [
-        { role: "system", content: system },
-        // A vision model (qwen3-vl, gemma3…) reads the pictures; a text-only one answers from the words.
-        { role: "user", content: user, ...(images.length && { images: images.map((i) => i.data.toString("base64")) }) },
-      ],
-    }),
-    signal: AbortSignal.timeout(images.length ? 180_000 : 60_000),
-  });
-  if (!res.ok) throw new Error(`ollama ${res.status}`);
-  const j = (await res.json()) as { message?: { content?: string } };
-  return j.message?.content?.replace(/<think>[\s\S]*?<\/think>/g, "").trim() || null;
+export interface LlmTextOptions {
+  /** The JSON Schema the answer follows on a local model (Claude follows the prompt); see JsonSpec. */
+  json?: JsonSpec;
+  /** How long to wait (default: 60 s, or 3 minutes with pictures or when the local model isn't loaded yet). */
+  timeoutMs?: number;
+  /** The open engine: a local model, never Claude (the AI helper set to Offline still means none). */
+  ollamaOnly?: boolean;
 }
 
-/** Which LLM llmText would ask right now (Claude is the one that costs money). */
+/** The local model in use (Ollama, LM Studio, Unsloth Studio or the custom server), thinking off where the server allows it. */
+async function viaLocal(system: string, user: string, images: LlmImage[], opts: LlmTextOptions): Promise<string | null> {
+  const ready = await activeLocal();
+  if (!ready) return null;
+  const r = await chatLocal(ready, {
+    messages: [
+      { role: "system", content: system },
+      // A vision model (qwen3-vl, gemma3…) reads the pictures; a text-only one answers from the words.
+      { role: "user", content: user, ...(images.length && { images: images.map((i) => ({ data: i.data.toString("base64"), contentType: i.contentType })) }) },
+    ],
+    think: false,
+    json: opts.json,
+    timeoutMs: opts.timeoutMs ?? (images.length || ready.status.loaded === false ? 180_000 : 60_000),
+  });
+  return r.text || null;
+}
+
+/**
+ * Which LLM llmText would ask right now (Claude is the one that costs money). "ollama" means a local
+ * model, whichever server runs it (Ollama, LM Studio, Unsloth Studio or the custom one: Settings → AI helper).
+ */
 export function llmTextBackend(): "claude" | "ollama" | null {
-  const choice = getSetting("enhanceProvider");
+  const choice = aiHelper();
   if (choice === "none") return null;
   if (choice === "anthropic" || (choice === "auto" && engineMode() !== "open" && !!getSetting("anthropicKey"))) return "claude";
-  return choice === "ollama" || choice === "auto" ? "ollama" : null;
+  return "ollama";
 }
 
 /**
  * One-shot text from whichever LLM this install allows: Claude (when a key is set, and never
- * on "open source only" installs unless picked explicitly), else a local Ollama. Null when none.
- * `images` go along for a model that can see them (Content Factory's reference frames).
+ * on "open source only" installs unless picked explicitly), else a local model. Null when none.
+ * `images` go along for a model that can see them (Content Factory's reference frames); `json`
+ * holds a local model to a schema. Takes (system, user, opts) or (system, user, images, opts).
  */
-export async function llmText(system: string, user: string, images: LlmImage[] = [], o: { ollamaOnly?: boolean } = {}): Promise<string | null> {
-  // The open engine never calls a paid API: Ollama, unless the AI helper is off.
-  const backend = o.ollamaOnly && llmTextBackend() === "claude" ? "ollama" : llmTextBackend();
+export async function llmText(system: string, user: string, opts?: LlmTextOptions): Promise<string | null>;
+export async function llmText(system: string, user: string, images?: LlmImage[], opts?: LlmTextOptions): Promise<string | null>;
+export async function llmText(system: string, user: string, a: LlmImage[] | LlmTextOptions = [], b: LlmTextOptions = {}): Promise<string | null> {
+  const images: LlmImage[] = Array.isArray(a) ? a : [];
+  const opts: LlmTextOptions = Array.isArray(a) ? b : a;
+  // The open engine never calls a paid API: a local model, unless the AI helper is off.
+  const backend = opts.ollamaOnly && llmTextBackend() === "claude" ? "ollama" : llmTextBackend();
   if (backend === "claude") return viaClaude(system, user, images).catch(() => null);
-  if (backend === "ollama") return viaOllama(system, user, images).catch(() => null);
+  if (backend === "ollama") return viaLocal(system, user, images, opts).catch(() => null);
   return null;
 }
 
@@ -153,7 +167,7 @@ const SOUL_SYSTEM =
   "Answer with the prompt only: plain sentences, no quotes, no lists, no preamble.";
 
 /**
- * Soul's words, expanded when an LLM is available (Claude or Ollama); otherwise the user's own words, since the
+ * Soul's words, expanded when an LLM is available (Claude or a local model); otherwise the user's own words, since the
  * look already says how the picture should look (the generic offline rewrite would fight it).
  */
 export async function enhanceSoulWords(words: string): Promise<string> {

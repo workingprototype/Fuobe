@@ -5,7 +5,7 @@ import path from "node:path";
 
 export const DATA_DIR = path.resolve(/*turbopackIgnore: true*/ process.env.FUOBE_DATA_DIR ?? path.join(process.cwd(), "data"));
 
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS generations (
     id TEXT PRIMARY KEY,
     batch_id TEXT,
@@ -564,6 +564,35 @@ const MIGRATIONS: string[] = [
   UPDATE ad_batches SET route = 'baked' WHERE route = 'higgsfield';
   UPDATE ad_creatives SET meta_json = json_set(meta_json, '$.route', 'baked')
     WHERE json_valid(meta_json) AND json_extract(meta_json, '$.route') = 'higgsfield';`,
+  // GPU pre-flight (src/server/gpu): what a viewer's ComfyUI had at its last check, per target ('install', or
+  // 'acct:<id>' for an account's own GPU) and per way it was read (a browser's facts never stand in for a server
+  // check), only the facts the requirement index asks about; and an audit of every check. `fix_json` on a failed
+  // run: what it was missing ({code, workflowId, items}), so its tile offers "Fix it".
+  `CREATE TABLE IF NOT EXISTS gpu_snapshots (
+    target_key TEXT NOT NULL,
+    via TEXT NOT NULL,
+    url_hash TEXT NOT NULL,
+    checked_at INTEGER NOT NULL,
+    index_hash TEXT NOT NULL,
+    inventory_json TEXT NOT NULL,
+    report_json TEXT,
+    stale INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (target_key, via)
+  );
+  CREATE TABLE IF NOT EXISTS gpu_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    actor TEXT NOT NULL,
+    target_key TEXT NOT NULL,
+    host TEXT NOT NULL,
+    action TEXT NOT NULL,
+    item TEXT,
+    job_id TEXT,
+    result TEXT NOT NULL,
+    detail TEXT
+  );
+  CREATE INDEX IF NOT EXISTS gpu_audit_target ON gpu_audit(target_key, at DESC);
+  ALTER TABLE generations ADD COLUMN fix_json TEXT;`,
 ];
 
 declare global {

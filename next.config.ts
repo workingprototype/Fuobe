@@ -8,6 +8,15 @@ const nextConfig: NextConfig = {
     // The sign-in proxy buffers request bodies (10 MB by default): uploads take up to 200 MB plus the form overhead.
     proxyClientMaxBodySize: "210mb",
   },
+  async headers() {
+    return [
+      // Vendored scripts (public/vendor: the 3D viewer's meshopt decoder) keep their name across upgrades:
+      // a day, then revalidated in the background.
+      { source: "/vendor/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }] },
+      // Preset covers (public/previews, pnpm eval:covers) keep their name when a cover is made again: the same.
+      { source: "/previews/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }] },
+    ];
+  },
   async redirects() {
     return [
       { source: "/characters", destination: "/elements", permanent: true },

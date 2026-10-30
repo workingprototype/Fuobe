@@ -32,7 +32,7 @@ const ONE_SHOT: Record<OneShotModel, { name: string; note: string }> = {
 
 const ROUTE_LINE = {
   open: "Open source: MelBand RoFormer splits the voice from the music and Qwen3-ASR times it → your local LLM translates → you review → Chatterbox speaks each line in the cloned voice, at its time → InfiniteTalk re-syncs the lips → mixed back over the music.",
-  cloud: "Cloud: ElevenLabs isolates the voice and Demucs lifts out the music and effects → Scribe v2 times the voice → Claude (or Ollama) translates → you review → ElevenLabs speaks each line at its time and Chatterbox turns it into the speaker's voice → Sync Lipsync 3 → mixed back over the music and effects.",
+  cloud: "Cloud: ElevenLabs isolates the voice and Demucs lifts out the music and effects → Scribe v2 times the voice → Claude (or a local model) translates → you review → ElevenLabs speaks each line at its time and Chatterbox turns it into the speaker's voice → Sync Lipsync 3 → mixed back over the music and effects.",
 };
 
 const STAGE: Record<DubStage, { label: string; tone: string }> = {
