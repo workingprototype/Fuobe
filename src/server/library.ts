@@ -21,7 +21,6 @@ import {
   type Folder,
   type ReviewFilter,
 } from "@/lib/library";
-import { asSystem } from "./access/actor";
 import { db } from "./db";
 import { assetUses, cancelGeneration, deleteGeneration, getGeneration, type ListOptions } from "./generations";
 import { absolutePath, deleteAsset, getAsset } from "./storage";
@@ -186,13 +185,10 @@ declare global {
 export function ensureTrashPurge(): void {
   if (globalThis.__fuobeTrashPurge) return;
   const run = () => void purgeTrash().catch((e) => console.warn(`[fuobe] trash purge failed: ${(e as Error).message}`));
-  // Housekeeping for everyone's Trash: the server's work, whichever library read started it.
-  asSystem(() => {
-    const timer = setInterval(run, DAY);
-    timer.unref?.();
-    globalThis.__fuobeTrashPurge = { timer };
-    run();
-  });
+  const timer = setInterval(run, DAY);
+  timer.unref?.();
+  globalThis.__fuobeTrashPurge = { timer };
+  run();
 }
 
 export function trashCount(): number {

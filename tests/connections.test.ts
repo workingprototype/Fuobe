@@ -332,7 +332,7 @@ describe("POST /api/providers/test with unsaved values", () => {
 });
 
 describe("GET /api/status", () => {
-  const onboarded = async () => ((await (await statusRoute(new Request("http://localhost/"))).json()) as { onboarded: boolean }).onboarded;
+  const onboarded = async () => ((await (await statusRoute()).json()) as { onboarded: boolean }).onboarded;
 
   it("says whether the first-run guide was put away", async () => {
     expect(await onboarded()).toBe(false);

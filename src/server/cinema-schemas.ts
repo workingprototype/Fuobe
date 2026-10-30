@@ -2,7 +2,6 @@ import "server-only";
 import { z } from "zod";
 import { DISTANCE, MAX_KEYS } from "@/lib/camera-path";
 import { APERTURE, LENS } from "@/lib/scene3d";
-import { rethrowAccess } from "./access/errors";
 import { CinemaError } from "./cinema";
 import { TurnaroundSchema } from "./turnaround";
 
@@ -159,7 +158,6 @@ export async function handle(fn: () => Promise<Response> | Response): Promise<Re
   try {
     return await fn();
   } catch (e) {
-    rethrowAccess(e);
     if (e instanceof CinemaError) return Response.json({ error: e.message }, { status: e.status });
     console.error("[cinema]", e);
     return Response.json({ error: (e as Error).message || "Something went wrong" }, { status: 500 });

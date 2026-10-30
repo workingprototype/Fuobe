@@ -43,8 +43,6 @@ import {
 import { genreInfo, pickerData, type ChannelSettings, type EpisodeSettings, type NarratorVoice, type TimedText } from "@/lib/catalog/faceless";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { probeMedia } from "@/lib/media-probe";
-import { rethrowAccess } from "./access/errors";
-import { rowOwner, runAsOwner } from "./access/permissions";
 import { authEnabled } from "./auth";
 import { db } from "./db";
 import { llmText, llmTextBackend, type LlmImage } from "./enhance";
@@ -460,11 +458,8 @@ async function writeBrief(id: string): Promise<void> {
   });
 }
 
-/**
- * Moves a reading series on: the steps' progress, then the brief once they're all done. The brief is written as the
- * person who started the series (`owner`), whoever's read happened to notice the steps had finished.
- */
-function advance(id: string, d: SeriesData, owner: string): SeriesData {
+/** Moves a reading series on: the steps' progress, then the brief once they're all done. */
+function advance(id: string, d: SeriesData): SeriesData {
   const a = d.analysis;
   if (!a || a.status !== "reading") return d;
   const gens = Object.values(a.steps).map((g) => getGeneration(g, { includeDeleted: true }));
@@ -473,8 +468,7 @@ function advance(id: string, d: SeriesData, owner: string): SeriesData {
     return { ...d, analysis: { ...a, stage: running?.status === "queued" ? "Waiting for its turn…" : a.stage } };
   }
   if (!writing().has(id)) {
-    const job = Promise.resolve()
-      .then(() => runAsOwner(owner, () => writeBrief(id)))
+    const job = writeBrief(id)
       .catch((e: Error) => {
         patch(id, (cur) => {
           if (cur.analysis?.status === "reading") cur.analysis = { ...cur.analysis, status: "failed", stage: undefined, error: e.message || "Couldn't write the brief" };
@@ -517,7 +511,7 @@ function toView(r: SeriesRow, d: SeriesData): SeriesView {
 
 export function seriesView(id: string): SeriesView {
   const r = mustRow(id);
-  return toView(r, advance(id, dataOf(r), rowOwner(r)));
+  return toView(r, advance(id, dataOf(r)));
 }
 
 /** A new series around a reference (reading starts straight away), a preset (its brief is ready), or nothing yet. */
@@ -879,7 +873,6 @@ export async function handle(fn: () => Promise<Response> | Response): Promise<Re
   try {
     return await fn();
   } catch (e) {
-    rethrowAccess(e);
     if (e instanceof NeedsUpload) return Response.json({ error: e.message, needsUpload: true }, { status: e.status });
     return facelessHandle(() => {
       throw e;

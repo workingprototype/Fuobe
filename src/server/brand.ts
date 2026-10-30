@@ -15,7 +15,6 @@ import {
   type BrandStatus,
   type Product,
 } from "@/lib/catalog/marketing";
-import { currentActor, runAs } from "./access/actor";
 import { db } from "./db";
 import { llmText } from "./enhance";
 import { fetchRemote } from "./remote-fetch";
@@ -969,8 +968,7 @@ const progressAt = (index: number): BrandProgress => ({ index, total: RESEARCH_L
 function startResearch(id: string): Promise<void> {
   const ac = new AbortController();
   runs().set(id, ac);
-  // It outlives the request (the route keeps it going with after()): it acts for the person who asked for it.
-  return runAs(currentActor(), () => research(id, ac.signal))
+  return research(id, ac.signal)
     .catch((e) => {
       if (ac.signal.aborted) return;
       const kit = storedKit(id);

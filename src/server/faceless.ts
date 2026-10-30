@@ -79,9 +79,6 @@ import { pricingAt } from "@/lib/catalog/promo";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { DocxError, docxText } from "./assist/docx";
 import { PdfError, pdfText } from "./assist/pdf";
-import { asSystem } from "./access/actor";
-import { rethrowAccess } from "./access/errors";
-import { rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained } from "./generations";
@@ -1110,9 +1107,6 @@ function finalOf(ep: FacelessEpisode): Generation | null {
 const brokenMessage = (g: Generation | null) =>
   !g ? "A step was deleted — retry to make it again" : g.status === "canceled" ? "A step was cancelled — retry to make it again" : (g.error ?? "A step didn't finish — retry it");
 
-/** Who started an episode (its row's owner). */
-const episodeOwner = (id: string) => rowOwner(db().prepare("SELECT * FROM faceless_episodes WHERE id = ?").get(id) ?? {});
-
 /**
  * The episode's status from its generations (saved when it changes). Once stage one has finished, the
  * first look starts stage two (advance).
@@ -1134,9 +1128,7 @@ function settle(ep: FacelessEpisode, gens?: Map<string, Generation | null>): Fac
   if (ep.plan.awaiting) {
     if (!active && !broken && ep.status !== "failed") {
       try {
-        // Stage two starts as the person who started the episode, whoever's look noticed stage one had finished; when
-        // they're turned off it doesn't start, and the episode fails saying so.
-        return settle(runAsOwner(episodeOwner(ep.id), () => advance(ep)));
+        return settle(advance(ep));
       } catch (e) {
         status = "failed";
         error = (e as Error).message;
@@ -1163,7 +1155,6 @@ function sweep(): void {
   const rows = db().prepare("SELECT * FROM faceless_episodes WHERE status = 'rendering' AND plan_json LIKE '%\"awaiting\":true%'").all() as EpisodeRow[];
   for (const r of rows) {
     try {
-      // Stage two starts as the person who started the episode (settle).
       settle(toEpisode(r));
     } catch (e) {
       console.warn(`[faceless] couldn't continue ${r.id}: ${(e as Error).message}`);
@@ -1179,8 +1170,7 @@ export function ensureFacelessRunner(): void {
     cur.tick = sweep;
     return;
   }
-  // The server's timer, whichever request started it; each episode then continues as its owner (sweep).
-  const state = { tick: sweep, timer: asSystem(() => setInterval(() => globalThis.__fuobeFacelessRunner?.tick(), SWEEP_MS)) };
+  const state = { tick: sweep, timer: setInterval(() => globalThis.__fuobeFacelessRunner?.tick(), SWEEP_MS) };
   state.timer.unref?.();
   globalThis.__fuobeFacelessRunner = state;
 }
@@ -1540,7 +1530,6 @@ export async function handle(fn: () => Promise<Response> | Response): Promise<Re
   try {
     return await fn();
   } catch (e) {
-    rethrowAccess(e);
     if (e instanceof FacelessError) return Response.json({ error: e.message }, { status: e.status });
     console.error("[faceless]", e);
     return Response.json({ error: (e as Error).message || "Something went wrong" }, { status: 500 });

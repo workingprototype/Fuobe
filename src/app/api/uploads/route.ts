@@ -1,12 +1,11 @@
 import { contentTypeFor, saveFile } from "@/server/storage";
-import { handler } from "@/server/access/route";
 
 const MAX_BYTES = 200 * 1024 * 1024;
 const ALLOWED = /^(image\/(png|jpeg|webp|gif)|video\/(mp4|webm|quicktime|x-matroska|x-msvideo)|audio\/(mpeg|wav|x-wav|ogg|flac|mp4|webm))$/;
 /** Names browsers give AVI and Matroska files, to the one Fuobe stores them under. */
 const VIDEO_ALIASES: Record<string, string> = { "video/avi": "video/x-msvideo", "video/msvideo": "video/x-msvideo", "video/vnd.avi": "video/x-msvideo", "video/mkv": "video/x-matroska" };
 
-export const POST = handler({ access: "signed-in" }, async (request: Request) => {
+export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File)) return Response.json({ error: "No file" }, { status: 400 });
@@ -22,4 +21,4 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     source: "upload",
   });
   return Response.json(asset, { status: 201 });
-});
+}

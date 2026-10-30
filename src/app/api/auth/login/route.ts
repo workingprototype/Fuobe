@@ -5,7 +5,6 @@ import { signInOwner, type SignInResult } from "@/server/identity/owner";
 import { PASSWORD_SIGN_IN_MAX } from "@/server/identity/password";
 import { refusal } from "@/server/identity/refusals";
 import { signInRequired } from "@/server/mode";
-import { handler } from "@/server/access/route";
 
 /**
  * Personal sign-in (docs/research/accounts-8.md §8): one password field, no email. Signs u_owner in through Better
@@ -23,7 +22,7 @@ const guard = (globalThis.__fuobeLoginGuard ??= new LoginGuard());
 /** The pre-accounts session cookie: no longer accepted, cleared on the next sign-in or sign-out. */
 const LEGACY_SESSION_COOKIE = "fuobe_session";
 
-export const POST = handler({ access: "public" }, async (request: Request) => {
+export async function POST(request: Request) {
   if (!signInRequired()) return Response.json({ ok: true });
   const key = LoginGuard.clientKey(request.headers);
   const wait = guard.blockedFor(key);
@@ -52,4 +51,4 @@ export const POST = handler({ access: "public" }, async (request: Request) => {
   for (const c of result.setCookies) headers.append("set-cookie", c);
   headers.append("set-cookie", `${LEGACY_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
   return Response.json({ ok: true }, { headers });
-});
+}

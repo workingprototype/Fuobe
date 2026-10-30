@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { makePrimary, ShortsError } from "@/server/shorts";
 import { body, handle } from "@/server/shorts-schemas";
-import { handler } from "@/server/access/route";
 
 /** Make a take the one the stitch uses. */
-export const POST = handler({ access: "signed-in" }, async (request: Request, ctx: RouteContext<"/api/shorts/sessions/[id]/segments/[index]/primary">) => {
+export async function POST(request: Request, ctx: RouteContext<"/api/shorts/sessions/[id]/segments/[index]/primary">) {
   return handle(async () => {
     const { id, index } = await ctx.params;
     const i = Number(index);
@@ -12,4 +11,4 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
     const { generationId } = await body(request, z.object({ generationId: z.string().min(1).max(40) }), "Pick a take");
     return Response.json(makePrimary(id, i, generationId));
   });
-});
+}

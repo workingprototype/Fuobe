@@ -1,5 +1,4 @@
 import { episodeView, handle, renderEpisode, retryEpisode, rewriteEpisode, undoChange, upscaleEpisode } from "@/server/faceless";
-import { handler } from "@/server/access/route";
 
 const ACTIONS = {
   /** Render the reviewed script. */
@@ -14,7 +13,7 @@ const ACTIONS = {
   upscale: upscaleEpisode,
 } as const;
 
-export const POST = handler({ access: "signed-in" }, async (_req: Request, ctx: RouteContext<"/api/faceless/episodes/[id]/[action]">) => {
+export async function POST(_req: Request, ctx: RouteContext<"/api/faceless/episodes/[id]/[action]">) {
   return handle(async () => {
     const { id, action } = await ctx.params;
     const run = ACTIONS[action as keyof typeof ACTIONS];
@@ -22,4 +21,4 @@ export const POST = handler({ access: "signed-in" }, async (_req: Request, ctx: 
     run(id);
     return Response.json(episodeView(id));
   });
-});
+}

@@ -1,6 +1,5 @@
 import { getAuth } from "@/server/identity/auth";
 import { signInRequired } from "@/server/mode";
-import { handler } from "@/server/access/route";
 
 /**
  * Better Auth's router (docs/research/accounts-8.md §7.1), mounted at /api/identity. Only allowlisted endpoints
@@ -13,6 +12,5 @@ async function handle(request: Request): Promise<Response> {
   return getAuth().handler(request);
 }
 
-// Public: signing in is how someone becomes an actor. Better Auth answers for itself (its own allowlist and checks).
-export const GET = handler({ access: "public" }, handle);
-export const POST = handler({ access: "public" }, handle);
+export const GET = handle;
+export const POST = handle;

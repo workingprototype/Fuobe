@@ -435,7 +435,7 @@ describe("the owner's API", () => {
     expect(created.status).toBe(201);
     const { share: s, token } = (await created.json()) as { share: { id: string; expiresAt: number }; token: string };
     expect(s.expiresAt).toBeGreaterThan(Date.now());
-    const list = (await (await listRoute.GET(new Request("http://localhost/"))).json()) as { items: ShareListItem[]; signIn: boolean };
+    const list = (await (await listRoute.GET()).json()) as { items: ShareListItem[]; signIn: boolean };
     const row = list.items.find((x) => x.id === s.id)!;
     expect(row).toMatchObject({ count: 1, gone: false, thumb: { kind: "image" } });
     expect(JSON.stringify(list)).not.toContain(token);

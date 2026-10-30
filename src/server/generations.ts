@@ -42,8 +42,6 @@ import {
   type Preset,
   type ProviderId,
 } from "@/lib/catalog/types";
-import { asSystem, runAs, type Actor } from "./access/actor";
-import { AccountOffError, ownerActor, rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
@@ -1052,7 +1050,8 @@ async function advanceDependents(): Promise<void> {
   const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
   // A forced look at ComfyUI, at most one a sweep, for the steps that found it not answering.
   let lookedAgain: Promise<boolean> | undefined;
-  const advance = async (r: Row): Promise<void> => {
+  for (const r of rows) {
+    if (submitting().has(r.id)) continue;
     // A step queued before its model was retired runs on what replaced it (and its row says so).
     const moved = currentRequest(JSON.parse(r.request_json) as GenerationRequest);
     const stored = moved.request;
@@ -1072,12 +1071,12 @@ async function advanceDependents(): Promise<void> {
     const skipped = allSlots.flatMap((s, i) => (s.optional && broken(allDeps[i]) ? [i] : []));
     if (allDeps.some((d, i) => broken(d) && !skipped.includes(i))) {
       fail(waitedOnFailure(!!stored.frame));
-      return;
+      continue;
     }
     const keep = (_: unknown, i: number) => !skipped.includes(i);
     const deps = allDeps.filter(keep);
     const slots = allSlots.filter(keep);
-    if (deps.some((d) => d!.status !== "succeeded")) return;
+    if (deps.some((d) => d!.status !== "succeeded")) continue;
     const request = skipped.length ? withoutSkipped(stored, allSlots, skipped) : stored;
     // What changed upstream (an earlier fallback) is said on this step too, down to the finished result.
     const notices = [request.notice, ...deps.map((d) => (JSON.parse(d!.request_json) as GenerationRequest).notice)].filter((x): x is string => !!x);
@@ -1086,7 +1085,7 @@ async function advanceDependents(): Promise<void> {
     const short = slots.map((s, i) => listShortfall(outputs[i], s)).find(Boolean);
     if (short) {
       fail(`${earlier} ${short}`);
-      return;
+      continue;
     }
     submitting().add(r.id);
     let handedOff = false;
@@ -1096,7 +1095,7 @@ async function advanceDependents(): Promise<void> {
       const missing = values.findIndex((u) => !u);
       if (missing >= 0) {
         fail(`${earlier} has no ${slotNoun(slots[missing])} to use`);
-        return;
+        continue;
       }
       // Routing reads cached reachability: make sure it's fresh for local engines. An Original counts with the routes of
       // the engine it runs on, ComfyUI taken as answering: one on the cloud doesn't use it, so doesn't wait for it.
@@ -1111,9 +1110,9 @@ async function advanceDependents(): Promise<void> {
         if (!back && first === undefined) {
           comfyWaits().set(r.id, Date.now());
           update(r.id, { message: "Waits for ComfyUI to answer" });
-          return;
+          continue;
         }
-        if (!back && Date.now() - first! < COMFY_WAIT.ms) return;
+        if (!back && Date.now() - first! < COMFY_WAIT.ms) continue;
       }
       comfyWaits().delete(r.id);
       if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
@@ -1142,19 +1141,6 @@ async function advanceDependents(): Promise<void> {
     } finally {
       if (!handedOff) submitting().delete(r.id);
     }
-  };
-  for (const r of rows) {
-    if (submitting().has(r.id)) continue;
-    // Each step is planned and submitted as the person who started its chain.
-    let owner: Actor;
-    try {
-      owner = ownerActor(rowOwner(r));
-    } catch (e) {
-      if (!(e instanceof AccountOffError)) throw e;
-      await pauseForOwner(r, e.message);
-      continue;
-    }
-    await runAs(owner, () => advance(r));
   }
 }
 
@@ -1343,45 +1329,25 @@ export function ensureRunner(): void {
     cur.fast = fastTick;
     cur.polling ??= new Set();
     if (!cur.fastTimer) {
-      cur.fastTimer = asSystem(() => setInterval(() => void globalThis.__fuobeRunner?.fast?.(), FAST_POLL_MS));
+      cur.fastTimer = setInterval(() => void globalThis.__fuobeRunner?.fast?.(), FAST_POLL_MS);
       cur.fastTimer.unref?.();
     }
     return;
   }
-  // The timers belong to the server, not to whichever request happened to start them: each row is then worked on as
-  // its owner (pollGuarded, advanceDependents).
-  asSystem(() => {
-    const state: RunnerState = {
-      busy: false,
-      tick,
-      fast: fastTick,
-      polling: new Set(),
-      timer: setInterval(() => void globalThis.__fuobeRunner?.tick(), POLL_MS),
-      fastTimer: setInterval(() => void globalThis.__fuobeRunner?.fast?.(), FAST_POLL_MS),
-    };
-    state.timer.unref?.();
-    state.fastTimer?.unref?.();
-    globalThis.__fuobeRunner = state;
-    void probeComfy().catch(() => false);
-    void probeOllama().catch(() => false);
-    sweepInterrupted();
-  });
-}
-
-/**
- * A job whose owner was turned off or went dormant (§7.11): the provider's job is canceled first, so it stops running
- * and charging, then the row fails with the reason, and steps waiting only to feed it are dropped before they're paid
- * for (as a failed or canceled step does).
- */
-async function pauseForOwner(r: Row, message: string): Promise<void> {
-  const model = getModel(r.model_id);
-  if (r.external_id && model && (r.status === "queued" || r.status === "running")) {
-    await provider(r.provider)
-      .cancel?.(pollContext(r, model))
-      .catch(() => {});
-  }
-  update(r.id, { status: "failed", error: message, message: null, completed_at: Date.now() });
-  dropUnused(depIds(r.depends_on));
+  const state: RunnerState = {
+    busy: false,
+    tick,
+    fast: fastTick,
+    polling: new Set(),
+    timer: setInterval(() => void globalThis.__fuobeRunner?.tick(), POLL_MS),
+    fastTimer: setInterval(() => void globalThis.__fuobeRunner?.fast?.(), FAST_POLL_MS),
+  };
+  state.timer.unref?.();
+  state.fastTimer?.unref?.();
+  globalThis.__fuobeRunner = state;
+  void probeComfy().catch(() => false);
+  void probeOllama().catch(() => false);
+  sweepInterrupted();
 }
 
 /** Jobs that never got an external id (the server died mid-submit) can't be recovered. Runs every tick. */
@@ -1401,11 +1367,9 @@ async function pollGuarded(r: Row): Promise<void> {
   if (polling.has(r.id)) return;
   polling.add(r.id);
   try {
-    // Polled, downloaded and saved as the person who started it.
-    await runAsOwner(rowOwner(r), () => pollOne(r));
+    await pollOne(r);
   } catch (e) {
-    if (e instanceof AccountOffError) await pauseForOwner(r, e.message);
-    else update(r.id, { message: `Poll error: ${(e as Error).message}` });
+    update(r.id, { message: `Poll error: ${(e as Error).message}` });
   } finally {
     polling.delete(r.id);
   }

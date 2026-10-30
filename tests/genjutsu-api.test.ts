@@ -143,7 +143,7 @@ describe("Genjutsu: estimates", () => {
   });
 
   describe("key mixes: a run is all real or all a demo, so a missing key is said before anything is paid for", () => {
-    const say = async (b: Record<string, unknown>, route: { POST: (r: Request, ctx?: unknown) => Promise<Response> } = estimateRoute) => {
+    const say = async (b: Record<string, unknown>, route: { POST: (r: Request) => Promise<Response> } = estimateRoute) => {
       const res = await route.POST(json(b));
       const out = await res.json();
       expect(res.status, JSON.stringify(out)).toBe(422);

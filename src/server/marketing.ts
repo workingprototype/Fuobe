@@ -49,7 +49,6 @@ import { routesFor } from "@/lib/catalog/plan";
 import { probeMedia } from "@/lib/media-probe";
 import { themeFrom } from "@/components/ads/layout";
 import type { ChainSlot, Engine, GenerationRequest, ModelDef, Operation } from "@/lib/catalog/types";
-import { rethrowAccess } from "./access/errors";
 import { getBrand, getProduct } from "./brand";
 import { createPipeline, type PipelineStep } from "./chains";
 import { db } from "./db";
@@ -1291,7 +1290,6 @@ export async function readBody<S extends z.ZodType>(request: Request, schema: S,
 
 /** A thrown error as a JSON response: 409 for duplicates, 422 for everything the user can fix. */
 export function failure(e: unknown): Response {
-  rethrowAccess(e);
   const err = e as Error;
   const status = err?.name === "DuplicateProductError" || err?.constructor?.name === "DuplicateProductError" ? 409 : 422;
   return Response.json({ error: err?.message || "Something went wrong" }, { status });

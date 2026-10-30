@@ -18,7 +18,6 @@ import {
 import type { Engine, Generation, GenerationRequest, OutputFile } from "@/lib/catalog/types";
 import { getModel } from "@/lib/catalog";
 import { getBrand, getProduct, listProducts, parseJsonObject } from "./brand";
-import { currentActor, runAs } from "./access/actor";
 import { db } from "./db";
 import { llmText } from "./enhance";
 import { createGenerations, getGeneration, previewGeneration, recordLocalGeneration } from "./generations";
@@ -295,8 +294,7 @@ export function createBatch(input: BatchInput, fixed: FixedCopy = {}): { batchId
     }
   })();
   running().add(batchId);
-  // Copy and pictures follow after the response (the route keeps it going with after()), for the person who asked.
-  const run = runAs(currentActor(), () => fillBatch(batchId, brand, ids, input, fixed)).finally(() => running().delete(batchId));
+  const run = fillBatch(batchId, brand, ids, input, fixed).finally(() => running().delete(batchId));
   return { batchId, creatives: listCreatives({ brandId: brand.id, batchId }), run };
 }
 

@@ -1,12 +1,11 @@
 import { applyChange, body, ChangeSchema, episodeView, handle, previewChange } from "@/server/faceless";
-import { handler } from "@/server/access/route";
 
 /**
  * The timeline editor: `{ blocks, part, instruction | narration }` returns what the change re-runs and its
  * price; with `apply: true` it re-runs those steps (that block's picture or clips, the joins after it,
  * the mix and the subtitles, or the narration).
  */
-export const POST = handler({ access: "signed-in" }, async (request: Request, ctx: RouteContext<"/api/faceless/episodes/[id]/change">) => {
+export async function POST(request: Request, ctx: RouteContext<"/api/faceless/episodes/[id]/change">) {
   return handle(async () => {
     const { id } = await ctx.params;
     const c = await body(request, ChangeSchema, "Pick a scene and describe the change");
@@ -14,4 +13,4 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
     applyChange(id, c);
     return Response.json(episodeView(id), { status: 201 });
   });
-});
+}

@@ -2,10 +2,9 @@ import { connection } from "next/server";
 import { listAssets } from "@/server/storage";
 import { cursorFrom } from "@/server/library";
 import type { MediaKind } from "@/lib/catalog/types";
-import { handler } from "@/server/access/route";
 
 /** Stored files, newest first: source / kind filters, limit, and paging with before=<createdAt>:<id> of the last one. */
-export const GET = handler({ access: "signed-in" }, async (request: Request) => {
+export async function GET(request: Request) {
   await connection();
   const u = new URL(request.url);
   return Response.json({
@@ -16,4 +15,4 @@ export const GET = handler({ access: "signed-in" }, async (request: Request) => 
       ...cursorFrom(u.searchParams.get("before")),
     }),
   });
-});
+}

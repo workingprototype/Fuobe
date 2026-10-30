@@ -1,17 +1,15 @@
 import { connection } from "next/server";
 import { createKatana, KatanaBody, listKatana, previewKatana } from "@/server/katana";
-import { rethrowAccess } from "@/server/access/errors";
-import { handler } from "@/server/access/route";
 
 /** Recent Katana runs with the state of every step. */
-export const GET = handler({ access: "signed-in" }, async (request: Request) => {
+export async function GET(request: Request) {
   await connection();
   const limit = Number(new URL(request.url).searchParams.get("limit") ?? 20);
   return Response.json({ items: listKatana(Number.isFinite(limit) ? limit : 20) });
-});
+}
 
 /** Start a run; `?preview=1` only plans and prices it (segments, steps, cost). */
-export const POST = handler({ access: "signed-in" }, async (request: Request) => {
+export async function POST(request: Request) {
   const parsed = KatanaBody.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     const path = String(parsed.error.issues[0]?.path[0] ?? "");
@@ -22,7 +20,6 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     if (new URL(request.url).searchParams.get("preview") === "1") return Response.json(previewKatana(parsed.data));
     return Response.json(createKatana(parsed.data), { status: 201 });
   } catch (e) {
-    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
-});
+}
