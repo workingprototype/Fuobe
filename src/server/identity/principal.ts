@@ -39,6 +39,8 @@ export interface Principal {
   actor: Actor | null;
   /** Why there is no actor: INVALID_TOKEN (401), or a refusal code (ACCOUNT_PENDING…). */
   code?: string;
+  /** The person a refusal code is about (their token or session was valid, they may not act now): for the audit log. */
+  refused?: { userId: string; via: "token" | "session" };
   /** The session is due for its daily refresh, which only a POST performs (deferSessionRefresh). */
   needsRefresh?: boolean;
 }
@@ -83,7 +85,7 @@ async function resolve(request: Request): Promise<Principal> {
     const p = person(bearer.userId);
     if (!p) return { actor: null, code: "INVALID_TOKEN" };
     const code = blocked(p);
-    if (code) return { actor: null, code };
+    if (code) return { actor: null, code, refused: { userId: p.id, via: "token" } };
     return { actor: { userId: p.id, role: p.role, via: "token", tokenId: bearer.tokenId, scopes: bearer.scopes, workspacePin: bearer.workspacePin } };
   }
   if (hasSessionCookie(request)) {
@@ -93,7 +95,7 @@ async function resolve(request: Request): Promise<Principal> {
     if (found) {
       const p = ensurePendingPerson(found.user.id);
       const code = blocked(p);
-      if (code) return { actor: null, code };
+      if (code) return { actor: null, code, refused: { userId: p.id, via: "session" } };
       return {
         actor: { userId: p.id, role: p.role, via: "session", sessionId: found.session.id, scopes: ["full"] },
         needsRefresh: !!(found as { needsRefresh?: boolean }).needsRefresh,

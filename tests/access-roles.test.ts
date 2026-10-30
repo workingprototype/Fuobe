@@ -22,12 +22,12 @@ for (const k of ["FUOBE_PASSWORD", "FUOBE_OWNER_PASSWORD", "FUOBE_SIGNIN", "FUOB
 
 const { db } = await import("@/server/db");
 const { bootstrapIdentity } = await import("@/server/identity/bootstrap");
-const { handler, registerActorSubstitute, registerRestrictedKind, restrictedAllows } = await import("@/server/access/route");
+const { handler, registerActorSubstitute, registerRestrictedKind, restrictedAllows, routePattern } = await import("@/server/access/route");
 const { currentActor, maybeActor, LOCAL_OWNER, runAs, SYSTEM } = await import("@/server/access/actor");
 const errors = await import("@/server/access/errors");
 const perms = await import("@/server/access/permissions");
 const { gate, gateRefusal, registerGate } = await import("@/server/access/gates");
-const { seedPerson, seedTeam, tokenFor, request, actor, asNobody } = await import("./helpers/actors");
+const { seedPerson, seedTeam, tokenFor, request, actor, asNobody, updatePerson } = await import("./helpers/actors");
 const { setOwnerPassword, ownerCookie } = await import("./helpers/identity");
 const settingsRoute = await import("@/app/api/settings/route");
 const modelsRoute = await import("@/app/api/settings/models/route");
@@ -310,5 +310,118 @@ describe("the test harness", () => {
 
   it("is the local owner again in the next test", () => {
     expect(currentActor().userId).toBe("u_owner");
+  });
+});
+
+describe("denials that can't flood the log", () => {
+  it("writes a public route's own 403 for nobody at most once a minute per address and route, counting the rest", async () => {
+    await setOwnerPassword("correct horse battery");
+    try {
+      // Better Auth's router answers 403 to every endpoint it keeps closed.
+      const blocked = handler({ access: "public" }, () => Response.json({ error: "blocked" }, { status: 403 }));
+      const send = (o: { bearer?: string } = {}) => blocked(request("/api/identity/sign-up/email", { method: "POST", body: {}, ...o }));
+      const before = auditCount("denied");
+      for (let i = 0; i < 20; i++) expect((await send()).status).toBe(403);
+      expect(auditCount("denied")).toBe(before + 1);
+      expect(lastAudit()).toMatchObject({ actor_id: null });
+      // A signed-in person's 403s are each written.
+      const token = tokenFor(member);
+      for (let i = 0; i < 3; i++) await send({ bearer: token });
+      expect(auditCount("denied")).toBe(before + 4);
+      // A minute on, the next one is written and says how many were held back.
+      vi.useFakeTimers({ now: Date.now() + 61_000, toFake: ["Date"] });
+      try {
+        await send();
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(auditCount("denied")).toBe(before + 5);
+      expect(JSON.parse(lastAudit().meta_json)).toMatchObject({ path: "/api/identity/sign-up/email", reason: "route", more: 19 });
+    } finally {
+      await setOwnerPassword(null);
+    }
+  });
+
+  it("counts hidden-record 404s per person and route, not per id", async () => {
+    const hidden = handler({}, async (_req: Request, ctx: { params: Promise<{ id: string }> }) => {
+      await ctx.params;
+      throw new errors.NotFoundError("Not found", true);
+    });
+    const before = auditCount("denied.hidden");
+    for (let i = 0; i < 50; i++) expect((await hidden(request(`/api/generations/id-${i}`), { params: Promise.resolve({ id: `id-${i}` }) })).status).toBe(404);
+    expect(auditCount("denied.hidden")).toBe(before + 1);
+    expect(JSON.parse(lastAudit().meta_json)).toMatchObject({ path: "/api/generations/id-0" });
+  });
+
+  it("names a route's dynamic segments from the params Next matched", async () => {
+    expect(await routePattern("/api/generations/g_1", { params: Promise.resolve({ id: "g_1" }) })).toBe("/api/generations/[id]");
+    expect(await routePattern("/s/tok/f/a/b%20c.png", { params: Promise.resolve({ token: "tok", path: ["a", "b c.png"] }) })).toBe("/s/[token]/f/[...path]");
+    expect(await routePattern("/api/settings", undefined)).toBe("/api/settings");
+  });
+
+  it("audits a turned-off person's refused credentials under their name", async () => {
+    const off = seedPerson({ role: "member" });
+    const token = tokenFor(off);
+    updatePerson(off, { status: "disabled" });
+    const echo = handler({}, () => Response.json({}));
+    const before = auditCount("denied");
+    const res = await echo(request("/api/mcp", { method: "POST", body: {}, bearer: token }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "ACCOUNT_DISABLED" });
+    expect(auditCount("denied")).toBe(before + 1);
+    expect(lastAudit()).toMatchObject({ actor_id: off, actor_via: "token" });
+    expect(JSON.parse(lastAudit().meta_json)).toMatchObject({ reason: "ACCOUNT_DISABLED", path: "/api/mcp", method: "POST" });
+  });
+});
+
+describe("refusals the studios pass on", () => {
+  it("answers a refusal thrown inside a studio's error helper with its status, and audits each 403", async () => {
+    const cinema = await import("@/server/cinema-schemas");
+    const faceless = await import("@/server/faceless");
+    const factory = await import("@/server/content-factory");
+    const shorts = await import("@/server/shorts-schemas");
+    const { failure } = await import("@/server/marketing");
+    const { recipeFailure } = await import("@/server/recipe-routes");
+    const caught = (answer: (e: unknown) => Response) => (fn: () => never) => {
+      try {
+        return fn();
+      } catch (e) {
+        return answer(e);
+      }
+    };
+    const wrappers: [string, (fn: () => never) => Response | Promise<Response>][] = [
+      ["cinema", cinema.handle],
+      ["faceless", faceless.handle],
+      ["content factory", factory.handle],
+      ["shorts", shorts.handle],
+      ["marketing", caught(failure)],
+      ["recipes", caught(recipeFailure)],
+    ];
+    const refusals: [Error, number][] = [
+      [new errors.ForbiddenError("No.", "NOPE"), 403],
+      [new errors.NotFoundError(), 404],
+      [new errors.PaymentRequiredError(), 402],
+      [new errors.ReauthRequiredError(), 403],
+    ];
+    for (const [name, wrap] of wrappers) {
+      for (const [e, status] of refusals) {
+        const before = auditCount("denied");
+        const res = await handler({}, () =>
+          wrap(() => {
+            throw e;
+          }),
+        )(request(`/studio/${name.replace(/ /g, "-")}`, { method: "POST", body: {} }));
+        expect(res.status, `${name}: ${e.name}`).toBe(status);
+        expect(((await res.json()) as { error: string }).error, `${name}: ${e.name}`).toBe(e.message);
+        expect(auditCount("denied"), `${name}: ${e.name}`).toBe(before + (status === 403 ? 1 : 0));
+      }
+      // Anything else is still the studio's own answer.
+      const own = await handler({}, () =>
+        wrap(() => {
+          throw new Error("Pick a clip first");
+        }),
+      )(request("/studio/own", { method: "POST", body: {} }));
+      expect([422, 500], name).toContain(own.status);
+    }
   });
 });

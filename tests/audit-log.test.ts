@@ -78,6 +78,53 @@ describe("audit()", () => {
     expect(last().meta_json).not.toMatch(/sk-live|hunter2|Bearer x/);
   });
 
+  it("knows Fuobe's own key names, plain key and value fields, values shaped like a key, and lists", () => {
+    audit("keys.set", null, {
+      falKey: "fal-SECRET-1",
+      anthropicKey: "sk-ant-SECRET",
+      "fal.key": "SECRET-dotted",
+      openaiKey: "sk-SECRET-openai",
+      replicateToken: "r8_SECRETSECRETSECRET",
+      key: "plain-SECRET",
+      list: [{ password: "SECRET-in-a-list" }, "fuobe_SECRETSECRETSECRET1234"],
+      note: "sk-ant-api03-SECRETSECRETSECRET",
+      falLike: "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b:00112233445566778899aabbccddeeff",
+      header: "Bearer SECRET-bearer-value",
+      maskedKey: "sk-a••••cret",
+      keyPrefix: "sk-ant-",
+      keyName: "anthropicKey",
+    });
+    const meta = JSON.parse(last().meta_json);
+    expect(meta).toEqual({
+      falKey: "[redacted]",
+      anthropicKey: "[redacted]",
+      "fal.key": "[redacted]",
+      openaiKey: "[redacted]",
+      replicateToken: "[redacted]",
+      key: "[redacted]",
+      list: [{ password: "[redacted]" }, "[redacted]"],
+      note: "[redacted]",
+      falLike: "[redacted]",
+      header: "[redacted]",
+      maskedKey: "sk-a••••cret",
+      keyPrefix: "sk-ant-",
+      keyName: "anthropicKey",
+    });
+    expect(last().meta_json).not.toMatch(/SECRET/);
+  });
+
+  it("keeps a setting's name but not its value: a key/value pair, or from/to on a secret setting's entry", () => {
+    audit("keys.set", null, { key: "falKey", value: "fal-SECRET-2" });
+    expect(JSON.parse(last().meta_json)).toEqual({ key: "falKey", value: "[redacted]" });
+    audit("install.setting_changed", null, { setting: "anthropic.key", from: "", to: "sk-ant-SECRET-3" });
+    expect(JSON.parse(last().meta_json)).toEqual({ setting: "anthropic.key", from: "", to: "[redacted]" });
+    audit("install.setting_changed", { kind: "setting", id: "fal.key" }, { from: "old-SECRET", to: "new-SECRET" });
+    expect(JSON.parse(last().meta_json)).toEqual({ from: "[redacted]", to: "[redacted]" });
+    // An ordinary setting keeps its values.
+    audit("install.setting_changed", { kind: "setting", id: "engine.mode" }, { key: "engineMode", from: "both", to: "open" });
+    expect(JSON.parse(last().meta_json)).toEqual({ key: "engineMode", from: "both", to: "open" });
+  });
+
   it("records a denial with the route and the reason", () => {
     withScope({ actor: actor("u_alex"), method: "POST", path: "/api/loras" }, () => auditDenied("FORBIDDEN"));
     expect(last().action).toBe("denied");

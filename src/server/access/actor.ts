@@ -22,6 +22,8 @@ export interface RequestScope {
   userAgent?: string | null;
   method?: string;
   path?: string;
+  /** The route's pattern (`/api/generations/[id]`): the path with each dynamic segment named, for rate-limited denials. */
+  route?: string;
 }
 
 declare global {
