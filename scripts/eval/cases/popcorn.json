@@ -1,0 +1,148 @@
+{
+ "$schema": "./case.schema.json",
+ "suite": "popcorn",
+ "title": "Popcorn · storyboards in Fuobe Soul's looks",
+ "description": "Runs the Storyboard (POST /api/storyboards, priced by /api/storyboards/estimate) with a Fuobe Soul look (build plan O13): frame 1 on Fuobe Soul with the look's LoRAs and words, the next frames from the frame before (Qwen-Image-Edit 2509 + the next-scene LoRA on both engines: your GPU's graph, or fal's hosted Qwen-Image-Edit 2509 with the LoRA sent as a URL) with the look's words; the look's grade and overlay are applied in the browser after, so scores are of the raw frames. Continuity is how well the frames hold together; the no-look case is the board as it was before.",
+ "original": [
+  "fuobe-soul"
+ ],
+ "kind": "image",
+ "targets": {
+  "open": {
+   "models": [
+    "fuobe-soul"
+   ]
+  },
+  "cloud": {
+   "models": [
+    "fuobe-soul"
+   ]
+  },
+  "demo": {
+   "models": [
+    "fuobe-soul"
+   ]
+  }
+ },
+ "defaults": {
+  "seeds": [
+   1001
+  ],
+  "metrics": [
+   "clip",
+   "continuity"
+  ],
+  "timeoutSeconds": 1800,
+  "candidate": "original"
+ },
+ "variants": {
+  "original": {
+   "description": "The Storyboard as the studio runs it"
+  }
+ },
+ "cases": [
+  {
+   "id": "popcorn/v1-digitalcam",
+   "title": "A four-frame board in the v1-digitalcam look",
+   "prompts": [
+    {
+     "id": "bus-stop",
+     "text": "a girl waits at a rainy bus stop at night; the bus arrives; she steps on; she looks back through the window"
+    }
+   ],
+   "metrics": [
+    "clip",
+    "continuity",
+    "aesthetic"
+   ],
+   "submit": {
+    "route": "/api/storyboards",
+    "result": "all",
+    "body": {
+     "engine": "{{engine}}",
+     "story": "{{prompt}}",
+     "frames": 4,
+     "look": "v1-digitalcam",
+     "aspectRatio": "16:9"
+    }
+   }
+  },
+  {
+   "id": "popcorn/v2-y2k-studio",
+   "title": "A four-frame board in the v2-y2k-studio look",
+   "prompts": [
+    {
+     "id": "bus-stop",
+     "text": "a girl waits at a rainy bus stop at night; the bus arrives; she steps on; she looks back through the window"
+    }
+   ],
+   "metrics": [
+    "clip",
+    "continuity",
+    "aesthetic"
+   ],
+   "submit": {
+    "route": "/api/storyboards",
+    "result": "all",
+    "body": {
+     "engine": "{{engine}}",
+     "story": "{{prompt}}",
+     "frames": 4,
+     "look": "v2-y2k-studio",
+     "aspectRatio": "16:9"
+    }
+   }
+  },
+  {
+   "id": "popcorn/v1-movie",
+   "title": "A four-frame board in the v1-movie look",
+   "prompts": [
+    {
+     "id": "bus-stop",
+     "text": "a girl waits at a rainy bus stop at night; the bus arrives; she steps on; she looks back through the window"
+    }
+   ],
+   "metrics": [
+    "clip",
+    "continuity",
+    "aesthetic"
+   ],
+   "submit": {
+    "route": "/api/storyboards",
+    "result": "all",
+    "body": {
+     "engine": "{{engine}}",
+     "story": "{{prompt}}",
+     "frames": 4,
+     "look": "v1-movie",
+     "aspectRatio": "16:9"
+    }
+   }
+  },
+  {
+   "id": "popcorn/no-look",
+   "title": "The same board without a look (the reference for the looks)",
+   "prompts": [
+    {
+     "id": "bus-stop",
+     "text": "a girl waits at a rainy bus stop at night; the bus arrives; she steps on; she looks back through the window"
+    }
+   ],
+   "metrics": [
+    "clip",
+    "continuity",
+    "aesthetic"
+   ],
+   "submit": {
+    "route": "/api/storyboards",
+    "result": "all",
+    "body": {
+     "engine": "{{engine}}",
+     "story": "{{prompt}}",
+     "frames": 4,
+     "aspectRatio": "16:9"
+    }
+   }
+  }
+ ]
+}

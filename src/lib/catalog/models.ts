@@ -2,7 +2,10 @@ import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
 import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
+import { loraEntry, loraRef } from "./loras";
+import { ANGLES_LORA, MOSAIC_SCALE, MOSAIC_TARGET, SPEAK_GRAPH, SPEAK_LORA, SPEAK_PROMPT } from "./open-tools";
 import { CINEMA_CROP, SOUL_ASPECTS, SOUL_TIERS } from "./soul";
+import { CLOUD_SHAPES, denoiseFor, EVOLUTION, EVOLUTION_DEFAULT_RESOLUTION, EVOLUTION_RESOLUTIONS, INTENSITIES, videoStrengthFor, type Intensity } from "./evolution";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelOptions, type ModelRoute, type Operation } from "./types";
 
 /*
@@ -43,6 +46,11 @@ const VIDEO_UPSCALE_TIERS = ["720p", "1080p", "1440p", "2160p"];
 
 // ---------------------------------------------------------------------------
 // Open source · ComfyUI
+
+/** Fuobe Try-On's LoRA (research adapterLoras): xocialize's try-on LoRA for FLUX.2 [klein] 4B, Apache-2.0. */
+const TRYON_LORA = loraEntry("tryon-klein-4b");
+/** The try-on LoRA card's own instruction, for a run with no words. */
+export const TRYON_PROMPT = "a full-body photo of a person. Replace the outfit with the top and bottom as shown in the reference images. The final image is a full body shot.";
 
 type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badges"] };
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
@@ -616,6 +624,18 @@ const open: ModelDef[] = [
     tagline: "Temporally stable, flicker-free depth · grayscale or inferno",
     routes: [comfy("depth-video", "video-depth-vda-small")],
     // VideoDepthAnythingOutput draws gray or inferno only; turbo, magma and viridis are the cloud's.
+    options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
+  }),
+  // Higgsfield's Depth Map runs Video Depth Anything Large (build plan O11). Its weights are CC-BY-NC-4.0: the licence is
+  // information (Settings → Models & licences lists it as Non-commercial, with a switch); the Depth map's default stays Small.
+  o({
+    id: "oss-video-depth-vda-large",
+    name: "Video Depth Anything (large)",
+    vendor: "ByteDance",
+    family: "depth-anything",
+    kind: "video",
+    tagline: "The finest temporally stable depth, the model hosted depth tools use · non-commercial weights (CC-BY-NC-4.0) · 8 GB",
+    routes: [comfy("depth-video", "video-depth-vda-large", "Video Depth Anything Large (about 1.5 GB, downloaded on first run)")],
     options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
   }),
   // Remove object (Video tools → Remove object; docs/research/comfyui-oss-4.md §b). The prompt names what to remove
@@ -1377,7 +1397,8 @@ const open: ModelDef[] = [
     tagline: "Dresses the person in image 1 in the garment in image 2 (a top, dress or outfit) and an optional bottom in image 3 · 10 GB GPU · Apache-2.0",
     badges: ["new", "fast"],
     routes: [comfy("edit", "tryon-flux2-klein-4b", "try-on LoRA; old outfit masked out first")],
-    options: { maxImages: 3, seed: true, requires: { images: 2, msg: "Add a photo of the person, then the garment" } },
+    // The graph loads the try-on LoRA itself; carrying it here lets Settings → Models & licences switch it off (as Fuobe Try-On's).
+    options: { maxImages: 3, seed: true, requires: { images: 2, msg: "Add a photo of the person, then the garment" }, ...(TRYON_LORA && { loras: [loraRef(TRYON_LORA)] }) },
   }),
   // Product shot (the open route of the Product shot app): cut out, on white, relit into the scene you describe.
   o({
@@ -1562,6 +1583,17 @@ const DOP_OPTIONS: ModelOptions = {
   requires: { images: 1, msg: "Add a start frame: Fuobe DoP moves the camera through your picture" },
 };
 
+/** Fuobe Evolution's change intensity as a composer control on one engine's own field (the GPU's denoise, fal's video_strength). */
+function intensityControl(param: string, value: (i: Intensity) => number): NonNullable<ModelOptions["controls"]>[number] {
+  return {
+    param,
+    label: "Change",
+    values: INTENSITIES.map((i) => value(i.id)),
+    default: value("medium"),
+    labels: Object.fromEntries(INTENSITIES.map((i) => [String(value(i.id)), i.label])),
+  };
+}
+
 /** Soul's options on both engines (research §4.3): 7 shapes, a 720p (about 1 MP) and a 1080p (about 2 MP) tier, 1–4 images. */
 const SOUL_OPTIONS: ModelOptions = { aspectRatios: SOUL_ASPECTS, resolutions: SOUL_TIERS, seed: true, maxOutputs: 4 };
 
@@ -1677,6 +1709,31 @@ const originals: ModelDef[] = [
     tagline: "Every frame takes a Fuobe look, motion and framing kept · Wan 2.2 Fun VACE free on your GPU (24 GB), or hosted on fal",
     options: { seed: true, negativePrompt: true, resolutions: ["480p", "720p"], maxImages: 4 },
   }),
+  // Fuobe Evolution (O13): Higgsfield Evolution's Original (src/lib/catalog/evolution.ts plans the segments, the direction
+  // frame and the sound; Video tools → Evolution is its studio). The change intensity is the denoise the GPU graph starts
+  // from, and LTX-2.3's video_strength (1 − denoise) in the cloud: one control, each engine's own field.
+  {
+    ...original({
+      id: EVOLUTION.model,
+      open: [comfy("v2v", "video-evolution-wan22-fun-vace", "Wan 2.2 Fun VACE from the noised segment, depth control, image = the direction frame; ≤81 frames at 16 fps")],
+      tagline: "Takes your clip further in a creative direction · Wan 2.2 Fun VACE free on your GPU (24 GB), or LTX-2.3 on fal",
+      options: { seed: true, negativePrompt: true, aspectRatios: [...CLOUD_SHAPES], resolutions: EVOLUTION_RESOLUTIONS.cloud, maxImages: 0 },
+    }),
+    defaults: { aspectRatio: "16:9", duration: 5, resolution: EVOLUTION_DEFAULT_RESOLUTION.cloud },
+    engineDefaults: { open: { resolution: EVOLUTION_DEFAULT_RESOLUTION.open, aspectRatio: "auto" } },
+    engineOptions: {
+      open: {
+        aspectRatios: ["auto", ...VID_AR],
+        resolutions: EVOLUTION_RESOLUTIONS.open,
+        durations: [3, 4, 5],
+        maxImages: 1,
+        imageLabels: ["direction frame (the clip's first frame as it should look)"],
+        controls: [intensityControl("denoise", denoiseFor)],
+        requires: { images: 1, msg: "Add the direction frame: the clip's first frame as it should look (Video tools → Evolution makes it for you)" },
+      },
+      cloud: { controls: [intensityControl("video_strength", videoStrengthFor)] },
+    },
+  },
   // Character swap (Openjutsu, Akatz Labs' H3 Character Swap): MiniMax H3 with the Character Swap LoRA. On your GPU the
   // h3_character_swap graph finds the person with SAM 3.1 and regenerates only them in 124-frame windows, keeping the
   // clip's own sound; on fal, H3 reference-to-video with the same LoRA (no mask), the clip's sound put back.
@@ -1686,7 +1743,128 @@ const originals: ModelDef[] = [
     tagline: "The person in your clip becomes your character · MiniMax H3 free on your GPU (48 GB+ advised), or hosted on fal",
     options: { seed: true, resolutions: ["480p", "768p"], maxImages: 2 },
   }),
+  // Marketing Studio Image and Fashion Factory's try-on (O10): Higgsfield's GPT Image 2.5 templates and Nano Banana outfit
+  // steps rebuilt on Apache-2.0 open weights (docs/research/fuobe-originals-recipes-5.json studios[marketing]).
+  {
+    ...original({
+      id: "fuobe-marketing-image",
+      open: [
+        // A Standalone product shot (params.extra.productShot, one product photo) runs product-shot-qwen-edit-2509 instead:
+        // cut out with BiRefNet, put on white, relit into the scene by the White_to_Scene LoRA.
+        comfy("edit", "qwen-image-edit-2511-multi", "Qwen-Image-Edit 2511 with up to 3 references (product, person, setting) and the template's prompt"),
+        comfy("t2i", "qwen-image-2512-t2i", "Qwen-Image 2512 when there is no product photo"),
+      ],
+      tagline: "Product shots, ads, posters and listings from your product photo · Qwen-Image-Edit 2511 free on your GPU (24 GB), or hosted on fal",
+      options: { aspectRatios: IMG_AR, maxImages: 10, maxOutputs: 4, seed: true, negativePrompt: true },
+    }),
+    // TextEncodeQwenImageEditPlus takes three pictures, and the edit keeps the first one's shape.
+    engineOptions: { open: { maxImages: 3 } },
+  },
+  {
+    ...original({
+      id: "fuobe-tryon",
+      open: [comfy("edit", "tryon-flux2-klein-4b", "the try-on LoRA on FLUX.2 [klein] 4B; the old outfit greyed out first (ClothesSegment)")],
+      tagline: "Puts the garment in image 2 (a bottom in image 3) on the person in image 1 · FLUX.2 [klein] 4B + try-on LoRA, free on your GPU (10 GB), or hosted on fal",
+      options: {
+        maxImages: 3,
+        seed: true,
+        promptOptional: true,
+        defaultPrompt: TRYON_PROMPT,
+        imageLabels: ["person photo", "garment (a top, dress or whole outfit)", "bottom (optional)"],
+        requires: { images: 2, msg: "Add a photo of the person, then the garment" },
+        ...(TRYON_LORA && { loras: [loraRef(TRYON_LORA)] }),
+      },
+    }),
+  },
+  // Fuobe Mixed Media (O9): Higgsfield's Mixed Media rebuilt on Z-Image Turbo + its Fun ControlNet, every frame drawn
+  // again in the look (its LoRA from the research's looks map) at one seed. On your GPU the whole selection is one
+  // per-frame job (v2v); in the cloud src/lib/catalog/mixed-media.ts fans the frame route out over every frame and puts
+  // them back together. "edit" is one frame in the look on both engines: the preview, Smooth's first frame and DoP's
+  // Mixed Media effects (Smooth then carries that frame through the clip on Fuobe Shorts' Wan 2.2 Fun VACE pass).
+  {
+    ...original({
+      id: "fuobe-mixed-media",
+      open: [
+        comfy("v2v", "mixed-media-zimage-frames", "every frame on Z-Image Turbo + Fun Union ControlNet (canny) with the look's LoRA, one seed"),
+        comfy("edit", "z-image-turbo-i2i", "one frame in the look with its LoRA (Smooth's first frame, DoP's Mixed Media effects)"),
+      ],
+      tagline: "Every frame drawn again in the look, one seed · Z-Image Turbo + ControlNet free on your GPU (16 GB), or per frame on fal",
+      options: { seed: true, resolutions: ["1K", "2K"], maxImages: 1, maxOutputs: 1 },
+    }),
+    // The per-frame graph renders up to 1536 px on the long side (its manifest's limit).
+    engineOptions: { open: { resolutions: ["1K"] } },
+  },
+  // Fuobe Shorts (O9): Shorts Studio's Original, the open Shorts chain on both engines: each segment's first frame in the
+  // look (Qwen-Image-Edit 2511 with up to two reference images), then Wan 2.2 Fun VACE carries it through every frame by
+  // depth; the segments are joined and the clip's own sound put back (src/lib/catalog/shorts.ts plans the steps).
+  {
+    ...original({
+      id: "fuobe-shorts",
+      open: [comfy("v2v", "video-restyle-wan22-fun-vace", "the restyled first frame, then every frame with depth; 81 frames at 16 fps a segment")],
+      tagline: "Your footage in a new look, motion kept · Wan 2.2 Fun VACE free on your GPU (24 GB), or hosted on fal",
+      options: { seed: true, negativePrompt: true, resolutions: ["480p", "720p"], maxImages: 1 },
+    }),
+    // The GPU graph follows a restyled first frame it can't make itself (fal's route runs without one, on the words).
+    engineOptions: { open: { requires: { images: 1, msg: "Add the clip's first frame in the new look: Wan 2.2 Fun VACE carries it through every frame" } } },
+  },
+  // Fuobe Angles (O11): Higgsfield Angles' recipe, Qwen-Image-Edit 2509 with dx8152's Multiple-angles LoRA. The camera is the
+  // hosted route's own fields on both engines (rotate −90…90°, positive = left; tilt −1…1; move forward 0–10; a wide-angle lens in
+  // the Angles app); on the GPU src/lib/catalog/open-tools.ts turns them into the LoRA's words. Words of your own are the GPU's
+  // only (fal's route has no prompt field).
+  {
+    ...original({
+      id: "fuobe-angles",
+      open: [comfy("edit", "qwen-image-edit-2509-angles", "Qwen-Image-Edit 2509 + Lightning + the Multiple-angles LoRA at 1.25, 6 steps")],
+      tagline: "The same shot from another camera: rotate, tilt, move closer, go wide · Qwen-Image-Edit 2509 + Multiple-angles LoRA, free on your GPU (24 GB), or hosted on fal",
+      options: { maxImages: 1, seed: true, promptOptional: true, sliders: ORIGINAL_HALVES.get("fuobe-angles")?.options.sliders },
+    }),
+    // The GPU graph loads the LoRA itself; as the recipe's LoRA it is downloaded before a run and has a switch in Settings.
+    engineOptions: { open: { ...(ANGLES_LORA && { loras: [ANGLES_LORA] }) }, cloud: { promptless: true } },
+  },
+  // Fuobe Speak (O11): InfiniteTalk. On the GPU, Higgsfield's Infinite Talk settings on kijai's wrapper graph (FusioniX in place of
+  // the lightx2v distill LoRA, 15 motion frames, 25 steps, shift 10, text and audio guidance 5, colour match): about ten times the
+  // fast pass's time (InfiniteTalk Long). In the cloud, fal's InfiniteTalk, which takes none of those knobs. As long as the voice.
+  {
+    ...original({
+      id: "fuobe-speak",
+      open: [{ ...comfy("avatar", "infinitetalk-wanwrapper", "InfiniteTalk + FusioniX, 25 steps, shift 10, guidance 5 / 5, 15 motion frames"), extra: { ...SPEAK_GRAPH }, loraSlot: true }],
+      tagline: "A portrait speaks your voice track, lips, face and head in sync, long takes · InfiniteTalk + FusioniX free on your GPU (16 GB), or hosted on fal",
+      options: { resolutions: ["480p", "720p"], seed: true, maxImages: 1, promptOptional: true, defaultPrompt: SPEAK_PROMPT },
+    }),
+    engineDefaults: { open: { aspectRatio: "auto" } },
+    // The GPU graph frames the portrait itself (its shape by default); the LoRA is the recipe's, downloaded before a run.
+    engineOptions: { open: { aspectRatios: ["auto", ...VID_AR], negativePrompt: true, ...(SPEAK_LORA && { loras: [SPEAK_LORA] }) } },
+  },
+  // Fuobe Speak · Motion (O11): a Speak v1-like route, Wan 2.2 Speech-to-Video. The body and the scene move with the speech; fal
+  // makes 2.5–7.5 s a call (num_frames 40–120), the GPU graph up to about 14 s.
+  {
+    ...original({
+      id: "fuobe-speak-motion",
+      open: [comfy("avatar", "wan22-s2v-14b", "Wan 2.2 S2V 14B with the lightx2v 4-step LoRA, up to about 14 s")],
+      tagline: "Speech with the body and the scene moving · Wan 2.2 S2V free on your GPU (24 GB), or hosted on fal (up to 7.5 s)",
+      options: { resolutions: ["480p", "580p", "720p"], seed: true, negativePrompt: true, maxImages: 1, promptOptional: true, defaultPrompt: SPEAK_PROMPT },
+    }),
+    engineDefaults: { open: { aspectRatio: "9:16" } },
+    engineOptions: { open: { aspectRatios: VID_AR, resolutions: ["480p", "720p"] } },
+  },
 ];
+
+/**
+ * Fuobe Soul's face mosaic on the GPU (build plan O11): SAM 3.1 finds the faces (or what the words name) and a block
+ * mosaic covers them, in one graph. A helper step after a look that asks for it (PixeletedFace); in the cloud fal's
+ * SAM 3.1 makes the masks and Fuobe pixelates under them (sam-3-1-face-mask).
+ */
+const faceMosaic: ModelDef = o({
+  id: "oss-face-mosaic",
+  name: "Pixelate faces",
+  vendor: "Meta SAM 3.1 + ComfyUI",
+  family: "sam",
+  kind: "image",
+  tagline: "SAM 3.1 finds every face and covers it with large blocks · core nodes, 4 GB",
+  routes: [comfy("face-mosaic", "image-face-mosaic-sam3", "SAM 3.1 face mask, grown 12 px, a 25 px block mosaic under it")],
+  options: { maxImages: 1, promptOptional: true, defaultPrompt: MOSAIC_TARGET, sliders: [{ param: "mosaicScale", label: "Block size (smaller = bigger blocks)", min: 0.01, max: 0.2, step: 0.01, default: MOSAIC_SCALE }] },
+  hidden: true,
+});
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */
 const local: ModelDef[] = [
@@ -1769,4 +1947,4 @@ const local: ModelDef[] = [
   }),
 ];
 
-export const MODELS: ModelDef[] = [...originals, ...cloud, ...open, ...local];
+export const MODELS: ModelDef[] = [...originals, ...cloud, ...open, faceMosaic, ...local];

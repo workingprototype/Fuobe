@@ -79,7 +79,9 @@ export type Operation =
   | "rig-3d" // 3D model (+ params.animation) → rigged / animated model
   | "extract-frames" // video → an image every params.frameInterval frames (meta.index)
   | "images-to-video" // images in order → a video at params.fps
-  | "overlay"; // image + a second image (logo) → composited (params.position, params.scale)
+  | "overlay" // image + a second image (logo) → composited (params.position, params.scale)
+  // round 5 (O11)
+  | "face-mosaic"; // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -146,6 +148,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   "extract-frames": "Extract frames",
   "images-to-video": "Images to video",
   overlay: "Overlay image",
+  "face-mosaic": "Pixelate faces",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -214,6 +217,7 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   "extract-frames": "image",
   "images-to-video": "video",
   overlay: "image",
+  "face-mosaic": "image",
 };
 
 /**
@@ -420,8 +424,10 @@ export interface FieldMap {
    * Also video models whose length is a frame count (Wan 2.2, LTX-2.3 22B), where `step` keeps the count at
    * step·n + 1 (Wan 4n+1, LTX 8n+1). `fromDuration`: the frames to add (extend), so params.duration counts,
    * never the input clip's length, at the clip's own frame rate when it is known (fal's LTX-2.3 extend matches it).
+   * `multiple`: a count that must be a multiple of it (fal's Wan 2.2 S2V: 4n). A talking-avatar route (fal's
+   * InfiniteTalk, Wan 2.2 S2V) renders as long as the voice: its header's length is params.sourceDuration.
    */
-  numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number; fromDuration?: boolean };
+  numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number; multiple?: number; fromDuration?: boolean };
   /**
    * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
    * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
@@ -480,6 +486,18 @@ export interface ModelRoute {
    * start/end-frame clip of `endpoint` per pair of frames, then joined; src/server/chains.ts).
    */
   chained?: true;
+  /**
+   * A ComfyUI route's graph settings sent unless the request sets them (params.extra wins): Fuobe Speak's InfiniteTalk
+   * defaults on kijai's wrapper graph (motion frames, steps, shift, text and audio guidance, colour match), the cloud's
+   * FieldMap.defaults for a graph.
+   */
+  extra?: Record<string, unknown>;
+  /**
+   * A ComfyUI wrapper graph that loads one LoRA itself (kijai's InfiniteTalk) takes the run's LoRA in that slot, in place of
+   * its own: only on a route whose recipe brings that LoRA and the settings it needs (Fuobe Speak's FusioniX with 25 steps).
+   * Other routes on the graph refuse a LoRA rather than swap out the one its settings are tuned for.
+   */
+  loraSlot?: true;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";
@@ -526,6 +544,15 @@ export interface ModelOptions {
   promptless?: boolean;
   /** The prompt box shows, but the model also runs without words (P-Video Replace, Genjutsu Lite object swap). */
   promptOptional?: boolean;
+  /** The words a run takes when none are given (Fuobe Try-On: its try-on LoRA's own instruction). */
+  defaultPrompt?: string;
+  /**
+   * LoRAs the model's recipe always loads (Fuobe Try-On's try-on LoRA): every run carries them before the user's own
+   * (an API's LoRA cap leaves out the user's first), their trigger words leading the prompt. A ComfyUI graph that loads
+   * one itself isn't given it twice (injectLoras), and a run is refused while Settings → Models & licences has one
+   * switched off, or when the route leaves one out for any other reason.
+   */
+  loras?: LoraRef[];
   /** Max reference videos / audio clips it accepts (reference-to-video: inputs.videos / inputs.audios). */
   maxVideos?: number;
   maxAudios?: number;
@@ -562,8 +589,6 @@ export interface Pricing {
   note?: string;
   /** The price per unit at each resolution (params.resolution), when it differs (Gemini Omni Flash: 360p $0.03/s … 4K $0.30/s); `usd` is the default resolution's. */
   byResolution?: Record<string, number>;
-  /** Billed on the input clip's seconds as well as the output's (Happy Horse video edit): a restyle costs about twice the clip's length. */
-  inputSeconds?: boolean;
   /**
    * A launch price that runs to the end of `until` (UTC, YYYY-MM-DD); `usd` / `byResolution` are the list
    * prices after it. The catalog applies whichever holds when it loads (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s).
@@ -852,13 +877,40 @@ export interface GenerationRequest {
    */
   dropWhenUnused?: boolean;
   /** Storyboard frame this request makes (shown under the frame). */
-  frame?: { scene: string; index: number; of: number };
+  /**
+   * A storyboard frame. `look`: the board's Fuobe Soul look, whose grade and overlay every frame gets after it is made
+   * (as meta, like a Soul picture); `crop`: a look board asked for 21:9 is made at 16:9 and cropped after.
+   */
+  frame?: { scene: string; index: number; of: number; look?: string; crop?: "21:9" };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
   step?: { label: string; index: number; of: number };
+  /**
+   * Server-set: the picture of a look whose step after it (PixeletedFace's face mosaic) is the next step of the same run
+   * (src/server/chains.ts createMosaicRun), so it doesn't start another.
+   */
+  postMade?: boolean;
   /** Server-set: what the user calls this result, shown instead of the prompt (Library, feeds). */
   title?: string;
   /** Server-set: the name of the batch it belongs to (an Assist plan's summary): the Library stack's title. */
   batchTitle?: string;
+  /**
+   * Server-set: made by a run of a skill's recipe (src/lib/recipe.ts): the skill's name and the run's id (its batch), so
+   * a run's history can be read back. Stripped from API input, like chainFilled.
+   */
+  skill?: { name: string; run: string };
+  /**
+   * Server-set: run on the demo provider whatever Settings → Demo mode says (a recipe's free dry run): chooseRoute
+   * returns the demo route, and a waiting step runs as a demo after demo steps even with Demo mode off. Stripped from
+   * API input.
+   */
+  demo?: boolean;
+  /**
+   * Server-set on the row a request that expanded into several rows returns first (a multi-shot film, a Frames film, an
+   * extend on a model with no extend API, open text-to-3D, a DoP relight: src/server/chains.ts): the request as it was
+   * asked, so a skill made from the result rebuilds that one request, not the steps it became (their number changes
+   * with the input). Stripped from API input.
+   */
+  asked?: GenerationRequest;
   /**
    * The Image studio's style signature (Color signature + Moodboard chips): what was picked, the
    * sentences the server adds to the prompt (`prompt` keeps the user's own words), and the request as
@@ -907,6 +959,11 @@ export interface ChainSlot {
    * missing input go), and `notice` is said on the result and on the steps after it.
    */
   optional?: { prompt?: string; notice: string };
+  /**
+   * Take the picture as the model made it, before Fuobe Soul's finish in the browser (`meta.original`): a storyboard
+   * with a look makes each next frame from the previous one, and every frame gets the look's grade on its own.
+   */
+  raw?: boolean;
 }
 
 /** How many outputs a planned list (ChainSlot.of) may be short of before the steps reading it fail. */
@@ -1017,7 +1074,7 @@ export interface PresetChoice {
   /** Text substituted for {option:<key>} in the prompt template. */
   prompt: string;
   /** Model settings this choice sets (params.extra), e.g. the camera angle sliders of Qwen Multiple Angles; what the user set wins. */
-  extra?: Record<string, number | string>;
+  extra?: Record<string, number | string | boolean>;
 }
 
 export interface PresetOption {
@@ -1034,6 +1091,11 @@ export interface PresetRoute {
   loras?: LoraRef[];
   /** Overrides the preset prompt template for this engine. */
   promptTemplate?: string;
+  /**
+   * An app on Fuobe Soul, or on a graph that is Soul's own base (the Soul Cast sheet on your GPU): the look its words
+   * run in, with the look's LoRAs (the AI Influencer app: the Realistic look).
+   */
+  look?: string;
   /**
    * A partner model running the preset's words because its Original has nothing of its own here yet (a Fuobe DoP move
    * with no hostable LoRA, camera LoRA, hosted move or step in the cloud keeps Kling 2.5 Turbo until the evaluation
@@ -1069,7 +1131,10 @@ export interface Preset {
   prestep?: PresetPrestep;
 }
 
-/** A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, then animates it). */
+/**
+ * A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, or draws it in a Mixed Media look
+ * on Fuobe Mixed Media, then animates it).
+ */
 export interface PresetPrestep {
   open: PrestepRoute;
   cloud: PrestepRoute;
@@ -1080,6 +1145,10 @@ export interface PrestepRoute {
   op: Operation;
   prompt: string;
   loras?: LoraRef[];
+  /** The step's own settings (Fuobe Mixed Media: its seed, control scale or strength). */
+  params?: GenParams;
+  /** What the step and the clip after it are called in a run ("Start frame in the look", "Restyled clip"); relight's when unset. */
+  labels?: { step: string; clip: string };
   /** What the step costs (a 1-megapixel picture), added to the clip's price before the run; 0 on the user's GPU. */
   usd?: number;
 }

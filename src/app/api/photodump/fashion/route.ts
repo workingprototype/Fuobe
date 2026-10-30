@@ -7,7 +7,7 @@ const Engine = z.enum(["cloud", "open"]);
 const Body = z.discriminatedUnion("step", [
   z.object({ step: z.literal("base"), templateId: z.string().max(80), elementId: z.string().max(40), engine: Engine }),
   z.object({ step: z.literal("outfit"), templateId: z.string().max(80), base: File, garment: File, engine: Engine, modelId: z.string().max(80).optional() }),
-  z.object({ step: z.literal("photoset"), templateId: z.string().max(80), dressed: File, engine: Engine }),
+  z.object({ step: z.literal("photoset"), templateId: z.string().max(80), dressed: File, engine: Engine, modelId: z.string().max(80).optional() }),
 ]);
 
 /**

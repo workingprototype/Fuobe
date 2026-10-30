@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-27T11:01:23.799Z",
+  "generatedAt": "2026-10-29T10:45:49.726Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -4823,7 +4823,7 @@
       "title": "InfiniteTalk Lip-sync (WanVideoWrapper, long audio)",
       "capability": "lipsync",
       "file": "infinitetalk-wanwrapper.json",
-      "source": "custom-node example ComfyUI-WanVideoWrapper/example_workflows/wanvideo_2_1_14B_I2V_InfiniteTalk_example_03.json @ 088128b (modified, see notes)",
+      "source": "hand-built (scripts/comfy/hand-built/infinitetalk-wanwrapper.json)",
       "bindings": {
         "prompt": [
           {
@@ -4879,6 +4879,54 @@
             "input": "steps"
           }
         ],
+        "lora": [
+          {
+            "node": "138",
+            "input": "lora"
+          }
+        ],
+        "loraStrength": [
+          {
+            "node": "138",
+            "input": "strength"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "128",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "128",
+            "input": "shift"
+          }
+        ],
+        "scheduler": [
+          {
+            "node": "128",
+            "input": "scheduler"
+          }
+        ],
+        "motionFrame": [
+          {
+            "node": "192",
+            "input": "motion_frame"
+          }
+        ],
+        "colormatch": [
+          {
+            "node": "192",
+            "input": "colormatch"
+          }
+        ],
+        "audioCfg": [
+          {
+            "node": "194",
+            "input": "audio_cfg_scale"
+          }
+        ],
         "filenamePrefix": [
           {
             "node": "131",
@@ -4896,7 +4944,15 @@
         "width": 640,
         "height": 640,
         "frames": 500,
-        "steps": 6
+        "steps": 6,
+        "cfg": 1,
+        "shift": 11,
+        "loraStrength": 1,
+        "motionFrame": 9,
+        "audioCfg": 1,
+        "fps": 25,
+        "scheduler": "dpm++_sde",
+        "colormatch": "disabled"
       },
       "limits": {
         "maxWidth": 1280,
@@ -4940,6 +4996,13 @@
           "folder": "text_encoders",
           "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/umt5-xxl-enc-bf16.safetensors",
           "sizeGb": 11.36
+        },
+        {
+          "file": "Wan2.1_I2V_14B_FusionX_LoRA.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/vrgamedevgirl84/Wan14BT2VFusioniX/resolve/b9793a1f84727f2f69bdffecc2f50f0abfa746a6/FusionX_LoRa/Wan2.1_I2V_14B_FusionX_LoRA.safetensors",
+          "sizeGb": 0.37,
+          "optional": true
         }
       ],
       "customNodes": [
@@ -4957,8 +5020,9 @@
         }
       ],
       "vramGb": 16,
+      "license": "Apache-2.0 (InfiniteTalk, Wan 2.1, lightx2v; FusioniX: Apache-2.0 card, the LoRAs it merges unchecked)",
       "validated": true,
-      "notes": "kijai WanVideoWrapper example 03 (GGUF Q8 Wan2.1-I2V-480p + InfiniteTalk single, lightx2v LoRA, 6 steps). Generates in 81-frame windows until the audio ends; `frames` is a MAX frame cap @25 fps (default 500 = 20 s). Changes vs example: MelBandRoFormer vocal separation removed (use clean speech audio), attention sdpa instead of sageattn, save_output=true, Windows sub-paths flattened. Output is a VHS_VideoCombine node: look in history outputs[node].gifs[], not .images[].",
+      "notes": "kijai WanVideoWrapper example 03 (GGUF Q8 Wan2.1-I2V-480p + InfiniteTalk single, lightx2v LoRA, 6 steps). Generates in 81-frame windows until the audio ends; `frames` is a MAX frame cap @25 fps (default 500 = 20 s). Changes vs example: MelBandRoFormer vocal separation removed (use clean speech audio), attention sdpa instead of sageattn, save_output=true, Windows sub-paths flattened. Output is a VHS_VideoCombine node: look in history outputs[node].gifs[], not .images[]. Originals O11 (Fuobe Speak): the graph is unchanged and its defaults stay the fast lightx2v pass (6 steps, cfg 1, shift 11, motion_frame 9, dpm++_sde); Fuobe Speak sends Higgsfield's Infinite Talk settings through the new bindings: lora Wan2.1_I2V_14B_FusionX_LoRA.safetensors at 1 (the run's LoRA goes into WanVideoLoraSelect, which this wrapper graph loads itself), steps 25, cfg 5 (text guidance), audioCfg 5 (audio guidance; the wrapper runs the extra audio-free pass when cfg > 1), shift 10, scheduler unipc (InfiniteTalk's solver), motionFrame 15 and colormatch reinhard for InfiniteTalk's colour correction (a Lab mean / spread match to the portrait; the wrapper has no strength, so on = 1). About 25 / 6 × 3 passes the time of the fast pass.",
       "autoDownloads": [
         "DownloadAndLoadWav2VecModel downloads TencentGameMate/chinese-wav2vec2-base into models/transformers on first run"
       ]
@@ -6200,6 +6264,115 @@
       "license": "Apache-2.0 (Qwen-Image-Edit-2509, Relight LoRA, Lightning LoRA)",
       "validated": true,
       "notes": "Official template image_qwen_image_edit_2509_relight = library qwen-image-edit-2509 + node 1001 (Relight LoRA after the Lightning LoRA) + node 1002 (StringConcatenate prefixing the LoRA trigger \"重新照明,\" = \"relight,\"). prompt = the light to apply, e.g. \"relight with neon magenta and cyan rim lights\" (Chinese prompts follow the LoRA captions best). Output size follows the input (~1 MP). 4 steps, cfg 1."
+    },
+    {
+      "id": "qwen-image-edit-2509-angles",
+      "title": "Qwen-Image-Edit 2509 Multiple Angles (Fuobe Angles: dx8152 LoRA + Qwen-Image-Lightning)",
+      "capability": "edit",
+      "file": "qwen-image-edit-2509-angles.json",
+      "source": "hand-built (scripts/comfy/hand-built/qwen-image-edit-2509-angles.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "433:111",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "433:110",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "78",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "433:3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "433:436",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "433:437",
+            "input": "value"
+          }
+        ],
+        "loraStrength": [
+          {
+            "node": "1001",
+            "input": "strength_model"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "469",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "469",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 6,
+        "cfg": 1,
+        "loraStrength": 1.25
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "qwen-edit-2509-multiple-angles-dx8152.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/dx8152/Qwen-Edit-2509-Multiple-angles/resolve/c342b0e746c3a3275af1a4a0c6ae78e0e4802531/%E9%95%9C%E5%A4%B4%E8%BD%AC%E6%8D%A2.safetensors",
+          "sizeGb": 0.24
+        },
+        {
+          "file": "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "sizeGb": 20.43
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "sizeGb": 0.85
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Qwen-Image-Edit 2509, dx8152 Multiple-angles LoRA, Qwen-Image-Lightning)",
+      "validated": true,
+      "notes": "Higgsfield Angles' recipe on the GPU (Originals O11; research studios[angles]): library qwen-image-edit-2509 (Qwen-Image-Edit 2509 fp8 + the Lightning 4-step LoRA, FluxKontextImageScale to ~1 MP, ModelSamplingAuraFlow 3, CFGNorm, euler / simple, cfg 1) with dx8152's Multiple-angles LoRA after the Lightning LoRA at 1.25 (as fal's hosted route and the public HF Space fuse it) and 6 steps (fal's default for this LoRA; the Lightning LoRA is distilled for 4, so 6 is a guess until measured). prompt = the LoRA's camera instructions in Chinese with English (\"将镜头向左旋转45度 Rotate the camera 45 degrees to the left.\" / move forward / close-up / bird's-eye / worm's-eye / wide-angle), which src/lib/catalog/open-tools.ts writes from Fuobe Angles' controls. The LoRA file is renamed from 镜头转换.safetensors to qwen-edit-2509-multiple-angles-dx8152.safetensors; Fuobe downloads it into ComfyUI's loras folder before a run. Output size follows the input (~1 MP)."
     },
     {
       "id": "relight-qwen-edit-2509-reference",
@@ -7854,6 +8027,140 @@
       "autoDownloads": [
         "LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Small video_depth_anything_vits.pth (0.12 GB) into models/videodepthanything on first run"
       ]
+    },
+    {
+      "id": "video-depth-vda-large",
+      "title": "Video Depth Map (Video Depth Anything Large, non-commercial weights)",
+      "capability": "depth-video",
+      "file": "video-depth-vda-large.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-depth-vda-small.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "colormap": [
+          {
+            "node": "5",
+            "input": "colormap"
+          }
+        ],
+        "sideBySide": [
+          {
+            "node": "9",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "7",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "colormap": "gray",
+        "sideBySide": false
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Video-Depth-Anything",
+          "repo": "https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything"
+        }
+      ],
+      "vramGb": 8,
+      "license": "CC-BY-NC-4.0 (Video-Depth-Anything-Large weights: non-commercial)",
+      "validated": true,
+      "notes": "video-depth-vda-small with the Large model (Originals O11): the model Higgsfield's Depth Map runs (higgsfield-originals-5.md §3.22). Its weights are CC-BY-NC-4.0: the licence is information (Settings → Models & licences lists it as Non-commercial with a switch), the Depth map defaults stay VDA-Small (Apache-2.0) on the GPU. Same graph otherwise: gray or inferno, side by side through the lazy switch, audio dropped.",
+      "autoDownloads": [
+        "LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Large video_depth_anything_vitl.pth (about 1.5 GB) into models/videodepthanything on first run"
+      ]
+    },
+    {
+      "id": "image-face-mosaic-sam3",
+      "title": "Pixelate faces (SAM 3.1 face mask + mosaic, core nodes)",
+      "capability": "face-mosaic",
+      "file": "image-face-mosaic-sam3.json",
+      "source": "hand-built (scripts/comfy/hand-built/image-face-mosaic-sam3.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "3",
+            "input": "text"
+          }
+        ],
+        "threshold": [
+          {
+            "node": "4",
+            "input": "threshold"
+          }
+        ],
+        "maskGrow": [
+          {
+            "node": "5",
+            "input": "expand"
+          }
+        ],
+        "mosaicScale": [
+          {
+            "node": "7",
+            "input": "scale_by"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "10",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "10",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "maskGrow": 12,
+        "threshold": 0.4,
+        "mosaicScale": 0.04
+      },
+      "limits": {
+        "maxWidth": 4096,
+        "maxHeight": 4096
+      },
+      "models": [
+        {
+          "file": "sam3.1_multiplex_fp16.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors",
+          "sizeGb": 1.75
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 4,
+      "license": "Meta SAM License (SAM 3.1: royalty-free, commercial use allowed; attribution + acceptable-use terms)",
+      "validated": true,
+      "notes": "Fuobe Soul's PixeletedFace look (Originals O11; research presets[PixeletedFace].post): SAM3_Detect with the words (prompt, \"face\" by default: every face, one merged mask, threshold 0.4), GrowMask 12 px so the hair line and jaw are covered, then the picture shrunk by mosaicScale with area averaging (0.04: blocks of 25 px) and blown back up with nearest-exact to its own size, composited only under the mask (ImageCompositeMasked). No face found: the picture comes back unchanged. Core nodes and the SAM 3.1 checkpoint only."
     },
     {
       "id": "palette-transfer-image",
@@ -9612,6 +9919,219 @@
       "license": "Apache-2.0 (Wan 2.2 Fun VACE, lightx2v, Depth Anything 3 mono-large)",
       "validated": true,
       "notes": "Shorts Studio chain: video-segment-resample (<=81 frames @16 fps + first frame) -> qwen-image-edit-2511 restyles the first frame with the preset prompt -> this graph -> video-concat-N. Control: frame 0 = the restyled frame (image, kept), frames 1..N-1 = Depth Anything 3 depth maps (generated); the restyled frame is also the VACE reference. Lightx2v 4 steps. frames must be 4n+1 and <= the segment length."
+    },
+    {
+      "id": "video-evolution-wan22-fun-vace",
+      "title": "Evolve a <=5 s segment: Wan 2.2 Fun VACE from the noised segment, depth control + a direction frame",
+      "capability": "v2v",
+      "file": "video-evolution-wan22-fun-vace.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-evolution-wan22-fun-vace.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "image": [
+          {
+            "node": "4",
+            "input": "image"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "12",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "13",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "3",
+            "input": "width"
+          },
+          {
+            "node": "5",
+            "input": "width"
+          },
+          {
+            "node": "9",
+            "input": "width"
+          },
+          {
+            "node": "15",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "3",
+            "input": "height"
+          },
+          {
+            "node": "5",
+            "input": "height"
+          },
+          {
+            "node": "9",
+            "input": "height"
+          },
+          {
+            "node": "15",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "30",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "1",
+            "input": "force_rate"
+          },
+          {
+            "node": "26",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "22",
+            "input": "noise_seed"
+          },
+          {
+            "node": "23",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "46",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "22",
+            "input": "cfg"
+          },
+          {
+            "node": "23",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "50",
+            "input": "value"
+          }
+        ],
+        "controlStrength": [
+          {
+            "node": "15",
+            "input": "strength"
+          }
+        ],
+        "denoise": [
+          {
+            "node": "45",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "27",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "27",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 832,
+        "height": 480,
+        "frames": 81,
+        "fps": 16,
+        "steps": 4,
+        "cfg": 1,
+        "denoise": 0.65,
+        "shift": 5,
+        "controlStrength": 1,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "dimensionMultiple": 16,
+        "maxFrames": 81
+      },
+      "models": [
+        {
+          "file": "depth_anything_3_mono_large.safetensors",
+          "folder": "geometry_estimation",
+          "url": "https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors",
+          "sizeGb": 1.34
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 17.35
+        },
+        {
+          "file": "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 17.35
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "sizeGb": 1.23
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+          "sizeGb": 1.23
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Wan 2.2 Fun VACE, lightx2v, Depth Anything 3 mono-large)",
+      "validated": true,
+      "notes": "Fuobe Evolution (build plan O13) on the GPU: video-segment-resample (<=81 frames @16 fps + first frame) -> qwen-image-edit-2511 takes the first frame toward the creative direction (images 2-3 = references) -> this graph -> video-concat-N -> the clip's sound. Any clip loads: VHS_LoadVideo resamples it to fps (16), keeps at most `frames` frames and cuts them to 4n+1 (Wan format), and every length in the graph is the loaded count, so a short or 30 fps clip is neither a shape error nor slow motion (Edit video sends whole clips). Unlike video-restyle-wan22-fun-vace the sampler starts from the segment itself: reference latent + VAE-encoded frames (LatentConcat on t, the shape WanVaceToVideo makes), noised to denoise = the noise level it starts from (flow matching: (1 - denoise) x clip + denoise x noise; low 0.45, medium 0.65, high 0.85). The simple scheduler with shift s reaches sigma = denoise N - steps steps into a schedule of N = round(steps x (s - (s - 1) x denoise) / denoise) steps, and the last `steps` run (Lightx2v 4-step), so the run starts within a few hundredths of any denoise from 0.02 to 1 (KSampler's floor(steps / denoise) could only make 1, 0.8, 0.67, 0.57 or 0.5 with 4 steps). Wan 2.2's high-noise expert takes only the steps at or above its switch point (sigma 0.875; ComfySwitchNode gives the first sampler the low-noise expert when the run starts below it, as all three intensities do). Control: Depth Anything 3 depth on every frame (no kept frame, no masks); the direction frame is the VACE reference. Same weights as the restyle graph."
     },
     {
       "id": "mixed-media-zimage-frames",

@@ -1,15 +1,36 @@
 import "server-only";
 import { nanoid } from "nanoid";
-import { framePrompt, heuristicScenes, MAX_FRAMES, parseScenes, SPLIT_SYSTEM, STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
+import { z } from "zod";
+import { heuristicScenes, MAX_FRAMES, parseScenes, planStoryboard, SPLIT_SYSTEM, STORYBOARD_PARTNER_IDS, type StoryboardLook, type StoryboardPartner } from "@/lib/catalog/storyboard";
+import { soulLook } from "@/lib/catalog/soul";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { storyboardName } from "@/lib/storyboard-board";
 import { supportsOp } from "@/lib/catalog";
 import { filmModel, joinClips } from "./chains";
 import { llmText } from "./enhance";
-import { createGenerations, listGenerations } from "./generations";
+import { createGenerations, listGenerations, previewChained } from "./generations";
+
+/** The body of POST /api/storyboards and /api/storyboards/estimate. */
+export const StoryboardBodySchema = z.object({
+  engine: z.enum(["cloud", "open"]),
+  /** A partner model for every frame instead of Fuobe's open recipe (cloud only): "nano-banana-pro". */
+  partner: z.enum(STORYBOARD_PARTNER_IDS).optional(),
+  scenes: z.array(z.string().max(1000)).max(8).optional(),
+  story: z.string().max(4000).optional(),
+  frames: z.number().int().min(1).max(8).optional(),
+  references: z.array(z.string().startsWith("/api/files/")).max(4).optional(),
+  style: z.string().max(500).optional(),
+  /** A Fuobe Soul look id ("v1-general"): frame 1 on Fuobe Soul, the look's grade on every frame. */
+  look: z.string().max(80).optional(),
+  lookStrength: z.number().min(0).max(1).optional(),
+  aspectRatio: z.string().max(10).optional(),
+  resolution: z.string().max(10).optional(),
+});
 
 export interface StoryboardRequest {
   engine: Engine;
+  /** A partner model for the whole board (cloud only); unset: Fuobe's open recipe (Qwen-Image-Edit + next-scene). */
+  partner?: StoryboardPartner;
   /** Manual: one prompt per frame. */
   scenes?: string[];
   /** Auto: one story, split into `frames`. */
@@ -17,6 +38,9 @@ export interface StoryboardRequest {
   frames?: number;
   references?: string[];
   style?: string;
+  /** A Fuobe Soul look for the board (build plan O13): frame 1 on Fuobe Soul, the look's grade on every frame. */
+  look?: string;
+  lookStrength?: number;
   aspectRatio?: string;
   resolution?: string;
 }
@@ -27,36 +51,47 @@ export async function splitStory(story: string, n: number): Promise<string[]> {
   return (text && parseScenes(text, n)) || heuristicScenes(story, n);
 }
 
+/** The look as the planner takes it (its words), or an error for an unknown one. */
+function boardLook(r: Pick<StoryboardRequest, "look" | "lookStrength">): StoryboardLook | undefined {
+  if (!r.look) return undefined;
+  const look = soulLook(r.look);
+  if (!look) throw new Error("That look doesn't exist — pick another one");
+  return { id: look.id, words: look.look, ...(r.lookStrength !== undefined && { strength: r.lookStrength }) };
+}
+
+/** What a board costs before it runs: each frame's price (frame 1 alone, the rest as chained steps), and whether it would be a demo. */
+export function estimateStoryboard(r: StoryboardRequest): { costUsd: number | null; demo: boolean; frames: number; models: string[] } {
+  const n = Math.max(1, Math.min(MAX_FRAMES, r.scenes?.filter((s) => s.trim()).length || r.frames || 4));
+  const scenes = Array.from({ length: n }, (_, i) => r.scenes?.[i]?.trim() || `scene ${i + 1}`);
+  const frames = planStoryboard({ engine: r.engine, partner: r.partner, scenes, references: r.references, style: r.style, look: boardLook(r), aspectRatio: r.aspectRatio, resolution: r.resolution });
+  let cost: number | null = 0;
+  let demo = false;
+  const models: string[] = [];
+  frames.forEach((f, i) => {
+    const p = previewChained(f, i ? 1 : 0);
+    demo ||= p.demo;
+    cost = cost === null || p.costUsd === null ? null : cost + p.costUsd;
+    if (!models.includes(p.model.name)) models.push(p.model.name);
+  });
+  return { costUsd: cost === null ? null : Math.round((cost as number) * 10000) / 10000, demo, frames: n, models };
+}
+
 export async function createStoryboard(r: StoryboardRequest): Promise<{ batchId: string; scenes: string[]; items: Generation[] }> {
   const n = Math.max(1, Math.min(MAX_FRAMES, r.scenes?.length || r.frames || 4));
+  const look = boardLook(r);
   const scenes = r.scenes?.length ? r.scenes.slice(0, MAX_FRAMES).map((s) => s.trim()).filter(Boolean) : await splitStory(r.story ?? "", n);
   if (!scenes.length) throw new Error("Describe the story or write at least one scene");
-  const refs = (r.references ?? []).slice(0, 4);
-  const m = STORYBOARD_MODELS[r.engine];
   const batchId = nanoid(10);
   // The board is named after the user's idea on every device (the Library's stack title too).
   const batchTitle = storyboardName(r.scenes?.length ? undefined : r.story, scenes);
-  const params = { aspectRatio: r.aspectRatio, resolution: r.resolution, numOutputs: 1 };
+  const frames = planStoryboard({ engine: r.engine, partner: r.partner, scenes, references: r.references, style: r.style, look, aspectRatio: r.aspectRatio, resolution: r.resolution, batchTitle });
   const items: Generation[] = [];
   let previous: string | undefined;
-  scenes.forEach((scene, i) => {
-    const first = i === 0;
-    // The open next-scene workflow takes the previous panel plus one character reference.
-    const frameRefs = first ? refs : m.chainFrom === "first" ? refs.slice(0, 1) : refs;
-    const request: GenerationRequest & { batchTitle?: string } = {
-      feature: "storyboard",
-      modelId: first ? (refs.length ? m.firstWithRefs : m.first) : m.next,
-      prompt: framePrompt(scene, i, { refs: frameRefs.length, chainFrom: m.chainFrom, style: r.style }),
-      inputs: frameRefs.length ? { images: frameRefs } : undefined,
-      params,
-      chainFrom: first ? undefined : m.chainFrom,
-      frame: { scene, index: i, of: scenes.length },
-      batchTitle,
-    };
+  for (const request of frames) {
     const [g] = createGenerations(request, { batchId, dependsOn: previous });
     items.push(g);
     previous = g.id;
-  });
+  }
   return { batchId, scenes, items };
 }
 
@@ -75,7 +110,8 @@ export function createStoryboardFilm(batchId: string, opts: { modelId?: string }
   const filmBatch = `${batchId}-film`;
   // Boards made before the server stored a name fall back to the first scene.
   const batchTitle = (frames[0].request as { batchTitle?: string }).batchTitle?.trim() || frames[0].request.frame?.scene || "Storyboard film";
-  const aspectRatio = frames[0].request.params?.aspectRatio;
+  // A 21:9 board in a look is made at 16:9 and cropped after (frame.crop): its film is 21:9, like its frames.
+  const aspectRatio = frames[0].request.frame?.crop ?? frames[0].request.params?.aspectRatio;
   const n = frames.length;
   const clips = frames.map((f, i) => {
     const next = flf ? frames[i + 1] : undefined;

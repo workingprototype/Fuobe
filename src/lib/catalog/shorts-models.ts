@@ -1,60 +1,56 @@
 /**
  * What the Shorts Studio and Mixed Media restyle models can take, read from their routes (field
  * maps), and slim rows for the pages. Uses the full catalog, so it runs on the server (pages and
- * src/server/shorts.ts, src/server/mixed-media.ts); the browser gets the rows.
+ * src/server/shorts.ts, src/server/mixed-media.ts); the browser gets the rows. A Fuobe Original runs on
+ * both engines: each answer is for the engine asked about (its default engine when none is named).
  */
+import { sourceSeconds } from "./clip-windows";
+import { onEngine } from "./engines";
 import { getModel } from "./index";
 import { routesFor } from "./plan";
-import { SHORTS } from "./shorts";
+import { SHORTS, SHORTS_ORIGINAL } from "./shorts";
 import type { Engine, ModelDef } from "./types";
 
-/** How many reference images a restyle model takes on every route (0: it restyles from words only). */
-export function maxRefsFor(modelId: string): number {
+/** The model as it runs on `engine` (an Original keeps that engine's routes only). */
+function view(modelId: string, engine?: Engine): ModelDef | undefined {
   const m = getModel(modelId);
+  return m && engine ? onEngine(m, engine) : m;
+}
+
+/** How many reference images a restyle model takes on every route (0: it restyles from words only). */
+export function maxRefsFor(modelId: string, engine?: Engine): number {
+  const m = view(modelId, engine);
   if (!m) return 0;
-  if (m.engine === "open") return SHORTS.openReferences;
+  // The open chain and Fuobe Shorts (both engines) send them to the first frame's edit, as images 2 and 3.
+  if (m.engine === "open" || modelId === SHORTS_ORIGINAL) return SHORTS.openReferences;
   const routes = routesFor(m, "v2v");
   if (!routes.length || !routes.every((r) => r.map?.images)) return 0;
   return Math.min(SHORTS.maxReferences, m.options.maxImages ?? 4);
 }
 
 /** Whether every v2v route of a cloud model reads an image (LTX: the first frame; Kling, Happy Horse: references). */
-export function takesImage(modelId: string): boolean {
-  const m = getModel(modelId);
+export function takesImage(modelId: string, engine?: Engine): boolean {
+  const m = view(modelId, engine);
   if (!m || m.engine !== "cloud") return false;
   const routes = routesFor(m, "v2v");
   return routes.length > 0 && routes.every((r) => r.map?.image || r.map?.images);
 }
 
 /** Whether every v2v route can be asked for an aspect ratio (else the output keeps the clip's shape). */
-export function reframes(modelId: string): boolean {
-  const m = getModel(modelId);
+export function reframes(modelId: string, engine?: Engine): boolean {
+  const m = view(modelId, engine);
   if (!m) return false;
   if (m.engine === "open") return true;
   const routes = routesFor(m, "v2v");
   return routes.length > 0 && routes.every((r) => r.map?.aspectRatio);
 }
 
-/**
- * How long a clip each restyle model takes (docs/research/paid-model-apis-3.md, "Input windows"):
- * a cut outside it is paid for and then refused by the provider.
- */
-const SOURCE_SECONDS: Record<string, { min?: number; max?: number }> = {
-  "kling-o3-4k-edit": { min: 3, max: 15 },
-  "happy-horse-video-edit": { min: 3, max: 60 },
-  "runway-aleph-2": { min: 2, max: 30 },
-  "wan-2-7": { min: 2, max: 10 },
-  // Higgsfield feeds Gemini Omni Flash ≤10 s segments.
-  "gemini-omni-flash": { max: 10 },
-};
-
-export function sourceSeconds(modelId: string): { min?: number; max?: number } {
-  return SOURCE_SECONDS[modelId] ?? {};
-}
+/** How long a clip each restyle model takes (./clip-windows): a cut outside it is paid for and then refused by the provider. */
+export { sourceSeconds };
 
 /** The cloud model's 720p setting, when it has one (Higgsfield renders Shorts at 720p). */
-export function resolutionFor(modelId: string): string | undefined {
-  const m = getModel(modelId);
+export function resolutionFor(modelId: string, engine?: Engine): string | undefined {
+  const m = view(modelId, engine);
   return m?.engine === "cloud" && m.options.resolutions?.includes("720p") ? "720p" : undefined;
 }
 
@@ -77,14 +73,20 @@ export interface RestyleModelInfo {
   maxSeconds?: number;
 }
 
-/** What one unit costs at the resolution the studios ask for, counting input seconds when the model bills them. */
+/**
+ * What one unit costs at the resolution the studios ask for. Fuobe Shorts in the cloud bills frames ÷ 16 as seconds:
+ * a second of a 30 fps clip, the common case, is shown.
+ */
 export function unitPrice(m: ModelDef): number | null {
   const p = m.pricing;
   if (!p) return null;
-  const res = resolutionFor(m.id) ?? m.defaults?.resolution;
+  const res = resolutionFor(m.id, m.engine) ?? m.defaults?.resolution;
   const usd = (res && p.byResolution?.[res]) || p.usd;
-  return p.unit === "second" && p.inputSeconds ? usd * 2 : usd;
+  if (m.id === SHORTS_ORIGINAL && p.unit === "second") return (usd * SHORTS.original.maxFps) / SHORTS.original.billFps;
+  return usd;
 }
+
+const UNIT: Record<string, string> = { second: "s", megapixel: "MP" };
 
 function priceLine(m: ModelDef): string | null {
   if (m.engine === "open") return "Free · your GPU";
@@ -92,14 +94,15 @@ function priceLine(m: ModelDef): string | null {
   const v = unitPrice(m);
   if (!p || v === null) return null;
   const usd = v < 0.1 ? v.toFixed(3).replace(/0$/, "") : v.toFixed(2);
-  return `$${usd} / ${p.unit === "second" ? "s" : p.unit}`;
+  return `$${usd} / ${UNIT[p.unit] ?? p.unit}${m.id === SHORTS_ORIGINAL ? " at 30 fps" : ""}`;
 }
 
-/** Slim model rows for a studio page (so the browser needs no catalog). */
-export function modelInfos(ids: string[]): RestyleModelInfo[] {
+/** Slim model rows for a studio page (so the browser needs no catalog), as each runs on `engine`. */
+export function modelInfos(ids: string[], engine?: Engine): RestyleModelInfo[] {
   return ids.flatMap((id) => {
-    const m = getModel(id);
-    if (!m) return [];
+    const found = getModel(id);
+    if (!found) return [];
+    const m = engine ? onEngine(found, engine) : found;
     return [
       {
         id,
@@ -107,9 +110,9 @@ export function modelInfos(ids: string[]): RestyleModelInfo[] {
         vendor: m.vendor,
         tagline: m.tagline,
         engine: m.engine,
-        refs: maxRefsFor(id),
-        image: takesImage(id),
-        reframes: reframes(id),
+        refs: maxRefsFor(id, m.engine),
+        image: takesImage(id, m.engine),
+        reframes: reframes(id, m.engine),
         price: priceLine(m),
         ...(m.options.resolutions ? { resolutions: m.options.resolutions } : {}),
         ...(sourceSeconds(id).min ? { minSeconds: sourceSeconds(id).min } : {}),

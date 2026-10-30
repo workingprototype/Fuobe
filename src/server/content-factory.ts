@@ -436,7 +436,7 @@ async function writeBrief(id: string): Promise<void> {
         : `The clip couldn't be read (${framesGen?.error ?? wordsGen?.error ?? "no frames or words came back"}). This brief comes from its shape and length — read it again to retry.`;
     } else if (!llmTextBackend()) {
       offline = true;
-      note = "No LLM is connected (Settings → AI helper), so this brief comes from the clip's shape, length and narration pace.";
+      note = "No LLM is connected (Settings → Prompt enhancement), so this brief comes from the clip's shape, length and narration pace.";
     } else {
       const transcript = cues.map((c) => `[${mmss(c.start)}] ${c.text.trim()}`).join("\n");
       const user = briefRequest({ seconds: ref.seconds, width: ref.width, height: ref.height, frames: frames.length, transcript, title: ref.title });

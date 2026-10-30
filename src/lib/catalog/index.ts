@@ -27,12 +27,15 @@ function withOssLoras(p: Preset): Preset {
   };
 }
 
-/** A relight effect's step before the clip, priced on its model (a 1-megapixel picture; free on the user's GPU). */
+/**
+ * A relight or Mixed Media effect's step before the clip, priced on its model as it runs in the cloud (a 1-megapixel
+ * picture; free on the user's GPU).
+ */
 function withPrestepPrice(p: Preset): Preset {
   if (!p.prestep) return p;
   const price = (s: NonNullable<Preset["prestep"]>["open"]) => {
     const m = modelIndex.get(s.modelId);
-    return m ? (estimateCost(m, { aspectRatio: "1:1", resolution: "1K", numOutputs: 1 }, 1, s.op, !!s.loras?.length) ?? undefined) : undefined;
+    return m ? (estimateCost(onEngine(m, "cloud"), { aspectRatio: "1:1", resolution: "1K", numOutputs: 1 }, 1, s.op, !!s.loras?.length) ?? undefined) : undefined;
   };
   return { ...p, prestep: { open: { ...p.prestep.open, usd: 0 }, cloud: { ...p.prestep.cloud, usd: price(p.prestep.cloud) } } };
 }

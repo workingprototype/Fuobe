@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildPayload, extractOutputs } from "@/lib/catalog/payload";
 import { getModel, getPreset } from "@/lib/catalog";
 import { planGeneration } from "@/lib/catalog/plan";
+import { onEngine } from "@/lib/catalog/engines";
 import { BURN_CAPS, burnPricePerMinute, burnRequest, burnRouteFor, CAPTION_STYLES, lookFor, nearestColorName, OPEN_FONT_SIZE, previewText, styleById, usesCues, type CaptionLook } from "@/lib/av/captions";
 import { animateSpinHref, model3dRequest, model3dView, MODELS_3D } from "@/lib/av/model3d";
 import { frameParams, frameRequest } from "@/lib/av/frames";
@@ -157,12 +158,14 @@ describe("extract frame on both engines", () => {
 
 describe("apps on the new models", () => {
   // Every app this package routes runs with only its inputs on both engines: no note needed, the pinned model, its settings.
-  const ids = ["app-virtual-try-on", "app-angles", "app-product-shot", "app-image-to-3d", "app-hook-frame"];
+  const ids = ["app-virtual-try-on", "app-angles", "app-fuobe-angles", "app-product-shot", "app-image-to-3d", "app-hook-frame"];
   const plan = (id: string, engine: "cloud" | "open", presetOptions?: Record<string, string>) => {
     const preset = getPreset(id)!;
     const route = engine === "cloud" ? preset.cloud! : preset.open!;
     const images = (preset.inputs ?? []).filter((s) => s.accept === "image").map((_, i) => `/api/files/in${i}.png`);
-    return planGeneration({ feature: `app:${id}`, presetId: id, modelId: route.modelId, inputs: { images }, presetOptions }, getModel, getPreset);
+    // An Original (Fuobe Angles) plans as it runs on the engine asked for.
+    const lookup = (m: string) => (getModel(m)?.engines ? onEngine(getModel(m)!, engine) : getModel(m));
+    return planGeneration({ feature: `app:${id}`, presetId: id, modelId: route.modelId, inputs: { images }, presetOptions }, lookup, getPreset);
   };
 
   it.each(ids.flatMap((id) => [[id, "cloud"] as const, [id, "open"] as const]))("%s plans on %s without a prompt", (id, engine) => {
@@ -186,6 +189,16 @@ describe("apps on the new models", () => {
     expect(cloud.prompt.length).toBeGreaterThan(0);
     const open = plan("app-angles", "open", choice);
     expect(open.prompt).toMatch(/^<sks> back-left quarter view high-angle shot close-up/);
+    expect(open.loras[0]?.file).toMatch(/multiple-angles/);
+  });
+
+  it("Fuobe Angles: the choices set the camera fields on the cloud and the LoRA's words on the open engine (O11)", () => {
+    const choice = { rotate: "45-right", height: "from-above", distance: "close-up" };
+    const cloud = plan("app-fuobe-angles", "cloud", choice);
+    expect(cloud.model.id).toBe("fuobe-angles");
+    expect(cloud.params.extra).toMatchObject({ rotate_right_left: -45, vertical_angle: -1, move_forward: 10 });
+    const open = plan("app-fuobe-angles", "open", choice);
+    expect(open.prompt).toMatch(/^将镜头向右旋转45度 Rotate the camera 45 degrees to the right\. .*Turn the camera to a close-up\. .*bird's-eye view\.$/);
     expect(open.loras[0]?.file).toMatch(/multiple-angles/);
   });
 

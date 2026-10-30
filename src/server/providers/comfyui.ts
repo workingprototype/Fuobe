@@ -1,8 +1,6 @@
 import "server-only";
 import fs from "node:fs";
-import net from "node:net";
 import path from "node:path";
-import { Worker } from "node:worker_threads";
 import { tracksFor, type MotionPaths } from "@/lib/motion-paths";
 import { nanoid } from "nanoid";
 import {
@@ -59,6 +57,7 @@ import { probeAvi } from "../avi-probe";
 import { probeWebm } from "../webm-probe";
 import { adoptFile, readRef, scratchDir } from "../storage";
 import { zipToFile } from "../zip";
+import { ask, checkReach, reachSync, sharedCheck, type Reach } from "./reach";
 import { ProviderError, type ProviderAdapter, type RemoteOutput } from "./types";
 
 export const WORKFLOW_DIR = path.join(process.cwd(), "workflows", "comfyui");
@@ -414,86 +413,32 @@ async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promi
 }
 
 // ---------------------------------------------------------------------------
-// Reachability. Routing (chooseRoute) is synchronous, so the first check for a server URL is a blocking probe
-// (a worker thread does the fetch); after that the cached result is refreshed in the background every 10 s.
-// A server that refuses the connection (or a name that doesn't resolve) is down at once. One that doesn't answer
-// GET /system_stats in time may only be busy: a CPU ComfyUI working on a job can take seconds to. So a late answer
-// keeps the server reachable when it answered lately. When it didn't, and its port takes a connection, it gets one
-// longer look (none again for a while once one goes unanswered): reachable if it answers then. A port that takes the
-// connection isn't enough on its own: an ssh tunnel or a proxy whose ComfyUI is gone (or a hung ComfyUI) takes it too.
+// Reachability: GET /system_stats by the busy-vs-down rules in ./reach (a late answer is busy when the server
+// answered lately; else the longer look when its port takes a connection). A busy server keeps the RAM it last said.
 
 declare global {
   /** Reachability of the ComfyUI server, its RAM (bytes) when /system_stats said, when it last answered, and when a longer look last went unanswered. */
-  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number; seen?: number; silent?: number } | undefined;
-  /** The check under way: callers in the meantime share its answer. */
-  var __fuobeComfyProbe: { url: string; done: Promise<boolean> } | undefined;
-}
-
-/**
- * How long a check waits for /system_stats, then for the port to take a connection, then for the longer look; how long
- * an answer (or an unanswered longer look) counts as recent.
- */
-export const REACH = { answerMs: 2000, connectMs: 3000, lookMs: 10_000, answeredLatelyMs: 2 * 60_000 };
-
-/** Host and port of a server address, for the connection check (undefined when it isn't a URL). */
-function hostPort(url: string): { host: string; port: number } | undefined {
-  try {
-    const u = new URL(url);
-    return { host: u.hostname.replace(/^\[|\]$/g, ""), port: Number(u.port) || (u.protocol === "https:" ? 443 : 80) };
-  } catch {
-    return undefined;
-  }
-}
-
-/** Whether the server's port takes a TCP connection within `timeoutMs` (a refusal says no at once). */
-function takesConnection(url: string, timeoutMs: number): Promise<boolean> {
-  const at = hostPort(url);
-  if (!at) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    const socket = net.connect(at);
-    const done = (ok: boolean) => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(ok);
-    };
-    const timer = setTimeout(() => done(false), timeoutMs);
-    socket.once("connect", () => done(true)).once("error", () => done(false));
-  });
+  var __fuobeComfyReach: (Reach & { ram?: number }) | undefined;
 }
 
 /** What GET /system_stats got: an answer (with the RAM it says), a no (an HTTP error, a refused connection), or nothing in time. */
-async function askComfy(url: string, timeoutMs = REACH.answerMs): Promise<{ answer: "yes"; ram?: number } | { answer: "no" | "late" }> {
-  try {
-    const r = await fetch(`${url}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(timeoutMs) });
-    if (!r.ok) return { answer: "no" };
-    const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
-    return { answer: "yes", ...(typeof total === "number" && total > 0 ? { ram: total } : {}) };
-  } catch (e) {
-    return { answer: (e as Error)?.name === "TimeoutError" ? "late" : "no" };
-  }
+function askComfy(url: string, timeoutMs: number) {
+  return ask<number>(`${url}/system_stats`, timeoutMs, {
+    headers: authHeaders(),
+    read: async (r) => {
+      const total = ((await r.json()) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
+      return typeof total === "number" && total > 0 ? total : undefined;
+    },
+  });
 }
 
 async function checkComfy(url: string): Promise<boolean> {
-  let asked = await askComfy(url);
   const prev = globalThis.__fuobeComfyReach?.url === url ? globalThis.__fuobeComfyReach : undefined;
-  const lately = (t?: number) => !!t && Date.now() - t < REACH.answeredLatelyMs;
-  // Late is busy, not down, when it answered lately. Otherwise it gets the longer look, when its port takes a
-  // connection and no longer look went unanswered lately (a silent server isn't waited on at every check).
-  const busy = asked.answer === "late" && lately(prev?.seen);
-  let silent = prev?.silent;
-  if (asked.answer === "late" && !busy && !lately(silent) && (await takesConnection(url, REACH.connectMs))) {
-    asked = await askComfy(url, REACH.lookMs);
-    if (asked.answer !== "yes") silent = Date.now();
-  }
-  const at = Date.now();
-  // A busy server keeps the RAM and the time of its last answer; a down one, when it last went silent.
-  const ram = asked.answer === "yes" ? (asked.ram ?? prev?.ram) : prev?.ram;
-  const seen = asked.answer === "yes" ? at : prev?.seen;
-  const ok = asked.answer === "yes" || busy;
-  const reach = ok ? { ok, at, url, ...(ram ? { ram } : {}), ...(seen ? { seen } : {}) } : { ok, at, url, ...(silent ? { silent } : {}) };
+  const { reach, asked } = await checkReach(url, prev, (ms) => askComfy(url, ms));
+  const ram = (asked.answer === "yes" ? asked.value : undefined) ?? prev?.ram;
   // The address may have changed while this ran: the new one's check speaks for it.
-  if (url === baseUrl()) globalThis.__fuobeComfyReach = reach;
-  return ok;
+  if (url === baseUrl()) globalThis.__fuobeComfyReach = reach.ok && ram ? { ...reach, ram } : reach;
+  return reach.ok;
 }
 
 /** Is the ComfyUI server reachable? Cached for 10 s (`force` checks now); one check runs at a time. */
@@ -501,13 +446,7 @@ export async function probeComfy(force = false): Promise<boolean> {
   const url = baseUrl();
   const cur = globalThis.__fuobeComfyReach;
   if (!force && cur && cur.url === url && Date.now() - cur.at < 10_000) return cur.ok;
-  const running = globalThis.__fuobeComfyProbe;
-  if (running?.url === url) return running.done;
-  const done: Promise<boolean> = checkComfy(url).finally(() => {
-    if (globalThis.__fuobeComfyProbe?.done === done) globalThis.__fuobeComfyProbe = undefined;
-  });
-  globalThis.__fuobeComfyProbe = { url, done };
-  return done;
+  return sharedCheck("comfy", url, () => checkComfy(url));
 }
 
 /** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
@@ -516,41 +455,17 @@ export function comfyRam(): number | undefined {
   return cur?.ok && cur.url === baseUrl() ? cur.ram : undefined;
 }
 
-// flag[0]: the answer (1 yes, 2 no or refused, 3 none in time); flag[1]: 1 once the port took the connection.
-const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
-const flag = new Int32Array(workerData.sab);
-if (workerData.at) {
-  const socket = require("node:net").connect(workerData.at);
-  socket.once("connect", () => (Atomics.store(flag, 1, 1), socket.destroy())).once("error", () => {});
-}
-fetch(workerData.url, { headers: workerData.headers, signal: AbortSignal.timeout(workerData.timeout) })
-  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), (e) => Atomics.store(flag, 0, e && e.name === "TimeoutError" ? 3 : 2))
-  .finally(() => Atomics.notify(flag, 0));`;
-
 /**
- * Blocking reachability check: a few ms for a server that answers or a refused port, at most `timeoutMs` otherwise.
- * A server that takes the connection but doesn't answer in time is taken as busy, so reachable, for now; one that
- * doesn't even take it as unreachable. Either way the unhurried check (probeComfy) goes on in the background to say
- * for sure.
+ * Blocking reachability check (reachSync): a few ms for a server that answers or a refused port, at most `timeoutMs`
+ * otherwise; a server that takes the connection but doesn't answer in time is busy for now, and probeComfy goes on in
+ * the background to say for sure.
  */
 export function probeComfySync(timeoutMs = 1500): boolean {
   const url = baseUrl();
-  let answer = 0;
-  let connected = false;
-  try {
-    const sab = new SharedArrayBuffer(8);
-    const flag = new Int32Array(sab);
-    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/system_stats`, at: hostPort(url), headers: authHeaders(), timeout: timeoutMs } });
-    Atomics.wait(flag, 0, 0, timeoutMs + 1000);
-    answer = Atomics.load(flag, 0);
-    connected = Atomics.load(flag, 1) === 1;
-    void worker.terminate();
-  } catch {}
-  const at = Date.now();
-  const ok = answer === 1 || (answer !== 2 && connected);
-  globalThis.__fuobeComfyReach = { ok, at, url, ...(answer === 1 ? { seen: at } : {}) };
-  if (answer !== 1 && answer !== 2) void probeComfy(true).catch(() => false);
-  return ok;
+  const { reach, sure } = reachSync(url, `${url}/system_stats`, timeoutMs, authHeaders());
+  globalThis.__fuobeComfyReach = reach;
+  if (!sure) void probeComfy(true).catch(() => false);
+  return reach.ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +513,12 @@ export function mediaInfoFor(name: unknown): MediaInfo | undefined {
  * runs there (Fuobe DoP on Wan 2.2 14B, Fuobe Cinema on its Lightning graph).
  */
 const CAMERA_POSE_GRAPH: Record<string, string> = { "wan22-i2v-14b": "wan22-fun-camera-14b", "wan22-i2v-14b-lightx2v": "wan22-fun-camera-14b" };
+
+/**
+ * Fuobe Marketing Image's Standalone product shot (params.extra.productShot with one product photo) runs the product-shot
+ * graph: the product cut out with BiRefNet, put on white and relit into the scene (Qwen-Image-Edit 2509 + White_to_Scene).
+ */
+const PRODUCT_SHOT_GRAPH: Record<string, string> = { "qwen-image-edit-2511-multi": "product-shot-qwen-edit-2509" };
 
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
 const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {
@@ -674,6 +595,11 @@ export interface PrepareContext {
   media?: (name: string) => MediaInfo | undefined;
   /** The ComfyUI server's RAM in bytes, for graphs that hold a whole clip in memory. */
   serverRam?: () => Promise<number | undefined>;
+  /**
+   * The route puts the run's one LoRA in the graph's own LoRA slot (ModelRoute.loraSlot: Fuobe Speak's FusioniX on kijai's
+   * InfiniteTalk graph, with the settings it goes with). Without it a graph with no model loader refuses a LoRA.
+   */
+  loraSlot?: boolean;
 }
 
 export interface PreparedPrompt {
@@ -809,6 +735,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // in is injected on its experts as on the plain image-to-video graph.
   const posed = CAMERA_POSE_GRAPH[endpoint];
   if (posed && typeof extra.cameraMotion === "string" && extra.cameraMotion) endpoint = posed;
+  const shot = PRODUCT_SHOT_GRAPH[endpoint];
+  if (shot && extra.productShot === true && (input.images?.length ?? 0) === 1 && loadManifest().workflows.some((w) => w.id === shot)) endpoint = shot;
+  delete extra.productShot;
 
   const { manifest, workflow } = getWorkflow(endpoint);
   const d = manifest.defaults;
@@ -916,14 +845,19 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     Object.assign(values, { width: clip.width, height: clip.height, fps: Math.round(clip.fps * 1000) / 1000 });
   }
   if (b.frames && span) values.frames = computeFrames(span, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
-  // Lip re-sync runs as long as the new voice; a voice past the frame cap is refused, not cut.
-  const voiceLength = ctx.op === "lipsync" && b.frames && !span ? ctx.media?.(String(values.audio ?? ""))?.duration : undefined;
+  // Lip re-sync and a talking avatar run as long as the voice (its header, or the length the run was given); a voice past
+  // the frame cap is refused, not cut.
+  const voiceLength =
+    (ctx.op === "lipsync" || ctx.op === "avatar") && b.frames && !span
+      ? (ctx.op === "avatar" && input.sourceDuration && input.sourceDuration > 0 ? input.sourceDuration : ctx.media?.(String(values.audio ?? ""))?.duration)
+      : undefined;
   if (voiceLength) {
     const step = Number(d.frameStep ?? 4);
     const frames = Math.ceil((voiceLength * fps) / step) * step + 1;
     const cap = Number(manifest.limits?.maxFrames ?? 0);
     if (cap && frames > cap) {
-      throw new ProviderError(`Lip re-sync on the open engine takes up to ${seconds(cap / fps)} s of speech per job (this voice is ${seconds(voiceLength)} s) — split it into shorter parts`);
+      const what = ctx.op === "avatar" ? "A talking avatar" : "Lip re-sync";
+      throw new ProviderError(`${what} on the open engine takes up to ${seconds(cap / fps)} s of speech per job (this voice is ${seconds(voiceLength)} s) — split it into shorter parts`);
     }
     values.frames = frames;
   }
@@ -1125,6 +1059,17 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     else if (want !== "gray") throw new ProviderError(b.colormap ? "The open engine's depth maps come in grayscale or inferno — turbo, magma and viridis are on the cloud" : "This depth model makes grayscale maps only — pick Video Depth Anything for inferno");
   }
   if (b.sideBySide && input.sideBySide !== undefined) values.sideBySide = input.sideBySide;
+  // A wrapper graph that loads its LoRA itself (kijai's InfiniteTalk: WanVideoLoraSelect, no core model loader to attach
+  // one after) takes the run's LoRA there on a route made for it: Fuobe Speak's FusioniX in place of the graph's lightx2v,
+  // with the steps and guidance it needs. One at most. Other routes on the graph (InfiniteTalk Long, tuned for lightx2v)
+  // refuse a LoRA below.
+  let loras = input.loras ?? [];
+  if (loras.length && b.lora && ctx.loraSlot && !canTakeLoras(workflow)) {
+    if (loras.length > 1) throw new ProviderError(`${manifest.title} takes one LoRA (it loads it itself): ${loras.map((l) => l.file).join(", ")}`);
+    values.lora = loras[0].file;
+    values.loraStrength = loras[0].strength ?? 1;
+    loras = [];
+  }
   // Matte graphs save a cut-out and a black-and-white matte: params.matteOutput keeps one.
   const keepRole: string | undefined = ctx.op === "bg-remove-video" ? input.matteOutput : undefined;
 
@@ -1249,10 +1194,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   } catch (e) {
     throw new ProviderError((e as Error).message);
   }
-  if (input.loras?.length) {
+  if (loras.length) {
     // A LoRA a graph can't attach would be dropped without a word: say so instead.
     if (!canTakeLoras(wf)) throw new ProviderError(`${manifest.title} can't take LoRAs (it has no model loader to attach them to)`);
-    wf = injectLoras(wf, input.loras);
+    wf = injectLoras(wf, loras);
   }
   // The output not asked for isn't saved (nor encoded: ComfyUI runs only what an output node needs).
   if (keepRole && manifest.outputs.some((o) => o.role === keepRole)) for (const o of manifest.outputs) if (o.role && o.role !== keepRole) delete wf[o.node];
@@ -1407,9 +1352,12 @@ export const comfyProvider: ProviderAdapter = {
 
   async submit({ route, input, generationId }) {
     const worker = workerFor(route.endpoint);
-    const { manifest, workflow: wf, meta } = await prepareWorkflow(route.endpoint, input, {
+    // A route's own graph settings (Fuobe Speak's InfiniteTalk recipe) go in unless the run sets them.
+    const asked = route.extra ? { ...input, extra: { ...route.extra, ...input.extra } } : input;
+    const { manifest, workflow: wf, meta } = await prepareWorkflow(route.endpoint, asked, {
       generationId,
       op: route.op,
+      loraSlot: route.loraSlot === true,
       upload: (data, contentType, name) => uploadTo(worker, data, contentType, name),
       media: mediaInfoFor,
       serverRam: async () => (await comfyJson<{ system?: { ram_total?: number } }>("/system_stats", worker).catch(() => undefined))?.system?.ram_total,

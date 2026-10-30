@@ -157,11 +157,25 @@ export function offeredRoutes(m: ModelDef, routes: ModelRoute[]): ModelRoute[] {
   return on;
 }
 
-/** Whether a model id is offered (an unknown id is not). */
+/**
+ * A LoRA the model's recipe can't run without (Fuobe Try-On's try-on LoRA, ModelOptions.loras) that Settings switches
+ * off (by file or licence class): the model is on, but a run of it is refused naming that LoRA.
+ */
+export function recipeLoraOff(m: Pick<ModelDef, "options">): LoraRef | undefined {
+  const loras = m.options.loras;
+  if (!loras?.length) return undefined;
+  const { dropped } = offeredLoras(loras);
+  return loras.find((l) => dropped.some((d) => d.file === l.file));
+}
+
+/**
+ * Whether a model id is offered (an unknown id is not): its switch and routes, and the LoRAs its recipe can't run
+ * without, so a studio's picker and its server-side default move on to the next model.
+ */
 export function isOffered(id: string | undefined, engine?: Engine): boolean {
   const m = id ? MODELS.find((x) => x.id === id) : undefined;
   const view = m && offeredModel(m);
-  return !!view && (!engine || !m!.engines || (view.engines ?? [view.engine]).includes(engine));
+  return !!view && !recipeLoraOff(m!) && (!engine || !m!.engines || (view.engines ?? [view.engine]).includes(engine));
 }
 
 /**
@@ -186,9 +200,14 @@ export function offeredDefault(id: string | undefined, engine: Engine): string |
   return next?.id ?? id;
 }
 
-/** The summary the browser filters its pickers with (undefined while everything is on). */
+/**
+ * The summary the browser filters its pickers with (undefined while everything is on). A model whose recipe LoRA is
+ * switched off counts as off there too (isOffered).
+ */
 export function offeredSummary(): AccessSummary | undefined {
-  return summarize(MODELS, readAccess(), factsOf);
+  const summary = summarize(MODELS, readAccess(), factsOf);
+  const blocked = MODELS.filter((m) => recipeLoraOff(m) && !summary?.off.includes(m.id)).map((m) => m.id);
+  return blocked.length ? { ...summary, off: [...(summary?.off ?? []), ...blocked] } : summary;
 }
 
 // ---------------------------------------------------------------------------

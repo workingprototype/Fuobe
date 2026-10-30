@@ -23,6 +23,7 @@ import {
   photoTips,
   SOUL_ID_COPY,
   TRAINING_FAMILIES,
+  trainingSettingsHref,
   triggerFor,
   usableOn,
   type TrainingFamily,
@@ -201,7 +202,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                   <p className="mt-2 text-[12px] text-muted-foreground">
                     {t.blocker ??
                       `${t.provider === "fal" ? "No fal.ai key yet" : "No AI-Toolkit set up yet"}: this runs as a demo and trains nothing${hasFamily(f) ? ", and the Soul ID you trained stays" : ""}.`}{" "}
-                    <Link href="/settings" className="text-brand-text underline underline-offset-2">
+                    <Link href={trainingSettingsHref(t)} className="text-brand-text underline underline-offset-2">
                       Open Settings
                     </Link>
                   </p>

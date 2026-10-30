@@ -7,6 +7,7 @@ import type { Manifest } from "@/lib/comfy";
 import { planGeneration } from "@/lib/catalog/plan";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { resample, tracksFor } from "@/lib/motion-paths";
+import { ANGLES_FIELDS, ANGLES_ORIGINAL } from "@/lib/catalog/open-tools";
 
 describe("motion paths (Wan-Move draw to video)", () => {
   it("resamples a path to evenly spaced points, one per frame", () => {
@@ -124,7 +125,8 @@ describe("round-3 open models", () => {
         for (const wid of ids) {
           const keys = Object.keys(workflowById.get(wid)?.bindings ?? {});
           for (const p of [...(m.options.sliders ?? []), ...(m.options.controls ?? [])].map((s) => s.param)) {
-            if (!PROVIDER_PARAMS.has(p) && p !== "cameraMotion") expect(keys, `${m.id} → ${wid}: ${p}`).toContain(p);
+            // Fuobe Angles' camera fields become the Multiple-angles LoRA's words in the planner (src/lib/catalog/open-tools.ts).
+            if (!PROVIDER_PARAMS.has(p) && p !== "cameraMotion" && !(m.id === ANGLES_ORIGINAL && (ANGLES_FIELDS as readonly string[]).includes(p))) expect(keys, `${m.id} → ${wid}: ${p}`).toContain(p);
           }
         }
       }
@@ -186,6 +188,9 @@ describe("round-3 open models", () => {
     expect(p.open).toMatchObject({ modelId: "oss-tryon-klein", op: "edit" });
     expect(p.parity).toMatch(/try-on LoRA/);
     const plan = planGeneration({ feature: "app", presetId: p.id, modelId: "oss-tryon-klein", inputs: { images: ["/me.png", "/dress.png"] } }, getModel, getPreset);
-    expect(plan.prompt).toMatch(/^A full-body photo of a person/);
+    // The LoRA's trigger leads the words (the graph's own prefix would add it too), and the run carries the LoRA so
+    // Settings → Models & licences can switch it off; the graph doesn't load it twice (injectLoras).
+    expect(plan.prompt).toMatch(/^TRYON A full-body photo of a person/);
+    expect(plan.loras.map((l) => l.file)).toEqual(["tryon-klein-4b.safetensors"]);
   });
 });

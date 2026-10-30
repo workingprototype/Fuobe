@@ -3,9 +3,10 @@ import { nanoid } from "nanoid";
 import { getModel, supportsOp } from "@/lib/catalog";
 import { MODEL3D_STEP_FEATURE, stillPromptFor3d } from "@/lib/av/model3d";
 import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
-import { onEngine } from "@/lib/catalog/engines";
+import { faceMosaicStep } from "@/lib/catalog/open-tools";
+import { dualEngine, onEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
-import type { ChainSlot, Engine, Generation, GenerationRequest, LoraRef, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
+import type { ChainSlot, Engine, GenParams, Generation, GenerationRequest, LoraRef, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
 import { db } from "./db";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained, previewGeneration } from "./generations";
 import { provider } from "./providers";
@@ -52,6 +53,22 @@ export function assertOneMode(steps: ModeStep[]): void {
   }
 }
 
+/**
+ * Keep the request as it was asked on the row an expansion returns first (GenerationRequest.asked): a skill made from
+ * the result (src/server/recipe-builder.ts) rebuilds that one request, not the rows it expanded into, whose number
+ * changes with the input (a film of 3 shots is 4 rows, of 5 shots 6).
+ */
+function withAsked(made: Generation[], asked: GenerationRequest, engine: Engine): Generation[] {
+  const [first, ...rest] = made;
+  if (!first) return made;
+  // A Fuobe Original keeps the engine it ran on, as a plain row's request does (createGenerations).
+  const request = { ...asked, ...(dualEngine(getModel(asked.modelId)) && { engine }) };
+  for (const k of ["asked", "chainFilled", "chainSkipped", "notice"] as const) delete request[k];
+  const stored: GenerationRequest = { ...first.request, asked: request };
+  db().prepare("UPDATE generations SET request_json = ? WHERE id = ?").run(JSON.stringify(stored), first.id);
+  return [{ ...first, request: stored }, ...rest];
+}
+
 /** Steps still waiting for their inputs (nothing spent yet) are canceled when the chain they feed can't be made. */
 function cancelWaiting(ids: string[]): void {
   for (const id of ids) {
@@ -71,6 +88,8 @@ export interface JoinOptions {
   /** Clips that already exist, placed before the chained ones (extend: the original video). */
   before?: string[];
   step?: GenerationRequest["step"];
+  /** A recipe's free dry run (GenerationRequest.demo): the join runs on the demo provider too. */
+  demo?: boolean;
 }
 
 const joinModelId = (engine: Engine) => (engine === "open" ? "oss-join-clips" : "join-clips");
@@ -104,6 +123,7 @@ export function joinClips(ids: string[], o: JoinOptions): Generation {
         feature: o.feature,
         modelId,
         op: "concat",
+        ...(o.demo && { demo: true }),
         prompt: o.title,
         inputs: last && o.before?.length ? { videos: o.before } : undefined,
         // ComfyUI's join plays at the first clip's frame rate (linked in the workflow).
@@ -174,13 +194,14 @@ export function createShotFilm(original: GenerationRequest, model: ModelDef): Ge
         engine: model.engine,
         feature: original.feature,
         batchId,
+        demo: original.demo,
         title: overall || shots.map((s) => tidy(s.prompt)).join(" / "),
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
         step: { label: `Film · ${n} shots`, index: n, of: n + 1 },
       },
     );
-    return [film, ...clips];
+    return withAsked([film, ...clips], original, model.engine);
   } catch (e) {
     // Don't leave shots rendering for a film that can't be made.
     for (const g of clips) void cancelGeneration(g.id);
@@ -235,20 +256,21 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
       };
       made.push(createGenerations(request, { batchId })[0]);
     }
-    if (n === 1) return made;
+    if (n === 1) return withAsked(made, original, model.engine);
     const film = joinClips(
       made.map((c) => c.id),
       {
         engine: model.engine,
         feature: original.feature,
         batchId,
+        demo: original.demo,
         title: tidy(original.prompt) || "Keyframe film",
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
         step: { label: `Film · ${images.length} frames`, index: n, of: n + 1 },
       },
     );
-    return [film, ...made];
+    return withAsked([film, ...made], original, model.engine);
   } catch (e) {
     // Don't leave half a film rendering.
     for (const g of made) void cancelGeneration(g.id);
@@ -294,11 +316,12 @@ export function createExtendChain(original: GenerationRequest, model: ModelDef):
       engine: model.engine,
       feature: original.feature,
       batchId,
+      demo: original.demo,
       title: tidy(original.prompt) || "Extended video",
       before: [video],
       step: { label: "Extended video", index: 2, of: 3 },
     });
-    return [film, clip, frame];
+    return withAsked([film, clip, frame], original, model.engine);
   } catch (e) {
     for (const g of made) void cancelGeneration(g.id);
     throw e;
@@ -351,7 +374,7 @@ export function createStillTo3d(original: GenerationRequest, model: ModelDef, ro
       },
       { batchId, dependsOn: still.id },
     )[0];
-    return [built, still];
+    return withAsked([built, still], original, model.engine);
   } catch (e) {
     void cancelGeneration(still.id);
     throw e;
@@ -362,27 +385,34 @@ export function createStillTo3d(original: GenerationRequest, model: ModelDef, ro
  * Fuobe DoP's relight effects (Silhouette, Window, Practicals…): the start frame is relit first (Qwen-Image-Edit 2509
  * with its Relight LoRA, on the engine the clip runs on), then animated with the effect's words. One batch of two steps.
  */
-export function createRelitClip(original: GenerationRequest, relight: { engine: Engine; step: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[] } }): Generation[] {
+export function createRelitClip(
+  original: GenerationRequest,
+  relight: { engine: Engine; step: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[]; params?: GenParams; labels?: { step: string; clip: string } } },
+): Generation[] {
   const [image, ...rest] = original.inputs?.images ?? [];
-  if (!image) throw new Error("Add a start frame to relight");
   const { engine, step } = relight;
+  const mixed = !!step.labels;
+  if (!image) throw new Error(mixed ? "Add a start frame to draw in the look" : "Add a start frame to relight");
   // The clip runs on the engine asked for, never quietly on the other one (createGenerations refuses an engine that is off).
   const where = (e: Engine) => (e === "open" ? "on your GPU" : "in the cloud");
-  if (original.engine && original.engine !== engine) throw new Error(`This relight effect was planned ${where(engine)}, but ${where(original.engine)} was asked for`);
+  if (original.engine && original.engine !== engine) throw new Error(`This ${mixed ? "effect" : "relight effect"} was planned ${where(engine)}, but ${where(original.engine)} was asked for`);
   assertOneMode([
-    { label: "Relighting the start frame", modelId: step.modelId, op: step.op, engine },
+    { label: step.labels?.step ?? "Relighting the start frame", modelId: step.modelId, op: step.op, engine },
     { label: getModel(original.modelId)?.name ?? original.modelId, modelId: original.modelId, op: original.op ?? "i2v", engine },
   ]);
   const batchId = nanoid(10);
   const relit = createGenerations(
     {
       feature: original.feature,
+      // The step's model may run on both engines (Fuobe Mixed Media): it runs on the clip's.
+      engine,
       modelId: step.modelId,
       op: step.op,
       prompt: step.prompt,
       inputs: { images: [image] },
       ...(step.loras?.length && { loras: step.loras }),
-      step: { label: "Relit start frame", index: 0, of: 2 },
+      ...(step.params && { params: step.params }),
+      step: { label: step.labels?.step ?? "Relit start frame", index: 0, of: 2 },
     },
     { batchId },
   )[0];
@@ -393,15 +423,75 @@ export function createRelitClip(original: GenerationRequest, relight: { engine: 
         engine,
         inputs: { ...original.inputs, images: rest.length ? rest : undefined },
         chain: [{ slot: "images", position: "first" }],
-        step: { label: "Relit clip", index: 1, of: 2 },
+        step: { label: step.labels?.clip ?? "Relit clip", index: 1, of: 2 },
       },
       { batchId, dependsOn: relit.id },
     )[0];
-    return [clip, relit];
+    return withAsked([clip, relit], original, engine);
   } catch (e) {
     void cancelGeneration(relit.id);
     throw e;
   }
+}
+
+/**
+ * Fuobe Soul's PixeletedFace look (O11): each picture, then its faces pixelated on the engine it was made on: one SAM 3.1 +
+ * mosaic graph on the GPU; in the cloud fal's SAM 3.1 finds the faces and the server (or, for a picture it can't decode, the
+ * browser) pixelates under its masks. One two-step pipeline per picture (a later step takes one result), all in one batch,
+ * each picture on its own seed (seed + i, as a batch of jobs gets). A run that waits for earlier steps (a Canvas node, a
+ * pipeline step) waits with its picture. The mosaics come first: a caller that takes the first result (a pipeline's next
+ * step, a Canvas node) gets the pixelated picture.
+ */
+export function createMosaicRun(original: GenerationRequest, model: ModelDef, opts: { batchId?: string; dependsOn?: string[] } = {}): Generation[] {
+  const n = Math.max(1, Math.min(4, original.params?.numOutputs ?? 1));
+  const engine = model.engine;
+  const step = faceMosaicStep(engine);
+  const words = original.prompt?.trim() || "Pixelated face";
+  const seed = original.params?.seed;
+  const deps = opts.dependsOn ?? [];
+  const existing: Record<string, string> = Object.fromEntries(deps.map((id, i) => [`in${i}`, id]));
+  const own = original.step;
+  const batchId = opts.batchId ?? nanoid(10);
+  const mosaics: Generation[] = [];
+  const pictures: Generation[] = [];
+  const made: Generation[] = [];
+  try {
+    for (let i = 0; i < n; i++) {
+      const of = n > 1 ? ` ${i + 1} of ${n}` : "";
+      const params = { ...original.params, numOutputs: 1, ...(seed !== undefined && seed >= 0 && { seed: seed + i }) };
+      const { items, byKey } = createPipeline(
+        [
+          {
+            key: "picture",
+            request: { ...original, engine, postMade: true, params, step: { label: own ? `${own.label} · before the face mosaic${of}` : `Before the face mosaic${of}`, index: 0, of: 2 } },
+            ...(deps.length > 0 && { after: Object.keys(existing) }),
+          },
+          {
+            key: "mosaic",
+            request: {
+              feature: original.feature,
+              modelId: step.modelId,
+              op: step.op,
+              prompt: step.prompt,
+              title: words,
+              ...(original.batchTitle && { batchTitle: original.batchTitle }),
+              step: { label: own ? `${own.label}${of}` : `Face mosaic${of}`, index: 1, of: 2 },
+            },
+            after: "picture",
+            chain: [{ slot: "images", position: "first" }],
+          },
+        ],
+        { batchId, ...(deps.length > 0 && { existing }) },
+      );
+      made.push(...items);
+      mosaics.push(byKey.mosaic);
+      pictures.push(byKey.picture);
+    }
+  } catch (e) {
+    for (const g of made) void cancelGeneration(g.id);
+    throw e;
+  }
+  return [...mosaics, ...pictures];
 }
 
 /** The model a storyboard film is animated with. */

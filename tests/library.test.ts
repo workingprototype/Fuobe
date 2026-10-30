@@ -17,6 +17,7 @@ const lib = await import("@/server/library");
 const { saveFile, absolutePath, listAssets } = await import("@/server/storage");
 const { zipStream, zipSize } = await import("@/server/zip");
 const { TOOLS } = await import("@/server/assist/tools");
+const skills = await import("@/server/skills");
 const { POST: bulk } = await import("@/app/api/generations/bulk/route");
 const folderRoutes = await import("@/app/api/folders/route");
 const folderIdRoutes = await import("@/app/api/folders/[id]/route");
@@ -728,6 +729,25 @@ describe("ASSET_REFS", () => {
     await lib.deleteForever([dubbed.g.id, cut.g.id]);
     expect(fs.existsSync(fileOf(dubbed.asset.url))).toBe(true);
     expect(fs.existsSync(fileOf(cut.asset.url))).toBe(true);
+  });
+
+  it("keeps a file that only a skill's recipe.json names through Empty trash", async () => {
+    const example = made("recipe example photo");
+    skills.createSkill({ name: "keep-example", title: "Keep example", description: "x", body: "x" });
+    const recipe = {
+      fuobeRecipe: 1,
+      params: [{ id: "photo", label: "Photo", type: "image", required: true, example: example.asset.url }],
+      steps: [{ key: "edit", kind: "generate", request: { feature: "skill", modelId: "nano-banana-pro", op: "edit", prompt: "warmer", inputs: { images: ["{{photo}}"] } } }],
+    };
+    skills.setSkillFile("keep-example", "recipe.json", JSON.stringify(recipe));
+    expect(gens.assetUses(example.asset.id, { exceptGeneration: example.g.id })).toEqual([{ what: "skill", key: "keep-example", name: "Keep example" }]);
+    lib.trashGenerations([example.g.id]);
+    expect(await lib.emptyTrash()).toBeGreaterThanOrEqual(1);
+    expect(gens.getGeneration(example.g.id, { includeDeleted: true })).toBeNull();
+    expect(fs.existsSync(fileOf(example.asset.url))).toBe(true);
+    // Without the skill, nothing keeps it.
+    skills.deleteSkill("keep-example");
+    expect(gens.assetUses(example.asset.id)).toEqual([]);
   });
 
   it("covers every column that can hold a file, and every entry's query runs", () => {

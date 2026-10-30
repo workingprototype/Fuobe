@@ -3,8 +3,10 @@ import { getModel, getPreset } from "./index";
 import { DOP_MODEL, LTX25_HOSTED } from "./dop";
 import { dualEngine, onEngine } from "./engines";
 import { localOnly, needsToken, triggerOf } from "./loras";
+import { ANGLES_2511_LORA } from "./open-tools";
 import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
 import { soulRecipe } from "./soul";
+import { CAST_LOOK } from "./soul-cards";
 import type { Engine, GenerationRequest, GenParams, LoraRef, ModelDef, Operation } from "./types";
 
 /*
@@ -568,7 +570,7 @@ export const CINEMA_STILL_MODEL = "fuobe-soul-cinema";
 /** Fuobe Soul: Soul Cast and Soul Location. */
 export const SOUL_BUILDER_MODEL = "fuobe-soul";
 /** The Soul look a cast sheet is made in (natural, unretouched skin and fabric) and a location in (a widescreen film still). */
-export const CAST_LOOK = "v1-realistic";
+export { CAST_LOOK };
 export const LOCATION_LOOK = "v1-movie";
 /** The open Soul Cast sheet graph (soul-cast-sheet-zimage): the sheet, then its four views as their own pictures. */
 export const CAST_SHEET_MODEL = "oss-zimage-soul-cast";
@@ -1638,7 +1640,7 @@ function planLocationView(input: CinemaGenerateInput): CinemaPlan {
     };
   } else {
     model = editModel("open");
-    const loras = getPreset("app-angles")?.open?.loras;
+    const loras = [ANGLES_2511_LORA];
     request = {
       feature: "cinema-location",
       modelId: model.id,
@@ -1927,7 +1929,7 @@ function planRecompose(input: CinemaGenerateInput): CinemaPlan {
     request = { feature: "cinema-recompose", modelId: model.id, op: "edit", prompt: anglesNote(lens, aperture, input.prompt), inputs: src ? { images: [src] } : undefined, params };
     notes.push(`${model.name} re-shoots the still from the angles you flew to (${Math.round(pose.horizontal)}° round, ${Math.round(pose.vertical)}° up, zoom ${pose.zoom}) — the capture itself isn't sent`);
   } else {
-    const loras = open ? getPreset("app-angles")?.open?.loras : undefined;
+    const loras = open ? [ANGLES_2511_LORA] : undefined;
     const words = recomposePrompt(lens, aperture, input.prompt);
     request = {
       feature: "cinema-recompose",

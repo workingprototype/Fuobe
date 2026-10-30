@@ -1,0 +1,223 @@
+{
+ "$schema": "./case.schema.json",
+ "suite": "evolution",
+ "title": "Fuobe Evolution · change intensity and the written direction",
+ "description": "Runs Video tools → Evolution (POST /api/evolution, priced by /api/evolution/estimate) on your clip and references in local/evolution/: walk.mp4 (4–30 s of someone walking, your own footage) and ref-1.png … ref-3.png (characters, places or a style you own; never Higgsfield previews). The Original (build plan O13) runs on both engines: on ComfyUI, a direction frame from Qwen-Image-Edit 2511 then Wan 2.2 Fun VACE from the noised segment at denoise 0.45 / 0.65 / 0.85; on fal, LTX-2.3 22B video to video at video_strength 0.55 / 0.35 / 0.15. The three intensity cases share a direction, so they show how much of the clip each keeps (temporal drift against the source, style against the references); the written case leaves the direction to the writer. Nothing here has been rendered yet: these cases decide the intensities' denoise values.",
+ "original": [
+  "fuobe-evolution"
+ ],
+ "kind": "video",
+ "targets": {
+  "open": {
+   "models": [
+    "fuobe-evolution"
+   ]
+  },
+  "cloud": {
+   "models": [
+    "fuobe-evolution"
+   ]
+  },
+  "demo": {
+   "models": [
+    "fuobe-evolution"
+   ]
+  }
+ },
+ "defaults": {
+  "seeds": [
+   1001
+  ],
+  "metrics": [
+   "temporal",
+   "clip"
+  ],
+  "timeoutSeconds": 3600,
+  "candidate": "original"
+ },
+ "variants": {
+  "original": {
+   "description": "Fuobe Evolution as the studio runs it"
+  }
+ },
+ "cases": [
+  {
+   "id": "evolution/low",
+   "title": "Change intensity low: the same direction, the same clip",
+   "inputs": {
+    "video": "local/evolution/walk.mp4",
+    "images": [
+     "local/evolution/ref-1.png",
+     "local/evolution/ref-2.png"
+    ]
+   },
+   "demoInputs": {
+    "video": "fixtures/walk-6s.mp4",
+    "images": [
+     "fixtures/references/warm-1.png",
+     "fixtures/references/warm-2.png"
+    ]
+   },
+   "prompts": [
+    {
+     "id": "market",
+     "text": "The same walk through a neon-lit night market in light rain, paper lanterns overhead, reflections on wet stone, warm food-stall light against blue dusk."
+    }
+   ],
+   "references": "local/evolution/ref-1.png",
+   "metrics": [
+    "temporal",
+    "style",
+    "clip"
+   ],
+   "submit": {
+    "route": "/api/evolution",
+    "body": {
+     "engine": "{{engine}}",
+     "intensity": "low",
+     "direction": "{{prompt}}",
+     "references": [
+      "{{inputs.images.0}}",
+      "{{inputs.images.1}}"
+     ],
+     "source": "{{source:inputs.video}}",
+     "requestId": "{{requestId}}"
+    }
+   }
+  },
+  {
+   "id": "evolution/medium",
+   "title": "Change intensity medium: the same direction, the same clip",
+   "inputs": {
+    "video": "local/evolution/walk.mp4",
+    "images": [
+     "local/evolution/ref-1.png",
+     "local/evolution/ref-2.png"
+    ]
+   },
+   "demoInputs": {
+    "video": "fixtures/walk-6s.mp4",
+    "images": [
+     "fixtures/references/warm-1.png",
+     "fixtures/references/warm-2.png"
+    ]
+   },
+   "prompts": [
+    {
+     "id": "market",
+     "text": "The same walk through a neon-lit night market in light rain, paper lanterns overhead, reflections on wet stone, warm food-stall light against blue dusk."
+    }
+   ],
+   "references": "local/evolution/ref-1.png",
+   "metrics": [
+    "temporal",
+    "style",
+    "clip"
+   ],
+   "submit": {
+    "route": "/api/evolution",
+    "body": {
+     "engine": "{{engine}}",
+     "intensity": "medium",
+     "direction": "{{prompt}}",
+     "references": [
+      "{{inputs.images.0}}",
+      "{{inputs.images.1}}"
+     ],
+     "source": "{{source:inputs.video}}",
+     "requestId": "{{requestId}}"
+    }
+   }
+  },
+  {
+   "id": "evolution/high",
+   "title": "Change intensity high: the same direction, the same clip",
+   "inputs": {
+    "video": "local/evolution/walk.mp4",
+    "images": [
+     "local/evolution/ref-1.png",
+     "local/evolution/ref-2.png"
+    ]
+   },
+   "demoInputs": {
+    "video": "fixtures/walk-6s.mp4",
+    "images": [
+     "fixtures/references/warm-1.png",
+     "fixtures/references/warm-2.png"
+    ]
+   },
+   "prompts": [
+    {
+     "id": "market",
+     "text": "The same walk through a neon-lit night market in light rain, paper lanterns overhead, reflections on wet stone, warm food-stall light against blue dusk."
+    }
+   ],
+   "references": "local/evolution/ref-1.png",
+   "metrics": [
+    "temporal",
+    "style",
+    "clip"
+   ],
+   "submit": {
+    "route": "/api/evolution",
+    "body": {
+     "engine": "{{engine}}",
+     "intensity": "high",
+     "direction": "{{prompt}}",
+     "references": [
+      "{{inputs.images.0}}",
+      "{{inputs.images.1}}"
+     ],
+     "source": "{{source:inputs.video}}",
+     "requestId": "{{requestId}}"
+    }
+   }
+  },
+  {
+   "id": "evolution/written",
+   "title": "No direction: the writer reads the references (Claude, Ollama or the offline writer)",
+   "inputs": {
+    "video": "local/evolution/walk.mp4",
+    "images": [
+     "local/evolution/ref-1.png",
+     "local/evolution/ref-2.png",
+     "local/evolution/ref-3.png"
+    ]
+   },
+   "demoInputs": {
+    "video": "fixtures/walk-6s.mp4",
+    "images": [
+     "fixtures/references/warm-1.png",
+     "fixtures/references/warm-2.png",
+     "fixtures/palette.png"
+    ]
+   },
+   "prompts": [
+    {
+     "id": "idea",
+     "text": "take it somewhere dreamlike"
+    }
+   ],
+   "references": "local/evolution/ref-1.png",
+   "metrics": [
+    "temporal",
+    "style"
+   ],
+   "submit": {
+    "route": "/api/evolution",
+    "body": {
+     "engine": "{{engine}}",
+     "intensity": "medium",
+     "idea": "{{prompt}}",
+     "references": [
+      "{{inputs.images.0}}",
+      "{{inputs.images.1}}",
+      "{{inputs.images.2}}"
+     ],
+     "source": "{{source:inputs.video}}",
+     "requestId": "{{requestId}}"
+    }
+   }
+  }
+ ]
+}

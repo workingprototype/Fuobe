@@ -62,9 +62,9 @@ const composeRatio = (g?: Generation) => {
 
 const overlayText = (run: MarketingRun) => ({ headline: run.meta.overlay?.headline ?? "", body: run.meta.overlay?.body ?? "", cta: run.meta.overlay?.cta ?? "" });
 
-/** An open-engine poster / ad whose picture is ready and whose words aren't set yet. */
+/** A poster / ad whose words are set in the browser (open models, Fuobe Marketing Image), its picture ready and its words not set yet. */
 function needsCompose(run: MarketingRun): boolean {
-  if (run.engine !== "open" || !run.meta.overlay || run.meta.composed || runStatus(run).state !== "done") return false;
+  if (!run.meta.overlay || run.meta.composed || runStatus(run).state !== "done") return false;
   return run.generations.some((g) => run.finalIds.includes(g.id) && g.outputs.some((o) => o.kind === "image"));
 }
 
@@ -96,7 +96,7 @@ function RunCard({ run, brand, onOpen, onCompose }: { run: MarketingRun; brand?:
   const cost = run.generations.reduce((n, g) => n + (g.costUsd ?? 0), 0);
   const ratio = runRatio(run, final);
   const format = run.meta.format ? FORMATS[run.meta.format] : null;
-  const canCompose = run.engine === "open" && !!run.meta.overlay && status.state === "done" && outputs.some((x) => x.o.kind === "image");
+  const canCompose = !!run.meta.overlay && status.state === "done" && outputs.some((x) => x.o.kind === "image");
   // The words are set in the browser right after the picture lands; the card shows that version.
   const composed = canCompose ? run.meta.composed : null;
   const setting = canCompose && !composed;

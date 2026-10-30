@@ -1,11 +1,14 @@
 "use client";
 
 import { Loader2, Minus, Plus, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AddFromLink, ProductCard, ProductDialog, UploadProductButton } from "@/components/brand/products";
-import { MAX_ADS_PER_PRODUCT, MAX_PRODUCTS_PER_RUN, type BrandKit, type Product } from "@/lib/catalog/marketing";
+import { AD_VISUAL_MODELS, MAX_ADS_PER_PRODUCT, MAX_PRODUCTS_PER_RUN, type BrandKit, type Product } from "@/lib/catalog/marketing";
+import { useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { formatCost } from "@/lib/format";
 import { useCreativeActions, useEstimate, useProductActions } from "@/components/marketing/hooks";
 
@@ -49,9 +52,15 @@ export function NewAds({ brand, products, engine, onCreated }: { brand: BrandKit
   const [selected, setSelected] = useState<string[]>(() => products.slice(0, MAX_PRODUCTS_PER_RUN).map((p) => p.id));
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [editing, setEditing] = useState<Product | null>(null);
+  // The picture's model: Fuobe Marketing Image first; partner models as choices (those switched off in Settings leave).
+  const access = useModelAccess();
+  const visuals = keepOffered(AD_VISUAL_MODELS[engine], (c) => offered(access, c.id, engine));
+  const [picked, setPicked] = useState<string>();
+  const visual = visuals.find((c) => c.id === picked) ?? visuals[0];
   const items = selected.filter((id) => products.some((p) => p.id === id)).map((productId) => ({ productId, count: counts[productId] ?? 4 }));
   const total = items.reduce((n, i) => n + i.count, 0);
-  const body = useMemo(() => (items.length ? { brandId: brand.id, engine, items } : null), [brand.id, engine, items]);
+  // useEstimate keys on the body's JSON, so a fresh object each render is fine.
+  const body = items.length ? { brandId: brand.id, engine, items, ...(visual && { modelId: visual.id }) } : null;
   const est = useEstimate<BatchEstimate>("/api/ads/estimate", body);
   const toggle = (id: string) =>
     setSelected((s) => {
@@ -73,7 +82,7 @@ export function NewAds({ brand, products, engine, onCreated }: { brand: BrandKit
       onError: (e) => toast.error((e as Error).message),
     });
   };
-  const price = est.data ? (est.data.demo ? "Demo · free" : est.data.costUsd == null ? "price unknown" : `≈ ${formatCost(est.data.costUsd)}`) : "";
+  const price = est.data ? (est.data.demo ? "Demo · free" : est.data.costUsd == null ? "price unknown" : est.data.costUsd === 0 ? "Free" : `≈ ${formatCost(est.data.costUsd)}`) : "";
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border bg-background p-4 sm:p-5">
@@ -124,6 +133,28 @@ export function NewAds({ brand, products, engine, onCreated }: { brand: BrandKit
               );
             })}
           </ul>
+          {visuals.length > 1 && visual && (
+            <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <label htmlFor="ads-visual" className="text-[13px] font-medium">
+                Pictures by
+              </label>
+              <Select value={visual.id} onValueChange={setPicked}>
+                <SelectTrigger id="ads-visual" size="sm" className="min-w-0 max-w-full sm:w-64" aria-describedby="ads-visual-note">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {visuals.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name ?? c.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p id="ads-visual-note" className="w-full text-[12px] text-muted-foreground">
+                {visual.note}. Headlines, copy and your logo are set in your brand fonts on top.
+              </p>
+            </div>
+          )}
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/60 px-4 py-3">
             <div className="min-w-0 text-[13px]">
               <p className="font-medium">

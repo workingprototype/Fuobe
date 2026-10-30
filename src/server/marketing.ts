@@ -14,6 +14,7 @@ import {
   FORMATS,
   formatModels,
   hookById,
+  MARKETING_IMAGE_MODEL,
   MAX_PROMPT,
   mentionsFor,
   MULTIPLIER,
@@ -30,6 +31,7 @@ import {
   TEMPLATE_INDEX,
   UGC_MODELS,
   wordBudget,
+  wordsOnTop,
   type BrandKit,
   type FormatDef,
   type FormatId,
@@ -42,6 +44,7 @@ import {
   type RunFeature,
   type RunOverlay,
 } from "@/lib/catalog/marketing";
+import { dualEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
 import { probeMedia } from "@/lib/media-probe";
 import { themeFrom } from "@/components/ads/layout";
@@ -201,11 +204,14 @@ function productLine(p?: Product | null): string {
 
 const KEEP_PRODUCT = "Keep the product exactly as in the reference photo: its shape, proportions, label, logo, text and colours";
 
-/** The exact headline/CTA in a prompt (cloud models render text), or room left for the browser to set it (open). */
-function textLine(f: FormatDef, open: boolean, headline?: string, cta?: string, brand?: BrandKit | null): string {
+/**
+ * The exact headline/CTA in a prompt (cloud partner models render text), or room left for the browser to set it (open
+ * models and Fuobe Marketing Image on either engine: wordsOnTop).
+ */
+function textLine(f: FormatDef, onTop: boolean, headline?: string, cta?: string, brand?: BrandKit | null): string {
   if (!f.text) return "";
-  // Open results get the words set in the browser, in the layout overlayLayout() picks: the picture leaves room for it.
-  if (open)
+  // The words are set in the browser, in the layout overlayLayout() picks: the picture leaves room for them.
+  if (onTop)
     return overlayLayout(f.id) === "frame"
       ? "No text, letters, words or logos anywhere in the image; the subject well composed with a little breathing room at the edges"
       : "Leave calm, uncluttered space in the lower third for a headline; no text, letters, words or logos anywhere in the image";
@@ -253,12 +259,13 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
   if (f.pipeline === "image") {
     const modelId = input.modelId && choices.some((c) => c.id === input.modelId) ? input.modelId : choices[0].id;
     const model = need(modelId);
+    const onTop = wordsOnTop(input.engine, modelId);
     const refs = [
       ...(f.product !== "none" ? productImages.slice(0, 1) : []),
       ...(input.avatar && f.avatar !== "none" ? [input.avatar] : []),
       ...(input.reference ? [input.reference] : []),
-      // The logo as a reference lets cloud models draw it; open results get it set on top in the browser.
-      ...(!open && f.text && brand?.logo && !isSvg(brand.logo) ? [brand.logo] : []),
+      // The logo as a reference lets a partner model draw it; otherwise it is set on top in the browser.
+      ...(!onTop && f.text && brand?.logo && !isSvg(brand.logo) ? [brand.logo] : []),
     ];
     const max = model.options.maxImages ?? (supportsOp(model, "edit") ? 1 : 0);
     let images = refs.slice(0, Math.max(0, max));
@@ -288,16 +295,21 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
       hasProduct && op === "edit" && KEEP_PRODUCT,
       input.reference && "Use the last reference photo for the setting and light",
       prompt,
-      textLine(f, open, headline, cta, brand),
+      textLine(f, onTop, headline, cta, brand),
       brandText,
     );
     // bria-product-shot and Product Photography take the scene alone.
     const scenePrompt = modelId === "bria-product-shot" ? join(scene || "A clean studio scene", prompt, brand?.aesthetics.slice(0, 2).join(", ")) : text;
     const palette = !open && brand?.colors.length && routesFor(model, op).some((r) => r.map?.palette) ? brand.colors.slice(0, 5) : undefined;
     const aspect = nearestAspect(input.aspectRatio ?? tpl?.aspect ?? f.defaultAspect, model.options.aspectRatios);
-    const batch = Math.min(input.batch ?? 1, f.batch);
-    meta.overlay = open && f.text && (headline || cta) ? { headline: headline || undefined, cta: cta || undefined } : null;
-    if (open && f.text) notes.push("Your headline is set over the picture in your brand fonts, so the words come out exact");
+    meta.overlay = onTop && f.text && (headline || cta) ? { headline: headline || undefined, cta: cta || undefined } : null;
+    // Words set in the browser go on one picture per run: a batch is that many runs (runsFor), each composed.
+    const batch = meta.overlay ? 1 : Math.min(input.batch ?? 1, f.batch);
+    if (onTop && f.text) notes.push("Your headline is set over the picture in your brand fonts, so the words come out exact");
+    // On the user's GPU a Standalone shot of one product photo is cut out and relit into the scene (White_to_Scene).
+    const productShot = open && modelId === MARKETING_IMAGE_MODEL && f.id === "product-standalone" && op === "edit" && images.length === 1;
+    if (productShot) notes.push("Your product is cut out and relit into the scene, so it stays as it is");
+    else if (open && op === "edit") notes.push("Qwen-Image-Edit keeps your first photo's shape on your GPU");
     return {
       feature,
       engine: input.engine,
@@ -309,10 +321,12 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
           request: {
             feature,
             modelId,
+            // Fuobe Marketing Image runs on both engines: the studio's engine picks its half.
+            ...(dualEngine(model) && { engine: input.engine }),
             op,
             prompt: model.options.promptless ? undefined : scenePrompt.slice(0, MAX_PROMPT),
             inputs: images.length ? { images } : undefined,
-            params: { aspectRatio: aspect, numOutputs: batch, ...(palette && { palette }) },
+            params: { aspectRatio: aspect, numOutputs: batch, ...(palette && { palette }), ...(productShot && { extra: { productShot: true } }) },
             title,
             batchTitle: title,
           },
@@ -972,8 +986,18 @@ const nearestRes = (want: string, m: ModelDef) => (m.options.resolutions?.includ
 // ---------------------------------------------------------------------------
 // Estimates and launching
 
+/**
+ * The plan with every step on the run's engine: a Fuobe Original runs on both, and a step that doesn't name one would
+ * run on the first engine connected (your GPU before the cloud) instead of the one picked in the studio.
+ */
+export function onPlanEngine(plan: RunPlan): RunPlan {
+  const pin = (s: Step): Step => (s.request.engine || !dualEngine(getModel(s.request.modelId)) ? s : { ...s, request: { ...s.request, engine: plan.engine } });
+  return plan.steps.some((s) => pin(s) !== s) ? { ...plan, steps: plan.steps.map(pin) } : plan;
+}
+
 /** Price and validate every step with placeholders for what earlier steps make (nothing is created). */
-export function estimatePlan(plan: RunPlan, runs = 1): RunEstimate {
+export function estimatePlan(input: RunPlan, runs = 1): RunEstimate {
+  const plan = onPlanEngine(input);
   let total: number | null = 0;
   let demo = false;
   const steps: PlannedStep[] = [];
@@ -998,7 +1022,8 @@ interface RunRow {
 }
 
 /** Create the run's generations (one request, or a pipeline) and record the run. */
-export function launch(plan: RunPlan, input?: object): MarketingRun {
+export function launch(planned: RunPlan, input?: object): MarketingRun {
+  const plan = onPlanEngine(planned);
   const engine = engineMode();
   if (engine !== "both" && engine !== plan.engine) throw new PlanError(engine === "open" ? "This install is set to open source only (Settings → Engine mode)" : "This install is set to paid cloud APIs only (Settings → Engine mode)");
   const batchId = nanoid(10);
@@ -1063,13 +1088,23 @@ export function presenterSeconds(input: MarketingInput, ctx: { product?: Product
   return Math.max(MIN_TALK_SECONDS, want - (hook ? shot : 0) - (broll ? shot : 0));
 }
 
+/**
+ * How many runs a Marketing Studio batch is: one run of every picture for an image format, unless its words are set
+ * in the browser (Fuobe Marketing Image, open models), which composes one picture per run; one run per video.
+ */
+function runsFor(input: MarketingInput, plan: RunPlan): number {
+  const f = FORMATS[input.format];
+  const batch = Math.min(input.batch ?? 1, f.batch);
+  return f.pipeline === "image" && !plan.meta.overlay ? 1 : batch;
+}
+
 /** Marketing Studio: price a run (a stand-in script of the right length for UGC; no LLM call). */
 export function estimateMarketing(input: MarketingInput): RunEstimate {
   const ctx = context(input);
   const f = FORMATS[input.format];
   const script = f.pipeline === "ugc" ? input.script?.trim() || Array(wordBudget(presenterSeconds(input, ctx))).fill("word").join(" ") : undefined;
-  const runs = f.pipeline === "image" ? 1 : Math.min(input.batch ?? 1, f.batch);
-  return estimatePlan(planMarketing(input, { ...ctx, script }), runs);
+  const plan = planMarketing(input, { ...ctx, script });
+  return estimatePlan(plan, runsFor(input, plan));
 }
 
 export async function runMarketing(input: MarketingInput): Promise<{ runs: MarketingRun[]; script?: string }> {
@@ -1085,7 +1120,7 @@ export async function runMarketing(input: MarketingInput): Promise<{ runs: Marke
       : (await writeScript({ product: ctx.product, brand: ctx.brand, seconds, hook: hook?.prompt, angle: tpl?.prompt, instructions: input.prompt })).script;
   }
   const plan = planMarketing(input, { ...ctx, script });
-  const runs = f.pipeline === "image" ? 1 : Math.min(input.batch ?? 1, f.batch);
+  const runs = runsFor(input, plan);
   // Check the whole plan (prices, models, engine mode, demo/real) before creating anything.
   estimatePlan(plan);
   return { runs: Array.from({ length: runs }, () => launch(plan, { ...input, batch: 1 })), script };
@@ -1216,7 +1251,7 @@ export async function rerun(id: string): Promise<MarketingRun[]> {
 }
 
 /**
- * An open-engine poster/ad with its words set in the browser (an uploaded PNG), recorded in the Library
+ * A poster/ad with its words set in the browser (an uploaded PNG: open models, Fuobe Marketing Image), recorded in the Library
  * and on the run (the card shows it). `auto`: the first composite the browser makes on its own once the
  * picture is ready; a run that has one already keeps it (no duplicate from a second tab).
  */

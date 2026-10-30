@@ -12,7 +12,8 @@ process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
 
 const { setSetting } = await import("@/server/settings");
-const { comfyProvider, comfyRam, probeComfy, REACH } = await import("@/server/providers/comfyui");
+const { comfyProvider, comfyRam, probeComfy } = await import("@/server/providers/comfyui");
+const { REACH } = await import("@/server/providers/reach");
 const gens = await import("@/server/generations");
 const { db } = await import("@/server/db");
 const { saveFile } = await import("@/server/storage");
@@ -57,7 +58,7 @@ const until = async <T>(f: () => T | undefined | null | false, ms = 20_000): Pro
 /** Forget what the probes found, as a fresh start does. */
 const forget = () => {
   globalThis.__fuobeComfyReach = undefined;
-  globalThis.__fuobeComfyProbe = undefined;
+  globalThis.__fuobeReachChecks?.delete("comfy");
 };
 
 beforeAll(async () => {

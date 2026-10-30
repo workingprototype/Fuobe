@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { applyPreset, PRESETS } from "@/lib/grade";
 import type { Generation } from "@/lib/catalog/types";
-import { cropRect, finishSteps, outputsToFinish, overlayLayout, type FinishSteps } from "@/lib/soul-post";
+import { cropRect, finishSteps, mosaicPixels, outputsToFinish, overlayLayout, unionMasks, type FinishSteps } from "@/lib/soul-post";
 
 /**
  * Fuobe Soul's post steps in the browser (research §4.4): when a result with a look arrives, Soul Cinema's 21:9
@@ -33,12 +33,38 @@ function load(url: string): Promise<HTMLImageElement> {
 
 const FONTS = { mono: '"Courier New", ui-monospace, monospace', serif: 'Georgia, "Times New Roman", serif' } as const;
 
+/** The face mosaic (O11): the picture SAM 3.1 looked at, with a block mosaic wherever its masks are white. */
+async function mosaicCanvas(m: NonNullable<FinishSteps["mosaic"]>): Promise<HTMLCanvasElement> {
+  const [img, ...masks] = await Promise.all([load(m.source), ...m.masks.map(load)]);
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const read = (el: HTMLImageElement) => {
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(el, 0, 0, w, h);
+    return ctx.getImageData(0, 0, w, h).data;
+  };
+  const mask = unionMasks(masks.map(read));
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0);
+  const pixels = ctx.getImageData(0, 0, w, h);
+  mosaicPixels(pixels.data, mask, w, h, m.scale);
+  ctx.putImageData(pixels, 0, 0);
+  return canvas;
+}
+
 /** The finished picture: graded, then its overlay drawn (a print border, a date stamp, a CCTV caption). */
 async function finish(url: string, steps: FinishSteps, when: Date): Promise<Blob> {
-  const img = await load(url);
+  // The face mosaic's cloud step: the output is the faces' mask; the result is the picture it was made from, pixelated.
+  const img: HTMLImageElement | HTMLCanvasElement = steps.mosaic ? await mosaicCanvas(steps.mosaic) : await load(url);
+  const iw = img instanceof HTMLCanvasElement ? img.width : img.naturalWidth;
+  const ih = img instanceof HTMLCanvasElement ? img.height : img.naturalHeight;
   let canvas = document.createElement("canvas");
   // Soul Cinema's 21:9: the middle band of the 16:9 picture.
-  const r = steps.crop ? cropRect(img.naturalWidth, img.naturalHeight, steps.crop) : { x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight };
+  const r = steps.crop ? cropRect(iw, ih, steps.crop) : { x: 0, y: 0, width: iw, height: ih };
   canvas.width = r.width;
   canvas.height = r.height;
   canvas.getContext("2d")!.drawImage(img, r.x, r.y, r.width, r.height, 0, 0, r.width, r.height);
@@ -75,6 +101,11 @@ async function finish(url: string, steps: FinishSteps, when: Date): Promise<Blob
     canvas = out;
   }
   return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't encode the picture"))), "image/png"));
+}
+
+/** The browser stopped trying to finish this result (no WebGL, a picture that won't load): it stays as it was made. */
+export function finishGaveUp(g: Generation): boolean {
+  return outputsToFinish(g).some((i) => (failed.get(`${g.id}:${i}`)?.tries ?? 0) >= MAX_TRIES);
 }
 
 /**

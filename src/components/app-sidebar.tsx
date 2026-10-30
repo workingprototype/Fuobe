@@ -28,6 +28,7 @@ import { CommandPalette, CommandPaletteProvider, useCommandPalette } from "@/com
 import { IntentLink } from "@/components/intent-link";
 import { JobNotifications } from "@/components/job-notifications";
 import { NAV, type NavGroupDef } from "@/components/nav-items";
+import { SkillBuilderProvider } from "@/components/skills/skill-builder-provider";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { useModKey } from "@/lib/keys";
 import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, parseClosed, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
@@ -240,19 +241,22 @@ export function StudioChrome({ children }: { children: React.ReactNode }) {
     // The shell stays static: the remembered collapsed state is read on the client (and applied
     // before first paint by AppSidebar's inline script), not from cookies() on the server.
     <CommandPaletteProvider>
-      <SidebarShell style={{ "--sidebar-width": "15.5rem", "--sidebar-width-icon": "3.25rem" } as React.CSSProperties}>
-        <SkipLink />
-        <AppSidebar />
-        <SidebarInset
-          id="content"
-          tabIndex={-1}
-          className="min-h-svh min-w-0 outline-none md:m-0 md:mt-2 md:rounded-none md:rounded-tl-xl md:border-t-[0.5px] md:border-l-[0.5px] md:shadow-[-2px_0_6px_rgba(0,0,0,.02)] md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:mt-2 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:rounded-tl-xl"
-        >
-          {children}
-        </SidebarInset>
-        <CommandPalette />
-        <JobNotifications />
-      </SidebarShell>
+      {/* Make a skill from any result's ⋯ menu: a page's, the ⌘K palette's and a job notification's viewer. */}
+      <SkillBuilderProvider>
+        <SidebarShell style={{ "--sidebar-width": "15.5rem", "--sidebar-width-icon": "3.25rem" } as React.CSSProperties}>
+          <SkipLink />
+          <AppSidebar />
+          <SidebarInset
+            id="content"
+            tabIndex={-1}
+            className="min-h-svh min-w-0 outline-none md:m-0 md:mt-2 md:rounded-none md:rounded-tl-xl md:border-t-[0.5px] md:border-l-[0.5px] md:shadow-[-2px_0_6px_rgba(0,0,0,.02)] md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:mt-2 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:rounded-tl-xl"
+          >
+            {children}
+          </SidebarInset>
+          <CommandPalette />
+          <JobNotifications />
+        </SidebarShell>
+      </SkillBuilderProvider>
     </CommandPaletteProvider>
   );
 }

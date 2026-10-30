@@ -36,8 +36,11 @@ Keep brand and product names exact. If a project source has a brand guide, read 
 ## 3. Generate
 - One job per card (op `edit` with the product photo in `images`, so the product stays exact).
   Quote every text element exactly and say "no other text".
-- Models: `nano-banana-pro` (best product fidelity + text), `ideogram-4-5` (best typography),
-  `gpt-image-2-5` (exact text). Open source: `oss-qwen-edit`.
+- Models that draw the words: `gpt-image-2-5` (exact text), `ideogram-4-5` (best typography),
+  `nano-banana-pro` (product fidelity + text). `fuobe-marketing-image` (Fuobe Original,
+  Qwen-Image-Edit 2511 on either engine, free on your GPU) makes the picture without words: ask it
+  for room for the headline, then set the words over it (Marketing Studio and Ads Studio do that in
+  your brand fonts, letter for letter).
 - Ratios: 4:5 feed, 9:16 Stories, 1:1 marketplaces, 16:9 banners. For "the full set", 4:5 + 9:16 + 1:1.
 
 ## 4. QC

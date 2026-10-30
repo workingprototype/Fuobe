@@ -223,6 +223,28 @@ describe("Before a cloud run", () => {
     expect(up.sent).toHaveLength(1);
   });
 
+  it("copies a civitai file once when many frames ask for it at the same time (a per-frame render)", async () => {
+    setSetting("civitaiKey", KEY);
+    net = network(civitaiRoutes(Y2K_BODY));
+    const up = upload();
+    // Fuobe Mixed Media's cloud frames all start together, each with the look's LoRA.
+    const frames = await Promise.all(Array.from({ length: 24 }, (_, i) => prepareCloudLoras([{ ...y2k, strength: 0.5 + i / 100 }], "fal", up.fn)));
+    expect(up.sent).toEqual([{ name: "civitai-3422541-y2k.safetensors", size: Y2K_BODY.length }]);
+    expect(frames.map((f) => f![0].hostedUrl)).toEqual(Array(24).fill("https://v3.fal.media/files/civitai-3422541-y2k.safetensors"));
+    // Each frame keeps its own settings; civitai is asked once, and the file downloaded once.
+    expect(frames[3]![0].strength).toBe(0.53);
+    expect(net.calls.filter((c) => c.url.startsWith("https://civitai.com/api/v1/models/"))).toHaveLength(1);
+    expect(net.calls.filter((c) => c.url.includes("/api/download/") && c.method === "GET")).toHaveLength(1);
+    expect(listLoraCopies().filter((c) => c.target === "fal")).toHaveLength(1);
+    // A failed copy fails every frame that waited for it, and the next run tries again.
+    db().prepare("DELETE FROM lora_mirrors").run();
+    const failing = async (): Promise<string> => Promise.reject(new Error("fal storage is down"));
+    const tries = await Promise.allSettled(Array.from({ length: 3 }, () => prepareCloudLoras([y2k], "fal", failing)));
+    expect(tries.map((t) => t.status)).toEqual(["rejected", "rejected", "rejected"]);
+    expect((await prepareCloudLoras([y2k], "fal", up.fn))![0].hostedUrl).toBe("https://v3.fal.media/files/civitai-3422541-y2k.safetensors");
+    expect(up.sent).toHaveLength(2);
+  });
+
   it("mirrors a civitai file whose hosting permission is gone, recording what civitai says (licences are information)", async () => {
     setSetting("civitaiKey", KEY);
     net = network(civitaiRoutes(Y2K_BODY, { permissions: ["Image", "RentCivit"] }));

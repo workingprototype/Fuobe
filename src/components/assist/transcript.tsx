@@ -1,19 +1,18 @@
 "use client";
 
-import { AppWindow, ArrowUpRight, AudioLines, Box, Brain, Captions, Check, CircleAlert, Clapperboard, Film, FileText, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Plug, Scissors, Search, Sparkles, Video } from "lucide-react";
+import { AppWindow, ArrowUpRight, Brain, Captions, Check, CircleAlert, Clapperboard, Film, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Plug, Scissors, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { useCreateGeneration } from "@/lib/api";
-import { planRunnable, type AssistItem, type AssistThread, type PlannedJob, type SkillSummary } from "@/lib/assist";
-import { OPERATION_LABELS, type Generation, type MediaKind, type Operation } from "@/lib/catalog/types";
+import { memoryCardLine, planRunnable, type AssistItem, type AssistThread, type SkillSummary } from "@/lib/assist";
+import type { Generation } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { PlanJobs } from "./plan-jobs";
 import { SkillIcon } from "./skill-icon";
-
-const KIND_ICON: Record<MediaKind | "storyboard" | "memory", typeof ImageIcon> = { image: ImageIcon, video: Video, audio: AudioLines, text: FileText, model3d: Box, storyboard: Clapperboard, memory: Brain };
 
 /** Paragraphs, "- " bullets and **bold** — the little markdown the assistant uses. */
 export function Prose({ text }: { text: string }) {
@@ -41,28 +40,13 @@ export function Prose({ text }: { text: string }) {
   );
 }
 
-function jobPrice(j: PlannedJob): string {
-  if (j.error) return "—";
-  if (j.op === "memory") return "";
-  if (j.demo) return "Demo";
-  if (j.costUsd === 0) return "Free";
-  return j.costUsd === null ? "Price varies" : formatCost(j.costUsd);
-}
-
-function jobLine(j: PlannedJob): string {
-  if (j.op === "storyboard") return `Storyboard · ${j.count} frames`;
-  if (j.op === "memory") return j.note ?? "Memory";
-  const op = OPERATION_LABELS[j.op as Operation] ?? j.op;
-  return [j.note && j.note !== op ? j.note : op, j.count > 1 ? `${j.count} takes` : ""].filter(Boolean).join(" · ");
-}
-
 export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistItem, { role: "approval" }>; live: boolean; onAnswer: (ok: boolean) => Promise<void> }) {
   const [busy, setBusy] = useState<boolean | null>(null);
   const runnable = planRunnable(item.jobs);
   const memoryOnly = item.jobs.length > 0 && item.jobs.every((j) => j.op === "memory");
   const allDemo = item.jobs.every((j) => j.demo || j.error || j.op === "memory");
   const total = memoryOnly
-    ? "Saved to memory for future chats"
+    ? memoryCardLine(item.status)
     : !runnable && item.status === "pending"
       ? "Can't run yet — fix what's marked above, or tell Assist what to change"
       : allDemo
@@ -82,9 +66,6 @@ export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistIte
       setBusy(null);
     }
   };
-  // Long studio plans (a dub, a faceless episode) fold after six steps.
-  const [all, setAll] = useState(false);
-  const shown = all ? item.jobs : item.jobs.slice(0, 6);
   return (
     <div className={cn("animate-fade-up overflow-hidden rounded-2xl border bg-background shadow-soft", item.status !== "pending" && "opacity-80")}>
       <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2.5">
@@ -97,34 +78,7 @@ export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistIte
         )}
         {item.status === "declined" && <span className="text-[12px] text-muted-foreground">Skipped</span>}
       </div>
-      <ul className="divide-y">
-        {shown.map((j, i) => {
-          const Icon = KIND_ICON[j.op === "storyboard" ? "storyboard" : j.op === "memory" ? "memory" : j.kind];
-          return (
-            <li key={i} className="flex gap-3 px-4 py-3">
-              <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-secondary">
-                <Icon className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium break-words">
-                  {j.modelName}
-                  <span className="font-normal text-muted-foreground">
-                    {" · "}
-                    {jobLine(j)}
-                  </span>
-                </p>
-                <p className={cn("mt-0.5 text-[13px] break-words", j.op === "memory" ? "text-foreground" : "line-clamp-2 text-muted-foreground")}>{j.prompt}</p>
-                {j.error && (
-                  <p className="mt-1 flex items-start gap-1 text-[12px] text-destructive">
-                    <CircleAlert className="mt-0.5 size-3 shrink-0" /> {j.error}
-                  </p>
-                )}
-              </div>
-              <span className="shrink-0 font-mono text-[12px] text-muted-foreground">{jobPrice(j)}</span>
-            </li>
-          );
-        })}
-      </ul>
+      <PlanJobs jobs={item.jobs} />
       {!!(item.opens?.length || item.notes?.length) && (
         <div className="space-y-1 border-t px-4 py-2.5 text-[12px] text-muted-foreground">
           {item.opens?.length ? (
@@ -138,11 +92,6 @@ export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistIte
             </p>
           ))}
         </div>
-      )}
-      {item.jobs.length > 6 && (
-        <button onClick={() => setAll((v) => !v)} className="w-full border-t px-4 py-2 text-left text-[12px] font-medium text-brand-text hover:bg-accent">
-          {all ? "Show fewer steps" : `Show all ${item.jobs.length} steps`}
-        </button>
       )}
       <div className="flex flex-wrap items-center gap-2 border-t px-4 py-2.5">
         <p className="text-[12px] text-muted-foreground">{total}</p>

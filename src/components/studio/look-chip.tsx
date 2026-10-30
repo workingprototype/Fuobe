@@ -29,15 +29,18 @@ export default function LookChip({
   strength,
   onChange,
   onStrength,
+  none,
 }: {
-  /** The look's id (Soul's default look when unset). */
+  /** The look's id (Soul's default look when unset, or no look when `none` is set). */
   value?: string;
   strength: number;
   onChange: (id: string | undefined, look?: SoulLookCard) => void;
   onStrength: (v: number) => void;
+  /** Unset means no look at all (a storyboard without one), shown as this label; picking General then sends its id. */
+  none?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const picked = lookCard(value ?? DEFAULT_LOOK);
+  const picked = value ? lookCard(value) : none ? undefined : lookCard(DEFAULT_LOOK);
   const [family, setFamily] = useState<"v1" | "v2">(picked?.family ?? "v2");
   const [tab, setTab] = useState("All presets");
   const [q, setQ] = useState("");
@@ -50,7 +53,7 @@ export default function LookChip({
     return pool.filter((l) => (words ? `${l.name} ${l.description}`.toLowerCase().includes(words) : tab === "All presets" || l.categories.includes(tab)));
   }, [q, set, tab]);
   return (
-    <ClearableChip active={!!value} onClear={() => onChange(undefined)} clearLabel="Back to the General look">
+    <ClearableChip active={!!value} onClear={() => onChange(undefined)} clearLabel={none ? `Back to ${none.toLowerCase()}` : "Back to the General look"}>
       <ResponsivePanel
         open={open}
         onOpenChange={setOpen}
@@ -58,9 +61,9 @@ export default function LookChip({
         description="Soul's looks on open weights: words, LoRAs and a grade"
         className="w-[min(92vw,480px)] p-2"
         trigger={
-          <Chip icon={picked ? undefined : Sparkles} active={!!value} aria-label={`Look: ${picked?.name ?? "General"}`}>
+          <Chip icon={picked ? undefined : Sparkles} active={!!value} aria-label={`Look: ${picked?.name ?? none ?? "General"}`}>
             {picked && <CuratedCover m={{ name: "", ...curatedLook(picked.id) }} className="size-4 rounded-full" />}
-            <span className="max-w-32 truncate">{picked?.name ?? "Look"}</span>
+            <span className="max-w-32 truncate">{picked?.name ?? none ?? "Look"}</span>
             {strength < 1 && <span className="text-muted-foreground tabular-nums">{pct(strength)}</span>}
           </Chip>
         }
@@ -127,7 +130,7 @@ export default function LookChip({
               aria-pressed={picked?.id === l.id}
               title={l.description}
               onClick={() => {
-                onChange(l.id === DEFAULT_LOOK ? undefined : l.id, l);
+                onChange(l.id === DEFAULT_LOOK && !none ? undefined : l.id, l);
                 setOpen(false);
               }}
               className={cn("group flex min-w-0 flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent", picked?.id === l.id && "ring-2")}

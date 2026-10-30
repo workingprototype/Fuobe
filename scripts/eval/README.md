@@ -117,10 +117,14 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `dop` | Fuobe DoP motions and effects | the 69 the research gives a LoRA, and the 20 camera moves it gives a Fun Camera pose or an LTX camera LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
 | `dop-mix` | Fuobe DoP's Mix | 5 move + effect pairs | `mix` (the candidate), `first` (the move alone) | temporal, clip |
 | `genjutsu` | Genjutsu move / swap / restyle / Character swap | 7: Motion transfer and Object swap (each also on the Lite tier), Restyle, and Character swap with and without the first frame (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
-| `mixed-media` | Mixed Media | 5 looks on one clip (through `/api/mixed-media`) | `studio` | temporal, style |
-| `shorts` | Shorts restyle | 1 | `restyle` | temporal, style, clip |
-| `speak` | talking portraits | 1 portrait + voice | `infinitetalk`, `s2v` | lipsync, temporal, identity |
+| `mixed-media` | Fuobe Mixed Media (O9) | 7 looks on one clip, 3 s at 8 fps (through `/api/mixed-media`): 3 with a look LoRA, 4 on their words | `studio` (the Original frame by frame), `smooth` (its first frame, then Wan 2.2 Fun VACE), `words` (open: the per-frame model before O9), `partner-frames` (cloud: Nano Banana 2 per frame), `fast` (cloud: LTX-2.3 Reference Restyle) | temporal, style |
+| `shorts` | Fuobe Shorts (O9) | 2: one segment from its first frame (`/api/generations`), and a 6 s session (`/api/shorts/sessions`) | `restyle` (Fuobe Shorts), `partner` (cloud: Gemini Omni Flash) | temporal, style, clip |
+| `speak` | Fuobe Speak and Speak · Motion (O11) | 1 portrait + voice | `infinitetalk` (Fuobe Speak: InfiniteTalk with the FusioniX recipe on your GPU, fal's InfiniteTalk in the cloud), `s2v` (Fuobe Speak · Motion: Wan 2.2 speech to video) | lipsync, temporal, identity |
+| `angles` | Fuobe Angles (O11) | 1: your photo with the camera turned 45° to the left, 2 seeds | `recipe` (Fuobe Angles: Qwen-Image-Edit 2509 + the Multiple-angles LoRA), `today-open` (open: the Angles app's 2511 recipe), `today-cloud` (cloud: fal's Qwen Multiple Angles) | identity, clip, aesthetic |
+| `evolution` | Fuobe Evolution (O13) | 4 (through `/api/evolution`): Low, Medium and High on one clip with the same direction and 2 references, and one whose direction the writer makes from 3 references | `original` | temporal, style, clip |
+| `popcorn` | Storyboards in Fuobe Soul's looks (O13) | 4 four-frame boards (through `/api/storyboards`): 3 looks and the same board without one | `original` | clip, continuity, aesthetic |
 | `cinema` | Fuobe Cinema (O6) | 3 Director scenes (the prompt Cinema compiles), 4 camera moves as LTX-2.3's `camera_lora` (cloud), 2 films of 3 shots | `original`, `words` (no camera LoRA), `expansion` (fal's prompt expansion on), `wan` (Wan 2.2 A14B hosted), `partner` (Seedance 2.5); all but `original` cloud only | clip, temporal, continuity |
+| `marketing` | Fuobe Marketing Image, Fuobe Try-On, the AI Influencer sheet and Instadump (O10) | 7: a Standalone product shot (the product-shot graph on your GPU; hosted Qwen-Image-Edit in the cloud), an ad's picture, a poster without a product, a try-on, the builder's sheet (through `/api/influencer`), an Instadump photo from a selfie | `original`, `partner` (cloud: GPT Image 2.5, Nano Banana Pro, Ideogram 3.0, FASHN) | clip, aesthetic, style (the product), identity (try-on, Instadump) |
 
 `soul.json`, `soul-cinema.json`, `soul-hex.json`, `dop.json` and `dop-mix.json` are **generated** from the research. They come from
 `docs/research/higgsfield-image-studios.json` (the look ids) and
@@ -192,15 +196,23 @@ small synthetic files in `fixtures/` instead.
 scripts/eval/local/
   references/soul/<look-slug>/*.jpg   # style references per look (your own or licensed images; never Higgsfield previews)
   references/mixed-media/<look>/*     # what each Mixed Media look should look like
+  references/shorts/claymation/*      # what the Shorts session's look should look like
   characters/default/*.jpg            # 20+ photos (80 at most) of ONE consenting person (soul-id)
   styles/default/*.jpg                # 20+ images in one style, a moodboard (soul-id/look)
   dop/start.png, dop/end.png          # a start frame (a person on a bridge fits the prompts), an end frame for transitions
   genjutsu/dance.mp4, character.png, style.png
   genjutsu/street.mp4, object.png     # street.mp4 at least 720 px on each side (Kling O3's edit, the cloud partner)
-  mixed-media/clip.mp4
-  shorts/clip.mp4, shorts/frame0.png
+  mixed-media/clip.mp4                # 4–10 s
+  shorts/clip.mp4, shorts/frame0.png  # clip.mp4 at least 6 s (the session case); frame0.png its first frame in the new look
   speak/portrait.png, speak/voice.wav
+  marketing/product.png, person.png   # a product photo on a plain background; a full-body photo of a consenting person
+  marketing/garment.png, selfie.jpg   # a garment on its own or flat-lay; a consenting person's selfie
+  angles/subject.png                  # a person or a product in a scene
+  evolution/walk.mp4                  # 4–30 s of someone walking, your own footage
+  evolution/ref-1.png … ref-3.png     # characters, places or a style you own (never Higgsfield previews)
 ```
+
+The `popcorn` suite needs no inputs of its own: its boards start from words.
 
 **Training needs consent.** `soul-id.json` ships with `"consent": false`, so a character's training
 refuses to start. Copy the file to `local/soul-id.json`. In your copy, set `"consent": true` only
@@ -267,7 +279,8 @@ Other case fields:
 - `shots`: a film's shots. Continuity is measured across them.
 - `train`: photos, a target per engine, `kind` (`character` or `style`), `consent`, and `minPhotos`.
 - `submit`: a studio route and its body, with `{{inputs.video}}`, `{{source:inputs.video}}`,
-  `{{prompt}}`, `{{seed}}`, `{{engine}}` and `{{requestId}}` filled in.
+  `{{prompt}}`, `{{seed}}`, `{{engine}}` and `{{requestId}}` filled in. `pnpm eval:validate` refuses a
+  body that names an input (`{{inputs.images.1}}`, say) the case's `inputs` or `demoInputs` don't have.
 - `engines`: the engines the case runs on.
 - `tags`, `metrics` and `note`.
 
@@ -451,7 +464,7 @@ instead of their procedural preview.
 - `tests/eval-harness.test.ts` (Vitest) covers several areas:
   - The runner runs end to end against Fuobe's real route handlers, served over HTTP, with the demo
     provider: plan, price, upload, submit, wait, download and record.
-  - A studio route (Genjutsu), and a training case.
+  - Studio routes (Genjutsu, a Shorts session, the Evolution suite), and a training case.
   - The engine checks, the spend cap, `--resume` and the dry run.
   - Case-file validation.
   - Report, blind review, compare (with its exit codes), promote and `--record`.

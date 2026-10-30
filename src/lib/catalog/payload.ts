@@ -76,6 +76,14 @@ export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pic
     while (f.min !== undefined && n < f.min) n += step;
     return n;
   }
+  // A multiple of n (Wan 2.2 S2V's 4n), inside the limits.
+  if (f.multiple) {
+    const m = f.multiple;
+    let n = Math.max(m, Math.round((seconds * fps) / m) * m);
+    while (f.max !== undefined && n > f.max) n -= m;
+    while (f.min !== undefined && n < f.min) n += m;
+    return n;
+  }
   return inRange(seconds * fps, { min: f.min, max: f.max, integer: true });
 }
 
@@ -848,6 +856,22 @@ function matteOutputs(response: unknown): ExtractedOutput[] {
   ];
 }
 
+/**
+ * Pixelate faces on the cloud (fal's SAM 3.1 image): the answer is masks, not the picture. One answer carries every mask
+ * (meta.masks, white = a face): the server pixelates the picture SAM looked at under all of them (src/server/generations.ts
+ * mosaicOutput). An answer that found no face (an empty masks list) is still an answer, with no masks: the picture stays
+ * as it is, as on the GPU. Anything else is no result.
+ */
+function faceMaskOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  if (!isObj(r)) return [];
+  const masks = Array.isArray(r.masks) ? r.masks.map(fileOf).filter((f): f is NonNullable<ReturnType<typeof fileOf>> => !!f) : [];
+  // Without a masks list, the mask preview (`image`) is the one mask.
+  const all = Array.isArray(r.masks) ? masks : fileOf(r.image) ? [fileOf(r.image)!] : [];
+  if (!all.length) return Array.isArray(r.masks) ? [{ url: "", kind: "image", meta: { role: "mask", masks: [] } }] : [];
+  return [{ url: all[0].url, kind: "image", contentType: all[0].contentType, meta: { role: "mask", masks: all.map((m) => m.url) } }];
+}
+
 /** The results of a Remove background job: only the asked-for file when the answer tagged both (else all of them). */
 export function keepMatte<T extends { meta?: Record<string, unknown> }>(outputs: T[], want: MatteOutput | undefined): T[] {
   if (!want) return outputs;
@@ -900,6 +924,9 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       break;
     case "bg-remove-video":
       out = matteOutputs(response);
+      break;
+    case "face-mosaic":
+      out = faceMaskOutputs(response);
       break;
     default:
       out = extractMedia(response);

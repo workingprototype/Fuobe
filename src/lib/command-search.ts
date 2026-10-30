@@ -4,7 +4,7 @@
  */
 import { offered, type AccessSummary } from "./model-access";
 
-export type PaletteKind = "page" | "setting" | "app" | "motion" | "effect" | "model" | "recent";
+export type PaletteKind = "page" | "setting" | "skill" | "app" | "motion" | "effect" | "model" | "recent";
 
 export interface PaletteEntry {
   /** Unique in the palette. */
@@ -22,6 +22,7 @@ export interface PaletteEntry {
 export const KIND_LABELS: Record<PaletteKind, string> = {
   page: "Go to",
   setting: "Settings",
+  skill: "Run a skill",
   app: "Apps",
   motion: "Camera motions",
   effect: "Effects",
@@ -117,7 +118,7 @@ export interface PaletteGroup {
 }
 
 /** How many matches each group shows. */
-export const GROUP_LIMIT: Record<PaletteKind, number> = { page: 6, setting: 4, app: 5, motion: 4, effect: 4, model: 5, recent: 5 };
+export const GROUP_LIMIT: Record<PaletteKind, number> = { page: 6, setting: 4, skill: 4, app: 5, motion: 4, effect: 4, model: 5, recent: 5 };
 
 /** Matches far weaker than the best one are noise next to it ("lip" finds Lipsync, not "virality predictor"). */
 const KEEP_FROM_BEST = 0.35;
@@ -207,4 +208,11 @@ export function indexEntries(index: PaletteIndex, mode: "both" | "cloud" | "open
         };
       }),
   ];
+}
+
+/** Skills that run by themselves (a recipe), switched on: "Run Lamp turntable…", opening its Run form. */
+export function skillEntries(skills: { name: string; title: string; description: string; recipe?: boolean; enabled: boolean }[]): PaletteEntry[] {
+  return skills
+    .filter((s) => s.recipe && s.enabled)
+    .map((s) => ({ key: `skill:${s.name}`, kind: "skill" as const, label: `Run ${s.title}…`, hint: "Skill", href: `/assist/skills?run=${s.name}`, keywords: `${s.name} ${s.description} skill run` }));
 }

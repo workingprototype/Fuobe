@@ -18,6 +18,7 @@
  *   (`legacyStyleId`); they are never sent anywhere.
  */
 import { loraEntry, loraRef } from "./loras";
+import type { SoulPost } from "./open-tools";
 import { DEFAULT_LOOK, OWN_LOOK, SOUL_MODEL_IDS } from "./soul-cards";
 import { SOUL_CINEMA, SOUL_CORE_LORAS, SOUL_ORIGINALS, SOUL_SIZES, SOUL_TAILS } from "./soul-originals.generated";
 import type { LoraRef, ModelDef } from "./types";
@@ -49,6 +50,11 @@ export interface SoulLook {
   grade?: string;
   /** Drawn on the result in the browser (diffusion draws text and frames badly). */
   overlay?: SoulOverlay;
+  /**
+   * A step after the picture (O11): "face-mosaic" pixelates the faces (PixeletedFace): SAM 3.1 and a mosaic on the GPU, fal's
+   * SAM 3.1 masks pixelated by the server in the cloud (src/lib/catalog/open-tools.ts).
+   */
+  post?: SoulPost;
   /** A Fuobe-trained LoRA should replace the public one or the words (research §6). */
   train?: true;
   note?: string;
@@ -242,6 +248,13 @@ export function promptWithLoras(prompt: string, triggers: string[], kept: Pick<L
   if (after === before) return prompt;
   const rest = prompt.slice(before.length + 2);
   return after ? `${after}, ${rest}` : rest;
+}
+
+/** The step a Soul run's look asks for after its picture (the face mosaic), or none. Soul Cinema has none. */
+export function soulPostStep(modelId: string, presetId: string | null | undefined): SoulPost | undefined {
+  const kind = soulKind(modelId);
+  if (!kind || kind === "cinema") return undefined;
+  return soulLook(presetId ?? DEFAULT_LOOK)?.post;
 }
 
 /**

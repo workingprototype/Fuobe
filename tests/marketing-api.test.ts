@@ -255,26 +255,51 @@ describe("brand kits", () => {
     const b = brand.getBrand(brandId)!;
     const product = brand.listProducts(brandId)[0];
     const ctx = { product, brand: b };
+    // Fuobe Marketing Image (build plan O10) on both engines: the words are set over the picture in the browser.
     const cloudAd = mk.planMarketing({ engine: "cloud", format: "ads", templateId: "ad-hero-headline" }, ctx);
     const r = cloudAd.steps[0].request;
-    expect(r).toMatchObject({ modelId: "gpt-image-2-5", op: "edit", feature: "marketing", params: { aspectRatio: "4:5", numOutputs: 1 } });
-    expect(r.prompt).toContain("“Meet Maple Pecan Granola”");
-    expect(r.prompt).toContain("“Shop now”");
-    expect(r.inputs?.images).toEqual([product.images[0]]); // the SVG logo isn't sent to the model
-    expect(cloudAd.meta.overlay).toBeNull();
+    expect(r).toMatchObject({ modelId: "fuobe-marketing-image", engine: "cloud", op: "edit", feature: "marketing", params: { aspectRatio: "4:5", numOutputs: 1 } });
+    expect(r.prompt).toMatch(/no text, letters/);
+    expect(r.prompt).not.toContain("“Meet Maple Pecan Granola”");
+    expect(r.inputs?.images).toEqual([product.images[0]]);
+    expect(r.params?.extra).toBeUndefined();
+    expect(cloudAd.meta.overlay).toEqual({ headline: "Meet Maple Pecan Granola", cta: "Shop now" });
+    expect(cloudAd.notes).toContain("Your headline is set over the picture in your brand fonts, so the words come out exact");
+
+    // GPT Image 2.5 stays a choice: it draws the exact words itself.
+    const gptAd = mk.planMarketing({ engine: "cloud", format: "ads", templateId: "ad-hero-headline", modelId: "gpt-image-2-5" }, ctx);
+    const g = gptAd.steps[0].request;
+    expect(g).toMatchObject({ modelId: "gpt-image-2-5", op: "edit", feature: "marketing", params: { aspectRatio: "4:5", numOutputs: 1 } });
+    expect(g.prompt).toContain("“Meet Maple Pecan Granola”");
+    expect(g.prompt).toContain("“Shop now”");
+    expect(g.inputs?.images).toEqual([product.images[0]]); // the SVG logo isn't sent to the model
+    expect(gptAd.meta.overlay).toBeNull();
 
     const openAd = mk.planMarketing({ engine: "open", format: "ads", templateId: "ad-hero-headline", headline: "Crunch, sorted" }, ctx);
-    expect(openAd.steps[0].request).toMatchObject({ modelId: "oss-qwen-edit", op: "edit" });
+    expect(openAd.steps[0].request).toMatchObject({ modelId: "fuobe-marketing-image", engine: "open", op: "edit" });
     expect(openAd.steps[0].request.prompt).toMatch(/no text, letters/);
     expect(openAd.meta.overlay).toEqual({ headline: "Crunch, sorted", cta: "Shop now" });
+    expect(openAd.notes).toContain("Qwen-Image-Edit keeps your first photo's shape on your GPU");
 
+    // A poster without a product: Qwen-Image 2512 (the Original's text-to-image) by default, Ideogram 3.0 with the palette when picked.
     const poster = mk.planMarketing({ engine: "cloud", format: "poster", templateId: "po-swiss-grid", prompt: "Autumn launch" }, { ...ctx, product: null });
-    expect(poster.steps[0].request).toMatchObject({ modelId: "ideogram-3", op: "t2i", params: { palette: b.colors.slice(0, 5) } });
-    expect(mk.planMarketing({ engine: "open", format: "poster", prompt: "Autumn" }, { ...ctx, product: null }).steps[0].request).toMatchObject({ modelId: "oss-qwen-image", op: "t2i" });
+    expect(poster.steps[0].request).toMatchObject({ modelId: "fuobe-marketing-image", op: "t2i" });
+    expect(poster.steps[0].request.params?.palette).toBeUndefined();
+    const ideogram = mk.planMarketing({ engine: "cloud", format: "poster", templateId: "po-swiss-grid", prompt: "Autumn launch", modelId: "ideogram-3" }, { ...ctx, product: null });
+    expect(ideogram.steps[0].request).toMatchObject({ modelId: "ideogram-3", op: "t2i", params: { palette: b.colors.slice(0, 5) } });
+    expect(mk.planMarketing({ engine: "open", format: "poster", prompt: "Autumn" }, { ...ctx, product: null }).steps[0].request).toMatchObject({ modelId: "fuobe-marketing-image", op: "t2i" });
 
+    // A Standalone product shot: the Original by default; on the user's GPU one product photo is cut out and relit
+    // (product-shot-qwen-edit-2509); Bria Product Shot stays a cloud choice.
     const shot = mk.planMarketing({ engine: "cloud", format: "product-standalone", templateId: "ps-ice-bath" }, ctx);
-    expect(shot.steps[0].request.modelId).toBe("bria-product-shot");
-    expect(shot.steps[0].request.prompt).toMatch(/^The product is half buried in crushed ice/);
+    expect(shot.steps[0].request).toMatchObject({ modelId: "fuobe-marketing-image", op: "edit" });
+    expect(shot.steps[0].request.params?.extra).toBeUndefined();
+    const openShot = mk.planMarketing({ engine: "open", format: "product-standalone", templateId: "ps-ice-bath" }, ctx);
+    expect(openShot.steps[0].request).toMatchObject({ modelId: "fuobe-marketing-image", op: "edit", params: { extra: { productShot: true } } });
+    expect(openShot.notes).toContain("Your product is cut out and relit into the scene, so it stays as it is");
+    const bria = mk.planMarketing({ engine: "cloud", format: "product-standalone", templateId: "ps-ice-bath", modelId: "bria-product-shot" }, ctx);
+    expect(bria.steps[0].request.modelId).toBe("bria-product-shot");
+    expect(bria.steps[0].request.prompt).toMatch(/^The product is half buried in crushed ice/);
     expect(() => mk.planMarketing({ engine: "cloud", format: "product-standalone" }, { ...ctx, product: null })).toThrow("Attach a product to generate");
     expect(() => mk.planMarketing({ engine: "cloud", format: "product-with-model" }, { ...ctx, product: null })).toThrow("Attach reference or product");
     expect(() => mk.planMarketing({ engine: "cloud", format: "ads", templateId: "po-swiss-grid" }, ctx)).toThrow(/another format/);
@@ -316,23 +341,34 @@ describe("brand kits", () => {
 
   it("runs a template in demo mode and lists the run with its generations", async () => {
     const product = brand.listProducts(brandId)[0];
+    // Fuobe Marketing Image's words are set in the browser, one picture per run: a batch of 2 is two runs, each composed.
     const est = await (await estimateRoute.POST(json("POST", { engine: "cloud", format: "ads", templateId: "ad-offer-burst", productId: product.id, brandId, batch: 2 }))).json();
-    expect(est).toMatchObject({ demo: true, runs: 1, steps: [{ key: "image", modelId: "gpt-image-2-5" }] });
+    expect(est).toMatchObject({ demo: true, runs: 2, steps: [{ key: "image", modelId: "fuobe-marketing-image" }] });
     const blocked = await (await estimateRoute.POST(json("POST", { engine: "cloud", format: "ads" }))).json();
     expect(blocked.blocker).toBe("Attach a product to generate");
 
     const res = await runsRoute.POST(json("POST", { engine: "cloud", format: "ads", templateId: "ad-offer-burst", productId: product.id, brandId, batch: 2 }));
     expect(res.status).toBe(201);
     const { runs } = await res.json();
-    expect(runs).toHaveLength(1);
+    expect(runs).toHaveLength(2);
+    for (const run of runs) {
+      expect(run.meta.overlay).toBeTruthy();
+      expect(run.meta.input).toMatchObject({ batch: 1 });
+      const one = await settle(run.finalIds[0]);
+      expect(one).toMatchObject({ status: "succeeded", engine: "cloud" });
+      expect(one.outputs).toHaveLength(1);
+    }
     const g = await settle(runs[0].finalIds[0]);
-    expect(g.status).toBe("succeeded");
-    expect(g.outputs).toHaveLength(2);
     expect(g.request.title).toBe("Offer Burst · Maple Pecan Granola");
+    // A partner that draws the words itself makes the batch in one run.
+    const gpt = await (await runsRoute.POST(json("POST", { engine: "cloud", format: "ads", templateId: "ad-offer-burst", productId: product.id, brandId, batch: 2, modelId: "gpt-image-2-5" }))).json();
+    expect(gpt.runs).toHaveLength(1);
+    expect((await settle(gpt.runs[0].finalIds[0])).outputs).toHaveLength(2);
     const list = await (await runsRoute.GET(json("GET", undefined, "http://x/api/marketing/runs?feature=marketing"))).json();
-    expect(list.items[0]).toMatchObject({ id: runs[0].id, title: "Offer Burst · Maple Pecan Granola", meta: { templateId: "ad-offer-burst", format: "ads" } });
-    expect(list.items[0].generations[0].status).toBe("succeeded");
-  });
+    const listed = list.items.find((i: { id: string }) => i.id === runs[0].id);
+    expect(listed).toMatchObject({ id: runs[0].id, title: "Offer Burst · Maple Pecan Granola", meta: { templateId: "ad-offer-burst", format: "ads" } });
+    expect(listed.generations[0].status).toBe("succeeded");
+  }, 60_000);
 
   it("runs a whole UGC pipeline on the demo provider (open engine: voice clone → presenter → captions → join)", async () => {
     const product = brand.listProducts(brandId)[0];
@@ -393,7 +429,7 @@ describe("Ad Multiplier", () => {
     const imgs = [upload("a.png"), upload("b.png")];
     const v = video();
     const hh = mk.planMultiplier({ engine: "cloud", video: v, duration: 30, images: imgs, mode: "prompt", prompt: "Swap the bottle for @image_2", quality: "720p", modelId: "happy-horse-video-edit" }, {});
-    // The first 15 s are cut first (Happy Horse returns at most 15 s and bills the input seconds too).
+    // The first 15 s are cut first (Happy Horse returns at most 15 s).
     expect(hh.steps.map((s) => s.key)).toEqual(["clip", "edit"]);
     expect(hh.steps[0].request.params).toEqual({ startTime: 0, endTime: 15 });
     expect(hh.notes.join(" ")).toMatch(/Happy Horse Video Edit recreates up to 15 s: the first 15 s of your selection are used/);
@@ -502,7 +538,12 @@ describe("Ads Studio", () => {
       { productId: products[1].id, count: 2 },
     ];
     const est = await (await adsEstimate.POST(json("POST", { brandId, engine: "open", items }))).json();
-    expect(est).toMatchObject({ modelId: "oss-qwen-edit", total: 5, demo: true });
+    // Fuobe Marketing Image on the user's GPU: free.
+    expect(est).toMatchObject({ modelId: "fuobe-marketing-image", modelName: "Fuobe Marketing Image", total: 5, demo: true });
+    // In the cloud Nano Banana Pro and GPT Image 2.5 stay choices; a model the studio doesn't offer runs the Original.
+    expect((await (await adsEstimate.POST(json("POST", { brandId, engine: "cloud", items }))).json()).modelId).toBe("fuobe-marketing-image");
+    expect((await (await adsEstimate.POST(json("POST", { brandId, engine: "cloud", items, modelId: "nano-banana-pro" }))).json()).modelId).toBe("nano-banana-pro");
+    expect((await (await adsEstimate.POST(json("POST", { brandId, engine: "cloud", items, modelId: "flux-3" }))).json()).modelId).toBe("fuobe-marketing-image");
     const { batchId, creatives, run } = ads.createBatch({ brandId, engine: "open", items });
     expect(creatives).toHaveLength(5);
     expect(creatives.every((c) => c.status === "writing")).toBe(true);
@@ -510,7 +551,7 @@ describe("Ads Studio", () => {
     const written = ads.listCreatives({ brandId, batchId });
     expect(written.every((c) => c.headline && c.generationId)).toBe(true);
     const g = await settle(written[0].generationId!);
-    expect(g.request).toMatchObject({ feature: "ads", modelId: "oss-qwen-edit", op: "edit" });
+    expect(g.request).toMatchObject({ feature: "ads", modelId: "fuobe-marketing-image", engine: "open", op: "edit" });
     expect(g.request.prompt).toMatch(/No text, letters/);
     for (const c of written) await settle(c.generationId!);
     const ready = await (await creativesRoute.GET(json("GET", undefined, `http://x/api/ads/creatives?brand=${brandId}&batch=${batchId}`))).json();

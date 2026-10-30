@@ -1,5 +1,4 @@
 import "server-only";
-import { Worker } from "node:worker_threads";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { getModel } from "@/lib/catalog";
@@ -8,6 +7,7 @@ import type { GenInput, ModelRoute, Operation } from "@/lib/catalog/types";
 import { engineMode, getSetting } from "../settings";
 import { toDataUri } from "../storage";
 import { comfyProvider } from "./comfyui";
+import { ask, checkReach, reachSync, runningCheck, sharedCheck, takesConnection, within, type Reach } from "./reach";
 import type { PollResult, ProviderAdapter, RemoteOutput } from "./types";
 
 /**
@@ -39,44 +39,84 @@ export function textOutput(text: string, cues?: Cue[] | null, meta: Record<strin
 // Which LLM
 
 declare global {
-  var __fuobeOllamaReach: { ok: boolean; at: number; url: string } | undefined;
+  /** Reachability of Ollama, the models it listed when it last answered, when it last answered, and when a longer look last went unanswered (./reach). */
+  var __fuobeOllamaReach: (Reach & { models?: string[] }) | undefined;
   var __fuobeLlmJobs: Map<string, LlmJob> | undefined;
 }
 
 const ollamaUrl = () => getSetting("ollamaUrl").replace(/\/+$/, "");
 const PROBE_MS = 15_000;
 
-/** Is Ollama answering? Cached for 15 s; routing reads the cached answer (see llmBackends). */
+/** What GET /api/tags got: an answer (with the names of the models pulled), a no, or nothing in time. */
+function askOllama(url: string, timeoutMs: number) {
+  return ask<string[]>(`${url}/api/tags`, timeoutMs, {
+    read: async (r) => {
+      const models = ((await r.json()) as { models?: { name?: unknown }[] } | null)?.models;
+      return Array.isArray(models) ? models.map((m) => (typeof m?.name === "string" ? m.name : "")).filter(Boolean).slice(0, 50) : undefined;
+    },
+  });
+}
+
+/**
+ * Is Ollama answering GET /api/tags? By the busy-vs-down rules ComfyUI has (./reach): a refused port or an HTTP
+ * error is down at once; no answer in time is busy when it answered lately, else it gets the longer look when its
+ * port takes a connection. Cached for 15 s (`force` checks now); one check runs at a time. Routing reads the cached
+ * answer (see llmBackends), and so does Assist (with the models). A busy Ollama keeps the models it last listed.
+ */
 export async function probeOllama(force = false): Promise<boolean> {
   const cur = globalThis.__fuobeOllamaReach;
   const url = ollamaUrl();
   if (!force && cur && cur.url === url && Date.now() - cur.at < PROBE_MS) return cur.ok;
-  const ok = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(1500) })
-    .then((r) => r.ok)
-    .catch(() => false);
-  globalThis.__fuobeOllamaReach = { ok, at: Date.now(), url };
-  return ok;
+  return sharedCheck("ollama", url, async () => {
+    const prev = globalThis.__fuobeOllamaReach?.url === url ? globalThis.__fuobeOllamaReach : undefined;
+    const { reach, asked } = await checkReach(url, prev, (ms) => askOllama(url, ms));
+    const models = (asked.answer === "yes" ? asked.value : undefined) ?? prev?.models;
+    // The address may have changed while this ran: the new one's check speaks for it.
+    if (url === ollamaUrl()) globalThis.__fuobeOllamaReach = reach.ok && models ? { ...reach, models } : reach;
+    return reach.ok;
+  });
 }
 
-const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
-const flag = new Int32Array(workerData.sab);
-fetch(workerData.url, { signal: AbortSignal.timeout(workerData.timeout) })
-  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), () => Atomics.store(flag, 0, 2))
-  .finally(() => Atomics.notify(flag, 0));`;
+/** The models the reachable Ollama listed when it last answered ([] when it's down, or no check has read them yet). */
+export function ollamaModels(): string[] {
+  const cur = globalThis.__fuobeOllamaReach;
+  return cur?.ok && cur.url === ollamaUrl() ? (cur.models ?? []) : [];
+}
 
-/** Blocking check (a few ms for a refused port, at most `timeoutMs` for a host that doesn't answer). */
+/** How long a person's question (Assist) waits for what the last check of Ollama doesn't say yet. */
+const SOON_MS = 1500;
+
+/**
+ * Is Ollama answering, for a person waiting on the answer (Assist's panel, a chat's mode)? What the last check found,
+ * as routing reads it (ollamaReady): a stale answer is refreshed in the background, not waited on. It waits, at most
+ * `waitMs`, only for what nothing has said yet: the first check of an address, or the models a check under way is
+ * reading for a reachable Ollama. A first check still going then (no answer yet) counts an Ollama whose port took the
+ * connection as busy for now, so reachable, as routing's blocking check does; the check goes on to say for sure.
+ */
+export async function ollamaSoon(waitMs = SOON_MS): Promise<boolean> {
+  const url = ollamaUrl();
+  const known = globalThis.__fuobeOllamaReach?.url === url ? globalThis.__fuobeOllamaReach : undefined;
+  if (known) {
+    if (Date.now() - known.at > PROBE_MS) void probeOllama().catch(() => false);
+    const reading = known.ok && !known.models ? runningCheck("ollama", url) : undefined;
+    if (reading) await within(reading, waitMs);
+    const now = globalThis.__fuobeOllamaReach;
+    return now?.url === url ? now.ok : known.ok;
+  }
+  const port = takesConnection(url, waitMs);
+  return (await within(probeOllama().catch(() => false), waitMs)) ?? (await port);
+}
+
+/**
+ * Blocking check (reachSync): a few ms for an Ollama that answers or a refused port, at most `timeoutMs` otherwise.
+ * One that takes the connection but doesn't answer in time is busy for now, and probeOllama goes on in the background
+ * to say for sure. One that answers gets a background check too: this one can't read the models it has (Assist lists them).
+ */
 function probeOllamaSync(url: string, timeoutMs = 1500): boolean {
-  let ok = false;
-  try {
-    const sab = new SharedArrayBuffer(4);
-    const flag = new Int32Array(sab);
-    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/api/tags`, timeout: timeoutMs } });
-    Atomics.wait(flag, 0, 0, timeoutMs + 1000);
-    ok = Atomics.load(flag, 0) === 1;
-    void worker.terminate();
-  } catch {}
-  globalThis.__fuobeOllamaReach = { ok, at: Date.now(), url };
-  return ok;
+  const { reach, sure } = reachSync(url, `${url}/api/tags`, timeoutMs);
+  globalThis.__fuobeOllamaReach = reach;
+  if (!sure || reach.ok) void probeOllama(true).catch(() => false);
+  return reach.ok;
 }
 
 /**
@@ -88,7 +128,7 @@ function ollamaReady(): boolean {
   const cur = globalThis.__fuobeOllamaReach;
   const url = ollamaUrl();
   if (!cur || cur.url !== url) return probeOllamaSync(url);
-  if (Date.now() - cur.at > PROBE_MS) void probeOllama();
+  if (Date.now() - cur.at > PROBE_MS) void probeOllama().catch(() => false);
   return cur.ok;
 }
 
@@ -144,7 +184,7 @@ async function viaClaude(system: string, user: string, signal: AbortSignal): Pro
       { signal },
     )) as Anthropic.Beta.BetaMessage;
   } catch (e) {
-    if (e instanceof Anthropic.AuthenticationError) throw new Error("Your Anthropic API key was rejected. Check it in Settings → API keys.");
+    if (e instanceof Anthropic.AuthenticationError) throw new Error("Your Anthropic API key was rejected. Check it in Settings → Prompt enhancement.");
     if (e instanceof Anthropic.RateLimitError) throw new Error("Claude is rate-limited right now. Try again in a minute.");
     if (e instanceof Anthropic.APIError) throw new Error(`Claude returned an error (${e.status ?? "network"}): ${e.message}`);
     throw e;

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { claudeStream } from "./fixtures/claude-sse";
 import type Anthropic from "@anthropic-ai/sdk";
+import type { AssistItem } from "@/lib/assist";
 
 vi.setConfig({ testTimeout: 60_000 });
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-assist-ctx-"));
@@ -19,7 +20,7 @@ const memory = await import("@/server/assist/memory");
 const projects = await import("@/server/assist/projects");
 const { handleMcp } = await import("@/server/mcp");
 const { db } = await import("@/server/db");
-const { planRunnable } = await import("@/lib/assist");
+const { memoryCardLine, planRunnable } = await import("@/lib/assist");
 
 type Msg = Anthropic.Beta.BetaMessage;
 type Block = Anthropic.Beta.BetaContentBlock;
@@ -131,13 +132,31 @@ describe("a chat's context", () => {
     await agent.run(t.id, m.call);
     let v = agent.getThread(t.id)!;
     expect(v.thread.status).toBe("waiting");
-    expect(v.thread.items.find((i) => i.role === "approval")).toMatchObject({ summary: "Remember this?", jobs: [{ tool: "remember", op: "memory", prompt: "Logo always bottom right.", note: "This project" }] });
+    const card = () => v.thread.items.find((i) => i.role === "approval") as Extract<AssistItem, { role: "approval" }>;
+    expect(card()).toMatchObject({ summary: "Remember this?", status: "pending", jobs: [{ tool: "remember", op: "memory", prompt: "Logo always bottom right.", note: "This project" }] });
+    // The card's line doesn't say it's saved before the person says yes.
+    expect(memoryCardLine(card().status)).toBe("Saves to memory for future chats");
     expect(memory.listMemories({ scope: "project", projectId: p.id })).toHaveLength(0);
     await agent.answerApproval(t.id, true);
     await agent.run(t.id, m.call);
     v = agent.getThread(t.id)!;
     expect(memory.listMemories({ scope: "project", projectId: p.id }).map((x) => [x.text, x.source])).toEqual([["Logo always bottom right.", "agent"]]);
     expect(v.thread.items.some((i) => i.role === "tool" && /Remembered/.test(i.text))).toBe(true);
+    expect(card().status).toBe("approved");
+    expect(memoryCardLine(card().status)).toBe("Saved to memory for future chats");
+  });
+
+  it("a memory declined with Not now isn't saved, and its card says so", async () => {
+    const t = agent.createThread({ engine: "cloud", agent: "offline" });
+    agent.addMessage(t.id, "Remember that captions are always yellow");
+    const m = scripted(reply([use("toolu_n", "remember", { text: "Captions are always yellow.", category: "Style" })], "tool_use"), reply([text("Okay.")], "end_turn"));
+    await agent.run(t.id, m.call);
+    await agent.answerApproval(t.id, false);
+    await agent.run(t.id, m.call);
+    const card = agent.getThread(t.id)!.thread.items.find((i) => i.role === "approval") as Extract<AssistItem, { role: "approval" }>;
+    expect(card.status).toBe("declined");
+    expect(memoryCardLine(card.status)).toBe("Not saved to memory");
+    expect(memory.listMemories({ scope: "all" }).some((x) => x.text === "Captions are always yellow.")).toBe(false);
   });
 
   it("gives project chats the instructions and sources, and read_source the full text", async () => {
@@ -277,7 +296,12 @@ describe("studio tools", () => {
     expect(studio.fallbackSteps.captions({ video, translate_to: "Spanish" }, { engine: "cloud" })[0].request).toMatchObject({ modelId: "veed-subtitles", params: { targetLanguage: "Spanish" } });
     expect(plan("split_layers", { image: "/api/files/uploads/a.png", layers: 5 }).jobs).toMatchObject([{ op: "layers", modelId: "oss-qwen-layered" }]);
     expect(plan("restyle_footage", { video, style: "claymation" }, "cloud").jobs).toMatchObject([{ op: "v2v", modelId: "kling-o3" }]);
-    const ads = studio.fallbackSteps.ads({ brief: "oat milk", product_image: "/api/files/uploads/p.png", count: 8, aspect_ratios: ["1:1", "4:5", "9:16"] }, { engine: "cloud" });
+    // On your GPU: Fuobe Mixed Media's per-frame pass on the GPU, one seed (its graph reads no reference images).
+    const [open] = studio.fallbackSteps.restyle({ video, style: "anime", references: ["/api/files/uploads/r.png"] }, { engine: "open" });
+    expect(open.request).toMatchObject({ modelId: "fuobe-mixed-media", engine: "open", op: "v2v", prompt: "anime", params: { seed: 424242 }, inputs: { video } });
+    expect(open.request.inputs?.images).toBeUndefined();
+    expect(plan("restyle_footage", { video, style: "claymation" }, "open").jobs).toMatchObject([{ op: "v2v", modelId: "fuobe-mixed-media" }]);
+    const ads =studio.fallbackSteps.ads({ brief: "oat milk", product_image: "/api/files/uploads/p.png", count: 8, aspect_ratios: ["1:1", "4:5", "9:16"] }, { engine: "cloud" });
     expect(ads).toHaveLength(12);
     expect(ads[0]).toMatchObject({ modelId: "nano-banana-pro", op: "edit", inputs: { images: ["/api/files/uploads/p.png"] } });
   });

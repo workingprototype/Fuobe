@@ -364,10 +364,18 @@ export interface PlanCaps {
 /** Fuobe Soul: a character with a trained Soul ID makes its photos there, on either engine (build plan O3). */
 export const PHOTODUMP_SOUL = "fuobe-soul";
 
+/**
+ * Instadump's Original (build plan O10): Qwen-Image-Edit 2511 with the photos as references, one Fuobe prompt per pack
+ * photo — hosted in the cloud, the 3-image graph on your GPU. It also makes a character's photos before a Soul ID.
+ */
+export const PHOTO_EDIT: Record<Engine, string> = { cloud: "qwen-image-edit-2511-cloud", open: "oss-qwen-edit" };
+
 export const PHOTODUMP_MODELS: Record<Engine, string[]> = {
-  cloud: [PHOTODUMP_SOUL, "nano-banana-pro", "seedream-5-pro"],
-  open: [PHOTODUMP_SOUL, "oss-qwen-edit"],
+  cloud: [PHOTODUMP_SOUL, PHOTO_EDIT.cloud, "nano-banana-pro", "seedream-5-pro"],
+  open: [PHOTODUMP_SOUL, PHOTO_EDIT.open],
 };
+
+const EDIT_NAMES: Record<string, string> = { "qwen-image-edit-2511-cloud": "Qwen-Image-Edit 2511", "oss-qwen-edit": "Qwen-Image-Edit 2511", "nano-banana-pro": "Nano Banana Pro", "seedream-5-pro": "Seedream 5.0 Pro" };
 
 /** The character's Soul ID that runs on Fuobe Soul on this engine (a demo training's stand-in doesn't count). */
 export const soulIdOf = (s: PhotoSubject, engine: Engine): ElementLora | undefined => (s.kind === "element" ? identityFor(s.loras, { id: PHOTODUMP_SOUL, engine }) : undefined);
@@ -380,9 +388,10 @@ export const soulIdOf = (s: PhotoSubject, engine: Engine): ElementLora | undefin
 export function photodumpModel(subject: PhotoSubject, engine: Engine, _caps: PlanCaps, pick?: string, custom = false): { modelId: string; note?: string } {
   const trained = soulIdOf(subject, engine);
   if (!custom && trained && (!pick || pick === PHOTODUMP_SOUL)) return { modelId: PHOTODUMP_SOUL };
-  // Say why when the pick (or a character without a Soul ID) ends up on an edit model.
-  const fallback = engine === "open" ? "oss-qwen-edit" : pick === "seedream-5-pro" ? "seedream-5-pro" : "nano-banana-pro";
-  const name = fallback === "oss-qwen-edit" ? "Qwen-Image-Edit" : fallback === "seedream-5-pro" ? "Seedream 5.0 Pro" : "Nano Banana Pro";
+  // Say why when the pick (or a character without a Soul ID) ends up on an edit model: Qwen-Image-Edit 2511 unless a
+  // partner model is picked in the cloud.
+  const fallback = engine === "cloud" && (pick === "nano-banana-pro" || pick === "seedream-5-pro") ? pick : PHOTO_EDIT[engine];
+  const name = EDIT_NAMES[fallback] ?? fallback;
   const note =
     pick === PHOTODUMP_SOUL && custom
       ? `Your own packs recreate each reference photo — ${name} runs them`
@@ -577,9 +586,27 @@ export const FASHION: FashionTemplate[] = FASHION_TEMPLATES.map((t) => ({
 }));
 export const getTemplate = (id: string) => FASHION.find((t) => t.id === id);
 
+/**
+ * Fashion Factory's models per step (build plan O10): Fuobe Try-On (FLUX.2 [klein] 4B + the try-on LoRA) dresses the
+ * base shot on both engines, FASHN and Nano Banana Pro stay as cloud choices and Qwen-Image-Edit 2511 dresses it on your
+ * GPU when the try-on can't run; Qwen-Image-Edit 2511 makes the photoset, Nano Banana Pro a cloud choice.
+ */
+export const TRYON_MODEL = "fuobe-tryon";
 export const FASHION_MODELS = {
-  outfit: { cloud: ["fashn-tryon", "nano-banana-pro"], open: ["oss-tryon-klein"] },
+  outfit: { cloud: [TRYON_MODEL, "fashn-tryon", "nano-banana-pro"], open: [TRYON_MODEL, PHOTO_EDIT.open] },
+  photoset: { cloud: [PHOTO_EDIT.cloud, "nano-banana-pro"], open: [PHOTO_EDIT.open] },
 } as const;
+
+/**
+ * A Fashion step's model: the one picked when it is one of the step's on this engine, else the first of them this
+ * install offers (caps.has: its switch, and a recipe LoRA it can't run without), else the first (its run then
+ * refuses, naming the switch to turn back on).
+ */
+export function fashionModel(step: keyof typeof FASHION_MODELS, engine: Engine, pick?: string, caps?: Pick<PlanCaps, "has">): string {
+  const list: readonly string[] = FASHION_MODELS[step][engine];
+  if (pick && list.includes(pick)) return pick;
+  return list.find((id) => !caps?.has || caps.has(id, engine)) ?? list[0];
+}
 
 const element = (s: PhotoSubject) => (s.kind === "element" ? `@${s.handle}` : "the person in image 1");
 
@@ -598,15 +625,17 @@ export function fashionBaseRequest(t: FashionTemplate, subject: Extract<PhotoSub
 }
 
 /** Step 4: the base shot wearing the uploaded outfit (try-on, or an edit that dresses them). */
-export function fashionOutfitRequest(t: FashionTemplate, base: string, garment: string, engine: Engine, modelId?: string): GenerationRequest {
-  const id = engine === "open" ? "oss-tryon-klein" : modelId === "nano-banana-pro" ? "nano-banana-pro" : "fashn-tryon";
-  const tryon = id !== "nano-banana-pro";
+export function fashionOutfitRequest(t: FashionTemplate, base: string, garment: string, engine: Engine, modelId?: string, caps?: Pick<PlanCaps, "has">): GenerationRequest {
+  const id = fashionModel("outfit", engine, modelId, caps);
+  const tryon = id === TRYON_MODEL || id === "fashn-tryon";
   return {
     feature: "fashion",
     modelId: id,
+    // Fuobe Try-On runs on both engines: the run's engine picks its half.
+    ...(id === TRYON_MODEL && { engine }),
     op: "edit",
     prompt: tryon
-      ? "A full-body photo of a person. Replace the outfit with the garment shown in the reference image, with its fabric, colour, pattern, logo and fit."
+      ? "a full-body photo of a person. Replace the outfit with the garment shown in the reference image, with its fabric, colour, pattern, logo and fit. The final image is a full body shot."
       : `Dress the person in image 1 in the outfit or product from image 2: its exact fabric, colour, pattern, logo and fit. Keep their face, pose and ${t.name.toLowerCase()} set from image 1.`,
     inputs: { images: [base, garment] },
     params: { numOutputs: 2, ...(tryon ? {} : { aspectRatio: "3:4" }) },
@@ -614,9 +643,9 @@ export function fashionOutfitRequest(t: FashionTemplate, base: string, garment: 
   };
 }
 
-/** Step 5: one photo per template shot, from the dressed image. */
-export function fashionPhotosetRequests(t: FashionTemplate, dressed: string, engine: Engine): GenerationRequest[] {
-  const modelId = engine === "open" ? "oss-qwen-edit" : "nano-banana-pro";
+/** Step 5: one photo per template shot, from the dressed image (Qwen-Image-Edit 2511, or Nano Banana Pro when picked). */
+export function fashionPhotosetRequests(t: FashionTemplate, dressed: string, engine: Engine, pick?: string, caps?: Pick<PlanCaps, "has">): GenerationRequest[] {
+  const modelId = fashionModel("photoset", engine, pick, caps);
   const n = t.photoset.length;
   return t.photoset.map((shot, i) => ({
     feature: "fashion",

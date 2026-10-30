@@ -320,6 +320,9 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
       return Array.from({ length: clamp(Math.round(Number(meta.frames ?? 4)), 1, 500) }, (_, index) => ({ url: svgUri(demoSvg(`frame ${index + 1}`, ar, index)), kind: "image" as const, contentType: "image/svg+xml", meta: { index, demo: true } }));
     case "overlay":
       return [{ url: svgUri(demoSvg(brief || "overlay", ar, 5)), kind: "image", contentType: "image/svg+xml", meta: { demo: true } }];
+    // The face mosaic (O11): a demo picture; no masks, so the browser has nothing to pixelate.
+    case "face-mosaic":
+      return [{ url: svgUri(demoSvg(brief || "pixelated faces", ar, 6)), kind: "image", contentType: "image/svg+xml", meta: { demo: true } }];
     // The same tone, as long as the loop was asked to be (or the clips joined end to end).
     case "audio-loop":
       return [{ url: toDataUri(demoWav(clamp(Math.round(Number(meta.duration ?? 12)), 4, 30)), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { demo: true } }];

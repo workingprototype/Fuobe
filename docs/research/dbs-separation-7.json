@@ -1,0 +1,1664 @@
+{
+ "asOf": "2026-10-29",
+ "scope": "DBS (Dynamic Band Splitting) soundtrack separation into music, sound effects and speech: the two released models (JusperLee/DBS-TIGER-DnR, JusperLee/DBS-BSRNN-DnR), the ComfyUI pack hiroki-abe-58/ComfyUI-DBS, running it outside ComfyUI, hosted routes, what Fuobe has today, where DBS goes in Fuobe on both engines, and a build plan. Licences are information (owner's decision). Read-only: no code from these repositories was run or installed, nothing was installed into Fuobe's ComfyUI, and no paid API was called.",
+ "doc": "docs/research/dbs-separation-7.md",
+ "fuobe": {
+  "branch": "claude/fuobe-parity-4",
+  "commit": "7d7a765be3ae154610473172680250417b440264"
+ },
+ "dbs": {
+  "paper": {
+   "title": "Learning Where to Split: Dynamic Band Splitting for Audio Source Separation",
+   "authors": [
+    "Bingzhe Zhang",
+    "Kai Li",
+    "Xiaolin Hu"
+   ],
+   "affiliation": "Tsinghua University",
+   "arxiv": "2610.14993",
+   "url": "https://arxiv.org/abs/2610.14993",
+   "submitted": "2026-10-10",
+   "pages": 25,
+   "licence": "arXiv non-exclusive distribution licence 1.0"
+  },
+  "code": {
+   "repo": "https://github.com/JusperLee/Dynamic-Band-Splitting",
+   "commit": "ff526463a58ee0278e7bd05c4b8bce112b743e34",
+   "commitDate": "2026-10-15",
+   "licence": "Apache-2.0 (THIRD_PARTY.md: MIT notices for BS-RoFormer, Music-Source-Separation-Training, TIGER/Look2Hear)",
+   "python": ">=3.11"
+  },
+  "projectPage": "https://cslikai.cn/Dynamic-Band-Splitting/",
+  "demoSpace": "https://huggingface.co/spaces/JusperLee/DBS-Demo",
+  "method": [
+   "content-conditioned scorer rates every STFT bin inside 4 coarse regions",
+   "hard Top-K picks a fixed number of boundaries (128 band tokens)",
+   "content-weighted pooling makes one token per band",
+   "unchanged backbone (BSRNN, TIGER, BS-RoFormer or Mel-RoFormer) separates the tokens",
+   "tokens smoothed, expanded to the STFT grid, refined along frequency, decoded to complex masks by a frequency-shared head",
+   "DBS-MelRoFormer uses a soft router instead"
+  ],
+  "io": {
+   "sampleRate": 44100,
+   "channels": "mono",
+   "stems": [
+    "music",
+    "sfx",
+    "speech"
+   ],
+   "stemOrderSource": "model cards; dbs_comfy/runtime.py L29",
+   "mixtureConsistency": "masks sum to 1+0j (dbs/modules/dbs.py L326-329): music + sfx + speech = input; max measured difference 5e-7 (VERIFICATION.md L56-57)",
+   "length": "any; equal-weight overlap-add (dbs/engine/inference.py L29-53); clips <= half a window padded to one window, clips between half a window and one window run unpadded (L32-36)",
+   "windows": {
+    "DBS-TIGER-DnR": {
+     "chunkSeconds": 6.0,
+     "hopSeconds": 3.0
+    },
+    "DBS-BSRNN-DnR": {
+     "chunkSeconds": 3.0,
+     "hopSeconds": 1.5
+    }
+   },
+   "auxOutput": "model(mixture, return_aux=True) also returns the band boundaries (tiger.py L682-689); not exposed by the pack"
+  },
+  "stereoModes": {
+   "mono": "separates the channel mean (official usage); stems come out mono; 5.1 mean includes LFE and surrounds",
+   "each channel": "separates every channel; time x channel count",
+   "fastStereoBed": "proposal (guess until heard): separate the mono mean, AudioMerge(original, speech, subtract) broadcasts the mono speech over each channel and keeps the original stereo image (comfy_extras/nodes_audio.py L708-741); exact for centre-panned dialogue; AudioMerge divides the result by its peak when over 1.0 (L747-749)"
+  },
+  "quality": {
+   "dataset": "DnR v2 test set, 973 full-length tracks, SI-SDR dB",
+   "models": [
+    {
+     "model": "DBS-TIGER (128 bands)",
+     "music": 7.78,
+     "speech": 15.9,
+     "sfx": 6.7,
+     "avg": 10.13,
+     "params": "1.0M",
+     "gmacsPerSecond": 31.6
+    },
+    {
+     "model": "DBS-BSRNN (128 bands)",
+     "music": 6.48,
+     "speech": 15.01,
+     "sfx": 5.73,
+     "avg": 9.07,
+     "params": "4.7M",
+     "gmacsPerSecond": 124.0
+    }
+   ],
+   "baselines": [
+    {
+     "model": "TIGER (128), retrained",
+     "avg": 8.74,
+     "params": "1.4M",
+     "gmacsPerSecond": 20.4
+    },
+    {
+     "model": "BSRNN (128), retrained",
+     "avg": 7.69,
+     "params": "35.5M",
+     "gmacsPerSecond": 76.6
+    },
+    {
+     "model": "TIGER (published)",
+     "avg": 7.44,
+     "params": "1.4M",
+     "gmacsPerSecond": 10.8
+    },
+    {
+     "model": "MRX",
+     "avg": 7.4,
+     "params": "30.5M",
+     "gmacsPerSecond": 10.6
+    },
+    {
+     "model": "BSRNN (published)",
+     "avg": 7.03,
+     "params": "52.8M",
+     "gmacsPerSecond": 18.2
+    },
+    {
+     "model": "Conv-TasNet",
+     "avg": 3.6,
+     "params": "5.3M",
+     "gmacsPerSecond": 19.8
+    }
+   ],
+   "notes": [
+    "abstract's 29.0% gain for DBS-BSRNN is vs the published BSRNN (9.07/7.03 = 1.290); vs retrained BSRNN(128) it is +18%",
+    "dialogue separates well (15-16 dB); music vs effects is weak (5.7-7.8 dB): expect bleed between those two stems",
+    "all numbers in-domain on synthetic English DnR v2; not measured on real films"
+   ],
+   "unreleased": {
+    "MUSDB18-HQ": {
+     "DBS-BSRNN": "5.43 dB (21.7M)",
+     "DBS-BS-RoFormer": "6.34 dB (33.9M)",
+     "DBS-MelRoFormer": "8.07 dB (19.1M)"
+    },
+    "EchoSet SDRi": {
+     "DBS-TIGER": "14.55 dB (1.0M)",
+     "DBS-BSRNN": "13.21 dB (7.1M)"
+    }
+   },
+   "sources": [
+    "upstream README L127-147",
+    "model cards",
+    "project_page/index.html",
+    "arXiv abstract"
+   ]
+  },
+  "speed": {
+   "source": "ComfyUI-DBS docs/VERIFICATION.md L96-108 (Windows 11, RTX 5090, Core Ultra 9 285K 24 threads, torch 2.14.1+cu130, model loaded)",
+   "rows": [
+    {
+     "model": "DBS-TIGER",
+     "device": "RTX 5090",
+     "input": "10 min mono",
+     "seconds": 37.9,
+     "xRealTime": 15.9,
+     "peakGpuGiB": 1.64
+    },
+    {
+     "model": "DBS-TIGER",
+     "device": "RTX 5090",
+     "input": "10 min each channel",
+     "seconds": 74.5,
+     "xRealTime": 16.1,
+     "perChannel": true,
+     "peakGpuGiB": 1.61
+    },
+    {
+     "model": "DBS-BSRNN",
+     "device": "RTX 5090",
+     "input": "10 min mono",
+     "seconds": 26.9,
+     "xRealTime": 22.4,
+     "peakGpuGiB": 1.42
+    },
+    {
+     "model": "DBS-BSRNN",
+     "device": "RTX 5090",
+     "input": "10 min each channel",
+     "seconds": 53.7,
+     "xRealTime": 22.4,
+     "perChannel": true,
+     "peakGpuGiB": 1.42
+    },
+    {
+     "model": "DBS-TIGER",
+     "device": "CPU 24 threads",
+     "input": "60 s mono",
+     "seconds": 122.5,
+     "xRealTime": 0.49
+    },
+    {
+     "model": "DBS-BSRNN",
+     "device": "CPU 24 threads",
+     "input": "60 s mono",
+     "seconds": 32.8,
+     "xRealTime": 1.83
+    }
+   ],
+   "fuobeHostGuess": "4 logical CPUs, torch 2.14.1+cpu: DBS-BSRNN about 0.3-0.6x real time (guess), DBS-TIGER about 4x slower; not measured (rules forbid running the pack)",
+   "threads": "upstream demo: single thread, NNPACK off for TIGER on CPU is faster and identical (demo/README.md L74-75); the pack measured it 3.3x slower and not bit-identical (71.5 s vs 21.4 s for 10 s; VERIFICATION.md L112-114)",
+   "memory": "stems held for the whole input: 12 bytes per input sample at 44.1 kHz, about 0.3 GB per 10 minutes (VERIFICATION.md L107-108)"
+  },
+  "limits": [
+   "trained only on DnR v2 (LibriSpeech English read speech, FMA music, FSD50K effects); other languages, crowd/shouted speech, very loud music, real films unverified",
+   "singing likely goes to music",
+   "CUDA runs not bit-identical (pack 69-80 dB SNR vs official; official run-to-run 77.5 dB TIGER, 90.7 dB BSRNN); ComfyUI --deterministic does not set cudnn.deterministic",
+   "pack 'auto' uses ComfyUI's device when its type is cuda, else CPU (nodes.py L28-35); ROCm reports cuda (comfy/model_management.py L195-220); MPS, XPU, DirectML fall back to CPU; AMD untested (VERIFICATION.md L124)"
+  ]
+ },
+ "models": [
+  {
+   "name": "DBS-TIGER-DnR",
+   "repo": "JusperLee/DBS-TIGER-DnR",
+   "revision": "22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b",
+   "url": "https://huggingface.co/JusperLee/DBS-TIGER-DnR",
+   "licence": "Apache-2.0",
+   "licenceSource": "model card front matter license: apache-2.0; HF tag license:apache-2.0",
+   "gated": false,
+   "trainedOn": "DnR v2 (CC BY 4.0), from scratch",
+   "params": 1013729,
+   "paramsNote": "1,013,727 F32 + 2 I64, 507 tensors, safetensors header 56,904 bytes",
+   "sizeBytes": 4111836,
+   "sizeMb": 4.11,
+   "comfyFolder": "models/dbs/DBS-TIGER-DnR/",
+   "files": [
+    {
+     "name": "model.safetensors",
+     "bytes": 4111836,
+     "sha256": "3d8205743f2a6f5a6704f5d4104d7cf5bf7bf02dab2fd728da31f4c69225cadb",
+     "required": true,
+     "url": "https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/model.safetensors"
+    },
+    {
+     "name": "config.json",
+     "bytes": 957,
+     "sha256": "c7f7893323e78f9b99747a13090558a13c4f4b77383a38acb9979709fd04d1d8",
+     "required": true,
+     "url": "https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/config.json"
+    },
+    {
+     "name": "README.md",
+     "bytes": 2403,
+     "sha256": "df844475771bc045de2586686df4df9acf933cf57080dca7c9db41d6b22e2f2e",
+     "required": false,
+     "url": "https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/README.md"
+    },
+    {
+     "name": ".gitattributes",
+     "bytes": 1519,
+     "required": false
+    }
+   ],
+   "config": "win 2048, stride 512, in_channels 256, out_channels 132, num_blocks 8, upsampling_depth 5, num_sources 3, use_fla false; 4 regions bins 0-40-80-352-1025, 32 tokens each = 128 bands",
+   "windows": {
+    "chunkSeconds": 6.0,
+    "hopSeconds": 3.0
+   },
+   "created": "2026-10-10T08:53:19Z",
+   "lastModified": "2026-10-15T11:38:56Z",
+   "downloads": 1648,
+   "role": "better quality (10.13 dB avg); default on CUDA hosts",
+   "mirror": "oulianov/DBS-TIGER-DnR (unofficial, same size, not needed)"
+  },
+  {
+   "name": "DBS-BSRNN-DnR",
+   "repo": "JusperLee/DBS-BSRNN-DnR",
+   "revision": "5af343f57f106fbb95efe8a60f1a3999eeb0aef8",
+   "url": "https://huggingface.co/JusperLee/DBS-BSRNN-DnR",
+   "licence": "Apache-2.0",
+   "licenceSource": "model card front matter; HF tag license:apache-2.0",
+   "gated": false,
+   "trainedOn": "DnR v2 (CC BY 4.0), from scratch",
+   "params": 4713557,
+   "paramsNote": "all F32, 314 tensors, safetensors header 31,920 bytes",
+   "sizeBytes": 18886156,
+   "sizeMb": 18.89,
+   "comfyFolder": "models/dbs/DBS-BSRNN-DnR/",
+   "files": [
+    {
+     "name": "model.safetensors",
+     "bytes": 18886156,
+     "sha256": "26290f93e7b501113325e922e7b0c18edca944634e6b9be39856a55204628405",
+     "required": true,
+     "url": "https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/model.safetensors"
+    },
+    {
+     "name": "config.json",
+     "bytes": 1242,
+     "sha256": "57055e2b71913d98a4e1ed426b71617f0dfc372901cc5a8a3bc4a5c69415043e",
+     "required": true,
+     "url": "https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/config.json"
+    },
+    {
+     "name": "README.md",
+     "bytes": 2404,
+     "sha256": "fb386d345dd955befb6dd13e7cb4522d1b2222cba382c17747750ac6a41b3f21",
+     "required": false,
+     "url": "https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/README.md"
+    },
+    {
+     "name": ".gitattributes",
+     "bytes": 1519,
+     "required": false
+    }
+   ],
+   "config": "stft_n_fft 2048, hop 512, win 2048, not normalized; dim 128, depth 6, LSTM bidirectional, rnn_hidden_size 128, num_stems 3, stereo false; 4 regions bins 0-64-128-576-1025, max_chunks 64/64/32/32 = 128 bands",
+   "windows": {
+    "chunkSeconds": 3.0,
+    "hopSeconds": 1.5
+   },
+   "created": "2026-10-10T08:52:44Z",
+   "lastModified": "2026-10-15T11:37:45Z",
+   "downloads": 704,
+   "role": "3.7x faster on CPU (9.07 dB avg); default on CPU hosts"
+  }
+ ],
+ "requiredFilesTotalBytes": 23000191,
+ "licences": [
+  {
+   "item": "DBS-TIGER-DnR and DBS-BSRNN-DnR weights",
+   "licence": "Apache-2.0",
+   "class": "commercial",
+   "notes": "not gated; trained on DnR v2",
+   "source": "model cards at the pinned revisions; HF API"
+  },
+  {
+   "item": "Upstream DBS code (JusperLee/Dynamic-Band-Splitting)",
+   "licence": "Apache-2.0",
+   "class": "commercial",
+   "notes": "LICENSE is the plain template; authors from pyproject/CITATION (Zhang, Li, Hu); keep THIRD_PARTY.md MIT notices: BS-RoFormer (c) 2023 Phil Wang; Music-Source-Separation-Training (c) 2024 Roman Solovyev (ZFTurbo); TIGER / Look2Hear (c) 2026 Kai Li",
+   "source": "upstream @ ff526463a58ee0278e7bd05c4b8bce112b743e34"
+  },
+  {
+   "item": "ComfyUI-DBS pack code (outside dbs_comfy/vendor)",
+   "licence": "MIT",
+   "class": "commercial",
+   "notes": "(c) 2026 hiroki-abe-58; Registry metadata license {file: LICENSE}",
+   "source": "pack @ f656e53434b5485c148a2866fbd6ddc6b6152ed6 LICENSE, NOTICE"
+  },
+  {
+   "item": "Vendored DBS code (dbs_comfy/vendor)",
+   "licence": "Apache-2.0 with MIT notices",
+   "class": "commercial",
+   "notes": "vendor/LICENSE SHA-256 cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30, identical to upstream",
+   "source": "sha256sum"
+  },
+  {
+   "item": "DnR v2 dataset (Zenodo 6949108)",
+   "licence": "CC BY 4.0",
+   "class": "conditions",
+   "notes": "attribution Petermann, Wichern, Wang, Le Roux; from general knowledge (not checked): some FSD50K/FMA source clips carry their own CC licences incl. NC; reach to weights/outputs unresolved; information only",
+   "source": "https://zenodo.org/api/records/6949108"
+  },
+  {
+   "item": "Paper arXiv:2610.14993",
+   "licence": "arXiv non-exclusive distribution licence 1.0",
+   "source": "abs page"
+  },
+  {
+   "item": "HF Space JusperLee/DBS-Demo",
+   "licence": "apache-2.0 (card)",
+   "source": "Space API"
+  },
+  {
+   "item": "Docs images (pack docs/images/stems.png, project page media)",
+   "licence": "CC BY 3.0, (c) Blender Foundation (Tears of Steel, Sintel)",
+   "notes": "Fuobe does not need them"
+  },
+  {
+   "item": "fal-ai/sam-audio/* (hosted)",
+   "licence": "paid API; weights facebook/sam-audio-* under Meta's SAM License (last updated November 19, 2025), gated manual",
+   "class": "paid-api"
+  },
+  {
+   "item": "fal-ai/demucs (hosted)",
+   "licence": "paid API; Demucs MIT",
+   "class": "paid-api"
+  },
+  {
+   "item": "fal-ai/elevenlabs/audio-isolation, veed/clean-audio (hosted)",
+   "licence": "proprietary, paid API",
+   "class": "paid-api"
+  },
+  {
+   "item": "fal-ai/deepfilternet3 (hosted)",
+   "licence": "paid API; DeepFilterNet upstream licence not checked",
+   "class": "paid-api"
+  }
+ ],
+ "licencesForFuobe": {
+  "nodePackRow": {
+   "file": "src/lib/licences.ts (NODE_PACKS, ~L406)",
+   "name": "ComfyUI-DBS",
+   "url": "https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/f656e53434b5485c148a2866fbd6ddc6b6152ed6",
+   "licence": "MIT",
+   "class": "commercial",
+   "note": "Dialogue / music / effects separation; MIT code, vendored DBS code Apache-2.0 with MIT notices; the DBS weights are Apache-2.0, trained on DnR v2 (CC BY 4.0)"
+  },
+  "workflowLicenceText": "DBS weights Apache-2.0 (JusperLee; trained on DnR v2, CC BY 4.0); ComfyUI-DBS code MIT; vendored DBS code Apache-2.0 with MIT notices (BS-RoFormer, MSST, TIGER)",
+  "aboutPage": "show the DnR v2 CC BY 4.0 attribution and the three MIT notices",
+  "default": "all switches on"
+ },
+ "notReleased": {
+  "dbs": "only the two DnR v2 checkpoints; HF author JusperLee lists 21 models, 2 DBS; no MUSDB18-HQ or EchoSet DBS checkpoints",
+  "predecessor": "JusperLee/TIGER-DnR (static TIGER, arXiv 2410.01469, Apache-2.0, 17.1 MB, 7.44 dB avg)",
+  "bandit": "kwatcharasupat/bandit: code Apache-2.0; DnR checkpoints Zenodo 10160698 CC BY-NC 4.0, 309-776 MB, 32-83M params; scores not compared (DnR record 5574713 may differ)"
+ },
+ "pack": {
+  "name": "ComfyUI-DBS",
+  "registryName": "dbs-soundtrack-separation",
+  "url": "https://github.com/hiroki-abe-58/ComfyUI-DBS",
+  "commit": "f656e53434b5485c148a2866fbd6ddc6b6152ed6",
+  "commitDate": "2026-10-19T15:46:40+09:00",
+  "commitMessage": "Make the slowest tests cheaper and give CI more time",
+  "tag": "v0.1.0",
+  "version": "0.1.0",
+  "official": false,
+  "licence": "MIT (c) 2026 hiroki-abe-58; vendored dbs code Apache-2.0 with MIT notices; models Apache-2.0 (trained on DnR v2, CC BY 4.0)",
+  "requiresPython": ">=3.10",
+  "comfyApi": "V3 (comfy_api.latest io.ComfyNode, ComfyExtension, comfy_entrypoint; nodes.py L100-107); README asks ComfyUI v0.38.0+",
+  "dependencies": {
+   "requirements": [
+    "einops>=0.7",
+    "safetensors>=0.4"
+   ],
+   "torch": "from ComfyUI",
+   "fuobeHasThem": "yes: einops (install-comfyui.sh L121) and safetensors; no new package",
+   "worker": "main ComfyUI (no conflicts); not the isolated worker"
+  },
+  "nodeClasses": [
+   "DBSLoader",
+   "DBSSeparate"
+  ],
+  "nodes": [
+   {
+    "class": "DBSLoader",
+    "displayName": "DBS Loader",
+    "category": "loaders/dbs",
+    "source": "dbs_comfy/nodes.py L38-63",
+    "inputs": [
+     {
+      "name": "model",
+      "type": "COMBO",
+      "options": [
+       "DBS-TIGER-DnR",
+       "DBS-BSRNN-DnR"
+      ],
+      "default": "DBS-TIGER-DnR",
+      "note": "fixed name list, not a file picker"
+     },
+     {
+      "name": "device",
+      "type": "COMBO",
+      "options": [
+       "auto",
+       "cpu"
+      ],
+      "default": "auto",
+      "note": "auto = ComfyUI's device when its type is cuda, else CPU"
+     }
+    ],
+    "outputs": [
+     {
+      "name": "model",
+      "type": "DBS_MODEL",
+      "note": "dict {folder, name, device}"
+     }
+    ],
+    "behaviour": [
+     "loads at once from <models>/dbs/<model>/ with config.json + model.safetensors; first registered dbs folder holding both wins (paths.py L13-28)",
+     "fails at this node when a file is missing",
+     "safetensors.torch.load_model(strict=True) (runtime.py L61)",
+     "one cached model at a time keyed by realpath, name, device; cleared on any other load (runtime.py L56-66)"
+    ]
+   },
+   {
+    "class": "DBSSeparate",
+    "displayName": "DBS Separate (music / sfx / speech)",
+    "category": "audio/dbs",
+    "source": "dbs_comfy/nodes.py L66-97",
+    "inputs": [
+     {
+      "name": "model",
+      "type": "DBS_MODEL"
+     },
+     {
+      "name": "audio",
+      "type": "AUDIO"
+     },
+     {
+      "name": "channels",
+      "type": "COMBO",
+      "options": [
+       "mono",
+       "each channel"
+      ],
+      "default": "mono"
+     },
+     {
+      "name": "output_sample_rate",
+      "type": "COMBO",
+      "options": [
+       "44100",
+       "input"
+      ],
+      "default": "44100"
+     }
+    ],
+    "outputs": [
+     {
+      "name": "music",
+      "type": "AUDIO"
+     },
+     {
+      "name": "sfx",
+      "type": "AUDIO"
+     },
+     {
+      "name": "speech",
+      "type": "AUDIO"
+     },
+     {
+      "name": "report",
+      "type": "STRING",
+      "note": "indented JSON: model, device, input_sample_rate, resampled_to_44100, output_sample_rate, channels, batch, signals_per_item, windows, window_seconds, hop_seconds, audio_seconds, seconds, times_real_time"
+     }
+    ],
+    "behaviour": [
+     "progress bar per window and an interrupt check per window (nodes.py L15-25)",
+     "batch items processed one by one",
+     "refuses empty or non-finite waveforms (runtime.py L120-123)",
+     "resamples non-44.1 kHz input with comfy.audio.resample (runtime.py L102-107)"
+    ]
+   }
+  ],
+  "liveServer": "GET /object_info/DBSLoader and /object_info/DBSSeparate on 127.0.0.1:8188 return {} (not installed; nothing installed)",
+  "fitWithFuobeComfy": "ComfyUI fc04da91 has io.Custom (comfy_api/latest/_io.py L133), ComfyExtension, comfy.audio.resample (comfy/audio.py L36), folder_paths.add_model_folder_path(is_default) (folder_paths.py L382-398)",
+  "ci": "ComfyUI v0.38.0 (Ubuntu + Windows, Python 3.12, torch 2.14.1; Ubuntu Python 3.10, torch 2.8.0) and v0.42.1 (Ubuntu, Python 3.12); Fuobe's v0.41.0-7 on Python 3.13 not covered",
+  "downloads": "none at run time (paths.py, runtime.py read local files; vendored hub.py is an empty mixin); tools/download_model.py is a manual script using hf_hub_download at the pinned revisions with SHA-256 checks",
+  "vendored": {
+   "upstreamCommit": "ff526463a58ee0278e7bd05c4b8bce112b743e34",
+   "byteIdentical": [
+    "models/bsrnn.py",
+    "models/tiger.py",
+    "modules/__init__.py",
+    "modules/band_split.py",
+    "modules/dbs.py",
+    "modules/stft.py",
+    "engine/inference.py",
+    "LICENSE",
+    "THIRD_PARTY.md"
+   ],
+   "manifestCheck": "sha256sum -c MANIFEST.sha256: 13/13 OK",
+   "shims": [
+    "dbs/__init__.py",
+    "engine/__init__.py (exports separate only)",
+    "models/__init__.py (BSRNN and TIGER only)",
+    "hub.py (empty PyTorchModelHubMixin)"
+   ],
+   "parity": "author reports CPU bit-for-bit 6/6 and CUDA with deterministic algorithms 4/4 (VERIFICATION.md L22-54)"
+  },
+  "riskScan": {
+   "patterns": [
+    "requests",
+    "urllib",
+    "subprocess",
+    "eval(",
+    "exec(",
+    "pickle",
+    "torch.load",
+    "trust_remote_code",
+    "socket",
+    "os.system",
+    "Popen",
+    "importlib",
+    "hf_hub"
+   ],
+   "nodeAndVendoredCode": "no hits",
+   "hits": {
+    "tools/download_model.py": "hf_hub_download (manual)",
+    "scripts/ci_queue_check.py": "subprocess.Popen of a ComfyUI, urllib to 127.0.0.1",
+    "scripts/queue_client.py": "urllib to a ComfyUI URL",
+    "scripts/export_gui_workflows.py": "refuses URLs other than http://127.0.0.1:"
+   },
+   "excludedFromRegistryZip": [
+    "scripts/",
+    "tests/",
+    ".github/"
+   ],
+   "other": "tiger.py imports fla only with use_fla=true (released config false); config.json splatted into the constructor (runtime.py L60): a tampered config could only raise"
+  },
+  "registry": {
+   "url": "https://api.comfy.org/nodes/dbs-soundtrack-separation",
+   "created": "2026-10-19",
+   "downloads": 12,
+   "githubStars": 46,
+   "versions": [
+    {
+     "version": "0.1.0",
+     "status": "NodeVersionStatusFlagged",
+     "reason": "not public"
+    }
+   ],
+   "zipMatchesGit": "yes, at f656e53434b5485c148a2866fbd6ddc6b6152ed6 (listed and hashed without extraction)",
+   "fuobeImpact": "Fuobe installs by pinned git clone (install-comfyui.sh NODES), so the flag does not block it; record it as a trust signal"
+  },
+  "exampleWorkflows": [
+   {
+    "file": "workflows/api/separate_soundtrack.json",
+    "graph": "LoadAudio -> DBSLoader(DBS-TIGER-DnR, auto) -> DBSSeparate(mono, 44100) -> 3x SaveAudioAdvanced flac (dbs/music, dbs/sfx, dbs/speech) + PreviewAny(report)"
+   },
+   {
+    "file": "workflows/api/remove_dialogue.json",
+    "graph": "LoadAudio -> DBSLoader -> DBSSeparate(each channel, input) -> AudioMerge(music, sfx, add) -> SaveAudioAdvanced dbs/music_and_effects; speech -> SaveAudioAdvanced dbs/dialogue; PreviewAny"
+   },
+   {
+    "file": "workflows/api/video_remove_dialogue.json",
+    "graph": "LoadVideo -> GetVideoComponents -> DBSSeparate(each channel, input) -> AudioMerge add -> CreateVideo -> SaveVideo dbs/no_dialogue; dialogue FLAC; PreviewAny",
+    "fuobe": "do not reuse: decodes every frame to IMAGE tensors and re-encodes (about 45 GB per minute of 1080p30 at float32, my arithmetic); use LoadAudio + stream-copy video-mux-audio(-replace)"
+   }
+  ],
+  "install": {
+   "nodesRow": "[ComfyUI-DBS]=\"https://github.com/hiroki-abe-58/ComfyUI-DBS f656e53434b5485c148a2866fbd6ddc6b6152ed6\"",
+   "where": "scripts/comfy/install-comfyui.sh NODES (L15-34)",
+   "weights": "opt-out block (DBS_WEIGHTS=0) downloading the 4 required files at the pinned revisions into models/dbs/<name>/ with sha256sum -c"
+  }
+ },
+ "graphs": [
+  {
+   "id": "separate-soundtrack-dbs",
+   "capability": "separate-audio",
+   "handBuilt": "scripts/comfy/hand-built/separate-soundtrack-dbs.json",
+   "nodes": [
+    {
+     "id": "1",
+     "class": "LoadAudio",
+     "inputs": {
+      "audio": "<binding audio>"
+     }
+    },
+    {
+     "id": "2",
+     "class": "DBSLoader",
+     "inputs": {
+      "model": "DBS-BSRNN-DnR",
+      "device": "auto"
+     }
+    },
+    {
+     "id": "3",
+     "class": "DBSSeparate",
+     "inputs": {
+      "model": [
+       "2",
+       0
+      ],
+      "audio": [
+       "1",
+       0
+      ],
+      "channels": "mono",
+      "output_sample_rate": "input"
+     }
+    },
+    {
+     "id": "4",
+     "class": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "1",
+       0
+      ],
+      "audio2": [
+       "3",
+       2
+      ],
+      "merge_method": "subtract"
+     }
+    },
+    {
+     "id": "5",
+     "class": "SaveAudioAdvanced",
+     "inputs": {
+      "audio": [
+       "3",
+       2
+      ],
+      "filename_prefix": "fuobe/dbs/voice",
+      "format": "flac"
+     }
+    },
+    {
+     "id": "6",
+     "class": "SaveAudioAdvanced",
+     "inputs": {
+      "audio": [
+       "3",
+       0
+      ],
+      "filename_prefix": "fuobe/dbs/music",
+      "format": "flac"
+     }
+    },
+    {
+     "id": "7",
+     "class": "SaveAudioAdvanced",
+     "inputs": {
+      "audio": [
+       "3",
+       1
+      ],
+      "filename_prefix": "fuobe/dbs/effects",
+      "format": "flac"
+     }
+    },
+    {
+     "id": "8",
+     "class": "SaveAudioAdvanced",
+     "inputs": {
+      "audio": [
+       "4",
+       0
+      ],
+      "filename_prefix": "fuobe/dbs/background",
+      "format": "flac"
+     }
+    },
+    {
+     "id": "9",
+     "class": "PreviewAny",
+     "inputs": {
+      "source": [
+       "3",
+       3
+      ]
+     }
+    }
+   ],
+   "bindings": {
+    "audio": "1.audio",
+    "separationModel": "2.model",
+    "channels": "3.channels"
+   },
+   "outputs": [
+    {
+     "node": "5",
+     "kind": "audio",
+     "stem": "voice"
+    },
+    {
+     "node": "6",
+     "kind": "audio",
+     "stem": "music"
+    },
+    {
+     "node": "7",
+     "kind": "audio",
+     "stem": "effects"
+    },
+    {
+     "node": "8",
+     "kind": "audio",
+     "stem": "background"
+    },
+    {
+     "node": "9",
+     "kind": "text",
+     "role": "report"
+    }
+   ],
+   "defaults": {
+    "separationModel": "DBS-BSRNN-DnR (DBS-TIGER-DnR when /system_stats devices[0].type is cuda)",
+    "channels": "mono ('each channel' for > 2 channels or when stereo stems are asked)"
+   },
+   "requiredModels": [
+    "dbs/DBS-BSRNN-DnR/model.safetensors",
+    "dbs/DBS-BSRNN-DnR/config.json"
+   ],
+   "optionalModels": [
+    "dbs/DBS-TIGER-DnR/model.safetensors",
+    "dbs/DBS-TIGER-DnR/config.json"
+   ],
+   "packs": [
+    "ComfyUI-DBS"
+   ],
+   "vramGb": 0,
+   "notes": "background = original - speech: keeps the original stereo image in mono mode, equals music + effects per channel in each-channel mode; voice first so a chain without a stem takes the dialogue"
+  },
+  {
+   "id": "dub-prepare-dbs-transcribe",
+   "capability": "separate-audio",
+   "handBuilt": "scripts/comfy/hand-built/dub-prepare-dbs-transcribe.json",
+   "nodes": [
+    {
+     "id": "1",
+     "class": "LoadAudio"
+    },
+    {
+     "id": "2",
+     "class": "DBSLoader",
+     "inputs": {
+      "model": "DBS-BSRNN-DnR",
+      "device": "auto"
+     }
+    },
+    {
+     "id": "3",
+     "class": "DBSSeparate",
+     "inputs": {
+      "channels": "mono",
+      "output_sample_rate": "input"
+     }
+    },
+    {
+     "id": "4",
+     "class": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "1",
+       0
+      ],
+      "audio2": [
+       "3",
+       2
+      ],
+      "merge_method": "subtract"
+     }
+    },
+    {
+     "id": "5",
+     "class": "SaveAudioAdvanced",
+     "inputs": {
+      "audio": [
+       "3",
+       2
+      ],
+      "format": "flac"
+     }
+    },
+    {
+     "id": "6",
+     "class": "SaveAudioAdvanced",
+     "inputs": {
+      "audio": [
+       "4",
+       0
+      ],
+      "format": "flac"
+     }
+    },
+    {
+     "id": "7",
+     "class": "AILab_Qwen3ASRSubtitle",
+     "inputs": {
+      "audio": [
+       "3",
+       2
+      ],
+      "note": "same settings as node 7 of dub-prepare-separate-transcribe"
+     }
+    },
+    {
+     "id": "8",
+     "class": "SaveText",
+     "role": "cues"
+    },
+    {
+     "id": "9",
+     "class": "SaveText",
+     "role": "transcript"
+    },
+    {
+     "id": "10",
+     "class": "PreviewAny",
+     "role": "language"
+    }
+   ],
+   "bindings": {
+    "audio": "1.audio",
+    "separationModel": "2.model",
+    "sourceLanguage": "7.language",
+    "asrModel": "7.model",
+    "hints": "7.hints",
+    "maxChars": "7.max_chars"
+   },
+   "outputs": [
+    {
+     "node": "5",
+     "kind": "audio",
+     "stem": "voice"
+    },
+    {
+     "node": "6",
+     "kind": "audio",
+     "stem": "background"
+    },
+    {
+     "node": "8",
+     "kind": "text",
+     "role": "cues"
+    },
+    {
+     "node": "9",
+     "kind": "text",
+     "role": "transcript"
+    },
+    {
+     "node": "10",
+     "kind": "text",
+     "role": "language"
+    }
+   ],
+   "vramGb": 8,
+   "notes": "same output contract as dub-prepare-separate-transcribe (library.spec.mjs L2239-2262); Qwen3-ASR stays, so the 8 GB listing and ~5.9 GB first-run download remain"
+  },
+  {
+   "id": "soundtrack-remix-dbs",
+   "capability": "separate-audio",
+   "handBuilt": "scripts/comfy/hand-built/soundtrack-remix-dbs.json",
+   "nodes": [
+    {
+     "id": "1-3",
+     "class": "LoadAudio, DBSLoader, DBSSeparate",
+     "inputs": {
+      "channels": "<binding channels>"
+     }
+    },
+    {
+     "id": "4",
+     "class": "AudioAdjustVolume",
+     "inputs": {
+      "audio": [
+       "3",
+       2
+      ],
+      "volume": "<binding voiceDb>"
+     }
+    },
+    {
+     "id": "5",
+     "class": "AudioAdjustVolume",
+     "inputs": {
+      "audio": [
+       "3",
+       0
+      ],
+      "volume": "<binding musicDb>"
+     }
+    },
+    {
+     "id": "6",
+     "class": "AudioAdjustVolume",
+     "inputs": {
+      "audio": [
+       "3",
+       1
+      ],
+      "volume": "<binding effectsDb>"
+     }
+    },
+    {
+     "id": "7",
+     "class": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "4",
+       0
+      ],
+      "audio2": [
+       "5",
+       0
+      ],
+      "merge_method": "add"
+     }
+    },
+    {
+     "id": "8",
+     "class": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "7",
+       0
+      ],
+      "audio2": [
+       "6",
+       0
+      ],
+      "merge_method": "add"
+     }
+    },
+    {
+     "id": "9",
+     "class": "SaveAudioAdvanced",
+     "inputs": {
+      "audio": [
+       "8",
+       0
+      ],
+      "format": "flac"
+     }
+    }
+   ],
+   "bindings": {
+    "audio": "1.audio",
+    "separationModel": "2.model",
+    "channels": "3.channels",
+    "voiceDb": "4.volume",
+    "musicDb": "5.volume",
+    "effectsDb": "6.volume"
+   },
+   "outputs": [
+    {
+     "node": "9",
+     "kind": "audio",
+     "role": "mix"
+    }
+   ],
+   "notes": "AudioAdjustVolume takes INT dB -100..100; AudioMerge scales the whole mix down when it peaks over 1.0; mono mode gives a mono mix"
+  }
+ ],
+ "videoChains": {
+  "noDialogue": "separate-soundtrack-dbs -> mux (video-mux-audio-replace) with stem background",
+  "dialogueOnly": "separate-soundtrack-dbs -> mux (video-mux-audio-replace) with stem voice",
+  "lowerTheMusic": "separate-soundtrack-dbs -> mux (video-mux-audio) audio = voice, audio2 = background, backgroundVolumeDb",
+  "why": "picture stream-copied by Concatenate Video complete_audio (library.spec.mjs L2400-2428)"
+ },
+ "libraryTooling": {
+  "problem": "build-library detects models only via LOADER_FOLDERS[class][input] or a model extension on a widget value (build-library.mjs L31-48, L306-334); DBSLoader.model is an extension-less name, so DBS weights would be invisible to install and missing-model help",
+  "fix": [
+   "KNOWN_MODELS keyed by path under the folder: 'DBS-BSRNN-DnR/model.safetensors' etc. with folder 'dbs' and pinned URLs",
+   "new spec field requiredModels next to optionalModels (build-library.mjs L335-346); TIGER pair as optionalModels",
+   "packs: ['ComfyUI-DBS'] + PACK_CLASSES['ComfyUI-DBS'] = /^DBS(Loader|Separate)$/ (library.spec.mjs L140-143) + CUSTOM_NODE_REPOS (L110-136)",
+   "binding keys separationModel, channels, voiceDb, musicDb, effectsDb in BINDING_KEYS (build-library.mjs L96ff)"
+  ],
+  "presence": "ComfyUI registers 'dbs' with no extension filter (folder_paths.py L398, L445-446); GET /models/dbs lists 'DBS-BSRNN-DnR/model.safetensors'; /api/comfyui matches by file string (Windows hosts list back-slashed paths)",
+  "validation": "validate-workflows.mjs only POSTs /prompt and deletes the job (L9-20); zero-byte placeholders (L111-113, L190) are not needed for DBS's fixed combo; nothing checks the real weights exist"
+ },
+ "outsideComfy": {
+  "weights": "plain F32 safetensors + config.json (PyTorchModelHubMixin layout); no ONNX, no export path anywhere",
+  "pythonSidecar": "dbs_comfy/runtime.py runs without ComfyUI except comfy.audio for resampling (L102-107); needs torch, safetensors, einops, 77,643 bytes of vendored .py, the weights; Fuobe's app server never spawns processes (git grep in src/ for child_process|spawn(|execFile|execa|fluent-ffmpeg: none); not worth it as a product path",
+  "evalHarness": "scripts/eval/metrics venv has torch 2.14.1+cpu and safetensors 0.8.0 (requirements.txt L73, L83); only einops missing; no separation metric yet",
+  "onnx": "feasible, unverified: wrap the network core (no complex tensors, no ISTFT in ONNX); patch torch.stft/istft/complex (tiger.py L651, L679, L526; modules/dbs.py L315, L332); ops TopK, CumSum, GatherElements, ScatterElements add (opset 16+) and max (opset 18+, export unverified), bidirectional LSTM, grouped/dilated conv; windows TIGER 264,600 samples/517 frames, BSRNN 132,300/259; short clips run unpadded (inference.py L32-34)",
+  "browser": "decode/resample available (decodeAudioData, OfflineAudioContext); JS STFT -> onnxruntime-web (WASM or WebGPU) -> JS iSTFT; 4.1 MB / 18.9 MB models; 31.6 G / 124 G MACs per second of audio; guess minutes per minute on WASM; WebGPU coverage of LSTM and ScatterElements max unknown",
+  "browserMixer": "a live stem mixer (gain, solo, mute, OfflineAudioContext export) needs no model and works for any engine's stems"
+ },
+ "hosted": [
+  {
+   "provider": "fal",
+   "id": "fal-ai/sam-audio/separate",
+   "stems": [
+    "target",
+    "residual"
+   ],
+   "inputs": {
+    "audio_url": "required, WAV/MP3/FLAC",
+    "prompt": "required",
+    "predict_spans": "default false",
+    "reranking_candidates": "1-7, default 1",
+    "acceleration": "fast|balanced|quality, default balanced",
+    "max_chunk_duration": "10-60 s, default 60",
+    "chunk_overlap": "0-30 s, default 5",
+    "output_format": "wav|mp3, default wav"
+   },
+   "outputs": [
+    "target",
+    "residual",
+    "duration",
+    "sample_rate (default 48000)"
+   ],
+   "price": {
+    "usd": 0.05,
+    "per": "30 s of output audio",
+    "extraCandidate": "0.025 per 30 s"
+   },
+   "priceNote": "1 min one pass about $0.10, or $0.20 if target and residual both count; two-pass 3 stems $0.20-0.40/min",
+   "source": "https://fal.ai/models/fal-ai/sam-audio/separate/llms.txt",
+   "inFuobe": "researched (paid-model-apis-3.md L369), not in the catalog; STEM_ALIASES maps target->voice, residual->background",
+   "fuobeId": "sam-audio-separate (proposed)"
+  },
+  {
+   "provider": "fal",
+   "id": "fal-ai/sam-audio/visual-separate",
+   "stems": [
+    "target",
+    "residual"
+   ],
+   "inputs": {
+    "video_url": "required",
+    "mask_video_url": "black = target",
+    "prompt": "default ''",
+    "reranking_candidates": "1-4",
+    "acceleration": "",
+    "max_chunk_duration": "10-60",
+    "chunk_overlap": "0-30",
+    "output_format": ""
+   },
+   "price": {
+    "usd": 0.05,
+    "per": "30 s of output audio",
+    "extraCandidate": "0.025 per 30 s"
+   },
+   "source": "https://fal.ai/models/fal-ai/sam-audio/visual-separate/llms.txt",
+   "inFuobe": "no",
+   "use": "remove only one person's voice with a SAM mask (Character Swap Studio, Remove object)"
+  },
+  {
+   "provider": "fal",
+   "id": "fal-ai/sam-audio/span-separate",
+   "stems": [
+    "target",
+    "residual"
+   ],
+   "inputs": {
+    "audio_url": "required",
+    "spans": "required [{start, end, include}]",
+    "prompt": "optional",
+    "reranking_candidates": "1-7 (needs a prompt)",
+    "use_sound_activity_ranking": "",
+    "trim_to_span": "",
+    "acceleration": "",
+    "max_chunk_duration": "",
+    "chunk_overlap": "",
+    "output_format": ""
+   },
+   "price": {
+    "usd": 0.05,
+    "per": "30 s of output audio",
+    "extraCandidate": "0.025 per 30 s"
+   },
+   "source": "https://fal.ai/models/fal-ai/sam-audio/span-separate/llms.txt",
+   "inFuobe": "no"
+  },
+  {
+   "provider": "fal",
+   "id": "fal-ai/demucs",
+   "stems": [
+    "vocals",
+    "drums",
+    "bass",
+    "other",
+    "guitar (6s)",
+    "piano (6s)"
+   ],
+   "inputs": {
+    "audio_url": "required",
+    "model": "htdemucs|htdemucs_ft|htdemucs_6s (default)|hdemucs_mmi|mdx|mdx_extra|mdx_q|mdx_extra_q",
+    "stems": "list",
+    "segment_length": "",
+    "shifts": "1-10, default 1",
+    "overlap": "0-1, default 0.25",
+    "output_format": "mp3 (default)|wav"
+   },
+   "price": {
+    "usd": 0.0007,
+    "per": "second (audio or compute not stated; Fuobe assumes audio: $0.042/min)"
+   },
+   "source": "https://fal.ai/models/fal-ai/demucs/llms.txt",
+   "inFuobe": "demucs (fixed htdemucs; scripts/gen-cloud-models.py L886-887)",
+   "note": "a music separator: speech goes to vocals with any singing; effects scatter"
+  },
+  {
+   "provider": "fal",
+   "id": "fal-ai/elevenlabs/audio-isolation",
+   "stems": [
+    "voice"
+   ],
+   "inputs": {
+    "audio_url": "or video_url (one required)"
+   },
+   "price": {
+    "usd": 0.1,
+    "per": "minute"
+   },
+   "source": "https://fal.ai/models/fal-ai/elevenlabs/audio-isolation/llms.txt",
+   "inFuobe": "elevenlabs-voice-isolation (gen-cloud-models.py L895-896)",
+   "note": "no background returned"
+  },
+  {
+   "provider": "fal",
+   "id": "fal-ai/deepfilternet3",
+   "stems": [
+    "denoised speech"
+   ],
+   "price": {
+    "usd": 0.001,
+    "per": "second"
+   },
+   "source": "https://fal.ai/models/fal-ai/deepfilternet3/llms.txt",
+   "inFuobe": "no",
+   "note": "speech enhancement, not separation"
+  },
+  {
+   "provider": "fal",
+   "id": "veed/clean-audio",
+   "stems": [
+    "cleaned speech (48 kHz, loudness-normalized)"
+   ],
+   "inputs": {
+    "audio_url": "required (audio or video, up to 30 min)",
+    "strength": ""
+   },
+   "price": {
+    "usd": 0.0125,
+    "per": "minute of input, rounded up, 1-minute minimum"
+   },
+   "source": "https://fal.ai/models/veed/clean-audio/llms.txt",
+   "inFuobe": "researched (paid-model-apis-3.md L370), not in the catalog"
+  },
+  {
+   "provider": "replicate",
+   "id": "ryan5453/demucs",
+   "stems": [
+    "vocals",
+    "drums",
+    "bass",
+    "other",
+    "guitar",
+    "piano"
+   ],
+   "price": {
+    "usdPerRun": 0.0062,
+    "note": "page estimate (161 runs per $1); hardware text A100 40GB vs page JSON A40"
+   },
+   "source": "https://replicate.com/ryan5453/demucs",
+   "inFuobe": "no"
+  },
+  {
+   "provider": "replicate",
+   "id": "cjwbw/demucs",
+   "stems": [
+    "drums",
+    "bass",
+    "vocals",
+    "other"
+   ],
+   "price": {
+    "usdPerRun": 0.0087,
+    "note": "page estimate on an Nvidia T4 (114 runs per $1)"
+   },
+   "source": "https://replicate.com/cjwbw/demucs",
+   "inFuobe": "no"
+  },
+  {
+   "provider": "replicate",
+   "id": "geopti/sam-audio-large",
+   "stems": [
+    "target",
+    "residual (output_residual=true)"
+   ],
+   "inputs": {
+    "audio": "required (audio or video URI)",
+    "description": "default 'speech'",
+    "use_span_prompting": "",
+    "span_anchors": "JSON",
+    "predict_spans": "",
+    "output_residual": "default false"
+   },
+   "price": {
+    "usdPerRun": 0.063,
+    "note": "page estimate on an L40S (15 runs per $1), ~65 s per run"
+   },
+   "source": "https://replicate.com/geopti/sam-audio-large",
+   "inFuobe": "no",
+   "note": "community wrapper"
+  },
+  {
+   "provider": "huggingface-space",
+   "id": "JusperLee/DBS-Demo (Gradio api_name 'separate')",
+   "stems": [
+    "music",
+    "sfx",
+    "speech",
+    "boundary JSON"
+   ],
+   "price": {
+    "note": "free within the visitor's ZeroGPU quota; queue max 4, concurrency 1"
+   },
+   "source": "https://huggingface.co/api/spaces/JusperLee/DBS-Demo; upstream demo/app.py L444-445",
+   "inFuobe": "no",
+   "note": "the only hosted DBS; not a production engine"
+  },
+  {
+   "provider": "audioshake",
+   "id": "AudioShake API: dialogue, effects, music_fx, music_removal",
+   "stems": [
+    "dialogue",
+    "effects",
+    "music + effects",
+    "speech + effects"
+   ],
+   "price": {
+    "credits": {
+     "dialogue": 1.5,
+     "effects": 1.5,
+     "music_fx": 1.5,
+     "music_removal": 10
+    },
+    "per": "minute of source audio, per target model, rounded up",
+    "usdPerCredit": "not public"
+   },
+   "source": "https://developer.audioshake.ai/models.md; https://developer.audioshake.ai/billing.md",
+   "inFuobe": "no (new provider and key)"
+  }
+ ],
+ "hostedSummary": {
+  "noHostedDbs": "fal model search 2026-10-29 found no DBS or other dialogue/music/effects model; Replicate search could not be checked (client-rendered); web search found none",
+  "threeStemsCloud": "two SAM Audio passes (my proposal): 'speech' -> target dialogue, residual music+effects; 'music' on the residual -> target music, residual effects",
+  "selfHost": "possible as a Cog model or fal serverless app (CPU is enough; guess well under $0.01 per audio minute); not a listed endpoint"
+ },
+ "fuobeToday": {
+  "summary": "no three-stem separation anywhere; a voice/background split for dubbing and Demucs music stems in the cloud",
+  "operation": {
+   "id": "separate-audio",
+   "type": "src/lib/catalog/types.ts L59 ('audio or video -> voice and background stems')",
+   "label": "types.ts L126 'Separate voice'",
+   "outputKind": "types.ts L193 audio",
+   "planCheck": "plan.ts L492",
+   "stemOutputs": "payload.ts L822-834 (STEM_ORDER lacks music/sfx/effects)",
+   "stemAliases": "src/server/generations.ts L764-789 (voice = voice|vocals|speech|target; background = background|accompaniment|instrumental|residual|no_vocals)",
+   "chainSlotStem": "types.ts L894-898",
+   "dubStemLists": "src/lib/av/dub.ts L159-160",
+   "demo": "src/server/providers/mock.ts L287-297 (voice + background)",
+   "videoToLoadAudio": "src/server/providers/comfyui.ts L864"
+  },
+  "cloudModels": {
+   "demucs": "fal-ai/demucs, htdemucs, $0.0007/s",
+   "extract-soundtrack": "fal-ai/workflow-utilities/extract-audio, hidden, $0.0002/s compute",
+   "elevenlabs-voice-isolation": "$0.10/min",
+   "source": "scripts/gen-cloud-models.py L886-896"
+  },
+  "openModel": {
+   "id": "oss-voice-separate",
+   "name": "MelBand RoFormer + Qwen3-ASR",
+   "where": "src/lib/catalog/models.ts L1113-1124",
+   "workflow": "dub-prepare-separate-transcribe (library.spec.mjs L2239-2262)",
+   "separator": "MelBandRoformer_fp16, 0.46 GB, MIT, vocals/instrumental model",
+   "vramGb": "8 for separation + ASR"
+  },
+  "dub": {
+   "files": [
+    "src/lib/av/dub.ts",
+    "src/server/dub.ts",
+    "src/components/dub/dub-studio.tsx"
+   ],
+   "cloud": "ElevenLabs isolation -> Scribe v2; extract-soundtrack -> Demucs (every stem but vocals); each bed lowered BACKGROUND_DB -3 by linear loudnorm (L61-70); OPTIONAL_PREPARE (L157)",
+   "open": "oss-voice-separate -> oss-mux"
+  },
+  "hubs": {
+   "audio": "src/lib/hubs.ts L16-27 (no split mode)",
+   "videoTools": "hubs.ts L28-37 (no sound tools)",
+   "tools": "src/components/studio/mode-switch-studio.tsx L56-67",
+   "audioToolsApi": "src/server/audio-tools.ts L24 (loop | join), /api/audio-tools ?preview=1"
+  },
+  "soundPutBack": {
+   "shorts": "src/lib/catalog/shorts.ts L694-764",
+   "mixedMedia": "mixed-media.ts L709-747, L869-878",
+   "swapStudio": "swap-studio-plan.ts L540-549",
+   "genjutsu": "genjutsu.ts L1034",
+   "removeObject": "remove-object.ts L632",
+   "faceless": "faceless.ts L572-626 (generated bed)"
+  },
+  "canvas": "one OUT handle (canvas.ts L457); OP_PORTS separate-audio audio|video (L501)",
+  "assist": "src/server/assist/tools.ts L93, L254-260 (background_audio = the background stem from separate-audio)",
+  "eval": "no separation or dub cases; no separation metric",
+  "outputActions": "src/lib/output-actions.ts L105-131, NEXT_STEPS L165-166",
+  "mediaProbe": "src/lib/media-probe.ts reads hasAudio and duration, not channels (L22, L152-163)"
+ },
+ "comparison": [
+  {
+   "job": "dialogue / music / effects (3 stems)",
+   "todayOpen": "none",
+   "todayCloud": "none",
+   "dbsOpen": "DBS, one job, 23 MB, CPU or GPU",
+   "cloud": "SAM Audio x2, $0.20-0.40/min"
+  },
+  {
+   "job": "voice vs music-and-effects (dub, remove dialogue)",
+   "todayOpen": "MelBand RoFormer (vocals model; singing goes with the voice)",
+   "todayCloud": "ElevenLabs isolation + extract + Demucs",
+   "dbsOpen": "DBS: singing stays in music, effects stay in the bed",
+   "cloud": "SAM Audio 'speech' (target + residual in one call)"
+  },
+  {
+   "job": "music stems (drums, bass...)",
+   "todayOpen": "none",
+   "todayCloud": "Demucs",
+   "dbsOpen": "not DBS's job",
+   "cloud": "Demucs"
+  },
+  {
+   "job": "clean up speech (noise, hiss)",
+   "todayOpen": "none",
+   "todayCloud": "ElevenLabs isolation",
+   "dbsOpen": "removes music and effects; steady noise unmeasured",
+   "cloud": "veed/clean-audio, DeepFilterNet 3, ElevenLabs isolation"
+  },
+  {
+   "job": "weights / price",
+   "todayOpen": "MelBand 0.46 GB",
+   "todayCloud": "$0.042-0.10/min",
+   "dbsOpen": "4.1 MB or 18.9 MB",
+   "cloud": "$0.10-0.40/min"
+  }
+ ],
+ "placements": [
+  {
+   "where": "Audio hub -> Split soundtrack (/audio/split): src/lib/hubs.ts, TOOLS.audio.split (mode-switch-studio.tsx L56), src/lib/av/split.ts, AudioToolBody 'split' (src/server/audio-tools.ts L24), /api/audio-tools, chips in src/lib/output-actions.ts",
+   "userStory": "drop a song, podcast, film clip or video; get Dialogue, Music, Effects and Music & effects tiles with play, solo, mute, level, download; presets; free live mixer; export; put back on the video",
+   "openEngine": "separate-soundtrack-dbs on oss-dbs-separate",
+   "cloudEngine": "sam-audio-separate x2 (speech, then music on the residual); Demucs fallback as Voice / Background",
+   "why": "the exact ask; nothing like it in Fuobe",
+   "priority": "P0",
+   "package": "D1-split-soundtrack"
+  },
+  {
+   "where": "Video tools -> Remove dialogue (/video-tools/remove-dialogue): hubs.ts L28-37, TOOLS['video-tools'], chips on video results",
+   "userStory": "No dialogue / Dialogue only / Lower the music on a video; picture stream-copied; removed stem downloadable",
+   "openEngine": "separate-soundtrack-dbs -> mux (video-mux-audio-replace or video-mux-audio)",
+   "cloudEngine": "extract-soundtrack -> sam-audio-separate 'speech' -> merge-audio-video (loudnorm + compose for Lower)",
+   "why": "re-voicing, B-roll beds, posting without speech",
+   "priority": "P0",
+   "package": "D2-remove-dialogue"
+  },
+  {
+   "where": "Translate & dub: src/lib/av/dub.ts DUB_STEP_MODELS and prepareSteps; new workflow dub-prepare-dbs-transcribe; src/components/dub/dub-studio.tsx",
+   "userStory": "the dub keeps the original score and effects; only the voice changes",
+   "openEngine": "dub-prepare-dbs-transcribe (oss-dbs-voice-separate) as a choice next to MelBand",
+   "cloudEngine": "one sam-audio-separate 'speech' call replaces extract + Demucs; Demucs stays fallback",
+   "why": "today's open split is a vocals model; the cloud split scatters effects and takes singing with the dialogue",
+   "priority": "P0",
+   "package": "D3-dub-keeps-score"
+  },
+  {
+   "where": "scripts/eval: separation metrics and cases",
+   "userStory": "defaults chosen with numbers",
+   "openEngine": "DBS-TIGER vs DBS-BSRNN, mono vs fast stereo vs each channel, DBS vs MelBand",
+   "cloudEngine": "SAM Audio vs Demucs",
+   "why": "every default above is a guess today",
+   "priority": "P1",
+   "package": "D4-separation-eval"
+  },
+  {
+   "where": "Clean up dialogue: a Split preset + chips on audio and video results",
+   "userStory": "clear speech from a noisy or musical recording",
+   "openEngine": "DBS voice (+ bed at -18 dB via soundtrack-remix-dbs or the mixer); no open denoiser",
+   "cloudEngine": "veed/clean-audio, fal-ai/deepfilternet3, ElevenLabs isolation",
+   "why": "the owner's 'cleaning up audio'",
+   "priority": "P1",
+   "package": "D5-clean-dialogue"
+  },
+  {
+   "where": "Transcribe (studios.ts L259), Captions, Lipsync (studios.ts L94), Genjutsu transcribe route, Swap Studio transcript (swap-studio.ts L713)",
+   "userStory": "'Clean the voice first' for tighter transcripts and lip sync; the bed goes back after lipsync",
+   "openEngine": "DBS voice before Qwen3-ASR / InfiniteTalk / LatentSync; video-mux-audio after",
+   "cloudEngine": "ElevenLabs isolation; SAM residual to put the bed back",
+   "why": "music under speech hurts ASR and lip sync",
+   "priority": "P1",
+   "package": "D6-voice-first"
+  },
+  {
+   "where": "Shorts, Mixed Media, Genjutsu, Remove object, Character Swap Studio (sound put-back), Faceless (bed)",
+   "userStory": "Original sound: Everything / Music & effects only / Dialogue only / Lower the music; a clip's soundtrack as Faceless's bed",
+   "openEngine": "DBS before the existing stream-copy mux; Faceless bed via oss-audio-loop",
+   "cloudEngine": "SAM 'speech' before compose + merge; visual-separate with the studio's SAM mask to remove one person's voice (cloud only)",
+   "why": "a swapped or removed person's speech should usually go too",
+   "priority": "P1",
+   "package": "D7-original-sound"
+  },
+  {
+   "where": "Canvas: a Split soundtrack node (canvas.ts L44-62, PALETTE L259+, OUT L457; components/canvas/nodes.tsx)",
+   "userStory": "Dialogue, Music, Effects, Music & effects handles wired into other nodes",
+   "openEngine": "oss-dbs-separate",
+   "cloudEngine": "sam-audio-separate / demucs (unfillable handles disabled with a reason)",
+   "why": "stems as building blocks",
+   "priority": "P1",
+   "package": "D8-canvas-split-node"
+  },
+  {
+   "where": "Assist and MCP: src/server/assist/studio-tools.ts, tools.ts L93/L254-260, src/server/mcp.ts",
+   "userStory": "'Remove the dialogue from this video', 'just the music', 'dub this but keep the score'",
+   "openEngine": "split_soundtrack / remove_dialogue on oss-dbs-separate (+ soundtrack-remix-dbs)",
+   "cloudEngine": "same tools on SAM / Demucs, priced first",
+   "why": "one sentence does it",
+   "priority": "P1",
+   "package": "D9-assist-mcp-split"
+  },
+  {
+   "where": "On this device (beta) in Split soundtrack; demo mode",
+   "userStory": "split a short clip in the browser with nothing installed and no key",
+   "openEngine": "ONNX + onnxruntime-web (unverified)",
+   "cloudEngine": "n/a (falls back to the cloud)",
+   "why": "no ComfyUI, no key",
+   "priority": "P2",
+   "package": "D10-on-device-split"
+  }
+ ],
+ "plan": {
+  "order": [
+   "D1-split-soundtrack",
+   "D2-remove-dialogue",
+   "D3-dub-keeps-score",
+   "D4-separation-eval",
+   "D5-clean-dialogue",
+   "D6-voice-first",
+   "D7-original-sound",
+   "D8-canvas-split-node",
+   "D9-assist-mcp-split",
+   "D10-on-device-split"
+  ],
+  "common": "both engines where a route exists and an honest note where not; prices before running; tests; browser check at 1440 and 390 px in light and dark with no horizontal scroll; pnpm typecheck, pnpm lint, targeted tests, full vitest; a commit per step",
+  "packages": [
+   {
+    "key": "D1-split-soundtrack",
+    "title": "Split soundtrack in the Audio hub: dialogue, music and effects on both engines (and the DBS ground)",
+    "priority": "P0",
+    "dependsOn": [],
+    "effort": "large",
+    "brief": "GOAL. Give Fuobe a Split soundtrack tool in the Audio hub that turns any audio or video into Dialogue, Music, Effects and Music & effects stems on both engines, with a free live mixer, and lay the DBS ground every later package uses. Read docs/research/dbs-separation-7.md \u00a71-\u00a74, \u00a76, \u00a78 and \u00a79 D1 first.\n\nGROUND, OPEN ENGINE. (1) Pin the pack: add [ComfyUI-DBS]=\"https://github.com/hiroki-abe-58/ComfyUI-DBS f656e53434b5485c148a2866fbd6ddc6b6152ed6\" to NODES in scripts/comfy/install-comfyui.sh (L15-34) with a comment that the Comfy Registry flags 0.1.0 (reason not public) and the code was read at this commit (\u00a74.2). No extra Python packages (einops and safetensors are already installed). Add an opt-out block (DBS_WEIGHTS=0 skips it) that downloads config.json and model.safetensors of JusperLee/DBS-BSRNN-DnR @ 5af343f57f106fbb95efe8a60f1a3999eeb0aef8 and JusperLee/DBS-TIGER-DnR @ 22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b into models/dbs/<name>/ and checks them with sha256sum -c against \u00a73.1. (2) Library tooling (\u00a74.5): KNOWN_MODELS entries keyed 'DBS-BSRNN-DnR/model.safetensors', 'DBS-BSRNN-DnR/config.json', 'DBS-TIGER-DnR/model.safetensors', 'DBS-TIGER-DnR/config.json' with folder 'dbs' and the pinned resolve URLs; a new spec field requiredModels handled in scripts/comfy/build-library.mjs beside the optionalModels loop (L335-346); the TIGER pair in optionalModels; packs: ['ComfyUI-DBS'] with PACK_CLASSES['ComfyUI-DBS'] = /^DBS(Loader|Separate)$/ (library.spec.mjs L140-143) and CUSTOM_NODE_REPOS (L110-136); new binding keys separationModel and channels in BINDING_KEYS (build-library.mjs L96ff) and the spec header. Presence then works as is: with the pack loaded, GET /models/dbs lists 'DBS-BSRNN-DnR/model.safetensors' etc., which /api/comfyui matches by file string. (3) Graph A separate-soundtrack-dbs exactly as \u00a74.4 (hand-built JSON in scripts/comfy/hand-built/: LoadAudio -> DBSLoader -> DBSSeparate with output_sample_rate 'input' -> AudioMerge(original, speech, subtract) -> four SaveAudioAdvanced flac + PreviewAny report), outputs in order voice, music, effects, background, report; vramGb 0 with the note 'CPU OK, about 1.7 GiB on CUDA'; license text 'DBS weights Apache-2.0 (JusperLee; trained on DnR v2, CC BY 4.0); ComfyUI-DBS code MIT; vendored DBS code Apache-2.0 with MIT notices (BS-RoFormer, MSST, TIGER)'. Build it with npm run build -- separate-soundtrack-dbs in scripts/comfy so workflows/comfyui/manifest.json gets the entry. (4) ModelDef oss-dbs-separate in src/lib/catalog/models.ts next to oss-voice-separate (L1113): name 'DBS (dialogue, music, effects)', kind audio, tagline 'Splits a soundtrack into dialogue, music and effects \u00b7 23 MB \u00b7 CPU or GPU \u00b7 Apache-2.0', route comfy('separate-audio', 'separate-soundtrack-dbs', ...), options for the model (fast/best) and stereo stems. Map params to the bindings in src/server/providers/comfyui.ts: DBS-BSRNN-DnR unless GET /system_stats devices[0].type is 'cuda' (Fuobe already reads devices[0] at comfyui.ts L1530; ComfyUI server.py L783-796); 'mono' unless the user asks for stereo stems; 'each channel' for inputs with more than 2 channels (\u00a74.4). (5) Stems: STEM_ALIASES (src/server/generations.ts L764) gains music: ['music'] and effects: ['effects','sfx']; STEM_ORDER (src/lib/catalog/payload.ts L822) gains 'music','sfx','effects' after the voice names; update the 'separate-audio' comment (src/lib/catalog/types.ts L59). Demo: src/server/providers/mock.ts L287-297 returns voice, music, effects and background demo WAVs (meta.stem) for oss-dbs-separate and for the cloud split. (6) Licences: a NODE_PACKS row pack('ComfyUI-DBS', 'https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/f656e53434b5485c148a2866fbd6ddc6b6152ed6', { name: 'MIT', class: 'commercial', note: 'Dialogue / music / effects separation; MIT code, vendored DBS code Apache-2.0 with MIT notices; the DBS weights are Apache-2.0, trained on DnR v2 (CC BY 4.0)' }) in src/lib/licences.ts (~L406); the workflow license text gives the model rows; About & licences shows the DnR v2 CC BY 4.0 attribution (Petermann, Wichern, Wang, Le Roux) and the three MIT notices (\u00a73.2).\n\nGROUND, CLOUD ENGINE. Add sam-audio-separate through scripts/gen-cloud-models.py from the research row (paid-model-apis-3.json; fal-ai/sam-audio/separate; fields audio_url, prompt, acceleration, output_format 'wav'; pricing $0.05 per 30 s of output audio with a note that fal may bill the target and the residual both) and regenerate (pnpm gen:catalog). stemOutputs already tags target/residual and STEM_ALIASES maps them to voice/background.\n\nTOOL. {id: 'split', label: 'Split soundtrack'} in HUB_MODES.audio (src/lib/hubs.ts, after Transcribe; route /audio/split), TOOLS.audio.split in src/components/studio/mode-switch-studio.tsx (L56), a pure planner src/lib/av/split.ts (plans per engine, prices, labels, presets, mixer maths), a 'split' variant of AudioToolBody (src/server/audio-tools.ts L24) behind /api/audio-tools (?preview=1 plans and prices; one createPipeline batch so results land in the Library), and a component in src/components/audio-tools/. Open: one job on oss-dbs-separate. Cloud 'Dialogue, music, effects': SAM pass 1 prompt 'speech' (a video goes through extract-soundtrack first), then pass 2 prompt 'music' on pass 1's background (residual) stem; the planner labels pass 2's target Music and its residual Effects. Cloud 'Dialogue and the rest': pass 1 only. Cloud 'Demucs (music model)': demucs, labelled Voice / Background. Prices: SAM $0.05 x ceil(seconds/30) per pass, shown as a range up to 2x until a real bill settles the residual question (\u00a76); Demucs $0.0007/s.\n\nUI. Drop or pick audio or video (Library, ?audio= / ?video=); engine switch; open options 'Fast (DBS-BSRNN)' / 'Best (DBS-TIGER)' with the host's pick preselected and 'Stereo stems (takes about twice as long)'; a time estimate on the open engine (start from \u00a72.4's guess, replace it with the measurement below) and a price on the cloud. Result: four stem tiles (Dialogue, Music, Effects, Music & effects) with waveform, play, solo, mute, level -24...+6 dB and Download (the stems are already Library outputs); presets No dialogue, Dialogue only, Music only, Music under dialogue (-12 dB); a live WebAudio mixer (free, no job); Export mix (OfflineAudioContext -> WAV -> upload -> Library); for a video source 'Put back on the video' (open: the mux op -> video-mux-audio-replace, picture stream-copied; cloud: merge-audio-video). A 'Split soundtrack' chip on audio and video results (src/lib/output-actions.ts L105-131, NEXT_STEPS L165-166). Plain copy about limits: 'Dialogue comes out clean; music and effects can bleed into each other.' Honest cloud note: there is no hosted DBS; the cloud uses SAM Audio.\n\nTESTS. tests/split-soundtrack.test.ts (plans per engine and option, chains and stems, prices incl. the SAM range, presets and dB-to-gain maths, the >2-channel rule); tests/comfy-dbs.test.ts (manifest entry: bindings 1.audio / 2.model / 3.channels, output order and stems, requiredModels/optionalModels with folder dbs, file paths, pinned URLs and sizes, customNodes pin f656e53, the install-comfyui.sh pin and the weights block's hashes); extend the generations/outputs tests for the music/effects/sfx aliases and STEM_ORDER; mock stems; the licences row; a cloud-catalog test for sam-audio-separate's payload. Then pnpm typecheck, pnpm lint, the targeted tests and the full vitest run.\n\nBROWSER. pnpm dev in demo mode, then with the open engine pointed at the isolated worker: /audio/split at 1440 px and 390 px, light and dark. Tiles stack on phones, sliders are full width, no horizontal scroll, labelled controls reachable by keyboard, the mixer plays, Export lands in the Library, 'Put back on the video' gives a video.\n\nVERIFY HERE. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). Run both models, mono and each channel; write the measured speed into the doc's \u00a72.4 and the tool's time estimate. Not verifiable here: GPU timing, paid SAM Audio and Demucs calls (test payloads against the research schema; prices from \u00a76), quality on real films.\n\nLICENCES (information, nothing gated; every row starts on). DBS weights Apache-2.0; ComfyUI-DBS MIT; vendored DBS code Apache-2.0 with MIT notices; DnR v2 CC BY 4.0; SAM Audio (hosted, paid API) weights under Meta's SAM License; Demucs MIT."
+   },
+   {
+    "key": "D2-remove-dialogue",
+    "title": "Remove dialogue for videos in Video tools (No dialogue / Dialogue only / Lower the music), picture stream-copied",
+    "priority": "P0",
+    "dependsOn": [
+     "D1-split-soundtrack"
+    ],
+    "effort": "small",
+    "brief": "GOAL. A Remove dialogue tool for videos in the Video tools hub, on both engines, with the picture untouched. Builds on D1 (graph A, oss-dbs-separate, sam-audio-separate, the stem aliases). Read docs/research/dbs-separation-7.md \u00a72.1 (the exact sum and the fast stereo bed), \u00a74.3 (why the pack's video graph must not be copied), \u00a74.4 ('Video jobs need no new graph'), \u00a76, \u00a78 and \u00a79 D2.\n\nPLACEMENT. {id: 'remove-dialogue', label: 'Remove dialogue'} in HUB_MODES['video-tools'] (src/lib/hubs.ts L28-37; route /video-tools/remove-dialogue) and TOOLS['video-tools'] in src/components/studio/mode-switch-studio.tsx (L56-67); a 'Remove dialogue' chip on video results (src/lib/output-actions.ts L105-124, NEXT_STEPS L165); hand-offs by ?video= from the Genjutsu and Video tools result menus.\n\nOUTCOMES. No dialogue (default: music and effects), Dialogue only, Lower the music (slider -30...0 dB, default -12). The removed stem stays as a second output to download.\n\nOPEN ENGINE. Step 1 oss-dbs-separate (graph A, mono; LoadAudio reads the video's soundtrack, comfyui.ts L864). Step 2 the existing mux op: No dialogue -> video-mux-audio-replace with chain stem 'background'; Dialogue only -> the same with stem 'voice'; Lower -> video-mux-audio with audio = voice, audio2 = background and backgroundVolumeDb (scripts/comfy/library.spec.mjs L2400-2428; the provider already picks between the two graphs). Concatenate Video with complete_audio copies the picture packets. More than 2 channels: 'each channel' (\u00a74.4).\n\nCLOUD ENGINE. extract-soundtrack (fal-ai/workflow-utilities/extract-audio) -> sam-audio-separate prompt 'speech' (one pass; residual = music & effects) -> merge-audio-video (fal-ai/ffmpeg-api/merge-audio-video) with the residual (No dialogue) or the target (Dialogue only). Lower -> ffmpeg-loudnorm in linear mode on the residual (linearGain only lowers, src/lib/av/dub.ts L61-70) -> compose the voice and the lowered bed as the cloud dub does -> merge. Price: SAM $0.05 x ceil(s/30), shown as a range up to 2x, plus the utilities' per-second prices. Whether fal's merge re-encodes the picture is unverified: say so in the step note.\n\nPLANNER AND SERVER. src/lib/av/remove-dialogue.ts (or an export of src/lib/av/split.ts): plans per engine and outcome, prices, blockers ('This clip has no sound' from src/lib/media-probe.ts hasAudio; over 30 minutes). Serve it as tool 'remove-dialogue' on /api/audio-tools or a small endpoint following Remove object's pattern; one createPipeline batch so the result lands in the Library.\n\nUI. Video drop/pick, outcome segmented control, the Lower slider, engine switch, price or time line, before/after players, the removed stem as a download. Copy: 'Takes the talking out and keeps the music and sound effects. The picture is not re-encoded.' Honest note: speech the model misses stays in the bed (\u00a72.1).\n\nTESTS. tests/remove-dialogue.test.ts: plans per engine and outcome, chain stems (background/voice), mux graph choice (replace vs mix), prices, blockers; a provider binding test that a video URL is bound to LoadAudio for the oss-dbs-separate step. Then typecheck, lint, targeted tests, full vitest.\n\nBROWSER. /video-tools/remove-dialogue at 1440 px and 390 px, light and dark, in demo mode and with the isolated worker: players fit, no horizontal scroll, controls labelled.\n\nVERIFY HERE. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). Check that the result's video stream is byte-identical to the source's (ffprobe / packet hashes) and that voice + bed add back to the source. Not verifiable: paid fal calls, GPU timing.\n\nLICENCES (information). As D1; SAM Audio (hosted) weights under Meta's SAM License."
+   },
+   {
+    "key": "D3-dub-keeps-score",
+    "title": "Translate & dub keeps the original music and effects: DBS on the open engine, one SAM Audio pass in the cloud",
+    "priority": "P0",
+    "dependsOn": [
+     "D1-split-soundtrack"
+    ],
+    "effort": "medium",
+    "brief": "GOAL. Dubs keep the original score and sound effects where they were; only the voice changes. Both engines. Builds on D1. Read docs/research/dbs-separation-7.md \u00a74.4 (graph B), \u00a76, \u00a77.1 (Translate & dub today), \u00a78 and \u00a79 D3.\n\nOPEN ENGINE. Hand-build graph B dub-prepare-dbs-transcribe (scripts/comfy/hand-built/; spec entry next to dub-prepare-separate-transcribe at scripts/comfy/library.spec.mjs L2239-2262) with the same output contract: stems voice and background, text cues, transcript and language. Copy the Qwen3-ASR node from node 7 of the existing graph with its bindings (sourceLanguage, asrModel, hints, maxChars) and add separationModel. vramGb stays 8 (Qwen3-ASR is still in the graph) with the existing autoDownloads note; license text 'DBS weights Apache-2.0 (trained on DnR v2, CC BY 4.0); Qwen3-ASR / ForcedAligner Apache-2.0; ComfyUI-QwenASR GPL-3.0; ComfyUI-DBS MIT'. ModelDef oss-dbs-voice-separate 'DBS + Qwen3-ASR' beside oss-voice-separate (src/lib/catalog/models.ts L1113-1124). In src/lib/av/dub.ts make DUB_STEP_MODELS.open.stems selectable with a 'Voice split' setting ('DBS: keeps music and effects, CPU-friendly' / 'MelBand RoFormer'); keep MelBand as the default until D4's A/B says otherwise. Assist's open dub (src/server/assist/studio-tools.ts L234) takes the same setting.\n\nCLOUD ENGINE. In prepareSteps (src/lib/av/dub.ts L116, cloud branch L144-158) replace 'sound' (extract-soundtrack) + 'background' (Demucs: three beds and three loudnorm steps) with 'sound' + one sam-audio-separate step, prompt 'speech'. Its residual is the single bed: one ffmpeg-loudnorm at BACKGROUND_DB (-3), one compose track. Keep ElevenLabs isolation for the clone voice. Keep Demucs as the fallback when SAM fails and the voice-only fallback (OPTIONAL_PREPARE, L157). Put it behind a 'Background split: SAM Audio / Demucs' setting so the default can flip after D4.\n\nPRICES. SAM about $0.10-0.20 per minute against Demucs about $0.042 per minute plus two extra loudnorm steps; the Dub studio price line shows the chosen one.\n\nUI. src/components/dub/dub-studio.tsx: the two settings, copy 'Keeps the music and sound effects of the original', and with Demucs a short note 'Music model: some sound effects may be lowered, and singing may be replaced'.\n\nTESTS. Extend the dub tests: prepareSteps per engine and setting (one bed with SAM, three with Demucs), fallback order, prices; a library test for graph B (same outputs and bindings as dub-prepare-separate-transcribe); mock: separate-audio on oss-dbs-voice-separate returns voice, background and cues. Then typecheck, lint, targeted tests, full vitest.\n\nBROWSER. /audio/translate at 1440 px and 390 px, light and dark, demo mode: the settings, the price line and the copy; no horizontal scroll.\n\nVERIFY HERE. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). Graph B's DBS half runs on CPU; Qwen3-ASR 1.7B downloads about 5.9 GB on first run and is slow on CPU, so smoke-test a short clip, or with asrModel set to the 0.6B model. Not verifiable: paid SAM, ElevenLabs and Scribe calls, GPU timing, dub quality without listening.\n\nLICENCES (information). DBS Apache-2.0; Qwen3-ASR Apache-2.0; ComfyUI-QwenASR GPL-3.0; SAM Audio (hosted) under Meta's SAM License; Demucs MIT; ElevenLabs proprietary."
+   },
+   {
+    "key": "D4-separation-eval",
+    "title": "Separation evaluation in scripts/eval: SI-SDR, ASR WER, bed level and stereo, speed on this host, blind A/B",
+    "priority": "P1",
+    "dependsOn": [
+     "D1-split-soundtrack"
+    ],
+    "effort": "medium",
+    "brief": "GOAL. Choose defaults with numbers: DBS-TIGER vs DBS-BSRNN, mono vs fast stereo bed vs each channel, DBS vs MelBand RoFormer for the dub voice, SAM Audio vs Demucs in the cloud, and the real speed on this host. Builds on D1 (and D3 for the dub cases). Read docs/research/dbs-separation-7.md \u00a72.1 (fast stereo bed, AudioMerge peak scaling), \u00a72.3-\u00a72.4, \u00a75 item 3, \u00a77.2 and \u00a711.\n\nMETRICS. In scripts/eval/metrics/fuobe_metrics (the uv venv already has torch 2.14.1+cpu and safetensors 0.8.0; pin any addition in requirements.in/.txt): SI-SDR and SDR per stem against known references; mixture consistency (sum of stems vs input); level and peak of the bed vs the reference (catches AudioMerge's peak scaling); ASR WER of the voice stem against the known text (through the harness's open ASR, or a small pinned model); a stereo check for the fast bed (left/right correlation and level against the reference bed). Pytest on synthetic fixtures.\n\nTEST MATERIAL. Synthetic mixes Fuobe may use, with known stems: speech from Fuobe's own TTS (open Chatterbox or the demo voice), music and effects from Fuobe's open models (Stable Audio 3 SFX, a music model) or CC0 sources with their licences recorded; mixed at known levels; stereo with centre-panned and off-centre dialogue; one or two with steady noise (hum, hiss) to answer \u00a711's 'where does noise go'. Real clips only for the blind A/B page.\n\nCASES. A new suite scripts/eval/cases/separation.json (gen-cases.mjs, case.schema.json): open oss-dbs-separate (TIGER, BSRNN; mono, each channel), oss-voice-separate (voice/background only), and with D3 oss-dbs-voice-separate; cloud sam-audio-separate (1 and 2 passes) and demucs. Record speed per case (times real time from the DBS report output).\n\nREPORT. The existing report and blind A/B review page; write the measured speed into the doc's \u00a72.4 and the chosen defaults (model per host, stereo mode, dub voice split, cloud background split) into D1's and D3's settings, with a short note in the doc.\n\nTESTS. pytest for the new metrics (known SI-SDR on constructed signals, WER on fixed strings), the case generator test, pnpm eval:validate.\n\nBROWSER. The report and A/B page at 1440 px and 390 px, light and dark.\n\nVERIFY HERE. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). The open cases run for real on that worker; cloud cases are dry runs without a key and a budget (the harness's spend cap); no paid call by default.\n\nLICENCES (information). Record the licence of every fixture source in the case files; DBS Apache-2.0; MelBand RoFormer MIT."
+   },
+   {
+    "key": "D5-clean-dialogue",
+    "title": "Clean up dialogue: DBS voice with an optional quiet bed on the open engine, VEED / DeepFilterNet / ElevenLabs in the cloud",
+    "priority": "P1",
+    "dependsOn": [
+     "D1-split-soundtrack"
+    ],
+    "effort": "small",
+    "brief": "GOAL. 'Clean up dialogue' (the owner's 'cleaning up audio'): make the speech in a noisy or musical recording clear, on audio and video. Builds on D1 (and D2 for video). Read docs/research/dbs-separation-7.md \u00a72.5, \u00a74.4 (graph C), \u00a76 (veed/clean-audio, fal-ai/deepfilternet3, ElevenLabs isolation), \u00a77.2, \u00a78, \u00a79 D5 and \u00a711 (steady noise unmeasured).\n\nPLACEMENT. A 'Clean dialogue' preset in Split soundtrack (D1) that opens on the Dialogue tile with the bed at -18 dB; a 'Clean up dialogue' chip on audio and video results (src/lib/output-actions.ts) that opens it. For videos the result goes back on the picture with D2's stream-copy mux.\n\nOPEN ENGINE. The DBS voice stem (graph A), optionally the bed mixed back at a chosen level: graph C soundtrack-remix-dbs (\u00a74.4: AudioAdjustVolume x3 with bindings voiceDb, musicDb, effectsDb, added to BINDING_KEYS; AudioMerge add x2; SaveAudioAdvanced) or the browser mixer. Honest: Fuobe's research has no open denoiser, so the open route removes music and effects but not steady hiss or hum (unmeasured, \u00a711). Copy: 'Removes music and sound effects. For hiss and hum, use the cloud cleaner.'\n\nCLOUD ENGINE. Add veed/clean-audio (research row paid-model-apis-3.md L370: audio_url, strength; $0.0125 per minute, rounded up, 1-minute minimum; 48 kHz, loudness-normalized; up to 30 min; takes video) and fal-ai/deepfilternet3 ($0.001/s; write its research record first, with fetch-hosted-schemas.py or by hand in the research JSON, then gen-cloud-models.py). Choices: 'Clean (VEED)', 'Denoise (DeepFilterNet 3)', 'Voice only (ElevenLabs isolation, $0.10/min, already in the catalog)'. A bed under the cleaned voice in the cloud: SAM 'speech' residual + loudnorm (lower only) + compose, as D2's Lower.\n\nTESTS. Plans per engine and choice; prices (VEED minute rounding and minimum; DeepFilterNet per second); graph C bindings and outputs; cloud payloads against the research schemas. Then typecheck, lint, targeted tests, full vitest.\n\nBROWSER. The preset in /audio/split and the chips, at 1440 px and 390 px, light and dark, no horizontal scroll.\n\nVERIFY HERE. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). Run speech-with-music and speech-with-hum clips to describe honestly what the open route removes. Not verifiable: paid VEED, DeepFilterNet and ElevenLabs calls.\n\nLICENCES (information). veed/clean-audio and ElevenLabs proprietary (paid APIs); DeepFilterNet's licence recorded when its research record is written (not checked in this research); DBS Apache-2.0."
+   },
+   {
+    "key": "D6-voice-first",
+    "title": "Clean the voice first for Transcribe, Captions and Lipsync, and put the music and effects back after lipsync",
+    "priority": "P1",
+    "dependsOn": [
+     "D1-split-soundtrack"
+    ],
+    "effort": "small",
+    "brief": "GOAL. A 'Clean the voice first' switch wherever speech feeds a model: tighter transcripts and lip sync, and after lipsync the original music and effects go back under the new mouth movement. Builds on D1. Read docs/research/dbs-separation-7.md \u00a74.4 (graph A; stems voice/background), \u00a77.1, \u00a78 and \u00a79 D6.\n\nPLACEMENTS. Transcribe (TRANSCRIBE_STUDIO, src/lib/studios.ts L259); Captions (Video tools, CaptionsStudio); Lipsync & avatars (LIPSYNC_STUDIO, studios.ts L94); Genjutsu transcribe (src/app/api/genjutsu/transcribe/route.ts); the Character Swap Studio transcript (src/server/swap-studio.ts L713).\n\nOPEN ENGINE. A chain step oss-dbs-separate before oss-qwen3-asr, InfiniteTalk or LatentSync with ChainSlot stem 'voice' (STEM_ALIASES resolves it, src/server/generations.ts L764-789). Lipsync on a video: after the lip re-sync, video-mux-audio with audio = the voice (or the new audio) and audio2 = the background stem at 0 dB.\n\nCLOUD ENGINE. elevenlabs-voice-isolation (in the catalog, $0.10/min) before scribe-v2 or the lipsync model; when the bed must go back, sam-audio-separate 'speech' residual + compose + merge-audio-video.\n\nDEFAULTS. On for video sources, off for audio-only speech uploads (a guess until D4 measures WER with and without). The switch shows its added time (open) or price (cloud).\n\nTESTS. Plans with and without the switch per engine and studio; chain stems; the put-back step after lipsync; prices. Then typecheck, lint, targeted tests, full vitest.\n\nBROWSER. The Transcribe, Captions and Lipsync composers at 1440 px and 390 px, light and dark: the switch, its hint and its time/price line; no layout shift; no horizontal scroll.\n\nVERIFY HERE. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). Run DBS -> captions on a short clip with music (use the 0.6B ASR to keep the download small). Not verifiable: paid calls, GPU lipsync.\n\nLICENCES (information). As D1; ElevenLabs proprietary (paid API)."
+   },
+   {
+    "key": "D7-original-sound",
+    "title": "An 'Original sound' choice in Shorts, Mixed Media, Genjutsu, Remove object and Character Swap Studio, and a clip's soundtrack as Faceless's bed",
+    "priority": "P1",
+    "dependsOn": [
+     "D1-split-soundtrack",
+     "D2-remove-dialogue"
+    ],
+    "effort": "medium",
+    "brief": "GOAL. When a studio puts a clip's sound back, the user chooses what goes back: Everything (today), Music & effects only, Dialogue only, or Lower the music. Faceless can use a clip's soundtrack as its music bed. Builds on D1 and D2. Read docs/research/dbs-separation-7.md \u00a74.4 ('Video jobs need no new graph'), \u00a76 (visual-separate), \u00a77.1 (studios that put sound back), \u00a78 and \u00a79 D7.\n\nSPOTS. Shorts (src/lib/catalog/shorts.ts L694-764, L909-914); Mixed Media (src/lib/catalog/mixed-media.ts L709-747, L869-878); Genjutsu (src/lib/catalog/genjutsu.ts L1034, the put-back when the maker doesn't keep sound or there are several pieces); Remove object (src/lib/catalog/remove-object.ts L79, L632); Character Swap Studio (src/lib/catalog/swap-studio-plan.ts L540-549 'Put the clip's sound back'; UI src/components/swap-studio/stage-words.tsx); Faceless (src/lib/catalog/faceless.ts L572-626): 'Use a clip's soundtrack as the bed'.\n\nOPEN ENGINE. Graph A on the working clip (the trimmed source, not the result), then the existing stream-copy mux with the chosen stem (background, voice, or voice + background at backgroundVolumeDb). Faceless: background stem -> oss-audio-loop (audio-loop-crossfade) -> oss-mux at the existing -14 dB.\n\nCLOUD ENGINE. SAM 'speech' on the working clip's sound (extract first), then the existing compose + merge steps with the residual or the target. 'Remove only this person's voice' (Character Swap Studio, Remove object's person removal): fal-ai/sam-audio/visual-separate with the studio's SAM mask video (black = target); cloud only, because DBS removes all speech and the open engine has no per-person route, so the option is hidden there with a one-line reason.\n\nDEFAULTS. Everything (today's behaviour), except Remove object's person removal and Character Swap Studio, where the replaced person's speech is new: suggest 'Music & effects only' there.\n\nTESTS. Each studio's plan with each choice and engine; the 'Everything' path unchanged (regression); the visual-separate payload; the Faceless bed chain; prices. Then typecheck, lint, targeted tests, full vitest.\n\nBROWSER. Each studio's setting at 1440 px and 390 px, light and dark; no horizontal scroll.\n\nVERIFY HERE. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). Run the DBS step for a Shorts case and a Remove object case on short clips; the GPU-heavy steps cannot run here, so test their plans only. Not verifiable: paid fal calls, GPU video steps.\n\nLICENCES (information). As D1; SAM Audio (hosted) under Meta's SAM License."
+   },
+   {
+    "key": "D8-canvas-split-node",
+    "title": "Canvas Split soundtrack node with Dialogue, Music, Effects and Music & effects handles",
+    "priority": "P1",
+    "dependsOn": [
+     "D1-split-soundtrack"
+    ],
+    "effort": "medium",
+    "brief": "GOAL. A Split soundtrack node in Canvas whose four output handles wire stems into other nodes. Builds on D1. Read docs/research/dbs-separation-7.md \u00a74.4, \u00a77.1 (Canvas has one OUT handle), \u00a78 and \u00a79 D8.\n\nSPOTS. src/lib/catalog/canvas.ts (CanvasNodeType L44-62, PALETTE from L259, OUT L457, OP_PORTS 'separate-audio' L501), src/components/canvas/nodes.tsx and the canvas run planner. A new utility node 'split-soundtrack' with handles Dialogue, Music, Effects and Music & effects mapped to ChainSlot.stem voice / music / effects / background; an edge from a handle carries that stem into the next node's chain. Multi-handle output is new: keep OUT as an alias for Dialogue so saved boards keep working, and extend the board storage round trip.\n\nENGINES. Open: oss-dbs-separate (all four handles). Cloud: sam-audio-separate two passes (all four), one pass (Dialogue and Music & effects only), or demucs (Dialogue ~ vocals and Music & effects; Music and Effects disabled with the reason 'Demucs has no effects stem'), following paletteItems()' disabled-with-a-reason pattern.\n\nTESTS. Canvas lib tests (handles, edges with stems, storage round trip with old single-OUT boards), plan tests per engine, disabled handles. Then typecheck, lint, targeted tests, full vitest.\n\nBROWSER. Canvas at 1440 px and 390 px, light and dark: the node, its four labelled handles, wiring Dialogue into Transcribe and Music & effects into a mux; no overflow.\n\nVERIFY HERE. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). Run a small board whose DBS step is real; downstream GPU steps are plan-only. Not verifiable: paid calls.\n\nLICENCES (information). As D1."
+   },
+   {
+    "key": "D9-assist-mcp-split",
+    "title": "Assist and MCP tools: split_soundtrack and remove_dialogue, priced first",
+    "priority": "P1",
+    "dependsOn": [
+     "D1-split-soundtrack",
+     "D2-remove-dialogue"
+    ],
+    "effort": "small",
+    "brief": "GOAL. Assist and MCP split a soundtrack or remove dialogue in one call, with the price or time first. Builds on D1 and D2. Read docs/research/dbs-separation-7.md \u00a74.4, \u00a78 and \u00a79 D9.\n\nSPOTS. src/server/assist/studio-tools.ts (new routes split_soundtrack and remove_dialogue next to the open dub at L230-245); src/server/assist/tools.ts (document the stems voice/music/effects/background on 'separate-audio' at L93 and the background_audio note at L254-260); exposed through src/server/mcp.ts; offline planner suggestions in src/server/assist/agent.ts for 'remove the dialogue' and 'just the music'.\n\nTOOLS. split_soundtrack({ media, keep?: ['dialogue','music','effects'], levels_db?: { dialogue?, music?, effects? }, engine? }) returns stem URLs, or one mixed file when levels_db is given (open: graph C soundtrack-remix-dbs; cloud: SAM passes + linear loudnorm, which can only lower, + compose). remove_dialogue({ video, keep?: 'bed' | 'dialogue', music_db? }) returns a new video through D2's planner. Both run estimate_job / estimate_cost first.\n\nENGINES. Open oss-dbs-separate (+ graph C); cloud sam-audio-separate / demucs. Honest notes in the tool descriptions: the cloud can only lower a stem's level; Demucs has no effects stem; there is no hosted DBS.\n\nTESTS. Tool schema validation, routing per engine, price-first behaviour, result shapes, offline planner suggestions. Then typecheck, lint, targeted tests, full vitest.\n\nBROWSER. The Assist panel at 1440 px and 390 px, light and dark, running 'Remove the dialogue from this video' in demo mode.\n\nVERIFY HERE. Demo mode end to end. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: it does not have ComfyUI-DBS and must not get it. DBS is tiny (23 MB of weights) and runs on a CPU, so set the pack up on an isolated worker (the scripts/comfy/install-isolated-worker.sh pattern with its own ISO_DIR, port and venv; the pack pinned at f656e53434b5485c148a2866fbd6ddc6b6152ed6; the four weight files of doc \u00a73.1 downloaded at their pinned revisions and checked with sha256sum) and validate there with COMFYUI_URL=http://127.0.0.1:<port> node scripts/comfy/validate-workflows.mjs <ids>, then run real CPU separations of short clips (10-30 s). Not verifiable: paid calls.\n\nLICENCES (information). As D1."
+   },
+   {
+    "key": "D10-on-device-split",
+    "title": "On this device (beta): DBS in the browser with ONNX and onnxruntime-web",
+    "priority": "P2",
+    "dependsOn": [
+     "D1-split-soundtrack",
+     "D4-separation-eval"
+    ],
+    "effort": "large",
+    "brief": "GOAL. Split a short clip in the browser with nothing installed and no key: an 'On this device (beta)' engine in Split soundtrack, and real separation in demo mode. Unverified; ship only if parity and speed hold. Builds on D1 (UI) and D4 (metrics). Read docs/research/dbs-separation-7.md \u00a75 items 4-6 and \u00a711.\n\nSTEPS. (1) An export script (scripts/onnx/export_dbs.py, run with the eval venv's torch plus einops, reading the pinned weights) that wraps the network core of DBS-BSRNN and DBS-TIGER: real/imaginary spectrum in, masked spectra out; patch torch.stft/istft and torch.complex (tiger.py L651, L679, L526; modules/dbs.py L315, L332); opset 18 for ScatterElements max; fixed windows (TIGER 517 frames, BSRNN 259) and always-pad, documenting the small difference from the official short-clip path (inference.py L32-34). (2) A parity test against PyTorch on the same input (the pack's test_parity approach; SI-SDR between outputs above a set bar, e.g. 60 dB). (3) JS STFT / iSTFT (n_fft 2048, hop 512, Hann, centre reflect padding) and equal-weight overlap-add with the official windows in src/lib/av/dbs-web/, unit-tested against numpy references. (4) onnxruntime-web pinned to an exact version (bundled, or from an allowed CDN), WASM SIMD with threads, WebGPU where its ops work, in a Web Worker with progress and cancel. (5) UI: 'On this device (beta)' in the engine switch for clips up to 60 s, a time estimate measured on the first run, a fallback to the cloud. (6) Demo mode uses it when available.\n\nTESTS. Export parity (Python, eval venv), JS DSP tests, planner tests for the new engine choice. Then typecheck, lint, targeted tests, full vitest.\n\nBROWSER. /audio/split on-device at 1440 px and 390 px, light and dark; the WASM path in headless Chromium; the main thread stays responsive (worker).\n\nVERIFY HERE. Export and parity run on CPU in the eval venv; WASM inference runs in the headless browser on a 10 s clip with timing. Not verifiable: WebGPU (no GPU here) and phone performance.\n\nLICENCES (information). The exported ONNX files derive from the Apache-2.0 weights: keep the attribution and NOTICE; onnxruntime-web is MIT; DnR v2 CC BY 4.0 attribution as in D1."
+   }
+  ]
+ },
+ "risks": [
+  "Comfy Registry flags dbs-soundtrack-separation 0.1.0 (NodeVersionStatusFlagged, reason not public); node code has no network/exec path; zip matches git at f656e53; new pack, one author, 12 Registry downloads; pin the commit and record the flag",
+  "the pack's video graph decodes every frame and re-encodes (about 45 GB per minute of 1080p30 float32): use LoadAudio + stream-copy mux",
+  "domain: synthetic English DnR v2 only; real films, other languages, crowd/shouted speech, songs unverified; singing goes to music",
+  "music vs effects modest (5.7-7.8 dB); missed speech stays in the bed",
+  "CPU speed: TIGER 0.49x on 24 threads; default BSRNN on CPU; guess 0.3-0.6x on Fuobe's 4-CPU host; each channel x2 for stereo, x6 for 5.1",
+  "channels: mono collapses stereo stems; fast stereo bed is a guess; for > 2 channels it would take speech out of LFE and surrounds; Fuobe's media probe doesn't read channel counts",
+  "AudioMerge normalizes peaks over 1.0 (nodes_audio.py L747-749): a bed or remix may come out quieter",
+  "library tooling: without folder models the weights are invisible to install and missing-model help; validation passes with no weights",
+  "untested combination: pack CI covers ComfyUI v0.38.0/v0.42.1 on Python 3.10/3.12; Fuobe runs v0.41.0-7 on Python 3.13",
+  "devices: ROCm uses the GPU via 'auto' (untested by the pack); CUDA output not bit-deterministic",
+  "cloud: no hosted DBS; SAM Audio needs two passes for three stems, 48 kHz, may bill target and residual; prompted music vs effects undocumented; SAM weights under Meta's gated SAM License (information)",
+  "cloud dub: SAM ($0.10-0.20/min) costs more than Demucs ($0.042/min) but drops two loudnorm steps: listen before switching the default",
+  "licences (information): MIT and Apache-2.0 code and weights, CC BY 4.0 data; show the attribution and notices; some DnR source clips may carry NC licences (unverified)"
+ ],
+ "unknowns": [
+  "quality on real film/video soundtracks, other languages and music with vocals vs MelBand RoFormer, Demucs htdemucs and SAM Audio on the same clips",
+  "speed on Fuobe's CPU-only host (4 logical CPUs, 14.3 GB RAM, torch 2.14.1+cpu, Python 3.13) and whether single-thread no-NNPACK helps TIGER there",
+  "whether the fast stereo bed sounds right on real stereo mixes",
+  "why the Comfy Registry flagged 0.1.0",
+  "whether an ONNX export of the network core works and matches PyTorch; onnxruntime-web WebGPU op coverage (bidirectional LSTM, ScatterElements max)",
+  "how fal bills SAM Audio (input length vs summed target + residual); how well 'music' vs 'sound effects' prompts split the residual; whether Demucs's '$0.0007 per seconds' counts audio or compute seconds",
+  "whether more DBS checkpoints (MUSDB 4-stem, EchoSet) will be released; whether fal or Replicate will host DBS (Replicate not ruled out with certainty)",
+  "AudioShake's dollar price per credit",
+  "ryan5453/demucs hardware (A100 in the text, A40 in the page JSON); Replicate prices are page estimates",
+  "where steady noise (hiss, hum, room tone) lands: sfx or speech",
+  "licences of individual DnR v2 source clips and whether they matter for the Apache-2.0 weights or their outputs"
+ ],
+ "sources": [
+  "https://github.com/hiroki-abe-58/ComfyUI-DBS cloned at f656e53434b5485c148a2866fbd6ddc6b6152ed6 (/home/user/ext/ComfyUI-DBS/repo; HEAD = main = tag v0.1.0 per git ls-remote 2026-10-29): README.md, LICENSE, NOTICE, .comfyignore, requirements.txt, pyproject.toml, __init__.py, dbs_comfy/nodes.py, paths.py, runtime.py, vendor/UPSTREAM.md, vendor/MANIFEST.sha256 (sha256sum -c OK), vendor shims, tools/download_model.py, tools/model_files.sha256, docs/VERIFICATION.md, workflows/api/*.json, .github/workflows/ci.yml; grep scan of every .py outside tests/",
+  "https://api.comfy.org/nodes/dbs-soundtrack-separation and /versions (NodeVersionStatusFlagged); https://cdn.comfy.org/hiroki-abe-58/dbs-soundtrack-separation/0.1.0/node.zip (listed and hashed, not extracted)",
+  "https://github.com/JusperLee/Dynamic-Band-Splitting cloned at ff526463a58ee0278e7bd05c4b8bce112b743e34 (/home/user/ext/Dynamic-Band-Splitting/repo): README.md, CITATION.cff, LICENSE, THIRD_PARTY.md, pyproject.toml, requirements.txt, demo/README.md, demo/app.py, demo/backend.py L57-155, project_page/index.html, dbs/engine/inference.py, dbs/modules/stft.py, band_split.py, dbs.py L300-332, dbs/models/tiger.py L275-285, L454-526, L640-690",
+  "https://export.arxiv.org/api/query?id_list=2610.14993 ; https://arxiv.org/abs/2610.14993",
+  "https://huggingface.co/api/models/JusperLee/DBS-TIGER-DnR and /tree/main; README.md and config.json at 22da7d4c (hashed); safetensors header by HTTP range request",
+  "https://huggingface.co/api/models/JusperLee/DBS-BSRNN-DnR and /tree/main; README.md and config.json at 5af343f5 (hashed); safetensors header by HTTP range request",
+  "https://huggingface.co/api/models?author=JusperLee ; https://huggingface.co/api/models/JusperLee/TIGER-DnR ; https://huggingface.co/api/models/oulianov/DBS-TIGER-DnR ; https://huggingface.co/api/spaces/JusperLee/DBS-Demo",
+  "https://zenodo.org/api/records/6949108 (DnR v2.0, cc-by-4.0); https://github.com/kwatcharasupat/bandit ; https://zenodo.org/api/records/10160698",
+  "https://fal.ai/models/fal-ai/sam-audio/separate/llms.txt ; .../visual-separate/llms.txt ; .../span-separate/llms.txt ; https://fal.ai/models/fal-ai/demucs/llms.txt ; https://fal.ai/models/fal-ai/elevenlabs/audio-isolation/llms.txt ; https://fal.ai/models/fal-ai/deepfilternet3/llms.txt ; https://fal.ai/models/veed/clean-audio/llms.txt ; https://fal.ai/api/models?keywords=... (2026-10-29)",
+  "https://replicate.com/ryan5453/demucs ; https://replicate.com/cjwbw/demucs ; https://replicate.com/geopti/sam-audio-large",
+  "https://huggingface.co/api/models/facebook/sam-audio-large (and -base, -small); https://huggingface.co/facebook/sam-audio-large/resolve/main/LICENSE ; https://raw.githubusercontent.com/facebookresearch/demucs/main/LICENSE",
+  "https://developer.audioshake.ai/models.md ; https://developer.audioshake.ai/billing.md",
+  "Live ComfyUI read-only GETs: http://127.0.0.1:8188/system_stats, /object_info; source /home/user/ComfyUI @ fc04da91: comfy/audio.py L36, comfy/model_management.py L195-220, comfy_api/latest/_io.py L133, folder_paths.py L382-400 and L445-491, comfy_extras/nodes_audio.py L198-335, L400-420, L520-600, L617-790, server.py L406-418 and L783-820; nproc = 4",
+  "Fuobe @ claude/fuobe-parity-4 (7d7a765): see the doc's Sources for the file list"
+ ]
+}

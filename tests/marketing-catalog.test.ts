@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { enginesOf } from "@/lib/catalog/engines";
 import { getModel, supportsOp } from "@/lib/catalog";
 import {
   AD_STYLES,
@@ -65,7 +66,8 @@ describe("marketing catalog", () => {
           for (const c of list) {
             const m = getModel(c.id);
             expect(m, c.id).toBeDefined();
-            expect(m!.engine).toBe(engine);
+            // A Fuobe Original runs on both engines.
+            expect(enginesOf(m!), c.id).toContain(engine);
           }
         }
       }

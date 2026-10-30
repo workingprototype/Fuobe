@@ -2,9 +2,10 @@ import "server-only";
 import type { AssistMemory, ContextFact, Skill } from "@/lib/assist";
 import { describeRule, zoneLabel, type ScheduleRule } from "@/lib/assist-schedule";
 import type { Engine } from "@/lib/catalog/types";
+import { recipeMarkdown } from "@/lib/recipe";
 import { db } from "../db";
 import { engineMode } from "../settings";
-import { enabledSkills, getSkill } from "../skills";
+import { enabledSkills, getSkill, skillRecipe } from "../skills";
 import { memoriesFor } from "./memory";
 import { getProject } from "./projects";
 
@@ -150,7 +151,9 @@ export function chatFacts(c: ChatInfo, now = new Date()): ContextFact[] {
     const s = getSkill(name);
     if (!s) continue;
     const files = s.files.length ? `\n\n(Files with this skill, readable with load_skill and file: ${s.files.map((f) => f.path).join(", ")})` : "";
-    facts.push({ section: "active", key: s.name, text: `### /${s.name} — ${s.title}\n${clip(s.body, SKILL_BODY)}${files}` });
+    const recipe = s.recipe ? skillRecipe(s.name) : null;
+    const runs = recipe ? `\n\n${recipeMarkdown(recipe, { name: s.name })}` : "";
+    facts.push({ section: "active", key: s.name, text: `### /${s.name} — ${s.title}\n${clip(s.body, SKILL_BODY)}${files}${runs}` });
   }
   return facts;
 }
