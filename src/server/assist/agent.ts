@@ -26,6 +26,8 @@ import {
   type SkillMeta,
 } from "@/lib/assist";
 import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
+import { currentActor } from "../access/actor";
+import { rowOwner, runAsOwner } from "../access/permissions";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { offeredDefault } from "../model-access";
@@ -1110,6 +1112,7 @@ function animateTake(still: { url: string; g: Generation }, take: number, prefer
 function toolCtx(s: State): ToolContext {
   return {
     engine: s.thread.engine,
+    actor: currentActor(),
     thread: {
       id: s.thread.id,
       projectId: s.ext.projectId,
@@ -1286,7 +1289,18 @@ const MODELS: Record<AssistThread["agent"], ModelCall> = { claude, ollama, offli
  * Run the agent until it ends its turn or waits for approval. Call it right after addMessage or
  * answerApproval: it claims the thread synchronously, so the "running" status they saved stays valid.
  */
+/**
+ * Carry the chat on until the agent stops (or asks for approval). The turn acts for the chat's author (§7.10), whoever's
+ * request or schedule carried it on: tools it runs, generations it starts and what it spends are theirs.
+ */
 export async function run(id: string, model?: ModelCall): Promise<void> {
+  if (runs.has(id)) return;
+  const row = db().prepare("SELECT * FROM assist_threads WHERE id = ?").get(id) as Row | undefined;
+  if (!row) return;
+  return runAsOwner(rowOwner(row), () => turn(id, model));
+}
+
+async function turn(id: string, model?: ModelCall): Promise<void> {
   if (runs.has(id)) return;
   runs.add(id);
   try {

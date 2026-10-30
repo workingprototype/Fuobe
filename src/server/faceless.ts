@@ -78,6 +78,8 @@ import { routesFor } from "@/lib/catalog/plan";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { DocxError, docxText } from "./assist/docx";
 import { PdfError, pdfText } from "./assist/pdf";
+import { asSystem } from "./access/actor";
+import { rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained } from "./generations";
@@ -1154,7 +1156,8 @@ function sweep(): void {
   const rows = db().prepare("SELECT * FROM faceless_episodes WHERE status = 'rendering' AND plan_json LIKE '%\"awaiting\":true%'").all() as EpisodeRow[];
   for (const r of rows) {
     try {
-      settle(toEpisode(r));
+      // Stage two starts as the person who started the episode.
+      runAsOwner(rowOwner(r), () => settle(toEpisode(r)));
     } catch (e) {
       console.warn(`[faceless] couldn't continue ${r.id}: ${(e as Error).message}`);
     }
@@ -1169,7 +1172,8 @@ export function ensureFacelessRunner(): void {
     cur.tick = sweep;
     return;
   }
-  const state = { tick: sweep, timer: setInterval(() => globalThis.__fuobeFacelessRunner?.tick(), SWEEP_MS) };
+  // The server's timer, whichever request started it; each episode then continues as its owner (sweep).
+  const state = { tick: sweep, timer: asSystem(() => setInterval(() => globalThis.__fuobeFacelessRunner?.tick(), SWEEP_MS)) };
   state.timer.unref?.();
   globalThis.__fuobeFacelessRunner = state;
 }

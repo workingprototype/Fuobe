@@ -46,6 +46,8 @@ import { cloudMaskCut, frozenTakePlan, planAnchor, planAssembly, planMask, planN
 import type { Engine, Generation, PixelPoint } from "@/lib/catalog/types";
 import { ACCESS_PLACE } from "@/lib/model-access";
 import { createPipeline } from "./chains";
+import { asSystem } from "./access/actor";
+import { rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { cancelGeneration, getGeneration, previewChained } from "./generations";
 import { isOffered, offeredLoras } from "./model-access";
@@ -342,10 +344,11 @@ export function ensureSwapStudioRunner(): void {
   if (globalThis.__fuobeSwapStudioRunner) return;
   const tick = () => {
     try {
-      const rows = db().prepare("SELECT id FROM swap_projects WHERE waiting > 0").all() as { id: string }[];
+      const rows = db().prepare("SELECT * FROM swap_projects WHERE waiting > 0").all() as { id: string }[];
       for (const r of rows) {
         try {
-          advanceProject(r.id);
+          // Waiting takes launch as the person who started the project.
+          runAsOwner(rowOwner(r), () => advanceProject(r.id));
         } catch (e) {
           console.error(`[swap-studio] ${r.id}:`, (e as Error).message);
         }
@@ -354,9 +357,12 @@ export function ensureSwapStudioRunner(): void {
       console.error("[swap-studio] sweep:", (e as Error).message);
     }
   };
-  globalThis.__fuobeSwapStudioRunner = setInterval(tick, 3000);
-  globalThis.__fuobeSwapStudioRunner.unref?.();
-  setTimeout(tick, 500).unref?.();
+  // The server's timers, whichever request started them; each project then advances as its owner.
+  asSystem(() => {
+    globalThis.__fuobeSwapStudioRunner = setInterval(tick, 3000);
+    globalThis.__fuobeSwapStudioRunner.unref?.();
+    setTimeout(tick, 500).unref?.();
+  });
 }
 
 // ---------------------------------------------------------------------------

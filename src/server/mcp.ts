@@ -3,6 +3,7 @@ import { z } from "zod";
 // The studio modules behind the studio tools (tools.ts imports them too; named here so MCP never runs without them).
 import "./assist/studio-routes";
 import { apiSchema, executeTool, getTool, planFor, TOOLS, type ToolContext } from "./assist/tools";
+import { currentActor, runAs, type Actor } from "./access/actor";
 import { engineMode } from "./settings";
 import { recipeMarkdown } from "@/lib/recipe";
 import { enabledSkills, getSkill, skillRecipe } from "./skills";
@@ -38,7 +39,8 @@ type JsonRpcResponse = { jsonrpc: "2.0"; id: string | number | null } & ({ resul
 const ok = (id: JsonRpcRequest["id"], result: unknown): JsonRpcResponse => ({ jsonrpc: "2.0", id: id ?? null, result });
 const fail = (id: JsonRpcRequest["id"], code: number, message: string): JsonRpcResponse => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
-const ctx = (): ToolContext => ({ engine: engineMode() === "open" ? "open" : "cloud" });
+/** The tools' context: the engine, and who the tool acts for (the token's or session's person, from the scope). */
+const ctx = (): ToolContext => ({ engine: engineMode() === "open" ? "open" : "cloud", actor: currentActor() });
 
 const READ_ONLY = new Set(["search_models", "list_elements", "list_recent", "check_generations", "estimate_cost", "estimate_job", "list_skills", "load_skill", "read_source"]);
 
@@ -160,8 +162,16 @@ function promptGet(params: unknown) {
   };
 }
 
-/** Handle one JSON-RPC message; null for notifications (no response). */
-export async function handleMcp(msg: unknown): Promise<JsonRpcResponse | null> {
+/**
+ * Handle one JSON-RPC message as `actor` (the person behind the bearer token or session; by default whoever the scope
+ * says is acting); null for notifications (no response). Everything the message runs — tool calls and what they start —
+ * acts for that person.
+ */
+export async function handleMcp(msg: unknown, actor: Actor = currentActor()): Promise<JsonRpcResponse | null> {
+  return runAs(actor, () => answer(msg));
+}
+
+async function answer(msg: unknown): Promise<JsonRpcResponse | null> {
   const m = msg as JsonRpcRequest;
   if (!m || m.jsonrpc !== "2.0" || typeof m.method !== "string") return fail(null, -32600, "Invalid request");
   const isNotification = m.id === undefined;
