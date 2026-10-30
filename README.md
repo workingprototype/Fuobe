@@ -192,10 +192,6 @@ node tests/e2e/comfyui-faceless-plus.mjs http://localhost:3000   # Ken Burns, th
 node tests/e2e/comfyui-canvas-concat.mjs http://localhost:3000   # the Canvas Video concatenator: three test clips are cut, framed to 9:16 at 30 fps and joined, then the film is probed; model-free, needs ffmpeg and ffprobe
 ```
 
-## To do
-
-- [ ] **Chunked uploads, so files over 100 MB work on fuobe.com.** Cloudflare (Free and Pro plans) refuses a request body over 100 MB, but Fuobe accepts 200 MB, so a 100–200 MB upload fails there. Send files over about 90 MB as 50 MB chunks and join them on the server before `saveFile()`: add a chunk endpoint next to `src/app/api/uploads/route.ts` and one client helper for its three callers (`src/components/studio/media-slot.tsx`, `src/lib/api.ts`, and `src/components/shorts/use-source-clip.ts`, which keeps its progress bar). Smaller files upload in one request, as now. See [docs/deploy.md](docs/deploy.md#cloudflare-limits).
-
 ## Development
 
 ```bash
@@ -258,7 +254,6 @@ node tests/e2e/eval-review.mjs                 # the report and blind review pag
 - `docs/cli.md` — the `fuobe` command line: install, sign in, every command (`fuobe eval` included), MCP and skills for other agents
 - `docs/research/` — the research this is built on (Higgsfield inventory, studios, image studios, marketing and agents, API, round-4 changes, in-house products; paid model APIs parts 1–4; ComfyUI equivalents parts 1–4; workflow library; the round-4 UX and speed audit; open recipes for Fuobe Originals; Openjutsu and Akatz Labs' H3 Character Swap; new models (Open-H3-Regenerate-2K, WorldCast, MOSS-Image Layout), DBS soundtrack separation, Work2Skill and accounts, all plans for now except Work2Skill's first two packages; Liner UI language); [`docs/research/README.md`](docs/research/README.md) says what each file covers
 - `docs/workers/tribe-v2.md` — the optional, non-commercial TRIBE v2 worker contract for the Virality predictor
-- `docs/deploy.md` — how fuobe.com is hosted and auto-deployed from `main` (server files in `deploy/fuobe.com/`)
 - `scripts/comfy/` — the pipeline that exports and validates the ComfyUI workflow library
 - `scripts/eval/` — the Fuobe Originals evaluation harness: suites, metrics, blind review and the promote rule
 - `skills/` — Assist's built-in skills (`<name>/SKILL.md` in the Agent Skills format: name, description and compatibility, with Fuobe's own fields under `metadata`: title, when_to_use, icon, studio, tags, offline hints); a skill of your own can also carry a `recipe.json` that lets it run by itself (see [`skills/README.md`](skills/README.md)); `.agents/skills/fuobe/` teaches another agent to drive Fuobe through MCP or the CLI
