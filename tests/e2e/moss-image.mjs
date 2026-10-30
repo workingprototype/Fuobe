@@ -1,7 +1,10 @@
 // N7-1 in the browser (no run reaches a GPU or fal): MOSS-Image in the Image studio's model menu on both engines with its
 // price ($0.05 per megapixel in the cloud; "on your GPU, about 13 GB of files" and Free on the open engine), its Quality
-// setting under Options reached by keyboard, and both rows in Settings → Models & licences with their switches on. Each
-// page at 1440 and 390 px, light and dark, without sideways scroll.
+// setting under Options reached by keyboard (on a phone, Options sits in the Settings sheet), and both rows in Settings →
+// Models & licences with their switches on and their licence facts on screen (the cloud row's weights and fal's
+// black-image catch shown whole; a cut note opened with "More" from the keyboard). A LoRA run's price is unknown, never
+// free (the preview API: no picker attaches a LoRA to MOSS yet). Each page at 1440 and 390 px, light and dark, without
+// sideways scroll.
 // Usage: FAL_KEY=anything pnpm dev, then node tests/e2e/moss-image.mjs [appUrl] [--shots <dir>]   (with a fal key the
 // cloud price shows instead of "Demo · free"; nothing is sent: Generate is never pressed). Exits 1 on a failed check.
 import fs from "node:fs";
@@ -45,6 +48,20 @@ const openStudio = async (page) => {
 };
 
 try {
+  // A LoRA run goes to fal's /lora twin, whose price isn't published: unknown (null), never free.
+  const preview = async (loras) =>
+    (
+      await fetch(`${app}/api/generations?preview=1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feature: "image", modelId: "moss-image", op: "t2i", prompt: 'A neon sign that reads "OPEN"', ...(loras && { loras }) }),
+      })
+    ).json();
+  const plain = await preview();
+  const withLora = await preview([{ file: "moss-style.safetensors", url: "https://huggingface.co/example/moss-style/resolve/main/moss-style.safetensors", strength: 0.8 }]);
+  check("api: a plain MOSS-Image run is priced at $0.05 (1024 × 1024)", plain.costUsd === 0.05, JSON.stringify(plain.costUsd));
+  check("api: a MOSS-Image run with a LoRA goes to /lora at an unknown price, not free", withLora.costUsd === null && withLora.route?.endpoint === "fal-ai/moss-image/lora", `${JSON.stringify(withLora.costUsd)} ${withLora.route?.endpoint ?? withLora.error ?? ""}`);
+
   for (const width of [1440, 390]) {
     for (const scheme of ["light", "dark"]) {
       const tag = `${width} ${scheme}`;
@@ -83,13 +100,24 @@ try {
         check(`${tag} ${engine}: the composer now runs MOSS-Image`, /MOSS-Image/.test(t), t.slice(0, 100));
         const price = engine === "open" ? /\bFree\b/ : fal ? /≈ \$0\.05\b/ : /Demo/;
         check(`${tag} ${engine}: its price shows before the run`, price.test(t), (t.match(/Demo · free|Demo|≈ \$[\d.]+|\bFree\b/) ?? ["no price"])[0]);
-        if (engine === "open" && width === 1440) {
-          // Quality under Options, from the keyboard.
-          const options = composer(page).getByRole("button", { name: /^Options/ }).first();
+        if (engine === "open") {
+          // Quality under Options, from the keyboard; on a phone Options is in the Settings sheet (a popover in a sheet).
+          let scope = composer(page);
+          if (width < 500) {
+            const settings = composer(page).getByRole("button", { name: /^Settings:/ }).first();
+            await settings.focus();
+            await page.keyboard.press("Enter");
+            scope = page.getByRole("dialog").first();
+            await scope.waitFor({ timeout: 10_000 });
+          }
+          const options = scope.getByRole("button", { name: /^Options/ }).first();
           await options.focus();
+          check(`${tag} open: the keyboard reaches Options`, await options.evaluate((el) => el === document.activeElement));
           await page.keyboard.press("Enter");
           const quality = page.getByRole("combobox", { name: "Quality" });
           await quality.waitFor({ timeout: 10_000 });
+          const qbox = await quality.boundingBox();
+          check(`${tag} open: Quality fits the screen`, !!qbox && qbox.x >= 0 && qbox.x + qbox.width <= width + 1, qbox ? `${Math.round(qbox.x)}+${Math.round(qbox.width)}` : "no box");
           check(`${tag} open: Options shows Quality, Auto = Standard · 25 steps`, /Auto · Standard · 25 steps/.test(flat(await quality.innerText())), flat(await quality.innerText()));
           await quality.focus();
           await page.keyboard.press("Enter");
@@ -97,9 +125,15 @@ try {
           await best.waitFor({ timeout: 10_000 });
           const opts = flat(await page.getByRole("listbox").innerText());
           check(`${tag} open: Quality offers Best · 50 steps and Fast · 8 steps`, /Best · 50 steps/.test(opts) && /Fast · 8 steps/.test(opts), opts);
+          // The keyboard picks Best (arrows to it, Enter); the setting says so.
+          for (let i = 0; i < 6 && (await best.getAttribute("data-highlighted")) === null; i++) await page.keyboard.press("ArrowDown");
+          await page.keyboard.press("Enter");
+          await page.waitForTimeout(300);
+          check(`${tag} open: Best picked from the keyboard`, /Best · 50 steps/.test(flat(await quality.innerText())), flat(await quality.innerText()));
           await shoot(page, `moss-options-${width}-${scheme}.png`);
           await page.keyboard.press("Escape");
           await page.keyboard.press("Escape");
+          if (width < 500) await page.keyboard.press("Escape");
         }
         check(`${tag} ${engine}: no sideways scroll on the Image studio`, await noSideways(page));
         await shoot(page, `moss-image-${engine}-${width}-${scheme}.png`);
@@ -113,15 +147,31 @@ try {
       await find.waitFor({ timeout: 60_000 });
       await find.fill("MOSS");
       await page.waitForTimeout(800);
-      for (const [id, want] of [
-        ["oss-moss-image", /Apache-2\.0/],
-        ["moss-image", /Paid API · fal\.ai[\s\S]*safety checker returns a black image/],
+      for (const [id, want, fact] of [
+        ["oss-moss-image", /Apache-2\.0/, /Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2\.0/],
+        ["moss-image", /Paid API · fal\.ai[\s\S]*Weights: Apache-2\.0/, /safety checker returns a black image/],
       ]) {
         const sw = page.locator(`#model-${id}`);
         await sw.waitFor({ timeout: 15_000 });
-        const rowText = flat(await sw.locator("xpath=ancestor::li[1]").innerText());
-        const titles = flat(await sw.locator("xpath=ancestor::li[1]").evaluate((li) => [...li.querySelectorAll("[title]")].map((e) => e.getAttribute("title")).join(" ")));
-        check(`${tag} settings: ${id} is listed with its licence`, want.test(`${rowText} ${titles}`), rowText.slice(0, 140));
+        const row = sw.locator("xpath=ancestor::li[1]");
+        const rowText = flat(await row.innerText());
+        check(`${tag} settings: ${id} is listed with its licence`, want.test(rowText), rowText.slice(0, 140));
+        // The fact is on screen, not only in a hover title: a note cut at two lines opens with "More" from the keyboard.
+        const more = row.getByRole("button", { name: /^More/ });
+        if (await more.count()) {
+          await more.first().focus();
+          await page.keyboard.press("Enter");
+          await page.waitForTimeout(200);
+          check(`${tag} settings: ${id}'s cut note opens from the keyboard`, (await row.getByRole("button", { name: /^Less/ }).first().getAttribute("aria-expanded")) === "true");
+        }
+        const shown = await row.evaluate((li, src) => {
+          const re = new RegExp(src);
+          const p = [...li.querySelectorAll("p")].find((e) => re.test(e.textContent ?? ""));
+          if (!p) return "missing";
+          const r = p.getBoundingClientRect();
+          return p.scrollHeight <= p.clientHeight + 1 && r.width > 0 && r.right <= window.innerWidth + 1 ? "shown" : `cut (${p.scrollHeight} > ${p.clientHeight})`;
+        }, fact.source);
+        check(`${tag} settings: ${id}'s ${fact.source.slice(0, 40)}… is on screen`, shown === "shown", shown);
         check(`${tag} settings: ${id} starts on`, (await sw.getAttribute("aria-checked")) === "true" || (await sw.getAttribute("data-state")) === "checked");
         // Keyboard: Space flips it, Space flips it back.
         await sw.focus();

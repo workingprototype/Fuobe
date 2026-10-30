@@ -5,7 +5,7 @@ import { onEngine, providerEngine } from "@/lib/catalog/engines";
 import { LORA_LIBRARY, MOTION_EFFECT_LORAS } from "@/lib/catalog/lora-library.generated";
 import { libraryEntry, loraName } from "@/lib/catalog/loras";
 import { OSS_LORAS, type OssLora } from "@/lib/catalog/oss-loras.generated";
-import type { Engine, LoraRef, ModelDef, ModelRoute } from "@/lib/catalog/types";
+import type { Engine, LoraRef, ModelDef, ModelLicence, ModelRoute } from "@/lib/catalog/types";
 import type { ManifestWorkflow } from "@/lib/comfy";
 import {
   BROWSER_LICENCE,
@@ -21,6 +21,7 @@ import {
   paidApiLicence,
   PROVIDER_NAME,
   workflowLicence,
+  type LicenceClass,
   type LicenceInfo,
 } from "@/lib/licences";
 import {
@@ -253,8 +254,23 @@ export function offeredLoras(loras: LoraRef[]): { loras: LoraRef[]; notes: strin
 
 const isOpenRoute = (r: ModelRoute) => providerEngine(r.provider) === "open";
 
-/** A model's licence as the list shows it: the open half names it, the cloud half is said beside it. */
-export function modelLicence(m: ModelDef): { licence: LicenceInfo; cloud?: LicenceInfo; packs: string[] } {
+/**
+ * The open weights a hosted model runs (fal's MOSS-Image, Replicate's FLUX dev LoRA builds), as their own line: their
+ * licence's name and class, and what the research noted about them and the host (fal's black-image safety checker).
+ * `commercial` from the research decides the class when the licence's name alone doesn't say.
+ */
+function weightsLicence(l: ModelLicence): LicenceInfo {
+  const info = licenceInfo(l.licence);
+  const cls: LicenceClass =
+    l.commercial === false ? (info.class === "research" ? "research" : "non-commercial") : l.commercial === null && info.class === "commercial" ? "conditions" : info.class;
+  return { ...info, class: cls, note: l.note?.trim() || l.licence };
+}
+
+/**
+ * A model's licence as the list shows it: the open half names it, the cloud half is said beside it. A hosted open model
+ * (only cloud routes, open weights recorded) also gets `weights`: the provider's terms name it, the weights' line follows.
+ */
+export function modelLicence(m: ModelDef): { licence: LicenceInfo; cloud?: LicenceInfo; weights?: LicenceInfo; packs: string[] } {
   const open = m.routes.filter(isOpenRoute);
   const cloud = m.routes.filter((r) => !isOpenRoute(r));
   const packs = [...new Set(open.flatMap((r) => (r.provider === "comfyui" ? comfyFacts(r.endpoint).packs : [])))];
@@ -262,10 +278,8 @@ export function modelLicence(m: ModelDef): { licence: LicenceInfo; cloud?: Licen
   const cloudRoutes = cloud.filter((r) => r.provider !== "llm");
   const cloudLicence = cloudRoutes.length ? paidApiLicence(m.vendor, cloudRoutes) : cloud.length ? routeLicence(cloud[0], m) : undefined;
   if (openLicence) return { licence: openLicence, ...(cloudLicence && { cloud: cloudLicence }), packs };
-  // A hosted open model (fal's MOSS-Image) says what its weights are and what the research noted about the host.
-  const stop = (t: string) => t.trim().replace(/\.?$/, ".");
-  const weights = m.licence && cloudLicence?.class === "paid-api" ? ` Weights: ${stop(m.licence.note ?? m.licence.licence)}` : "";
-  return { licence: cloudLicence ? { ...cloudLicence, note: weights ? `${stop(cloudLicence.note)}${weights}` : cloudLicence.note } : { name: "Not recorded", class: "unknown", note: "" }, packs };
+  if (!cloudLicence) return { licence: { name: "Not recorded", class: "unknown", note: "" }, packs };
+  return { licence: cloudLicence, ...(m.licence && cloudLicence.class === "paid-api" && { weights: weightsLicence(m.licence) }), packs };
 }
 
 /** The presets a map key names: a map v2 preset id, or a round-1 slug (the motion, effect or app it matches). */
@@ -327,7 +341,7 @@ export function knownSwitch(kind: "model" | "provider" | "pack" | "lora", id: st
 export function accessList(): AccessList {
   const access = readAccess();
   const models: ModelEntry[] = MODELS.map((m) => {
-    const { licence, cloud, packs } = modelLicence(m);
+    const { licence, cloud, weights, packs } = modelLicence(m);
     const others = { ...access, models: access.models.filter((x) => x !== m.id) };
     const off = m.routes.map((r) => routeOff(m, r, others, factsOf)).filter((s): s is NonNullable<typeof s> => !!s);
     const labels = [...new Set(off.map(switchLabel))];
@@ -342,6 +356,7 @@ export function accessList(): AccessList {
       providers: [...new Set(m.routes.map((r) => r.provider))],
       licence,
       ...(cloud && { cloud }),
+      ...(weights && { weights }),
       packs,
       on: !access.models.includes(m.id),
       offBy: all ? labels : [],

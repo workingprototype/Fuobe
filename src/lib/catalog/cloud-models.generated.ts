@@ -1720,7 +1720,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "label": "Guidance",
           "min": 0,
           "max": 10,
-          "step": 1,
+          "step": 0.5,
           "default": 3
         }
       ],

@@ -1304,10 +1304,20 @@ export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeCon
     // it can't wait for another node (said before Run).
     const chained = plan.op === "keyframes" ? !!keyframeChain(plan.model) : routesFor(plan.model, plan.op).some((r) => r.chained);
     if (built.deps.length && chained) return { ...built, model, costUsd: null, error: chainedWaitMessage(plan.model.name, plan.op) };
-    return { ...built, model, plan, costUsd: estimateCost(plan.model, plan.params, plan.jobs, plan.op) };
+    return { ...built, model, plan, costUsd: planCost(plan) };
   } catch (e) {
     return { ...built, model, costUsd: null, error: (e as Error).message };
   }
+}
+
+/**
+ * A planned node's price, as the composer and the server work it out. A run with LoRAs (Fuobe Soul's look, a recipe's)
+ * goes to the route's LoRA endpoint at its own price, or an unknown one (fal's MOSS-Image /lora): null then, which the
+ * node shows as "Price unknown", never as free.
+ */
+function planCost(plan: Plan): number | null {
+  const withLoras = plan.loras.length > 0 && routesFor(plan.model, plan.op).some((r) => !!r.loraEndpoint);
+  return estimateCost(plan.model, plan.params, plan.jobs, plan.op, withLoras);
 }
 
 /** A node made in several steps: every step planned with placeholders, the price their sum, the plan the last step's. */
@@ -1321,7 +1331,7 @@ function describeSteps(built: NodeRequest, model: ModelDef): NodeDescription {
     } catch (e) {
       return { ...built, model, costUsd: null, error: `${st.request.step?.label ?? st.key}: ${(e as Error).message}` };
     }
-    const c = estimateCost(plan.model, plan.params, plan.jobs, plan.op);
+    const c = planCost(plan);
     if (c === null) unknown = true;
     else cost += c;
   }

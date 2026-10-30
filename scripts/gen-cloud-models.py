@@ -82,7 +82,8 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
           sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
           frame_step=None, original=False, sizes=None, keep_shape=False, licence=None, frame_fps=None, frame_multiple=None,
           exact_size=False):
-    """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
+    """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field; a slider's
+    third item is its step, when the generic one is too coarse):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
     formats: {canonical VideoFormat: the API's value} for its output-format field (params.format), checked against the enum.
@@ -202,7 +203,7 @@ model("moss-image", "MOSS-Image", "OpenMOSS", "moss", "image",
       "Clean Chinese and English text, and it follows layout boxes",
       [("t2i", "fal-ai/moss-image", "fal", {"loraEndpoint": "fal-ai/moss-image/lora"})],
       badges=["new"], defaults={"aspectRatio": "1:1"}, fixed={"output_format": "png"}, exact_size=True, options={"layout": "moss"},
-      sliders=[("num_inference_steps", "Steps"), ("guidance_scale", "Guidance")],
+      sliders=[("num_inference_steps", "Steps"), ("guidance_scale", "Guidance", 0.5)],
       licence={"licence": re.match(r"[\w.-]+", MOSS_FAL["license"]).group(0), "commercial": True,
                "note": f"{MOSS_FAL['license']}. fal's safety checker returns a black image when it flags an output",
                "checked": MOSS_FAL["fetched"]})
@@ -1348,12 +1349,13 @@ def time_field(key, spec):
     return {"key": key, "type": t, **({"multiplier": 1000} if key.endswith("_ms") else {})}
 
 
-def add_slider(opts, param, label, spec):
+def add_slider(opts, param, label, spec, step=None):
     if not spec or "minimum" not in spec or "maximum" not in spec or any(s["param"] == param for s in opts.get("sliders", [])):
         return
     lo, hi = spec["minimum"], spec["maximum"]
-    # Narrow ranges (Topaz grain 0-0.1) get a step that still gives them about twenty stops.
-    step = 1 if hi - lo > 4 else 0.05 if hi - lo > 0.2 else round((hi - lo) / 20, 4)
+    # Narrow ranges (Topaz grain 0-0.1) get a step that still gives them about twenty stops; a model line can name its own
+    # (MOSS-Image's guidance in halves, so 2.5, the GPU's Standard CFG, is one of them).
+    step = step or (1 if hi - lo > 4 else 0.05 if hi - lo > 0.2 else round((hi - lo) / 20, 4))
     opts.setdefault("sliders", []).append({"param": param, "label": label, "min": lo, "max": hi, "step": step,
                                            "default": spec.get("default", lo)})
 
@@ -1707,8 +1709,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         enum = (inputs.get(kf["targetLanguage"]) or {}).get("values")
         opts["languages"] = enum or ISO_LANGUAGES
     # The model's own slider/control labels win over the generic voice-setting labels below.
-    for path, label in m.get("sliders") or []:
-        add_slider(opts, path, label, spec_at(inputs, path))
+    for path, label, *step in m.get("sliders") or []:
+        add_slider(opts, path, label, spec_at(inputs, path), step[0] if step else None)
     for path, label, *labels in m.get("controls") or []:
         add_control(opts, path, label, spec_at(inputs, path), (m.get("api_defaults") or {}).get(path), labels[0] if labels else None)
     for k, v in inputs.items():

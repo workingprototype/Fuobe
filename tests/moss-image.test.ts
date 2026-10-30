@@ -47,11 +47,17 @@ describe("moss-image on fal", () => {
     expect(m.fixed).toEqual({ output_format: "png" });
     expect(BASE.inputs.num_images).toMatchObject({ minimum: 1, maximum: 4 });
     expect(cloud.options.maxOutputs).toBe(4);
-    // Steps and guidance are fal's own fields, with fal's range and default.
+    // Steps and guidance are fal's own fields, with fal's range and default; guidance (a float) moves in halves, so the
+    // GPU's Standard CFG 2.5 can be asked for in the cloud too.
     expect(cloud.options.sliders).toEqual([
       { param: "num_inference_steps", label: "Steps", min: 1, max: 100, step: 1, default: 50 },
-      { param: "guidance_scale", label: "Guidance", min: 0, max: 10, step: 1, default: 3 },
+      { param: "guidance_scale", label: "Guidance", min: 0, max: 10, step: 0.5, default: 3 },
     ]);
+    expect(BASE.inputs.guidance_scale.type).toBe("number");
+    const guidance = cloud.options.sliders!.find((x) => x.param === "guidance_scale")!;
+    for (const set of Object.values(open.options.controls!.find((c) => c.param === "quality")!.sets!)) {
+      expect(Number.isInteger((Number(set.cfg) - guidance.min) / guidance.step), `cfg ${set.cfg}`).toBe(true);
+    }
     expect(BASE.inputs.num_inference_steps).toMatchObject({ minimum: 1, maximum: 100, default: 50 });
     expect(BASE.inputs.guidance_scale).toMatchObject({ minimum: 0, maximum: 10, default: 3 });
     // LoRAs go through the /lora twin: up to 3 of {path, scale 0-4}.
@@ -154,7 +160,26 @@ describe("Settings → Models & licences", () => {
     expect(o.packs).toEqual([]);
     const c = modelLicence(cloud);
     expect(c.licence).toMatchObject({ class: "paid-api", name: "Paid API · fal.ai" });
-    expect(c.licence.note).toMatch(/Weights: Apache-2\.0 weights \(OpenMOSS-Team\/MOSS-Image-SFT\); hosted under fal's terms\. fal's safety checker returns a black image when it flags an output\.$/);
+    // The weights and the host's catch are a line of their own (shown whole at 390 px), not the end of the paid-API note.
+    expect(c.licence.note).not.toMatch(/Weights|safety checker/);
+    expect(c.weights).toEqual({
+      name: "Apache-2.0",
+      class: "commercial",
+      url: "https://spdx.org/licenses/Apache-2.0.html",
+      note: "Apache-2.0 weights (OpenMOSS-Team/MOSS-Image-SFT); hosted under fal's terms. fal's safety checker returns a black image when it flags an output",
+    });
+    expect(o.weights).toBeUndefined();
+  });
+
+  it("names a hosted model's weights by their licence, its class from the research where the name doesn't say", () => {
+    const w = (id: string) => modelLicence(getModel(id)!).weights;
+    // Was "Weights: Weights are non-commercial; …" at the end of the paid-API note.
+    expect(w("flux-1-dev-lora-cloud")).toMatchObject({ name: "FLUX.1 [dev] Non-Commercial License", class: "non-commercial" });
+    expect(w("flux-2-klein-9b-lora-cloud")).toMatchObject({ class: "non-commercial" });
+    expect(w("ltx-2-3-22b-cloud")).toMatchObject({ name: "LTX-2 Community License", class: "conditions" });
+    // A closed model has no weights line; a Fuobe Original's open half names its licence as before.
+    expect(w("nano-banana-pro")).toBeUndefined();
+    expect(modelLicence(getModel("fuobe-soul")!).weights).toBeUndefined();
   });
 
   it("lists both, switched on", () => {
