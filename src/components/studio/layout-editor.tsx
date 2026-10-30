@@ -93,8 +93,16 @@ export function LayoutEditor(props: {
 }) {
   const content = useRef<HTMLDivElement>(null);
   const escapeRef = useRef<() => boolean>(() => false);
+  // Closing the editor any way (Escape, a press outside it) keeps what was drawn, as Done does: there is no Cancel.
+  const keepRef = useRef<() => void>(() => {});
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+    <Dialog
+      open={props.open}
+      onOpenChange={(o) => {
+        if (!o) keepRef.current();
+        props.onOpenChange(o);
+      }}
+    >
       <DialogContent
         ref={content}
         showCloseButton={false}
@@ -108,7 +116,7 @@ export function LayoutEditor(props: {
           if (escapeRef.current()) e.preventDefault();
         }}
       >
-        {props.open && <LayoutBoard {...props} escapeRef={escapeRef} />}
+        {props.open && <LayoutBoard {...props} escapeRef={escapeRef} keepRef={keepRef} />}
       </DialogContent>
     </Dialog>
   );
@@ -138,7 +146,8 @@ function LayoutBoard({
   model,
   onDone,
   escapeRef,
-}: Parameters<typeof LayoutEditor>[0] & { escapeRef: React.RefObject<() => boolean> }) {
+  keepRef,
+}: Parameters<typeof LayoutEditor>[0] & { escapeRef: React.RefObject<() => boolean>; keepRef: React.RefObject<() => void> }) {
   const [items, setItems] = useState<LayoutItem[]>(layout.items);
   const [canvasType, setCanvasType] = useState<CanvasType>(layout.summary.canvas);
   const [tags, setTags] = useState(layout.summary.meta.join(", "));
@@ -171,7 +180,7 @@ function LayoutBoard({
     [caption, tags, canvasType, items, aspect, layout.summary.palette],
   );
 
-  // Escape first lets go of a selected box, then closes the editor (which keeps the boxes).
+  // Escape first closes Import, then lets go of a selected box, then closes the editor (which keeps the boxes, as Done does).
   useEffect(() => {
     escapeRef.current = () => {
       if (importing) return (setImporting(false), true);
@@ -180,8 +189,12 @@ function LayoutBoard({
     };
   }, [escapeRef, importing, selected]);
 
+  const keep = () => onDone({ layout: { ...draft, summary: { ...draft.summary, caption: "" } }, caption, aspect });
+  useEffect(() => {
+    keepRef.current = keep;
+  });
   const finish = () => {
-    onDone({ layout: { ...draft, summary: { ...draft.summary, caption: "" } }, caption, aspect });
+    keep();
     onOpenChange(false);
   };
 
@@ -227,12 +240,16 @@ function LayoutBoard({
       return;
     }
     // A box's number tab picks that box; elsewhere a press picks from the boxes under it (again on the same spot: the next one down).
+    // Shift or Alt draws a new box even over others (a headline on a product).
     const tab = (e.target as HTMLElement).closest<HTMLElement>("[data-box-tab]")?.dataset.boxTab;
-    const stack = boxesAt(
-      items.map((x) => x.box),
-      p.x / size.width,
-      p.y / size.height,
-    );
+    const stack =
+      e.shiftKey || e.altKey
+        ? []
+        : boxesAt(
+            items.map((x) => x.box),
+            p.x / size.width,
+            p.y / size.height,
+          );
     const again = !!lastPress.current && Math.hypot(lastPress.current.x - p.sx, lastPress.current.y - p.sy) < 6;
     const picked = tab !== undefined ? Number(tab) : pickBox(stack, selected, again);
     if (picked === null) {
@@ -287,6 +304,8 @@ function LayoutBoard({
     const box = nudgedBox(items[selected].box, e.key, e.shiftKey, size.width, size.height);
     if (box) {
       e.preventDefault();
+      // Undo takes back a nudge (a held key is one step).
+      if (!e.repeat) remember();
       patch(selected, { box });
     }
   };
@@ -395,7 +414,7 @@ function LayoutBoard({
           </Button>
         </div>
         <DialogDescription id="layout-editor-hint" className="w-full text-[12px] leading-snug text-muted-foreground max-sm:sr-only">
-          Drag to draw a box, then say what goes in it. Layout prompts are experimental in MOSS-Image&apos;s own guide: boxes guide the picture, they don&apos;t pin it.
+          Drag to draw a box, then say what goes in it; hold Shift to draw over another box. Layout prompts are experimental in MOSS-Image&apos;s own guide: boxes guide the picture, they don&apos;t pin it.
         </DialogDescription>
       </header>
 
@@ -406,7 +425,7 @@ function LayoutBoard({
             <div
               ref={board}
               role="application"
-              aria-label={`Layout canvas, ${size.width} by ${size.height}: drag to draw a box. With a box picked, arrow keys move it and Delete removes it.`}
+              aria-label={`Layout canvas, ${size.width} by ${size.height}: drag to draw a box (Shift to draw over another). With a box picked, arrow keys move it and Delete removes it.`}
               tabIndex={0}
               data-layout-canvas
               onPointerDown={onPointerDown}
@@ -482,7 +501,8 @@ function LayoutBoard({
           aria-label="Boxes"
           className={cn(
             "flex min-h-0 flex-col border-t bg-popover max-sm:rounded-t-2xl max-sm:shadow-strong sm:w-[380px] sm:border-t-0 sm:border-l",
-            sheetOpen ? "max-sm:max-h-[48svh]" : "max-sm:max-h-12",
+            // A fixed height on phones, so the canvas keeps its size while rows come and go.
+            sheetOpen ? "max-sm:h-[46svh]" : "max-sm:h-12",
           )}
         >
           <button
