@@ -29,7 +29,7 @@ import { IntentLink } from "@/components/intent-link";
 import { JobNotifications } from "@/components/job-notifications";
 import { NAV, type NavGroupDef } from "@/components/nav-items";
 import { SkillBuilderProvider } from "@/components/skills/skill-builder-provider";
-import { signInHref, useEngineMode, useIsGuest, useStatus } from "@/lib/api";
+import { CONNECT_GPU_EVENT, signInHref, useEngineMode, useIsGuest, useStatus, type StatusInfo } from "@/lib/api";
 import { useModKey } from "@/lib/keys";
 import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, parseClosed, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -332,6 +332,42 @@ function GuestRow() {
   );
 }
 
+/**
+ * A visitor's status strip (public sign-up): its own GPU, never the install's. A guest is sent to sign
+ * up first; an account without one opens "Connect your GPU"; a connected one says whether it answers.
+ */
+function YourGpuChip({ viewer }: { viewer: NonNullable<StatusInfo["viewer"]> }) {
+  const cls = "flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent group-data-[collapsible=icon]:hidden";
+  const g = viewer.gpu;
+  if (g.connected) {
+    const vram = g.vramBytes ? `${Math.round(g.vramBytes / 2 ** 30)} GB` : "";
+    return (
+      <IntentLink href="/settings#your-gpu" className={cls}>
+        <span className="flex items-center gap-2">
+          <StatusDot ok={g.online} /> Your GPU
+          <span className="ml-auto">{g.online ? "online" : "offline"}</span>
+        </span>
+        {(g.device || vram) && <span className="truncate text-[11px]">{[g.device, vram && `${vram} VRAM`].filter(Boolean).join(" · ")}</span>}
+      </IntentLink>
+    );
+  }
+  const body = (
+    <span className="flex items-center gap-2">
+      <StatusDot ok={false} /> Your GPU
+      <span className="ml-auto font-medium text-brand-text">Connect</span>
+    </span>
+  );
+  return viewer.kind === "guest" ? (
+    <a href={signInHref("signup", "/settings#your-gpu")} className={cls}>
+      {body}
+    </a>
+  ) : (
+    <button type="button" className={cls} onClick={() => window.dispatchEvent(new Event(CONNECT_GPU_EVENT))}>
+      {body}
+    </button>
+  );
+}
+
 /** The GitHub mark (lucide has no brand icons). */
 function GitHubMark() {
   return (
@@ -414,6 +450,9 @@ export function AppSidebar() {
             })}
           </SidebarContent>
           <SidebarFooter className="gap-1 border-t border-sidebar-border" onClick={closeOnLink}>
+            {status?.viewer ? (
+              <YourGpuChip viewer={status.viewer} />
+            ) : (
             <IntentLink
               href="/settings"
               className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent group-data-[collapsible=icon]:hidden"
@@ -437,6 +476,7 @@ export function AppSidebar() {
                 </span>
               )}
             </IntentLink>
+            )}
             <SidebarMenu className="flex-row gap-1 group-data-[collapsible=icon]:flex-col">
               <SidebarMenuItem className="min-w-0 flex-1">
                 <SidebarMenuButton tooltip="Toggle theme" className="h-8 text-[13px]" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>

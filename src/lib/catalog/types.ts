@@ -816,6 +816,11 @@ export type LoraField =
 
 /** What the UI posts to /api/generations. Asset references are local asset ids or URLs. */
 export interface GenerationRequest {
+  /**
+   * Public sign-up: the account whose own ComfyUI runs this ("Your GPU"), never the install's providers. Set by the
+   * server from the session only (the request schema drops it from what a client sends).
+   */
+  account?: string;
   feature: string;
   presetId?: string;
   modelId: string;

@@ -35,6 +35,12 @@ export interface ApiToken {
   lastUsedAt?: number;
 }
 
+/** An account's own ComfyUI ("Your GPU"): where its runs go, never the install's. A public address (a tunnel). */
+export interface AccountGpu {
+  url: string;
+  token?: string;
+}
+
 /** A signed-up visitor (public sign-up). */
 export interface Account {
   id: string;
@@ -47,6 +53,7 @@ export interface Account {
   lastLoginAt?: number;
   /** Switched off by the owner (Settings → Accounts): signed out, and can't log in. */
   disabled?: boolean;
+  gpu?: AccountGpu;
 }
 
 interface AuthFile {
@@ -229,7 +236,7 @@ export interface AccountInfo {
 
 export function listAccounts(): AccountInfo[] {
   return (read().accounts ?? [])
-    .map((a) => ({ id: a.id, email: a.email, createdAt: a.createdAt, lastLoginAt: a.lastLoginAt ?? null, disabled: !!a.disabled, gpu: "gpu" in a && !!(a as { gpu?: unknown }).gpu }))
+    .map((a) => ({ id: a.id, email: a.email, createdAt: a.createdAt, lastLoginAt: a.lastLoginAt ?? null, disabled: !!a.disabled, gpu: !!a.gpu }))
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -263,6 +270,51 @@ export function accountsCsv(items = listAccounts()): string {
   const iso = (t: number | null) => (t ? new Date(t).toISOString() : null);
   const rows = [["email", "created", "last_login", "gpu_connected", "disabled"], ...items.map((a) => [a.email, iso(a.createdAt), iso(a.lastLoginAt), a.gpu, a.disabled])];
   return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+export const accountById = (id: string): Account | undefined => read().accounts?.find((a) => a.id === id);
+
+/** The account's own ComfyUI, or null when it hasn't connected one. */
+export const accountGpu = (id: string): AccountGpu | null => accountById(id)?.gpu ?? null;
+
+function withoutGpu(a: Account): Account {
+  const copy = { ...a };
+  delete copy.gpu;
+  return copy;
+}
+
+/** Save (or with null, forget) the account's own ComfyUI. The caller checks the address first (src/server/account-gpu.ts). */
+export function setAccountGpu(id: string, gpu: AccountGpu | null): void {
+  const d = read();
+  if (!d.accounts?.some((a) => a.id === id)) throw new AccountError("No such account", 404);
+  write({ ...d, accounts: d.accounts.map((a) => (a.id !== id ? a : gpu ? { ...a, gpu: { url: gpu.url, ...(gpu.token && { token: gpu.token }) } } : withoutGpu(a))) });
+}
+
+/** Who is asking: the owner (also everyone while no password is set), an account (public sign-up on), or a guest. */
+export type RequestViewer = { kind: "owner" } | { kind: "account"; account: Account } | { kind: "guest" };
+
+/** The session cookie a request carries (read from its Cookie header: works outside Next's request scope too). */
+export function sessionCookieOf(request: Request): string | undefined {
+  for (const part of (request.headers.get("cookie") ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq > 0 && part.slice(0, eq).trim() === SESSION_COOKIE) return part.slice(eq + 1).trim();
+  }
+  return undefined;
+}
+
+export function requestViewer(request: Request, cookie = sessionCookieOf(request)): RequestViewer {
+  if (!authEnabled() || validToken(request.headers.get("authorization"))) return { kind: "owner" };
+  const v = sessionViewer(cookie);
+  if (v?.kind === "owner") return v;
+  if (v?.kind === "account" && publicSignup(request.headers.get("host"))) return v;
+  return { kind: "guest" };
+}
+
+/** The account behind this request's session, while public sign-up is on for its address (null: the owner, a guest, or off). */
+export function requestAccount(request: Request, cookie = sessionCookieOf(request)): Account | null {
+  if (validToken(request.headers.get("authorization"))) return null;
+  const v = sessionViewer(cookie);
+  return v?.kind === "account" && publicSignup(request.headers.get("host")) ? v.account : null;
 }
 
 // ---------------------------------------------------------------------------

@@ -110,7 +110,7 @@ export function GetStarted({
             Get started
           </h2>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            {!status || nothingConnected(status)
+            {status && nothingConnected(status)
               ? "Nothing is connected yet, so every run is a free demo with placeholder results. Connect a model to make the real thing:"
               : "Three ways to make things with Fuobe. Connect another one, or check one you set up:"}
           </p>

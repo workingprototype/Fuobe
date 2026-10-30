@@ -4,6 +4,7 @@ import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import { Readable } from "node:stream";
 
 /**
  * Fetch a file from a URL someone handed us (API callers, MCP clients, the Assist LLM) without
@@ -214,5 +215,52 @@ function get(
     req.on("timeout", () => req.destroy(new RemoteFetchError(`Timed out fetching ${url.host}`)));
     req.on("error", (e) => reject(e instanceof RemoteFetchError ? e : new RemoteFetchError(`Could not fetch ${url.toString()}: ${e.message}`)));
     req.end();
+  });
+}
+
+/**
+ * fetch() for a server someone else named (an account's own ComfyUI, public sign-up): any method and
+ * body, the response streamed, but the connection only goes to a public address, checked on the
+ * address the socket actually connects to (so a name re-pointed at this machine after it was saved
+ * still can't reach the install's own ComfyUI or anything else on its network). Redirects aren't
+ * followed. FUOBE_ALLOW_PRIVATE_URLS=1 allows private addresses, as for fetchRemote.
+ */
+export async function fetchPublic(url: string, init: RequestInit = {}, o: Pick<RemoteFetchOptions, "resolve" | "blocked" | "timeoutMs"> = {}): Promise<Response> {
+  const target = new URL(url);
+  if (target.protocol !== "http:" && target.protocol !== "https:") throw new RemoteFetchError(`Only http(s) addresses, not ${target.protocol}`);
+  const blocked = o.blocked ?? ((ip: string) => !allowPrivate() && isPrivateAddress(ip));
+  const resolve = o.resolve ?? (async (host: string) => (await dns.lookup(host, { all: true, verbatim: true })).map((a) => a.address));
+  const host = target.hostname.replace(/^\[|\]$/g, "");
+  if (net.isIP(host) && blocked(host)) throw refuse(target.host);
+  // The body and headers as fetch would send them (FormData gets its boundary).
+  const asked = new Request(target, init);
+  const body = asked.method === "GET" || asked.method === "HEAD" ? undefined : Buffer.from(await asked.arrayBuffer());
+  const headers: Record<string, string> = {};
+  asked.headers.forEach((v, k) => (headers[k] = v));
+  if (body) headers["content-length"] = String(body.length);
+  const lookup: net.LookupFunction = (hostname, options, cb) => {
+    resolve(hostname).then(
+      (addrs) => {
+        if (!addrs.length) return cb(new RemoteFetchError(`Couldn't resolve ${hostname}`), "", 4);
+        if (addrs.some(blocked)) return cb(refuse(hostname), "", 4);
+        if (options.all) return (cb as unknown as (e: null, a: { address: string; family: number }[]) => void)(null, addrs.map((a) => ({ address: a, family: net.isIPv6(a) ? 6 : 4 })));
+        cb(null, addrs[0], net.isIPv6(addrs[0]) ? 6 : 4);
+      },
+      (e: Error) => cb(e, "", 4),
+    );
+  };
+  return new Promise<Response>((resolveRes, reject) => {
+    const req = (target.protocol === "https:" ? https : http).request(target, { method: asked.method, headers, lookup, timeout: o.timeoutMs ?? 60_000 }, (res) => {
+      const status = res.statusCode ?? 0;
+      const out = new Headers();
+      for (const [k, v] of Object.entries(res.headers)) if (v !== undefined) out.set(k, Array.isArray(v) ? v.join(", ") : v);
+      const empty = asked.method === "HEAD" || status === 204 || status === 304;
+      if (empty) res.resume();
+      resolveRes(new Response(empty ? null : (Readable.toWeb(res) as ReadableStream<Uint8Array>), { status, statusText: res.statusMessage, headers: out }));
+    });
+    req.on("timeout", () => req.destroy(new RemoteFetchError(`Timed out reaching ${target.host}`)));
+    req.on("error", (e) => reject(e instanceof RemoteFetchError ? e : new RemoteFetchError(`Couldn't reach ${target.host}: ${e.message}`)));
+    if (init.signal) init.signal.addEventListener("abort", () => req.destroy(new RemoteFetchError("Aborted")), { once: true });
+    req.end(body);
   });
 }

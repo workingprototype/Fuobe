@@ -12,7 +12,9 @@ const auth = await import("@/server/auth");
 const { proxy } = await import("@/proxy");
 afterAll(() => {
   delete process.env.FUOBE_PUBLIC_SIGNUP;
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
 });
 
 const req = (url: string, method = "GET", cookie?: string) =>

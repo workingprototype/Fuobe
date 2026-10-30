@@ -1,4 +1,5 @@
 import "server-only";
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
 import { tracksFor, type MotionPaths } from "@/lib/motion-paths";
@@ -56,6 +57,8 @@ import { decodePng, encodePng } from "../png";
 import { probeAvi } from "../avi-probe";
 import { probeWebm } from "../webm-probe";
 import { adoptFile, readRef, scratchDir } from "../storage";
+import { CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
+import { fetchPublic } from "../remote-fetch";
 import { zipToFile } from "../zip";
 import { ask, checkReach, reachSync, sharedCheck, type Reach } from "./reach";
 import { ProviderError, type ProviderAdapter, type RemoteOutput } from "./types";
@@ -91,7 +94,38 @@ export type ComfyWorker = "main" | "isolated";
 /** Where the isolated worker's address is set, for messages. */
 export const ISOLATED_SETTING = "Settings → Open-source engine · ComfyUI → Isolated worker URL";
 
+// ---------------------------------------------------------------------------
+// An account's own ComfyUI (public sign-up, "Your GPU")
+
+/** Where an account's run goes: its own ComfyUI (a public address), with its own token. */
+export interface OwnGpu {
+  url: string;
+  token?: string;
+}
+
+const ownGpuStore = new AsyncLocalStorage<OwnGpu>();
+
+/**
+ * Run `fn` on an account's own ComfyUI: every ComfyUI call inside (uploads, the prompt, polls, outputs)
+ * goes to `gpu` through fetchPublic, which connects only to public addresses, so it can't reach the
+ * install's own ComfyUI, even when the account's name is re-pointed at this machine. The install's
+ * address and token are never used. Without a socket: progress comes from polling.
+ */
+export function onOwnGpu<T>(gpu: OwnGpu, fn: () => T): T {
+  return ownGpuStore.run({ url: gpu.url.replace(/\/+$/, ""), token: gpu.token }, fn);
+}
+
+/** Inside onOwnGpu: the account's ComfyUI. */
+export const ownGpu = (): OwnGpu | undefined => ownGpuStore.getStore();
+
+/** fetch() for a provider's file: through fetchPublic on an account's own ComfyUI. */
+export function outputFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return ownGpu() ? fetchPublic(url, init, { timeoutMs: 120_000 }) : fetch(url, init);
+}
+
 function baseUrl(worker: ComfyWorker = "main"): string {
+  const own = ownGpu();
+  if (own) return own.url;
   return getSetting(worker === "isolated" ? "comfyIsolatedUrl" : "comfyUrl").replace(/\/+$/, "");
 }
 
@@ -104,6 +138,8 @@ export function workerFor(endpoint: string | undefined): ComfyWorker {
 const sameAddress = (a: string, b: string) => a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
 
 function authHeaders(worker: ComfyWorker = "main"): Record<string, string> {
+  const own = ownGpu();
+  if (own) return own.token ? { Authorization: `Bearer ${own.token}` } : {};
   // Save & test of an address that isn't the saved one: the saved token stays with the server it
   // was saved for. Only a token typed for this test goes to the new address.
   const address = worker === "isolated" ? "comfyIsolatedUrl" : "comfyUrl";
@@ -114,6 +150,15 @@ function authHeaders(worker: ComfyWorker = "main"): Record<string, string> {
 
 async function comfyFetch(p: string, init: RequestInit = {}, worker: ComfyWorker = "main"): Promise<Response> {
   const base = baseUrl(worker);
+  if (ownGpu()) {
+    // A visitor without a GPU of its own (a price check): nothing to reach, and never the install's.
+    if (!base) throw new ProviderError(CONNECT_GPU_MESSAGE);
+    try {
+      return await fetchPublic(`${base}${p}`, { ...init, headers: { ...authHeaders(worker), ...(init.headers ?? {}) } }, { timeoutMs: 120_000 });
+    } catch (e) {
+      throw new ProviderError(`Can't reach your ComfyUI at ${base} (${(e as Error).message}). Is it running, and is its tunnel up?`);
+    }
+  }
   if (worker === "isolated" && !base) {
     throw new ProviderError(`This model runs on the isolated ComfyUI worker, which isn't set up yet: add its address in ${ISOLATED_SETTING} (or COMFYUI_ISOLATED_URL). scripts/comfy/README.md shows how to start one, usually on port 8189`);
   }
@@ -180,6 +225,8 @@ function setSocket(worker: ComfyWorker, s: ComfySocket | undefined) {
 }
 
 function ensureSocket(worker: ComfyWorker = "main"): { clientId: string; progress: Map<string, Progress> } {
+  // An account's own ComfyUI: no socket (the install's stays as it is); its progress comes from polling.
+  if (ownGpu()) return { clientId: "fuobe-account", progress: new Map() };
   const url = baseUrl(worker);
   const cur = socketOf(worker);
   if (cur && cur.url === url && cur.ws.readyState <= 1) return cur;
@@ -375,7 +422,7 @@ async function withLayerBoxes(outputs: ComfyOutput[]): Promise<ComfyOutput[]> {
     outputs.map(async (o) => {
       if (o.kind !== "image" || typeof o.meta?.z !== "number" || o.url.startsWith("data:")) return o;
       try {
-        const res = await fetch(o.url, { headers: o.headers });
+        const res = await outputFetch(o.url, { headers: o.headers });
         if (!res.ok) return o;
         const data = Buffer.from(await res.arrayBuffer());
         const png = decodePng(data);
@@ -402,7 +449,7 @@ async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promi
   const dest = path.join(scratchDir(), `${generationId || nanoid(8)}-${nanoid(6)}.zip`);
   async function* files() {
     for (const [i, f] of frames.entries()) {
-      const res = await fetch(f.url, { headers: f.headers });
+      const res = await outputFetch(f.url, { headers: f.headers });
       if (!res.ok) throw new ProviderError(`ComfyUI answered HTTP ${res.status} for EXR frame ${i + 1}`);
       yield { name: `frame_${String(i + 1).padStart(5, "0")}.exr`, data: Buffer.from(await res.arrayBuffer()) };
     }
@@ -443,6 +490,8 @@ async function checkComfy(url: string): Promise<boolean> {
 
 /** Is the ComfyUI server reachable? Cached for 10 s (`force` checks now); one check runs at a time. */
 export async function probeComfy(force = false): Promise<boolean> {
+  // An account's own ComfyUI is taken as there: its run says so when it isn't (the install's state stays its own).
+  if (ownGpu()) return true;
   const url = baseUrl();
   const cur = globalThis.__fuobeComfyReach;
   if (!force && cur && cur.url === url && Date.now() - cur.at < 10_000) return cur.ok;
@@ -451,6 +500,7 @@ export async function probeComfy(force = false): Promise<boolean> {
 
 /** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
 export function comfyRam(): number | undefined {
+  if (ownGpu()) return undefined;
   const cur = globalThis.__fuobeComfyReach;
   return cur?.ok && cur.url === baseUrl() ? cur.ram : undefined;
 }
@@ -461,6 +511,7 @@ export function comfyRam(): number | undefined {
  * the background to say for sure.
  */
 export function probeComfySync(timeoutMs = 1500): boolean {
+  if (ownGpu()) return true;
   const url = baseUrl();
   const { reach, sure } = reachSync(url, `${url}/system_stats`, timeoutMs, authHeaders());
   globalThis.__fuobeComfyReach = reach;
@@ -1338,6 +1389,7 @@ export const comfyProvider: ProviderAdapter = {
   id: "comfyui",
   label: "ComfyUI",
   isConfigured: () => {
+    if (ownGpu()) return true;
     const cur = globalThis.__fuobeComfyReach;
     // First check for this server: wait for the answer, so a request right after start isn't sent to demo.
     if (!cur || cur.url !== baseUrl()) return probeComfySync();

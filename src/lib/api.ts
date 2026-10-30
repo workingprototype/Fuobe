@@ -827,6 +827,11 @@ export interface StatusInfo {
   onboarded?: boolean;
   /** Settings → Models & licences: what is switched off (absent while everything is on). */
   access?: AccessSummary;
+  /**
+   * Public sign-up: a guest or an account is looking. Then everything else here is its own view
+   * (its own GPU as ComfyUI, the open engine, no Demo mode), never the install's (src/server/account-gpu.ts).
+   */
+  viewer?: { kind: "guest" | "account"; gpu: { connected: boolean; online?: boolean; device?: string; vramBytes?: number } };
 }
 
 /** A connection test's answer (POST /api/providers/test). */

@@ -3,6 +3,7 @@
 import { Cpu, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { YourGpu } from "@/components/gpu/your-gpu";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CONNECT_GPU_EVENT, GUEST_PROMPT_EVENT, signInHref, watchGuestRefusals } from "@/lib/api";
@@ -30,7 +31,7 @@ export function GuestPrompt() {
   }, []);
   return (
     <Dialog open={prompt !== null} onOpenChange={(o) => !o && setPrompt(null)}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className={prompt?.kind === "gpu" ? "max-h-[90svh] overflow-y-auto sm:max-w-xl" : "sm:max-w-sm"}>
         {prompt?.kind === "gpu" ? (
           <>
             <DialogHeader>
@@ -39,17 +40,14 @@ export function GuestPrompt() {
               </div>
               <DialogTitle>Connect your GPU to run this</DialogTitle>
               <DialogDescription>
-                Free accounts run on their own ComfyUI, never on this studio&apos;s keys or GPU. Your ComfyUI must be reachable from the internet, for example through a Cloudflare
-                Tunnel or ngrok. Or run Fuobe on your own computer: it&apos;s open source.
+                Or run Fuobe on your own computer: it&apos;s{" "}
+                <a href="https://github.com/workingprototype/fuobe" target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                  open source
+                </a>
+                .
               </DialogDescription>
             </DialogHeader>
-            <DialogFooter className="gap-2 sm:justify-start">
-              <Button asChild variant="secondary">
-                <a href="https://github.com/workingprototype/fuobe" target="_blank" rel="noreferrer">
-                  Get Fuobe
-                </a>
-              </Button>
-            </DialogFooter>
+            <YourGpu />
           </>
         ) : (
           <>

@@ -1,7 +1,8 @@
 import { AudioToolBody, AudioToolError, previewAudioTool, runAudioTool } from "@/server/audio-tools";
+import { priceAs } from "@/server/visitor";
 
 /** Audio → Loop / extend and Join: start a run; `?preview=1` only plans and prices it. */
-export async function POST(request: Request) {
+async function post(request: Request) {
   const parsed = AudioToolBody.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     const path = parsed.error.issues[0]?.path.join(".") ?? "";
@@ -24,4 +25,9 @@ export async function POST(request: Request) {
     console.error("[audio-tools]", e);
     return Response.json({ error: (e as Error).message || "Something went wrong" }, { status: 500 });
   }
+}
+
+/** A visitor (public sign-up) gets the price of its run on its own GPU, never a demo (src/server/visitor.ts). */
+export async function POST(request: Request) {
+  return priceAs(request, () => post(request));
 }

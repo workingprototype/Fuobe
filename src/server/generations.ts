@@ -49,7 +49,9 @@ import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
-import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { comfyLoraFiles, onOwnGpu, outputFetch, probeComfy } from "./providers/comfyui";
+import { accountGpu } from "./auth";
+import { CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
 import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
 import { ACCESS_PLACE } from "@/lib/model-access";
@@ -59,7 +61,7 @@ import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
 import { modelToFinish, startModelFinish, startTurntable, stopModelFinish, type OutputStore } from "./model3d-finish";
 import { convertMask, decodePng, encodePng } from "./png";
-import { engineMode, getSetting } from "./settings";
+import { engineMode, getSetting, withCandidates } from "./settings";
 import { fetchRemoteToFile } from "./remote-fetch";
 import { adoptFile, contentTypeFor, deleteAsset, localHead, readRef, saveFile, scratchDir } from "./storage";
 
@@ -215,6 +217,11 @@ export interface ListOptions {
    */
   before?: number;
   beforeId?: string;
+  /**
+   * Public sign-up: only this account's runs. Without it, only the owner's (an account's runs are its
+   * own: they stay out of the owner's lists).
+   */
+  account?: string;
   /** Date range on createdAt: since ≤ t < until. */
   since?: number;
   until?: number;
@@ -231,6 +238,8 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
     args.push(...values);
   };
   const oneOf = (col: string, values: unknown[]) => add(`${col} IN (${values.map(() => "?").join(", ")})`, ...values);
+  if (o.account) add("json_extract(g.request_json, '$.account') = ?", o.account);
+  else add("json_extract(g.request_json, '$.account') IS NULL");
   if (o.batchId) add("g.batch_id = ?", o.batchId);
   if (o.feature) add("g.feature = ?", o.feature);
   if (o.features?.length) add(`(${o.features.map(() => "g.feature LIKE ?").join(" OR ")})`, ...o.features.map(featureLike));
@@ -1102,7 +1111,10 @@ async function advanceDependents(): Promise<void> {
       // Filled with the slots that have an input; stored with its whole chain (and what was skipped) for a retry.
       const filled = withChainInputs({ ...request, chain: slots }, values as string[]);
       const original: GenerationRequest = { ...filled, chain: request.chain, chainFilled: true };
-      const prepared = prepare(original);
+      // An account's step is planned as its run was: on its own ComfyUI.
+      const own = original.account ? accountRun(original.account, "comfyui") : undefined;
+      if (own && "error" in own) throw new Error(own.error);
+      const prepared = own ? own.run(() => prepare(original)) : prepare(original);
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[], original);
       if (mode.error) throw new Error(mode.error);
       const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
@@ -1136,7 +1148,50 @@ function recordSubmission(id: string, at: number): void {
     .run(id, at);
 }
 
-async function submit(
+// ---------------------------------------------------------------------------
+// Public sign-up: an account's runs go to its own ComfyUI ("Your GPU"), never the install's providers
+
+export const OWN_GPU_ONLY = "Free accounts run only on their own ComfyUI: pick an open-source model.";
+
+/**
+ * How an account's job reaches a provider: inside onOwnGpu (its own ComfyUI, the open engine, no demo
+ * outputs), or not at all: no GPU connected, or a provider other than ComfyUI (the install's cloud
+ * keys, its local LLM). An unreachable GPU fails the job; it never falls back to the install's.
+ */
+export function accountRun(accountId: string, providerId: string): { run: <T>(fn: () => T) => T } | { error: string } {
+  const gpu = accountGpu(accountId);
+  if (!gpu) return { error: CONNECT_GPU_MESSAGE };
+  if (providerId !== "comfyui") return { error: OWN_GPU_ONLY };
+  return { run: (fn) => onOwnGpu(gpu, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn)) };
+}
+
+/**
+ * Plan (and price) as a visitor's run would go: on its own ComfyUI (none yet: an empty address that
+ * reaches nothing), the open engine, no demo outputs. For previews; a run goes through accountRun.
+ */
+export function asVisitor<T>(gpu: { url: string; token?: string } | null, fn: () => T): T {
+  return onOwnGpu(gpu ?? { url: "" }, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn));
+}
+
+const accountOf = (r: Pick<Row, "request_json">): string | undefined => {
+  try {
+    return (JSON.parse(r.request_json) as GenerationRequest).account;
+  } catch {
+    return undefined;
+  }
+};
+
+function submit(id: string, route: ModelRoute, providerId: ProviderId, plan: ReturnType<typeof planGeneration>, req: GenerationRequest, index: number): Promise<void> {
+  if (!req.account) return submitNow(id, route, providerId, plan, req, index);
+  const own = accountRun(req.account, providerId);
+  if ("error" in own) {
+    update(id, { status: "failed", error: own.error, completed_at: Date.now(), message: null });
+    return Promise.resolve();
+  }
+  return own.run(() => submitNow(id, route, providerId, plan, req, index));
+}
+
+async function submitNow(
   id: string,
   route: ModelRoute,
   providerId: ProviderId,
@@ -1241,7 +1296,8 @@ async function submit(
     // file mirrored once to the provider's storage (the civitai key never leaves this server).
     if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
       input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
-    } else if (providerId === "comfyui" && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
+    } else if (providerId === "comfyui" && !req.account && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
+      // (Not for an account's own ComfyUI: the download writes to the install's LoRA folder.)
       // A graph that loads its own LoRAs (Genjutsu's Character swap: the Turbo and swap LoRAs) gets them downloaded too.
       await ensureLorasOnComfy([...(input.loras ?? []), ...graphLoras(route.endpoint, input.extra)], await comfyLoraFiles(route), (message) => update(id, { message }));
     }
@@ -1351,7 +1407,11 @@ async function pollGuarded(r: Row): Promise<void> {
   if (polling.has(r.id)) return;
   polling.add(r.id);
   try {
-    await pollOne(r);
+    const account = accountOf(r);
+    const own = account ? accountRun(account, r.provider) : undefined;
+    if (own && "error" in own) update(r.id, { status: "failed", error: own.error, completed_at: Date.now(), message: null });
+    else if (own) await own.run(() => pollOne(r));
+    else await pollOne(r);
   } catch (e) {
     update(r.id, { message: `Poll error: ${(e as Error).message}` });
   } finally {
@@ -1684,7 +1744,7 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     data = f.data;
     contentType ??= f.contentType;
   } else {
-    const res = await fetch(o.url, { headers: o.headers });
+    const res = await outputFetch(o.url, { headers: o.headers });
     if (!res.ok) throw new Error(`download ${res.status}`);
     data = Buffer.from(await res.arrayBuffer());
     const header = res.headers.get("content-type")?.split(";")[0];
@@ -1717,9 +1777,11 @@ export async function cancelGeneration(id: string): Promise<void> {
   const model = getModel(r.model_id);
   // Without an external id the job is still being handed over: submit() cancels it as soon as it lands.
   if (r.external_id && model) {
-    await provider(r.provider)
-      .cancel?.(pollContext(r, model))
-      .catch(() => {});
+    const account = accountOf(r);
+    const own = account ? accountRun(account, r.provider) : undefined;
+    const cancel = () => Promise.resolve(provider(r.provider).cancel?.(pollContext(r, model))).catch(() => {});
+    if (!own) await cancel();
+    else if ("run" in own) await own.run(cancel);
   }
   stopModelFinish(id);
   update(id, { status: "canceled", completed_at: Date.now(), message: null });

@@ -12,7 +12,12 @@ delete process.env.FUOBE_ALLOWED_ORIGINS;
 const auth = await import("@/server/auth");
 const { proxy } = await import("@/proxy");
 const access = await import("@/lib/guest-access");
-afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+afterAll(() => {
+  // The database stays open until the worker exits (Windows won't delete it before).
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
+});
 
 const passed = (r: Response) => r.headers.get("x-middleware-next") === "1";
 const toLogin = (r: Response) => r.status === 307 && new URL(r.headers.get("location") ?? "", "http://x").pathname === "/login";
@@ -243,7 +248,8 @@ describe("accounts never run on the owner's keys or GPU", () => {
 describe("accounts never see or change the owner's library", () => {
   const families: Record<string, { lists: string[]; records: string[]; changes: [string, string][] }> = {
     generations: {
-      lists: ["/api/generations", "/api/generations/trash", "/api/generations/facets"],
+      // (/api/generations itself goes to the route, which lists only the account's own runs: tests/account-gpu.test.ts.)
+      lists: ["/api/generations/trash", "/api/generations/facets"],
       records: ["/api/generations/g1", "/api/generations/zip?ids=g1"],
       changes: [["PATCH", "/api/generations/g1"], ["DELETE", "/api/generations/g1"], ["POST", "/api/generations/bulk"], ["DELETE", "/api/generations/trash"], ["POST", "/api/generations/g1/cancel"]],
     },
@@ -302,5 +308,30 @@ describe("accounts never see or change the owner's library", () => {
     expect(access.isPriceCheck("POST", "/api/canvases/c1/run", "?preview=1")).toBe(false);
     expect(access.isPriceCheck("POST", "/api/shorts/sessions/s1/segments/estimate", "")).toBe(false);
     expect(access.isPriceCheck("GET", "/api/shorts/estimate", "")).toBe(false);
+  });
+});
+
+describe("accounts with their own GPU", () => {
+  it("run the studios' generations once connected; other tools still say so", async () => {
+    process.env.FUOBE_PUBLIC_SIGNUP = "1";
+    const a = auth.createAccount("own-gpu@example.com", "long enough");
+    const cookie = auth.createSession(a.id).value;
+    expect(passed(proxy(req("/api/account/gpu", { method: "PUT", cookie })))).toBe(true);
+    expect(passed(proxy(req("/api/account/gpu", { method: "DELETE", cookie })))).toBe(true);
+    expect(proxy(req("/api/generations", { method: "POST", cookie })).headers.get(access.CONNECT_GPU_HEADER)).toBe("1");
+    auth.setAccountGpu(a.id, { url: "https://gpu.example" });
+    expect(passed(proxy(req("/api/generations", { method: "POST", cookie })))).toBe(true);
+    const tool = proxy(req("/api/canvases/c1/run", { method: "POST", cookie }));
+    expect(tool.status).toBe(403);
+    expect(tool.headers.get(access.CONNECT_GPU_HEADER)).toBeNull();
+    expect((await tool.json()).code).toBe("own-gpu-tool");
+    // Still never settings, keys or tokens.
+    expect(proxy(req("/api/settings", { method: "PUT", cookie })).status).toBe(403);
+  });
+
+  it("keeps a guest out of Your GPU", () => {
+    process.env.FUOBE_PUBLIC_SIGNUP = "1";
+    expect(proxy(req("/api/account/gpu", { method: "PUT" })).status).toBe(401);
+    expect(proxy(req("/api/account/gpu")).status).toBe(401);
   });
 });

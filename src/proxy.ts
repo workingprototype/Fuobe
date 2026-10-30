@@ -4,7 +4,9 @@ import { recordForPath, unknownHubMode } from "@/lib/record-pages";
 import { countsAsView, SHARE_VIEW_HEADER, shareRoute } from "@/lib/share";
 import {
   ACCOUNT_LIBRARY_MESSAGE,
+  accountGeneration,
   accountMayChange,
+  accountOwnRead,
   CONNECT_GPU_HEADER,
   CONNECT_GPU_MESSAGE,
   GUEST_HEADER,
@@ -14,9 +16,12 @@ import {
   isLibraryChange,
   isPriceCheck,
   LIBRARY_MESSAGE,
+  OWN_GPU_TOOL_MESSAGE,
   ownerOnly,
+  ownGpuRun,
 } from "@/lib/guest-access";
-import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, SESSION_COOKIE, sessionViewer, validSession, validToken, type Viewer } from "@/server/auth";
+import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, SESSION_COOKIE, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
+import { fileAccount, generationAccount } from "@/server/account-library";
 import { recordExists } from "@/server/records";
 import { findShare, shareGuard, shareTargetExists } from "@/server/share-access";
 
@@ -92,19 +97,30 @@ function readAsGuest(request: NextRequest, isAccount: boolean): NextResponse {
 
 /**
  * An account sees the owner's studio as a guest does: every page, the catalog, and none of the
- * owner's library or projects (hidden, and every change to them refused). Install-wide settings,
- * keys and tokens are the owner's, and anything that would reach a model is refused ("Connect your
- * GPU"): an account never runs on the owner's cloud keys or GPU.
+ * owner's library or projects (hidden, and every change to them refused). Its own runs are its own
+ * (accountGeneration, accountOwnRead: only what it made). Install-wide settings, keys and tokens are
+ * the owner's, and it never runs on the owner's cloud keys or GPU: with its own ComfyUI connected
+ * ("Your GPU") the studios' generations run there, and anything else that would reach a model is
+ * refused ("Connect your GPU" until it has one).
  */
-function account(request: NextRequest): NextResponse {
+const notYours = () => NextResponse.json({ error: ACCOUNT_LIBRARY_MESSAGE }, { status: 403, headers: { "Cache-Control": "no-store" } });
+
+function account(request: NextRequest, who: Account): NextResponse {
   const { pathname, search } = request.nextUrl;
   if (ownerOnly(request.method, pathname)) {
     return NextResponse.json({ error: "Only the studio's owner can change settings, keys and tokens." }, { status: 403 });
   }
-  if (request.method === "GET" || request.method === "HEAD") return readAsGuest(request, true);
+  // Its own runs and their files: only what it made.
+  const gen = accountGeneration(request.method, pathname);
+  if (gen !== undefined) return generationAccount(gen) === who.id ? pass(request) : notYours();
+  const file = request.method === "GET" || request.method === "HEAD" ? /^\/api\/files\/(.+)$/.exec(pathname)?.[1] : undefined;
+  if (file !== undefined) return fileAccount(safeDecode(file)) === who.id ? pass(request) : notYours();
+  if (request.method === "GET" || request.method === "HEAD") return accountOwnRead(pathname) ? pass(request) : readAsGuest(request, true);
   if (accountMayChange(request.method, pathname, search)) return pass(request);
   if (isLibraryChange(request.method, pathname)) return NextResponse.json({ error: LIBRARY_MESSAGE, code: "library" }, { status: 403 });
-  return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
+  if (!who.gpu) return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
+  if (ownGpuRun(request.method, pathname)) return pass(request);
+  return NextResponse.json({ error: OWN_GPU_TOOL_MESSAGE, code: "own-gpu-tool" }, { status: 403 });
 }
 
 const tooMany = (seconds: number) =>
@@ -178,7 +194,7 @@ export function proxy(request: NextRequest) {
   const open = publicSignup(request.headers.get("host") ?? request.nextUrl.host);
   const viewer = viewerOf(request, open);
   if (viewer?.kind === "owner") return pass(request);
-  if (viewer?.kind === "account") return account(request);
+  if (viewer?.kind === "account") return account(request, viewer.account);
   if (open) return guest(request);
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Sign in, or send an API token as Authorization: Bearer fuobe_…" }, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="fuobe"' } });
