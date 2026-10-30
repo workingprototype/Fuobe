@@ -931,6 +931,11 @@ export interface GenerationRequest {
    * it was before the signature routed it (Reuse restores that). See src/lib/catalog/palettes.ts.
    */
   signature?: SignatureRecord;
+  /**
+   * Server-set: when someone confirmed Soul ID's consent line for the real person this run shows (Turnaround video's
+   * steps, src/server/turnaround.ts; a character trained with it carries its training's time). Stripped from API input.
+   */
+  consentAt?: number;
 }
 
 export interface ChainSlot {

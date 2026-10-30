@@ -20,6 +20,8 @@ const { saveFile } = await import("@/server/storage");
 const { encodePng } = await import("@/server/png");
 const { NEEDS_CONSENT } = await import("@/server/turnaround");
 const { ORBIT_PROMPT } = await import("@/lib/catalog/turnaround");
+const { db } = await import("@/server/db");
+const { routeResult } = (await import("../scripts/eval/lib/run.mjs")) as { routeResult: (answer: unknown, how?: string) => { id: string; op?: string }[] };
 
 beforeAll(() => {
   setSetting("demoMode", "auto");
@@ -58,8 +60,12 @@ describe("/api/turnaround", () => {
     const back = upload("back2.png");
     const res = await post({ engine: "open", views: { front, back }, name: "Ada", requestId: "turn-open-1" });
     expect(res.status).toBe(201);
-    const { items, filmId, batchId } = await res.json();
+    const answer = await res.json();
+    const { items, filmId, batchId } = answer;
     expect(items[0].id).toBe(filmId);
+    // The answer names the film as `final`, so the evaluation harness measures it (not the last clip made).
+    expect(answer.final.id).toBe(filmId);
+    expect(routeResult(answer).map((g: { id: string }) => g.id)).toEqual([filmId]);
     expect(items[0]).toMatchObject({ modelId: "oss-join-clips", op: "concat", feature: "turnaround", prompt: "Turnaround · Ada" });
     const steps = items.slice(1);
     expect(steps.filter((g: { feature: string }) => g.feature === "turnaround-step").map((g: { request: { step: { label: string } } }) => g.request.step.label)).toEqual(["Right side (Angles)", "Left side (Angles)"]);
@@ -80,8 +86,10 @@ describe("/api/turnaround", () => {
     expect(preview.gpuGb).toBeUndefined();
     const res = await post({ engine: "cloud", views: pics, route: "keyframes" });
     expect(res.status).toBe(201);
-    const { filmId, items } = await res.json();
+    const answer = await res.json();
+    const { filmId, items } = answer;
     expect(items[0]).toMatchObject({ modelId: "flux-3-max", op: "keyframes", feature: "turnaround" });
+    expect(routeResult(answer)[0].id).toBe(filmId);
     expect((await settle(filmId)).status).toBe("succeeded");
   }, 60_000);
 
@@ -100,6 +108,52 @@ describe("/api/turnaround", () => {
     const { items, filmId } = await res.json();
     expect(items[0]).toMatchObject({ modelId: "minimax-h3-max-camera", op: "camera-path", feature: `element:${el.id}` });
     await settle(filmId);
+  }, 60_000);
+
+  it("names the film, not a drawn side, when the cloud's references wait for the Angles app", async () => {
+    const res = await post({ engine: "cloud", views: { front: upload("rf.png"), back: upload("rb.png") }, fill: true, requestId: "turn-refs-fill" });
+    expect(res.status).toBe(201);
+    const answer = await res.json();
+    expect(answer.items.map((g: { op: string }) => g.op)).toEqual(["ref2v", "edit", "edit"]);
+    expect(routeResult(answer)).toEqual([expect.objectContaining({ id: answer.filmId, op: "ref2v" })]);
+    // It ends on the front, as it starts.
+    expect(answer.final.request.inputs.endImage).toBe(answer.final.request.inputs.images[0]);
+    await settle(answer.filmId);
+  }, 60_000);
+
+  it("asks a character's consent on the server whatever the client says, records it, and takes it from its Soul ID training", async () => {
+    const { createElement } = await import("@/server/elements");
+    const front = upload("char.png");
+    const el = createElement({ name: "Bea", kind: "character", references: [front] });
+    // Left out, or the switch turned off: still asked.
+    for (const body of [{}, { realPerson: false }]) {
+      const preview = await (await post({ engine: "cloud", views: { front }, elementId: el.id, ...body }, true)).json();
+      expect(preview).toMatchObject({ blocker: NEEDS_CONSENT, consent: "asked" });
+      const refused = await post({ engine: "cloud", views: { front }, elementId: el.id, ...body });
+      expect(refused.status).toBe(422);
+    }
+    // Confirmed: every step records when.
+    const before = Date.now();
+    const ok = await post({ engine: "cloud", views: { front }, elementId: el.id, consent: true });
+    expect(ok.status).toBe(201);
+    const { items } = await ok.json();
+    expect(items.every((g: { request: { consentAt?: number } }) => (g.request.consentAt ?? 0) >= before)).toBe(true);
+    // A character trained for Soul ID with the consent line confirmed has it on file.
+    const trained = createElement({ name: "Cy", kind: "character", references: [front] });
+    const at = 1_790_000_000_000;
+    db()
+      .prepare(
+        "INSERT INTO trainings (id, element_id, target, provider, status, progress, message, external_id, meta_json, trigger_word, error, cost_usd, created_at, updated_at, completed_at) VALUES (?, ?, 'demo', 'demo', 'succeeded', NULL, NULL, 'demo', ?, 'cy', NULL, NULL, ?, ?, ?)",
+      )
+      .run("tr-cy", trained.id, JSON.stringify({ consentAt: at }), at, at, at);
+    const onFile = await (await post({ engine: "cloud", views: { front }, elementId: trained.id }, true)).json();
+    expect(onFile.blocker).toBeUndefined();
+    expect(onFile.consent).toBe("on-file");
+    const run = await (await post({ engine: "cloud", views: { front }, elementId: trained.id })).json();
+    expect(run.final.request.consentAt).toBe(at);
+    // A Character Sheet with no character: the client's own switch (made-up people need no consent line).
+    expect((await (await post({ engine: "cloud", views: { front } }, true)).json()).consent).toBeUndefined();
+    await settle(run.filmId);
   }, 60_000);
 
   it("prices a job named by its model at /api/turnaround/estimate, as the evaluation harness does", async () => {

@@ -5,9 +5,12 @@ import { getModel } from "@/lib/catalog";
 import { routesFor } from "@/lib/catalog/plan";
 import { planTurnaround, routeOfModel, type TurnaroundContext, type TurnaroundInput, type TurnaroundPlan, type TurnaroundPreview, type TurnStep } from "@/lib/catalog/turnaround";
 import type { Generation } from "@/lib/catalog/types";
+import { needsConsent } from "@/lib/catalog/training";
+import { getElement } from "./elements";
 import { cancelGeneration, createGenerations, previewChained, previewGeneration } from "./generations";
 import { isOffered } from "./model-access";
 import { loadManifest } from "./providers/comfyui";
+import { consentOnFile } from "./training";
 
 /**
  * Turnaround video (build plan N7-6): the plan from src/lib/catalog/turnaround.ts, checked step by step on this install
@@ -44,10 +47,23 @@ export const TurnaroundBodySchema = TurnaroundSchema.extend({
   requestId: z.string().max(80).optional(),
 });
 
-/** A request body as the server runs it: a character's run filed in its feed, a named model's route. */
+/**
+ * A request body as the server runs it: a character's run filed in its feed, a named model's route. A character is a
+ * person whatever the client says (Soul ID's rule, needsConsent): its run needs the consent line, unless the character
+ * was trained with it confirmed (the training's consentAt).
+ */
 export function turnaroundRun({ elementId, modelId, ...input }: Omit<z.infer<typeof TurnaroundBodySchema>, "requestId">): TurnaroundRequest {
   const route = input.route ?? routeOfModel(input.engine, modelId);
-  return { ...input, ...(route && { route }), ...(elementId && { feature: `element:${elementId}` }) };
+  const el = elementId ? getElement(elementId) : null;
+  const person = !!el && needsConsent(el.kind);
+  const onFile = person ? consentOnFile(el.id) : undefined;
+  return {
+    ...input,
+    ...(route && { route }),
+    ...(elementId && { feature: `element:${elementId}` }),
+    ...(person && { realPerson: true }),
+    ...(onFile !== undefined && { consentOnFile: onFile }),
+  };
 }
 
 export class TurnaroundError extends Error {
@@ -63,6 +79,8 @@ export interface TurnaroundRequest extends TurnaroundInput {
   /** The pictures show a real person (not one Fuobe made): Soul ID's consent line must be confirmed. */
   realPerson?: boolean;
   consent?: boolean;
+  /** Server-set (never from the body): when the character's consent was confirmed for its Soul ID training. */
+  consentOnFile?: number;
 }
 
 /** What this install offers (Settings → Models & licences). */
@@ -121,7 +139,7 @@ export function previewTurnaround(input: TurnaroundRequest): TurnaroundPreview {
       blocker = (e as Error).message;
     }
   }
-  if (!blocker && input.realPerson && !input.consent) blocker = NEEDS_CONSENT;
+  if (!blocker && input.realPerson && !input.consent && input.consentOnFile === undefined) blocker = NEEDS_CONSENT;
   return {
     route: plan.route,
     routes: plan.routes,
@@ -135,6 +153,7 @@ export function previewTurnaround(input: TurnaroundRequest): TurnaroundPreview {
     steps: plan.steps.length,
     notes: [...plan.notes, ...check.notes.filter((n) => !plan.notes.includes(n))],
     ...(blocker && { blocker }),
+    ...(input.realPerson && { consent: input.consentOnFile !== undefined ? ("on-file" as const) : ("asked" as const) }),
     costUsd: check.demo ? 0 : check.costUsd,
     demo: check.demo,
     ...(gpuGb(plan) !== undefined && { gpuGb: gpuGb(plan) }),
@@ -164,19 +183,28 @@ export function runTurnaroundSteps(steps: TurnStep[], batchId = nanoid(10)): Gen
 }
 
 export interface TurnaroundResult {
+  /** The finished turnaround's generation (the film, or the one clip): what the studio routes' `final` names, so the
+   * evaluation harness measures the film, not the last step made. */
+  final: Generation;
   items: Generation[];
-  /** The finished turnaround's generation (the film, or the one clip). */
   filmId: string;
   batchId: string;
   plan: TurnaroundPreview;
 }
 
-/** Plan, check every step, then run them; a real person's pictures need the consent line. */
+/**
+ * Plan, check every step, then run them. A real person's pictures need the consent line: every step's request records
+ * when it was confirmed (GenerationRequest.consentAt; the training's time for a character trained with it).
+ */
 export function createTurnaround(input: TurnaroundRequest): TurnaroundResult {
   const preview = previewTurnaround(input);
   if (preview.blocker) throw new TurnaroundError(preview.blocker);
   const plan = planTurnaround(input, turnaroundContext());
+  if (input.realPerson) {
+    const consentAt = input.consent ? Date.now() : input.consentOnFile;
+    for (const s of plan.steps) s.request.consentAt = consentAt;
+  }
   const batchId = nanoid(10);
   const items = runTurnaroundSteps(plan.steps, batchId);
-  return { items, filmId: items[0].id, batchId, plan: preview };
+  return { final: items[0], items, filmId: items[0].id, batchId, plan: preview };
 }
