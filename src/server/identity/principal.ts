@@ -2,6 +2,7 @@ import "server-only";
 import { hostAllowed } from "../auth";
 import { db } from "../db";
 import { installMode, signInOn } from "../mode";
+import { LOCAL_OWNER } from "../access/actor";
 import { ensurePendingPerson, getAuth, sessionCookieName } from "./auth";
 import { tokenFromHeader } from "./tokens";
 
@@ -15,8 +16,8 @@ import { tokenFromHeader } from "./tokens";
  * 3. Just me (Personal, sign-in off, a local address) → the owner, via `local`.
  * 4. Otherwise nobody.
  *
- * The proxy uses it optimistically; route handlers that need a person ask again (acc-2 puts an actor on every
- * route).
+ * The proxy uses it optimistically; every route handler asks again through handler() (src/server/access/route.ts),
+ * which also holds the restricted session kinds' registry and the actor-substitution seam.
  */
 
 export type ActorVia = "session" | "token" | "local" | "system" | "runner" | "scim";
@@ -42,11 +43,8 @@ export interface Principal {
   needsRefresh?: boolean;
 }
 
-/**
- * Restricted session kinds and the routes each may reach (packages add theirs: two-step enrolment, view-as…). A
- * restricted actor outside its routes is treated as signed out.
- */
-export const RESTRICTED_KINDS = new Map<string, (pathname: string) => boolean>();
+/** The header Better Auth and the audit log read the client's address from; only the proxy writes it. */
+export const CLIENT_IP_HEADER = "x-fuobe-client-ip";
 
 interface PersonRow {
   id: string;
@@ -76,8 +74,6 @@ export function hasSessionCookie(request: Request): boolean {
   return (request.headers.get("cookie") ?? "").split(";").some((c) => c.trim().startsWith(`${name}=`));
 }
 
-const LOCAL: Actor = { userId: "u_owner", role: "owner", via: "local", scopes: ["full"] };
-
 async function resolve(request: Request): Promise<Principal> {
   const local = justMe(request);
   const bearer = tokenFromHeader(request.headers.get("authorization"));
@@ -104,7 +100,7 @@ async function resolve(request: Request): Promise<Principal> {
       };
     }
   }
-  if (local) return { actor: LOCAL };
+  if (local) return { actor: LOCAL_OWNER };
   return { actor: null };
 }
 
@@ -117,15 +113,6 @@ export function resolvePrincipal(request: Request): Promise<Principal> {
     memo.set(request, p);
   }
   return p;
-}
-
-/** Act as someone else for this request (view-as, §9.5 E5b). The real actor is kept as the impersonator. */
-export function substituteActor(actor: Actor, request: Request): void {
-  const real = memo.get(request);
-  memo.set(
-    request,
-    (real ?? Promise.resolve({ actor: null } as Principal)).then((r) => ({ actor: { ...actor, impersonatorId: r.actor?.userId ?? actor.impersonatorId } })),
-  );
 }
 
 /**

@@ -3,7 +3,7 @@ import { APPS } from "@/lib/catalog/apps";
 import { recordForPath, unknownHubMode } from "@/lib/record-pages";
 import { countsAsView, SHARE_VIEW_HEADER, shareRoute } from "@/lib/share";
 import { clientIp, crossSite, hostAllowed, LoginGuard } from "@/server/auth";
-import { refreshSession, resolvePrincipal } from "@/server/identity/principal";
+import { CLIENT_IP_HEADER, refreshSession, resolvePrincipal } from "@/server/identity/principal";
 import { refusal } from "@/server/identity/refusals";
 import { signInRequired } from "@/server/mode";
 import { recordExists } from "@/server/records";
@@ -37,7 +37,7 @@ const crossSiteExempt = (pathname: string) => CROSS_SITE_EXEMPT.some((r) => rule
 const noStore = (pathname: string) => NO_STORE.some((r) => ruleMatches(r, pathname));
 
 /** The header Better Auth reads the client's address from; only this proxy may write it. */
-export const CLIENT_IP_HEADER = "x-fuobe-client-ip";
+export { CLIENT_IP_HEADER };
 
 /**
  * The request headers handed on: any x-fuobe-client-ip a client sent is dropped, and one is written only when a
