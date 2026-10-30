@@ -1136,7 +1136,7 @@ async function advanceDependents(): Promise<void> {
       owner = ownerActor(rowOwner(r));
     } catch (e) {
       if (!(e instanceof AccountOffError)) throw e;
-      update(r.id, { status: "failed", error: e.message, message: null, completed_at: Date.now() });
+      await pauseForOwner(r, e.message);
       continue;
     }
     await runAs(owner, () => advance(r));
@@ -1353,6 +1353,22 @@ export function ensureRunner(): void {
   });
 }
 
+/**
+ * A job whose owner was turned off or went dormant (§7.11): the provider's job is canceled first, so it stops running
+ * and charging, then the row fails with the reason, and steps waiting only to feed it are dropped before they're paid
+ * for (as a failed or canceled step does).
+ */
+async function pauseForOwner(r: Row, message: string): Promise<void> {
+  const model = getModel(r.model_id);
+  if (r.external_id && model && (r.status === "queued" || r.status === "running")) {
+    await provider(r.provider)
+      .cancel?.(pollContext(r, model))
+      .catch(() => {});
+  }
+  update(r.id, { status: "failed", error: message, message: null, completed_at: Date.now() });
+  dropUnused(depIds(r.depends_on));
+}
+
 /** Jobs that never got an external id (the server died mid-submit) can't be recovered. Runs every tick. */
 function sweepInterrupted(): void {
   const rows = db()
@@ -1373,7 +1389,7 @@ async function pollGuarded(r: Row): Promise<void> {
     // Polled, downloaded and saved as the person who started it.
     await runAsOwner(rowOwner(r), () => pollOne(r));
   } catch (e) {
-    if (e instanceof AccountOffError) update(r.id, { status: "failed", error: e.message, completed_at: Date.now(), message: null });
+    if (e instanceof AccountOffError) await pauseForOwner(r, e.message);
     else update(r.id, { message: `Poll error: ${(e as Error).message}` });
   } finally {
     polling.delete(r.id);
