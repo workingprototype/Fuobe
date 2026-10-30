@@ -401,7 +401,7 @@ export function storedMedia(ref: string): { info: MediaInfo | null } | null {
   let st: fs.Stats;
   try {
     abs = absolutePath(rel);
-    st = fs.statSync(abs);
+    st = fs.statSync(/*turbopackIgnore: true*/ abs);
   } catch {
     return null;
   }
@@ -412,7 +412,7 @@ export function storedMedia(ref: string): { info: MediaInfo | null } | null {
   if (cache.has(key)) return { info: cache.get(key) ?? null };
   let info: MediaInfo | null = null;
   try {
-    const fd = fs.openSync(abs, "r");
+    const fd = fs.openSync(/*turbopackIgnore: true*/ abs, "r");
     try {
       const read = (start: number, end: number) => {
         const buf = Buffer.alloc(Math.max(0, end - start));
