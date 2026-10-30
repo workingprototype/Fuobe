@@ -1058,10 +1058,22 @@ export interface Generation {
   /** Review status (null: none). */
   review?: ReviewStatus | null;
   /**
+   * A failed ComfyUI run that something missing on the GPU caused (a model file, a node class): its tile offers
+   * "Fix it", which opens the GPU pre-flight's guided fix.
+   */
+  fix?: GenerationFix | null;
+  /**
    * What the run leaves out or changes, said when it is created (LoRAs a cloud run can't carry, a clip length
    * the API rounds). Only on the answer that creates it; not stored.
    */
   notes?: string[];
+}
+
+/** Why a ComfyUI run failed, when the GPU was missing something (generations.fix_json). */
+export interface GenerationFix {
+  code: "comfy_missing_model" | "comfy_missing_node" | "comfy_oom";
+  workflowId?: string;
+  items: { folder?: string; file?: string; class?: string; pack?: string }[];
 }
 
 /** Input slot a preset asks the user for. */

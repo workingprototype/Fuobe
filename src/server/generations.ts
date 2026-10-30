@@ -31,6 +31,7 @@ import {
   type ChainSlot,
   type Engine,
   type Generation,
+  type GenerationFix,
   type GenerationRequest,
   type MediaKind,
   type GenInput,
@@ -44,6 +45,7 @@ import {
 } from "@/lib/catalog/types";
 import { db } from "./db";
 import { listElements } from "./elements";
+import { markStale } from "./gpu/snapshots";
 import { pollTrainings } from "./training";
 import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
@@ -97,6 +99,8 @@ interface Row {
   /** Joined by the library readers (generation_trash, folder_items); looked up when absent. */
   deleted_at?: number | null;
   folder_id?: string | null;
+  /** What a failed ComfyUI run was missing (GenerationFix as JSON). */
+  fix_json?: string | null;
 }
 
 /** Trash and folder columns, joined onto every library read. */
@@ -147,7 +151,17 @@ export function toGeneration(r: Row): Generation {
     folderId: lib.folder_id ?? null,
     pinnedAt: r.pinned_at ?? null,
     review: isReviewStatus(r.review) ? r.review : null,
+    ...(r.status === "failed" && r.fix_json && { fix: parseFix(r.fix_json) }),
   };
+}
+
+function parseFix(json: string): GenerationFix | null {
+  try {
+    const f = JSON.parse(json) as GenerationFix;
+    return f && typeof f.code === "string" && Array.isArray(f.items) ? f : null;
+  } catch {
+    return null;
+  }
 }
 
 function update(id: string, fields: Partial<Row>): void {
@@ -344,6 +358,9 @@ export const ASSET_REFS: AssetRef[] = [
  */
 export const ASSET_FREE: Record<string, string> = {
   "generations.provider_input_json": "what a provider was sent: its own upload URLs or file names, never ours",
+  "generations.fix_json": "what a failed ComfyUI run was missing: model file names, node classes and packs",
+  "gpu_snapshots.inventory_json": "what a GPU's ComfyUI has (class names, model file names and sizes), never a Fuobe file",
+  "gpu_snapshots.report_json": "readiness built from that inventory",
   "generations.external_meta_json": "the provider's job handles",
   "shorts_sessions.range_json": "start and end times",
   "shorts_sessions.settings_json": "ratio, language, model and resolution",
@@ -1320,8 +1337,11 @@ async function submitNow(
       recordSubmission(id, now);
     })();
   } catch (e) {
-    // A cancel during the hand-over stays a cancel.
-    if (statusOf(id) !== "canceled") update(id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null });
+    // A cancel during the hand-over stays a cancel. What the GPU was missing (a model, a node class) is kept, so the
+    // tile offers "Fix it", and the account's GPU check counts as stale.
+    const fix = (e as { fix?: GenerationFix }).fix;
+    if (statusOf(id) !== "canceled") update(id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null, ...(fix && { fix_json: JSON.stringify(fix) }) });
+    if (fix) markStale(req.account ? `acct:${req.account}` : "install");
   } finally {
     submitting().delete(id);
   }

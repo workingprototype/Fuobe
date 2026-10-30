@@ -65,6 +65,7 @@ import {
 } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { badgeFor, badgeText, openGpuSetup, setGpuRetry, useGpuBadges } from "@/hooks/use-gpu";
 import { AttachMenu } from "./attach-menu";
 import { useAttach, useComposerBridge, useUploadReaper } from "./attachments";
 import { DialogueEditor, LanguageChip, VoicePicker } from "./audio-controls";
@@ -462,7 +463,28 @@ export function Composer({ docked }: { docked: boolean }) {
     promptMissing,
   });
 
-  const submit = () => {
+  // GPU pre-flight: the picked open tool's state on the viewer's GPU. Not ready (something to set up, or a bigger
+  // GPU): Generate opens the guided fix instead of sending a run that would fail late, and the prompt stays here.
+  const gpuBadges = useGpuBadges().data;
+  const gpuOp = op ?? studioOp;
+  const gpuBadge =
+    model?.engine === "open" && gpuBadges?.connected
+      ? ((preset?.open ? gpuBadges.presets[preset.id] : undefined) ?? badgeFor(gpuBadges, { modelId: model.id, op: gpuOp }))
+      : null;
+  const gpuSetup = gpuBadge && gpuBadge[0] !== "r" ? gpuBadge : null;
+  const gpuRef = preset?.open && gpuBadges?.presets[preset.id] ? `preset:${preset.id}` : model ? `model:${model.id}#${gpuOp ?? Object.keys(gpuBadges?.models ?? {}).find((k) => k.startsWith(`${model.id}#`))?.split("#")[1] ?? ""}` : "";
+  const openGpuFix = () => {
+    setGpuRetry(
+      () => submitRef.current(),
+      () => submitRef.current(true),
+    );
+    openGpuSetup({ ref: gpuRef, name: preset?.open ? preset.name : model?.name });
+  };
+
+  // `skip` is true only from the guided fix's "Run anyway" (a click handler passes its event here).
+  const submit = (skip?: unknown) => {
+    const skipGpu = skip === true;
+    if (!blocker && gpuSetup && !skipGpu && !create.isPending) return openGpuFix();
     if (blocker || create.isPending || signature.lock.isPending) {
       if (blocker) {
         // One blocker toast at a time (pressing Generate again replaces it), gone once a run starts.
@@ -482,8 +504,14 @@ export function Composer({ docked }: { docked: boolean }) {
     const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx, targetFor(draft.modelId)));
     // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
     if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
-    create.mutate(sent.request, {
-      onError: (e) => toast.error((e as Error).message),
+    // If the server's pre-flight stops it (409 gpu-setup), the guided fix that opens can try again, or run it anyway.
+    setGpuRetry(
+      () => submitRef.current(),
+      () => submitRef.current(true),
+    );
+    create.mutate(skipGpu ? ({ ...sent.request, gpuCheck: "skip" } as typeof sent.request) : sent.request, {
+      // Stopped by the GPU pre-flight: the guided fix is open already, so no error toast on top.
+      onError: (e) => void ((e as { gpuSetup?: boolean }).gpuSetup || toast.error((e as Error).message)),
     });
   };
 
@@ -1065,6 +1093,18 @@ export function Composer({ docked }: { docked: boolean }) {
             ) : (
               <span className="inline-flex min-h-6 items-center">{blocker.message}</span>
             )}
+          </p>
+        )}
+        {!blocker && gpuSetup && (
+          <p className="px-2 text-[12px] text-muted-foreground">
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={openGpuFix}
+              className="inline-flex min-h-6 items-center text-left underline decoration-border-strong underline-offset-2 hover:text-foreground hover:decoration-current"
+            >
+              {badgeText(gpuSetup, gpuBadges?.gpu).long}
+            </button>
           </p>
         )}
       </div>

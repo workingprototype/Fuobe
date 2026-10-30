@@ -8,6 +8,8 @@ import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { HeaderPill } from "@/components/gpu/readiness-chip";
+import { badgeFor, openGpuSetup, useGpuBadges } from "@/hooks/use-gpu";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
 import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
@@ -231,6 +233,25 @@ function PromptSuggestions({ suggestions }: { suggestions: string[] }) {
   );
 }
 
+/**
+ * The picked open model's state on the viewer's GPU (the GPU pre-flight), left of the engine switch: a pill that opens
+ * the guided fix. Its own component, so the draft it reads re-renders only this.
+ */
+function StudioGpuPill() {
+  const { config, draft } = useStudio();
+  const [engine] = useEngine();
+  const badges = useGpuBadges().data;
+  if (engine !== "open" || !badges?.connected) return null;
+  const modelId = draft.modelId || config.defaultModels.open;
+  const presetId = draft.presetId ?? config.preset?.id;
+  const preset = presetId ? badges.presets[presetId] : undefined;
+  const op = config.ops.find((o) => badges.models[`${modelId}#${o}`]);
+  const badge = preset ?? (op ? badges.models[`${modelId}#${op}`] : badgeFor(badges, { modelId }));
+  if (!badge) return null;
+  const ref = preset && presetId ? `preset:${presetId}` : `model:${modelId}#${op ?? Object.keys(badges.models).find((k) => k.startsWith(`${modelId}#`))?.split("#")[1] ?? ""}`;
+  return <HeaderPill badge={badge} gpu={badges.gpu} compact onOpen={() => openGpuSetup({ ref })} />;
+}
+
 /** Sticky page header (title + engine), with an optional row of mode tabs under it. */
 function StudioHeader({ title, header, tabs }: { title: string; header?: React.ReactNode; tabs?: React.ReactNode }) {
   const [engine, setEngine] = useEngine();
@@ -241,6 +262,7 @@ function StudioHeader({ title, header, tabs }: { title: string; header?: React.R
         <h1 className="min-w-0 truncate font-heading text-[22px] leading-[1.15]">{title}</h1>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {header}
+          <StudioGpuPill />
           <EngineSwitch value={engine} onChange={setEngine} />
         </div>
       </header>

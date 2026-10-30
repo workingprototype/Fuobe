@@ -1,6 +1,7 @@
 "use client";
 
-import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, Wrench, X } from "lucide-react";
+import { openGpuSetup } from "@/hooks/use-gpu";
 import Link from "next/link";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -95,15 +96,29 @@ export function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number
         <p className="text-[13px] font-medium">{g.status === "canceled" ? "Canceled" : "Couldn't generate this one"}</p>
         {g.error && <p className="line-clamp-5 text-[12px] leading-snug break-words whitespace-pre-line text-muted-foreground">{g.error}</p>}
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onRetry();
-        }}
-        className="mt-2 inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium hover:bg-accent"
-      >
-        <RotateCcw className="size-3" /> Retry
-      </button>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {g.status === "failed" && g.fix && (
+          // Something was missing on the GPU: the guided fix shows what, and how to add it.
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              openGpuSetup({ ref: g.presetId ? `preset:${g.presetId}` : `model:${g.modelId}#${g.op}`, name: g.presetName ?? g.modelName });
+            }}
+            className="inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-highlight px-2.5 text-[12px] font-medium text-highlight-foreground hover:opacity-90"
+          >
+            <Wrench className="size-3" /> Fix it
+          </button>
+        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+          className="inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium hover:bg-accent"
+        >
+          <RotateCcw className="size-3" /> Retry
+        </button>
+      </div>
     </div>
   );
 }

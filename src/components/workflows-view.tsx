@@ -18,7 +18,8 @@ import { capabilityGroup, usedByIndex, WORKFLOW_GROUPS, type ComfyRoute } from "
 type WF = Omit<ManifestWorkflow, "models"> & { models: (ManifestWorkflow["models"][number] & { present: boolean | null })[] };
 
 interface ComfyStatus {
-  reachable: boolean;
+  /** null: a visitor, who isn't told about the studio's own ComfyUI (their own is on /connect). */
+  reachable: boolean | null;
   generatedAt: string;
   comfyuiCommit?: string;
   workflows: WF[];
@@ -28,7 +29,7 @@ async function fetchStatus(): Promise<ComfyStatus> {
   const res = await fetch("/api/comfyui");
   const body = (await res.json().catch(() => ({}))) as Partial<ComfyStatus> & { error?: string };
   if (!res.ok) throw new Error(body.error ?? `Couldn’t load the workflow library (${res.status})`);
-  return { reachable: !!body.reachable, generatedAt: body.generatedAt ?? "", comfyuiCommit: body.comfyuiCommit, workflows: body.workflows ?? [] };
+  return { reachable: body.reachable === null ? null : !!body.reachable, generatedAt: body.generatedAt ?? "", comfyuiCommit: body.comfyuiCommit, workflows: body.workflows ?? [] };
 }
 
 function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
@@ -165,15 +166,25 @@ export function WorkflowsView({ routes = [] }: { routes?: ComfyRoute[] }) {
   const validated = workflows.filter((w) => w.validated).length;
   return (
     <div className="space-y-6">
-      <div className={cn("flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-[13px]", data.reachable ? "bg-background" : "bg-brand-faint")}>
-        {data.reachable ? <CheckCircle2 className="size-4 shrink-0 text-success" /> : <CircleAlert className="size-4 shrink-0 text-warning" />}
-        <span className="min-w-0 flex-1 basis-56">
-          {data.reachable ? "Connected to ComfyUI — model checkmarks below reflect what’s installed." : "ComfyUI is not reachable, so open-source runs fall back to demo output."}
-        </span>
-        <Link href="/settings#comfyui" className="text-brand-text underline underline-offset-2">
-          Server settings
-        </Link>
-      </div>
+      {data.reachable === null ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-brand-faint px-4 py-3 text-[13px]">
+          <CircleAlert className="size-4 shrink-0 text-brand-text" />
+          <span className="min-w-0 flex-1 basis-56">These are the graphs your own ComfyUI runs. Connect your GPU to see what it has and what it still needs.</span>
+          <Link href="/connect" className="text-brand-text underline underline-offset-2">
+            Connect your GPU
+          </Link>
+        </div>
+      ) : (
+        <div className={cn("flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-[13px]", data.reachable ? "bg-background" : "bg-brand-faint")}>
+          {data.reachable ? <CheckCircle2 className="size-4 shrink-0 text-success" /> : <CircleAlert className="size-4 shrink-0 text-warning" />}
+          <span className="min-w-0 flex-1 basis-56">
+            {data.reachable ? "Connected to ComfyUI — model checkmarks below reflect what’s installed." : "ComfyUI is not reachable, so open-source runs fall back to demo output."}
+          </span>
+          <Link href="/settings#comfyui" className="text-brand-text underline underline-offset-2">
+            Server settings
+          </Link>
+        </div>
+      )}
       {workflows.length > 0 && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative w-full sm:w-80">

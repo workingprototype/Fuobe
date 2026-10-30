@@ -354,15 +354,18 @@ describe("ComfyUI uploads and submit", () => {
     expect(mediaInfoFor(await comfyProvider.prepareFile(Buffer.from("\x89PNG...."), "image/png", "a.png"))).toBeUndefined();
   });
 
-  it("names the node pack to install when ComfyUI lacks a node class", async () => {
+  it("names the node pack to install when ComfyUI lacks a node class: the missing class's pack, with a code for Fix it", async () => {
     handler = (url) =>
       url.endsWith("/prompt")
         ? json({ error: { type: "missing_node_type", message: "Node 'Apply Whisper' not found. The custom node may not be installed." }, node_errors: {} }, 400)
         : json({});
     const whisperRoute: ModelRoute = { op: "captions", provider: "comfyui", endpoint: "captions-whisper-burnin" };
-    await expect(
-      comfyProvider.submit({ generationId: "g-np", model, route: whisperRoute, input: { video: "clip.mp4", prompt: "" } }),
-    ).rejects.toThrow("This workflow needs the ComfyUI-VideoHelperSuite + ComfyUI-Whisper node packs on your ComfyUI (see scripts/comfy/README.md)");
+    const err = (await comfyProvider.submit({ generationId: "g-np", model, route: whisperRoute, input: { video: "clip.mp4", prompt: "" } }).then(
+      () => new Error("submitted"),
+      (e: unknown) => e,
+    )) as Error & { fix?: unknown };
+    expect(err.message).toBe("This workflow needs the ComfyUI-Whisper node pack on your ComfyUI (see scripts/comfy/README.md)");
+    expect(err.fix).toEqual({ code: "comfy_missing_node", workflowId: "captions-whisper-burnin", items: [{ class: "Apply Whisper", pack: "ComfyUI-Whisper" }] });
   });
 });
 

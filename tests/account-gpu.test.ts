@@ -44,7 +44,11 @@ describe("Your GPU: the address", () => {
     }
     // A public name that resolves to a private address.
     await expect(checkGpuAddress("https://sneaky.example", { resolve: async () => ["10.0.0.7"] })).rejects.toThrow(/own computer or network/);
-    await expect(checkGpuAddress("http://owner-comfy.test:8188", { resolve: publicDns })).rejects.toThrow(/own ComfyUI/);
+    // The install's own ComfyUI by host, on any scheme, port or path (ComfyUI copies every route under /api), with one
+    // message that doesn't confirm the guess.
+    for (const url of ["http://owner-comfy.test:8188", "https://owner-comfy.test/api", "http://OWNER-comfy.test.:9000/", "https://owner-comfy.test:8188/api/"]) {
+      await expect(checkGpuAddress(url, { resolve: publicDns }), url).rejects.toThrow(/can't use this address/);
+    }
     await expect(checkGpuAddress("ftp://x.example", { resolve: publicDns })).rejects.toBeInstanceOf(GpuError);
     await expect(checkGpuAddress("https://user:pw@x.example", { resolve: publicDns })).rejects.toThrow(/token field/);
   });

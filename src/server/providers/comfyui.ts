@@ -36,10 +36,13 @@ import {
   type ManifestWorkflow,
 } from "@/lib/comfy";
 import { fpsPlan } from "@/lib/av/fps";
+import { resolveWorkflowId } from "@/lib/comfy-variants";
+import { fixFromPromptError } from "@/lib/gpu/fix-codes";
+import { loadIndex } from "../gpu/index-file";
 import { crossfadeProblem, fadeCurveWav } from "@/lib/av/crossfade";
 import { expandAudioJoinWorkflow, expandVideoJoinWorkflow } from "@/lib/av/joins";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
-import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
+import { exportValues, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
 import { loraByFile, needsToken } from "@/lib/catalog/loras";
 import { CHARACTER_SWAP, packResolution, samCoords, swapPrompt, SWAP_LORAS, windowPlan } from "@/lib/catalog/character-swap";
@@ -168,6 +171,14 @@ async function comfyFetch(p: string, init: RequestInit = {}, worker: ComfyWorker
     if (worker === "isolated") throw new ProviderError(`The isolated ComfyUI worker at ${base} doesn't answer (${(e as Error).message}). Start it (scripts/comfy/README.md) or check ${ISOLATED_SETTING}`);
     throw new ProviderError(`Can't reach ComfyUI at ${base} (${(e as Error).message}). Is it running?`);
   }
+}
+
+/**
+ * A raw request to the ComfyUI in scope: the install's (its address and token), or an account's inside onOwnGpu.
+ * The GPU pre-flight's reads go through it (src/server/gpu/target.ts).
+ */
+export function comfyRequest(p: string, init: RequestInit = {}, worker: ComfyWorker = "main"): Promise<Response> {
+  return comfyFetch(p, init, worker);
 }
 
 /**
@@ -559,18 +570,6 @@ export function mediaInfoFor(name: unknown): MediaInfo | undefined {
   return typeof name === "string" ? globalThis.__fuobeComfyMedia?.get(name) : undefined;
 }
 
-/**
- * Image-to-video graphs whose camera moves Wan 2.2 Fun Camera makes natively: a request with a pose (params.extra.cameraMotion)
- * runs there (Fuobe DoP on Wan 2.2 14B, Fuobe Cinema on its Lightning graph).
- */
-const CAMERA_POSE_GRAPH: Record<string, string> = { "wan22-i2v-14b": "wan22-fun-camera-14b", "wan22-i2v-14b-lightx2v": "wan22-fun-camera-14b" };
-
-/**
- * Fuobe Marketing Image's Standalone product shot (params.extra.productShot with one product photo) runs the product-shot
- * graph: the product cut out with BiRefNet, put on white and relit into the scene (Qwen-Image-Edit 2509 + White_to_Scene).
- */
-const PRODUCT_SHOT_GRAPH: Record<string, string> = { "qwen-image-edit-2511-multi": "product-shot-qwen-edit-2509" };
-
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
 const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {
   // Edit graphs whose extra images feed TextEncodeQwenImageEditPlus: a repeated reference is harmless.
@@ -762,7 +761,6 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // "video-concat-{n}": one workflow per clip count.
   const clips = input.videos ?? [];
   if (endpointTemplate.includes("{n}") && clips.length > 4) throw new ProviderError("ComfyUI joins up to 4 clips at a time");
-  let endpoint = endpointTemplate.replace("{n}", String(Math.max(2, Math.min(4, clips.length))));
   const extra: Record<string, unknown> = { ...(input.extra ?? {}) };
   // The second audio track (mux background): the canonical input when the runtime sends it, else params.extra.audio2.
   const given2 = (input as GenInput & { audio2?: unknown }).audio2;
@@ -775,19 +773,18 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     const f = await readRef(v);
     extra[k] = await ctx.upload(f.data, f.contentType, f.name);
   }
-  // Soundtrack without a background stem: the single-track graph.
-  if (ctx.op === "mux" && !audio2 && !extra.audio2 && loadManifest().workflows.some((w) => w.id === `${endpoint}-replace`)) endpoint = `${endpoint}-replace`;
-  // EXR frames have graphs of their own (export, SDR to HDR).
-  if (input.format === "exr" && (ctx.op === "export-video" || ctx.op === "sdr-to-hdr")) {
-    const exr = exrWorkflow(ctx.op);
-    if (loadManifest().workflows.some((w) => w.id === exr)) endpoint = exr;
-  }
-  // Fuobe DoP: a camera move Wan 2.2 Fun Camera makes natively (a pose, no LoRA needed) runs on its graph; a LoRA mixed
-  // in is injected on its experts as on the plain image-to-video graph.
-  const posed = CAMERA_POSE_GRAPH[endpoint];
-  if (posed && typeof extra.cameraMotion === "string" && extra.cameraMotion) endpoint = posed;
-  const shot = PRODUCT_SHOT_GRAPH[endpoint];
-  if (shot && extra.productShot === true && (input.images?.length ?? 0) === 1 && loadManifest().workflows.some((w) => w.id === shot)) endpoint = shot;
+  // The variant this request runs (one graph per clip count, the single-track soundtrack, EXR frames, a Fun Camera pose,
+  // the product shot): src/lib/comfy-variants.ts, which the GPU pre-flight's gate reads too. A LoRA mixed into a pose is
+  // injected on its experts as on the plain image-to-video graph.
+  const endpoint = resolveWorkflowId(endpointTemplate, {
+    op: ctx.op,
+    clips: clips.length,
+    images: input.images?.length ?? 0,
+    format: input.format,
+    audio2: !!audio2 || !!extra.audio2,
+    extra,
+    has: (id) => loadManifest().workflows.some((w) => w.id === id),
+  });
   delete extra.productShot;
 
   const { manifest, workflow } = getWorkflow(endpoint);
@@ -1424,10 +1421,19 @@ export const comfyProvider: ProviderAdapter = {
       },
       worker,
     );
-    const body = (await res.json().catch(() => ({}))) as { prompt_id?: string; error?: { type?: string; message?: string }; node_errors?: unknown };
+    const body = (await res.json().catch(() => ({}))) as { prompt_id?: string; error?: { type?: string; message?: string; extra_info?: { class_type?: string } }; node_errors?: unknown };
     if (!res.ok || !body.prompt_id) {
+      // What was missing, as a code its failed tile turns into "Fix it" (the GPU pre-flight's guided fix). The index names
+      // the pack a missing class comes from, so the message names that pack, not every pack the workflow uses.
+      let packOf: (cls: string) => string | undefined = () => undefined;
+      try {
+        const idx = loadIndex();
+        packOf = (cls) => Object.entries(idx.packs).find(([, p]) => p.classes.includes(cls))?.[0];
+      } catch {}
+      const fix = fixFromPromptError(body, manifest.id, manifest.models, packOf);
+      const missingClass = fix?.code === "comfy_missing_node" ? fix.items[0] : undefined;
       // A node class the server doesn't have: name the pack to install (opt-in packs like ComfyUI-Whisper).
-      const packs = manifest.customNodes.map((c) => c.name);
+      const packs = missingClass?.pack ? [missingClass.pack] : manifest.customNodes.map((c) => c.name);
       const where = worker === "isolated" ? "the isolated ComfyUI worker" : "your ComfyUI";
       const missingPack =
         body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on ${where} (see scripts/comfy/README.md)` : undefined;
@@ -1436,7 +1442,7 @@ export const comfyProvider: ProviderAdapter = {
       let detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...loraModels] }) : (missingPack ?? body.error?.message);
       if (detail && loraModels.some((l) => detail!.includes(`"${l.file}"`))) detail = `${detail}\nSet the LoRA folder in Settings → LoRAs and Fuobe downloads LoRAs before a run`;
       if (!detail && !res.ok && worker === "isolated") throw isolatedAnswer("the prompt", res.status);
-      throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
+      throw Object.assign(new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status), fix ? { fix } : {});
     }
     return { externalId: body.prompt_id, meta: { ...meta, generationId, ...(worker === "isolated" && { worker }) }, payload: wf };
   },

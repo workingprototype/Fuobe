@@ -4,7 +4,7 @@ import net from "node:net";
 import { accountGpu, type Account, type AccountGpu } from "./auth";
 import { PROVIDERS } from "./providers";
 import { fetchPublic, isPrivateAddress } from "./remote-fetch";
-import { getSetting } from "./settings";
+import { isInstallHost, REFUSED_ADDRESS } from "./gpu/hosts";
 
 /**
  * "Your GPU" (public sign-up): the ComfyUI an account connects, where its runs go. The server calls
@@ -49,14 +49,9 @@ export async function checkGpuAddress(raw: string, o: { resolve?: (host: string)
     if (addrs.some(isPrivateAddress)) throw new GpuError(LOCAL_GPU_MESSAGE);
   }
   const url = normal(u);
-  const same = (setting: string) => {
-    try {
-      return !!setting && normal(new URL(setting)).toLowerCase() === url.toLowerCase();
-    } catch {
-      return false;
-    }
-  };
-  if (same(getSetting("comfyUrl")) || same(getSetting("comfyIsolatedUrl"))) throw new GpuError("That's this studio's own ComfyUI. Connect yours.");
+  // The install's own ComfyUI on any scheme, port or path (ComfyUI answers every route under /api too), compared by
+  // host. One message for every such refusal, so it never confirms a guessed address.
+  if (isInstallHost(url)) throw new GpuError(REFUSED_ADDRESS);
   return url;
 }
 

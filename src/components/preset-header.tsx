@@ -2,7 +2,10 @@
 
 import { Cloud, Cpu, Info, X } from "lucide-react";
 import { useSyncExternalStore } from "react";
+import { HeaderPill } from "@/components/gpu/readiness-chip";
 import { PresetPreview, useSaveData } from "@/components/preset-preview";
+import { openGpuSetup, useGpuBadges } from "@/hooks/use-gpu";
+import { useEngine } from "@/lib/api";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Preset } from "@/lib/catalog/types";
 // The covers manifest comes with toPresetCard: this component is loaded on its own (next/dynamic in studio-page.tsx).
@@ -50,6 +53,10 @@ export function PresetHeader({
   // Not with Save-Data or on 2G either: a clip cover would download as soon as the studio opens.
   const saveData = useSaveData();
   const routes = presetRouteLines(preset, modelName);
+  // Its state on the viewer's GPU (open engine only): a pill that opens the guided fix.
+  const badges = useGpuBadges().data;
+  const [engine] = useEngine();
+  const gpu = preset.open && engine === "open" ? (badges?.presets[preset.id] ?? null) : null;
   return (
     <div className={cn("mx-auto flex w-full max-w-[760px] items-center gap-3 rounded-2xl border bg-background p-2 pr-3 text-left shadow-soft", className)}>
       <div className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-32">
@@ -59,6 +66,7 @@ export function PresetHeader({
         <p className="truncate font-heading text-[19px] leading-snug">{preset.name}</p>
         <p className="line-clamp-2 text-[13px] text-muted-foreground">{presetHowTo(preset)}</p>
       </div>
+      {gpu && <HeaderPill badge={gpu} gpu={badges?.gpu} compact onOpen={() => openGpuSetup({ ref: `preset:${preset.id}`, name: preset.name })} />}
       <Popover>
         <PopoverTrigger asChild>
           <button

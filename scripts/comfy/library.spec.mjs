@@ -117,7 +117,6 @@ export const CUSTOM_NODE_REPOS = {
   'ComfyUI-WanVideoWrapper': 'https://github.com/kijai/ComfyUI-WanVideoWrapper',
   'ComfyUI-VideoHelperSuite': 'https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite',
   'ComfyUI-KJNodes': 'https://github.com/kijai/ComfyUI-KJNodes',
-  'ComfyUI-SeedVR2_VideoUpscaler': 'https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler',
   'ComfyUI-Frame-Interpolation': 'https://github.com/Fannovel16/ComfyUI-Frame-Interpolation',
   'ComfyUI-RMBG': 'https://github.com/1038lab/ComfyUI-RMBG',
   'ComfyUI-ReActor': 'https://github.com/Gourieff/ComfyUI-ReActor',

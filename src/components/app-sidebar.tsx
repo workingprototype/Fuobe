@@ -342,7 +342,7 @@ function YourGpuChip({ viewer }: { viewer: NonNullable<StatusInfo["viewer"]> }) 
   if (g.connected) {
     const vram = g.vramBytes ? `${Math.round(g.vramBytes / 2 ** 30)} GB` : "";
     return (
-      <IntentLink href="/settings#your-gpu" className={cls}>
+      <IntentLink href="/connect" className={cls}>
         <span className="flex items-center gap-2">
           <StatusDot ok={g.online} /> Your GPU
           <span className="ml-auto">{g.online ? "online" : "offline"}</span>
@@ -358,7 +358,7 @@ function YourGpuChip({ viewer }: { viewer: NonNullable<StatusInfo["viewer"]> }) 
     </span>
   );
   return viewer.kind === "guest" ? (
-    <a href={signInHref("signup", "/settings#your-gpu")} className={cls}>
+    <a href={signInHref("signup", "/connect")} className={cls}>
       {body}
     </a>
   ) : (

@@ -47,7 +47,12 @@ export function LoginForm() {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (res.ok) {
       // Only a page on this site: never bounce to another origin after signing in.
-      window.location.assign(safeNext(params.get("next"), window.location.origin));
+      const after = safeNext(params.get("next"), window.location.origin);
+      // A new account connects its GPU first (the pre-flight board), then goes on to where it was headed.
+      const q = new URLSearchParams({ welcome: "1" });
+      if (after !== "/" && !after.startsWith("/connect")) q.set("next", after);
+      const dest = mode === "signup" ? new URL(`/connect?${q}`, window.location.origin).toString() : after;
+      window.location.assign(dest);
       return;
     }
     setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't sign in");

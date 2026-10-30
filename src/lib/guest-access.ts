@@ -21,7 +21,7 @@ export const GUEST_LIBRARY_MESSAGE = "Sign up to see your library.";
 export const GUEST_RUN_MESSAGE = "Create a free account to run this.";
 
 /** Catalog and status reads that hold nothing of the owner's library: a guest gets the real answer. */
-const GUEST_READS = new Set(["/api/status", "/api/models", "/api/search-index", "/api/comfyui", "/api/settings/models"]);
+const GUEST_READS = new Set(["/api/status", "/api/models", "/api/search-index", "/api/comfyui", "/api/settings/models", "/api/gpu/requirements"]);
 
 /** Catalogs mixed with the owner's own items: the route leaves the owner's part out for a guest (GUEST_HEADER). */
 const GUEST_FILTERED = new Set(["/api/moodboards", "/api/palettes", "/api/assist/skills"]);
@@ -59,6 +59,9 @@ const EMPTY: Record<string, unknown> = {
   "/api/photodump": { packs: [] },
   "/api/photodump/packs": { packs: [] },
   "/api/generations/facets": { models: [], kinds: {}, total: 0, favorites: 0, failed: 0, trash: 0, pinned: 0, steps: 0, reviews: {} },
+  // GPU pre-flight: a guest has no GPU (Connect your GPU), so no board and no chips.
+  "/api/gpu/readiness": { connected: false, reason: "guest" },
+  "/api/gpu/badges": { connected: false, models: {}, presets: {} },
 };
 
 export type GuestRead =
@@ -148,13 +151,18 @@ export function accountGeneration(method: string, pathname: string): string | un
  * the list of its runs, a stored file (the proxy checks whose it is), its GPU.
  */
 export function accountOwnRead(pathname: string): boolean {
-  return pathname === "/api/generations" || pathname === "/api/account/gpu";
+  return pathname === "/api/generations" || pathname === "/api/account/gpu" || GPU_READS.has(pathname);
 }
 
-/** A change an account may send: signing out, its own GPU, and price checks (reads go by guestRead, as a guest's). */
+/** GPU pre-flight reads: each answers for the account's own GPU only (src/server/gpu/target.ts). */
+const GPU_READS = new Set(["/api/gpu/readiness", "/api/gpu/badges", "/api/gpu/plan"]);
+
+/** A change an account may send: signing out, its own GPU and its check, and price checks (reads go by guestRead, as a guest's). */
 export function accountMayChange(method: string, pathname: string, search: string): boolean {
   if (method === "POST" && pathname === "/api/auth/logout") return true;
   if ((method === "PUT" || method === "DELETE") && pathname === "/api/account/gpu") return true;
+  // GPU pre-flight: checking its own ComfyUI (reads only; the routes check the target and the request themselves).
+  if ((method === "POST" && pathname === "/api/gpu/check") || (method === "PUT" && pathname === "/api/gpu/inventory")) return true;
   return isPriceCheck(method, pathname, search);
 }
 

@@ -414,7 +414,6 @@ export const NODE_PACKS: NodePack[] = [
   pack("ComfyUI-WanVideoWrapper", "https://github.com/kijai/ComfyUI-WanVideoWrapper", { name: "Apache-2.0", class: "commercial", url: SPDX("Apache-2.0"), note: "Code Apache-2.0; the Wan weights it loads are Apache-2.0" }),
   pack("ComfyUI-VideoHelperSuite", "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite", { ...GPL, note: "Video loading and saving; GPL-3.0 code, like ComfyUI" }),
   pack("ComfyUI-KJNodes", "https://github.com/kijai/ComfyUI-KJNodes", { ...GPL, note: "Utility nodes (GrowMaskWithBlur, resizing); GPL-3.0 code, like ComfyUI" }),
-  pack("ComfyUI-SeedVR2_VideoUpscaler", "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler", { name: "Apache-2.0", class: "commercial", url: SPDX("Apache-2.0"), note: "SeedVR2 upscaling; code and weights Apache-2.0" }),
   pack("ComfyUI-Frame-Interpolation", "https://github.com/Fannovel16/ComfyUI-Frame-Interpolation", { name: "MIT", class: "commercial", url: SPDX("MIT"), note: "RIFE and FILM frame interpolation; MIT code" }),
   pack("ComfyUI-RMBG", "https://github.com/1038lab/ComfyUI-RMBG", { ...GPL, note: "Background removal; GPL-3.0 code. Fuobe uses BEN2 (MIT); RMBG-2.0 in the same pack is CC BY-NC 4.0" }),
   pack("ComfyUI-ReActor", "https://github.com/Gourieff/ComfyUI-ReActor", { name: "MIT (per the research)", class: "commercial", note: "Face swap node; the inswapper_128 weights it loads are for non-commercial research only" }),
