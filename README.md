@@ -1,7 +1,34 @@
 # Fuobe
 
-**An open-source AI image, video and audio studio — a 1:1 alternative to Higgsfield.**
-Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, Gemini Omni, MiniMax, ElevenLabs…) with your own fal.ai / Replicate key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch. Fuobe's own rebuilds of Higgsfield's in-house models, the **Fuobe Originals** (Fuobe Soul, DoP, Cinema, Genjutsu, Marketing Image, Try-On, Mixed Media, Shorts, Evolution, Angles and Speak so far, plus Soul ID training), run either way. Higgsfield is never called: Soul, Cinema Studio, Genjutsu, Marketing Studio Image, Ads Studio and AI Influencer runs, saved setups and Assist plans from before open on the Original that replaced them. Licences are information, not gates: **Settings → Models & licences** shows the licence of every model, LoRA and node pack, everything starts switched on, and whoever runs the install switches off what doesn't fit.
+**The open creative studio on ComfyUI: images, video, 3D and audio, on your own GPU or in the cloud.**
+
+![Fuobe: premium presets rendered locally on ComfyUI](docs/media/hero.jpg)
+
+[![Watch the intro (64 s)](docs/media/intro-poster.jpg)](docs/media/fuobe-intro.mp4)
+
+▶ **[Watch the intro video](docs/media/fuobe-intro.mp4)** (64 s, 1280×720)
+
+Fuobe is a complete creative studio you can run yourself: 108 camera motions, 255 effects and 124 apps, Cinema, Shorts, Marketing and Ads studios, Layers, Canvas, Storyboard, Image to 3D, voice and music tools, and an Assist agent that plans and runs whole jobs. Every tool runs either on open-weight models on your own GPU through **ComfyUI**, or on frontier models with your own fal.ai / Replicate key. Flip one switch. Licences are information, not gates: **Settings → Models & licences** shows the licence of every model, LoRA and node pack.
+
+**Every preview on the site was rendered locally on ComfyUI** with open weights: stills with Ideogram 4, before/after end frames with Qwen Image 2.1 edits, and the motion clips with MiniMax H3 (including its Orbit LoRA for bullet time), all on one RTX 5090.
+
+| Camera motions | Effects | Apps |
+|---|---|---|
+| ![Camera motions](docs/media/screens/motions.jpg) | ![Effects](docs/media/screens/effects.jpg) | ![Apps](docs/media/screens/apps.jpg) |
+| **Layers** | **Image to 3D** | **Settings** |
+| ![Layers](docs/media/screens/layers.jpg) | ![Image to 3D](docs/media/screens/image-to-3d.jpg) | ![Settings: open source only, local models](docs/media/screens/settings.jpg) |
+
+**Quick start** (Windows, macOS or Linux; Node 22+, pnpm, a running ComfyUI for the open engine):
+
+```bash
+pnpm install
+pnpm build && pnpm start -p 3001    # or: pnpm dev
+# Settings → Engine mode → "Open source only", point Fuobe at your ComfyUI (default http://127.0.0.1:8188)
+```
+
+Local language models for prompt help and Assist: Ollama, LM Studio, Unsloth Studio or any OpenAI-compatible server (Settings → AI helper). Licensed MIT, see [LICENSE](LICENSE).
+
+## What's inside
 
 - **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Free / Smart / Manual modes, 20 built-in **skills** (SKILL.md playbooks, or upload your own), **projects** with instructions and up to 20 sources (links, files and PDFs, elements, notes), and **memory**. **Scheduled tasks** run a request daily, weekly, every 1–168 hours or once, in your time zone; each run is a new chat that asks before it generates, or runs on its own within a cost cap ($2 a run by default). Your own **MCP connectors** (remote MCP servers, added in Settings → Assist · connectors) give Claude chats another app's tools: Anthropic's servers call them, so a local one needs a public tunnel, and their tools run without asking Fuobe, so each connector's Allowed tools list is the safeguard. Runs on Claude, a local model (Ollama, LM Studio, Unsloth Studio or another OpenAI-compatible server), or an offline planner (connectors need Claude)
 - **Skills that run by themselves:** **Make a skill from this…** (the ⋯ menu on a result) or **Make a skill** (the Library's selection bar) turns the steps behind your results, Edit and Animate chains made by hand included, into a skill of your own: pick the inputs that change next time, check it for free, save it. In **Assist → Skills**, a skill with a recipe (`recipe.json`: its steps and inputs) says "Runs by itself" and gets a **Run…** form: typed inputs, the price before it starts, the steps, and a Many tab for up to 50 CSV rows. No chat or AI is involved. A skill must pass a free check on an engine before it runs there, and asks for a new check when a model it uses is retired, switched off or repriced. ⌘K has "Run a skill", and a skill downloads as a .zip with its files. Translate & dub, Katana and Captions results can become skills; results from other studios are refused for now, naming the studio

@@ -15,4 +15,3371 @@ export interface PresetPreviewMedia {
   variant: string;
 }
 
-export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {};
+export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
+  "app-3d-figure": {
+    "poster": "/previews/presets/app-3d-figure.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-3d-render": {
+    "poster": "/previews/presets/app-3d-render.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-3d-rotation": {
+    "poster": "/previews/presets/app-3d-rotation.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-60s-cafe": {
+    "poster": "/previews/presets/app-60s-cafe.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-ad-creative": {
+    "poster": "/previews/presets/app-ad-creative.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-age-shift": {
+    "poster": "/previews/presets/app-age-shift.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-ai-influencer": {
+    "poster": "/previews/presets/app-ai-influencer.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-ai-stylist": {
+    "poster": "/previews/presets/app-ai-stylist.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-angles": {
+    "poster": "/previews/presets/app-angles.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-asmr-add-on": {
+    "poster": "/previews/presets/app-asmr-add-on.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-asmr-classic": {
+    "poster": "/previews/presets/app-asmr-classic.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-asmr-host": {
+    "poster": "/previews/presets/app-asmr-host.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-asmr-promo": {
+    "poster": "/previews/presets/app-asmr-promo.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-banana-eating": {
+    "poster": "/previews/presets/app-banana-eating.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-behind-the-scenes": {
+    "poster": "/previews/presets/app-behind-the-scenes.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-billboard-ad": {
+    "poster": "/previews/presets/app-billboard-ad.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-breakdown": {
+    "poster": "/previews/presets/app-breakdown.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-brick-cube": {
+    "poster": "/previews/presets/app-brick-cube.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-bring-to-life": {
+    "poster": "/previews/presets/app-bring-to-life.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-bullet-time-scene": {
+    "poster": "/previews/presets/app-bullet-time-scene.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-bullet-time-splash": {
+    "poster": "/previews/presets/app-bullet-time-splash.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-bullet-time-white": {
+    "poster": "/previews/presets/app-bullet-time-white.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-burning-sunset": {
+    "poster": "/previews/presets/app-burning-sunset.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-chameleon": {
+    "poster": "/previews/presets/app-chameleon.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-change-background": {
+    "poster": "/previews/presets/app-change-background.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-character-swap": {
+    "poster": "/previews/presets/app-character-swap.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-click-to-ad": {
+    "poster": "/previews/presets/app-click-to-ad.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-clipcut": {
+    "poster": "/previews/presets/app-clipcut.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-cloud-surf": {
+    "poster": "/previews/presets/app-cloud-surf.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-color-grading": {
+    "poster": "/previews/presets/app-color-grading.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-colorize": {
+    "poster": "/previews/presets/app-colorize.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-comic-book": {
+    "poster": "/previews/presets/app-comic-book.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-commercial-faces": {
+    "poster": "/previews/presets/app-commercial-faces.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-dance": {
+    "poster": "/previews/presets/app-dance.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-expand-image": {
+    "poster": "/previews/presets/app-expand-image.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-expression-edit": {
+    "poster": "/previews/presets/app-expression-edit.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-face-swap": {
+    "poster": "/previews/presets/app-face-swap.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-figurine": {
+    "poster": "/previews/presets/app-figurine.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-fridge-ad": {
+    "poster": "/previews/presets/app-fridge-ad.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-game-dump": {
+    "poster": "/previews/presets/app-game-dump.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-ghoulgao": {
+    "poster": "/previews/presets/app-ghoulgao.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-giallo-horror": {
+    "poster": "/previews/presets/app-giallo-horror.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-giant-product": {
+    "poster": "/previews/presets/app-giant-product.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-glitter-sticker": {
+    "poster": "/previews/presets/app-glitter-sticker.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-graffiti-ad": {
+    "poster": "/previews/presets/app-graffiti-ad.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-gtai": {
+    "poster": "/previews/presets/app-gtai.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-hairstyle-try-on": {
+    "poster": "/previews/presets/app-hairstyle-try-on.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-headshot-generator": {
+    "poster": "/previews/presets/app-headshot-generator.jpg",
+    "video": "/previews/presets/app-headshot-generator.mp4",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "minimax-h3",
+    "variant": "lean-json"
+  },
+  "app-hook-frame": {
+    "poster": "/previews/presets/app-hook-frame.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-hug": {
+    "poster": "/previews/presets/app-hug.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-idol": {
+    "poster": "/previews/presets/app-idol.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-image-to-3d": {
+    "poster": "/previews/presets/app-image-to-3d.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-j-magazine": {
+    "poster": "/previews/presets/app-j-magazine.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-j-poster": {
+    "poster": "/previews/presets/app-j-poster.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-japanese-show": {
+    "poster": "/previews/presets/app-japanese-show.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-kick-ad": {
+    "poster": "/previews/presets/app-kick-ad.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-latex": {
+    "poster": "/previews/presets/app-latex.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-link-to-video-ad": {
+    "poster": "/previews/presets/app-link-to-video-ad.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-macro-scene": {
+    "poster": "/previews/presets/app-macro-scene.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-macroshot-product": {
+    "poster": "/previews/presets/app-macroshot-product.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-magic-button": {
+    "poster": "/previews/presets/app-magic-button.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-makeup-studio": {
+    "poster": "/previews/presets/app-makeup-studio.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-mascot": {
+    "poster": "/previews/presets/app-mascot.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-match-colors": {
+    "poster": "/previews/presets/app-match-colors.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-match-lighting": {
+    "poster": "/previews/presets/app-match-lighting.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-melting-doodle": {
+    "poster": "/previews/presets/app-melting-doodle.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-meme-generator": {
+    "poster": "/previews/presets/app-meme-generator.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-micro-beasts": {
+    "poster": "/previews/presets/app-micro-beasts.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-mugshot": {
+    "poster": "/previews/presets/app-mugshot.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-mukbang": {
+    "poster": "/previews/presets/app-mukbang.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-nano-strike": {
+    "poster": "/previews/presets/app-nano-strike.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-nano-theft": {
+    "poster": "/previews/presets/app-nano-theft.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-object-remover": {
+    "poster": "/previews/presets/app-object-remover.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-outfit-shot": {
+    "poster": "/previews/presets/app-outfit-shot.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-outfit-swap": {
+    "poster": "/previews/presets/app-outfit-swap.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-outfit-vending": {
+    "poster": "/previews/presets/app-outfit-vending.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-packshot": {
+    "poster": "/previews/presets/app-packshot.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-paint-app": {
+    "poster": "/previews/presets/app-paint-app.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-pixel-game": {
+    "poster": "/previews/presets/app-pixel-game.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-plushies": {
+    "poster": "/previews/presets/app-plushies.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-poster": {
+    "poster": "/previews/presets/app-poster.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-product-360": {
+    "poster": "/previews/presets/app-product-360.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-product-placement": {
+    "poster": "/previews/presets/app-product-placement.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-product-shot": {
+    "poster": "/previews/presets/app-product-shot.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-rap-god": {
+    "poster": "/previews/presets/app-rap-god.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-recast": {
+    "poster": "/previews/presets/app-recast.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-relight": {
+    "poster": "/previews/presets/app-relight.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-remove-background": {
+    "poster": "/previews/presets/app-remove-background.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-renaissance": {
+    "poster": "/previews/presets/app-renaissance.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-restore-photo": {
+    "poster": "/previews/presets/app-restore-photo.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-roller-coaster": {
+    "poster": "/previews/presets/app-roller-coaster.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-sand-worm": {
+    "poster": "/previews/presets/app-sand-worm.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-signboard": {
+    "poster": "/previews/presets/app-signboard.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-similarity-score": {
+    "poster": "/previews/presets/app-similarity-score.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-simlife": {
+    "poster": "/previews/presets/app-simlife.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-sketch-to-real": {
+    "poster": "/previews/presets/app-sketch-to-real.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-skibidi": {
+    "poster": "/previews/presets/app-skibidi.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-skin-enhancer": {
+    "poster": "/previews/presets/app-skin-enhancer.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-social-media-icon": {
+    "poster": "/previews/presets/app-social-media-icon.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-steal-the-look": {
+    "poster": "/previews/presets/app-steal-the-look.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-sticker-match-cut": {
+    "poster": "/previews/presets/app-sticker-match-cut.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-sticker-pack": {
+    "poster": "/previews/presets/app-sticker-pack.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-storm-creature": {
+    "poster": "/previews/presets/app-storm-creature.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-style-snap": {
+    "poster": "/previews/presets/app-style-snap.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-style-transfer": {
+    "poster": "/previews/presets/app-style-transfer.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-text-edit": {
+    "poster": "/previews/presets/app-text-edit.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-this-is-fine": {
+    "poster": "/previews/presets/app-this-is-fine.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-transitions": {
+    "poster": "/previews/presets/app-transitions.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-truck-ad": {
+    "poster": "/previews/presets/app-truck-ad.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-unboxing-video": {
+    "poster": "/previews/presets/app-unboxing-video.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-upscale": {
+    "poster": "/previews/presets/app-upscale.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-urban-cuts": {
+    "poster": "/previews/presets/app-urban-cuts.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-vectorize": {
+    "poster": "/previews/presets/app-vectorize.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-victory-card": {
+    "poster": "/previews/presets/app-victory-card.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-video-background-remover": {
+    "poster": "/previews/presets/app-video-background-remover.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-video-face-swap": {
+    "poster": "/previews/presets/app-video-face-swap.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-virtual-try-on": {
+    "poster": "/previews/presets/app-virtual-try-on.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-volcano-ad": {
+    "poster": "/previews/presets/app-volcano-ad.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-what-s-next": {
+    "poster": "/previews/presets/app-what-s-next.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-yes-kiss": {
+    "poster": "/previews/presets/app-yes-kiss.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-zoom-out": {
+    "poster": "/previews/presets/app-zoom-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "app-zooms": {
+    "poster": "/previews/presets/app-zooms.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-acid": {
+    "poster": "/previews/presets/effect-acid.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-act-natural": {
+    "poster": "/previews/presets/effect-act-natural.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-agamemnon": {
+    "poster": "/previews/presets/effect-agamemnon.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-agent-reveal": {
+    "poster": "/previews/presets/effect-agent-reveal.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-air-bending": {
+    "poster": "/previews/presets/effect-air-bending.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-akrill": {
+    "poster": "/previews/presets/effect-akrill.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-angel-wings": {
+    "poster": "/previews/presets/effect-angel-wings.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-angry-mode": {
+    "poster": "/previews/presets/effect-angry-mode.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-animalization": {
+    "poster": "/previews/presets/effect-animalization.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-aquarium": {
+    "poster": "/previews/presets/effect-aquarium.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-architecture-wave": {
+    "poster": "/previews/presets/effect-architecture-wave.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-atomic": {
+    "poster": "/previews/presets/effect-atomic.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-attack-of-clones": {
+    "poster": "/previews/presets/effect-attack-of-clones.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-ballet": {
+    "poster": "/previews/presets/effect-ballet.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-balloon": {
+    "poster": "/previews/presets/effect-balloon.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-beach-ride": {
+    "poster": "/previews/presets/effect-beach-ride.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-beast-appearance": {
+    "poster": "/previews/presets/effect-beast-appearance.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-black-gloss": {
+    "poster": "/previews/presets/effect-black-gloss.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-black-tears": {
+    "poster": "/previews/presets/effect-black-tears.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-bleach-bypass": {
+    "poster": "/previews/presets/effect-bleach-bypass.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-bleached-warm": {
+    "poster": "/previews/presets/effect-bleached-warm.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-bloom-mouth": {
+    "poster": "/previews/presets/effect-bloom-mouth.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-blue-depth": {
+    "poster": "/previews/presets/effect-blue-depth.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-boarding-pass": {
+    "poster": "/previews/presets/effect-boarding-pass.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-boiling-point": {
+    "poster": "/previews/presets/effect-boiling-point.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-broken-mirror": {
+    "poster": "/previews/presets/effect-broken-mirror.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-bubbles": {
+    "poster": "/previews/presets/effect-bubbles.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-buddy": {
+    "poster": "/previews/presets/effect-buddy.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-building-explosion": {
+    "poster": "/previews/presets/effect-building-explosion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-burning-man": {
+    "poster": "/previews/presets/effect-burning-man.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-cakeify": {
+    "poster": "/previews/presets/effect-cakeify.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-candy-pink": {
+    "poster": "/previews/presets/effect-candy-pink.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-cannabis": {
+    "poster": "/previews/presets/effect-cannabis.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-canvas": {
+    "poster": "/previews/presets/effect-canvas.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-car-drive": {
+    "poster": "/previews/presets/effect-car-drive.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-car-explosion": {
+    "poster": "/previews/presets/effect-car-explosion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-censorship": {
+    "poster": "/previews/presets/effect-censorship.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-classic-bw": {
+    "poster": "/previews/presets/effect-classic-bw.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-clone-explosion": {
+    "poster": "/previews/presets/effect-clone-explosion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-clones": {
+    "poster": "/previews/presets/effect-clones.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-clothes-rain": {
+    "poster": "/previews/presets/effect-clothes-rain.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-cold-steel": {
+    "poster": "/previews/presets/effect-cold-steel.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-cold-vision": {
+    "poster": "/previews/presets/effect-cold-vision.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-color-rain": {
+    "poster": "/previews/presets/effect-color-rain.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-column-wipe": {
+    "poster": "/previews/presets/effect-column-wipe.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-comic": {
+    "poster": "/previews/presets/effect-comic.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-contre-jour": {
+    "poster": "/previews/presets/effect-contre-jour.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-cotton-cloud": {
+    "poster": "/previews/presets/effect-cotton-cloud.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-crimson-vigil": {
+    "poster": "/previews/presets/effect-crimson-vigil.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-crush": {
+    "poster": "/previews/presets/effect-crush.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-crying": {
+    "poster": "/previews/presets/effect-crying.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-cutout": {
+    "poster": "/previews/presets/effect-cutout.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-cyborg": {
+    "poster": "/previews/presets/effect-cyborg.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-cyclope": {
+    "poster": "/previews/presets/effect-cyclope.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-datamosh": {
+    "poster": "/previews/presets/effect-datamosh.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-deflate": {
+    "poster": "/previews/presets/effect-deflate.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-diamond": {
+    "poster": "/previews/presets/effect-diamond.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-dirty-lens": {
+    "poster": "/previews/presets/effect-dirty-lens.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-disintegration": {
+    "poster": "/previews/presets/effect-disintegration.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-display-transition": {
+    "poster": "/previews/presets/effect-display-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-dolphin-ride": {
+    "poster": "/previews/presets/effect-dolphin-ride.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-dream-date": {
+    "poster": "/previews/presets/effect-dream-date.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-drunk-master": {
+    "poster": "/previews/presets/effect-drunk-master.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-duplicate": {
+    "poster": "/previews/presets/effect-duplicate.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-earth-element": {
+    "poster": "/previews/presets/effect-earth-element.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-earth-wave": {
+    "poster": "/previews/presets/effect-earth-wave.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-earth-zoom-out": {
+    "poster": "/previews/presets/effect-earth-zoom-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-eating": {
+    "poster": "/previews/presets/effect-eating.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-exploded-view": {
+    "poster": "/previews/presets/effect-exploded-view.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-explosion": {
+    "poster": "/previews/presets/effect-explosion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-fairies-around": {
+    "poster": "/previews/presets/effect-fairies-around.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-fairytale-castle": {
+    "poster": "/previews/presets/effect-fairytale-castle.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-fallen-angel": {
+    "poster": "/previews/presets/effect-fallen-angel.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-film-colors": {
+    "poster": "/previews/presets/effect-film-colors.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-fire-breath": {
+    "poster": "/previews/presets/effect-fire-breath.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-fire-element": {
+    "poster": "/previews/presets/effect-fire-element.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-firelava": {
+    "poster": "/previews/presets/effect-firelava.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-firework": {
+    "poster": "/previews/presets/effect-firework.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-fix-and-pose": {
+    "poster": "/previews/presets/effect-fix-and-pose.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-flame-on": {
+    "poster": "/previews/presets/effect-flame-on.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-flame-transition": {
+    "poster": "/previews/presets/effect-flame-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-flash-comic": {
+    "poster": "/previews/presets/effect-flash-comic.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-flashback": {
+    "poster": "/previews/presets/effect-flashback.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-floating-fall": {
+    "poster": "/previews/presets/effect-floating-fall.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-floating-fish": {
+    "poster": "/previews/presets/effect-floating-fish.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-flood": {
+    "poster": "/previews/presets/effect-flood.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-floral-eyes": {
+    "poster": "/previews/presets/effect-floral-eyes.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-fragments": {
+    "poster": "/previews/presets/effect-fragments.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-freezing": {
+    "poster": "/previews/presets/effect-freezing.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-frozen-in-motion": {
+    "poster": "/previews/presets/effect-frozen-in-motion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-garden-bloom": {
+    "poster": "/previews/presets/effect-garden-bloom.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-gas-transformation": {
+    "poster": "/previews/presets/effect-gas-transformation.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-giant": {
+    "poster": "/previews/presets/effect-giant.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-giant-grab": {
+    "poster": "/previews/presets/effect-giant-grab.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-giant-people": {
+    "poster": "/previews/presets/effect-giant-people.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-glitch": {
+    "poster": "/previews/presets/effect-glitch.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-glow-trace": {
+    "poster": "/previews/presets/effect-glow-trace.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-glowing-fish": {
+    "poster": "/previews/presets/effect-glowing-fish.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-glowshift": {
+    "poster": "/previews/presets/effect-glowshift.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-gorilla-transfer": {
+    "poster": "/previews/presets/effect-gorilla-transfer.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-group-photo": {
+    "poster": "/previews/presets/effect-group-photo.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-hair-style": {
+    "poster": "/previews/presets/effect-hair-style.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-hand-paint": {
+    "poster": "/previews/presets/effect-hand-paint.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-hand-transition": {
+    "poster": "/previews/presets/effect-hand-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-handheld-run": {
+    "poster": "/previews/presets/effect-handheld-run.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-happy": {
+    "poster": "/previews/presets/effect-happy.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-happy-mode": {
+    "poster": "/previews/presets/effect-happy-mode.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-head-explosion": {
+    "poster": "/previews/presets/effect-head-explosion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-head-off": {
+    "poster": "/previews/presets/effect-head-off.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-helicopter-escape": {
+    "poster": "/previews/presets/effect-helicopter-escape.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-hero-flight": {
+    "poster": "/previews/presets/effect-hero-flight.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-high-flip": {
+    "poster": "/previews/presets/effect-high-flip.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-hole-transition": {
+    "poster": "/previews/presets/effect-hole-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-horror-face": {
+    "poster": "/previews/presets/effect-horror-face.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-hyper-neon": {
+    "poster": "/previews/presets/effect-hyper-neon.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-i-can-fly": {
+    "poster": "/previews/presets/effect-i-can-fly.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-ice-rose": {
+    "poster": "/previews/presets/effect-ice-rose.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-infinite-clones": {
+    "poster": "/previews/presets/effect-infinite-clones.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-inflate": {
+    "poster": "/previews/presets/effect-inflate.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-innerlight": {
+    "poster": "/previews/presets/effect-innerlight.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-invisible": {
+    "poster": "/previews/presets/effect-invisible.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-jelly-drift": {
+    "poster": "/previews/presets/effect-jelly-drift.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-jump-transition": {
+    "poster": "/previews/presets/effect-jump-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-lacewalker": {
+    "poster": "/previews/presets/effect-lacewalker.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-lava": {
+    "poster": "/previews/presets/effect-lava.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-layer-mixed-media": {
+    "poster": "/previews/presets/effect-layer-mixed-media.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-lens-crack": {
+    "poster": "/previews/presets/effect-lens-crack.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-lens-flare": {
+    "poster": "/previews/presets/effect-lens-flare.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-levitation": {
+    "poster": "/previews/presets/effect-levitation.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-lidar-transition": {
+    "poster": "/previews/presets/effect-lidar-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-lime-jam": {
+    "poster": "/previews/presets/effect-lime-jam.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-live-concert": {
+    "poster": "/previews/presets/effect-live-concert.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-look-boom": {
+    "poster": "/previews/presets/effect-look-boom.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-lsd": {
+    "poster": "/previews/presets/effect-lsd.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-luminous-gaze": {
+    "poster": "/previews/presets/effect-luminous-gaze.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-magazine": {
+    "poster": "/previews/presets/effect-magazine.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-marble": {
+    "poster": "/previews/presets/effect-marble.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-medusa-gorgona": {
+    "poster": "/previews/presets/effect-medusa-gorgona.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-melt-transition": {
+    "poster": "/previews/presets/effect-melt-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-melting": {
+    "poster": "/previews/presets/effect-melting.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-mighty-fighter": {
+    "poster": "/previews/presets/effect-mighty-fighter.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-modern": {
+    "poster": "/previews/presets/effect-modern.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-monet-muse": {
+    "poster": "/previews/presets/effect-monet-muse.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-money-rain": {
+    "poster": "/previews/presets/effect-money-rain.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-monster-dab": {
+    "poster": "/previews/presets/effect-monster-dab.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-monstrosity": {
+    "poster": "/previews/presets/effect-monstrosity.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-moonwalk": {
+    "poster": "/previews/presets/effect-moonwalk.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-morning-routine": {
+    "poster": "/previews/presets/effect-morning-routine.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-morphskin": {
+    "poster": "/previews/presets/effect-morphskin.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-motor-ride": {
+    "poster": "/previews/presets/effect-motor-ride.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-multiverse": {
+    "poster": "/previews/presets/effect-multiverse.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-muscle-up": {
+    "poster": "/previews/presets/effect-muscle-up.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-mystification": {
+    "poster": "/previews/presets/effect-mystification.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-naturalistic-clean": {
+    "poster": "/previews/presets/effect-naturalistic-clean.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-nature-bloom": {
+    "poster": "/previews/presets/effect-nature-bloom.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-noir": {
+    "poster": "/previews/presets/effect-noir.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-northern-lights": {
+    "poster": "/previews/presets/effect-northern-lights.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-nostalgic-blue": {
+    "poster": "/previews/presets/effect-nostalgic-blue.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-objects-around": {
+    "poster": "/previews/presets/effect-objects-around.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-ocean": {
+    "poster": "/previews/presets/effect-ocean.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-oni-mask": {
+    "poster": "/previews/presets/effect-oni-mask.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-origami": {
+    "poster": "/previews/presets/effect-origami.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-outfit-check": {
+    "poster": "/previews/presets/effect-outfit-check.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-outfit-switch": {
+    "poster": "/previews/presets/effect-outfit-switch.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-overexposed": {
+    "poster": "/previews/presets/effect-overexposed.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-overhead-fall": {
+    "poster": "/previews/presets/effect-overhead-fall.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-overtime": {
+    "poster": "/previews/presets/effect-overtime.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-paint-splash": {
+    "poster": "/previews/presets/effect-paint-splash.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-palette": {
+    "poster": "/previews/presets/effect-palette.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-paparazzi": {
+    "poster": "/previews/presets/effect-paparazzi.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-paper": {
+    "poster": "/previews/presets/effect-paper.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-particles": {
+    "poster": "/previews/presets/effect-particles.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-peak-moment": {
+    "poster": "/previews/presets/effect-peak-moment.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-pearl-earring": {
+    "poster": "/previews/presets/effect-pearl-earring.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-pigeons": {
+    "poster": "/previews/presets/effect-pigeons.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-pixelated-face": {
+    "poster": "/previews/presets/effect-pixelated-face.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-pizza-fall": {
+    "poster": "/previews/presets/effect-pizza-fall.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-plasma-explosion": {
+    "poster": "/previews/presets/effect-plasma-explosion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-plate-check": {
+    "poster": "/previews/presets/effect-plate-check.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-point-cloud": {
+    "poster": "/previews/presets/effect-point-cloud.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-polygon": {
+    "poster": "/previews/presets/effect-polygon.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-pool-jump": {
+    "poster": "/previews/presets/effect-pool-jump.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-portal": {
+    "poster": "/previews/presets/effect-portal.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-powder-explosion": {
+    "poster": "/previews/presets/effect-powder-explosion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-practicals": {
+    "poster": "/previews/presets/effect-practicals.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-push-to-glass": {
+    "poster": "/previews/presets/effect-push-to-glass.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-random-glow": {
+    "poster": "/previews/presets/effect-random-glow.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-raven-transition": {
+    "poster": "/previews/presets/effect-raven-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-red-carpet": {
+    "poster": "/previews/presets/effect-red-carpet.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-saint-glow": {
+    "poster": "/previews/presets/effect-saint-glow.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-sakura-petals": {
+    "poster": "/previews/presets/effect-sakura-petals.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-sand-cut": {
+    "poster": "/previews/presets/effect-sand-cut.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-sand-storm": {
+    "poster": "/previews/presets/effect-sand-storm.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-scrapbook-collage": {
+    "poster": "/previews/presets/effect-scrapbook-collage.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-seamless-transition": {
+    "poster": "/previews/presets/effect-seamless-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-selfception": {
+    "poster": "/previews/presets/effect-selfception.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-selfie": {
+    "poster": "/previews/presets/effect-selfie.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-selfie-outfit": {
+    "poster": "/previews/presets/effect-selfie-outfit.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-selfie-posing": {
+    "poster": "/previews/presets/effect-selfie-posing.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-set-on-fire": {
+    "poster": "/previews/presets/effect-set-on-fire.jpg",
+    "video": "/previews/presets/effect-set-on-fire.mp4",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "minimax-h3",
+    "variant": "lean-json"
+  },
+  "effect-shadow-smoke": {
+    "poster": "/previews/presets/effect-shadow-smoke.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-shocked": {
+    "poster": "/previews/presets/effect-shocked.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-silhouette": {
+    "poster": "/previews/presets/effect-silhouette.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-skatedog": {
+    "poster": "/previews/presets/effect-skatedog.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-sketch": {
+    "poster": "/previews/presets/effect-sketch.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-skin-surge": {
+    "poster": "/previews/presets/effect-skin-surge.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-smash-and-grab": {
+    "poster": "/previews/presets/effect-smash-and-grab.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-smoke-transition": {
+    "poster": "/previews/presets/effect-smoke-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-sodium-decay": {
+    "poster": "/previews/presets/effect-sodium-decay.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-soft-cross": {
+    "poster": "/previews/presets/effect-soft-cross.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-soft-palette": {
+    "poster": "/previews/presets/effect-soft-palette.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-soul-jump": {
+    "poster": "/previews/presets/effect-soul-jump.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-spiders-from-mouth": {
+    "poster": "/previews/presets/effect-spiders-from-mouth.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-spirit-animal": {
+    "poster": "/previews/presets/effect-spirit-animal.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-splash-transition": {
+    "poster": "/previews/presets/effect-splash-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-squish": {
+    "poster": "/previews/presets/effect-squish.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-starship-troopers": {
+    "poster": "/previews/presets/effect-starship-troopers.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-static-posing": {
+    "poster": "/previews/presets/effect-static-posing.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-stop-world": {
+    "poster": "/previews/presets/effect-stop-world.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-street-colossus": {
+    "poster": "/previews/presets/effect-street-colossus.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-studio-slide": {
+    "poster": "/previews/presets/effect-studio-slide.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-sunglasses": {
+    "poster": "/previews/presets/effect-sunglasses.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-super-fast-run": {
+    "poster": "/previews/presets/effect-super-fast-run.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-super-saiyan": {
+    "poster": "/previews/presets/effect-super-saiyan.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-superstar": {
+    "poster": "/previews/presets/effect-superstar.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-tattoo-animation": {
+    "poster": "/previews/presets/effect-tattoo-animation.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-teal-orange-epic": {
+    "poster": "/previews/presets/effect-teal-orange-epic.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-tentacles": {
+    "poster": "/previews/presets/effect-tentacles.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-thunder-god": {
+    "poster": "/previews/presets/effect-thunder-god.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-tiny-planet": {
+    "poster": "/previews/presets/effect-tiny-planet.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-toxic": {
+    "poster": "/previews/presets/effect-toxic.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-tracking": {
+    "poster": "/previews/presets/effect-tracking.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-train-rush": {
+    "poster": "/previews/presets/effect-train-rush.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-trucksition": {
+    "poster": "/previews/presets/effect-trucksition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-turn-into-statue": {
+    "poster": "/previews/presets/effect-turn-into-statue.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-turning-metal": {
+    "poster": "/previews/presets/effect-turning-metal.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-turning-monkey": {
+    "poster": "/previews/presets/effect-turning-monkey.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-two-color": {
+    "poster": "/previews/presets/effect-two-color.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-ultraviolet": {
+    "poster": "/previews/presets/effect-ultraviolet.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-vanish": {
+    "poster": "/previews/presets/effect-vanish.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-vintage": {
+    "poster": "/previews/presets/effect-vintage.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-visor-x": {
+    "poster": "/previews/presets/effect-visor-x.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-water-bending": {
+    "poster": "/previews/presets/effect-water-bending.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-water-element": {
+    "poster": "/previews/presets/effect-water-element.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-water-splash": {
+    "poster": "/previews/presets/effect-water-splash.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-werewolf": {
+    "poster": "/previews/presets/effect-werewolf.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-wild-ride": {
+    "poster": "/previews/presets/effect-wild-ride.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-wind-to-face": {
+    "poster": "/previews/presets/effect-wind-to-face.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-window": {
+    "poster": "/previews/presets/effect-window.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-windows": {
+    "poster": "/previews/presets/effect-windows.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-wireframe": {
+    "poster": "/previews/presets/effect-wireframe.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-wonderland": {
+    "poster": "/previews/presets/effect-wonderland.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-world-morphing": {
+    "poster": "/previews/presets/effect-world-morphing.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-x-ray": {
+    "poster": "/previews/presets/effect-x-ray.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "effect-yacht": {
+    "poster": "/previews/presets/effect-yacht.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-360-orbit": {
+    "poster": "/previews/presets/motion-360-orbit.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-action-run": {
+    "poster": "/previews/presets/motion-action-run.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-aerial-pullback": {
+    "poster": "/previews/presets/motion-aerial-pullback.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-arc-left": {
+    "poster": "/previews/presets/motion-arc-left.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-arc-right": {
+    "poster": "/previews/presets/motion-arc-right.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-baseball-kick": {
+    "poster": "/previews/presets/motion-baseball-kick.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-basketball-dunks": {
+    "poster": "/previews/presets/motion-basketball-dunks.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-boxing": {
+    "poster": "/previews/presets/motion-boxing.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-bts": {
+    "poster": "/previews/presets/motion-bts.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-bullet-time": {
+    "poster": "/previews/presets/motion-bullet-time.jpg",
+    "video": "/previews/presets/motion-bullet-time.mp4",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "minimax-h3",
+    "variant": "lean-json"
+  },
+  "motion-car-chasing": {
+    "poster": "/previews/presets/motion-car-chasing.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-car-grip": {
+    "poster": "/previews/presets/motion-car-grip.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-catwalk": {
+    "poster": "/previews/presets/motion-catwalk.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-classic-static": {
+    "poster": "/previews/presets/motion-classic-static.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-crane-down": {
+    "poster": "/previews/presets/motion-crane-down.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-crane-over-the-head": {
+    "poster": "/previews/presets/motion-crane-over-the-head.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-crane-up": {
+    "poster": "/previews/presets/motion-crane-up.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-crash-zoom-in": {
+    "poster": "/previews/presets/motion-crash-zoom-in.jpg",
+    "video": "/previews/presets/motion-crash-zoom-in.mp4",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "minimax-h3",
+    "variant": "lean-json"
+  },
+  "motion-crash-zoom-out": {
+    "poster": "/previews/presets/motion-crash-zoom-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-documentary-snap": {
+    "poster": "/previews/presets/motion-documentary-snap.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-dolly-in": {
+    "poster": "/previews/presets/motion-dolly-in.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-dolly-left": {
+    "poster": "/previews/presets/motion-dolly-left.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-dolly-out": {
+    "poster": "/previews/presets/motion-dolly-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-dolly-right": {
+    "poster": "/previews/presets/motion-dolly-right.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-dolly-zoom-in": {
+    "poster": "/previews/presets/motion-dolly-zoom-in.jpg",
+    "video": "/previews/presets/motion-dolly-zoom-in.mp4",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "minimax-h3",
+    "variant": "lean-json"
+  },
+  "motion-double-dolly": {
+    "poster": "/previews/presets/motion-double-dolly.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-downhill-pov": {
+    "poster": "/previews/presets/motion-downhill-pov.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-dreamy-flow": {
+    "poster": "/previews/presets/motion-dreamy-flow.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-drone-reveal": {
+    "poster": "/previews/presets/motion-drone-reveal.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-dutch-angle": {
+    "poster": "/previews/presets/motion-dutch-angle.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-earth-zoom-out": {
+    "poster": "/previews/presets/motion-earth-zoom-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-eating-zoom": {
+    "poster": "/previews/presets/motion-eating-zoom.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-epic-scale": {
+    "poster": "/previews/presets/motion-epic-scale.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-eyes-in": {
+    "poster": "/previews/presets/motion-eyes-in.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-face-punch": {
+    "poster": "/previews/presets/motion-face-punch.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-fisheye": {
+    "poster": "/previews/presets/motion-fisheye.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-flying": {
+    "poster": "/previews/presets/motion-flying.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-flying-cam-transition": {
+    "poster": "/previews/presets/motion-flying-cam-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-focus-change": {
+    "poster": "/previews/presets/motion-focus-change.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-fpv-drone": {
+    "poster": "/previews/presets/motion-fpv-drone.jpg",
+    "video": "/previews/presets/motion-fpv-drone.mp4",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "minimax-h3",
+    "variant": "lean-json"
+  },
+  "motion-general": {
+    "poster": "/previews/presets/motion-general.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-glam": {
+    "poster": "/previews/presets/motion-glam.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-handheld": {
+    "poster": "/previews/presets/motion-handheld.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-head-tracking": {
+    "poster": "/previews/presets/motion-head-tracking.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-helicopter-shot": {
+    "poster": "/previews/presets/motion-helicopter-shot.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-hero-cam": {
+    "poster": "/previews/presets/motion-hero-cam.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-hyperlapse": {
+    "poster": "/previews/presets/motion-hyperlapse.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-impossible-camera": {
+    "poster": "/previews/presets/motion-impossible-camera.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-incline": {
+    "poster": "/previews/presets/motion-incline.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-intimate-observer": {
+    "poster": "/previews/presets/motion-intimate-observer.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-jib-down": {
+    "poster": "/previews/presets/motion-jib-down.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-jib-up": {
+    "poster": "/previews/presets/motion-jib-up.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-kiss": {
+    "poster": "/previews/presets/motion-kiss.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-lazy-orbit": {
+    "poster": "/previews/presets/motion-lazy-orbit.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-lazy-susan": {
+    "poster": "/previews/presets/motion-lazy-susan.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-low-shutter": {
+    "poster": "/previews/presets/motion-low-shutter.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-moonwalk-left": {
+    "poster": "/previews/presets/motion-moonwalk-left.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-moonwalk-right": {
+    "poster": "/previews/presets/motion-moonwalk-right.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-mouth-in": {
+    "poster": "/previews/presets/motion-mouth-in.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-object-pov": {
+    "poster": "/previews/presets/motion-object-pov.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-one-take": {
+    "poster": "/previews/presets/motion-one-take.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-overhead": {
+    "poster": "/previews/presets/motion-overhead.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-pan": {
+    "poster": "/previews/presets/motion-pan.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-pan-left": {
+    "poster": "/previews/presets/motion-pan-left.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-pan-right": {
+    "poster": "/previews/presets/motion-pan-right.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-pov": {
+    "poster": "/previews/presets/motion-pov.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-rap-flex": {
+    "poster": "/previews/presets/motion-rap-flex.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-rapid-zoom-in": {
+    "poster": "/previews/presets/motion-rapid-zoom-in.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-rapid-zoom-out": {
+    "poster": "/previews/presets/motion-rapid-zoom-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-raw-chaos": {
+    "poster": "/previews/presets/motion-raw-chaos.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-road-rush": {
+    "poster": "/previews/presets/motion-road-rush.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-robo-arm": {
+    "poster": "/previews/presets/motion-robo-arm.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-robot-arm": {
+    "poster": "/previews/presets/motion-robot-arm.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-roll-transition": {
+    "poster": "/previews/presets/motion-roll-transition.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-silent-machine": {
+    "poster": "/previews/presets/motion-silent-machine.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-skate-cruise": {
+    "poster": "/previews/presets/motion-skate-cruise.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-skateboard-glide": {
+    "poster": "/previews/presets/motion-skateboard-glide.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-skateboard-ollie": {
+    "poster": "/previews/presets/motion-skateboard-ollie.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-ski-carving": {
+    "poster": "/previews/presets/motion-ski-carving.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-ski-powder": {
+    "poster": "/previews/presets/motion-ski-powder.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-slow-motion": {
+    "poster": "/previews/presets/motion-slow-motion.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-snorricam": {
+    "poster": "/previews/presets/motion-snorricam.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-snowboard-carving": {
+    "poster": "/previews/presets/motion-snowboard-carving.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-snowboard-powder": {
+    "poster": "/previews/presets/motion-snowboard-powder.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-static": {
+    "poster": "/previews/presets/motion-static.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-super-dolly-in": {
+    "poster": "/previews/presets/motion-super-dolly-in.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-super-dolly-out": {
+    "poster": "/previews/presets/motion-super-dolly-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-through-object-in": {
+    "poster": "/previews/presets/motion-through-object-in.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-through-object-out": {
+    "poster": "/previews/presets/motion-through-object-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-tilt-up": {
+    "poster": "/previews/presets/motion-tilt-up.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-timelapse": {
+    "poster": "/previews/presets/motion-timelapse.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-timelapse-glam": {
+    "poster": "/previews/presets/motion-timelapse-glam.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-timelapse-human": {
+    "poster": "/previews/presets/motion-timelapse-human.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-timelapse-landscape": {
+    "poster": "/previews/presets/motion-timelapse-landscape.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-tracking": {
+    "poster": "/previews/presets/motion-tracking.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-truck-left": {
+    "poster": "/previews/presets/motion-truck-left.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-truck-right": {
+    "poster": "/previews/presets/motion-truck-right.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-whip-pan": {
+    "poster": "/previews/presets/motion-whip-pan.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-wiggle": {
+    "poster": "/previews/presets/motion-wiggle.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-yoyo-zoom": {
+    "poster": "/previews/presets/motion-yoyo-zoom.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-zoom": {
+    "poster": "/previews/presets/motion-zoom.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-zoom-in": {
+    "poster": "/previews/presets/motion-zoom-in.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  },
+  "motion-zoom-out": {
+    "poster": "/previews/presets/motion-zoom-out.jpg",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "ideogram4",
+    "variant": "lean-json"
+  }
+};
