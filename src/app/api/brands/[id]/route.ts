@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { deleteBrand, getBrand, listProducts, updateBrand } from "@/server/brand";
 import { failure, readBody } from "@/server/marketing";
+import { handler } from "@/server/access/route";
 
 const list = (max: number, len: number) => z.array(z.string().max(len)).max(max);
 
@@ -26,15 +27,15 @@ const Patch = z.object({
 });
 
 /** One brand kit with its products. */
-export async function GET(_req: Request, ctx: RouteContext<"/api/brands/[id]">) {
+export const GET = handler({ access: "signed-in" }, async (_req: Request, ctx: RouteContext<"/api/brands/[id]">) => {
   await connection();
   const { id } = await ctx.params;
   const brand = getBrand(id);
   return brand ? Response.json({ brand, products: listProducts(id) }) : Response.json({ error: "Not found" }, { status: 404 });
-}
+});
 
 /** Edits from the review form. */
-export async function PATCH(request: Request, ctx: RouteContext<"/api/brands/[id]">) {
+export const PATCH = handler({ access: "signed-in" }, async (request: Request, ctx: RouteContext<"/api/brands/[id]">) => {
   const { id } = await ctx.params;
   const body = await readBody(request, Patch);
   if (body instanceof Response) return body;
@@ -44,10 +45,10 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/brands/[id
   } catch (e) {
     return failure(e);
   }
-}
+});
 
 /** The kit and its products leave the shelf; ads already made stay in the Library. */
-export async function DELETE(_req: Request, ctx: RouteContext<"/api/brands/[id]">) {
+export const DELETE = handler({ access: "signed-in" }, async (_req: Request, ctx: RouteContext<"/api/brands/[id]">) => {
   const { id } = await ctx.params;
   return deleteBrand(id) ? new Response(null, { status: 204 }) : Response.json({ error: "Not found" }, { status: 404 });
-}
+});

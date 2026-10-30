@@ -1,10 +1,11 @@
 import { EngineSchema, FacelessError, handle, MAX_DOCUMENT_BYTES, readDocument } from "@/server/faceless";
+import { handler } from "@/server/access/route";
 
 /**
  * A PDF or Word source (multipart: "file", "engine"): the text is read on the server and, when the
  * document is longer than the script writer reads, summarised. The file itself isn't kept.
  */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   return handle(async () => {
     const form = await request.formData().catch(() => null);
     const file = form?.get("file");
@@ -13,4 +14,4 @@ export async function POST(request: Request) {
     const engine = EngineSchema.safeParse(form?.get("engine"));
     return Response.json(await readDocument({ name: file.name, data: Buffer.from(await file.arrayBuffer()), type: file.type }, engine.success ? engine.data : "cloud"));
   });
-}
+});

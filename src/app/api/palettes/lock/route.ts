@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createLockedRun, SignatureSchema } from "@/server/palettes";
+import { handler } from "@/server/access/route";
 
 const Hex = z.string().regex(/^#?[0-9a-fA-F]{6}$/);
 
@@ -33,7 +34,7 @@ const RequestSchema = z.object({
 const Body = z.object({ request: RequestSchema, colors: z.array(Hex).min(1).max(16), strength: z.number().min(0).max(1).optional() });
 
 /** Make the images, then recolour each one to the palette (open engine: a chained palette-transfer step). */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
   try {
@@ -42,4 +43,4 @@ export async function POST(request: Request) {
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
-}
+});

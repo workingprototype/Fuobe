@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { readProductLink } from "@/server/brand";
 import { failure, readBody } from "@/server/marketing";
+import { handler } from "@/server/access/route";
 
 const Body = z.object({
   url: z.string().trim().min(1).max(600),
@@ -12,7 +13,7 @@ const Body = z.object({
 });
 
 /** Add product(s) from a link: names, descriptions, prices and pictures read from the page. */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const body = await readBody(request, Body, "Use a valid product link.");
   if (body instanceof Response) return body;
   try {
@@ -21,4 +22,4 @@ export async function POST(request: Request) {
   } catch (e) {
     return failure(e);
   }
-}
+});

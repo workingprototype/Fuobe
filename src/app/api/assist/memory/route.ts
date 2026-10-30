@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { addMemory, listMemories, MemoryError } from "@/server/assist/memory";
 import { MemoryCategorySchema } from "@/server/assist/schemas";
+import { handler } from "@/server/access/route";
 
 const Add = z.object({
   text: z.string().trim().min(1).max(500),
@@ -11,17 +12,17 @@ const Add = z.object({
 });
 
 /** Memories: `?scope=personal|project|all` and `?project=<id>`. */
-export async function GET(request: Request) {
+export const GET = handler({ access: "signed-in" }, async (request: Request) => {
   await connection();
   const sp = new URL(request.url).searchParams;
   const scope = sp.get("scope");
   return Response.json({
     items: listMemories({ scope: scope === "personal" || scope === "project" ? scope : "all", projectId: sp.get("project") }),
   });
-}
+});
 
 /** "Remember that: …" */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Add.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Write what to remember and pick a category" }, { status: 400 });
   try {
@@ -29,4 +30,4 @@ export async function POST(request: Request) {
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: e instanceof MemoryError ? e.status : 500 });
   }
-}
+});

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createSheet, previewSheet, type SheetRun } from "@/server/photodump";
+import { handler } from "@/server/access/route";
 
 const Engine = z.enum(["cloud", "open"]);
 
@@ -32,7 +33,7 @@ function bodyError(mode: unknown, issues: z.core.$ZodIssue[]): string {
  * Character Sheet: a turnaround sheet from 1–5 reference photos, from a Soul Cast build, or from a
  * description (the AI Influencer app). `?preview=1` prices it instead.
  */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const body = (await request.json().catch(() => null)) as { mode?: unknown } | null;
   const parsed = Body.safeParse(body);
   if (!parsed.success) return Response.json({ error: bodyError(body?.mode, parsed.error.issues) }, { status: 400 });
@@ -43,4 +44,4 @@ export async function POST(request: Request) {
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
-}
+});

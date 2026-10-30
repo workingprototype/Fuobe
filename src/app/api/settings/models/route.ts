@@ -2,16 +2,17 @@ import { connection } from "next/server";
 import { LICENCE_CLASSES } from "@/lib/licences";
 import type { AccessChange } from "@/lib/model-access";
 import { accessList, changeAccess, knownSwitch } from "@/server/model-access";
+import { handler } from "@/server/access/route";
 
 /**
  * Settings → Models & licences: every model, LoRA and node pack with its licence and its switch, and the
  * switches per licence class and provider (GET); flip switches (PUT `{ changes: AccessChange[] }`, answered with
  * the list as it is now). Everything is on until an admin turns it off.
  */
-export async function GET() {
+export const GET = handler({ access: "signed-in" }, async () => {
   await connection();
   return Response.json(accessList());
-}
+});
 
 const KINDS = new Set(["model", "class", "provider", "pack", "lora"]);
 const NOUN = { model: "Model", provider: "Provider", pack: "Node pack", lora: "LoRA" } as const;
@@ -34,7 +35,7 @@ function readChange(v: unknown): AccessChange | string {
   return { kind, id, on: c.on };
 }
 
-export async function PUT(request: Request) {
+export const PUT = handler({ access: "perm:install.settings" }, async (request: Request) => {
   const body = (await request.json().catch(() => ({}))) as { changes?: unknown };
   if (!Array.isArray(body.changes) || !body.changes.length) return Response.json({ error: "Send { changes: [...] }" }, { status: 400 });
   const changes = body.changes.map(readChange);
@@ -42,4 +43,4 @@ export async function PUT(request: Request) {
   if (bad) return Response.json({ error: bad }, { status: 400 });
   changeAccess(changes as AccessChange[]);
   return Response.json(accessList());
-}
+});

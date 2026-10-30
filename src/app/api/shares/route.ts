@@ -3,6 +3,7 @@ import { z } from "zod";
 import { MAX_EXPIRY_DAYS, SHARE_KINDS } from "@/lib/share";
 import { authEnabled } from "@/server/auth";
 import { createShare, listShares, MAX_PUBLISH_ITEMS, ShareError } from "@/server/shares";
+import { handler } from "@/server/access/route";
 
 const Body = z.object({
   kind: z.enum(SHARE_KINDS as [string, ...string[]]),
@@ -18,16 +19,16 @@ const Body = z.object({
 });
 
 /** Every share link (Library → Shared), and whether sign-in is on (the share dialog warns when it isn't). */
-export async function GET() {
+export const GET = handler({ access: "signed-in" }, async () => {
   await connection();
   return Response.json({ items: listShares(), signIn: authEnabled() });
-}
+});
 
 /**
  * A new read-only link to a result, a folder, a Cinema project, or (kind "publish") a page of picked
  * results. The answer carries the token once; only its hash is stored.
  */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues.some((i) => i.path[0] === "items") ? `Pick up to ${MAX_PUBLISH_ITEMS} results` : "That isn't something Fuobe can share" }, { status: 400 });
   try {
@@ -37,4 +38,4 @@ export async function POST(request: Request) {
     if (e instanceof ShareError) return Response.json({ error: e.message }, { status: e.status });
     throw e;
   }
-}
+});

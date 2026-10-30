@@ -2,6 +2,7 @@ import { z } from "zod";
 import { parseMemoryImport } from "@/lib/assist";
 import { importMemories, MemoryError } from "@/server/assist/memory";
 import { MemoryCategorySchema } from "@/server/assist/schemas";
+import { handler } from "@/server/access/route";
 
 const Body = z.object({
   /** Pasted text (parsed here) … */
@@ -13,7 +14,7 @@ const Body = z.object({
 });
 
 /** Import memories pasted from another assistant (Claude, ChatGPT, Codex…). */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success || (!parsed.data.text && !parsed.data.items)) return Response.json({ error: "Paste the memories to import" }, { status: 400 });
   const items = parsed.data.items ?? parseMemoryImport(parsed.data.text ?? "");
@@ -23,4 +24,4 @@ export async function POST(request: Request) {
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: e instanceof MemoryError ? e.status : 500 });
   }
-}
+});

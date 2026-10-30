@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { deleteForever, moveToFolder, restoreGenerations, setFavorites, setPinned, setReview, trashGenerations } from "@/server/library";
+import { handler } from "@/server/access/route";
 
 const Body = z.object({
   action: z.enum(["trash", "restore", "delete", "favorite", "unfavorite", "move", "pin", "unpin", "review"]),
@@ -11,7 +12,7 @@ const Body = z.object({
 });
 
 /** One action on many generations: Trash / Restore / Delete forever / (un)favorite / move to a folder / (un)pin / review status. */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Pick something first" }, { status: 400 });
   const { action, ids, folderId, review } = parsed.data;
@@ -34,4 +35,4 @@ export async function POST(request: Request) {
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
-}
+});

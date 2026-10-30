@@ -1,4 +1,5 @@
 import { FinishError, finishOutput } from "@/server/generations";
+import { handler } from "@/server/access/route";
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -7,7 +8,7 @@ const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
  * Fuobe Soul's finished picture (the look's grade and overlay, made in the browser): it replaces the raw output,
  * which stays as meta.original. Form fields: file (PNG), index (the output's place).
  */
-export async function POST(request: Request, ctx: RouteContext<"/api/generations/[id]/finish">) {
+export const POST = handler({ access: "signed-in" }, async (request: Request, ctx: RouteContext<"/api/generations/[id]/finish">) => {
   const { id } = await ctx.params;
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
@@ -22,4 +23,4 @@ export async function POST(request: Request, ctx: RouteContext<"/api/generations
     if (e instanceof FinishError) return Response.json({ error: e.message }, { status: e.status });
     throw e;
   }
-}
+});

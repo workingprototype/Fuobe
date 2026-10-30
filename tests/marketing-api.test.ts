@@ -150,7 +150,7 @@ describe("brand kits", () => {
   });
 
   it("lists, edits (cleaning values) and cancels through the routes", async () => {
-    const list = await (await brandsRoute.GET()).json();
+    const list = await (await brandsRoute.GET(new Request("http://localhost/"))).json();
     expect(list.items[0]).toMatchObject({ id: brandId, productCount: 2 });
     const res = await brandRoute.PATCH(json("PATCH", { tagline: "  Slow Sunday granola  ", colors: ["#ABCDEF", "nope", "rgb(1,2,3)"], tone: ["Warm", "Warm", ""], language: "de" }), params({ id: brandId }));
     const b = await res.json();

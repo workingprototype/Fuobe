@@ -1,11 +1,12 @@
 import { JobInputSchema, LayersError, startJob } from "@/server/layers";
+import { handler } from "@/server/access/route";
 
 /**
  * Start a tool (decompose, separate a layer, edit text, remove background, a regional edit, upscale,
  * relight, angles, expand, generate a layer): its generations run on the chosen engine; the editor
  * applies the result when it lands. 422 with the reason when it can't start.
  */
-export async function POST(request: Request, ctx: RouteContext<"/api/layers/[id]/jobs">) {
+export const POST = handler({ access: "signed-in" }, async (request: Request, ctx: RouteContext<"/api/layers/[id]/jobs">) => {
   const { id } = await ctx.params;
   const parsed = JobInputSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Could not start the tool: the request was incomplete" }, { status: 400 });
@@ -14,4 +15,4 @@ export async function POST(request: Request, ctx: RouteContext<"/api/layers/[id]
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: e instanceof LayersError ? e.status : 422 });
   }
-}
+});

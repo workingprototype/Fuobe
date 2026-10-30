@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { addSource, ProjectError } from "@/server/assist/projects";
 import { contentTypeFor, deleteAsset, saveFile } from "@/server/storage";
+import { handler } from "@/server/access/route";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 /** Documents Assist can read (text, Markdown, PDF), plus media it can pass on as inputs. */
@@ -18,7 +19,7 @@ const Json = z.discriminatedUnion("kind", [
  * Add a source: JSON (a link, an uploaded file URL, an element, a note) or multipart "file"
  * (documents and media are stored like uploads). Links are fetched through the guarded fetcher.
  */
-export async function POST(request: Request, ctx: RouteContext<"/api/assist/projects/[projectId]/sources">) {
+export const POST = handler({ access: "signed-in" }, async (request: Request, ctx: RouteContext<"/api/assist/projects/[projectId]/sources">) => {
   const { projectId } = await ctx.params;
   try {
     if ((request.headers.get("content-type") ?? "").startsWith("multipart/form-data")) {
@@ -47,4 +48,4 @@ export async function POST(request: Request, ctx: RouteContext<"/api/assist/proj
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: e instanceof ProjectError ? e.status : 500 });
   }
-}
+});

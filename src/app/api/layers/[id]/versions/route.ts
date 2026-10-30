@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createVersion, LayersError, parseDoc } from "@/server/layers";
+import { handler } from "@/server/access/route";
 
 const Body = z.object({
   doc: z.unknown().optional(),
@@ -11,7 +12,7 @@ const Body = z.object({
 });
 
 /** Save a version (a tool's result, or a restored older version); it becomes the head. */
-export async function POST(request: Request, ctx: RouteContext<"/api/layers/[id]/versions">) {
+export const POST = handler({ access: "signed-in" }, async (request: Request, ctx: RouteContext<"/api/layers/[id]/versions">) => {
   const { id } = await ctx.params;
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid version" }, { status: 400 });
@@ -22,4 +23,4 @@ export async function POST(request: Request, ctx: RouteContext<"/api/layers/[id]
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: e instanceof LayersError ? e.status : 422 });
   }
-}
+});

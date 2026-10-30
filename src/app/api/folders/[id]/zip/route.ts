@@ -1,13 +1,14 @@
 import { connection } from "next/server";
 import { folderZipEntries, LibraryError, ZIP_MAX_BYTES } from "@/server/library";
 import { zipSize, zipStream } from "@/server/zip";
+import { handler } from "@/server/access/route";
 
 /**
  * Download a folder as one zip: its finished results, and each subfolder's in a folder of its own.
  * `?check=1` answers {files, size} (or the error) without the zip, so the page can explain a refusal.
  * Helper steps are left out, as on the folder's page, unless `?steps=1` (Show steps is on).
  */
-export async function GET(request: Request, ctx: RouteContext<"/api/folders/[id]/zip">) {
+export const GET = handler({ access: "signed-in" }, async (request: Request, ctx: RouteContext<"/api/folders/[id]/zip">) => {
   await connection();
   const { id } = await ctx.params;
   const sp = new URL(request.url).searchParams;
@@ -31,4 +32,4 @@ export async function GET(request: Request, ctx: RouteContext<"/api/folders/[id]
       "Cache-Control": "no-store",
     },
   });
-}
+});

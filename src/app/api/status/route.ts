@@ -4,9 +4,10 @@ import { comfyRam, probeComfy } from "@/server/providers/comfyui";
 import { nothingConnected, type EngineModeName } from "@/lib/connections";
 import { getSetting, setSetting } from "@/server/settings";
 import { offeredSummary } from "@/server/model-access";
+import { handler } from "@/server/access/route";
 
 /** Which providers are usable right now — drives badges, the demo-mode notice and Home's first-run guide. */
-export async function GET() {
+export const GET = handler({ access: "signed-in" }, async () => {
   await connection();
   const comfy = await probeComfy(true);
   const ram = comfy ? comfyRam() : undefined;
@@ -35,4 +36,4 @@ export async function GET() {
     // Settings → Models & licences: the models switched off, so pickers leave them out (absent while everything is on).
     ...(access && { access }),
   });
-}
+});
