@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownToLine, ClipboardCopy, FileJson, FlaskConical, Import, Plus, Trash2, X } from "lucide-react";
+import { ArrowDownToLine, ClipboardCopy, FileJson, FlaskConical, Import, Plus, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -116,8 +116,17 @@ export function LayoutEditor(props: {
 
 type Drag =
   | { mode: "draw"; x0: number; y0: number; x1: number; y1: number; id: number }
-  | { mode: "move"; index: number; box: LayoutBox; sx: number; sy: number; moved: boolean; id: number }
-  | { mode: "resize"; index: number; box: LayoutBox; handle: Handle; sx: number; sy: number; id: number };
+  | { mode: "move"; index: number; box: LayoutBox; sx: number; sy: number; moved: boolean; id: number; before: LayoutItem[] }
+  | { mode: "resize"; index: number; box: LayoutBox; handle: Handle; sx: number; sy: number; id: number; before: LayoutItem[] };
+
+/** What Undo goes back to (the editor's own: a toast behind the dialog can't be pressed). */
+interface Snapshot {
+  items: LayoutItem[];
+  caption: string;
+  tags: string;
+  canvasType: CanvasType;
+  aspect: string;
+}
 
 function LayoutBoard({
   onOpenChange,
@@ -139,6 +148,7 @@ function LayoutBoard({
   const [drag, setDrag] = useState<Drag | null>(null);
   const [importing, setImporting] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(true);
+  const [history, setHistory] = useState<Snapshot[]>([]);
   const board = useRef<HTMLDivElement>(null);
   const lastPress = useRef<{ x: number; y: number } | null>(null);
   const size = canvasFor(aspect);
@@ -176,13 +186,26 @@ function LayoutBoard({
   };
 
   const patch = (i: number, p: Partial<LayoutItem>) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  /** Keep the state before a change Undo can take back (drawing, moving, resizing, removing, importing). */
+  const remember = (over: Partial<Snapshot> = {}) => setHistory((h) => [...h.slice(-49), { items, caption, tags, canvasType, aspect, ...over }]);
+  const undo = () => {
+    const last = history.at(-1);
+    if (!last) return;
+    setHistory(history.slice(0, -1));
+    setItems(last.items);
+    setCaption(last.caption);
+    setTags(last.tags);
+    setCanvasType(last.canvasType);
+    setAspect(last.aspect);
+    setSelected((s) => (s !== null && s < last.items.length ? s : null));
+  };
   const remove = (i: number) => {
-    const before = items;
+    remember();
     setItems((xs) => xs.filter((_, j) => j !== i));
     setSelected((s) => (s === null ? null : s === i ? (items.length > 1 ? Math.max(0, i - 1) : null) : s > i ? s - 1 : s));
-    toast(`Box ${i + 1} removed`, { id: "layout-removed", action: { label: "Undo", onClick: () => setItems(before) } });
   };
   const add = (box: LayoutBox) => {
+    remember();
     setItems((xs) => [...xs, { label: "object", caption: "", box }]);
     setSelected(items.length);
     setSheetOpen(true);
@@ -200,7 +223,7 @@ function LayoutBoard({
     const p = at(e);
     board.current?.setPointerCapture(e.pointerId);
     if (handle && selected !== null) {
-      setDrag({ mode: "resize", index: selected, box: items[selected].box, handle, sx: p.x, sy: p.y, id: e.pointerId });
+      setDrag({ mode: "resize", index: selected, box: items[selected].box, handle, sx: p.x, sy: p.y, id: e.pointerId, before: items });
       return;
     }
     // A box's number tab picks that box; elsewhere a press picks from the boxes under it (again on the same spot: the next one down).
@@ -219,7 +242,7 @@ function LayoutBoard({
       return;
     }
     setSelected(picked);
-    setDrag({ mode: "move", index: picked, box: items[picked].box, sx: p.x, sy: p.y, moved: false, id: e.pointerId });
+    setDrag({ mode: "move", index: picked, box: items[picked].box, sx: p.x, sy: p.y, moved: false, id: e.pointerId, before: items });
     lastPress.current = { x: p.sx, y: p.sy };
   };
 
@@ -246,11 +269,17 @@ function LayoutBoard({
     }
     // A drag isn't a press on the same spot: the next press there picks the top box again.
     if (drag.mode === "move" && drag.moved) lastPress.current = null;
+    if (drag.mode !== "draw" && drag.before[drag.index]?.box !== items[drag.index]?.box) remember({ items: drag.before });
     setDrag(null);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (typing(e.target) || selected === null || !items[selected]) return;
+    if (typing(e.target)) return;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+      e.preventDefault();
+      return undo();
+    }
+    if (selected === null || !items[selected]) return;
     if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       return remove(selected);
@@ -273,7 +302,7 @@ function LayoutBoard({
       toast.error("No layout found there: paste a Fuobe or ComfyUI layout, a MOSS-Image prompt or bounding boxes");
       return false;
     }
-    const before = { items, caption, tags, canvasType, aspect };
+    remember();
     const own = parsed.draft.aspect && aspects?.includes(parsed.draft.aspect) ? parsed.draft.aspect : undefined;
     setItems(parsed.draft.items);
     if (parsed.draft.summary.caption.trim()) setCaption(parsed.draft.summary.caption.trim());
@@ -282,19 +311,7 @@ function LayoutBoard({
     if (own) setAspect(own);
     setSelected(parsed.draft.items.length ? 0 : null);
     const n = parsed.draft.items.length;
-    toast(`Imported ${n} box${n === 1 ? "" : "es"} from ${SOURCE_WORDS[parsed.from]}`, {
-      id: "layout-import",
-      action: {
-        label: "Undo",
-        onClick: () => {
-          setItems(before.items);
-          setCaption(before.caption);
-          setTags(before.tags);
-          setCanvasType(before.canvasType);
-          setAspect(before.aspect);
-        },
-      },
-    });
+    toast(`Imported ${n} box${n === 1 ? "" : "es"} from ${SOURCE_WORDS[parsed.from]} · Undo is under the canvas`, { id: "layout-import" });
     return true;
   };
 
@@ -377,7 +394,7 @@ function LayoutBoard({
             Done
           </Button>
         </div>
-        <DialogDescription id="layout-editor-hint" className="w-full text-[12px] leading-snug text-muted-foreground">
+        <DialogDescription id="layout-editor-hint" className="w-full text-[12px] leading-snug text-muted-foreground max-sm:sr-only">
           Drag to draw a box, then say what goes in it. Layout prompts are experimental in MOSS-Image&apos;s own guide: boxes guide the picture, they don&apos;t pin it.
         </DialogDescription>
       </header>
@@ -448,6 +465,9 @@ function LayoutBoard({
           <div className="flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
             <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[12px]" onClick={() => add(newBox(items.length))}>
               <Plus className="size-3.5" /> Add box
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[12px]" onClick={undo} disabled={!history.length} aria-keyshortcuts="Control+Z Meta+Z">
+              <Undo2 className="size-3.5" /> Undo
             </Button>
             <span className="tabular-nums">
               {aspect} · {size.exact ? "" : "about "}

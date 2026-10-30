@@ -7,6 +7,7 @@ import type { Generation, GenerationRequest, ModelDef, ModelRoute } from "@/lib/
 import { fitCanvas } from "@/lib/comfy";
 import { enterLayout, groupModels, layoutModelNote, layoutRequest, layoutShape, layoutSizeWarning, leaveLayout, settingsShape, withoutLayout } from "@/lib/composer";
 import { compileFlux3, compileIdeogram, compileMoss, compileWords, type LayoutDraft } from "@/lib/layout-prompt";
+import { boxesAt, drawnBox, movedBox, newBox, nudgedBox, pickBox, resizedBox } from "@/lib/layout-edit";
 import { editableLayout, editLayoutHref, outputActions, readEditLayoutParam } from "@/lib/output-actions";
 import { slimModel } from "@/lib/studio-catalog";
 
@@ -244,5 +245,51 @@ describe("Edit layout", () => {
     expect(readEditLayoutParam("gen_abc123.2")).toEqual({ id: "gen_abc123", index: 2 });
     expect(readEditLayoutParam("gen_abc123")).toEqual({ id: "gen_abc123", index: 0 });
     for (const bad of ["", null, "../etc", "a.b", "x".repeat(80)]) expect(readEditLayoutParam(bad)).toBeNull();
+  });
+});
+
+describe("the editor's box maths", () => {
+  // Whole pixels at this size: boxes snap to the canvas's pixels.
+  const W = 1000;
+  const H = 500;
+
+  it("draws a box corner to corner on the canvas's own pixels, kept inside, none for a click", () => {
+    expect(drawnBox(100, 50, 500, 250, W, H)).toEqual([0.1, 0.1, 0.5, 0.5]);
+    // Dragged up and to the left, and past the edge; snapped to whole pixels.
+    expect(drawnBox(500, 250, -50, -50, W, H)).toEqual([0, 0, 0.5, 0.5]);
+    expect(drawnBox(100.4, 50.4, 500.4, 250.4, W, H)).toEqual([0.1, 0.1, 0.5, 0.5]);
+    expect(drawnBox(100, 100, 108, 104, W, H)).toBeNull();
+  });
+
+  it("picks the top box, keeps a picked one under another, and cycles on the same spot", () => {
+    const boxes: [number, number, number, number][] = [
+      [0, 0, 1, 1],
+      [0.2, 0.2, 0.6, 0.6],
+      [0.4, 0.4, 0.8, 0.8],
+    ];
+    const stack = boxesAt(boxes, 0.5, 0.5);
+    expect(stack).toEqual([2, 1, 0]);
+    expect(pickBox(stack, null, false)).toBe(2);
+    expect(pickBox(stack, 0, false)).toBe(0);
+    expect(pickBox(stack, 2, true)).toBe(1);
+    expect(pickBox(stack, 1, true)).toBe(0);
+    expect(pickBox(stack, 0, true)).toBe(2);
+    expect(pickBox([], 1, true)).toBeNull();
+  });
+
+  it("moves, resizes and nudges within the canvas, never below 16 px", () => {
+    const box: [number, number, number, number] = [0.1, 0.1, 0.5, 0.5];
+    expect(movedBox(box, 100, 50, W, H)).toEqual([0.2, 0.2, 0.6, 0.6]);
+    // Pushed past the right edge: held there whole.
+    expect(movedBox(box, 5000, 0, W, H)).toEqual([0.6, 0.1, 1, 0.5]);
+    // The south-east handle drags the corner; the north-west corner stays.
+    expect(resizedBox(box, "se", 100, 50, W, H)).toEqual([0.1, 0.1, 0.6, 0.6]);
+    expect(resizedBox(box, "n", 0, -1000, W, H)[1]).toBe(0);
+    const tiny = resizedBox(box, "e", -5000, 0, W, H);
+    expect(Math.round((tiny[2] - tiny[0]) * W)).toBe(16);
+    expect(nudgedBox(box, "ArrowRight", false, W, H)).toEqual([0.101, 0.1, 0.501, 0.5]);
+    expect(nudgedBox(box, "ArrowUp", true, W, H)).toEqual([0.1, 0.08, 0.5, 0.48]);
+    expect(nudgedBox(box, "Enter", false, W, H)).toBeNull();
+    expect(newBox(0)).toEqual([0.333333, 0.333333, 0.666667, 0.666667]);
   });
 });
