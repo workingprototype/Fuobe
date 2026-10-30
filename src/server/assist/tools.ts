@@ -62,7 +62,7 @@ function summarize(m: ModelDef) {
           ? "free (your machine)"
           : "free (your GPU)"
         : m.pricing
-          ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.note ? ` — ${m.pricing.note}` : ""}`
+          ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.note ? ` — ${m.pricing.note}` : ""}${m.pricing.lorasUnknown ? "; with LoRAs the price is unknown (not published yet)" : ""}`
           : "unknown",
     connected: configured,
     ...(o.aspectRatios && { aspectRatios: o.aspectRatios }),

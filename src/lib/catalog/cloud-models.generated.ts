@@ -1147,7 +1147,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "blackforestlabs/flux-3/text-to-image",
         "map": {
           "aspectRatio": "aspect_ratio",
-          "resolution": "resolution"
+          "resolution": "resolution",
+          "promptExpansion": "enable_prompt_expansion"
         }
       },
       {
@@ -1157,7 +1158,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "images": "image_urls",
           "aspectRatio": "aspect_ratio",
-          "resolution": "resolution"
+          "resolution": "resolution",
+          "promptExpansion": "enable_prompt_expansion"
         }
       }
     ],
@@ -1186,7 +1188,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "2k",
         "4k"
       ],
-      "maxImages": 10
+      "maxImages": 10,
+      "layout": "flux3"
     },
     "badges": [
       "new"
@@ -1362,7 +1365,8 @@ export const CLOUD_MODELS: ModelDef[] = [
               "4:5": "portrait_4_3"
             }
           },
-          "resolution": "quality"
+          "resolution": "quality",
+          "promptExpansion": "enable_prompt_expansion"
         }
       },
       {
@@ -1443,7 +1447,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "very_low"
       ],
       "maxOutputs": 4,
-      "maxImages": 4
+      "maxImages": 4,
+      "layout": "ideogram"
     },
     "defaults": {
       "aspectRatio": "1:1"
@@ -1658,6 +1663,100 @@ export const CLOUD_MODELS: ModelDef[] = [
     },
     "defaults": {
       "aspectRatio": "1:1"
+    }
+  },
+  {
+    "id": "moss-image",
+    "name": "MOSS-Image",
+    "vendor": "OpenMOSS",
+    "family": "moss",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Clean Chinese and English text, and it follows layout boxes",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/moss-image",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "size": {
+            "key": "image_size",
+            "multiple": 16,
+            "min": 512,
+            "max": 2048
+          },
+          "fixed": {
+            "output_format": "png"
+          },
+          "promptExpansion": "enable_prompt_expansion",
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/moss-image/lora"
+      }
+    ],
+    "options": {
+      "sliders": [
+        {
+          "param": "num_inference_steps",
+          "label": "Steps",
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "default": 50
+        },
+        {
+          "param": "guidance_scale",
+          "label": "Guidance",
+          "min": 0,
+          "max": 10,
+          "step": 0.5,
+          "default": 3
+        }
+      ],
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "maxOutputs": 4,
+      "layout": "moss"
+    },
+    "badges": [
+      "new"
+    ],
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Apache-2.0 weights (OpenMOSS-Team/MOSS-Image-SFT); hosted under fal's terms. fal's safety checker returns a black image when it flags an output",
+      "checked": "2026-10-29"
+    },
+    "defaults": {
+      "aspectRatio": "1:1"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.05,
+      "lorasUnknown": true
     }
   },
   {
@@ -16750,7 +16849,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "16:10",
         "21:9"
       ],
-      "maxImages": 4
+      "maxImages": 4,
+      "layout": "vgl"
     },
     "badges": [
       "new"

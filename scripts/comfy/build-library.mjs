@@ -132,6 +132,8 @@ export const BINDING_KEYS = new Set([
   'scheduler', 'motionFrame', 'colormatch', 'audioCfg', 'threshold', 'mosaicScale',
   // DBS soundtrack separation (docs/research/dbs-separation-7.md §4.5): the DBS model and its channel mode
   'separationModel', 'channels',
+  // MOSS-Image (docs/research/new-models-7.md §4.6): the KSampler's sampler and the UNET file its Quality / Fast settings pick
+  'sampler', 'unet',
 ]);
 
 // Sizes in GB: two decimals, and three where two would read 0 (a 4 MB DBS model), so no other entry's size changes.

@@ -971,11 +971,12 @@ export function toggleIn(list: string[], id: string): string[] {
 // ---------------------------------------------------------------------------
 // Cost hint
 
-export function costLabel(s: { demo: boolean; cost: number | null; compact?: boolean }, format: (usd: number) => string): string {
+export function costLabel(s: { demo: boolean; cost: number | null; compact?: boolean; unknown?: boolean }, format: (usd: number) => string): string {
   if (s.demo) return s.compact ? "Demo" : "Demo · free";
   if (s.cost === 0) return "Free";
   if (s.cost != null) return `≈ ${format(s.cost)}`;
-  return "";
+  // A price the provider hasn't published (fal's MOSS-Image with LoRAs): said, never shown as free.
+  return s.unknown ? "Price unknown" : "";
 }
 
 /** Prompts with an @mention: spellcheck would underline every handle. */

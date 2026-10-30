@@ -376,6 +376,35 @@ node validate-workflows.mjs wan21-i2v-uni3c-path --shared
 - **Licences, as information**: Apache-2.0 (Wan 2.1; Uni3C, whose Kijai repack carries no licence field).
 - **GPU**: Uni3C's own figures are 46–51 GB with offload; Fuobe's older 24 GB note is unverified.
 
+## MOSS-Image (N7-1)
+
+One hand-built graph on core nodes (MOSS-Image is native in the pinned ComfyUI; docs/research/new-models-7.md §4.6):
+
+```bash
+npm run build -- moss-image-t2i
+node validate-workflows.mjs moss-image-t2i --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `moss-image-t2i` | t2i | `UNETLoader` (SFT int8; `unet`) → `CLIPLoader` qwen3.5-9b w4a8, type `moss_image` → `VAELoader` FLUX.2 small → `CLIPTextEncode` ×2 (the prompt: plain words or a compiled layout, verbatim) → `EmptyFlux2LatentImage` (`width` / `height`: the layout's canvas) → `SkipLayerGuidanceDiTSimple` (layer 22, first half) → `KSampler` (`steps`, `cfg`, `sampler`, `scheduler`) → `VAEDecode` → `SaveImage` | `/prompt` only (CPU, zero-byte model stand-ins): no render here |
+
+- **Weights** (13 GB): Comfy-Org/MOSS-Image at `530a4c94f92c35ef6818b1b035a983fe9dcf5f54` (diffusion model 5.41 GB, text encoder
+  7.34 GB, small VAE 0.25 GB), and, for the Fast setting only, Spectrallic's SFT with the 8-step DMD LoRA merged in (5.41 GB,
+  `optionalModels`). All Apache-2.0. The Workflows page's install commands fetch them; nothing is downloaded at build time.
+- **Settings**: Standard is the Comfy template's (25 steps, CFG 2.5, er_sde / simple), Best OpenMOSS's guide (50, 3, euler),
+  Fast the DMD file at 8 steps and CFG 1 (`ModelOptions.controls[].sets` on `oss-moss-image` writes them).
+- **Canvas**: a size the request names (`params.extra.width` / `height`, a layout's canvas) is fitted to the 16-pixel grid
+  and 2048 px a side with its shape kept (`fitCanvas` in `src/lib/comfy.ts`), as fal's `image_size` is, so both engines
+  render one size (2560 × 1000 becomes 2048 × 800 on both).
+- **Licences, as information**: all Apache-2.0, the optional Fast file's too; the small decoder is byte-identical to BFL's
+  Apache-2.0 FLUX.2-small-decoder (the manifest's `license` says so, and Settings → Models & licences shows it).
+- **Not installed on purpose**: LinXce's Comfyui-Moss-LayoutPrompt (its `MOSSImageLayoutPrompt` id collides with core's) and
+  OpenMOSS's loader pack (core's native path is what its own README recommends). Fuobe compiles layouts itself
+  (`src/lib/layout-prompt.ts`).
+- **GPU**: no official VRAM figure (16 GB is a guess with ComfyUI's offloading). comfy-kitchen's int8 / w4a8 kernels need a
+  PyTorch built for CUDA 13 (cu130); otherwise `comfy/quant_ops.py` turns them off with a warning.
+
 ## Adding a workflow
 
 1. Find the template name in `$COMFYUI_DIR/.venv/lib/python3.*/site-packages/comfyui_workflow_templates_json/templates/index.json`

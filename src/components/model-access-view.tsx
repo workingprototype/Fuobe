@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CheckCircle2, CircleHelp, CreditCard, ExternalLink, FlaskConical, Globe, Info, RotateCcw, Search } from "lucide-react";
-import { Fragment, useDeferredValue, useMemo, useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,7 +36,46 @@ function ClassBadge({ licence }: { licence: LicenceInfo }) {
   );
 }
 
-function LicenceLine({ licence, prefix }: { licence: LicenceInfo; prefix?: string }) {
+const NOTE = "text-[12px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]";
+
+/**
+ * A licence note cut at two lines. When it is cut, "More" shows the rest: a tap or the keyboard reaches it, not only a
+ * mouse over the title.
+ */
+function ClampedNote({ text, about }: { text: string; about: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    // The observer answers once as it starts, then on every resize (a phone turned, the window narrowed).
+    const watch = new ResizeObserver(() => setCut(el.scrollHeight > el.clientHeight + 1));
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [open, text]);
+  return (
+    <div>
+      <p ref={ref} className={cn(NOTE, !open && "line-clamp-2")} title={open ? undefined : text}>
+        {text}
+      </p>
+      {(cut || open) && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="inline-flex h-6 items-center rounded-sm text-[12px] font-medium text-foreground underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          {open ? "Less" : "More"}
+          <span className="sr-only"> about {about}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** `full`: the note is shown whole (a hosted model's weights line: short facts of its own), not cut at two lines. */
+function LicenceLine({ licence, prefix, full }: { licence: LicenceInfo; prefix?: string; full?: boolean }) {
   return (
     <div className="mt-1 space-y-0.5">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
@@ -57,7 +96,7 @@ function LicenceLine({ licence, prefix }: { licence: LicenceInfo; prefix?: strin
           </span>
         ))}
       </p>
-      {licence.note && <p className="line-clamp-2 text-[12px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]" title={licence.note}>{licence.note}</p>}
+      {licence.note && (full ? <p className={NOTE}>{licence.note}</p> : <ClampedNote text={licence.note} about={prefix ? `${prefix} ${licence.name}` : licence.name} />)}
     </div>
   );
 }
@@ -100,6 +139,7 @@ function ModelRow({ m, on, onChange }: { m: ModelEntry; on: boolean; onChange: (
           {m.hidden ? " · a helper step studios run" : ""}
         </p>
         <LicenceLine licence={m.licence} />
+        {m.weights && <LicenceLine licence={m.weights} prefix="Weights:" full />}
         {m.cloud && <LicenceLine licence={m.cloud} prefix="In the cloud:" />}
         {on && m.offBy.length > 0 && <p className="mt-1 text-[12px] font-medium text-warning">Not offered: {m.offBy.join(" and ")}</p>}
         {on && m.partly.length > 0 && <p className="mt-1 text-[12px] text-muted-foreground">Partly: {m.partly.join(" and ")}, so it runs on what is still on</p>}
@@ -202,7 +242,7 @@ export function ModelAccessView() {
     if (!data) return [];
     const order = (c: LicenceClass) => LICENCE_CLASSES.indexOf(c);
     return data.models
-      .filter((m) => keep(!access!.models.includes(m.id) && !m.offBy.length) && matches(q, m.name, m.vendor, m.id, m.licence.name, m.licence.note, m.cloud?.name, CLASS_LABEL[m.licence.class]))
+      .filter((m) => keep(!access!.models.includes(m.id) && !m.offBy.length) && matches(q, m.name, m.vendor, m.id, m.licence.name, m.licence.note, m.cloud?.name, m.weights?.name, m.weights?.note, CLASS_LABEL[m.licence.class]))
       .sort((a, b) => order(a.licence.class) - order(b.licence.class));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, access, q, show]);

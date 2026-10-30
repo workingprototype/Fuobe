@@ -15,7 +15,7 @@ import { sourceSeconds } from "./clip-windows";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
 import { anglesPrompt, anglesWords, ANGLES_ORIGINAL } from "./open-tools";
-import { numFramesValue, sizeValue } from "./payload";
+import { askedSize, numFramesValue, sizeValue } from "./payload";
 import { characterScale, CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
 /** Infer the operation from what the user attached. */
@@ -396,6 +396,8 @@ export function planGeneration(
     params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
   }
 
+  params = controlSets(model, params);
+
   const requested = Math.max(1, Math.min(8, params.numOutputs ?? 1));
   const maxPerJob = Math.max(1, model.options.maxOutputs ?? 1);
   const perJobOutputs = Math.min(requested, maxPerJob);
@@ -411,6 +413,24 @@ export function planGeneration(
     ...(notes.length && { notes }),
     ...(soulPlan && { soul: soulPlan }),
   };
+}
+
+/**
+ * A control whose value stands for several settings (ModelOptions.controls[].sets: MOSS-Image's Quality is 50 steps,
+ * CFG 3 and euler on your GPU) writes them into params.extra in its own place; a setting the request gives itself wins.
+ * The request as asked (Reuse) keeps the control's value.
+ */
+export function controlSets(model: ModelDef, params: GenParams): GenParams {
+  const controls = (model.options.controls ?? []).filter((c) => c.sets);
+  if (!controls.length) return params;
+  const extra: Record<string, unknown> = { ...params.extra };
+  for (const c of controls) {
+    const value = extra[c.param] ?? c.default;
+    delete extra[c.param];
+    const chosen = value === undefined || value === null ? undefined : c.sets?.[String(value)];
+    for (const [k, v] of Object.entries(chosen ?? {})) if (!(k in extra)) extra[k] = v;
+  }
+  return { ...params, extra: Object.keys(extra).length ? extra : undefined };
 }
 
 /**
@@ -690,10 +710,25 @@ function sentMegapixels(params: GenParams): number | undefined {
   return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 ? (w * h) / (1024 * 1024) : undefined;
 }
 
+/**
+ * The megapixels the run's route makes when it sends a size (FieldMap.size: fal's MOSS-Image image_size): the aspect
+ * ratio's size, or the size asked for (a layout's canvas) kept on the route's grid and within its limits, as the
+ * payload sends it. fal's megapixel is 1024 × 1024 pixels. Undefined when the route sends no size.
+ */
+function routeMegapixels(model: ModelDef, params: GenParams, op?: Operation): number | undefined {
+  const size = (op ? model.routes.find((r) => r.op === op) : model.routes[0])?.map?.size;
+  if (!size) return undefined;
+  const asked = size.key ? askedSize(params.extra?.[size.key]) : undefined;
+  const { width, height } = sizeValue(size, params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution, asked);
+  return (width * height) / (1024 * 1024);
+}
+
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
 export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation, withLoras = false): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
   const p = model.pricing;
+  // A LoRA endpoint with no published price (fal's MOSS-Image /lora): unknown, never free.
+  if (withLoras && p.lorasUnknown) return null;
   const n = params.numOutputs ?? 1;
   const res = params.resolution ?? model.defaults?.resolution;
   // A run with LoRAs goes to the LoRA endpoint, which has its own price.
@@ -707,7 +742,9 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   // Per megapixel of every image made: Soul's sizes are known (about 1 or 2 MP), so is a size sent as fal's image_size
   // {width, height} (Fuobe Mixed Media's frames); other models are taken as 1 MP.
   if (p.unit === "megapixel") {
-    const mp = soulKind(model) ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution) : (sentMegapixels(params) ?? 1);
+    const mp = soulKind(model)
+      ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution)
+      : (routeMegapixels(model, params, op) ?? sentMegapixels(params) ?? 1);
     per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
   }
   if (p.unit === "second") {

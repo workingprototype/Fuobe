@@ -124,7 +124,11 @@ describe("round-3 open models", () => {
         const ids = r.endpoint.includes("{n}") ? ["2", "3", "4"].map((n) => r.endpoint.replace("{n}", n)) : [r.endpoint];
         for (const wid of ids) {
           const keys = Object.keys(workflowById.get(wid)?.bindings ?? {});
-          for (const p of [...(m.options.sliders ?? []), ...(m.options.controls ?? [])].map((s) => s.param)) {
+          // A control that stands for several settings (MOSS-Image's Quality) is the settings it writes.
+          const params = [...(m.options.sliders ?? []), ...(m.options.controls ?? [])].flatMap((s) =>
+            "sets" in s && s.sets ? [...new Set(Object.values(s.sets).flatMap((v) => Object.keys(v)))] : [s.param],
+          );
+          for (const p of params) {
             // Fuobe Angles' camera fields become the Multiple-angles LoRA's words in the planner (src/lib/catalog/open-tools.ts).
             if (!PROVIDER_PARAMS.has(p) && p !== "cameraMotion" && !(m.id === ANGLES_ORIGINAL && (ANGLES_FIELDS as readonly string[]).includes(p))) expect(keys, `${m.id} → ${wid}: ${p}`).toContain(p);
           }

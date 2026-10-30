@@ -111,6 +111,9 @@
 //                                          else the host's pick: TIGER when /system_stats says the device is cuda, BSRNN on a CPU)
 //   channels*                             (DBSSeparate channels: mono | each channel; params.extra.channels, "mono" for inputs with
 //                                          more than 2 channels, which ComfyUI can't save, with node 4 rewired to music + effects)
+// Keys added with MOSS-Image (docs/research/new-models-7.md §4.6). Model settings (params.extra; MOSS-Image's Quality control writes them):
+//   sampler, scheduler                    (KSampler sampler_name / scheduler)
+//   unet                                  (UNETLoader file: the Fast tier's drop-in 8-step DMD file, listed in optionalModels)
 // Entry field requiredModels: files a loader reads by a name with no extension (DBSLoader's model folder), listed in the
 // manifest like any model (KNOWN_MODELS keys are the path under the folder, e.g. 'DBS-BSRNN-DnR/model.safetensors'), so the
 // Workflows page's presence check and its install commands cover them.
@@ -217,6 +220,12 @@ export const KNOWN_MODELS = {
   'H3-Person-Remover-V1.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA/resolve/fe136b3dc93aea993b9f194d48ea9859fdc2de14/H3-Person-Remover-V1.safetensors' },
   'depth_anything_3_mono_large.safetensors': { folder: 'geometry_estimation', url: 'https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors' },
   // comfyui-oss-3 additions (docs/research/comfyui-oss-3.json, sizes from the Hugging Face tree API)
+  // MOSS-Image (research #7 §4.4): Comfy-Org's int8 / w4a8 set (the Comfy template's) at a pinned commit, and Spectrallic's SFT with the
+  // 8-step DMD LoRA merged in, a drop-in UNET for the Fast tier (Apache-2.0 throughout; the small VAE is byte-identical to BFL's FLUX.2-small-decoder).
+  'moss_image_sft_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_sft_int8_convrot.safetensors' },
+  'qwen3.5_9b_w4a8_gptq.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors' },
+  'flux2-vae_small.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/vae/flux2-vae_small.safetensors' },
+  'moss_image_sft_8stepdmd_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/resolve/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors' },
   'z_image_turbo_bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
   'qwen_3_4b.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors' },
   'ae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors' },
@@ -651,6 +660,35 @@ export const SPEC = [
     limits: { maxWidth: 1536, maxHeight: 1536, dimensionMultiple: 8 },
     vramGb: 8,
     notes: 'Lightweight baseline (single 6.9 GB checkpoint). Native 1024x1024 class resolutions. Default negative prompt replaced with a generic one.',
+  },
+  // ---- MOSS-Image (research #7 §4.6, package N7-1): plain words or a layout's JSON boxes ------------------------
+  {
+    id: 'moss-image-t2i',
+    title: 'MOSS-Image SFT text to image (plain words or a layout of boxes; strong Chinese and English text)',
+    capability: 't2i',
+    handBuilt: 'hand-built/moss-image-t2i.json',
+    bindings: {
+      prompt: [b('4', 'text')], negativePrompt: [b('5', 'text')], width: [b('6', 'width')], height: [b('6', 'height')],
+      seed: [b('8', 'seed')], steps: [b('8', 'steps')], cfg: [b('8', 'cfg')], sampler: [b('8', 'sampler_name')], scheduler: [b('8', 'scheduler')],
+      unet: [b('1', 'unet_name')],
+    },
+    outputs: [{ node: '10', kind: 'image' }],
+    defaults: { sampler: 'er_sde', scheduler: 'simple', unet: 'moss_image_sft_int8_convrot.safetensors' },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    optionalModels: ['moss_image_sft_8stepdmd_int8_convrot.safetensors'],
+    vramGb: 16,
+    // §4.5: each file's licence, the optional Fast file's too (Spectrallic's card is Apache-2.0).
+    license:
+      "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; " +
+      "Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
+    notes:
+      'Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org\'s template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. ' +
+      'The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; ' +
+      'width / height are the layout\'s canvas (multiples of 16, up to 2048). Standard = the template: 25 steps, CFG 2.5, er_sde / simple, skip-layer guidance on layer 22 for the first half; ' +
+      'Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic\'s SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested). ' +
+      'vramGb 16 is a guess: there is no official figure; about 13 GB of files (DiT 5.4 + encoder 7.3 + VAE 0.25) and ComfyUI offloads. ' +
+      'The int8 / w4a8 files run through comfy-kitchen\'s kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. ' +
+      'Validated by /prompt on the CPU library server only: no render, speed or text accuracy measured here.',
   },
   {
     id: 'qwen-image-edit-2509',
