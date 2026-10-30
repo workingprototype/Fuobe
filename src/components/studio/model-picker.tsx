@@ -10,6 +10,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { type Engine, type ModelDef } from "@/lib/catalog/types";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { bestForStudio, groupModels, toggleIn } from "@/lib/composer";
+import { readsBoxes } from "@/lib/layout-prompt";
 import { formatCost } from "@/lib/format";
 import { ISOLATED_NOTE } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
@@ -80,12 +81,15 @@ function ModelRow({
   selected,
   starred,
   showEngine,
+  boxes,
   onStar,
 }: {
   m: ModelDef;
   selected: boolean;
   starred: boolean;
   showEngine: boolean;
+  /** Layout mode: a "Reads boxes" badge on the models that place boxes by their coordinates. */
+  boxes?: boolean;
   onStar: () => void;
 }) {
   return (
@@ -97,7 +101,13 @@ function ModelRow({
             {m.name}
             {starred && <span className="sr-only">, starred</span>}
           </span>
-          <ModelBadges model={m} max={2} />
+          {boxes && readsBoxes(m) ? (
+            <Badge variant="secondary" className="h-4 shrink-0 rounded-[4px] bg-brand-faint px-1 text-[10px] font-medium text-brand-text">
+              Reads boxes
+            </Badge>
+          ) : (
+            <ModelBadges model={m} max={2} />
+          )}
           {showEngine && (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] bg-muted px-1 text-[10px] leading-4 font-medium text-muted-foreground">
               {m.engine === "open" ? <Cpu className="size-2.5!" /> : <Cloud className="size-2.5!" />}
@@ -145,6 +155,8 @@ interface PickerProps {
   engine: Engine;
   onEngineChange: (e: Engine) => void;
   defaultModels?: { cloud: string; open: string };
+  /** Layout mode: the models that read boxes come first, badged. */
+  boxes?: boolean;
 }
 
 /**
@@ -177,7 +189,7 @@ export function ModelPicker(props: PickerProps) {
 }
 
 /** The searchable list (mounted by the popover / sheet only while it shows). */
-function PickerList({ models, value, onChange, engine, onEngineChange, defaultModels, onPicked }: PickerProps & { onPicked: () => void }) {
+function PickerList({ models, value, onChange, engine, onEngineChange, defaultModels, boxes, onPicked }: PickerProps & { onPicked: () => void }) {
   const [q, setQ] = useState("");
   const status = useStatus().data;
   const mode = useEngineMode();
@@ -191,7 +203,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
     const op = models.find((m) => m.id === id)?.routes[0]?.op;
     return bestForStudio(models, engine, id, 4, op).map((m) => m.id);
   }, [models, engine, defaultModels]);
-  const { groups, count } = useMemo(() => groupModels({ models, engine, engines, query: q, recent, starred, best }), [models, engine, engines, q, recent, starred, best]);
+  const { groups, count } = useMemo(() => groupModels({ models, engine, engines, query: q, recent, starred, best, boxes }), [models, engine, engines, q, recent, starred, best, boxes]);
   const ready = (m: ModelDef) => m.routes.some((r) => status?.providers[r.provider]?.configured);
   const shown = groups.flatMap((g) => g.models);
   const demo = status && status.demoMode !== "off" && shown.some((m) => !ready(m));
@@ -239,7 +251,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
                 data-checked={value?.id === m.id}
                 className={cn("gap-2.5 rounded-lg px-2 py-1.5 [&>svg:last-child]:hidden", value?.id === m.id && "bg-brand-faint data-selected:bg-brand-faint-hover")}
               >
-                <ModelRow m={m} selected={value?.id === m.id} starred={starred.includes(m.id)} showEngine={!!q || m.engine !== engine} onStar={() => setStarred((s) => toggleIn(s, m.id))} />
+                <ModelRow m={m} selected={value?.id === m.id} starred={starred.includes(m.id)} showEngine={!!q || m.engine !== engine} boxes={boxes} onStar={() => setStarred((s) => toggleIn(s, m.id))} />
               </CommandItem>
             ))}
           </CommandGroup>

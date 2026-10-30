@@ -10,7 +10,8 @@ import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
-import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
+import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutLayout, withoutStart } from "@/lib/composer";
+import { editableLayout, EDIT_LAYOUT_PARAM, readEditLayoutParam } from "@/lib/output-actions";
 import { positionsFrom } from "@/lib/catalog/keyframes";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
 import { currentModelId, migrateRequest } from "@/lib/catalog/replaced";
@@ -111,11 +112,14 @@ function draftFromGeneration(g: Generation, config: StudioConfig, getModel: (id:
   // A spoken language stored as a name (Assist's "Spanish") or a locale comes back as the model's own code.
   const languages = getModel(r.modelId)?.options.sourceLanguages;
   if (languages?.length && params.sourceLanguage) params.sourceLanguage = matchSpokenLanguage(params.sourceLanguage, languages) ?? params.sourceLanguage;
+  // A layout run comes back in Layout mode (studios that have it): its boxes in the editor, the prompt as their caption.
+  const laid = config.layout ? withoutLayout(params) : { params, layout: undefined };
   return {
     prompt: r.prompt ?? "",
     negativePrompt: r.negativePrompt ?? "",
     modelId: r.modelId,
-    params,
+    params: laid.params,
+    layout: laid.layout,
     slots: frames ? {} : slots,
     refs: frames ? [] : refs,
     frames,
@@ -451,6 +455,46 @@ function HandoffSync({
   );
 }
 
+/**
+ * Edit layout (`/image?layout=<generation>[.<picture>]`, from a result's menu anywhere): the picture's boxes open in
+ * Layout mode with its words, model and seed: the request's own layout, or the one fal's MOSS-Image planned (decoded at
+ * the picture's size). The param isn't part of the hand-off key, so the draft on screen isn't reset first; it is taken
+ * out of the address once read, so a reload doesn't open it again.
+ */
+function LayoutHandoff() {
+  const sp = useSearchParams();
+  const value = sp.get(EDIT_LAYOUT_PARAM);
+  const { config, setDraft } = useStudioActions();
+  const catalog = useCatalog();
+  const [engine, setEngine] = useEngine();
+  const opened = useRef<string | null>(null);
+  const ref = config.layout ? readEditLayoutParam(value) : null;
+  useEffect(() => {
+    if (!ref || !value || opened.current === value || !catalog.ready) return;
+    opened.current = value;
+    void fetch(`/api/generations/${encodeURIComponent(ref.id)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("That picture isn't in your library any more");
+        const g = (await res.json()) as Generation;
+        const e = editableLayout(g, ref.index);
+        if (!e) throw new Error("This picture has no layout to open");
+        const base = draftFromGeneration(g, config, catalog.getModel);
+        const params = { ...(base.params ?? {}), ...(e.seed !== undefined && { seed: e.seed }) };
+        setDraft({ ...base, prompt: e.caption, params, layout: { ...e.draft, summary: { ...e.draft.summary, caption: "" } } });
+        if (g.engine !== engine) setEngine(g.engine);
+        toast(e.seed !== undefined ? "Layout opened with the picture's seed: move a box or change a word, then generate" : "Layout opened: move a box or change a word, then generate", { id: "edit-layout" });
+        requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
+      })
+      .catch((err: Error) => toast.error(err.message, { id: "edit-layout" }))
+      .finally(() => {
+        const u = new URL(window.location.href);
+        u.searchParams.delete(EDIT_LAYOUT_PARAM);
+        window.history.replaceState(null, "", `${u.pathname}${u.search}${u.hash}`);
+      });
+  }, [ref, value, catalog, config, engine, setDraft, setEngine]);
+  return null;
+}
+
 /** One draft's page: the studio and its hand-off. The start request resets with the draft (a new epoch). */
 function StudioSession({ header, tabs, sync }: { header?: React.ReactNode; tabs?: React.ReactNode; sync: Omit<React.ComponentProps<typeof HandoffSync>, "onStart"> }) {
   const [startRequest, setStartRequest] = useState(0);
@@ -459,6 +503,9 @@ function StudioSession({ header, tabs, sync }: { header?: React.ReactNode; tabs?
     <StartRequestCtx.Provider value={startRequest}>
       <StudioBody header={header} tabs={tabs} />
       <HandoffSync {...sync} onStart={onStart} />
+      <Suspense fallback={null}>
+        <LayoutHandoff />
+      </Suspense>
     </StartRequestCtx.Provider>
   );
 }
