@@ -494,6 +494,16 @@ model("minimax-h3-max", "MiniMax H3 Max", "MiniMax", "hailuo", "video", "Top-tie
       [("t2v", "minimax/h3-max/text-to-video"), ("i2v", "minimax/h3-max/image-to-video", "fal", "+flf2v"), ("ref2v", "minimax/h3-max/reference-to-video"),
        ("extend", "minimax/h3-max/extend-video")],
       badges=["pro"], defaults={"aspectRatio": "16:9"})
+# Build plan N7-5 (Fly path in Cinema's 3D scene): H3 Max following a keyframed camera path from one still. A hidden
+# helper (Cinema's "Film this path" picks it), priced per second by resolution: fal's launch rates until 2026-10-31, then
+# the list rates (Pricing.promo). Prompt expansion stays off so the user's motion words reach the model as written.
+model("minimax-h3-max-camera", "MiniMax H3 Max camera controls", "MiniMax", "hailuo", "video",
+      "A still filmed along a camera path you keyframe: orbits, arcs, dollies and slides that follow the path exactly",
+      [("camera-path", "minimax/h3-max/camera-controls")], hidden=True, ranged_durations=True,
+      defaults={"duration": 5, "resolution": "768P"}, fixed={"prompt_expansion_mode": "disabled"},
+      pricing=("second", 0.08, "768P; 480P $0.05, 1080P $0.16 — launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31",
+               {"byResolution": {"480P": 0.05, "768P": 0.08, "1080P": 0.16},
+                "promo": {"until": "2026-10-31", "usd": 0.052, "byResolution": {"480P": 0.0325, "768P": 0.052, "1080P": 0.104}}}))
 model("hailuo-2-3", "MiniMax Hailuo 2.3", "MiniMax", "hailuo", "video", "Expressive characters and dynamic action",
       [("t2v", "fal-ai/minimax/hailuo-2.3/pro/text-to-video"), ("i2v", "fal-ai/minimax/hailuo-2.3/pro/image-to-video")],
       pricing=("video", 0.49), defaults={"duration": 6}, fixed={"prompt_optimizer": True})
@@ -1456,7 +1466,7 @@ def enum_of(inputs, key):
 
 # Operations research part 4 added (their numeric fields get FieldMap.ranges).
 ROUND4_OPS = ("remove-object", "video-swap", "video-insert", "keyframes", "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop",
-              "audio-join", "scene-3d", "splat", "text-to-3d", "rig-3d", "extract-frames", "images-to-video", "overlay")
+              "audio-join", "scene-3d", "splat", "text-to-3d", "rig-3d", "extract-frames", "images-to-video", "overlay", "camera-path")
 
 
 def part4_slots(op, kf, inputs, m, opts, fmap):
@@ -1493,6 +1503,8 @@ def part4_slots(op, kf, inputs, m, opts, fmap):
             warn(f"{m['id']}: format values {bad or list(m['formats'].values())} not in its output-format enum")
     if "crossfade" in kf and op in ("audio-loop", "audio-join"):
         fmap["crossfade"] = kf["crossfade"]
+    if "trajectory" in kf and op == "camera-path":
+        camera_path_slot(kf, inputs, m, fmap)
     if "zoom" in kf and op == "still-motion":
         z = {"factor": kf["zoom"]}
         # The furthest it zooms (fal: 2x); a steeper move is sent at that.
@@ -1582,6 +1594,28 @@ def part4_ranges(op, inputs, fmap):
             ranges[f] = r
     if ranges:
         fmap["ranges"] = ranges
+
+
+def camera_path_slot(kf, inputs, m, fmap):
+    """A camera path (build plan N7-5: H3 Max camera-controls): FieldMap.cameraPath from the trajectory field's schema,
+    keyframes {time, azimuth, elevation, distance} (the item fields must carry those names), their count, the height's
+    limits and the most turns its description allows; plus the endpoint's fixed moves (free_camera_preset) when it has them."""
+    spec = inputs.get(kf["trajectory"]) or {}
+    item = spec.get("itemSchema") or {}
+    if spec.get("type") != "array" or not {"time", "azimuth", "elevation", "distance"} <= set(item):
+        warn(f"{m['id']}: {kf['trajectory']} is not a list of {{time, azimuth, elevation, distance}} keyframes")
+        return
+    el = item["elevation"]
+    turns = re.search(r"at most (\d+) turns", spec.get("desc") or "")
+    f = {"key": kf["trajectory"], "min": int(spec.get("minItems") or 2), "max": int(spec.get("maxItems") or 12),
+         "elevation": [num(el.get("minimum")) if num(el.get("minimum")) is not None else -90, num(el.get("maximum")) if num(el.get("maximum")) is not None else 90],
+         "maxTurns": int(turns[1]) if turns else 32}
+    free = kf.get("freeCamera")
+    values = enum_of(inputs, free) if free else []
+    if values:
+        f["free"] = {"key": free, "values": [v for v in values if isinstance(v, str)]}
+    fmap["cameraPath"] = f
+
 
 
 def build_route(op, ep, provider, m, opts, ropts=None):

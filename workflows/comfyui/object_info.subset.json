@@ -23096,6 +23096,84 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "WanUni3CControlnetApply": {
+    "input": {
+      "required": {
+        "model": [
+          "MODEL"
+        ],
+        "model_patch": [
+          "MODEL_PATCH"
+        ],
+        "vae": [
+          "VAE"
+        ],
+        "render_video": [
+          "IMAGE",
+          {
+            "tooltip": "The guidance video rendered from the camera trajectory, most commonly warped point cloud renders of the input image."
+          }
+        ],
+        "strength": [
+          "FLOAT",
+          {
+            "default": 1,
+            "min": -10,
+            "max": 10,
+            "step": 0.01
+          }
+        ],
+        "start_percent": [
+          "FLOAT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 1,
+            "step": 0.001
+          }
+        ],
+        "end_percent": [
+          "FLOAT",
+          {
+            "default": 1,
+            "min": 0,
+            "max": 1,
+            "step": 0.001
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "model",
+        "model_patch",
+        "vae",
+        "render_video",
+        "strength",
+        "start_percent",
+        "end_percent"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MODEL"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "MODEL"
+    ],
+    "name": "WanUni3CControlnetApply",
+    "display_name": "Apply Wan Uni3C ControlNet",
+    "description": "",
+    "python_module": "comfy_extras.nodes_model_patch",
+    "category": "model/patch/wan",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "experimental": true,
+    "search_aliases": []
+  },
   "WanVaceToVideo": {
     "input": {
       "required": {

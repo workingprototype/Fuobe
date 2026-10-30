@@ -15708,6 +15708,160 @@
       "notes": "Subject or product splat (3D Angles, 3D Jutsu props, a splat alternative to TRELLIS.2 spins). The official template 3d_triposplat_image_to_gaussian_splat (2026-06-02) with the UI-only live-preview patch removed and a 75-frame H.264 orbit (RenderSplat + CreateCameraInfo orbit yaw 35, pitch 30, distance 2.5; role turntable, 25 fps). Subject only: BiRefNet cuts it out first (cutout false = use the image's own alpha). Output 1 (role splat): splatFormat spz (Niantic, gzip, ~10x smaller, base colour), ply (full spherical harmonics) or ksplat, saved by SaveGLB under that extension (meta.format = the extension). Storage: ComfyUI's /view serves all three as application/octet-stream (Python mimetypes knows none), so persistOutput falls back to the extension: storage.ts maps spz / ply to model/x-spz / model/ply (added by catalog-4) and so kind model3d, but ksplat has no mapping and lands as an image .bin; collectOutputs sets only meta.role, so the provider sets meta.format (and a contentType for ksplat). cutout is true by default (manifest defaults). numGaussians up to 1,048,576 (262,144 by default); seed drives both the sampler and the decoder. RenderSplat also takes a look_at camera, so a view picked in the browser can be rendered on the server. 3.78 GB of weights (TripoSplat 0.74, DINOv3 ViT-H 1.68, TripoSplat VAE decoder 0.58, FLUX.2 VAE 0.34, BiRefNet 0.44). VRAM unverified. Validated by /prompt only."
     },
     {
+      "id": "wan21-i2v-uni3c-path",
+      "title": "Fly path: a still filmed along a camera path, Wan 2.1 I2V guided by Uni3C on a browser render of the path (core nodes)",
+      "capability": "camera-path",
+      "file": "wan21-i2v-uni3c-path.json",
+      "source": "hand-built (scripts/comfy/hand-built/wan21-i2v-uni3c-path.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "5",
+            "input": "image"
+          }
+        ],
+        "video": [
+          {
+            "node": "7",
+            "input": "file"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "10",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "11",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "12",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "12",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "13",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "13",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "13",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "18",
+            "input": "shift"
+          }
+        ],
+        "strength": [
+          {
+            "node": "9",
+            "input": "strength"
+          }
+        ],
+        "checkpoint": [
+          {
+            "node": "1",
+            "input": "unet_name"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "16",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "16",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 832,
+        "height": 480,
+        "steps": 30,
+        "cfg": 5,
+        "shift": 5,
+        "strength": 1,
+        "frameStep": 4,
+        "fps": 16,
+        "checkpoint": "wan2.1_i2v_720p_14B_fp8_scaled.safetensors"
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "dimensionMultiple": 16,
+        "maxFrames": 81
+      },
+      "models": [
+        {
+          "file": "wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan-2.1/resolve/123acf1cc74bccbb9bfff8ac1ee72edc08c2341d/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+          "sizeGb": 16.4
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "clip_vision_h.safetensors",
+          "folder": "clip_vision",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors",
+          "sizeGb": 1.26
+        },
+        {
+          "file": "Wan21_Uni3C_controlnet_fp16.safetensors",
+          "folder": "model_patches",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/8260d429d19fd7a72304cad059160b95d843913f/Wan21_Uni3C_controlnet_fp16.safetensors",
+          "sizeGb": 2
+        },
+        {
+          "file": "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/4d02bd37ce7d852ae45a4c2841956db727b480b4/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+          "sizeGb": 16.64,
+          "optional": true
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 48,
+      "license": "Apache-2.0 (Wan 2.1 I2V 14B; Uni3C, alibaba-damo-academy/Uni3C — Kijai's repack repo carries no licence field)",
+      "validated": true,
+      "notes": "Cinema 3D scene \"Film this path\" (N7-5): the still is the start image (WanImageToVideo, 81 frames, CLIP vision H) and the browser's render of the MoGe mesh or point cloud along the path (src/components/cinema/scene-engine.ts recordPath: 81 frames, 16 fps, black where nothing was seen) is the `video`, which core WanUni3CControlnetApply encodes with the Wan VAE as Uni3C's render_video (it pads or cuts it to the latent's frame count and resizes it, centre crop, to the output size; it has no hole-mask input, so the render's mask stays in the browser for WorldCast, N7-9). Model path: UNETLoader -> ModelSamplingSD3 (shift 5) -> Uni3C (strength 1, 0-1) -> KSampler (30 steps, cfg 5, uni_pc / simple; Uni3C's own sampler settings are 50 steps at cfg 5 — to confirm on a GPU). Weights: Kijai/WanVideo_comfy Wan21_Uni3C_controlnet_fp16 @ 8260d429 in models/model_patches (its header has every key core ModelPatchLoader's Uni3C branch reads; loading it is inferred, not run) and Wan 2.1 I2V 14B 720P fp8 scaled (Comfy-Org/Wan-2.1 @ 123acf1c), the base Uni3C was trained on. The 480P Q8 GGUF Fuobe pins for InfiniteTalk can't load through a core node (UNETLoader reads no GGUF; that needs city96's ComfyUI-GGUF pack), so the core drop-in to try first on a smaller GPU is the 480P fp8 file the native InfiniteTalk graph uses (`checkpoint`): both are dim 5120, which the Uni3C node checks. VRAM: Uni3C's own figures are 46-51 GB with offload (Fuobe's older 24 GB note is unverified). Validated by /prompt only (no GPU here)."
+    },
+    {
       "id": "reference-brief-gemma4",
       "title": "Reference video to a style brief: Gemma 4 E4B reads the frames and the sound (core TextGenerate)",
       "capability": "write",

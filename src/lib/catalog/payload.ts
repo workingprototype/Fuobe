@@ -1,4 +1,5 @@
 import { readTimeline, timelineTracks } from "@/lib/av/timeline";
+import { toH3MaxTrajectory, type CameraKey } from "@/lib/camera-path";
 import { upscaleFactorFor } from "@/lib/av/upscale";
 import { carriesLayout, LAYOUT_PARAM } from "@/lib/layout-prompt";
 import { loraFields } from "./loras";
@@ -7,6 +8,21 @@ import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, ty
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
   if (typeof field === "string") return [field, value];
   return [field.key, field.values && value in field.values ? field.values[value] : value];
+}
+
+/**
+ * A camera path as the route takes it (H3 Max camera-controls): the keyframes within the route's limits, or, for a pure
+ * slide, the endpoint's own truck move in place of them (the field the schema says replaces the trajectory).
+ */
+export function cameraPathFields(f: NonNullable<FieldMap["cameraPath"]>, keys: CameraKey[]): Record<string, unknown> {
+  const cam = toH3MaxTrajectory(keys, { min: f.min, max: f.max, elevation: f.elevation, maxTurns: f.maxTurns });
+  if ("freeCamera" in cam) {
+    if (f.free?.values.includes(cam.freeCamera)) return { [f.free.key]: cam.freeCamera };
+    // No fixed moves on this route: the slide is sent as a still trajectory (the camera holds its pose).
+    const held = toH3MaxTrajectory(keys.map((k) => ({ ...k, truck: 0 })), { min: f.min, max: f.max, elevation: f.elevation, maxTurns: f.maxTurns });
+    return "trajectory" in held ? { [f.key]: held.trajectory } : {};
+  }
+  return { [f.key]: cam.trajectory };
 }
 
 /** "16:9" → 16/9; undefined for "auto" and other names. */
@@ -440,6 +456,7 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     out[map.animation.key] = numeric ? n : input.animation;
     if (map.animation.flag) out[map.animation.flag] = true;
   }
+  if (map.cameraPath && input.cameraPath?.length) Object.assign(out, cameraPathFields(map.cameraPath, input.cameraPath));
   if (map.numFrames) {
     const n = numFramesValue(map.numFrames, input);
     if (n !== undefined) out[map.numFrames.key] = n;

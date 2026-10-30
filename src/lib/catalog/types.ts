@@ -7,6 +7,7 @@
  * (fal, replicate, comfyui, ...). Presets (apps, camera motions, effects) sit on top
  * of models and add prompt templates, fixed inputs and LoRAs.
  */
+import type { CameraKey } from "@/lib/camera-path";
 import type { SignatureRecord } from "./palettes";
 
 export type Engine = "cloud" | "open";
@@ -81,7 +82,9 @@ export type Operation =
   | "images-to-video" // images in order → a video at params.fps
   | "overlay" // image + a second image (logo) → composited (params.position, params.scale)
   // round 5 (O11)
-  | "face-mosaic"; // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
+  | "face-mosaic" // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
+  // N7-5
+  | "camera-path"; // image + params.cameraPath (+ inputs.video: the open engine's render along the path) → the camera following the path
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -149,6 +152,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   "images-to-video": "Images to video",
   overlay: "Overlay image",
   "face-mosaic": "Pixelate faces",
+  "camera-path": "Fly path",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -218,6 +222,7 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   "images-to-video": "video",
   overlay: "image",
   "face-mosaic": "image",
+  "camera-path": "video",
 };
 
 /**
@@ -459,6 +464,12 @@ export interface FieldMap {
    * layout (params.extra.layout), which expansion would rewrite; a plain prompt leaves the API's default.
    */
   promptExpansion?: string;
+  /**
+   * A camera path (params.cameraPath, build plan N7-5) as the API's keyframes [{time, azimuth, elevation, distance}]:
+   * `min`–`max` of them, the height kept inside `elevation`, at most `maxTurns` turns of travel. `free`: the API's fixed
+   * moves (H3 Max's free_camera_preset), which a pure slide (Truck left / right) is sent as instead of the keyframes.
+   */
+  cameraPath?: { key: string; min: number; max: number; elevation: [number, number]; maxTurns: number; free?: { key: string; values: string[] } };
   /** An empty prompt is left out rather than sent as "" (APIs that read a missing prompt as "no words": Bria Expand). */
   omitEmptyPrompt?: boolean;
   /** params.extra keys this route has no field for (a model-wide control only its other routes read): left out. */
@@ -580,9 +591,10 @@ export interface ModelOptions {
   /**
    * What this model needs beyond its operation's own inputs, checked before a job is created (the
    * composer shows `msg` inline): reference images for a style-reference t2i model, a prompt for a
-   * model whose operation is otherwise promptless, a painted mask or clicked points (video erasers).
+   * model whose operation is otherwise promptless, a painted mask or clicked points (video erasers), a video to follow
+   * (the open Fly path's render).
    */
-  requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; msg: string };
+  requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; video?: boolean; msg: string };
   /** Output formats it can write (params.format: SDR to HDR, export). */
   formats?: VideoFormat[];
   /** Depth maps: the colour maps it draws (params.colormap; see COLORMAPS). Unset = grayscale only. */
@@ -770,6 +782,8 @@ export interface GenParams {
   scale?: number;
   /** An animation preset for a rigged model (the provider's preset id). */
   animation?: string | number;
+  /** A camera path's keyframes (N7-5, src/lib/camera-path.ts): the cloud route sends them as its trajectory. */
+  cameraPath?: CameraKey[];
   /** Free-form advanced params forwarded to the provider payload. */
   extra?: Record<string, unknown>;
 }

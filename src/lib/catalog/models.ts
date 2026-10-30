@@ -1448,6 +1448,27 @@ const open: ModelDef[] = [
       ],
     },
   }),
+  // N7-5: Cinema's "Film this path" on the GPU. The browser renders the 3D scene along the path (Uni3C's render_video);
+  // Wan 2.1 I2V starts from the still and Uni3C keeps its camera on the render. 81 frames at 16 fps, always.
+  o({
+    id: "oss-uni3c-path",
+    name: "Wan 2.1 + Uni3C path",
+    vendor: "Alibaba (Wan, DAMO Uni3C)",
+    family: "wan",
+    kind: "video",
+    tagline: "A still filmed along the camera path you fly in the 3D scene: Uni3C keeps Wan 2.1 on your path · 5 s · ~48 GB GPU · Apache-2.0",
+    badges: ["new"],
+    hidden: true,
+    routes: [comfy("camera-path", "wan21-i2v-uni3c-path", "your browser's render of the path guides Wan 2.1 I2V 720P through core Uni3C")],
+    options: {
+      resolutions: ["480p", "720p"],
+      aspectRatios: ["auto", ...VID_AR],
+      seed: true,
+      maxImages: 1,
+      requires: { images: 1, video: true, msg: "Add the still and the render of the path (Cinema's 3D scene records it when you film a path)" },
+    },
+    defaults: { resolution: "480p", aspectRatio: "auto" },
+  }),
   o({
     id: "oss-tryon-klein",
     name: "FLUX.2 [klein] Try-On",
@@ -1601,8 +1622,17 @@ function withLastFrameExtend(m: ModelDef): ModelDef {
   return { ...m, routes: [...m.routes, { op: "extend", provider: "fal", endpoint: LAST_FRAME_CHAIN, note: "last frame → Kling image-to-video → joined" }] };
 }
 
-/** A launch price while it lasts, the list price after (FLUX 3 Max); read once, when the catalog loads. */
-const withCurrentPrice = (m: ModelDef): ModelDef => (m.pricing?.promo ? { ...m, pricing: pricingAt(m.pricing) } : m);
+/**
+ * A launch price while it lasts, the list price after (FLUX 3 Max, H3 Max camera controls): read each time the price is,
+ * so a run is priced at the rate of the day it runs, even on a server started before the launch price ended.
+ */
+const withCurrentPrice = (m: ModelDef): ModelDef => {
+  const raw = m.pricing;
+  if (!raw?.promo) return m;
+  const out = { ...m };
+  Object.defineProperty(out, "pricing", { get: () => pricingAt(raw), enumerable: true, configurable: true });
+  return out;
+};
 
 /** Cloud models (fal and Replicate) and the cloud tools. */
 const cloud: ModelDef[] = [...CLOUD_MODELS.map(withLastFrameExtend).map(withCurrentPrice), ...cloudTools];

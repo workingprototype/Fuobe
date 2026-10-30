@@ -1,7 +1,7 @@
 "use client";
 
-import { Box, Camera, CircleHelp, Loader2, RotateCcw, SlidersHorizontal, X } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Box, Camera, CircleHelp, Loader2, Route, RotateCcw, SlidersHorizontal, X } from "lucide-react";
+import { useEffect, useEffectEvent, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -12,14 +12,17 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { EngineSwitch } from "@/components/studio/engine-switch";
-import { uploadFile } from "@/lib/api";
+import { uploadFile, useDeleteUpload, useModelAccess, useStatus } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
-import { IMAGE_ASPECTS, RECOMPOSE_MODELS, planCinema, type CinemaGenerateInput, type DirectorSettings } from "@/lib/catalog/cinema";
+import { IMAGE_ASPECTS, PATH_MODELS, PATH_RENDER_FIRST, RECOMPOSE_MODELS, planCinema, type CinemaGenerateInput, type DirectorSettings } from "@/lib/catalog/cinema";
+import { PATH_FPS, PATH_FRAMES, PHOTO_KEY, addKey, flyPoseOf, framePoses, fromScenePose, keyAt, keyPose, presetKeys, removeKey, renderSize, type CameraKey } from "@/lib/camera-path";
 import type { Engine } from "@/lib/catalog/types";
+import { ACCESS_PLACE, offered } from "@/lib/model-access";
 import { APERTURE, FLY_KEYS, F_STOPS, LENS, LENS_STOPS, captureSize, formatStop, frameRect, ratioOf, scenePose, twoFinger, type Rect } from "@/lib/scene3d";
 import { cn } from "@/lib/utils";
 import { useCinemaGenerate } from "./hooks";
 import { usePlanPrice, type SceneTake } from "./scene-actions";
+import { FilmButton, OPEN_SECONDS, PathKeys, PathOptions } from "./scene-path";
 import type { SceneEngine, SceneInfo } from "./scene-engine";
 
 /**
@@ -27,6 +30,10 @@ import type { SceneEngine, SceneInfo } from "./scene-engine";
  * (Shift faster), drag to look, scroll or pinch to move, two fingers to slide; a full-frame lens (18–300 mm),
  * an aperture that previews the depth of field, the project's frame ratios, and Capture, which renders the
  * frame to a PNG, uploads it and queues the recomposition as a new take next to the scene.
+ *
+ * Fly path (build plan N7-5): keyframe the camera (or pick a move), preview the flight, and "Film this path" films the
+ * still along it as a new take: H3 Max camera-controls on the cloud; on the open engine the browser first records the
+ * scene along the path, which guides Wan 2.1 through Uni3C on the user's GPU.
  */
 
 export interface SceneViewerProps {
@@ -51,8 +58,9 @@ const LN_MAX = Math.log(LENS.max);
 const lensToPos = (mm: number) => Math.round(((Math.log(mm) - LN_MIN) / (LN_MAX - LN_MIN)) * 1000);
 const posToLens = (pos: number) => Math.round(Math.exp(LN_MIN + (pos / 1000) * (LN_MAX - LN_MIN)));
 const clampLens = (mm: number) => Math.max(LENS.min, Math.min(LENS.max, Math.round(mm)));
-/** What the planner needs to price a recomposition before anything is captured. */
+/** What the planner needs to price a recomposition before anything is captured (and a path before it is recorded). */
 const PLACEHOLDER_CAPTURE = "/api/files/placeholder.png";
+const PLACEHOLDER_RENDER = "/api/files/placeholder.mp4";
 
 const isTyping = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
@@ -104,6 +112,17 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
   const [capturing, setCapturing] = useState(false);
   const [flash, setFlash] = useState(false);
   const [queued, setQueued] = useState(0);
+  // The path: its keys (the first is the still's own camera), the move it came from, and how it is filmed.
+  const [keys, setKeys] = useState<CameraKey[]>([PHOTO_KEY]);
+  const [preset, setPreset] = useState<string | null>(null);
+  const [pathSeconds, setPathSeconds] = useState(5);
+  const [pathQuality, setPathQuality] = useState<string | null>(null);
+  const [words, setWords] = useState("");
+  const [pathOpen, setPathOpen] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [filming, setFilming] = useState<"render" | "send" | null>(null);
+  const [progress, setProgress] = useState(0);
+  const previewRef = useRef<AbortController | null>(null);
   const generate = useCinemaGenerate(take.generation.projectId ?? projectId);
   const noteId = useId();
 
@@ -118,6 +137,44 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
     [input, brief, context, lens, aperture],
   );
   const price = usePlanPrice(plan);
+
+  const pathModel = getModel(PATH_MODELS[engine]);
+  const qualities = engine === "cloud" ? (pathModel?.options.resolutions ?? []) : [];
+  const quality = pathQuality && qualities.includes(pathQuality) ? pathQuality : (pathModel?.defaults?.resolution ?? qualities[0] ?? "");
+  const seconds = engine === "open" ? OPEN_SECONDS : pathSeconds;
+  const pathInput: Omit<CinemaGenerateInput, "brief"> = useMemo(
+    () => ({
+      engine,
+      mode: "video",
+      action: "path",
+      prompt: words,
+      settings,
+      source: { url: take.still, kind: "image" },
+      ...(engine === "cloud" && quality ? { resolution: quality } : {}),
+      path: { keys, duration: pathSeconds, ...(preset ? { preset } : {}) },
+    }),
+    [engine, words, settings, take.still, quality, keys, pathSeconds, preset],
+  );
+  const pathPlan = useMemo(
+    () => planCinema({ ...pathInput, brief, path: { ...pathInput.path!, ...(engine === "open" ? { render: PLACEHOLDER_RENDER } : {}) } }, context),
+    [pathInput, brief, context, engine],
+  );
+  const pathPrice = usePlanPrice(pathPlan);
+  const pathBusy = previewing || !!filming;
+  const appStatus = useStatus().data;
+  const access = useModelAccess();
+  const deleteUpload = useDeleteUpload();
+
+  /**
+   * What would refuse an open run anyway, asked before the browser renders every frame and uploads them: the model
+   * switched off, or (demo mode off) no ComfyUI to run it on. The server checks again when the run is sent.
+   */
+  const openRefusal = (): string | undefined => {
+    const m = pathPlan.model;
+    if (!offered(access, m.id, "open")) return `${m.name} is turned off in ${ACCESS_PLACE}. Turn it back on there, or film on the cloud engine`;
+    if (appStatus && !pathPrice.demo && !m.routes.some((r) => appStatus.providers[r.provider]?.configured)) return "Connect ComfyUI in Settings to film a path on your GPU";
+    return undefined;
+  };
 
   // The frame: the ratio's largest rectangle, centred, leaving room for the bars over the view.
   const frame: Rect | null = useMemo(() => {
@@ -180,6 +237,29 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
     if (frame && status === "ready") engineRef.current?.setView({ lens, aperture, aspect: ratioOf(aspect), dof, frame, speed });
   }, [lens, aperture, aspect, dof, frame, speed, status]);
 
+  // The camera of a key as the path films it: the still's own lens (a key's distance already counts the lens it was set with).
+  const goTo = (i: number) => {
+    const eng = engineRef.current;
+    if (!eng || !info || !keys[i]) return;
+    setLens(clampLens(info.photoLens));
+    eng.setPose(flyPoseOf(keyPose(keys[i], info.pivotDepth)));
+  };
+
+  const addKeyframe = () => {
+    const eng = engineRef.current;
+    if (!eng || !info || pathBusy) return;
+    const last = keys[keys.length - 1];
+    const k = fromScenePose(scenePose(eng.getPose(), lens, info.photoLens, info.pivotDepth), 1, last.azimuth);
+    if (Math.abs(k.azimuth - last.azimuth) < 0.5 && Math.abs(k.elevation - last.elevation) < 0.5 && Math.abs(k.distance / last.distance - 1) < 0.02) {
+      toast.info("Fly the camera somewhere new first, then add a keyframe");
+      return;
+    }
+    setKeys(addKey(keys, k));
+    setPreset(null);
+  };
+  // K on the view adds a keyframe (the key listener is set up once).
+  const onKeyframeKey = useEffectEvent(() => addKeyframe());
+
   // W A S D Q E fly from anywhere in the viewer except a text field; arrows and R act on the focused view.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -198,6 +278,7 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
         e.preventDefault();
         eng.turn(...turn[e.key]);
       } else if (e.code === "KeyR") eng.reset();
+      else if (e.code === "KeyK") onKeyframeKey();
     };
     const up = (e: KeyboardEvent) => {
       engineRef.current?.key(e.code, false);
@@ -215,6 +296,71 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
       document.removeEventListener("visibilitychange", release);
     };
   }, []);
+
+  const pickPreset = (id: string) => {
+    const k = presetKeys(id);
+    if (!k) return;
+    setKeys(k);
+    setPreset(id);
+  };
+
+  const preview = async () => {
+    const eng = engineRef.current;
+    if (previewing) {
+      previewRef.current?.abort();
+      return;
+    }
+    if (!eng || !info || keys.length < 2 || filming) return;
+    setPathOpen(false);
+    const ctl = new AbortController();
+    previewRef.current = ctl;
+    const lensBefore = lens;
+    setLens(clampLens(info.photoLens));
+    setPreviewing(true);
+    try {
+      await eng.playPath((t) => flyPoseOf(keyPose(keyAt(keys, t), info.pivotDepth)), seconds, ctl.signal);
+    } finally {
+      setPreviewing(false);
+      setLens(lensBefore);
+    }
+  };
+
+  const filmPath = async () => {
+    const eng = engineRef.current;
+    if (!eng || !info || filming || previewing) return;
+    const blocker = (pathPlan.blocker && pathPlan.blocker !== PATH_RENDER_FIRST ? pathPlan.blocker : undefined) ?? (engine === "open" ? openRefusal() : undefined);
+    if (blocker) {
+      toast.error(blocker);
+      return;
+    }
+    setPathOpen(false);
+    let uploaded: string | undefined;
+    try {
+      let render: string | undefined;
+      if (engine === "open") {
+        // The still's own view along the path: Uni3C's guide, in the still's shape (the open run keeps it).
+        setFilming("render");
+        setProgress(0);
+        const poses = framePoses(keys, PATH_FRAMES, info.pivotDepth, info.photoFov.h, renderSize(info.photoAspect));
+        const rec = await eng.recordPath(poses, { fps: PATH_FPS, onProgress: setProgress });
+        const ext = rec.type.includes("mp4") ? "mp4" : "webm";
+        setFilming("send");
+        const asset = await uploadFile(new File([rec.render], `path-render.${ext}`, { type: rec.type }));
+        uploaded = asset.id;
+        render = asset.url;
+      } else setFilming("send");
+      await generate.mutateAsync({ input: { ...pathInput, path: { ...pathInput.path!, ...(render ? { render } : {}) } }, folderId: take.generation.folderId });
+      setQueued((n) => n + 1);
+      toast.success("Filming this path — it lands next to the scene as a new take", { duration: 3000 });
+    } catch (e) {
+      // A render the run didn't take isn't left in Uploads (the server refuses to delete one that is used).
+      if (uploaded) deleteUpload.mutate(uploaded);
+      // Closing the viewer stops a recording: nothing to report then.
+      if ((e as Error).name !== "AbortError") toast.error((e as Error).message || "Couldn't film this path");
+    } finally {
+      setFilming(null);
+    }
+  };
 
   const resetView = () => {
     engineRef.current?.reset();
@@ -364,6 +510,51 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
     </div>
   );
 
+  const pathKeys = (tone: "overlay" | "panel") => (
+    <PathKeys
+      keys={keys}
+      seconds={seconds}
+      disabled={status !== "ready" || pathBusy}
+      previewing={previewing}
+      onAdd={addKeyframe}
+      onRemove={(i) => {
+        setKeys(removeKey(keys, i));
+        setPreset(null);
+      }}
+      onGoTo={goTo}
+      onPreview={() => void preview()}
+      tone={tone}
+    />
+  );
+
+  const pathOptions = (
+    <PathOptions
+      engine={engine}
+      preset={preset}
+      onPreset={pickPreset}
+      duration={pathSeconds}
+      onDuration={setPathSeconds}
+      resolution={quality}
+      resolutions={qualities}
+      onResolution={setPathQuality}
+      words={words}
+      onWords={setWords}
+      notes={pathPlan.notes}
+      disabled={status !== "ready" || pathBusy}
+    />
+  );
+
+  const filmButton = (className?: string) => (
+    <FilmButton
+      onClick={() => void filmPath()}
+      busy={filming}
+      progress={progress}
+      price={pathPrice.label}
+      disabled={status !== "ready" || previewing || keys.length < 2}
+      className={className}
+    />
+  );
+
   const captureButton = (className?: string) => (
     <Button onClick={() => void capture()} disabled={status !== "ready" || capturing} className={cn("rounded-full", className)}>
       {capturing ? <Loader2 className="animate-spin" /> : <Camera />} {captureLabel} <span className="opacity-80">· {price.label}</span>
@@ -441,7 +632,7 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
               <p className="truncate text-[11.5px] text-white/70">
                 {kind === "points" ? "Point cloud from a depth map" : info?.layout === "object" ? "3D model" : "MoGe 2 mesh"}
                 {sizeText ? ` · ${sizeText}` : ""}
-                {queued ? ` · ${queued} re-render${queued > 1 ? "s" : ""} queued` : ""}
+                {queued ? ` · ${queued} new take${queued > 1 ? "s" : ""} queued` : ""}
               </p>
             </div>
             <button type="button" onClick={() => setHelp((v) => !v)} aria-pressed={help} aria-label="Controls" className="grid size-9 place-items-center rounded-full hover:bg-white/15">
@@ -455,8 +646,20 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
             </button>
           </div>
 
+          {/* Wide screens: the path's keys over the view, beside the frame (phones get them in the Path sheet). */}
+          {status === "ready" && (
+            <div className="absolute inset-x-3 bottom-3 hidden justify-center md:flex">
+              <div role="group" aria-label="Fly path" className="flex max-w-full min-w-0 items-center gap-2 rounded-full bg-black/65 py-1 pr-1 pl-3 text-white backdrop-blur">
+                <span className="flex shrink-0 items-center gap-1.5 text-[12px] font-medium">
+                  <Route className="size-3.5" aria-hidden /> Path
+                </span>
+                {pathKeys("overlay")}
+              </div>
+            </div>
+          )}
+
           {help && status === "ready" && (
-            <div className="absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] rounded-xl bg-black/65 px-3 py-2 text-[12px] leading-relaxed text-white/90 backdrop-blur">
+            <div className="absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] rounded-xl bg-black/65 px-3 py-2 text-[12px] leading-relaxed text-white/90 backdrop-blur md:bottom-16">
               {coarse ? (
                 <p>Drag to look · two fingers to move · pinch to go forward or back</p>
               ) : (
@@ -471,6 +674,9 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
                     <Kbd>Shift</Kbd> faster
                   </span>
                   <span>drag to look · scroll to go forward</span>
+                  <span>
+                    <Kbd>K</Kbd> keyframe
+                  </span>
                 </p>
               )}
             </div>
@@ -508,8 +714,11 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
 
         {/* Phones: the capture stays in reach; the camera and re-render settings open in a sheet. */}
         <div className="flex shrink-0 items-center gap-2 border-t border-white/10 bg-[#0b0b0c] px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:hidden">
-          <Button variant="secondary" className="rounded-full" onClick={() => setPanelOpen(true)}>
-            <SlidersHorizontal /> Camera
+          <Button variant="secondary" size="icon" className="shrink-0 rounded-full" onClick={() => setPanelOpen(true)} aria-label="Camera" title="Camera: lens, aperture, frame">
+            <SlidersHorizontal />
+          </Button>
+          <Button variant="secondary" className="shrink-0 rounded-full px-3" onClick={() => setPathOpen(true)} disabled={status !== "ready"} aria-label={`Path, ${keys.length - 1} keyframe${keys.length === 2 ? "" : "s"}`}>
+            {filming ? <Loader2 className="animate-spin" /> : <Route />} Path{keys.length > 1 ? ` · ${keys.length - 1}` : ""}
           </Button>
           {captureButton("min-w-0 flex-1")}
         </div>
@@ -526,15 +735,31 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
             </div>
           </SheetContent>
         </Sheet>
+        <Sheet open={pathOpen} onOpenChange={setPathOpen}>
+          <SheetContent side="bottom" className="max-h-[80svh] gap-0 overflow-y-auto rounded-t-2xl p-0 md:hidden">
+            <SheetHeader className="border-b px-4 py-3">
+              <SheetTitle className="font-heading text-[20px] font-normal">Fly path</SheetTitle>
+              <SheetDescription className="text-[12.5px]">Fly the camera, add keyframes or pick a move, then film the still along the path.</SheetDescription>
+            </SheetHeader>
+            <div className="space-y-5 p-4">
+              {pathKeys("panel")}
+              {pathOptions}
+              <EngineSwitch value={engine} onChange={onEngine} size="sm" />
+              {filmButton("w-full")}
+            </div>
+          </SheetContent>
+        </Sheet>
 
         <aside className="hidden w-[320px] shrink-0 flex-col border-l bg-background md:flex" aria-label="Camera and re-render">
           <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
             {camera}
             {rerender}
+            <Section title="Fly path">{pathOptions}</Section>
           </div>
           <div className="space-y-1.5 border-t p-4">
             {captureButton("w-full")}
-            <p className="text-center text-[11.5px] text-muted-foreground">Renders the frame, then re-renders it as a new take next to the scene</p>
+            {filmButton("w-full")}
+            <p className="text-center text-[11.5px] text-muted-foreground">Capture re-renders the frame; Film follows the path. Both land next to the scene</p>
           </div>
         </aside>
       </DialogContent>

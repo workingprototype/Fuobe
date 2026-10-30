@@ -1,40 +1,54 @@
-import { cookies } from "next/headers";
 import { z } from "zod";
-import { authEnabled, checkPassword, createSession, LoginGuard, SESSION_COOKIE } from "@/server/auth";
+import { LoginGuard } from "@/server/auth";
+import { appendAudit } from "@/server/identity/audit-log";
+import { signInOwner, type SignInResult } from "@/server/identity/owner";
+import { PASSWORD_SIGN_IN_MAX } from "@/server/identity/password";
+import { refusal } from "@/server/identity/refusals";
+import { signInRequired } from "@/server/mode";
 
-const Body = z.object({ password: z.string().min(1).max(500) });
+/**
+ * Personal sign-in (docs/research/accounts-8.md §8): one password field, no email. Signs u_owner in through Better
+ * Auth (its session, its cookies, the password upgrade); the page then does a full load, so nothing from before the
+ * sign-in stays in memory. Kept at this path so today's page and scripts work unchanged.
+ */
+
+const Body = z.object({ password: z.string().min(1).max(PASSWORD_SIGN_IN_MAX) });
 
 declare global {
   var __fuobeLoginGuard: LoginGuard | undefined;
 }
 const guard = (globalThis.__fuobeLoginGuard ??= new LoginGuard());
 
+/** The pre-accounts session cookie: no longer accepted, cleared on the next sign-in or sign-out. */
+const LEGACY_SESSION_COOKIE = "fuobe_session";
+
 export async function POST(request: Request) {
-  if (!authEnabled()) return Response.json({ ok: true });
+  if (!signInRequired()) return Response.json({ ok: true });
   const key = LoginGuard.clientKey(request.headers);
   const wait = guard.blockedFor(key);
   if (wait > 0) {
     const secs = Math.ceil(wait / 1000);
     // Without a trusted proxy every visitor shares one limit (the hint is for whoever runs the server).
-    const hint = key === LoginGuard.DIRECT ? " Behind a reverse proxy? Set FUOBE_TRUST_PROXY=1 so each visitor gets their own limit." : "";
+    const hint = key === LoginGuard.DIRECT ? " Behind a reverse proxy? Set FUOBE_TRUSTED_PROXIES=1 so each visitor gets their own limit." : "";
     return Response.json(
       { error: `Too many wrong passwords. Try again in ${secs} second${secs === 1 ? "" : "s"}.${hint}` },
       { status: 429, headers: { "Retry-After": String(secs) } },
     );
   }
   const parsed = Body.safeParse(await request.json().catch(() => null));
-  if (!parsed.success || !checkPassword(parsed.data.password)) {
+  const result: SignInResult = parsed.success ? await signInOwner(parsed.data.password, request.headers) : { ok: false };
+  if (!result.ok) {
+    if (result.code) {
+      const r = refusal(result.code);
+      return Response.json({ error: r.message, code: r.code }, { status: r.status });
+    }
     guard.fail(key);
-    return Response.json({ error: "Wrong password" }, { status: 401 });
+    appendAudit({ action: "auth.sign_in_failed", via: "session", meta: { method: "password" }, userAgent: request.headers.get("user-agent") });
+    return Response.json({ error: "That password isn't right." }, { status: 401 });
   }
   guard.succeed(key);
-  const s = createSession();
-  (await cookies()).set(SESSION_COOKIE, s.value, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: new URL(request.url).protocol === "https:",
-    path: "/",
-    maxAge: s.maxAge,
-  });
-  return Response.json({ ok: true });
+  const headers = new Headers({ "Cache-Control": "no-store" });
+  for (const c of result.setCookies) headers.append("set-cookie", c);
+  headers.append("set-cookie", `${LEGACY_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
+  return Response.json({ ok: true }, { headers });
 }

@@ -6410,6 +6410,111 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "minimax-h3-max-camera",
+    "name": "MiniMax H3 Max camera controls",
+    "vendor": "MiniMax",
+    "family": "hailuo",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "A still filmed along a camera path you keyframe: orbits, arcs, dollies and slides that follow the path exactly",
+    "routes": [
+      {
+        "op": "camera-path",
+        "provider": "fal",
+        "endpoint": "minimax/h3-max/camera-controls",
+        "map": {
+          "image": "image_url",
+          "seed": "seed",
+          "cameraPath": {
+            "key": "camera_trajectory",
+            "min": 2,
+            "max": 12,
+            "elevation": [
+              -90,
+              90
+            ],
+            "maxTurns": 32,
+            "free": {
+              "key": "free_camera_preset",
+              "values": [
+                "truck_right",
+                "truck_left",
+                "pedestal_up",
+                "pedestal_down",
+                "dolly_in",
+                "dolly_out",
+                "pan_right",
+                "pan_left",
+                "tilt_up",
+                "tilt_down",
+                "roll_right",
+                "roll_left",
+                "s_curve_forward"
+              ]
+            }
+          },
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          },
+          "ranges": {
+            "duration": {
+              "min": 0.92,
+              "max": 15
+            }
+          },
+          "fixed": {
+            "prompt_expansion_mode": "disabled"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480P",
+        "768P",
+        "1080P"
+      ],
+      "durations": [
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        12,
+        15
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "duration": 5,
+      "resolution": "768P"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "768P; 480P $0.05, 1080P $0.16 \u2014 launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31",
+      "byResolution": {
+        "480P": 0.05,
+        "768P": 0.08,
+        "1080P": 0.16
+      },
+      "promo": {
+        "until": "2026-10-31",
+        "usd": 0.052,
+        "byResolution": {
+          "480P": 0.0325,
+          "768P": 0.052,
+          "1080P": 0.104
+        }
+      }
+    },
+    "hidden": true
+  },
+  {
     "id": "hailuo-2-3",
     "name": "MiniMax Hailuo 2.3",
     "vendor": "MiniMax",

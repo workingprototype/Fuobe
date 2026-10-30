@@ -26,7 +26,7 @@ const { SOUL_LEGACY_IDS } = await import("@/lib/catalog/soul-looks.generated");
 const { PROVIDER_SETTINGS } = await import("@/lib/connections");
 const { PROVIDERS, provider, RETIRED_PROVIDER_ERROR } = await import("@/server/providers");
 const { SETTINGS, getSetting, setSetting } = await import("@/server/settings");
-const { db } = await import("@/server/db");
+const { db, migrationIndexOf } = await import("@/server/db");
 const { withCurrentModels } = await import("@/lib/catalog/canvas");
 const generationsRoute = await import("@/app/api/generations/route");
 const { currentRequest, ensureRunner, getGeneration, listGenerations, previewGeneration } = await import("@/server/generations");
@@ -538,7 +538,9 @@ describe("stored ids resolve where they are read", () => {
 describe("the O7 migration", () => {
   it("deletes the retired key, resets the provider choice and marks the ads drawn whole as baked", () => {
     const d = db();
-    const last = (d.prepare("SELECT MAX(id) AS id FROM _migrations").get() as { id: number }).id;
+    // The O7 migration by what it does (later packages append theirs after it).
+    const last = migrationIndexOf("DELETE FROM settings WHERE key = 'higgsfield.key'");
+    expect(last).toBeGreaterThan(0);
     // An install from before: rows the migration rewrites, then the migration runs again on the next open.
     d.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('higgsfield.key', 'id:secret'), ('cloud.provider', 'higgsfield')").run();
     d.prepare("INSERT INTO ad_batches (id, brand_id, engine, route, model_id, created_at) VALUES ('b1', 'br', 'cloud', 'higgsfield', 'ads-studio', 1), ('b2', 'br', 'cloud', 'fuobe', 'nano-banana-pro', 2)").run();

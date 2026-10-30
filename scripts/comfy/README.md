@@ -351,6 +351,31 @@ COMFYUI_URL=http://127.0.0.1:<port> COMFYUI_MODELS_DIR=<that ComfyUI>/models nod
   scrambled stereo three times as long), so a file with more than 2 channels is split in `mono` and its background is the
   music and effects stems added up (the provider rewires node 4 to `AudioMerge` add).
 
+## Fly path (N7-5)
+
+One hand-built graph films a still along a camera path keyframed in Cinema's 3D scene, on core nodes only
+(docs/research/new-models-7.md §3.6):
+
+```bash
+npm run build -- wan21-i2v-uni3c-path
+node validate-workflows.mjs wan21-i2v-uni3c-path --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `wan21-i2v-uni3c-path` | camera-path | `UNETLoader` (Wan 2.1 I2V 14B 720P fp8; `checkpoint` swaps in the 480P fp8 file) → `ModelSamplingSD3` (`shift`) → `ModelPatchLoader` (Uni3C) + `WanUni3CControlnetApply` (`strength`, 0–1) on the browser's render of the path (`video`: `LoadVideo` → `GetVideoComponents`; the node pads or cuts it to the latent's frames and centre-crops it to the size) → umt5 / CLIP vision H / Wan VAE → `WanImageToVideo` (the still as `image`, 81 frames) → `KSampler` (`steps` 30, `cfg` 5, uni_pc; a guess to tune on a GPU) → `VAEDecode` → `CreateVideo` (16 fps) → `SaveVideo` | `/prompt` only (no GPU here); a model-free `LoadVideo` run read the browser's render as 81 frames |
+
+- **Weights**, pinned in `library.spec.mjs`: Kijai/WanVideo_comfy `Wan21_Uni3C_controlnet_fp16.safetensors` @ `8260d429`
+  (1,997,314,376 B, in `models/model_patches`) and Comfy-Org/Wan-2.1 `wan2.1_i2v_720p_14B_fp8_scaled.safetensors` @
+  `123acf1c` (16,401,356,938 B); optional: Kijai/WanVideo_comfy_fp8_scaled's 480P fp8 file @ `4d02bd37` (16,643,349,018 B).
+  The 480P Q8 GGUF Fuobe pins for InfiniteTalk can't load here: core `UNETLoader` reads no GGUF (that needs city96's
+  ComfyUI-GGUF pack). Loading Kijai's file through core `ModelPatchLoader` is inferred from its header keys, not run.
+- **The render** comes from the browser (`src/components/cinema/scene-engine.ts` `recordPath`): 81 frames at 16 fps, black
+  where nothing was seen, VP8 in WebM at exact frame times. Its hole mask is made only when asked for (core's Uni3C node
+  has no mask input; WorldCast, N7-9, will ask).
+- **Licences, as information**: Apache-2.0 (Wan 2.1; Uni3C, whose Kijai repack carries no licence field).
+- **GPU**: Uni3C's own figures are 46–51 GB with offload; Fuobe's older 24 GB note is unverified.
+
 ## MOSS-Image (N7-1)
 
 One hand-built graph on core nodes (MOSS-Image is native in the pinned ComfyUI; docs/research/new-models-7.md §4.6):

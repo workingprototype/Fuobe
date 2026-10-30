@@ -356,6 +356,7 @@ export function planGeneration(
   if (requires?.images && (req.inputs?.images?.length ?? 0) < requires.images) throw new Error(requires.msg);
   if (requires?.prompt && !prompt) throw new Error(requires.msg);
   if (requires?.mask && !req.inputs?.mask) throw new Error(requires.msg);
+  if (requires?.video && !req.inputs?.video) throw new Error(requires.msg);
   if (requires?.points && !params.points?.length) throw new Error(requires.msg);
   if (op === "bg-remove-video" || op === "depth-video") checkVideoToolOptions(model, op, prompt, params);
   // Remove background on a model that makes both files: the picker's default (the cut-out) unless asked, so the job
@@ -547,6 +548,8 @@ const NEEDS: Partial<
   "extract-frames": { video: true, msg: "Add the video to take frames from" },
   "images-to-video": { images: 1, msg: "Add the images, in order" },
   overlay: { images: 2, msg: "Add the picture and the overlay to put on it" },
+  // N7-5 (the open engine also needs the browser's render along the path: its model's options.requires.video)
+  "camera-path": { images: 1, msg: "Add the still to film along the path" },
 };
 
 const given = (v: unknown) => (Array.isArray(v) ? v.length > 0 : !!v);

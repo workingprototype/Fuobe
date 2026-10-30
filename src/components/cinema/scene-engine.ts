@@ -3,6 +3,8 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
+import { flyPoseOf, type FramePoses } from "@/lib/camera-path";
+import { muxWebM, type EncodedFrame } from "@/lib/webm";
 import {
   LENS,
   blurScale,
@@ -28,8 +30,9 @@ import type { SceneSource } from "./scene-actions";
 
 /**
  * The 3D scene viewer's renderer (three.js, loaded only when a scene opens): a MoGe mesh (GLB) or a point cloud
- * built from the still and its depth map, a fly camera, the frame-fitted lens, a depth-of-field pass, and the
- * capture of exactly what the frame shows. The maths is in src/lib/scene3d.ts; this file only draws.
+ * built from the still and its depth map, a fly camera, the frame-fitted lens, a depth-of-field pass, the capture
+ * of exactly what the frame shows, and (Fly path, N7-5) a preview flight and a recording of the scene along a camera
+ * path. The maths is in src/lib/scene3d.ts and src/lib/camera-path.ts; this file only draws.
  */
 
 export type { SceneSource };
@@ -40,8 +43,11 @@ export interface SceneInfo {
   layout: "scene" | "object";
   /** The lens (mm) that shows the photo's own view from the start. */
   photoLens: number;
-  /** The subject distance: the orbit pivot for the re-shot angles. */
+  /** The subject distance: the orbit pivot for the re-shot angles and camera paths. */
   pivotDepth: number;
+  /** The photo's own field of view (degrees) and shape: what a path render starts from. */
+  photoFov: { h: number; v: number };
+  photoAspect: number;
   /** Points, or triangles, drawn. */
   size: number;
 }
@@ -99,6 +105,7 @@ uniform float blur;
 uniform float framePx;
 uniform float maxRadius;
 uniform float holeRadius;
+uniform float holeAlpha;
 varying vec2 vUv;
 const float EMPTY = 0.99999;
 float rawAt(vec2 uv) { return texture2D(tDepth, uv).x; }
@@ -149,7 +156,8 @@ void main() {
     }
     base = acc / wsum;
   }
-  gl_FragColor = vec4(toSRGB(base), 1.0);
+  // What nothing covers: the background colour on screen, transparent black in a path render (Uni3C's holes).
+  gl_FragColor = raw >= EMPTY ? vec4(toSRGB(base) * holeAlpha, holeAlpha) : vec4(toSRGB(base), 1.0);
 }`;
 
 const VOID = 0x0b0b0c;
@@ -195,6 +203,100 @@ function sampleVertices(root: THREE.Object3D, max = 80_000): Float32Array {
   return Float32Array.from(out);
 }
 
+/** The type MediaRecorder records a path in when WebCodecs can't: MP4 (H.264) where it writes it, else WebM. Null: none. */
+export function pathVideoType(): string | null {
+  if (typeof MediaRecorder === "undefined") return null;
+  return ["video/mp4;codecs=avc1.42E01E", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t)) ?? null;
+}
+
+const VP8 = (width: number, height: number, fps: number): VideoEncoderConfig => ({ codec: "vp8", width, height, bitrate: 8_000_000, framerate: fps });
+
+/** WebCodecs can encode VP8 at this size here. */
+async function vp8Supported(width: number, height: number, fps: number): Promise<boolean> {
+  if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") return false;
+  try {
+    return !!(await VideoEncoder.isConfigSupported(VP8(width, height, fps))).supported;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `count` frames of two streams (`draw(i)` gives frame i of each) encoded with WebCodecs and written as two WebM files:
+ * every frame kept, frame i at i / fps, a keyframe each second.
+ */
+async function encodeVp8(count: number, width: number, height: number, fps: number, outputs: number, draw: (i: number) => ImageData[]): Promise<Uint8Array[]> {
+  const chunks: EncodedFrame[][] = Array.from({ length: outputs }, () => []);
+  let failure: unknown;
+  const encoders = chunks.map((_, k) => {
+    const e = new VideoEncoder({
+      output: (chunk) => {
+        const data = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(data);
+        chunks[k].push({ data, key: chunk.type === "key" });
+      },
+      error: (err) => (failure = err),
+    });
+    e.configure(VP8(width, height, fps));
+    return e;
+  });
+  try {
+    const step = 1e6 / fps;
+    for (let i = 0; i < count; i++) {
+      const images = draw(i);
+      images.forEach((img, k) => {
+        const f = new VideoFrame(img.data, { format: "RGBA", codedWidth: width, codedHeight: height, timestamp: Math.round(i * step), duration: Math.round(step) });
+        encoders[k].encode(f, { keyFrame: i % Math.max(1, Math.round(fps)) === 0 });
+        f.close();
+      });
+      if (failure) throw failure;
+      // Let the encoders and the page breathe (the progress label repaints).
+      while (encoders.some((e) => e.encodeQueueSize > 4)) await new Promise((r) => setTimeout(r, 5));
+      if (i % 4 === 3) await new Promise((r) => setTimeout(r, 0));
+    }
+    await Promise.all(encoders.map((e) => e.flush()));
+    if (failure) throw failure;
+  } finally {
+    encoders.forEach((e) => e.state !== "closed" && e.close());
+  }
+  if (chunks.some((c) => c.length !== count)) throw new Error(`The path render lost frames (${chunks[0].length} of ${count})`);
+  const track = { codec: "V_VP8" as const, width, height, fps };
+  return chunks.map((c) => muxWebM(track, c));
+}
+
+/** The fallback: a canvas per stream recorded with MediaRecorder, each frame handed over 1/fps apart. */
+async function recordWithMediaRecorder(type: string, count: number, width: number, height: number, fps: number, outputs: number, draw: (i: number) => ImageData[]): Promise<Blob[]> {
+  const canvases = Array.from({ length: outputs }, () => Object.assign(document.createElement("canvas"), { width, height }));
+  const ctxs = canvases.map((c) => c.getContext("2d")!);
+  const streams = canvases.map((c) => c.captureStream(0));
+  const tracks = streams.map((s) => s.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void });
+  const recorders = streams.map((s) => new MediaRecorder(s, { mimeType: type, videoBitsPerSecond: 8_000_000 }));
+  const chunks: Blob[][] = recorders.map(() => []);
+  const stopped = recorders.map((r, i) => {
+    r.ondataavailable = (e) => e.data.size && chunks[i].push(e.data);
+    return new Promise<void>((resolve) => (r.onstop = () => resolve()));
+  });
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const step = 1000 / Math.max(1, fps);
+  try {
+    recorders.forEach((r) => r.start());
+    await wait(step);
+    const t0 = performance.now();
+    for (let i = 0; i < count; i++) {
+      draw(i).forEach((img, k) => ctxs[k].putImageData(img, 0, 0));
+      tracks.forEach((t) => t.requestFrame?.());
+      await wait(Math.max(0, t0 + (i + 1) * step - performance.now()));
+    }
+    await wait(step);
+  } finally {
+    recorders.forEach((r) => r.state !== "inactive" && r.stop());
+    await Promise.all(stopped);
+    streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+  }
+  const base = type.split(";")[0];
+  return chunks.map((c) => new Blob(c, { type: base }));
+}
+
 export class SceneEngine {
   info: SceneInfo | null = null;
   /** Called when the autofocus distance changes (scene units ≈ m). */
@@ -222,6 +324,8 @@ export class SceneEngine {
   private focusTimer: ReturnType<typeof setTimeout> | undefined;
   private size = { w: 1, h: 1, dpr: 1 };
   private disposed = false;
+  /** A path preview or recording owns the camera. */
+  private playing = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
@@ -245,6 +349,7 @@ export class SceneEngine {
         framePx: { value: 1 },
         maxRadius: { value: 0 },
         holeRadius: { value: 0 },
+        holeAlpha: { value: 1 },
       },
     });
     this.post = new FullScreenQuad(this.postMat);
@@ -297,7 +402,7 @@ export class SceneEngine {
       const fov = sceneFov(sample);
       if (fov) {
         const aspect = Math.tan((fov.h * Math.PI) / 360) / Math.tan((fov.v * Math.PI) / 360);
-        info = { kind: "mesh", layout: "scene", photoLens: focalForFov(fov.h, aspect), pivotDepth: medianDepth(sample), size: Math.round(triangles) };
+        info = { kind: "mesh", layout: "scene", photoLens: focalForFov(fov.h, aspect), pivotDepth: medianDepth(sample), size: Math.round(triangles), photoFov: fov, photoAspect: aspect };
       } else {
         // An object around its centre: move it so the camera starts at the origin, looking at it from the front.
         const sphere = new THREE.Box3().setFromObject(root).getBoundingSphere(new THREE.Sphere());
@@ -306,7 +411,15 @@ export class SceneEngine {
         root.position.sub(new THREE.Vector3(...start.position));
         root.updateMatrixWorld(true);
         sample = sampleVertices(root);
-        info = { kind: "mesh", layout: "object", photoLens: lens, pivotDepth: start.position[2] - sphere.center.z, size: Math.round(triangles) };
+        info = {
+          kind: "mesh",
+          layout: "object",
+          photoLens: lens,
+          pivotDepth: start.position[2] - sphere.center.z,
+          size: Math.round(triangles),
+          photoFov: lensFov(lens, 16 / 9),
+          photoAspect: 16 / 9,
+        };
       }
       this.sample = sample;
       this.model = root;
@@ -326,7 +439,7 @@ export class SceneEngine {
       points.frustumCulled = false;
       this.scene.add(points);
       this.sample = cloud.positions;
-      info = { kind: "points", layout: "scene", photoLens: LENS.default, pivotDepth: cloud.depth, size: cloud.count };
+      info = { kind: "points", layout: "scene", photoLens: LENS.default, pivotDepth: cloud.depth, size: cloud.count, photoFov: lensFov(LENS.default, aspect), photoAspect: aspect };
     }
     this.info = info;
     this.camera.near = Math.max(0.005, info.pivotDepth * 0.01);
@@ -399,6 +512,38 @@ export class SceneEngine {
     return this.pose;
   }
 
+  /** Put the camera at a pose (a path's keyframe). */
+  setPose(pose: FlyPose) {
+    this.move(pose);
+  }
+
+  /**
+   * Fly the camera along a path in real time (`poseAt(0…1)` for `seconds`), then put it back where it was. Flying keys
+   * do nothing meanwhile; the signal stops it early.
+   */
+  async playPath(poseAt: (t: number) => FlyPose, seconds: number, signal?: AbortSignal): Promise<void> {
+    const before = this.pose;
+    this.playing = true;
+    this.keys.clear();
+    try {
+      await new Promise<void>((resolve) => {
+        const t0 = performance.now();
+        const tick = () => {
+          if (this.disposed || signal?.aborted) return resolve();
+          const t = Math.min(1, (performance.now() - t0) / 1000 / Math.max(0.1, seconds));
+          this.pose = poseAt(t);
+          this.dirty = true;
+          if (t >= 1) return resolve();
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+    } finally {
+      this.playing = false;
+      if (!this.disposed) this.move(before);
+    }
+  }
+
   private move(pose: FlyPose) {
     this.pose = pose;
     this.dirty = true;
@@ -433,7 +578,7 @@ export class SceneEngine {
   // ---- Drawing
 
   private step(dt: number) {
-    if (this.info && this.view && this.keys.size) {
+    if (this.info && this.view && this.keys.size && !this.playing) {
       const input = keysToInput(this.keys);
       if (input.forward || input.right || input.up) {
         this.pose = flyStep(this.pose, input, dt, flySpeed(this.info.pivotDepth) * this.view.speed, this.boost);
@@ -447,15 +592,18 @@ export class SceneEngine {
     }
   }
 
-  /** Render into `out` (null = the screen) at w×h px; the frame is frameW×frameH px of it, centred. */
-  private draw(out: THREE.WebGLRenderTarget | null, w: number, h: number, frameW: number, frameH: number, color = this.target) {
+  /**
+   * Render into `out` (null = the screen) at w×h px; the frame is frameW×frameH px of it, centred. `shot` renders from
+   * another camera instead (a path frame: its pose and vertical field of view, no depth of field, holes transparent).
+   */
+  private draw(out: THREE.WebGLRenderTarget | null, w: number, h: number, frameW: number, frameH: number, color = this.target, shot?: { pose: FlyPose; vFov: number }) {
     const v = this.view!;
     const cam = this.camera;
-    const frameFov = lensFov(v.lens, v.aspect).v;
-    cam.fov = canvasFov(frameFov, frameH, h);
+    const pose = shot?.pose ?? this.pose;
+    cam.fov = shot ? shot.vFov : canvasFov(lensFov(v.lens, v.aspect).v, frameH, h);
     cam.aspect = w / h;
-    cam.position.set(...this.pose.position);
-    cam.rotation.set(this.pose.pitch, this.pose.yaw, 0, "YXZ");
+    cam.position.set(...pose.position);
+    cam.rotation.set(pose.pitch, pose.yaw, 0, "YXZ");
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
     if (this.pointsMat) this.pointsMat.uniforms.scale.value = h / 2 / Math.tan((cam.fov * Math.PI) / 360);
@@ -469,7 +617,8 @@ export class SceneEngine {
     u.cameraNear.value = cam.near;
     u.cameraFar.value = cam.far;
     u.focus.value = this.focus;
-    u.blur.value = v.dof ? blurScale(v.lens, v.aperture, this.focus, v.aspect) : 0;
+    u.blur.value = v.dof && !shot ? blurScale(v.lens, v.aperture, this.focus, v.aspect) : 0;
+    u.holeAlpha.value = shot ? 0 : 1;
     u.framePx.value = frameW;
     u.maxRadius.value = Math.min(0.025 * frameW, 48);
     // Cracks up to about 1.4% of the frame's width close; wider unseen areas stay empty.
@@ -502,6 +651,83 @@ export class SceneEngine {
       color.dispose();
       out.dispose();
       this.renderer.setRenderTarget(null);
+      this.dirty = true;
+    }
+  }
+
+  /**
+   * Record the scene along a path (build plan N7-5): every frame of `path` (OpenCV camera-to-world poses and a pixel
+   * intrinsic, src/lib/camera-path.ts framePoses) rendered at its size with nothing behind the scene, as two videos at
+   * `fps`: `render` (black where nothing was seen: Uni3C's render_video) and, when `mask` is asked for, the hole mask
+   * (white = a hole; core's Uni3C node has no mask input, so only WorldCast will ask, and Film doesn't pay for a second
+   * encode). With WebCodecs every frame is encoded (VP8) and written to WebM at its exact time; without it MediaRecorder
+   * records the frames handed over 1/fps apart, which may drop one.
+   */
+  async recordPath(
+    path: FramePoses,
+    o: { fps: number; mask?: boolean; onProgress?: (p: number) => void; signal?: AbortSignal },
+  ): Promise<{ render: Blob; mask?: Blob; type: string; frames: number }> {
+    if (!this.view || !this.info) throw new Error("The scene isn't ready yet");
+    const { width, height, poses, intrinsic } = path;
+    const exact = await vp8Supported(width, height, o.fps);
+    const type = exact ? "video/webm" : pathVideoType();
+    if (!type) throw new Error("This browser can't record video — use the cloud engine, or another browser");
+    const vFov = (2 * Math.atan(height / 2 / intrinsic[1][1]) * 180) / Math.PI;
+    const color = new THREE.WebGLRenderTarget(width, height, { type: this.target.texture.type, depthTexture: new THREE.DepthTexture(width, height) });
+    const out = new THREE.WebGLRenderTarget(width, height);
+    const buf = new Uint8Array(width * height * 4);
+    const render = new ImageData(width, height);
+    const mask = o.mask ? new ImageData(width, height) : null;
+    const images = mask ? [render, mask] : [render];
+    /** Frame i into `render` (and `mask`): WebGL reads bottom-up, and a pixel nothing covered is transparent black. */
+    const frame = (i: number) => {
+      this.draw(out, width, height, width, height, color, { pose: flyPoseOf(poses[i]), vFov });
+      this.renderer.readRenderTargetPixels(out, 0, 0, width, height, buf);
+      for (let y = 0; y < height; y++) {
+        const src = (height - 1 - y) * width * 4;
+        const dst = y * width * 4;
+        for (let x = 0; x < width * 4; x += 4) {
+          const hole = buf[src + x + 3] < 128;
+          render.data[dst + x] = hole ? 0 : buf[src + x];
+          render.data[dst + x + 1] = hole ? 0 : buf[src + x + 1];
+          render.data[dst + x + 2] = hole ? 0 : buf[src + x + 2];
+          render.data[dst + x + 3] = 255;
+          if (!mask) continue;
+          const m = hole ? 255 : 0;
+          mask.data[dst + x] = m;
+          mask.data[dst + x + 1] = m;
+          mask.data[dst + x + 2] = m;
+          mask.data[dst + x + 3] = 255;
+        }
+      }
+    };
+    const stop = () => {
+      if (o.signal?.aborted || this.disposed) throw new DOMException("Stopped", "AbortError");
+    };
+    this.playing = true;
+    try {
+      if (exact) {
+        const [a, b] = await encodeVp8(poses.length, width, height, o.fps, images.length, (i) => {
+          stop();
+          frame(i);
+          o.onProgress?.((i + 1) / poses.length);
+          return images;
+        });
+        return { render: new Blob([a as BlobPart], { type }), ...(b ? { mask: new Blob([b as BlobPart], { type }) } : {}), type, frames: poses.length };
+      }
+      const [r, m] = await recordWithMediaRecorder(type, poses.length, width, height, o.fps, images.length, (i) => {
+        stop();
+        frame(i);
+        o.onProgress?.((i + 1) / poses.length);
+        return images;
+      });
+      return { render: r, ...(m ? { mask: m } : {}), type: type.split(";")[0], frames: poses.length };
+    } finally {
+      color.depthTexture?.dispose();
+      color.dispose();
+      out.dispose();
+      this.renderer.setRenderTarget(null);
+      this.playing = false;
       this.dirty = true;
     }
   }
