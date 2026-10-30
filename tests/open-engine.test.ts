@@ -70,6 +70,7 @@ const ROUND3_MODELS: Record<string, { op: Operation; kind: MediaKind; workflow: 
   "oss-infinitetalk-v2v": { op: "lipsync", kind: "video", workflow: "lipsync-v2v-infinitetalk" },
   "oss-latentsync": { op: "lipsync", kind: "video", workflow: "lipsync-latentsync16" },
   "oss-mux": { op: "mux", kind: "video", workflow: "video-mux-audio" },
+  "oss-pixal3d": { op: "image-to-3d", kind: "model3d", workflow: "image-to-3d-pixal3d" },
   "oss-trellis2": { op: "image-to-3d", kind: "model3d", workflow: "image-to-3d-trellis2" },
   "oss-hunyuan3d-21": { op: "image-to-3d", kind: "model3d", workflow: "image-to-3d-hunyuan3d-21" },
   "oss-tryon-klein": { op: "edit", kind: "image", workflow: "tryon-flux2-klein-4b" },

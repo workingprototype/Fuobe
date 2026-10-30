@@ -9,6 +9,7 @@ import { GALLERY_GRID } from "@/components/skeletons";
 import { useProgressive } from "@/components/use-progressive";
 import { useEngineMode } from "@/lib/api";
 import { interleaveByCategory, previewFlip, searchText, type PresetCardData } from "@/lib/preset-cards";
+import { PREVIEW_SIZES } from "@/lib/preview-media";
 import { cn } from "@/lib/utils";
 
 /** A tiny label shown on hover/focus (CSS only: a gallery has hundreds of these). */
@@ -33,12 +34,18 @@ export const PresetCard = memo(function PresetCard({
   href,
   compact,
   engine,
+  sizes,
+  priority,
 }: {
   preset: PresetCardData;
   href: string;
   compact?: boolean;
   /** Settings → Engine mode: with one engine locked in, the other's chip would suggest a route the user turned off. */
   engine?: "cloud" | "open";
+  /** How wide the card is drawn (PREVIEW_SIZES), for picking its poster's size. */
+  sizes?: string;
+  /** Load the poster at once, ahead of other images (a gallery's first row). */
+  priority?: boolean;
 }) {
   const Icon = PRESET_ICONS[preset.icon] ?? Sparkles;
   const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id);
@@ -50,7 +57,7 @@ export const PresetCard = memo(function PresetCard({
       className="group/card flex min-w-0 flex-col gap-2 rounded-xl p-1.5 transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-muted">
-        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} flip={previewFlip(preset)} />
+        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} flip={previewFlip(preset)} card={preset} sizes={sizes} priority={priority} />
         <span className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/40 to-transparent" />
         <span className="pointer-events-none absolute bottom-1.5 left-1.5 grid size-6 place-items-center rounded-md bg-black/30 text-white">
           <Icon className="size-3.5" />
@@ -155,6 +162,8 @@ function useFadeEdges<T extends HTMLElement>() {
 
 const FIRST_PAGE = 30;
 const PAGE = 40;
+/** Cards in the grid's widest first row (GALLERY_GRID): their posters load at once. */
+const FIRST_ROW = 5;
 
 const GRID = GALLERY_GRID;
 
@@ -258,8 +267,8 @@ export function PresetGallery({
       {list.length ? (
         <>
           <div ref={grid} className={cn(GRID, "transition-opacity", stale && "opacity-70")}>
-            {list.slice(0, shown).map((p) => (
-              <PresetCard key={p.id} preset={p} href={href.replace("{id}", p.id)} engine={locked} />
+            {list.slice(0, shown).map((p, i) => (
+              <PresetCard key={p.id} preset={p} href={href.replace("{id}", p.id)} engine={locked} sizes={PREVIEW_SIZES.gallery} priority={i < FIRST_ROW} />
             ))}
           </div>
           {hasMore && (

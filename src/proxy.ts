@@ -63,6 +63,7 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // Everything except build assets and the public folder's own files: the favicon, the demo
-  // samples and the SVGs at the root. Generated SVGs under /api/files stay behind sign-in.
-  matcher: ["/((?!_next/static|_next/image|favicon\\.ico$|samples/|[^/]+\\.svg$).*)"],
+  // samples, the preset cards' preview media, vendored scripts (the 3D viewer's meshopt decoder)
+  // and the SVGs at the root. Generated SVGs under /api/files stay behind sign-in.
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico$|samples/|previews/|vendor/|[^/]+\\.svg$).*)"],
 };

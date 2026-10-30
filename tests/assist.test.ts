@@ -236,7 +236,7 @@ describe("claude request", () => {
   });
 });
 
-describe("ollama agent", () => {
+describe("local agent on Ollama", () => {
   it("talks to Ollama's chat API with tools and maps its tool calls back", async () => {
     const http = await import("node:http");
     const seen: { messages: { role: string; content: string; tool_calls?: unknown[]; tool_name?: string }[]; tools: { function: { name: string } }[]; model: string }[] = [];
@@ -259,8 +259,10 @@ describe("ollama agent", () => {
     setSetting("ollamaUrl", `http://127.0.0.1:${port}`);
     setSetting("ollamaModel", "qwen3:8b");
     try {
-      expect(await agent.resolveAgent()).toBe("ollama");
+      expect(await agent.resolveAgent()).toBe("local");
+      // "ollama", the agent's old name, still makes a local chat.
       const t = agent.createThread({ engine: "open", agent: "ollama" });
+      expect(t.agent).toBe("local");
       agent.addMessage(t.id, "Which image model should I use?");
       await agent.run(t.id);
       expect(seen).toHaveLength(2);

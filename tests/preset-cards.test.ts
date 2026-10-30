@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
+import { previewFor, toPresetCard } from "@/lib/preset-card-data";
 import {
   appFx,
   CAMERA_MOVES,
   effectFx,
+  fallbackPreview,
   FX,
   LAYER_BLEED,
   layerTransform,
@@ -13,14 +15,19 @@ import {
   PREVIEW_LAYERS,
   presetHowTo,
   presetRouteLines,
-  previewFor,
+  proceduralPreview,
   searchText,
-  toPresetCard,
   type CameraMove,
   type MoveSpec,
   type PreviewLayer,
 } from "@/lib/preset-cards";
 import type { Preset } from "@/lib/catalog/types";
+
+// Rendered media here: every effect, and one camera motion. Apps and the other motions have none.
+vi.mock("@/lib/catalog/preview-media.generated.json", async () => {
+  const { EFFECTS } = await import("@/lib/catalog");
+  return { default: { effects: Object.fromEntries(EFFECTS.map((e) => [e.id, "0123abcd"])), motions: { "motion-crash-zoom-in": "89abcdef" } } };
+});
 
 const byName = (list: Preset[], name: string) => {
   const p = list.find((x) => x.name === name);
@@ -225,8 +232,12 @@ describe("slim card DTOs", () => {
       const slim = JSON.stringify(list.map(toPresetCard)).length;
       expect(slim / full).toBeLessThan(0.45);
     }
-    // The 255-card effects gallery ships well under 80 KB of card data.
-    expect(JSON.stringify(EFFECTS.map(toPresetCard)).length).toBeLessThan(80_000);
+    // The 255-card effects gallery ships well under 80 KB of card data: with media (here every effect
+    // has some) only its 8-character hash goes out, and the procedural previews fit as well.
+    const cards = EFFECTS.map(toPresetCard);
+    const procedural = cards.map((c, i) => ({ ...c, preview: proceduralPreview(EFFECTS[i]) }));
+    expect(JSON.stringify(procedural).length).toBeLessThan(80_000);
+    expect(JSON.stringify(cards).length).toBeLessThan(JSON.stringify(procedural).length - 10_000);
   });
 
   it("reads the hue back from the preset look", () => {
@@ -244,6 +255,24 @@ describe("slim card DTOs", () => {
 
   it("searches name, description and category", () => {
     expect(searchText({ name: "Crash Zoom In", description: "A sudden zoom", category: "Push & Pull" })).toBe("crash zoom in a sudden zoom push & pull");
+  });
+});
+
+describe("rendered preview media", () => {
+  it("sends only the media's hash, and a motion's move for its glyph", () => {
+    expect(toPresetCard(byName(EFFECTS, "Set On Fire")).preview).toStrictEqual({ media: "0123abcd" });
+    expect(toPresetCard(byName(MOTIONS, "Crash Zoom In")).preview).toStrictEqual({ media: "89abcdef", move: "crash-in" });
+  });
+
+  it("keeps the procedural preview for presets without media", () => {
+    const faceSwap = toPresetCard(byName(APPS, "Face Swap"));
+    expect(faceSwap.preview).toEqual({ poster: "/samples/previews/portrait.svg", scene: "portrait", fx: "swap" });
+    expect(faceSwap.preview).not.toHaveProperty("media");
+    expect(previewFor(byName(MOTIONS, "Crash Zoom Out"))).toEqual(proceduralPreview(byName(MOTIONS, "Crash Zoom Out")));
+  });
+
+  it("lets the client work out each card's procedural preview again, for when its media doesn't load", () => {
+    for (const p of [...APPS, ...MOTIONS, ...EFFECTS]) expect(fallbackPreview(toPresetCard(p)), p.id).toEqual(proceduralPreview(p));
   });
 });
 

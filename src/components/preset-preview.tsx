@@ -1,20 +1,27 @@
 "use client";
 
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { PreviewMedia } from "@/components/preview-media";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import {
   CAMERA_MOVES,
+  fallbackPreview,
   LAYER_DEPTH,
   LAYER_OFFSET,
   moveVars,
   PREVIEW_LAYERS,
   sceneLayer,
   scenePoster,
+  type CameraMove,
   type MoveSpec,
+  type PresetCardData,
   type PresetPreview as Preview,
   type PreviewLayer,
   type PreviewScene,
+  type ProceduralPreview,
 } from "@/lib/preset-cards";
 import { glyphFor } from "@/lib/move-glyphs";
+import { kindOf, PREVIEW_SIZES, previewSrc } from "@/lib/preview-media";
 import { browserPlaybackEnv, createPlaybackStore } from "@/lib/preview-playback";
 
 /** One preview plays at a time (rules in lib/preview-playback.ts). */
@@ -22,7 +29,8 @@ const store = createPlaybackStore(browserPlaybackEnv);
 
 /**
  * Wire a card element to the playback store. Returns whether its preview should play and the
- * handlers to spread on the card (hover and focus on desktop; touch devices use visibility).
+ * handlers to spread on the card (hover and keyboard focus on desktop, after a short rest; touch
+ * devices use visibility).
  */
 export function usePreviewPlayback<T extends HTMLElement>(id: string) {
   const ref = useRef<T | null>(null);
@@ -45,10 +53,23 @@ export function usePreviewPlayback<T extends HTMLElement>(id: string) {
     handlers: {
       onPointerEnter: (e: React.PointerEvent) => e.pointerType === "mouse" && on(),
       onPointerLeave: (e: React.PointerEvent) => e.pointerType === "mouse" && off(),
-      onFocus: on,
+      // Keyboard focus only: a tap (or click) focuses the card too, and would start (and download) its clip.
+      onFocus: (e: React.FocusEvent) => e.currentTarget.matches(":focus-visible") && on(),
       onBlur: off,
     },
   };
+}
+
+const noSubscribe = () => () => {};
+
+/**
+ * Whether a preview may play without being hovered (the preset header's loop): not when the user
+ * prefers reduced motion, nor with Save-Data or on a 2G connection.
+ */
+export function useAutoplay(): boolean {
+  const reduced = useReducedMotion();
+  const saveData = useSyncExternalStore(noSubscribe, store.saveData, () => true);
+  return !reduced && !saveData;
 }
 
 const layerVars = (l: PreviewLayer) => ({ "--d": LAYER_DEPTH[l], "--o": LAYER_OFFSET[l] }) as React.CSSProperties;
@@ -242,54 +263,27 @@ function Fx({ fx, scene }: { fx: NonNullable<Preview["fx"]>; scene: PreviewScene
   }
 }
 
+/** The line diagram of a camera move (move-glyphs.ts), over a motion's resting frame until it plays. */
+function MoveGlyph({ move }: { move: CameraMove }) {
+  return (
+    <svg className="pv-glyph" viewBox="0 0 48 36" aria-hidden>
+      {glyphFor(move).map((part, i) => (
+        <path key={i} d={part.d} data-dashed={part.dashed || undefined} />
+      ))}
+    </svg>
+  );
+}
+
 /**
- * A preset's preview: a real clip when the catalog has one, otherwise the procedural version, a
- * camera move over a layered sample still (motions) or an animated treatment (effects, apps).
- * At rest it shows the poster frame (and the treatment's still frame); `playing` runs it. The depth
- * layers a camera move needs are only mounted once the card first plays.
+ * The procedural preview: a camera move over a layered sample still (motions) or an animated
+ * treatment (effects, apps). At rest it shows the poster frame (and the treatment's still frame);
+ * `playing` runs it. The depth layers a camera move needs are only mounted once the card first plays.
  */
-export const PresetPreview = memo(function PresetPreview({
-  preview,
-  hue,
-  playing,
-  flip,
-}: {
-  preview: Preview;
-  hue: number;
-  playing: boolean;
-  /** Mirror the still (see previewFlip). */
-  flip?: boolean;
-}) {
-  const video = useRef<HTMLVideoElement>(null);
+function Procedural({ preview, hue, playing, flip }: { preview: ProceduralPreview; hue: number; playing: boolean; flip?: boolean }) {
   const [armed, setArmed] = useState(false);
   if (playing && !armed) setArmed(true);
-  useEffect(() => {
-    const v = video.current;
-    if (!v) return;
-    if (playing) void v.play().catch(() => {});
-    else {
-      v.pause();
-      v.currentTime = 0;
-    }
-  }, [playing]);
-
-  if (preview.video)
-    return (
-      <video
-        ref={video}
-        src={preview.video}
-        poster={preview.poster}
-        muted
-        loop
-        playsInline
-        preload="none"
-        className="absolute inset-0 size-full object-cover"
-        aria-hidden
-      />
-    );
 
   const spec: MoveSpec | undefined = preview.move ? CAMERA_MOVES[preview.move] : undefined;
-  const glyph = preview.move ? glyphFor(preview.move) : undefined;
   const style = { "--pv-hue": hue, ...(spec ? moveVars(spec) : {}) } as React.CSSProperties;
   return (
     <div
@@ -328,13 +322,48 @@ export const PresetPreview = memo(function PresetPreview({
           )}
         </div>
       </div>
-      {glyph && (
-        <svg className="pv-glyph" viewBox="0 0 48 36" aria-hidden>
-          {glyph.map((part, i) => (
-            <path key={i} d={part.d} data-dashed={part.dashed || undefined} />
-          ))}
-        </svg>
-      )}
+      {preview.move && <MoveGlyph move={preview.move} />}
+    </div>
+  );
+}
+
+/**
+ * A preset's preview: its rendered media when it has some (a poster, and a clip while `playing`),
+ * otherwise the procedural version. A card whose media doesn't load falls back to the procedural
+ * version too, worked out from `card`.
+ */
+export const PresetPreview = memo(function PresetPreview({
+  preview,
+  hue,
+  playing,
+  flip,
+  card,
+  sizes = PREVIEW_SIZES.gallery,
+  priority,
+}: {
+  preview: Preview;
+  hue: number;
+  playing: boolean;
+  /** Mirror the still (see previewFlip). */
+  flip?: boolean;
+  /** The card it's for: the id names the media files, and id, name and category give the fallback (fallbackPreview). */
+  card?: Pick<PresetCardData, "id" | "name" | "category">;
+  /** How wide the card is drawn (PREVIEW_SIZES), for picking the poster's size. */
+  sizes?: string;
+  /** Load the poster at once, ahead of other images (a gallery's first row). */
+  priority?: boolean;
+}) {
+  // The media hash whose files didn't load.
+  const [failed, setFailed] = useState<string>();
+  const kind = card ? kindOf(card.id) : undefined;
+  const media = preview.media;
+  if (media === undefined) return <Procedural preview={preview} hue={hue} playing={playing} flip={flip} />;
+  if (!card) return null;
+  if (!kind || failed === media) return <Procedural preview={fallbackPreview(card)} hue={hue} playing={playing} flip={flip} />;
+  return (
+    <div className="pv" data-playing={playing || undefined} aria-hidden>
+      {/* No move glyph over real media: the clip itself shows the move, and the line diagram clutters a photograph. */}
+      <PreviewMedia src={previewSrc(kind, card.id, media)} playing={playing} sizes={sizes} priority={priority} onError={() => setFailed(media)} />
     </div>
   );
 });

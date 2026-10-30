@@ -2297,19 +2297,30 @@ export const SPEC = [
 
   // ---- Product 3D, try-on --------------------------------------------------------
   {
+    id: 'image-to-3d-pixal3d',
+    title: 'Image to textured 3D (Pixal3D, PBR GLB, ~250k triangles)',
+    capability: 'image-to-3d',
+    handBuilt: 'hand-built/image-to-3d-pixal3d.json',
+    bindings: {
+      image: [b('122', 'image')], seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')],
+    },
+    outputs: [{ node: '322', kind: 'model3d' }],
+    vramGb: 16,
+    license: 'Pixal3D weights, DINOv3-NAF and TRELLIS VAEs as repackaged by Comfy-Org (licence not reviewed yet); MoGe-2 and BiRefNet as in their own entries',
+    notes: 'Template 3d_pixal3d_trellis2_image_to_model, Pixal3D branch (the default image-to-3D route): MoGe-2 (geometry_estimation/moge_2_vitl_normal_fp16, resolution_level 9) estimates the camera from the cut-out, MoGeGeometryToFOV (horizontal, degrees) -> Pixal3DConditioning (camera_angle_x) with the DINOv3 encoder, UNet pixal3d_int8_convrot; ImageCropToMask pad_factor 1.1 (as the node asks for Pixal3D). BiRefNet cut-out -> ImageCropToMask 1024 -> structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> RemeshMesh (768, sign_mode solid, fill 20, band 1, smooth 20) -> DecimateMesh (250,000 faces, midpoint) -> smooth normals -> UV unwrap -> base colour / metallic / roughness baked at textureSize, normal map 2048 and AO 1024 baked from the dense remeshed mesh onto the decimated one -> GLB (Save3DAdvanced, history ui "3d"). No turntable in the graph: after the job the Fuobe server finishes the GLB (scripts/model3d/finish-glb.mjs: roughness floor by material, pivot at the bottom centre, meshopt + WebP 2048 web GLB as meta.web; the raw GLB stays the download) and renders a 96-frame 24 fps turntable on the CPU (scripts/model3d/render-turntable.mjs, model-viewer on SwiftShader) when Chromium and ffmpeg are available (src/server/model3d-finish.ts). GPU validation 2026-10-23 (RTX 5090, the same graph run end to end): 114-185 s per object, 25-35 MB raw GLB at ~250k triangles (was 8M triangles / 317 MB before the decimate step), web GLB 1.6-3.6 MB; more faithful to the photo than TRELLIS.2 (209-238 s). The origin is the camera-aligned volume centre, hence the pivot fix. Surfaces can show faint planar facets from the shape decode (no graph setting removes them).',
+  },
+  {
     id: 'image-to-3d-trellis2',
-    title: 'Image to textured 3D (TRELLIS.2, PBR GLB) + a 36-view turntable video',
+    title: 'Image to textured 3D (TRELLIS.2, PBR GLB, ~250k triangles; fallback to Pixal3D)',
     capability: 'image-to-3d',
     handBuilt: 'hand-built/image-to-3d-trellis2.json',
     bindings: {
-      image: [b('122', 'image')], seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')], turntableFps: [b('701', 'fps')],
+      image: [b('122', 'image')], seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')],
     },
-    outputs: [{ node: '322', kind: 'model3d' }, { node: '702', kind: 'video', role: 'turntable' }],
+    outputs: [{ node: '322', kind: 'model3d' }],
     vramGb: 16,
     license: 'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet)',
-    notes:
-      'Template 3d_pixal3d_trellis2_image_to_model: BiRefNet cut-out -> crop to mask -> TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> remesh -> UV unwrap -> ' +
-      'baked base colour / metallic / roughness / AO / normal at textureSize -> GLB (Save3DAdvanced, history ui "3d"). The graph adds a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps.',
+    notes: 'Template 3d_pixal3d_trellis2_image_to_model, TRELLIS.2 branch (the fallback image-to-3D route; Pixal3D is the default): Trellis2Conditioning with the DINOv3 encoder, UNet trellis_2_int8_convrot; ImageCropToMask pad_factor 1.0. BiRefNet cut-out -> ImageCropToMask 1024 -> structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> RemeshMesh (768, sign_mode solid, fill 20, band 1, smooth 20) -> DecimateMesh (250,000 faces, midpoint) -> smooth normals -> UV unwrap -> base colour / metallic / roughness baked at textureSize, normal map 2048 and AO 1024 baked from the dense remeshed mesh onto the decimated one -> GLB (Save3DAdvanced, history ui "3d"). No turntable in the graph: after the job the Fuobe server finishes the GLB (scripts/model3d/finish-glb.mjs: roughness floor by material, pivot at the bottom centre, meshopt + WebP 2048 web GLB as meta.web; the raw GLB stays the download) and renders a 96-frame 24 fps turntable on the CPU (scripts/model3d/render-turntable.mjs, model-viewer on SwiftShader) when Chromium and ffmpeg are available (src/server/model3d-finish.ts). GPU validation 2026-10-23: 209-238 s, 28-43 MB raw GLB at ~250k triangles. The 36-view RotateMesh + RenderMesh turntable (unlit, aliased, 12 fps) was removed.',
   },
   {
     id: 'image-to-3d-hunyuan3d-21',

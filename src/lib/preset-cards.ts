@@ -1,11 +1,14 @@
 /**
- * Slim preset card data for the galleries, and the procedural previews shown on each card.
+ * Slim preset card data for the galleries, and the previews shown on each card.
  *
  * Gallery pages are server components: they map the full catalog `Preset` (prompt templates,
- * routes, LoRA URLs, parity notes) to `PresetCardData` here, so only what a card shows reaches
- * the browser. Until real preview clips exist, every card gets a procedural preview: a camera
- * move over a bundled layered still for motions, a per-category animated treatment for effects
- * and apps. Pure module, safe on both sides.
+ * routes, LoRA URLs, parity notes) to `PresetCardData` with toPresetCard() (preset-card-data.ts),
+ * so only what a card shows reaches the browser. A preset with rendered media (public/previews, see
+ * preview-media.ts) sends only its hash; every other card gets a procedural preview: a camera move
+ * over a bundled layered still for motions, a per-category animated treatment for effects and apps.
+ * The procedural preview is also what a card with media falls back to when its files don't load.
+ * Pure module, safe on both sides. It doesn't import the media manifest: client code imports this
+ * module all over, so the manifest would ship in each of those chunks (tests/preview-media.test.ts).
  */
 import type { Preset } from "./catalog/types";
 
@@ -171,15 +174,30 @@ export const FX = [
 ] as const;
 export type PreviewFx = (typeof FX)[number];
 
-export interface PresetPreview {
+/** A camera move over a bundled layered still (motions), or an animated treatment over one (effects, apps). */
+export interface ProceduralPreview {
+  media?: undefined;
   /** Still shown before (and under) the preview. */
   poster: string;
-  /** A real example clip, once one exists: played instead of the procedural preview. */
-  video?: string;
   scene: PreviewScene;
   move?: CameraMove;
   fx?: PreviewFx;
 }
+
+/**
+ * Rendered media: a poster and a muted loop (public/previews, see preview-media.ts). Only the hash
+ * in their file names, plus a motion's move for the glyph drawn over its poster; the client works
+ * the procedural preview out again if the files don't load (fallbackPreview).
+ */
+export interface MediaPreview {
+  media: string;
+  move?: CameraMove;
+  poster?: undefined;
+  scene?: undefined;
+  fx?: undefined;
+}
+
+export type PresetPreview = ProceduralPreview | MediaPreview;
 
 export interface PresetCardData {
   id: string;
@@ -379,13 +397,22 @@ export function previewScene(p: Pick<Preset, "type" | "name" | "category"> & { i
   return pick(p.id, ["portrait", "landscape", "city", "portrait"] as const);
 }
 
-export function previewFor(p: Pick<Preset, "id" | "type" | "name" | "category">): PresetPreview {
+export function proceduralPreview(p: Pick<Preset, "id" | "type" | "name" | "category">): ProceduralPreview {
   const scene = previewScene(p);
   return {
     poster: scenePoster(scene),
     scene,
     ...(p.type === "motion" ? { move: motionMove(p) } : { fx: p.type === "effect" ? effectFx(p) : appFx(p) }),
   };
+}
+
+/**
+ * The procedural preview of a card whose media doesn't load. Card data only carries the media's
+ * hash, so the client works it out again from the id (which says the type), name and category.
+ */
+export function fallbackPreview(c: Pick<PresetCardData, "id" | "name" | "category">): ProceduralPreview {
+  const type: Preset["type"] = c.id.startsWith("motion-") ? "motion" : c.id.startsWith("effect-") ? "effect" : "app";
+  return proceduralPreview({ ...c, type });
 }
 
 /**
@@ -408,22 +435,6 @@ export function clip(s: string, max: number): string {
   if (s.length <= max) return s;
   const cut = s.slice(0, max - 1);
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max * 0.6)).replace(/[\s,;:.–—-]+$/, "")}…`;
-}
-
-/** What a gallery card needs, and nothing else. */
-export function toPresetCard(p: Preset): PresetCardData {
-  return {
-    id: p.id,
-    name: p.name,
-    description: clip(p.description, 100),
-    category: p.category,
-    icon: p.look.icon,
-    hue: lookHue(p.look),
-    ...(p.badges?.includes("top") ? { top: true as const } : {}),
-    cloud: !!p.cloud,
-    open: !!p.open,
-    preview: previewFor(p),
-  };
 }
 
 /**

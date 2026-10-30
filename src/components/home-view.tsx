@@ -28,6 +28,7 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
 import { userTitle } from "@/lib/library";
 import type { PresetCardData } from "@/lib/preset-cards";
+import { PREVIEW_SIZES } from "@/lib/preview-media";
 import { cn } from "@/lib/utils";
 
 // The viewer is only needed once a recent result is opened.
@@ -130,7 +131,7 @@ function CardRow({ cards, href, engine }: { cards: PresetCardData[]; href: (c: P
   return (
     <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-6">
       {cards.map((p) => (
-        <PresetCard key={p.id} preset={p} href={href(p)} compact engine={engine} />
+        <PresetCard key={p.id} preset={p} href={href(p)} compact engine={engine} sizes={PREVIEW_SIZES.home} />
       ))}
     </div>
   );

@@ -29,8 +29,9 @@ import { enhancePrompt } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
 import { probeComfy } from "./providers/comfyui";
-import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
+import { llmBackends, llmLabel, llmMissing, llmUsesClaude, probeLocal } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
+import { modelToFinish, startModelFinish, startTurntable, stopModelFinish, type OutputStore } from "./model3d-finish";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
 import { contentTypeFor, deleteAsset, readRef, saveFile } from "./storage";
@@ -336,6 +337,8 @@ export function assetInUse(assetId: string, exceptGeneration = ""): boolean {
  * src/server/library.ts (they cancel running jobs first); moving to the Trash is trashGenerations.
  */
 export function deleteGeneration(id: string): void {
+  // A 3D job's finish or turntable render stops with it.
+  stopModelFinish(id);
   const assets = db().prepare("SELECT id FROM assets WHERE generation_id = ?").all(id) as { id: string }[];
   db().transaction(() => {
     db().prepare("DELETE FROM generations WHERE id = ?").run(id);
@@ -422,7 +425,7 @@ function prepare(original: GenerationRequest) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
   }
   const providerId: ProviderId = demo ? "mock" : route.provider;
-  // A text step that runs on Ollama is free; only Claude costs money.
+  // A text step that runs on a local model is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
   return { req, plan, route, demo, providerId, cost: free ? 0 : estimateCost(plan.model, plan.params, 1) };
 }
@@ -620,7 +623,7 @@ const submitting = (): Set<string> => (globalThis.__fuobeSubmitting ??= new Set<
 function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route: ModelRoute }, deps: Pick<Row, "provider">[]): { error?: string; forceDemo?: boolean } {
   const demoDeps = deps.filter((d) => d.provider === "mock").length;
   if (p.demo && demoDeps < deps.length) {
-    const needs = p.route.provider === "llm" ? "Claude or Ollama" : provider(p.route.provider).label;
+    const needs = p.route.provider === "llm" ? llmLabel(p.route) : provider(p.route.provider).label;
     return { error: `${p.plan.model.name} needs ${needs} to continue what the earlier steps made for real — connect it in Settings, then retry` };
   }
   if (!p.demo && demoDeps > 0) {
@@ -660,7 +663,7 @@ async function advanceDependents(): Promise<void> {
       // Routing reads cached reachability: make sure it's fresh for local engines.
       const model = getModel(request.modelId);
       if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
-      if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
+      if (model?.routes.some((x) => x.provider === "llm")) await probeLocal();
       const original = withChainInputs(request, values as string[]);
       const prepared = prepare(original);
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
@@ -827,8 +830,9 @@ export function ensureRunner(): void {
   state.fastTimer?.unref?.();
   globalThis.__fuobeRunner = state;
   void probeComfy().catch(() => false);
-  void probeOllama().catch(() => false);
+  void probeLocal().catch(() => false);
   sweepInterrupted();
+  resumeTurntables();
 }
 
 /** Jobs that never got an external id (the server died mid-submit) can't be recovered. Runs every tick. */
@@ -919,6 +923,8 @@ async function pollOne(r: Row): Promise<void> {
     run = { submitted_at: now, started_at: null };
   }
   const ctx = pollContext(r, model);
+  // Its outputs are saved and the 3D finish runs (or ran until a restart): nothing more to ask the provider.
+  if (ctx.meta.finishing) return resumeFinish(r);
   // Poll first: a job that finished while the server was asleep or down is collected, not timed out.
   let res: PollResult | undefined;
   let pollError: unknown;
@@ -964,6 +970,14 @@ async function pollOne(r: Row): Promise<void> {
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
+  // An image-to-3D GLB from ComfyUI gets the server's finish first (the web GLB, seconds): the outputs are
+  // stored now and the row stays running until it's done, so a restart resumes it from them. The turntable
+  // is rendered after the job has succeeded (src/server/model3d-finish.ts).
+  if (modelToFinish(r, outputs) >= 0) {
+    update(r.id, { outputs_json: JSON.stringify(outputs), external_meta_json: JSON.stringify({ ...ctx.meta, finishing: true }), message: "Finishing the 3D model" });
+    resumeFinish({ ...r, outputs_json: JSON.stringify(outputs) });
+    return;
+  }
   update(r.id, {
     status: "succeeded",
     outputs_json: JSON.stringify(outputs),
@@ -971,6 +985,47 @@ async function pollOne(r: Row): Promise<void> {
     message: null,
     completed_at: Date.now(),
   });
+}
+
+/** Start (or keep running) the 3D finish of a job whose outputs are stored; it marks the job done when it ends. */
+function resumeFinish(r: Row): void {
+  const outputs = JSON.parse(r.outputs_json || "[]") as OutputFile[];
+  startModelFinish(r.id, outputs, {
+    op: r.op,
+    provider: r.provider,
+    onMessage: (message) => update(r.id, { message }),
+    done: (finished) => {
+      const now = db().prepare("SELECT status, external_meta_json FROM generations WHERE id = ?").get(r.id) as Pick<Row, "status" | "external_meta_json"> | undefined;
+      // Canceled or deleted meanwhile: leave it be.
+      if (!now || now.status !== "running") return;
+      const meta = JSON.parse(now.external_meta_json ?? "{}") as Record<string, unknown>;
+      delete meta.finishing;
+      update(r.id, { status: "succeeded", outputs_json: JSON.stringify(finished), external_meta_json: JSON.stringify(meta), progress: 1, message: null, completed_at: Date.now() });
+      // The model can be opened and downloaded now; its turntable is rendered after and added to the result.
+      startTurntable(r.id, outputStore(r.id));
+    },
+  });
+}
+
+/** A finished job's outputs, for the turntable render that adds to them later. */
+function outputStore(id: string): OutputStore {
+  return {
+    read: () => {
+      const row = db().prepare("SELECT outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "outputs_json"> | undefined;
+      return row ? (JSON.parse(row.outputs_json || "[]") as OutputFile[]) : null;
+    },
+    write: (outputs) => update(id, { outputs_json: JSON.stringify(outputs) }),
+  };
+}
+
+/** Turntables the server stopped before rendering (meta.finish.turntable queued or rendering): render them now. */
+function resumeTurntables(): void {
+  const rows = db()
+    .prepare(
+      `SELECT id FROM generations WHERE status = 'succeeded' AND op = 'image-to-3d' AND provider = 'comfyui' AND (outputs_json LIKE '%"turntable":"queued"%' OR outputs_json LIKE '%"turntable":"rendering"%') ORDER BY created_at ASC`,
+    )
+    .all() as Pick<Row, "id">[];
+  for (const r of rows) startTurntable(r.id, outputStore(r.id));
 }
 
 /** Outputs may carry text (transcripts, translations, scripts) and structured extras (layer boxes, cues, stems). */
@@ -1025,6 +1080,13 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
 export async function cancelGeneration(id: string): Promise<void> {
   const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
   if (!r || (r.status !== "queued" && r.status !== "running")) return;
+  // Its outputs are in and the 3D finish runs: the provider's job is over. Stop the finish before anything
+  // awaits, so it can't mark the job done in between.
+  if ((JSON.parse(r.external_meta_json ?? "{}") as Record<string, unknown>).finishing) {
+    stopModelFinish(id);
+    update(id, { status: "canceled", completed_at: Date.now(), message: null });
+    return;
+  }
   const model = getModel(r.model_id);
   // Without an external id the job is still being handed over: submit() cancels it as soon as it lands.
   if (r.external_id && model) {
@@ -1032,6 +1094,7 @@ export async function cancelGeneration(id: string): Promise<void> {
       .cancel?.(pollContext(r, model))
       .catch(() => {});
   }
+  stopModelFinish(id);
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
 }
 

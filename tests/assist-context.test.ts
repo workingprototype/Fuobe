@@ -167,8 +167,17 @@ describe("modes", () => {
     expect(await agent.resolveMode({ mode: "smart" })).toMatchObject({ mode: "free", agent: "offline", note: expect.stringMatching(/Anthropic API key/) });
     expect(await agent.resolveMode({ mode: "manual", agent: "claude", model: "claude-haiku-5-5" })).toMatchObject({ agent: "offline", note: expect.any(String) });
     expect(await agent.resolveMode({ mode: "manual", agent: "offline" })).toMatchObject({ mode: "manual", agent: "offline" });
-    expect(await agent.resolveMode({ mode: "manual", agent: "ollama", model: "llama3.2:3b" })).toMatchObject({ agent: "ollama", model: "llama3.2:3b", note: expect.stringMatching(/Ollama isn't answering/) });
-    expect(await agent.resolveMode({ mode: "manual", agent: "ollama", model: "bad name; rm -rf" })).toMatchObject({ model: null });
+    expect(await agent.resolveMode({ mode: "manual", agent: "local", model: "llama3.2:3b" })).toMatchObject({
+      agent: "local",
+      model: "llama3.2:3b",
+      note: expect.stringMatching(/No local model server is answering \(Ollama, LM Studio or Unsloth Studio\)/),
+    });
+    expect(await agent.resolveMode({ mode: "manual", agent: "local", model: "bad name; rm -rf" })).toMatchObject({ model: null });
+    // LM Studio names its models publisher/model@quant.
+    expect(await agent.resolveMode({ mode: "manual", agent: "local", model: "qwen/qwen3-8b@q4_k_m" })).toMatchObject({ model: "qwen/qwen3-8b@q4_k_m" });
+    // A choice saved by an older browser still says "ollama".
+    const { ModeChoice } = await import("@/server/assist/schemas");
+    expect(await agent.resolveMode(ModeChoice.parse({ mode: "manual", agent: "ollama", model: "llama3.2:3b" }))).toMatchObject({ mode: "manual", agent: "local", model: "llama3.2:3b" });
     setSetting("enhanceProvider", "none");
     expect(await agent.resolveMode({ mode: "smart" })).toMatchObject({ agent: "offline", note: expect.stringMatching(/AI helper is off/) });
     setSetting("enhanceProvider", "auto");

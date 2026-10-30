@@ -3,7 +3,7 @@
 **An open-source AI image, video and audio studio — a 1:1 alternative to Higgsfield.**
 Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, Gemini Omni, MiniMax, ElevenLabs…, and Higgsfield's own Soul and Cinema Studio) with your own fal.ai / Replicate / Higgsfield key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
 
-- **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Free / Smart / Manual modes, 20 built-in **skills** (SKILL.md playbooks, or upload your own), **projects** with instructions and up to 20 sources (links, files and PDFs, elements, notes), and **memory**. Runs on Claude, a local Ollama model, or an offline planner
+- **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Free / Smart / Manual modes, 20 built-in **skills** (SKILL.md playbooks, or upload your own), **projects** with instructions and up to 20 sources (links, files and PDFs, elements, notes), and **memory**. Runs on Claude, a local model (Ollama, LM Studio, Unsloth Studio or another OpenAI-compatible server), or an offline planner
 - **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`, including whole studio jobs (layers, restyle, dub, faceless episode, ads, captions, Katana; they run as plain pipelines and don't open a studio session yet) and the skills as prompts
 - **Create:** Image · Video (text, image, start/end frame, reference images and clips, multi-shot, draft mode) · Edit · **Layers** (split a flat image into editable layers, edit text, regional edits, cropped or positioned zips) · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard (and turn it into a film) · **Canvas** (wire prompts, files and models into node workflows; every template in a cloud and an open-source version) · Apps
 - **Studios:**
@@ -47,8 +47,13 @@ The mode can also be set with `FUOBE_ENGINE_MODE=both|open|cloud`. Then connect 
 | A [Higgsfield API](https://console.higgsfield.ai) key | `Higgsfield API key` as `KEY_ID:KEY_SECRET` (or `HIGGSFIELD_API_KEY`, `HF_KEY`, or `HF_API_KEY` + `HF_API_SECRET`) | Soul 2.0 / Soul Cinema / Soul v1 with live presets, Soul ID training, Genjutsu, Cinema Studio 4.0, Marketing Studio, Ads Studio, plus extra routes for Seedance, Kling, Wan, MiniMax… |
 | A GPU running ComfyUI | `ComfyUI server URL` (or `COMFYUI_URL`, default `http://127.0.0.1:8188`; `COMFYUI_TOKEN` if it sits behind a proxy) | Every open-source model, app, motion, effect and studio route |
 | An Anthropic key | `Anthropic API key` (or `ANTHROPIC_API_KEY`) | The full **Assist** agent (Smart and Manual modes), text steps (translate, write, scripts, ad copy, brand research), prompt **Enhance** and storyboard splitting with Claude |
-| Ollama | `Prompt enhancement` → Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`, default `qwen3:8b`; `FUOBE_ENHANCE_PROVIDER`) | The same text steps and the Assist agent on a local model (tool calling) |
+| [Ollama](https://ollama.com) | **AI helper** → Local model server → Ollama or Automatic (`OLLAMA_URL`, `OLLAMA_MODEL`, default `qwen3:8b`) | The same text steps and the Assist agent on a local model (tool calling) |
+| [LM Studio](https://lmstudio.ai) 0.4 or later | **AI helper** → LM Studio or Automatic (`LMSTUDIO_URL`, default `http://127.0.0.1:1234`; `LMSTUDIO_MODEL`, empty for the loaded model; `LMSTUDIO_API_TOKEN` only when its Require Authentication is on). In LM Studio, start the server (Developer → Start server, or `lms server start`) and download a model (`lms get qwen/qwen3-8b`) | The same on LM Studio. A model that isn't loaded yet is loaded with 16k context (`FUOBE_LLM_CONTEXT`), which Assist's tools need |
+| [Unsloth Studio](https://unsloth.ai/docs/new/studio/install) | **AI helper** → Unsloth Studio or Automatic (`UNSLOTH_URL`, default `http://127.0.0.1:8888`; `UNSLOTH_API_KEY`: an `sk-unsloth-…` key from avatar → Settings → API; `UNSLOTH_MODEL`, empty for the loaded model). Load a model on its Chat page | The same on the model loaded in Unsloth Studio. Its server-side tools (Python, terminal, web search) are always off for Fuobe's calls |
+| Another OpenAI-compatible server (llama.cpp's llama-server, vLLM, Jan…) | **AI helper** → Other (`FUOBE_LLM_URL`, the base URL such as `http://127.0.0.1:8080/v1`; `FUOBE_LLM_MODEL`; `FUOBE_LLM_API_KEY`) | The same on that server |
 | AI-Toolkit (ostris) on your GPU | `AI_TOOLKIT_URL` (+ `AI_TOOLKIT_AUTH`, `AI_TOOLKIT_DATASET_DIR`) and `COMFYUI_LORAS_DIR` | Train character and style LoRAs from an element's photos or a moodboard; the result is copied into ComfyUI and used whenever you @mention it |
+
+**AI helper** picks who writes: Automatic (Claude when a key is set, else a local model, else the offline rewriter), Claude, a local model only, or offline (`FUOBE_ENHANCE_PROVIDER=auto|anthropic|local|none`; the old value `ollama` means `local`). Its local model server is Automatic by default (`FUOBE_LLM_PROVIDER=auto`): the first one that answers with a model, in the order Ollama, LM Studio, Unsloth Studio, then the Other URL. `FUOBE_LLM_PROVIDER=ollama|lmstudio|unsloth|custom` pins one. Settings → AI helper shows what each server answers (its models, whether one is loaded, what's missing) and has a **Test connection** button. The local model shares the GPU with ComfyUI, so a 4–8B model leaves room for generations.
 
 Keys are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser. Generated media is saved under `data/files/`. Fuobe is single-user.
 
@@ -69,7 +74,8 @@ claude mcp add --transport http fuobe http://localhost:3000/api/mcp --header "Au
 | `FUOBE_DATA_DIR` | Where the database, files and `auth.json` live (default `./data`) |
 | `FUOBE_DEMO_MODE` | `auto` (default: demo outputs only when a model's provider isn't connected), `on` or `off` |
 | `FUOBE_SKILLS_DIR` | Where Assist's built-in skills are read from (default `./skills`) |
-| `FUOBE_ENGINE_MODE`, `FUOBE_CLOUD_PROVIDER`, `FUOBE_ENHANCE_PROVIDER` | The Settings choices above |
+| `FUOBE_ENGINE_MODE`, `FUOBE_CLOUD_PROVIDER`, `FUOBE_ENHANCE_PROVIDER`, `FUOBE_LLM_PROVIDER` | The Settings choices above |
+| `FUOBE_LLM_CONTEXT` | Tokens of context for the local model (default `16384`): Ollama's `num_ctx`, and the context LM Studio loads a model with. `0` leaves it to the server |
 | `OPENAI_API_KEY`, `GEMINI_API_KEY` | Read into Settings; no feature uses them yet |
 
 Uploads up to 200 MB work with sign-in on. Inputs given as URLs are fetched only from public addresses unless `FUOBE_ALLOW_PRIVATE_URLS=1`.
@@ -98,6 +104,10 @@ pnpm dev &
 pnpm test:e2e:comfyui http://localhost:3000   # runs the weight-free workflows through the full pipeline (mux, trim, segment, captions, meta-batch), checked with ffprobe when installed
 ```
 
+## To do
+
+- [ ] **Chunked uploads, so files over 100 MB work on fuobe.com.** Cloudflare (Free and Pro plans) refuses a request body over 100 MB, but Fuobe accepts 200 MB, so a 100–200 MB upload fails there. Send files over about 90 MB as 50 MB chunks and join them on the server before `saveFile()`: add a chunk endpoint next to `src/app/api/uploads/route.ts` and one client helper for its three callers (`src/components/studio/media-slot.tsx`, `src/lib/api.ts`, and `src/components/shorts/use-source-clip.ts`, which keeps its progress bar). Smaller files upload in one request, as now. See [docs/deploy.md](docs/deploy.md#cloudflare-limits).
+
 ## Development
 
 ```bash
@@ -106,6 +116,8 @@ pnpm build                                  # production build
 pnpm gen:catalog                            # regenerate cloud models, Higgsfield models and presets, LoRA map and icon map from docs/research/*.json
 pnpm dev:clean                              # clear the Turbopack cache if the dev server gets stuck reloading or serves stale CSS
 node scripts/gen-demo-3d.mjs                # regenerate the demo GLB and turntable (needs ffmpeg)
+node scripts/model3d/finish-glb.mjs --in raw.glb --out web.glb          # the server's GLB finish, by hand
+node scripts/model3d/render-turntable.mjs --glb web.glb --out spin.mp4  # the server's CPU turntable (needs ffmpeg and a Playwright Chromium: npx playwright-core install chromium-headless-shell)
 ```
 
 Browser checks (the app must be running; demo mode is fine; Playwright and Chromium are picked up from the repo, a global install or `$CHROMIUM_PATH`):
@@ -124,12 +136,13 @@ node tests/e2e/assist-flows.mjs [url]          # skills, memory, projects, skill
 - `docs/ARCHITECTURE.md` — how requests flow from the composer to providers and back, pipelines, live updates, security, each studio's modules
 - `docs/research/` — the research this is built on (Higgsfield inventory, studios, image studios, marketing and agents, API; paid model APIs parts 1–3; ComfyUI equivalents parts 1–3; workflow library; Liner UI language)
 - `docs/workers/tribe-v2.md` — the optional, non-commercial TRIBE v2 worker contract for the Virality predictor
+- `docs/deploy.md` — how fuobe.com is hosted and auto-deployed from `main` (server files in `deploy/fuobe.com/`)
 - `scripts/comfy/` — the pipeline that exports and validates the ComfyUI workflow library
 - `skills/` — Assist's built-in skills (`<name>/SKILL.md` with frontmatter: name, title, description, when_to_use, icon, studio, tags, offline hints)
 
 ## Tech
 
-Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shadcn/ui (Radix) · TanStack Query · SQLite (better-sqlite3) · zod · fal.ai queue API · Replicate predictions API · Higgsfield API · ComfyUI HTTP + WebSocket API · Anthropic SDK (Claude) · Ollama · @xyflow/react (Canvas) · @google/model-viewer + three (3D) · unpdf (PDF text) · cmdk · WebGL · server-sent events · Vitest · Playwright.
+Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shadcn/ui (Radix) · TanStack Query · SQLite (better-sqlite3) · zod · fal.ai queue API · Replicate predictions API · Higgsfield API · ComfyUI HTTP + WebSocket API · Anthropic SDK (Claude) · Ollama, LM Studio, Unsloth Studio and OpenAI-compatible chat APIs · @xyflow/react (Canvas) · @google/model-viewer + three (3D) · unpdf (PDF text) · cmdk · WebGL · server-sent events · Vitest · Playwright.
 
 ## License notes
 

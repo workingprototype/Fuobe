@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { PresetGallery } from "@/components/preset-gallery";
 import { MOTIONS } from "@/lib/catalog";
-import { toPresetCard } from "@/lib/preset-cards";
+import { toPresetCard } from "@/lib/preset-card-data";
 
 export const metadata: Metadata = { title: "Camera motions" };
 

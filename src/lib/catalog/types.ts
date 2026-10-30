@@ -235,7 +235,7 @@ export interface FocusPoint {
   y: number;
 }
 
-/** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
+/** "llm" runs text steps (translate, write) on the configured LLM (Claude or a local model) inside the server. */
 export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local" | "llm";
 
 /** Duration encodings differ between APIs ("5" vs 5 vs "5s"). */

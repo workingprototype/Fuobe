@@ -1,10 +1,10 @@
 import "server-only";
-import { Worker } from "node:worker_threads";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { getModel } from "@/lib/catalog";
 import { cueText, parseCues, toSrt, type Cue } from "@/lib/cues";
 import type { GenInput, ModelRoute, Operation } from "@/lib/catalog/types";
+import { aiHelper, chatLocal, emptyReply, localLabel, localProblem, localReady, localWhat, probeLocal, type JsonSpec, type Ready } from "../llm";
 import { engineMode, getSetting } from "../settings";
 import { toDataUri } from "../storage";
 import { comfyProvider } from "./comfyui";
@@ -13,14 +13,15 @@ import type { PollResult, ProviderAdapter, RemoteOutput } from "./types";
 /**
  * The "llm" provider: text steps (translate, write) run inside this server on the LLM the
  * install is set up with — Claude when an Anthropic key is set (and the install isn't open
- * source only), else a local Ollama. Route endpoint "ollama" (the open model) never uses Claude;
- * when Ollama isn't running, its translations run on ComfyUI instead (Qwen3.5 4B through the
+ * source only), else a local model (Ollama, LM Studio, Unsloth Studio or another OpenAI-compatible
+ * server; see src/server/llm). Route endpoint "ollama" (the open model) never uses Claude;
+ * when no local model is running, its translations run on ComfyUI instead (Qwen3.5 4B through the
  * translate-qwen35-textgen workflow, one prompt per batch of lines, so cue timing is kept the same way).
  * Jobs run in the background of this process and are polled like any provider; a restart
  * loses a job that was still writing (it fails as interrupted and can be retried).
  */
 
-type Backend = "claude" | "ollama" | "comfyui";
+type Backend = "claude" | "local" | "comfyui";
 
 /** The ComfyUI model and workflow open-source translations fall back to without Ollama. */
 export const COMFY_TRANSLATE_MODEL = "oss-qwen35-translate";
@@ -39,85 +40,51 @@ export function textOutput(text: string, cues?: Cue[] | null, meta: Record<strin
 // Which LLM
 
 declare global {
-  var __fuobeOllamaReach: { ok: boolean; at: number; url: string } | undefined;
   var __fuobeLlmJobs: Map<string, LlmJob> | undefined;
 }
 
-const ollamaUrl = () => getSetting("ollamaUrl").replace(/\/+$/, "");
-const PROBE_MS = 15_000;
-
-/** Is Ollama answering? Cached for 15 s; routing reads the cached answer (see llmBackends). */
-export async function probeOllama(force = false): Promise<boolean> {
-  const cur = globalThis.__fuobeOllamaReach;
-  const url = ollamaUrl();
-  if (!force && cur && cur.url === url && Date.now() - cur.at < PROBE_MS) return cur.ok;
-  const ok = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(1500) })
-    .then((r) => r.ok)
-    .catch(() => false);
-  globalThis.__fuobeOllamaReach = { ok, at: Date.now(), url };
-  return ok;
-}
-
-const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
-const flag = new Int32Array(workerData.sab);
-fetch(workerData.url, { signal: AbortSignal.timeout(workerData.timeout) })
-  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), () => Atomics.store(flag, 0, 2))
-  .finally(() => Atomics.notify(flag, 0));`;
-
-/** Blocking check (a few ms for a refused port, at most `timeoutMs` for a host that doesn't answer). */
-function probeOllamaSync(url: string, timeoutMs = 1500): boolean {
-  let ok = false;
-  try {
-    const sab = new SharedArrayBuffer(4);
-    const flag = new Int32Array(sab);
-    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/api/tags`, timeout: timeoutMs } });
-    Atomics.wait(flag, 0, 0, timeoutMs + 1000);
-    ok = Atomics.load(flag, 0) === 1;
-    void worker.terminate();
-  } catch {}
-  globalThis.__fuobeOllamaReach = { ok, at: Date.now(), url };
-  return ok;
-}
-
 /**
- * Routing is synchronous, so it reads the cached answer, refreshed in the background. The first
- * check for an address (right after boot, or after the Ollama URL changes in Settings) waits for a
- * real answer instead: a translate posted then must not fall back to demo text while Ollama is up.
+ * Is a local model server ready? Asks them all (answers kept 15 s); routing reads the cached
+ * answer (see llmBackends), and the first look at a new server waits for a real one.
  */
-function ollamaReady(): boolean {
-  const cur = globalThis.__fuobeOllamaReach;
-  const url = ollamaUrl();
-  if (!cur || cur.url !== url) return probeOllamaSync(url);
-  if (Date.now() - cur.at > PROBE_MS) void probeOllama();
-  return cur.ok;
-}
+export { probeLocal };
+/** @deprecated The old name: it now asks every local server (Ollama, LM Studio, Unsloth Studio, the custom URL). */
+export const probeOllama = probeLocal;
 
 /** A route, or the part of one that decides its LLMs (the op: only translations fall back to ComfyUI). */
 type LlmRoute = Pick<ModelRoute, "endpoint"> & { op?: Operation };
 
 /**
  * The LLMs a route may use right now, in the order they're tried. Follows Settings → AI helper
- * ("none" turns text steps off; "ollama" never calls Claude) and the engine mode. An open-source
- * translation with no Ollama answering runs on ComfyUI when that answers.
+ * ("none" turns text steps off; "local" never calls Claude) and the engine mode. An open-source
+ * translation with no local model answering runs on ComfyUI when that answers.
  */
 export function llmBackends(route: LlmRoute): Backend[] {
-  const choice = getSetting("enhanceProvider");
+  const choice = aiHelper();
   if (choice === "none") return [];
   const out: Backend[] = [];
   const claude = route.endpoint !== "ollama" && !!getSetting("anthropicKey") && (choice === "anthropic" || (choice === "auto" && engineMode() !== "open"));
   if (claude) out.push("claude");
-  if ((route.endpoint === "ollama" || choice !== "anthropic") && ollamaReady()) out.push("ollama");
+  if ((route.endpoint === "ollama" || choice !== "anthropic") && localReady()) out.push("local");
   else if (route.endpoint === "ollama" && route.op === "translate" && comfyProvider.isConfigured()) out.push("comfyui");
   return out;
 }
 
-/** What to tell the user when no LLM can run a route (demo mode off). */
-export const llmMissing = (route: LlmRoute) =>
-  route.endpoint !== "ollama"
-    ? "Connect Claude or Ollama in Settings to run this model"
-    : route.op === "translate"
-      ? "Connect Ollama, or start ComfyUI with Qwen3.5 4B, in Settings to translate on your own machine"
-      : "Connect Ollama in Settings to run this model (open-source text runs on your own machine)";
+/** What to tell the user when no LLM can run a route (demo mode off), with the local server's own reason when it gives one. */
+export function llmMissing(route: LlmRoute): string {
+  const what = localWhat();
+  const base =
+    route.endpoint !== "ollama"
+      ? `Connect Claude or ${what} in Settings to run this model`
+      : route.op === "translate"
+        ? `Connect ${what}, or start ComfyUI with Qwen3.5 4B, in Settings to translate on your own machine`
+        : `Connect ${what} in Settings to run this model (open-source text runs on your own machine)`;
+  const why = localProblem();
+  return why ? `${base}. ${why}` : base;
+}
+
+/** Who runs a route's text, as Settings names them: "Claude or LM Studio"; the open model never uses Claude. */
+export const llmLabel = (route: Pick<ModelRoute, "endpoint">) => (route.endpoint === "ollama" ? localLabel() : `Claude or ${localLabel()}`);
 
 /** Claude is the one that costs money. */
 export const llmUsesClaude = (route: Pick<ModelRoute, "endpoint">) => llmBackends(route)[0] === "claude";
@@ -125,7 +92,8 @@ export const llmUsesClaude = (route: Pick<ModelRoute, "endpoint">) => llmBackend
 // ---------------------------------------------------------------------------
 // Calls
 
-const BACKEND_LABEL: Record<Backend, string> = { claude: "Claude", ollama: "Ollama", comfyui: "Qwen3.5 on ComfyUI" };
+const BACKEND_LABEL: Record<Exclude<Backend, "local">, string> = { claude: "Claude", comfyui: "Qwen3.5 on ComfyUI" };
+const backendLabel = (b: Backend, job?: LlmJob) => (b === "local" ? (job?.local?.server.label ?? localLabel()) : BACKEND_LABEL[b]);
 
 async function viaClaude(system: string, user: string, signal: AbortSignal): Promise<string> {
   const client = new Anthropic({ apiKey: getSetting("anthropicKey") });
@@ -160,33 +128,22 @@ async function viaClaude(system: string, user: string, signal: AbortSignal): Pro
   return text;
 }
 
-async function viaOllama(system: string, user: string, signal: AbortSignal): Promise<string> {
-  const url = ollamaUrl();
-  const model = getSetting("ollamaModel");
-  const res = await fetch(`${url}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      think: false,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      options: { num_ctx: 16384 },
-    }),
-    signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]),
-  }).catch((e: Error) => {
-    if (signal.aborted) throw e;
-    throw new Error(`Couldn't reach Ollama at ${url} (${e.message}). Is it running?`);
+/** The local server the job started on (Ollama, LM Studio, Unsloth Studio or the custom one), thinking off where it can be. */
+async function viaLocal(system: string, user: string, job: LlmJob, json?: JsonSpec): Promise<string> {
+  const ready = (job.local ??= localReady());
+  if (!ready) throw new Error(llmMissing({ endpoint: "ollama" }));
+  const r = await chatLocal(ready, {
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    think: false,
+    json,
+    timeoutMs: 300_000,
+    signal: job.abort.signal,
   });
-  if (res.status === 404) throw new Error(`Ollama doesn't have ${model} yet — run \`ollama pull ${model}\``);
-  if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const j = (await res.json()) as { message?: { content?: string } };
-  const text = (j.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-  if (!text) throw new Error("Ollama returned no text");
-  return text;
+  if (!r.text) throw emptyReply(ready.server, r);
+  return r.text;
 }
 
 const COMFY_POLL_MS = 500;
@@ -237,15 +194,19 @@ async function viaComfy(system: string, user: string, signal: AbortSignal): Prom
   }
 }
 
-const CALL: Record<Backend, (system: string, user: string, signal: AbortSignal) => Promise<string>> = { claude: viaClaude, ollama: viaOllama, comfyui: viaComfy };
+const CALL: Record<Backend, (system: string, user: string, job: LlmJob, json?: JsonSpec) => Promise<string>> = {
+  claude: (system, user, job) => viaClaude(system, user, job.abort.signal),
+  local: viaLocal,
+  comfyui: (system, user, job) => viaComfy(system, user, job.abort.signal),
+};
 
-/** Ask the first backend; if it fails, the next (Claude → Ollama). Throws the first error when all fail. */
-async function complete(backends: Backend[], system: string, user: string, job: LlmJob): Promise<string> {
+/** Ask the first backend; if it fails, the next (Claude → the local model). Throws the first error when all fail. */
+async function complete(backends: Backend[], system: string, user: string, job: LlmJob, json?: JsonSpec): Promise<string> {
   let first: Error | null = null;
   for (const b of backends) {
     try {
       job.backend = b;
-      return await CALL[b](system, user, job.abort.signal);
+      return await CALL[b](system, user, job, json);
     } catch (e) {
       if (job.abort.signal.aborted) throw e;
       first ??= e as Error;
@@ -317,7 +278,7 @@ async function pool<T, R>(items: T[], limit: number, f: (item: T) => Promise<R>)
 }
 
 export interface TranslateCuesOptions {
-  /** Requests in flight at once for cue-by-cue translation (1 for Ollama, which serves one at a time). */
+  /** Requests in flight at once for cue-by-cue translation (1 for a local model, which serves one at a time). */
   concurrency?: number;
   onProgress?: (done: number) => void;
 }
@@ -355,6 +316,8 @@ interface LlmJob {
   state: "running" | "succeeded" | "failed";
   progress?: number;
   backend?: Backend;
+  /** The local server the job runs on (chosen when it starts). */
+  local?: Ready | null;
   outputs?: RemoteOutput[];
   error?: string;
   abort: AbortController;
@@ -363,13 +326,21 @@ interface LlmJob {
 
 const jobs = (): Map<string, LlmJob> => (globalThis.__fuobeLlmJobs ??= new Map<string, LlmJob>());
 
+/** extra.json on a write: the JSON Schema the answer follows (Faceless topics and scripts), or "object". */
+function jsonSpec(v: unknown): JsonSpec | undefined {
+  if (v === "object") return "object";
+  if (!v || typeof v !== "object") return undefined;
+  const { name, schema } = v as { name?: unknown; schema?: unknown };
+  return typeof name === "string" && /^[\w-]{1,64}$/.test(name) && schema && typeof schema === "object" && !Array.isArray(schema) ? { name, schema: schema as Record<string, unknown> } : undefined;
+}
+
 async function runJob(op: string, input: GenInput, backends: Backend[], job: LlmJob): Promise<RemoteOutput[]> {
-  const ask = (system: string, user: string) => complete(backends, system, user, job);
+  const ask = (system: string, user: string, json?: JsonSpec) => complete(backends, system, user, job, json);
   const source = (input.prompt ?? "").trim();
   if (op === "write") {
     const custom = typeof input.extra?.system === "string" ? input.extra.system.trim() : "";
     if (!source) throw new Error("Write a brief first");
-    return [textOutput(await ask(custom || WRITE_SYSTEM, source), null, { op: "write" })];
+    return [textOutput(await ask(custom || WRITE_SYSTEM, source, jsonSpec(input.extra?.json)), null, { op: "write" })];
   }
   if (op !== "translate") throw new Error(`The LLM can't do ${op}`);
   const lang = input.targetLanguage ?? (typeof input.extra?.targetLanguage === "string" ? input.extra.targetLanguage : "");
@@ -378,7 +349,7 @@ async function runJob(op: string, input: GenInput, backends: Backend[], job: Llm
   const from = input.sourceLanguage;
   const cues = parseCues(source);
   if (cues) {
-    // Claude takes a few cues at once; Ollama works through requests one by one.
+    // Claude takes a few cues at once; a local model works through requests one by one.
     const translated = await translateCues(cues, lang, from, ask, { concurrency: backends[0] === "claude" ? 4 : 1, onProgress: (done) => (job.progress = Math.min(0.95, done / cues.length)) });
     return [textOutput(cueText(translated), translated, { language: lang })];
   }
@@ -393,7 +364,10 @@ async function runJob(op: string, input: GenInput, backends: Backend[], job: Llm
 
 export const llmProvider: ProviderAdapter = {
   id: "llm",
-  label: "Claude or Ollama",
+  /** "Claude or LM Studio": the local server in use (or pinned), "a local model" when none answers. */
+  get label() {
+    return llmLabel({ endpoint: "auto" });
+  },
   isConfigured: () => llmBackends({ endpoint: "auto" }).length > 0,
 
   // Text steps read their text from the prompt; files aren't sent anywhere.
@@ -407,19 +381,22 @@ export const llmProvider: ProviderAdapter = {
     const all = jobs();
     for (const [id, j] of all) if (Date.now() - j.at > 6 * 3_600_000) all.delete(id);
     const id = `llm_${nanoid(10)}`;
-    const job: LlmJob = { state: "running", abort: new AbortController(), at: Date.now(), backend: backends[0] };
+    // The local server is fixed when the job starts: its calls all go to the same one.
+    const local = backends.includes("local") ? localReady() : null;
+    const job: LlmJob = { state: "running", abort: new AbortController(), at: Date.now(), backend: backends[0], local };
     all.set(id, job);
     runJob(route.op, input, backends, job).then(
       (outputs) => Object.assign(job, { state: "succeeded", outputs }),
       (e: Error) => Object.assign(job, { state: "failed", error: e.message || "The LLM failed" }),
     );
-    return { externalId: id, meta: { backends }, payload: { op: route.op, backends, targetLanguage: input.targetLanguage, chars: input.prompt?.length ?? 0 } };
+    const server = local && { local: local.server.kind, model: local.server.model || local.status.model };
+    return { externalId: id, meta: { backends }, payload: { op: route.op, backends, ...server, targetLanguage: input.targetLanguage, chars: input.prompt?.length ?? 0 } };
   },
 
   async poll({ externalId }) {
     const job = jobs().get(externalId);
     if (!job) return { state: "failed", error: "Interrupted — the server restarted while this was being written. Try again." };
-    if (job.state === "running") return { state: "running", progress: job.progress, message: `Writing with ${BACKEND_LABEL[job.backend ?? "claude"]}` };
+    if (job.state === "running") return { state: "running", progress: job.progress, message: `Writing with ${backendLabel(job.backend ?? "claude", job)}` };
     jobs().delete(externalId);
     return job.state === "succeeded" ? { state: "succeeded", outputs: job.outputs ?? [] } : { state: "failed", error: job.error ?? "The LLM failed" };
   },
@@ -430,8 +407,8 @@ export const llmProvider: ProviderAdapter = {
   },
 
   async test() {
-    await probeOllama(true);
+    await probeLocal(true);
     const b = llmBackends({ endpoint: "auto" });
-    return b.length ? { ok: true, detail: `Text steps run on ${b.map((x) => BACKEND_LABEL[x]).join(", then ")}` } : { ok: false, detail: "Add an Anthropic key or start Ollama" };
+    return b.length ? { ok: true, detail: `Text steps run on ${b.map((x) => backendLabel(x)).join(", then ")}` } : { ok: false, detail: llmMissing({ endpoint: "auto" }) };
   },
 };

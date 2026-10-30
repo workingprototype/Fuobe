@@ -10,6 +10,7 @@ import {
   CLAUDE_MODELS,
   DEFAULT_CLAUDE_MODEL,
   DEFAULT_EFFORT,
+  normalizeAgent,
   type AssistAgent,
   type AssistAvailability,
   type AssistModeChoice,
@@ -47,7 +48,8 @@ export function useModeChoice(defaultMode?: AssistModeChoice["mode"]): [AssistMo
   const choice = useMemo(() => {
     try {
       const saved = JSON.parse(raw ?? "null") as AssistModeChoice | null;
-      if (saved?.mode) return saved;
+      // A choice saved when the local agent was called "ollama" reads as "local".
+      if (saved?.mode) return saved.agent ? { ...saved, agent: normalizeAgent(saved.agent) } : saved;
     } catch {}
     return defaultMode ? { mode: defaultMode } : null;
   }, [raw, defaultMode]);
@@ -68,7 +70,7 @@ export function modeChipLabel(c: AssistModeChoice | null, can?: AssistAvailabili
   if (can?.aiOff) return "Offline";
   if (c.mode !== "manual") return c.mode === "smart" ? "Smart" : "Free";
   if (c.agent === "offline") return "Offline planner";
-  if (c.agent === "ollama") return c.model ?? can?.ollamaModel ?? "Local";
+  if (c.agent === "local") return c.model ?? can?.local.model ?? "Local";
   const m = CLAUDE_MODELS.find((x) => x.id === (c.model ?? DEFAULT_CLAUDE_MODEL))?.label.replace("Claude ", "") ?? "Claude";
   return `${m} · ${ASSIST_EFFORTS.find((e) => e.id === (c.effort ?? DEFAULT_EFFORT))?.label}`;
 }
@@ -89,7 +91,8 @@ interface ModelOption {
 }
 
 /**
- * Supercomputer's Free / Smart / Manual, on Fuobe's agents (Claude, Ollama, the offline planner).
+ * Supercomputer's Free / Smart / Manual, on Fuobe's agents (Claude, a local model on Ollama, LM Studio,
+ * Unsloth Studio or another OpenAI-compatible server, the offline planner).
  * With `applyOnClose` (an existing chat) choices are kept in the menu and sent once when it
  * closes, so trying the tabs doesn't switch the chat at every click. Smart needs Claude: without
  * an Anthropic key it can't be picked (and a saved Smart shows as the Free it runs as).
@@ -140,13 +143,13 @@ export function ModePicker({
       title: <span className="block text-[13px] font-medium">{m.label}</span>,
       hint: m.hint,
     })),
-    ...(can?.ollamaModels.length ? can.ollamaModels : can?.ollama ? [can.ollamaModel] : []).map((name) => ({
-      key: `ollama:${name}`,
-      on: agent === "ollama" && (shown?.model ?? can?.ollamaModel) === name,
-      pick: { agent: "ollama" as const, model: name, effort: null },
+    ...(can?.local.models.length ? can.local.models : can?.local.ok && can.local.model ? [can.local.model] : []).map((name) => ({
+      key: `local:${name}`,
+      on: agent === "local" && (shown?.model ?? can?.local.model) === name,
+      pick: { agent: "local" as const, model: name, effort: null },
       icon: Cpu,
       title: <span className="block truncate font-mono text-[12px]">{name}</span>,
-      hint: "Local, through Ollama · free",
+      hint: `Local, through ${can?.local.label ?? "your local server"} · free`,
     })),
     { key: "offline", on: agent === "offline", pick: { agent: "offline", model: null, effort: null }, icon: Gauge, title: <span className="block text-[13px] font-medium">Offline planner</span>, hint: "Rules, no LLM — simple requests only" },
   ];
@@ -190,7 +193,7 @@ export function ModePicker({
                 tabIndex={radioTab(mode === m.id)}
                 disabled={off}
                 title={off ? "Needs an Anthropic API key (Settings)" : undefined}
-                onClick={() => set({ mode: m.id, ...(m.id === "manual" && !shown?.agent && { agent: can?.claude ? "claude" : can?.ollama ? "ollama" : "offline" }) })}
+                onClick={() => set({ mode: m.id, ...(m.id === "manual" && !shown?.agent && { agent: can?.claude ? "claude" : can?.local.ok ? "local" : "offline" }) })}
                 className={cn("h-8 rounded-full text-[13px] font-medium transition-colors disabled:opacity-45", mode === m.id ? "bg-background text-foreground shadow-soft" : "text-muted-foreground enabled:hover:text-foreground")}
               >
                 {m.label}
@@ -210,12 +213,14 @@ export function ModePicker({
         )}
         {mode === "free" && (
           <p className="mt-2 px-1 text-[12px] text-muted-foreground">
-            {can?.ollama ? (
+            {can?.local.ok ? (
               <>
-                Runs on <span className="font-mono">{can.ollamaModel}</span> through Ollama — free, on this machine.
+                Runs on <span className="font-mono">{can.local.model}</span> through {can.local.label} — free, on this machine.
               </>
+            ) : can?.local.problem ? (
+              `${can.local.problem} Until then, the offline planner takes simple requests.`
             ) : (
-              "Ollama isn't answering, so the offline planner takes simple requests. Start Ollama for a real local assistant."
+              "No local model is answering, so the offline planner takes simple requests. Start Ollama, LM Studio or Unsloth Studio for a real local assistant."
             )}
           </p>
         )}

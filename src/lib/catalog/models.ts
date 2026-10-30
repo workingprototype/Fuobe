@@ -1040,16 +1040,29 @@ const open: ModelDef[] = [
     options: {},
     hidden: true,
   }),
-  // Product 3D, try-on
+  // Product 3D, try-on. Every image-to-3D route on ComfyUI (Pixal3D, TRELLIS.2, Hunyuan3D 2.1) ends in the
+  // server's finish (src/server/model3d-finish.ts): a web GLB and, when Chromium and ffmpeg are there, a
+  // CPU-rendered turntable video.
+  o({
+    id: "oss-pixal3d",
+    name: "Pixal3D",
+    vendor: "Pixal3D",
+    family: "trellis",
+    kind: "model3d",
+    tagline: "A textured 3D model (.glb) that stays true to your photo (camera-aware), plus a turntable video · 16 GB GPU",
+    badges: ["new", "top"],
+    routes: [comfy("image-to-3d", "image-to-3d-pixal3d", "MoGe-2 camera → Pixal3D; ~250k triangles; web GLB + turntable made after the job")],
+    options: { seed: true },
+  }),
   o({
     id: "oss-trellis2",
     name: "TRELLIS.2",
     vendor: "Microsoft",
     family: "trellis",
     kind: "model3d",
-    tagline: "A textured 3D model (.glb) from one product photo, plus a turntable video · 16 GB GPU · MIT",
-    badges: ["new", "top"],
-    routes: [comfy("image-to-3d", "image-to-3d-trellis2", "PBR textures; second output = 36-view turntable MP4")],
+    tagline: "A textured 3D model (.glb) from one product photo, plus a turntable video; the fallback to Pixal3D · 16 GB GPU · MIT",
+    badges: ["new"],
+    routes: [comfy("image-to-3d", "image-to-3d-trellis2", "~250k triangles; web GLB + turntable made after the job")],
     options: { seed: true },
   }),
   o({

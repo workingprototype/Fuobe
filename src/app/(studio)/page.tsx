@@ -1,6 +1,7 @@
 import { HomeView } from "@/components/home-view";
 import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
-import { homeEffects, toPresetCard } from "@/lib/preset-cards";
+import { toPresetCard } from "@/lib/preset-card-data";
+import { homeEffects } from "@/lib/preset-cards";
 
 const HOME_MOTIONS = ["motion-crash-zoom-in", "motion-360-orbit", "motion-bullet-time", "motion-fpv-drone", "motion-dolly-zoom-in", "motion-snorricam"];
 

@@ -10,7 +10,7 @@ import { createPipeline } from "../chains";
 import { listElements } from "../elements";
 import { createGenerations, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
 import { provider } from "../providers";
-import { llmBackends } from "../providers/llm";
+import { llmBackends, llmLabel } from "../providers/llm";
 import { engineMode } from "../settings";
 import { readRef } from "../storage";
 import { katanaTool } from "../katana";
@@ -39,7 +39,7 @@ function summarize(m: ModelDef) {
     id: m.id,
     name: m.name,
     vendor: m.vendor,
-    engine: m.engine === "open" ? (local ? "open source (Ollama, on this machine)" : "open source (ComfyUI)") : local ? "Claude (or Ollama when no key is set)" : "paid cloud API",
+    engine: m.engine === "open" ? (local ? `open source (${llmLabel({ endpoint: "ollama" })}, on this machine)` : "open source (ComfyUI)") : local ? `Claude (or ${llmLabel({ endpoint: "ollama" })} when no key is set)` : "paid cloud API",
     about: m.tagline,
     does: [...new Set(m.routes.map((r) => r.op))].map((op) => `${op} (${OPERATION_LABELS[op]})`),
     price: m.engine === "open" ? (local ? "free (your machine)" : "free (your GPU)") : m.pricing ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.note ? ` — ${m.pricing.note}` : ""}` : "unknown",

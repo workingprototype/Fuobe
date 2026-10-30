@@ -237,13 +237,13 @@ describe("Translate & dub", () => {
     expect(gen(b.results[0])).toMatchObject({ modelId: "elevenlabs-dubbing", op: "dub" });
   });
 
-  it("with a fal key but no Claude or Ollama, dubs in one go rather than plan a review that can't start", async () => {
+  it("with a fal key but no Claude or local model, dubs in one go rather than plan a review that can't start", async () => {
     // The review's translation would run as a demo among real steps, which createPipeline refuses.
     const p = await priced(() => plan("dub_video", { video: clip, languages: ["Spanish"] }));
     expect(p).toMatchObject({ studio: "Translate & dub", href: "/audio/translate" });
     expect(p.jobs).toEqual([expect.objectContaining({ modelId: "heygen-translate", op: "dub", demo: false })]);
     expect(p.jobs[0].error).toBeUndefined();
-    expect(p.jobs[0].note).toMatch(/Reviewing the lines can't start: Translate · Spanish would run as a demo \(it needs Claude or Ollama\).*dubs in one go with HeyGen Translate/);
+    expect(p.jobs[0].note).toMatch(/Reviewing the lines can't start: Translate · Spanish would run as a demo \(it needs Claude or a local model\).*dubs in one go with HeyGen Translate/);
     expect((await priced(() => estimate("dub_video", { video: clip, languages: ["Spanish"] }))).result.isError).toBe(false);
     // A review asked for outright isn't swapped: the card says why it can't start, and nothing is made.
     const asked = await priced(() => plan("dub_video", { video: clip, languages: ["Spanish"], review: true }));

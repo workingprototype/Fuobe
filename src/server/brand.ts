@@ -25,7 +25,7 @@ import { saveFile } from "./storage";
  *
  * Brand research: the site's HTML through the SSRF-safe fetch (remote-fetch.ts), then plain code
  * reads what's machine-readable (OpenGraph, JSON-LD Organization/Product, Shopify /products.json,
- * CSS colour variables, font families, logo, hero images) and an LLM (llmText: Claude, else Ollama)
+ * CSS colour variables, font families, logo, hero images) and an LLM (llmText: Claude, else a local model)
  * writes the soft fields (tagline, overview, tone, values, audience…). With no LLM, rule-based
  * heuristics fill them, so a kit always comes back. Progress uses Higgsfield's 14 labels.
  */
@@ -741,6 +741,17 @@ export function mergeKit(base: BrandKitFields, facts: Partial<BrandKitFields>, h
   };
 }
 
+// The answers' JSON as JSON Schemas, for local models that decode to one (Ollama, LM Studio, Unsloth
+// Studio); the prompts ask for the same JSON, which Claude and any other model follow.
+const S = { type: "string" };
+const STRINGS = { type: "array", items: S };
+const objectOf = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+const PRODUCT_FACTS = { type: "array", items: objectOf({ name: S, audience: S, sellingPoints: STRINGS }) };
+const KIT_FIELDS = { name: S, tagline: S, overview: S, values: STRINGS, aesthetics: STRINGS, tone: STRINGS, audience: S, sellingPoints: STRINGS, competitors: STRINGS, language: S };
+const BRAND_SCHEMA = { name: "brand_kit", schema: objectOf({ ...KIT_FIELDS, products: PRODUCT_FACTS }) };
+const MANUAL_SCHEMA = { name: "brand_kit", schema: objectOf({ ...KIT_FIELDS, colors: STRINGS, fonts: objectOf({ heading: S, body: S }) }) };
+const PRODUCTS_SCHEMA = { name: "products", schema: objectOf({ products: PRODUCT_FACTS }) };
+
 const BRAND_SYSTEM = `You are a brand strategist. You read a company's website and write its brand kit for an ad team.
 Answer with ONE JSON object and nothing else:
 {"name": string, "tagline": string (at most 12 words), "overview": string (2–3 sentences: what it sells, who it's for, what makes it different), "values": string[] (3–5), "aesthetics": string[] (3–5 short look-and-feel phrases, e.g. "Muted earth tones"), "tone": string[] (3–5 single words), "audience": string (one sentence), "sellingPoints": string[] (3–5 short reasons to buy), "competitors": string[] (2–4 brand names), "language": string (the site's language in English, e.g. "German"), "products": [{"name": string, "audience": string, "sellingPoints": string[] (up to 5)}] (only for the products listed, same names)}
@@ -1061,7 +1072,7 @@ async function research(id: string, signal: AbortSignal): Promise<void> {
     if (found.length) products = found;
   }
   const heuristic = facts ? heuristicFields(facts, colors, fonts) : { name: brand.name, language: "English" };
-  const llm = softFieldsFrom(parseJsonObject(await llmText(BRAND_SYSTEM, brandPrompt(facts, url, products))));
+  const llm = softFieldsFrom(parseJsonObject(await llmText(BRAND_SYSTEM, brandPrompt(facts, url, products), { json: BRAND_SCHEMA })));
   if (signal.aborted) return;
 
   step(11);
@@ -1123,7 +1134,7 @@ export function sellingPointsFrom(description: string | undefined): string[] {
 export async function createManualBrand(input: { description: string; name?: string; images?: string[]; colors?: string[]; origin?: "assist" }): Promise<BrandKit> {
   const description = input.description.trim();
   if (!description && !input.images?.length) throw new Error("Add a description or upload images");
-  const llm = description ? softFieldsFrom(parseJsonObject(await llmText(MANUAL_SYSTEM, `Business: ${description}`))) : {};
+  const llm = description ? softFieldsFrom(parseJsonObject(await llmText(MANUAL_SYSTEM, `Business: ${description}`, { json: MANUAL_SCHEMA }))) : {};
   const heur = heuristicManualKit(description || input.name || "My brand");
   const colors = (input.colors ?? []).filter(isHex);
   const kit: StoredKit = {
@@ -1412,6 +1423,7 @@ export async function readProductLink(input: { url: string; brandId?: string | n
             .slice(0, limit)
             .map((p) => `${p.name}: ${(p.description ?? "").slice(0, 800)}`)
             .join("\n"),
+          { json: PRODUCTS_SCHEMA },
         ),
       ),
     );

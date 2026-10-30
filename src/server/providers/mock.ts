@@ -194,7 +194,7 @@ function demoTranslate(source: string, language: string): DemoOutput {
         .map((l) => (l.trim() ? tag(l) : l))
         .join("\n")
     : tag("Demo translation");
-  return textOutput(`${body}\n\n(Demo translation — connect Claude or Ollama in Settings to translate for real.)`, null, { language, demo: true });
+  return textOutput(`${body}\n\n(Demo translation — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings to translate for real.)`, null, { language, demo: true });
 }
 
 function demoWrite(brief: string): DemoOutput {
@@ -209,7 +209,7 @@ function demoWrite(brief: string): DemoOutput {
       "BEAT 3 — A close-up detail that makes it feel real.",
       "CLOSE — One line call to action.",
       "",
-      "(Demo text — connect Claude or Ollama in Settings to write for real.)",
+      "(Demo text — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings to write for real.)",
     ].join("\n"),
     null,
     { demo: true },

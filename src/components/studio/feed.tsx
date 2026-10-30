@@ -38,7 +38,9 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   const pct = g.progress != null ? Math.round(g.progress * 100) : null;
   const label = g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…");
   return (
-    <div className="relative h-full overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }}>
+    // max-w-full: in a grid row stretched by a taller neighbour (a card with a footer), h-full + aspect-ratio would
+    // otherwise make the tile wider than its column and spill over the next card.
+    <div className="relative h-full max-w-full overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }}>
       <div className="skeleton-sweep absolute inset-0 animate-skeleton" />
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3">
         <div className="min-w-0">
@@ -75,7 +77,7 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
 
 export function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number; onRetry: () => void }) {
   return (
-    <div className="flex h-full flex-col justify-between rounded-xl border border-dashed bg-background p-3" style={{ aspectRatio: Math.max(ratio, 0.8) }}>
+    <div className="flex h-full max-w-full flex-col justify-between rounded-xl border border-dashed bg-background p-3" style={{ aspectRatio: Math.max(ratio, 0.8) }}>
       <div className="min-h-0 space-y-1 overflow-hidden">
         <p className="text-[13px] font-medium">{g.status === "canceled" ? "Canceled" : "Couldn't generate this one"}</p>
         {g.error && <p className="line-clamp-5 text-[12px] leading-snug break-words whitespace-pre-line text-muted-foreground">{g.error}</p>}

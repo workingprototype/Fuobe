@@ -1,9 +1,9 @@
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 
 /**
- * Image to 3D / Product spin: which model, and what a finished job gives the viewer — the .glb, a
- * turntable video (TRELLIS.2 renders one; for models that return only a mesh the page records one in
- * the browser), a poster, the source photo — and where "Animate the spin" goes next.
+ * Image to 3D / Product spin: which model, and what a finished job gives the viewer — the .glb (and its
+ * lighter web GLB), a turntable video (the server renders one for open models when it can; otherwise the
+ * page records one in the browser), a poster, the source photo — and where "Animate the spin" goes next.
  */
 export const MODEL3D_FEATURE = "image-to-3d";
 
@@ -16,10 +16,20 @@ export const MODELS_3D: Record<Engine, { id: string; note: string }[]> = {
     { id: "meshy-7-1", note: "Textured, optional rigging · ≈ $1.20" },
   ],
   open: [
-    { id: "oss-trellis2", note: "Textured GLB + turntable video · 16 GB GPU · MIT" },
+    { id: "oss-pixal3d", note: "Most faithful to the photo · textured GLB + turntable video · 16 GB GPU" },
+    { id: "oss-trellis2", note: "Fallback · textured GLB + turntable video · 16 GB GPU · MIT" },
     { id: "oss-hunyuan3d-21", note: "Shape only · 10 GB GPU" },
   ],
 };
+
+/**
+ * The GLB a viewer should load: the web GLB the server made after the job (meshopt geometry, WebP
+ * textures, pivot at the bottom; meta.web), else the original — results made before that keep working.
+ */
+export function viewerGlb(o: { url: string; meta?: Record<string, unknown> }): string {
+  const web = o.meta?.web;
+  return typeof web === "string" && web ? web : o.url;
+}
 
 export function model3dRequest(o: { engine: Engine; photo: string; modelId?: string }): GenerationRequest {
   const id = o.modelId && MODELS_3D[o.engine].some((m) => m.id === o.modelId) ? o.modelId : MODELS_3D[o.engine][0].id;
@@ -27,9 +37,16 @@ export function model3dRequest(o: { engine: Engine; photo: string; modelId?: str
 }
 
 export interface Model3dView {
+  /** The original GLB (the download). */
   glb?: string;
-  /** A rendered turntable that came with the model (TRELLIS.2 open, demo). */
+  /** The GLB to show in a viewer: the web GLB when there is one, else `glb`. */
+  web?: string;
+  /** A rendered turntable that came with the model (the server's render for open models, demo). */
   turntable?: string;
+  /** The server is still rendering the turntable (after the job finished): waiting its turn, or how far (0-1). */
+  rendering?: { queued: boolean; progress: number };
+  /** The material class the server's finish read from the textures (matte, metal, mixed, unknown). */
+  material?: string;
   poster?: string;
   /** The product photo it was made from. */
   photo?: string;
@@ -43,12 +60,17 @@ export function model3dView(g: Pick<Generation, "outputs" | "request">): Model3d
   const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
   const videos = g.outputs.filter((o) => o.kind === "video");
   const video = videos.find((o) => o.meta?.role === "turntable" || o.meta?.turntable) ?? videos[0];
+  const finish = (meta.finish ?? {}) as { turntable?: unknown; turntableProgress?: unknown; material?: unknown };
+  const pending = finish.turntable === "queued" || finish.turntable === "rendering";
   const formats: Record<string, string> = {};
   const listed = meta.formats;
   if (listed && typeof listed === "object") for (const [k, v] of Object.entries(listed as Record<string, unknown>)) if (typeof v === "string") formats[k.toLowerCase()] = v;
   return {
     glb: mesh?.url,
+    web: mesh ? viewerGlb(mesh) : undefined,
     turntable: str(meta.turntable) ?? str(meta.video) ?? video?.url,
+    rendering: pending ? { queued: finish.turntable === "queued", progress: typeof finish.turntableProgress === "number" ? finish.turntableProgress : 0 } : undefined,
+    material: str(finish.material),
     poster: str(meta.preview) ?? str(meta.poster) ?? g.outputs.find((o) => o.kind === "image")?.url,
     photo: g.request.inputs?.images?.[0],
     formats,

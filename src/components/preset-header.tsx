@@ -1,25 +1,13 @@
 "use client";
 
 import { Cloud, Cpu, Info, X } from "lucide-react";
-import { useSyncExternalStore } from "react";
-import { PresetPreview } from "@/components/preset-preview";
+import { PresetPreview, useAutoplay } from "@/components/preset-preview";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Preset } from "@/lib/catalog/types";
-import { presetHowTo, presetRouteLines, previewFlip, toPresetCard } from "@/lib/preset-cards";
+import { toPresetCard } from "@/lib/preset-card-data";
+import { presetHowTo, presetRouteLines, previewFlip } from "@/lib/preset-cards";
+import { PREVIEW_SIZES } from "@/lib/preview-media";
 import { cn } from "@/lib/utils";
-
-const REDUCED = "(prefers-reduced-motion: reduce)";
-function useReducedMotion() {
-  return useSyncExternalStore(
-    (cb) => {
-      const mq = window.matchMedia(REDUCED);
-      mq.addEventListener("change", cb);
-      return () => mq.removeEventListener("change", cb);
-    },
-    () => window.matchMedia(REDUCED).matches,
-    () => true,
-  );
-}
 
 /**
  * The card a studio shows above its composer while a preset (app, camera motion, effect) is active
@@ -44,12 +32,12 @@ export function PresetHeader({
   className?: string;
 }) {
   const card = toPresetCard(preset);
-  const reduced = useReducedMotion();
+  const autoplay = useAutoplay();
   const routes = presetRouteLines(preset, modelName);
   return (
     <div className={cn("mx-auto flex w-full max-w-[760px] items-center gap-3 rounded-2xl border bg-background p-2 pr-3 text-left shadow-soft", className)}>
       <div className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-32">
-        <PresetPreview preview={card.preview} hue={card.hue} playing={!reduced} flip={previewFlip(card)} />
+        <PresetPreview preview={card.preview} hue={card.hue} playing={autoplay} flip={previewFlip(card)} card={card} sizes={PREVIEW_SIZES.header} priority />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-heading text-[19px] leading-snug">{preset.name}</p>

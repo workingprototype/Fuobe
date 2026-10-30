@@ -200,7 +200,7 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
 
             <section aria-label="Topic suggestions" className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className={cn("text-[13px] text-muted-foreground", loadingTopics && "shimmer-text animate-shimmer-text")}>{loadingTopics ? "Writing topic suggestions…" : offline ? "Suggestions written offline — connect Claude or Ollama in Settings for fresher ones." : "Tick one, or write your own below."}</p>
+                <p className={cn("text-[13px] text-muted-foreground", loadingTopics && "shimmer-text animate-shimmer-text")}>{loadingTopics ? "Writing topic suggestions…" : offline ? "Suggestions written offline — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for fresher ones." : "Tick one, or write your own below."}</p>
                 <Button
                   variant="outline"
                   size="sm"

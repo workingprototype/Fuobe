@@ -1,11 +1,12 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { MediaKind, Operation } from "@/lib/catalog/types";
+import { activeLocal, aiHelper, chatLocal, type JsonSpec } from "./llm";
 import { engineMode, getSetting } from "./settings";
 
 /**
  * "Enhance prompt": rewrite a short idea into a rich, model-friendly prompt.
- * Order: Claude (if an Anthropic key is set) → local Ollama (open-source mode) → offline heuristic.
+ * Order: Claude (if an Anthropic key is set) → a local model (Ollama, LM Studio, Unsloth Studio…) → offline heuristic.
  */
 
 const SYSTEM = `You rewrite short creative ideas into prompts for image and video generation models.
@@ -48,37 +49,39 @@ async function viaClaude(system: string, user: string): Promise<string | null> {
   return text || null;
 }
 
-async function viaOllama(system: string, user: string): Promise<string | null> {
-  const res = await fetch(`${getSetting("ollamaUrl").replace(/\/+$/, "")}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: getSetting("ollamaModel"),
-      stream: false,
-      think: false,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-    signal: AbortSignal.timeout(60_000),
+export interface LlmTextOptions {
+  /** The JSON Schema the answer follows on a local model (Claude follows the prompt); see JsonSpec. */
+  json?: JsonSpec;
+  /** How long to wait (default: 60 s, or 3 minutes when the local model isn't loaded yet). */
+  timeoutMs?: number;
+}
+
+/** The local model in use, thinking off where the server allows it. */
+async function viaLocal(system: string, user: string, opts: LlmTextOptions): Promise<string | null> {
+  const ready = await activeLocal();
+  if (!ready) return null;
+  const r = await chatLocal(ready, {
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    think: false,
+    json: opts.json,
+    timeoutMs: opts.timeoutMs ?? (ready.status.loaded === false ? 180_000 : 60_000),
   });
-  if (!res.ok) throw new Error(`ollama ${res.status}`);
-  const j = (await res.json()) as { message?: { content?: string } };
-  return j.message?.content?.replace(/<think>[\s\S]*?<\/think>/g, "").trim() || null;
+  return r.text || null;
 }
 
 /**
  * One-shot text from whichever LLM this install allows: Claude (when a key is set, and never
- * on "open source only" installs unless picked explicitly), else a local Ollama. Null when none.
+ * on "open source only" installs unless picked explicitly), else a local model. Null when none.
  */
-export async function llmText(system: string, user: string): Promise<string | null> {
-  const choice = getSetting("enhanceProvider");
+export async function llmText(system: string, user: string, opts: LlmTextOptions = {}): Promise<string | null> {
+  const choice = aiHelper();
   if (choice === "none") return null;
   const useClaude = choice === "anthropic" || (choice === "auto" && engineMode() !== "open" && !!getSetting("anthropicKey"));
   if (useClaude) return viaClaude(system, user).catch(() => null);
-  if (choice === "ollama" || choice === "auto") return viaOllama(system, user).catch(() => null);
-  return null;
+  return viaLocal(system, user, opts).catch(() => null);
 }
 
 /** Deterministic fallback so the toggle always does something useful offline. */

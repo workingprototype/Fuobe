@@ -8,6 +8,16 @@ const nextConfig: NextConfig = {
     // The sign-in proxy buffers request bodies (10 MB by default): uploads take up to 200 MB plus the form overhead.
     proxyClientMaxBodySize: "210mb",
   },
+  async headers() {
+    return [
+      // Preset preview media (scripts/build-previews.mjs) has its content hash in every file name,
+      // so it can be cached for good; the public folder's default is max-age=0.
+      { source: "/previews/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
+      // Vendored scripts (public/vendor: the 3D viewer's meshopt decoder) keep their name across upgrades:
+      // a day, then revalidated in the background.
+      { source: "/vendor/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }] },
+    ];
+  },
   async redirects() {
     return [
       { source: "/characters", destination: "/elements", permanent: true },

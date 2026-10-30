@@ -772,6 +772,18 @@ export interface StatusInfo {
   demoMode: string;
   engineMode: EngineMode;
   cloudProvider: string;
+  /** The text LLM: Settings → AI helper, whether Claude takes text steps, and the local model server in use. */
+  llm?: {
+    helper: "auto" | "anthropic" | "local" | "none";
+    claude: boolean;
+    /** Settings' local server: "auto" or the one pinned. */
+    provider: string;
+    context: number;
+    local: { kind: string; label: string; url: string; model: string | null; loaded: boolean | null; context: number | null; warning: string | null } | null;
+    /** Why no local server can run, when one says. */
+    problem: string | null;
+    detected: { kind: string; label: string; url: string; up: boolean; auth: string; models: number; model: string | null; problem: string | null }[];
+  };
 }
 
 export function useStatus() {
