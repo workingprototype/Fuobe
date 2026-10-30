@@ -171,6 +171,8 @@ export function GetStarted({
             />
           </GuideCard>
         )}
+        {/* The owner's demo: not in the first paint (a visitor of a public studio never sees it). */}
+        {status && !status.viewer && (
         <GuideCard icon={Sparkles} title="Just try it" cost="Free: no keys, no GPU">
           <p className="text-[13px] leading-relaxed text-muted-foreground">Click through every studio with clearly labelled placeholder results. You can connect a model later in Settings.</p>
           <Button
@@ -184,6 +186,7 @@ export function GetStarted({
             Try the demo
           </Button>
         </GuideCard>
+        )}
       </div>
 
       {intents && (

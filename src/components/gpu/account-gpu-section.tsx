@@ -1,9 +1,11 @@
 "use client";
 
+import { LogOut } from "lucide-react";
 import { YourGpu } from "@/components/gpu/your-gpu";
+import { Button } from "@/components/ui/button";
 import { useViewer } from "@/lib/api";
 
-/** Settings for an account (public sign-up): "Your GPU", at the top of the page. Nothing for the owner or a guest. */
+/** Settings for an account (public sign-up): "Your GPU", at the top of the page, and signing out. Nothing for the owner or a guest. */
 export function AccountGpuSection() {
   const account = useViewer().data?.account;
   if (!account) return null;
@@ -14,6 +16,17 @@ export function AccountGpuSection() {
           Your GPU
         </h2>
         <p className="mt-1 text-[13px] text-muted-foreground">Signed in as {account.email}. Connect your own ComfyUI to run open-source models.</p>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2 -ml-2 h-7 text-muted-foreground"
+          onClick={async () => {
+            await fetch("/api/auth/logout", { method: "POST" });
+            window.location.reload();
+          }}
+        >
+          <LogOut /> Sign out
+        </Button>
       </div>
       <YourGpu />
     </section>
