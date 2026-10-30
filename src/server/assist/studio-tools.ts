@@ -661,7 +661,7 @@ const restoreVideo = defineTool({
   name: "restore_video",
   description:
     "Restore and colourise archive footage (old scans, tape, black-and-white film, up to 2 minutes) with Lightricks' Restore IC-LoRA — Fuobe's Restore & colourise tool (Video tools → Restore & colourise), where the result sits beside the original with a Before/After wipe. " +
-    "On your GPU: LTX-2.5 with tiled fusion in 97-frame windows, the sound kept, optional Restore to 4K and deinterlacing (the LoRA is gated: a Hugging Face token in Settings → Connections downloads it). " +
+    "On your GPU: LTX-2.5 with tiled fusion in 97-frame windows, the sound kept, optional Restore to 4K and deinterlacing (the LoRA is gated: a Hugging Face token in Settings → LoRAs downloads it). " +
     "In the cloud: fal's LTX-2.3 reference video-to-video in pieces, priced per megapixel. Leave prompt out to have one written. Gated by the same approval card as generate.",
   schema: RestoreInput,
   gated: true,

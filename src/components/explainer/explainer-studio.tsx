@@ -60,7 +60,7 @@ type Draft =
 
 const STEPS = [
   { icon: Sparkles, title: "Choose Preset", text: "One of 22 looks: whiteboard, pixel art, paper diorama…" },
-  { icon: Paperclip, title: "Attach a file or just prompt", text: "Images, a PDF, Word or text document, or a link — or only a topic." },
+  { icon: Paperclip, title: "Attach a file or just prompt", text: "Images, old footage, a PDF, Word or text document, or a link — or only a topic." },
   { icon: Download, title: "Download your result", text: "A narrated, subtitled video; fix any scene in the timeline." },
 ];
 
