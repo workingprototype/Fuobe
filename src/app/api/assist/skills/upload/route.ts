@@ -1,9 +1,13 @@
+import { gateAsProxy } from "@/server/direct-gate";
 import { importSkill, SkillError } from "@/server/skills";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
 /** Add a skill from a .zip / .skill archive or a SKILL.md (multipart "file"; `?replace=1` overwrites your skill of the same name). */
 export async function POST(request: Request) {
+  // The proxy doesn't run on this route (a big form): its checks run here.
+  const denied = gateAsProxy(request);
+  if (denied) return denied;
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File)) return Response.json({ error: "Choose a .zip, .skill or SKILL.md file" }, { status: 400 });

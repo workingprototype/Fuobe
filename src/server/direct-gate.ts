@@ -1,5 +1,7 @@
 import "server-only";
+import { NextRequest } from "next/server";
 import { GUEST_HEADER, GUEST_RUN_MESSAGE } from "@/lib/guest-access";
+import { proxy } from "@/proxy";
 import { authEnabled, crossSite, hostAllowed, publicSignup, requestViewer, type Account } from "./auth";
 
 /**
@@ -8,6 +10,16 @@ import { authEnabled, crossSite, hostAllowed, publicSignup, requestViewer, type 
  * install answers (without a password), a request from this site, then who is asking. Returns the viewer, or the
  * answer the proxy would have given.
  */
+/**
+ * The proxy's whole answer, for a route the proxy's matcher leaves out because it takes a file in a form (src/proxy.ts
+ * config): the proxy runs here on the request's address, method and headers (never its body), so every rule it has
+ * applies, the same way. Null when the proxy would let the request through; else its answer.
+ */
+export function gateAsProxy(request: Request): Response | null {
+  const res = proxy(new NextRequest(request.url, { method: request.method, headers: request.headers }));
+  return res.headers.get("x-middleware-next") === "1" ? null : res;
+}
+
 export function gateDirect(request: Request): { kind: "owner" } | { kind: "account"; account: Account } | Response {
   const url = new URL(request.url);
   const host = request.headers.get("host") ?? url.host;

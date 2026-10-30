@@ -1,4 +1,5 @@
 import { requestAccount } from "@/server/auth";
+import { gateAsProxy } from "@/server/direct-gate";
 import { FinishError, finishOutput } from "@/server/generations";
 
 const MAX_BYTES = 64 * 1024 * 1024;
@@ -12,6 +13,9 @@ const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
  * its own (through the generation).
  */
 export async function POST(request: Request, ctx: RouteContext<"/api/generations/[id]/finish">) {
+  // The proxy doesn't run on this route (a big form): its checks run here (an account: only its own run).
+  const denied = gateAsProxy(request);
+  if (denied) return denied;
   const { id } = await ctx.params;
   const max = requestAccount(request) ? ACCOUNT_MAX_BYTES : MAX_BYTES;
   if (Number(request.headers.get("content-length") ?? 0) > max + 64 * 1024) return Response.json({ error: `That picture is too large (${max / 2 ** 20} MB max)` }, { status: 413 });

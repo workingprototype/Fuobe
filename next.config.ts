@@ -5,10 +5,12 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   experimental: {
-    // The sign-in proxy buffers request bodies (10 MB by default). Uploads skip it (src/proxy.ts matcher), so this is
-    // the largest other body: a Soul finish or a Layers render (64 MB) plus the form overhead. A body over it reaches
-    // the route cut short, with no error.
-    proxyClientMaxBodySize: "66mb",
+    // The sign-in proxy holds every request body it sees in memory, up to this size, even one it refuses: a small limit
+    // keeps many open requests from filling the server's memory. The routes that take a file in a form (uploads, a Soul
+    // finish, a Layers render, a skill, an Assist source, an explainer document) skip the proxy and check the asker
+    // themselves (src/proxy.ts matcher). Everything else sends JSON: Evolution's 2 MB frame is the largest. A body over
+    // the limit reaches the route cut short, with no error (POST /api/generations then says it is too large).
+    proxyClientMaxBodySize: "4mb",
   },
   async headers() {
     return [

@@ -38,6 +38,10 @@ function activeRuns(accountId: string): number {
   return r.n;
 }
 
+/** What the sign-in proxy passes on of a request body (next.config.ts proxyClientMaxBodySize). */
+const PROXY_BODY_BYTES = 4 * 1024 * 1024;
+const BODY_TOO_BIG = "That request is over 4 MB. Upload pictures and clips first (POST /api/uploads), then send their /api/files/ paths.";
+
 const refuse = (status: number, error: string, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}) =>
   Response.json({ error, ...extra }, { status, headers: { "Cache-Control": "no-store", ...headers } });
 
@@ -56,7 +60,10 @@ export async function POST(request: Request) {
   let body: unknown = null;
   try {
     body = JSON.parse(text);
-  } catch {}
+  } catch {
+    // The sign-in proxy passes on the first 4 MB of a body (next.config.ts): a bigger one arrives cut short.
+    if (Number(request.headers.get("content-length") ?? 0) > PROXY_BODY_BYTES) return refuse(413, BODY_TOO_BIG);
+  }
   const parsed = GenerationRequestSchema.safeParse(body);
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });

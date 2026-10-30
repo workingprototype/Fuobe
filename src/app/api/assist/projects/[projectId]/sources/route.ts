@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { addSource, ProjectError } from "@/server/assist/projects";
+import { gateAsProxy } from "@/server/direct-gate";
 import { contentTypeFor, deleteAsset, saveFile } from "@/server/storage";
 
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -19,6 +20,9 @@ const Json = z.discriminatedUnion("kind", [
  * (documents and media are stored like uploads). Links are fetched through the guarded fetcher.
  */
 export async function POST(request: Request, ctx: RouteContext<"/api/assist/projects/[projectId]/sources">) {
+  // The proxy doesn't run on this route (a big form): its checks run here.
+  const denied = gateAsProxy(request);
+  if (denied) return denied;
   const { projectId } = await ctx.params;
   try {
     if ((request.headers.get("content-type") ?? "").startsWith("multipart/form-data")) {

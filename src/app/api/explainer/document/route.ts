@@ -1,3 +1,4 @@
+import { gateAsProxy } from "@/server/direct-gate";
 import { EngineSchema, FacelessError, handle, MAX_DOCUMENT_BYTES, readDocument } from "@/server/faceless";
 
 /**
@@ -5,6 +6,9 @@ import { EngineSchema, FacelessError, handle, MAX_DOCUMENT_BYTES, readDocument }
  * document is longer than the script writer reads, summarised. The file itself isn't kept.
  */
 export async function POST(request: Request) {
+  // The proxy doesn't run on this route (a big form): its checks run here.
+  const denied = gateAsProxy(request);
+  if (denied) return denied;
   return handle(async () => {
     const form = await request.formData().catch(() => null);
     const file = form?.get("file");
