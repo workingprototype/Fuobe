@@ -3,6 +3,12 @@
  * Then every page and API call needs a session cookie (from /login) or an API token
  * (`Authorization: Bearer fuobe_…`).
  *
+ * Public sign-up (publicSignup: FUOBE_PUBLIC_SIGNUP=1, Settings → Security, or fuobe.com itself)
+ * opens a password-protected studio a little: guests may browse it read-only, and anyone may make
+ * an account (email + password, no verification) whose session works across the app. An account
+ * never runs on the owner's cloud keys or GPU, and install-wide settings, keys and tokens stay the
+ * owner's (the install password's session, or an API token): src/proxy.ts, src/lib/guest-access.ts.
+ *
  * Kept in a small JSON file next to the database, not in SQLite, so the proxy's sign-in check
  * needs nothing but `fs` and `crypto`. (The proxy does open SQLite, for one primary-key lookup on
  * record pages only, so an unknown id gets a real 404: src/server/records.ts.)
@@ -29,12 +35,25 @@ export interface ApiToken {
   lastUsedAt?: number;
 }
 
+/** A signed-up visitor (public sign-up). */
+export interface Account {
+  id: string;
+  /** Lower-cased. */
+  email: string;
+  /** scrypt hash of the password ("salt:hash", hex), as the install password's. */
+  hash: string;
+  createdAt: number;
+}
+
 interface AuthFile {
   /** scrypt hash of the UI-set password ("salt:hash", hex). */
   password?: string;
   /** Signs session cookies; replaced when the password changes, which signs everyone out. */
   secret: string;
   tokens: ApiToken[];
+  accounts?: Account[];
+  /** Settings → Security: guests may browse and anyone may sign up (FUOBE_PUBLIC_SIGNUP overrides it). */
+  publicSignup?: boolean;
 }
 
 let cache: { mtime: number; data: AuthFile } | null = null;
@@ -84,13 +103,18 @@ function hashPassword(pw: string): string {
 
 const same = (a: Buffer, b: Buffer) => a.length === b.length && crypto.timingSafeEqual(a, b);
 
+function verifyHash(pw: string, stored: string): boolean {
+  const [salt, hash] = stored.split(":");
+  if (!salt || !hash) return false;
+  return same(crypto.scryptSync(pw, Buffer.from(salt, "hex"), 32), Buffer.from(hash, "hex"));
+}
+
 export function checkPassword(pw: string): boolean {
   const env = envPassword();
   if (env) return same(crypto.createHash("sha256").update(pw).digest(), crypto.createHash("sha256").update(env).digest());
   const stored = read().password;
   if (!stored) return false;
-  const [salt, hash] = stored.split(":");
-  return same(crypto.scryptSync(pw, Buffer.from(salt, "hex"), 32), Buffer.from(hash, "hex"));
+  return verifyHash(pw, stored);
 }
 
 /** Set, change or (with null) remove the UI password. Signs every browser out. */
@@ -106,22 +130,114 @@ export function setPassword(pw: string | null): void {
 
 const sign = (secret: string, payload: string) => crypto.createHmac("sha256", secret).update(payload).digest("base64url");
 
-export function createSession(): { value: string; maxAge: number } {
+/**
+ * A session cookie: "<expiry>.<mac>" for the owner, "<expiry>.<account id>.<mac>" for an account.
+ * The two sign different text, so neither can be turned into the other.
+ */
+export function createSession(accountId?: string): { value: string; maxAge: number } {
   let d = read();
   if (!d.secret) {
     d = withSecret(d);
     write(d);
   }
   const exp = Date.now() + SESSION_DAYS * 86_400_000;
-  return { value: `${exp}.${sign(d.secret, String(exp))}`, maxAge: SESSION_DAYS * 86_400 };
+  const payload = accountId ? `${exp}.${accountId}` : String(exp);
+  return { value: `${payload}.${sign(d.secret, payload)}`, maxAge: SESSION_DAYS * 86_400 };
 }
 
+/** Who a session cookie belongs to: the owner, an account that still exists, or nobody. */
+export type Viewer = { kind: "owner" } | { kind: "account"; account: Account };
+
+export function sessionViewer(value: string | undefined): Viewer | null {
+  if (!value) return null;
+  const parts = value.split(".");
+  if (parts.length !== 2 && parts.length !== 3) return null;
+  const exp = parts[0];
+  const mac = parts[parts.length - 1];
+  const d = read();
+  if (!d.secret || !exp || !mac || !(Number(exp) >= Date.now())) return null;
+  if (!same(Buffer.from(mac), Buffer.from(sign(d.secret, parts.slice(0, -1).join("."))))) return null;
+  if (parts.length === 2) return { kind: "owner" };
+  const account = d.accounts?.find((a) => a.id === parts[1]);
+  return account ? { kind: "account", account } : null;
+}
+
+/** The owner's session (the install password's): what Settings → Security and the tokens need. */
 export function validSession(value: string | undefined): boolean {
-  if (!value) return false;
-  const [exp, mac] = value.split(".");
-  const secret = read().secret;
-  if (!secret || !exp || !mac || Number(exp) < Date.now()) return false;
-  return same(Buffer.from(mac), Buffer.from(sign(secret, exp)));
+  return sessionViewer(value)?.kind === "owner";
+}
+
+// ---------------------------------------------------------------------------
+// Public sign-up: accounts
+
+export class AccountError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Lower-cased, or null when it doesn't look like an email address. */
+export function normalizeEmail(email: string): string | null {
+  const e = email.trim().toLowerCase();
+  return e.length <= 254 && /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(e) ? e : null;
+}
+
+export function createAccount(email: string, password: string): Account {
+  const e = normalizeEmail(email);
+  if (!e) throw new AccountError("Enter a valid email address", 400);
+  if (password.length < 8) throw new AccountError("Use at least 8 characters", 400);
+  const d = withSecret(read());
+  if (d.accounts?.some((a) => a.email === e)) throw new AccountError("An account with this email already exists. Log in instead.", 409);
+  const account: Account = { id: crypto.randomBytes(9).toString("hex"), email: e, hash: hashPassword(password), createdAt: Date.now() };
+  write({ ...d, accounts: [...(d.accounts ?? []), account] });
+  return account;
+}
+
+let dummy: string | undefined;
+
+/** The account for this email and password, or null. An unknown email costs the same scrypt as a known one. */
+export function checkAccount(email: string, password: string): Account | null {
+  const e = normalizeEmail(email);
+  const account = e ? read().accounts?.find((a) => a.email === e) : undefined;
+  const ok = verifyHash(password, account?.hash ?? (dummy ??= hashPassword(crypto.randomBytes(12).toString("hex"))));
+  return account && ok ? account : null;
+}
+
+// ---------------------------------------------------------------------------
+// Public sign-up: the switch
+
+const FUOBE_COM = new Set(["fuobe.com", "www.fuobe.com"]);
+
+/** FUOBE_PUBLIC_SIGNUP: "1" on, "0" off (Settings can't change either), else null. */
+export function publicSignupFromEnv(): boolean | null {
+  const v = process.env.FUOBE_PUBLIC_SIGNUP?.trim();
+  return v === "1" ? true : v === "0" ? false : null;
+}
+
+/** The Settings → Security switch (ignored while FUOBE_PUBLIC_SIGNUP is set). */
+export const publicSignupSetting = () => !!read().publicSignup;
+
+export function setPublicSignup(on: boolean): void {
+  if (publicSignupFromEnv() !== null) throw new Error("Public sign-up is set by FUOBE_PUBLIC_SIGNUP on the server");
+  write({ ...withSecret(read()), publicSignup: on });
+}
+
+/**
+ * Are guests and sign-ups let in for a request to this host? Only on a studio with a password
+ * (without one everyone is the owner already). FUOBE_PUBLIC_SIGNUP=1 or 0 decides; unset, the
+ * Settings switch, or the public demo at fuobe.com. The Host header is the client's word, so a
+ * self-hosted studio reached by its IP can't be opened with "Host: fuobe.com": the name counts
+ * only on an install that lists it in FUOBE_ALLOWED_ORIGINS, as fuobe.com's own server does.
+ */
+export function publicSignup(host: string | null | undefined): boolean {
+  if (!authEnabled()) return false;
+  const env = publicSignupFromEnv();
+  if (env !== null) return env;
+  if (publicSignupSetting()) return true;
+  return !!host && FUOBE_COM.has(hostName(host)) && allowedHosts().some((a) => FUOBE_COM.has(hostName(a)));
 }
 
 // ---------------------------------------------------------------------------

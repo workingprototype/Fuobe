@@ -1,11 +1,13 @@
 import { connection } from "next/server";
+import { isGuest } from "@/lib/guest-access";
 import { SkillBody } from "@/server/assist/schemas";
 import { createSkill, listSkills, SkillError } from "@/server/skills";
 
 /** Every skill: built-in (from skills/) and the user's own. */
-export async function GET() {
+export async function GET(request: Request) {
   await connection();
-  return Response.json({ items: listSkills() });
+  // A guest (public sign-up) sees the built-in skills, not the owner's own.
+  return Response.json({ items: isGuest(request) ? listSkills().filter((s) => s.source === "builtin") : listSkills() });
 }
 
 /** Create a skill from the form (name, title, description, when to use, instructions). */

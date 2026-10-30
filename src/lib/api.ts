@@ -1047,3 +1047,63 @@ export function useAssistActions() {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Who is looking (public sign-up: GET /api/auth/me)
+
+export interface ViewerInfo {
+  signedIn: boolean;
+  /** The install password's session or an API token (also everyone while no password is set). */
+  owner: boolean;
+  /** Guests may browse and anyone may sign up. */
+  publicSignup: boolean;
+  account?: { email: string };
+}
+
+export function useViewer() {
+  return useQuery({
+    queryKey: ["viewer"],
+    queryFn: async () => json<ViewerInfo>(await fetch("/api/auth/me")),
+    staleTime: 60_000,
+  });
+}
+
+/** A guest browsing a public studio: signed out while sign-up is open. */
+export function useIsGuest(): boolean {
+  const v = useViewer().data;
+  return !!v && v.publicSignup && !v.signedIn;
+}
+
+/** "Sign up" / "Log in" with a way back here. */
+export function signInHref(mode: "signup" | "login", next?: string): string {
+  const p = new URLSearchParams();
+  if (mode === "signup") p.set("signup", "1");
+  if (next && next !== "/") p.set("next", next);
+  const q = p.toString();
+  return q ? `/login?${q}` : "/login";
+}
+
+export const GUEST_PROMPT_EVENT = "fuobe:guest-prompt";
+export const CONNECT_GPU_EVENT = "fuobe:connect-gpu";
+
+/**
+ * A guest tried to change something (the proxy answers a guest's change with a 401 marked
+ * x-fuobe-guest): open "Create a free account" (GuestPrompt). An account tried to run something
+ * (a 403 marked x-fuobe-connect-gpu): open "Connect your GPU". Watches every fetch, so the studio's
+ * own helpers (json() here, and the components' own) all get it. Installed once.
+ */
+export function watchGuestRefusals(): void {
+  const w = window as typeof window & { __fuobeGuestFetch?: boolean };
+  if (w.__fuobeGuestFetch) return;
+  w.__fuobeGuestFetch = true;
+  const original = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const res = await original(input, init);
+    if (res.status === 401 && res.headers.get("x-fuobe-guest") === "1") {
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (method !== "GET" && method !== "HEAD") window.dispatchEvent(new Event(GUEST_PROMPT_EVENT));
+    }
+    if (res.status === 403 && res.headers.get("x-fuobe-connect-gpu") === "1") window.dispatchEvent(new Event(CONNECT_GPU_EVENT));
+    return res;
+  };
+}

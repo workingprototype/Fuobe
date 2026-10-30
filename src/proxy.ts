@@ -2,12 +2,26 @@ import { NextResponse, type NextRequest } from "next/server";
 import { APPS } from "@/lib/catalog/apps";
 import { recordForPath, unknownHubMode } from "@/lib/record-pages";
 import { countsAsView, SHARE_VIEW_HEADER, shareRoute } from "@/lib/share";
-import { authEnabled, crossSite, hostAllowed, LoginGuard, SESSION_COOKIE, validSession, validToken } from "@/server/auth";
+import {
+  accountMayChange,
+  CONNECT_GPU_HEADER,
+  CONNECT_GPU_MESSAGE,
+  GUEST_HEADER,
+  GUEST_LIBRARY_MESSAGE,
+  GUEST_RUN_MESSAGE,
+  guestRead,
+  isPriceCheck,
+  ownerOnly,
+} from "@/lib/guest-access";
+import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, SESSION_COOKIE, sessionViewer, validSession, validToken, type Viewer } from "@/server/auth";
 import { recordExists } from "@/server/records";
 import { findShare, shareGuard, shareTargetExists } from "@/server/share-access";
 
-/** Paths that work signed out: the login page and its API (and share links: openShare). */
-const OPEN = new Set(["/login", "/api/auth/login"]);
+/**
+ * Paths that work signed out: the login page and its API (and share links: openShare). Sign-up and
+ * "who am I" answer for themselves whether public sign-up is on.
+ */
+const OPEN = new Set(["/login", "/api/auth/login", "/api/auth/signup", "/api/auth/me"]);
 
 const APP_IDS = new Set(APPS.map((a) => a.id));
 
@@ -32,7 +46,55 @@ const notFound = (request: NextRequest) => NextResponse.rewrite(new URL("/_fuobe
 /** Share pages and their files: never indexed, and the token never leaks to another site in a Referer. */
 const SHARE_HEADERS = { "X-Robots-Tag": "noindex, nofollow, noarchive", "Referrer-Policy": "no-referrer" };
 
+/** The owner: the install password's session, or an API token. */
 const signedIn = (request: NextRequest) => validSession(request.cookies.get(SESSION_COOKIE)?.value) || validToken(request.headers.get("authorization"));
+
+/** The owner, an account (only while public sign-up is on), or null (a guest). */
+function viewerOf(request: NextRequest, open: boolean): Viewer | null {
+  const session = sessionViewer(request.cookies.get(SESSION_COOKIE)?.value);
+  if (session?.kind === "owner" || validToken(request.headers.get("authorization"))) return { kind: "owner" };
+  return open && session?.kind === "account" ? session : null;
+}
+
+const guestHeaders = { [GUEST_HEADER]: "1", "Cache-Control": "no-store" };
+
+/**
+ * A guest (public sign-up on, signed out): every page and the catalog reads, the owner's lists
+ * empty, the rest of the library 401, and every change 401 (the client offers to sign up).
+ */
+function guest(request: NextRequest): NextResponse {
+  const { pathname, search } = request.nextUrl;
+  if (request.method === "GET" || request.method === "HEAD") {
+    const read = guestRead(pathname);
+    if (read.kind === "pass") return pass(request);
+    if (read.kind === "filtered") {
+      const headers = new Headers(request.headers);
+      headers.set(GUEST_HEADER, "1");
+      return NextResponse.next({ request: { headers } });
+    }
+    if (read.kind === "empty") return NextResponse.json(read.body, { headers: guestHeaders });
+    if (read.kind === "none") return NextResponse.json({ error: "Not for guests" }, { status: 404, headers: guestHeaders });
+    return NextResponse.json({ error: GUEST_LIBRARY_MESSAGE }, { status: 401, headers: guestHeaders });
+  }
+  if (isPriceCheck(request.method, pathname, search)) return pass(request);
+  return NextResponse.json({ error: GUEST_RUN_MESSAGE }, { status: 401, headers: guestHeaders });
+}
+
+/**
+ * An account: browses the whole studio and keeps its own library and projects, but install-wide
+ * settings, keys and tokens are the owner's, and anything that would reach a model is refused
+ * ("Connect your GPU"): an account never runs on the owner's cloud keys or GPU.
+ */
+function account(request: NextRequest): NextResponse {
+  const { pathname, search } = request.nextUrl;
+  if (ownerOnly(request.method, pathname)) {
+    return NextResponse.json({ error: "Only the studio's owner can change settings, keys and tokens." }, { status: 403 });
+  }
+  if (!accountMayChange(request.method, pathname, search)) {
+    return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
+  }
+  return pass(request);
+}
 
 const tooMany = (seconds: number) =>
   new NextResponse("Too many wrong links. Try again in a minute.", { status: 429, headers: { ...SHARE_HEADERS, "Retry-After": String(seconds) } });
@@ -102,7 +164,11 @@ export function proxy(request: NextRequest) {
   if (share) return openShare(request, share.token, !!share.file);
   if (!authEnabled()) return pass(request);
   if (OPEN.has(pathname)) return NextResponse.next();
-  if (signedIn(request)) return pass(request);
+  const open = publicSignup(request.headers.get("host") ?? request.nextUrl.host);
+  const viewer = viewerOf(request, open);
+  if (viewer?.kind === "owner") return pass(request);
+  if (viewer?.kind === "account") return account(request);
+  if (open) return guest(request);
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Sign in, or send an API token as Authorization: Bearer fuobe_…" }, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="fuobe"' } });
   }

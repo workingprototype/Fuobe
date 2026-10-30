@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { isGuest } from "@/lib/guest-access";
 import { z } from "zod";
 import { createPalette, listPalettes, signatureCaps } from "@/server/palettes";
 
@@ -11,9 +12,9 @@ const Body = z.object({
 });
 
 /** Your colour signatures and the 50 built-in palettes, plus which models take a palette natively. */
-export async function GET() {
+export async function GET(request: Request) {
   await connection();
-  return Response.json({ items: listPalettes(), caps: signatureCaps() });
+  return Response.json({ items: isGuest(request) ? [] : listPalettes(), caps: signatureCaps() });
 }
 
 export async function POST(request: Request) {

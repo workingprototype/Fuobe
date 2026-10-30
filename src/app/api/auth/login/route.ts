@@ -1,8 +1,9 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { authEnabled, checkPassword, createSession, LoginGuard, SESSION_COOKIE } from "@/server/auth";
+import { authEnabled, checkAccount, checkPassword, createSession, LoginGuard, publicSignup, SESSION_COOKIE } from "@/server/auth";
 
-const Body = z.object({ password: z.string().min(1).max(500) });
+/** The install password alone (the owner), or an account's email and password (public sign-up). */
+const Body = z.object({ password: z.string().min(1).max(500), email: z.string().max(254).optional() });
 
 declare global {
   var __fuobeLoginGuard: LoginGuard | undefined;
@@ -23,12 +24,21 @@ export async function POST(request: Request) {
     );
   }
   const parsed = Body.safeParse(await request.json().catch(() => null));
-  if (!parsed.success || !checkPassword(parsed.data.password)) {
+  const email = parsed.success ? parsed.data.email?.trim() : undefined;
+  let accountId: string | undefined;
+  if (email) {
+    const account = parsed.success && publicSignup(request.headers.get("host")) ? checkAccount(email, parsed.data.password) : null;
+    if (!account) {
+      guard.fail(key);
+      return Response.json({ error: "Wrong email or password" }, { status: 401 });
+    }
+    accountId = account.id;
+  } else if (!parsed.success || !checkPassword(parsed.data.password)) {
     guard.fail(key);
     return Response.json({ error: "Wrong password" }, { status: 401 });
   }
   guard.succeed(key);
-  const s = createSession();
+  const s = createSession(accountId);
   (await cookies()).set(SESSION_COOKIE, s.value, {
     httpOnly: true,
     sameSite: "lax",

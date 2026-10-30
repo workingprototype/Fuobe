@@ -4,7 +4,7 @@ import { useLinkStatus } from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, Clapperboard, Moon, Plus, Search, Sun, X } from "lucide-react";
+import { ChevronRight, Clapperboard, LogIn, Moon, Plus, Search, Sun, UserPlus, X } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -29,7 +29,7 @@ import { IntentLink } from "@/components/intent-link";
 import { JobNotifications } from "@/components/job-notifications";
 import { NAV, type NavGroupDef } from "@/components/nav-items";
 import { SkillBuilderProvider } from "@/components/skills/skill-builder-provider";
-import { useEngineMode, useStatus } from "@/lib/api";
+import { signInHref, useEngineMode, useIsGuest, useStatus } from "@/lib/api";
 import { useModKey } from "@/lib/keys";
 import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, parseClosed, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -309,6 +309,29 @@ function SearchRow() {
   );
 }
 
+/** Public sign-up, signed out: "Sign up" and "Log in", coming back to this page. */
+function GuestRow() {
+  const guest = useIsGuest();
+  const pathname = usePathname();
+  if (!guest) return null;
+  return (
+    <SidebarMenuItem className="mt-1 flex gap-1.5 group-data-[collapsible=icon]:flex-col">
+      <SidebarMenuButton asChild tooltip="Sign up free" className="h-8 flex-1 justify-center bg-primary text-[13px] text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground">
+        <a href={signInHref("signup", pathname)}>
+          <UserPlus />
+          <span>Sign up</span>
+        </a>
+      </SidebarMenuButton>
+      <SidebarMenuButton asChild tooltip="Log in" className="h-8 flex-1 justify-center border border-sidebar-border text-[13px]">
+        <a href={signInHref("login", pathname)}>
+          <LogIn />
+          <span>Log in</span>
+        </a>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
 /** The GitHub mark (lucide has no brand icons). */
 function GitHubMark() {
   return (
@@ -364,6 +387,7 @@ export function AppSidebar() {
               )}
             </div>
             <SidebarMenu>
+              <GuestRow />
               <SearchRow />
               <SidebarMenuItem>
                 <SidebarMenuButton asChild tooltip="New creation" className="h-8 text-[13px] has-[[data-pending]]:bg-sidebar-accent">
