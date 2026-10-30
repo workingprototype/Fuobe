@@ -309,7 +309,7 @@ function SearchRow() {
   );
 }
 
-/** Public sign-up, signed out: "Sign up" and "Log in", coming back to this page. */
+/** Public sign-up, signed out: "Sign up" and "Log in", coming back to this page (under Suspense: it reads the path). */
 function GuestRow() {
   const guest = useIsGuest();
   const pathname = usePathname();
@@ -387,7 +387,9 @@ export function AppSidebar() {
               )}
             </div>
             <SidebarMenu>
-              <GuestRow />
+              <Suspense fallback={null}>
+                <GuestRow />
+              </Suspense>
               <SearchRow />
               <SidebarMenuItem>
                 <SidebarMenuButton asChild tooltip="New creation" className="h-8 text-[13px] has-[[data-pending]]:bg-sidebar-accent">
