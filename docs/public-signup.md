@@ -30,7 +30,9 @@ it (files, uploads, projects, settings values, tokens) answer 401 "Sign up to se
 Every change a guest sends (generate, upload, save a setting, create a project…) answers 401. The
 studio shows a "Create a free account to run this" card with **Sign up** and **Log in**. Price
 checks (the estimate routes, and `?preview=1` on the run routes that support it) stay open, so the
-studios can show prices.
+studios can show prices. A guest may send 120 price checks a minute (per visitor behind a trusted
+reverse proxy; see below), and so may each account. A price check reads only the header of a file
+it names, and only of the asker's own files: a guest owns none.
 
 ## Accounts
 

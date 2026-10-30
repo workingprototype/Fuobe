@@ -22,6 +22,7 @@ import {
 } from "@/lib/guest-access";
 import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, sessionCookieOf, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
 import { fileAccount, generationAccount } from "@/server/account-library";
+import { hit } from "@/server/rate";
 import { recordExists } from "@/server/records";
 import { findShare, shareGuard, shareTargetExists } from "@/server/share-access";
 
@@ -66,6 +67,16 @@ function viewerOf(request: NextRequest, open: boolean): Viewer | null {
 
 const guestHeaders = { [GUEST_HEADER]: "1", "Cache-Control": "no-store" };
 
+/** Price checks a guest (per address) or an account may send a minute: free, but each one plans a run. A page sends far fewer. */
+const PRICE_CHECKS_PER_MINUTE = 120;
+
+/** A guest's or an account's price check, within its budget (the owner's are never counted). */
+function priceCheck(request: NextRequest, who: string): NextResponse {
+  const r = hit(`price:${who}`, PRICE_CHECKS_PER_MINUTE, 60_000);
+  if (r.ok) return pass(request);
+  return NextResponse.json({ error: "Too many price checks. Try again in a minute." }, { status: 429, headers: { "Retry-After": String(r.retryAfterS), "Cache-Control": "no-store" } });
+}
+
 /**
  * A guest (public sign-up on, signed out): every page and the catalog reads, the owner's lists
  * empty, the rest of the library 401, and every change 401 (the client offers to sign up).
@@ -73,7 +84,7 @@ const guestHeaders = { [GUEST_HEADER]: "1", "Cache-Control": "no-store" };
 function guest(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
   if (request.method === "GET" || request.method === "HEAD") return readAsGuest(request, false);
-  if (isPriceCheck(request.method, pathname, search)) return pass(request);
+  if (isPriceCheck(request.method, pathname, search)) return priceCheck(request, `guest:${LoginGuard.clientKey(request.headers)}`);
   return NextResponse.json({ error: GUEST_RUN_MESSAGE }, { status: 401, headers: guestHeaders });
 }
 
@@ -116,6 +127,7 @@ function account(request: NextRequest, who: Account): NextResponse {
   const file = request.method === "GET" || request.method === "HEAD" ? /^\/api\/files\/(.+)$/.exec(pathname)?.[1] : undefined;
   if (file !== undefined) return fileAccount(safeDecode(file)) === who.id ? pass(request) : notYours();
   if (request.method === "GET" || request.method === "HEAD") return accountOwnRead(pathname) ? pass(request) : readAsGuest(request, true);
+  if (isPriceCheck(request.method, pathname, search)) return priceCheck(request, `account:${who.id}`);
   if (accountMayChange(request.method, pathname, search)) return pass(request);
   if (isLibraryChange(request.method, pathname)) return NextResponse.json({ error: LIBRARY_MESSAGE, code: "library" }, { status: 403 });
   if (!who.gpu) return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });

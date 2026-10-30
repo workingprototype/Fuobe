@@ -6,7 +6,7 @@ import { CinemaError } from "./cinema";
 /** Request bodies of /api/cinema/** (zod drops unknown keys). */
 
 const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
-const FileRef = z.string().startsWith("/api/files/");
+const FileRef = z.string().startsWith("/api/files/").max(500);
 const Slug = z.string().max(80).nullable().optional();
 
 export const DirectorSchema = z.object({

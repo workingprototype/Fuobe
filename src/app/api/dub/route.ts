@@ -7,7 +7,7 @@ import { priceAs } from "@/server/visitor";
 const Body = z.object({
   engine: z.enum(["cloud", "open"]),
   mode: z.enum(["oneshot", "steps"]),
-  video: z.string().startsWith("/api/files/"),
+  video: z.string().startsWith("/api/files/").max(500),
   title: z.string().max(200).optional(),
   source: z.string().max(12).optional(),
   targets: z.array(z.string().min(2).max(12)).min(1).max(8),

@@ -8,7 +8,7 @@ const Body = z.object({
   colors: z.array(z.string().max(9)).min(1).max(12),
   background: z.string().max(9).nullable().optional(),
   source: z.enum(["manual", "images"]).default("manual"),
-  thumb: z.string().startsWith("/api/files/").nullable().optional(),
+  thumb: z.string().startsWith("/api/files/").max(500).nullable().optional(),
 });
 
 /** Your colour signatures and the 50 built-in palettes, plus which models take a palette natively. */

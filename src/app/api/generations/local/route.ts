@@ -8,7 +8,7 @@ const Body = z.object({
   prompt: z.string().max(2000),
   inputs: z.object({ images: z.array(z.string()).max(1).optional(), video: z.string().optional() }),
   params: z.object({ extra: z.record(z.string(), z.unknown()).optional() }).optional(),
-  output: z.object({ url: z.string().startsWith("/api/files/"), kind: z.enum(["image", "video"]), contentType: z.string().optional() }),
+  output: z.object({ url: z.string().startsWith("/api/files/").max(500), kind: z.enum(["image", "video"]), contentType: z.string().optional() }),
 });
 
 /** Record a result rendered in the browser (e.g. a colour grade) so it shows up in the library. */

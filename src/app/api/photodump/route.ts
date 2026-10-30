@@ -7,7 +7,7 @@ const Body = z
     packId: z.string().min(1).max(80),
     engine: z.enum(["cloud", "open"]),
     elementId: z.string().max(40).optional(),
-    selfie: z.string().startsWith("/api/files/").optional(),
+    selfie: z.string().startsWith("/api/files/").max(500).optional(),
     aspectRatio: z.string().max(10).optional(),
     modelId: z.string().max(80).optional(),
   })

@@ -4,6 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { DATA_DIR, db } from "./db";
 import type { MediaKind } from "@/lib/catalog/types";
+import { probeMediaRangesSync, type MediaInfo } from "@/lib/media-probe";
 import { fetchRemote } from "./remote-fetch";
 import { tenant, tenantAccount } from "./tenant";
 import { accountInputLimit } from "./account-files";
@@ -372,6 +373,61 @@ export function guardRef(ref: string): void {
   const owner = ref.startsWith("/api/files/") ? (filesRel(ref) === null ? undefined : fileAccount(filesRel(ref)!)) : assetAccount(ref);
   if (owner === undefined) throw new RefError(GONE_MESSAGE, 404);
   if (!tenantAccount() || owner !== tenantAccount()) throw new RefError(NOT_YOURS_MESSAGE, 403);
+}
+
+declare global {
+  var __fuobeStoredFacts: Map<string, MediaInfo | null> | undefined;
+}
+const STORED_FACTS_KEPT = 500;
+/** The most read of a file's start for its header, and of an MP4's index (moov) inside a tenant and outside. */
+const STORED_HEAD_BYTES = 1024 * 1024;
+const TENANT_MOOV_BYTES = 8 * 1024 * 1024;
+const OWNER_MOOV_BYTES = 64 * 1024 * 1024;
+
+/**
+ * What a stored file's header says (length, size, tracks), for a price check or a plan: only the header (and an MP4's
+ * index) is read, never the whole file, at once and cached by the file's own path, size and time.
+ *
+ * - null: no such file here, as far as this asker may know. Inside a tenant (a visitor's price check, an account's run)
+ *   that is also another's file: it answers like one that is gone, before any cache is looked at.
+ * - { info: null }: a file the asker may use whose header says nothing Fuobe reads (WebM…), or, inside a tenant, one
+ *   bigger than an upload of its kind may be (never read: the run itself says it is too big).
+ */
+export function storedMedia(ref: string): { info: MediaInfo | null } | null {
+  const rel = filesRel(ref);
+  if (rel === null) return null;
+  if (tenant() && !ownsRef(ref, rel)) return null;
+  let abs: string;
+  let st: fs.Stats;
+  try {
+    abs = absolutePath(rel);
+    st = fs.statSync(abs);
+  } catch {
+    return null;
+  }
+  if (!st.isFile()) return null;
+  if (tenant() && st.size > accountInputLimit(contentTypeFor(rel)).bytes) return { info: null };
+  const cache = (globalThis.__fuobeStoredFacts ??= new Map());
+  const key = `${rel}:${st.size}:${st.mtimeMs}`;
+  if (cache.has(key)) return { info: cache.get(key) ?? null };
+  let info: MediaInfo | null = null;
+  try {
+    const fd = fs.openSync(abs, "r");
+    try {
+      const read = (start: number, end: number) => {
+        const buf = Buffer.alloc(Math.max(0, end - start));
+        return buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, start));
+      };
+      info = probeMediaRangesSync(read, st.size, { headBytes: STORED_HEAD_BYTES, maxMoov: tenant() ? TENANT_MOOV_BYTES : OWNER_MOOV_BYTES });
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+  if (cache.size >= STORED_FACTS_KEPT) cache.delete(cache.keys().next().value!);
+  cache.set(key, info);
+  return { info };
 }
 
 export function toDataUri(data: Buffer, contentType: string): string {

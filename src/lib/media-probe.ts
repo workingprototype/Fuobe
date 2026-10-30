@@ -24,13 +24,18 @@ export interface MediaInfo {
 
 const fourcc = (b: Uint8Array, o: number) => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]);
 
-export function probeMedia(data: Uint8Array): MediaInfo | null {
+/**
+ * `size`: the whole file's length when `data` is only its first bytes (a WAV's sound data and a constant-rate MP3's
+ * length are read from it). Leave it out when `data` is the whole file.
+ */
+export function probeMedia(data: Uint8Array, size = data.length): MediaInfo | null {
   try {
     if (data.length < 12) return null;
-    if (fourcc(data, 0) === "RIFF" && fourcc(data, 8) === "WAVE") return probeWav(data);
+    const total = Math.max(size, data.length);
+    if (fourcc(data, 0) === "RIFF" && fourcc(data, 8) === "WAVE") return probeWav(data, total);
     if (fourcc(data, 0) === "fLaC") return probeFlac(data);
     if (fourcc(data, 4) === "ftyp" || ["moov", "mdat", "free", "wide", "skip"].includes(fourcc(data, 4))) return probeIsoBmff(data);
-    return probeMp3(data);
+    return probeMp3(data, total);
   } catch {
     return null;
   }
@@ -71,6 +76,43 @@ export async function probeMediaRanges(read: ReadRange, size: number): Promise<M
         if (len > MAX_MOOV_BYTES) return null;
         const end = Math.min(size, o + len);
         return probeMedia(end <= head.length ? head.subarray(o, end) : await read(o, end));
+      }
+      o += len;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reads the bytes [start, end) of a file at once (a file on this computer's disk). */
+export type ReadRangeSync = (start: number, end: number) => Uint8Array;
+
+/**
+ * {@link probeMediaRanges} for a file read at once (on the server's own disk), never all of it: an MP4 / MOV's moov box
+ * (none over `maxMoov`), or the first `headBytes` of anything else, which is enough for a WAV, FLAC or MP3 with the
+ * file's size.
+ */
+export function probeMediaRangesSync(read: ReadRangeSync, size: number, opts: { headBytes?: number; maxMoov?: number } = {}): MediaInfo | null {
+  const maxMoov = opts.maxMoov ?? MAX_MOOV_BYTES;
+  try {
+    const head = read(0, Math.min(size, opts.headBytes ?? HEAD_BYTES));
+    if (head.length < 12) return null;
+    if (!ISO_TOP.includes(fourcc(head, 4))) return probeMedia(head, size);
+    for (let o = 0; o + 8 <= size; ) {
+      const h = o + 16 <= head.length ? head.subarray(o, o + 16) : read(o, Math.min(size, o + 16));
+      if (h.length < 8) return null;
+      const d = new DataView(h.buffer, h.byteOffset, h.byteLength);
+      let len = d.getUint32(0);
+      if (len === 1) {
+        if (h.length < 16) return null;
+        len = Number(d.getBigUint64(8));
+      } else if (len === 0) len = size - o;
+      if (len < 8) return null;
+      if (fourcc(h, 4) === "moov") {
+        if (len > maxMoov) return null;
+        const end = Math.min(size, o + len);
+        return probeMedia(end <= head.length ? head.subarray(o, end) : read(o, end));
       }
       o += len;
     }
@@ -198,7 +240,7 @@ function probeIsoBmff(data: Uint8Array): MediaInfo | null {
 // ---------------------------------------------------------------------------
 // WAV, FLAC, MP3
 
-function probeWav(data: Uint8Array): MediaInfo | null {
+function probeWav(data: Uint8Array, total = data.length): MediaInfo | null {
   const d = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let byteRate = 0;
   for (let o = 12; o + 8 <= data.length; ) {
@@ -206,7 +248,7 @@ function probeWav(data: Uint8Array): MediaInfo | null {
     let size = d.getUint32(o + 4, true);
     if (id === "fmt ") byteRate = d.getUint32(o + 16, true);
     if (id === "data") {
-      if (!size || size === 0xffffffff || o + 8 + size > data.length) size = data.length - o - 8; // streamed header
+      if (!size || size === 0xffffffff || o + 8 + size > total) size = total - o - 8; // streamed header
       return byteRate ? { container: "wav", duration: size / byteRate, hasVideo: false, hasAudio: true } : null;
     }
     o += 8 + size + (size % 2);
@@ -229,7 +271,7 @@ const MP3_BITRATES: Record<string, number[]> = {
 };
 const MP3_RATES: Record<number, number[]> = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] };
 
-function probeMp3(data: Uint8Array): MediaInfo | null {
+function probeMp3(data: Uint8Array, total = data.length): MediaInfo | null {
   let o = 0;
   if (fourcc(data, 0).startsWith("ID3")) o = 10 + ((data[6] & 0x7f) << 21) + ((data[7] & 0x7f) << 14) + ((data[8] & 0x7f) << 7) + (data[9] & 0x7f);
   // The first frame header within a few KB of the tag.
@@ -251,5 +293,5 @@ function probeMp3(data: Uint8Array): MediaInfo | null {
     return { container: "mp3", duration: (frames * samplesPerFrame) / rate, hasVideo: false, hasAudio: true };
   }
   if (!bitrate) return null;
-  return { container: "mp3", duration: ((data.length - o) * 8) / bitrate, hasVideo: false, hasAudio: true };
+  return { container: "mp3", duration: ((total - o) * 8) / bitrate, hasVideo: false, hasAudio: true };
 }

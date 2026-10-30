@@ -260,7 +260,8 @@ describe("Translate & dub", () => {
 
   it("reads a video's length once, however often a call is checked and priced", () => {
     const fresh = saveFile({ data: fs.readFileSync(fixture), contentType: "video/mp4", source: "upload", name: "read once.mp4" }).url;
-    const spy = vi.spyOn(fs, "readFileSync");
+    // Its header only (storage.ts storedMedia opens it and reads the start and the index), and only the first time.
+    const spy = vi.spyOn(fs, "openSync");
     try {
       for (let k = 0; k < 3; k++) {
         expect(plan("dub_video", { video: fresh, languages: ["German"] }, "open").studio).toBe("Translate & dub");
