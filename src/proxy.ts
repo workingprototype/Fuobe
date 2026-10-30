@@ -20,7 +20,7 @@ import {
   ownerOnly,
   ownGpuRun,
 } from "@/lib/guest-access";
-import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, SESSION_COOKIE, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
+import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, sessionCookieOf, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
 import { fileAccount, generationAccount } from "@/server/account-library";
 import { recordExists } from "@/server/records";
 import { findShare, shareGuard, shareTargetExists } from "@/server/share-access";
@@ -55,11 +55,11 @@ const notFound = (request: NextRequest) => NextResponse.rewrite(new URL("/_fuobe
 const SHARE_HEADERS = { "X-Robots-Tag": "noindex, nofollow, noarchive", "Referrer-Policy": "no-referrer" };
 
 /** The owner: the install password's session, or an API token. */
-const signedIn = (request: NextRequest) => validSession(request.cookies.get(SESSION_COOKIE)?.value) || validToken(request.headers.get("authorization"));
+const signedIn = (request: NextRequest) => validSession(sessionCookieOf(request)) || validToken(request.headers.get("authorization"));
 
 /** The owner, an account (only while public sign-up is on), or null (a guest). */
 function viewerOf(request: NextRequest, open: boolean): Viewer | null {
-  const session = sessionViewer(request.cookies.get(SESSION_COOKIE)?.value);
+  const session = sessionViewer(sessionCookieOf(request));
   if (session?.kind === "owner" || validToken(request.headers.get("authorization"))) return { kind: "owner" };
   return open && session?.kind === "account" ? session : null;
 }

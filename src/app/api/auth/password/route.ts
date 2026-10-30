@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { z } from "zod";
-import { authEnabled, authStatus, checkPassword, createSession, SESSION_COOKIE, setPassword, validSession } from "@/server/auth";
+import { authEnabled, authStatus, checkPassword, createSession, SESSION_COOKIE, sessionCookieOf, setPassword, validSession } from "@/server/auth";
 
 const Body = z.object({ current: z.string().max(500).optional(), password: z.string().max(500).nullable() });
 
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return Response.json({ error: "Invalid request" }, { status: 400 });
   const { current, password } = parsed.data;
   const jar = await cookies();
-  if (authEnabled() && !validSession(jar.get(SESSION_COOKIE)?.value)) return Response.json({ error: "Change the password from a signed-in browser" }, { status: 403 });
+  if (authEnabled() && !validSession(sessionCookieOf(request))) return Response.json({ error: "Change the password from a signed-in browser" }, { status: 403 });
   if (authEnabled() && !checkPassword(current ?? "")) return Response.json({ error: "The current password is wrong" }, { status: 403 });
   try {
     setPassword(password);

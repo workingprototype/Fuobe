@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+// Route handlers call connection(); outside a request scope it would throw.
+vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-signup-"));
 process.env.FUOBE_DATA_DIR = dir;
@@ -334,5 +336,50 @@ describe("accounts with their own GPU", () => {
     process.env.FUOBE_PUBLIC_SIGNUP = "1";
     expect(proxy(req("/api/account/gpu", { method: "PUT" })).status).toBe(401);
     expect(proxy(req("/api/account/gpu")).status).toBe(401);
+  });
+});
+
+describe("one reading of the session cookie (audit: proxy and routes must agree on who is asking)", () => {
+  let account = "";
+  beforeAll(() => {
+    account = auth.createSession(auth.createAccount("cookie-twice@example.com", "long enough").id).value;
+  });
+  const raw = (url: string, cookie: string, method = "GET") =>
+    new NextRequest(`http://localhost:3000${url}`, { method, headers: { cookie }, ...(method !== "GET" && { body: "{}" }) });
+  const doubled = () => `${auth.SESSION_COOKIE}=x; ${auth.SESSION_COOKIE}=${account}`;
+  const encoded = () => `${auth.SESSION_COOKIE}=${account.replaceAll(".", "%2E")}`;
+
+  it("reads exactly one plain session pair, and nothing else", () => {
+    expect(auth.sessionCookieFrom(`${auth.SESSION_COOKIE}=${account}`)).toBe(account);
+    expect(auth.sessionCookieFrom(`a=1; ${auth.SESSION_COOKIE}=${account}; b=2`)).toBe(account);
+    expect(auth.sessionCookieFrom(doubled())).toBeUndefined();
+    expect(auth.sessionCookieFrom(`${auth.SESSION_COOKIE}=${account}; ${auth.SESSION_COOKIE}=${account}`)).toBeUndefined();
+    expect(auth.sessionCookieFrom(encoded())).toBeUndefined();
+    expect(auth.sessionCookieFrom(`${auth.SESSION_COOKIE}="${account}"`)).toBeUndefined();
+    expect(auth.sessionCookieFrom(null)).toBeUndefined();
+  });
+
+  it("treats a doubled or encoded cookie as a guest in the proxy AND in the routes", () => {
+    process.env.FUOBE_PUBLIC_SIGNUP = "1";
+    for (const cookie of [doubled(), encoded()]) {
+      // The proxy: an account may list its own runs and start one; a guest may not start one.
+      expect(proxy(raw("/api/generations", cookie, "POST")).status, cookie).toBe(401);
+      expect(proxy(raw("/api/account/gpu", cookie)).status, cookie).toBe(401);
+      // The routes see the same guest, never "no account, so the owner".
+      expect(auth.requestViewer(raw("/api/generations", cookie)).kind, cookie).toBe("guest");
+      expect(auth.requestAccount(raw("/api/generations", cookie)), cookie).toBeNull();
+    }
+    // The plain cookie is still the account, in both.
+    expect(auth.requestViewer(raw("/api/generations", `${auth.SESSION_COOKIE}=${account}`)).kind).toBe("account");
+    expect(passed(proxy(raw("/api/account/gpu", `${auth.SESSION_COOKIE}=${account}`)))).toBe(true);
+  });
+
+  it("the run and list routes answer a guest as a guest, never as the owner", async () => {
+    process.env.FUOBE_PUBLIC_SIGNUP = "1";
+    const { GET, POST } = await import("@/app/api/generations/route");
+    const list = await GET(raw("/api/generations", doubled()));
+    expect(await list.json()).toEqual({ items: [] });
+    const run = await POST(raw("/api/generations", doubled(), "POST"));
+    expect(run.status).toBe(401);
   });
 });

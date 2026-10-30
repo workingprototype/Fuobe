@@ -1,7 +1,7 @@
 import { connection } from "next/server";
-import { CONNECT_GPU_HEADER, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
+import { CONNECT_GPU_HEADER, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { missingFilesMessage } from "@/lib/missing-files";
-import { accountGpu, requestAccount, requestViewer } from "@/server/auth";
+import { accountGpu, requestViewer } from "@/server/auth";
 import { OPERATION_LABELS } from "@/lib/catalog/types";
 import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "@/server/account-files";
 import { accountInputProblem } from "@/server/account-inputs";
@@ -22,9 +22,10 @@ import { gpuTargetFor } from "@/server/gpu/target";
 export async function GET(request: Request) {
   await connection();
   ensureTrashPurge();
-  // An account (public sign-up) lists only its own runs; the owner only theirs.
-  const account = requestAccount(request);
-  return Response.json({ items: listGenerations({ ...listOptionsFrom(new URL(request.url).searchParams), account: account?.id }) });
+  // An account (public sign-up) lists only its own runs; the owner only theirs; anyone else nothing.
+  const viewer = requestViewer(request);
+  if (viewer.kind === "guest") return Response.json({ items: [] });
+  return Response.json({ items: listGenerations({ ...listOptionsFrom(new URL(request.url).searchParams), account: viewer.kind === "account" ? viewer.account.id : undefined }) });
 }
 
 /** An account's runs going now (queued or running), counted as runs: a run's jobs and chain steps share a batch. */
@@ -45,6 +46,8 @@ export async function POST(request: Request) {
   const viewer = requestViewer(request);
   const account = viewer.kind === "account" ? viewer.account : null;
   const preview = new URL(request.url).searchParams.get("preview") === "1";
+  // Without a viewer only a price check: a run is the owner's or an account's, never "nobody, so the owner".
+  if (viewer.kind === "guest" && !preview) return refuse(401, GUEST_RUN_MESSAGE);
   // An account's run request is words and file paths (files are uploaded first): small.
   const limitBody = !!account && !preview;
   if (limitBody && Number(request.headers.get("content-length") ?? 0) > ACCOUNT_LIMITS.runBodyBytes) return refuse(413, ACCOUNT_MESSAGES.bodyTooBig);

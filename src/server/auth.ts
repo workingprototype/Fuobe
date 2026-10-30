@@ -306,13 +306,26 @@ export function setAccountGpu(id: string, gpu: AccountGpu | null): void {
 /** Who is asking: the owner (also everyone while no password is set), an account (public sign-up on), or a guest. */
 export type RequestViewer = { kind: "owner" } | { kind: "account"; account: Account } | { kind: "guest" };
 
+/**
+ * The session cookie in a Cookie header: the one reading the proxy and every route use, so they always agree on who is
+ * asking. Exactly one fuobe_session pair whose value is a plain token (letters, digits, "_", "-", "."). Two pairs, or an
+ * encoded value, mean no session: parsers that pick a different pair (Next keeps the last and decodes it) would
+ * otherwise let the proxy check one viewer while a route acts for another.
+ */
+export function sessionCookieFrom(header: string | null | undefined): string | undefined {
+  let found: string | undefined;
+  for (const part of (header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0 || part.slice(0, eq).trim() !== SESSION_COOKIE) continue;
+    if (found !== undefined) return undefined;
+    found = part.slice(eq + 1).trim();
+  }
+  return found && /^[\w.-]+$/.test(found) ? found : undefined;
+}
+
 /** The session cookie a request carries (read from its Cookie header: works outside Next's request scope too). */
 export function sessionCookieOf(request: Request): string | undefined {
-  for (const part of (request.headers.get("cookie") ?? "").split(";")) {
-    const eq = part.indexOf("=");
-    if (eq > 0 && part.slice(0, eq).trim() === SESSION_COOKIE) return part.slice(eq + 1).trim();
-  }
-  return undefined;
+  return sessionCookieFrom(request.headers.get("cookie"));
 }
 
 export function requestViewer(request: Request, cookie = sessionCookieOf(request)): RequestViewer {
