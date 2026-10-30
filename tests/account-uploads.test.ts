@@ -152,9 +152,10 @@ describe("an account's upload", () => {
   it("takes a small multipart form from an older page", async () => {
     const form = new FormData();
     form.append("file", new File([TINY_PNG], "old.png", { type: "image/png" }));
+    // The form's bytes as a browser sends them, with the boundary its content-type names (a FormData body sent again
+    // is serialized with a boundary of its own, which the first request's content-type doesn't name).
     const req = new Request("http://localhost:3000/api/uploads", { method: "POST", body: form });
-    const length = (await req.clone().arrayBuffer()).byteLength;
-    const r = await upload(form, { cookie: cookieA, type: req.headers.get("content-type")!, length });
+    const r = await upload(new Uint8Array(await req.arrayBuffer()), { cookie: cookieA, type: req.headers.get("content-type")! });
     expect(r.status).toBe(201);
     expect((await r.json()).accountId).toBe(a);
   });
