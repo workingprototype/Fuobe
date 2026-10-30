@@ -6,9 +6,13 @@ import { afterAll, describe, expect, it } from "vitest";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-glb-safety-"));
 process.env.FUOBE_DATA_DIR = path.join(dir, "data");
+process.env.FUOBE_TEST_SECRET = "do-not-pass-this-on";
+const { ACCOUNT_TURNTABLE, finishModel, pendingTurntable, scriptEnv } = await import("@/server/model3d-finish");
+const { saveFile } = await import("@/server/storage");
 const { createGenerations } = await import("@/server/generations");
 const { OWN_GPU_TOOL_MESSAGE } = await import("@/lib/guest-access");
 afterAll(() => {
+  delete process.env.FUOBE_TEST_SECRET;
   try {
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {}
@@ -85,6 +89,29 @@ describe("the 3D finish reads only the model it was given", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(fs.existsSync(out)).toBe(true);
   });
+
+  it("runs the scripts with a short environment, never the server's secrets", () => {
+    const env = scriptEnv();
+    expect(env.FUOBE_TEST_SECRET).toBeUndefined();
+    expect(Object.values(env)).not.toContain("do-not-pass-this-on");
+    expect(env.FUOBE_PARENT_PIPE).toBe("1");
+    expect(Object.keys(env).every((k) => /^(PATH|Path|SYSTEMROOT|SystemRoot|TEMP|TMP|TMPDIR|HOME|USERPROFILE|LOCALAPPDATA|APPDATA|LANG|FFMPEG_PATH|CHROMIUM_PATH|FUOBE_CHROMIUM|PLAYWRIGHT_BROWSERS_PATH|FUOBE_PARENT_PIPE)$/.test(k))).toBe(true);
+  });
+
+  it("gives an account's model its web GLB but no server turntable", async () => {
+    const asset = saveFile({ data: glb(), contentType: "model/gltf-binary", source: "generation", accountId: "acct-3d" });
+    const outputs = [{ url: asset.url, kind: "model3d" as const, contentType: "model/gltf-binary", assetId: asset.id }];
+    const done = await finishModel("gen-3d", outputs, { op: "image-to-3d", provider: "comfyui", account: "acct-3d" });
+    const finish = done[0].meta?.finish as { turntable?: string; webAsset?: string; error?: string };
+    expect(finish.error).toBeUndefined();
+    expect(finish.webAsset).toBeTruthy();
+    expect(finish.turntable).toBe(ACCOUNT_TURNTABLE);
+    expect(pendingTurntable(done)).toBe(-1);
+    // The owner's model still queues one.
+    const own = saveFile({ data: glb(), contentType: "model/gltf-binary", source: "generation" });
+    const mine = await finishModel("gen-3d-owner", [{ url: own.url, kind: "model3d", contentType: "model/gltf-binary", assetId: own.id }], { op: "image-to-3d", provider: "comfyui" });
+    expect(pendingTurntable(mine)).toBe(0);
+  }, 60_000);
 });
 
 describe("accounts don't run 3D models yet", () => {

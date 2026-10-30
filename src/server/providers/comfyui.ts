@@ -121,10 +121,32 @@ export function onOwnGpu<T>(gpu: OwnGpu, fn: () => T): T {
 /** Inside onOwnGpu: the account's ComfyUI. */
 export const ownGpu = (): OwnGpu | undefined => ownGpuStore.getStore();
 
-/** fetch() for a provider's file: through fetchPublic on an account's own ComfyUI. */
+/** Run `fn` outside any account's ComfyUI (the install's own again). */
+export const outsideOwnGpu = <T,>(fn: () => T): T => ownGpuStore.exit(fn);
+
+/** The most an account's ComfyUI may send back for one output file, and how long it may take. */
+export const OWN_OUTPUT_LIMITS = { maxBytes: 2 ** 30, deadlineMs: 15 * 60_000 };
+
+/** fetch() for a provider's file: through fetchPublic on an account's own ComfyUI (1 GB and 15 minutes at most). */
 export function outputFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  return ownGpu() ? fetchPublic(url, init, { timeoutMs: 120_000 }) : fetch(url, init);
+  return ownGpu() ? fetchPublic(url, init, { timeoutMs: 120_000, ...OWN_OUTPUT_LIMITS }) : fetch(url, init);
 }
+
+/**
+ * What an account's ComfyUI may answer, by path: a file (/view) up to 1 GB in 15 minutes; an upload's answer 1 MB, in
+ * 5 minutes (the time covers sending the file); the node list (/object_info) 64 MB in 2 minutes; anything else 8 MB in
+ * 60 seconds. A slow or endless answer can't hold the server.
+ */
+export function ownGpuLimits(p: string): { maxBytes: number; deadlineMs: number } {
+  const at = p.split("?")[0];
+  if (at.startsWith("/view")) return OWN_OUTPUT_LIMITS;
+  if (at.startsWith("/upload/")) return { maxBytes: 2 ** 20, deadlineMs: 5 * 60_000 };
+  if (at.startsWith("/object_info")) return { maxBytes: 64 * 2 ** 20, deadlineMs: 2 * 60_000 };
+  return { maxBytes: 8 * 2 ** 20, deadlineMs: 60_000 };
+}
+
+/** A job id as ComfyUI gives it (a UUID): anything else from an account's ComfyUI is refused, never put in a path. */
+export const PROMPT_ID = /^[\w-]{1,64}$/;
 
 function baseUrl(worker: ComfyWorker = "main"): string {
   const own = ownGpu();
@@ -157,7 +179,7 @@ async function comfyFetch(p: string, init: RequestInit = {}, worker: ComfyWorker
     // A visitor without a GPU of its own (a price check): nothing to reach, and never the install's.
     if (!base) throw new ProviderError(CONNECT_GPU_MESSAGE);
     try {
-      return await fetchPublic(`${base}${p}`, { ...init, headers: { ...authHeaders(worker), ...(init.headers ?? {}) } }, { timeoutMs: 120_000 });
+      return await fetchPublic(`${base}${p}`, { ...init, headers: { ...authHeaders(worker), ...(init.headers ?? {}) } }, { timeoutMs: 120_000, ...ownGpuLimits(p) });
     } catch (e) {
       throw new ProviderError(`Can't reach your ComfyUI at ${base} (${(e as Error).message}). Is it running, and is its tunnel up?`);
     }
@@ -543,9 +565,15 @@ declare global {
 const MEDIA_FILE = /^(video|audio)\//;
 const MEDIA_EXT = /\.(mp4|m4v|mov|m4a|wav|flac|mp3)$/i;
 
+/** A file name as remembered: an account's ComfyUI names its own files, so they are kept apart by its address. */
+const mediaKey = (name: string) => {
+  const own = ownGpu();
+  return own ? `${own.url}|${name}` : name;
+};
+
 function rememberMedia(name: string, info: MediaInfo) {
   const seen = (globalThis.__fuobeComfyMedia ??= new Map());
-  seen.set(name, info);
+  seen.set(mediaKey(name), info);
   if (seen.size > 256) seen.delete(seen.keys().next().value!);
 }
 
@@ -567,7 +595,7 @@ function aviInfo(data: Buffer): MediaInfo | null {
 
 /** The header facts of a file this server uploaded to ComfyUI (a still has only its size; undefined for unreadable containers). */
 export function mediaInfoFor(name: unknown): MediaInfo | undefined {
-  return typeof name === "string" ? globalThis.__fuobeComfyMedia?.get(name) : undefined;
+  return typeof name === "string" ? globalThis.__fuobeComfyMedia?.get(mediaKey(name)) : undefined;
 }
 
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
@@ -1333,7 +1361,7 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
     throw new ProviderError(`ComfyUI refused a ${mb} MB upload as too large (its --max-upload-size, 100 MB unless set) — start ComfyUI with a higher --max-upload-size, or send a smaller file`);
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text = (await res.text().catch(() => "")).slice(0, 500);
     throw worker === "isolated" ? isolatedAnswer("an upload", res.status, reasonOf(text)) : new ProviderError(`ComfyUI upload failed: ${res.status} ${text}`);
   }
   const j = (await res.json()) as { name: string; subfolder?: string };
@@ -1440,14 +1468,20 @@ export const comfyProvider: ProviderAdapter = {
       // A LoRA it lacks: point at its model card (a civitai download URL answers 401 without the key) and the LoRA folder setting.
       const loraModels = (input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: loraByFile(l.file)?.page ?? (l.url && !needsToken(l.url) ? l.url : undefined) }));
       let detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...loraModels] }) : (missingPack ?? body.error?.message);
-      if (detail && loraModels.some((l) => detail!.includes(`"${l.file}"`))) detail = `${detail}\nSet the LoRA folder in Settings → LoRAs and Fuobe downloads LoRAs before a run`;
+      // (Settings → LoRAs is the owner's page: an account's ComfyUI gets its LoRAs by hand.)
+      if (detail && !ownGpu() && loraModels.some((l) => detail!.includes(`"${l.file}"`))) detail = `${detail}\nSet the LoRA folder in Settings → LoRAs and Fuobe downloads LoRAs before a run`;
       if (!detail && !res.ok && worker === "isolated") throw isolatedAnswer("the prompt", res.status);
       throw Object.assign(new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status), fix ? { fix } : {});
+    }
+    if (!PROMPT_ID.test(body.prompt_id)) {
+      // Stop it there: an id Fuobe can't use would never be collected.
+      throw new ProviderError(ownGpu() ? "Your ComfyUI answered with a job id Fuobe can't use." : "ComfyUI answered with a job id Fuobe can't use.");
     }
     return { externalId: body.prompt_id, meta: { ...meta, generationId, ...(worker === "isolated" && { worker }) }, payload: wf };
   },
 
   async poll({ externalId, meta }) {
+    if (!PROMPT_ID.test(externalId)) return { state: "failed", error: "ComfyUI answered with a job id Fuobe can't use." };
     const worker: ComfyWorker = meta.worker === "isolated" ? "isolated" : "main";
     let manifest: ManifestWorkflow | undefined;
     try {
@@ -1479,7 +1513,7 @@ export const comfyProvider: ProviderAdapter = {
     };
     const isDone = (e: HistoryEntry | undefined): e is HistoryEntry => !!e && (!!e.status?.completed || e.status?.status_str === "success" || e.status?.status_str === "error");
 
-    const entry = (await comfyJson<Record<string, HistoryEntry>>(`/history/${externalId}`, worker))[externalId];
+    const entry = (await comfyJson<Record<string, HistoryEntry>>(`/history/${encodeURIComponent(externalId)}`, worker))[externalId];
     if (isDone(entry)) return finished(entry);
 
     // Still queued or running?
@@ -1490,7 +1524,7 @@ export const comfyProvider: ProviderAdapter = {
     const pendingIdx = queue.queue_pending?.findIndex((q) => q[1] === externalId) ?? -1;
     if (!running && pendingIdx < 0 && !entry) {
       // It may have finished between the two requests (ComfyUI moves it from the queue to the history at once).
-      const again = (await comfyJson<Record<string, HistoryEntry>>(`/history/${externalId}`, worker))[externalId];
+      const again = (await comfyJson<Record<string, HistoryEntry>>(`/history/${encodeURIComponent(externalId)}`, worker))[externalId];
       if (isDone(again)) return finished(again);
       const misses = globalThis.__fuobeComfyMisses ?? (globalThis.__fuobeComfyMisses = new Map());
       const n = (misses.get(externalId) ?? 0) + 1;

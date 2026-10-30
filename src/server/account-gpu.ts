@@ -3,7 +3,7 @@ import dns from "node:dns/promises";
 import net from "node:net";
 import { accountGpu, type Account, type AccountGpu } from "./auth";
 import { PROVIDERS } from "./providers";
-import { fetchPublic, isPrivateAddress } from "./remote-fetch";
+import { blockedForAccounts, fetchPublic, isLoopbackGpu } from "./remote-fetch";
 import { isInstallHost, REFUSED_ADDRESS } from "./gpu/hosts";
 
 /**
@@ -36,8 +36,9 @@ export async function checkGpuAddress(raw: string, o: { resolve?: (host: string)
   if (u.search || u.hash) throw new GpuError("Use the address without ? or #");
   const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   const local = host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".lan") || host.endsWith(".internal") || !host.includes(".");
-  if (!allowPrivate()) {
-    if (local && !net.isIP(host)) throw new GpuError(LOCAL_GPU_MESSAGE);
+  // A stand-in ComfyUI on this machine is allowed in tests and `next dev` only (remote-fetch.ts loopbackGpuPort).
+  if (!isLoopbackGpu(u)) {
+    if (local && !net.isIP(host) && !allowPrivate()) throw new GpuError(LOCAL_GPU_MESSAGE);
     const resolve = o.resolve ?? (async (h: string) => (await dns.lookup(h, { all: true, verbatim: true })).map((a) => a.address));
     let addrs: string[];
     try {
@@ -46,12 +47,14 @@ export async function checkGpuAddress(raw: string, o: { resolve?: (host: string)
       throw new GpuError(`Couldn't find ${host}. Check the address (is the tunnel running?)`);
     }
     if (!addrs.length) throw new GpuError(`Couldn't find ${host}. Check the address (is the tunnel running?)`);
-    if (addrs.some(isPrivateAddress)) throw new GpuError(LOCAL_GPU_MESSAGE);
+    // Private networks, this machine's own addresses (loopback too, even with FUOBE_ALLOW_PRIVATE_URLS), wrapped IPv4.
+    if (addrs.some(blockedForAccounts)) throw new GpuError(LOCAL_GPU_MESSAGE);
   }
   const url = normal(u);
   // The install's own ComfyUI on any scheme, port or path (ComfyUI answers every route under /api too), compared by
   // host. One message for every such refusal, so it never confirms a guessed address.
-  if (isInstallHost(url)) throw new GpuError(REFUSED_ADDRESS);
+  // (The tests' and `next dev`'s stand-in on this machine is on a port of its own: loopbackGpuPort.)
+  if (!isLoopbackGpu(u) && isInstallHost(url)) throw new GpuError(REFUSED_ADDRESS);
   return url;
 }
 
@@ -65,7 +68,7 @@ export interface GpuInfo {
 export async function testGpu(gpu: AccountGpu, o: { resolve?: (host: string) => Promise<string[]>; timeoutMs?: number } = {}): Promise<GpuInfo> {
   let res: Response;
   try {
-    res = await fetchPublic(`${gpu.url}/system_stats`, { headers: gpu.token ? { Authorization: `Bearer ${gpu.token}` } : {} }, { timeoutMs: o.timeoutMs ?? 10_000, resolve: o.resolve });
+    res = await fetchPublic(`${gpu.url}/system_stats`, { headers: gpu.token ? { Authorization: `Bearer ${gpu.token}` } : {} }, { timeoutMs: o.timeoutMs ?? 10_000, deadlineMs: (o.timeoutMs ?? 10_000) + 5_000, maxBytes: 1 * 2 ** 20, resolve: o.resolve });
   } catch (e) {
     throw new GpuError(`Couldn't reach your ComfyUI at ${gpu.url}: ${(e as Error).message}`);
   }

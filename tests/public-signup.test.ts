@@ -253,7 +253,8 @@ describe("accounts never see or change the owner's library", () => {
       records: ["/api/generations/g1", "/api/generations/zip?ids=g1"],
       changes: [["PATCH", "/api/generations/g1"], ["DELETE", "/api/generations/g1"], ["POST", "/api/generations/bulk"], ["DELETE", "/api/generations/trash"], ["POST", "/api/generations/g1/cancel"]],
     },
-    files: { lists: ["/api/assets"], records: ["/api/files/outputs/a.png", "/api/assets/a1", "/api/uploads"], changes: [["POST", "/api/uploads"], ["DELETE", "/api/assets/a1"]] },
+    // (POST /api/uploads is the account's own: the route checks it, tests/account-uploads.test.ts.)
+    files: { lists: ["/api/assets"], records: ["/api/files/outputs/a.png", "/api/assets/a1", "/api/uploads"], changes: [["DELETE", "/api/assets/a1"]] },
     folders: { lists: ["/api/folders"], records: ["/api/folders/f1", "/api/folders/f1/zip"], changes: [["POST", "/api/folders"], ["PATCH", "/api/folders/f1"], ["DELETE", "/api/folders/f1"]] },
     shares: { lists: ["/api/shares"], records: ["/api/shares/s1"], changes: [["POST", "/api/shares"], ["PATCH", "/api/shares/s1"], ["DELETE", "/api/shares/s1"]] },
     layers: { lists: ["/api/layers"], records: ["/api/layers/l1"], changes: [["POST", "/api/layers"], ["PATCH", "/api/layers/l1"], ["DELETE", "/api/layers/l1"], ["POST", "/api/layers/l1/versions"]] },

@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { MediaKind, Operation } from "@/lib/catalog/types";
 import { activeLocal, aiHelper, chatLocal, type JsonSpec } from "./llm";
 import { engineMode, getSetting } from "./settings";
+import { tenant } from "./tenant";
 
 /**
  * "Enhance prompt": rewrite a short idea into a rich, model-friendly prompt.
@@ -92,6 +93,9 @@ async function viaLocal(system: string, user: string, images: LlmImage[], opts: 
  * model, whichever server runs it (Ollama, LM Studio, Unsloth Studio or the custom one: Settings → AI helper).
  */
 export function llmTextBackend(): "claude" | "ollama" | null {
+  // An account's run or a visitor's price check never uses the install's AI helper (its LLM, its Claude key): the
+  // offline wording (heuristicEnhance) is used instead.
+  if (tenant()) return null;
   const choice = aiHelper();
   if (choice === "none") return null;
   if (choice === "anthropic" || (choice === "auto" && engineMode() !== "open" && !!getSetting("anthropicKey"))) return "claude";

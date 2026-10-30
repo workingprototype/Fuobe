@@ -5,6 +5,7 @@ import path from "node:path";
 
 export const DATA_DIR = path.resolve(/*turbopackIgnore: true*/ process.env.FUOBE_DATA_DIR ?? path.join(process.cwd(), "data"));
 
+/** Run in order, once each: a migration is known by its place in this list (append only, never reorder). */
 export const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS generations (
     id TEXT PRIMARY KEY,
@@ -593,6 +594,17 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS gpu_audit_target ON gpu_audit(target_key, at DESC);
   ALTER TABLE generations ADD COLUMN fix_json TEXT;`,
+  // Public sign-up ("Your GPU"): who owns a stored file. An account's uploads and the files of its runs carry its id; the
+  // owner's stay NULL. Files made before this go by the run that made them. Keep this entry last when rebasing: a
+  // migration is known by its place in this list.
+  `ALTER TABLE assets ADD COLUMN account_id TEXT;
+  UPDATE assets SET account_id = (
+    SELECT json_extract(g.request_json, '$.account') FROM generations g
+    WHERE g.id = assets.generation_id AND json_valid(g.request_json)
+  ) WHERE generation_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS assets_account ON assets(account_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS assets_rel ON assets(rel_path);
+  CREATE INDEX IF NOT EXISTS assets_generation ON assets(generation_id);`,
 ];
 
 declare global {

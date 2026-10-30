@@ -26,6 +26,7 @@ import {
   type StreamEvent,
 } from "./generation-stream";
 import { cursorAfter, filterToSearch, type AssetUse, type FeedFilter, type Folder } from "./library";
+import { postFile } from "./upload";
 import type { ShareCreated, ShareInfo, ShareListItem, SharePatch, ShareRequest } from "./share";
 import type { AccessSummary } from "./model-access";
 
@@ -722,10 +723,9 @@ export function useShareActions() {
 // ---------------------------------------------------------------------------
 // Uploads & assets
 
+/** Upload a file as it is (streamed by the server: src/lib/upload.ts). */
 export async function uploadFile(file: File): Promise<Asset> {
-  const form = new FormData();
-  form.append("file", file);
-  return json<Asset>(await fetch("/api/uploads", { method: "POST", body: form }));
+  return postFile(file);
 }
 
 /** A stored file's uses: where it's used, in one line ("2 results and the element “Maya”"), empty when nothing uses it. */

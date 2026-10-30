@@ -10,6 +10,9 @@ export async function register() {
   ensureRunner();
   const { ensureTrashPurge } = await import("./server/library");
   ensureTrashPurge();
+  // Public sign-up: accounts' uploads leave after 14 days and their runs after 30 (then daily); a deleted account's files go.
+  const { ensureAccountSweep } = await import("./server/account-sweep");
+  ensureAccountSweep();
   // Faceless / Explainer renders whose narration was timed while the server was down continue with their scenes.
   const { ensureFacelessRunner } = await import("./server/faceless");
   ensureFacelessRunner();

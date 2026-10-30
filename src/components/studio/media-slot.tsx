@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAssets, type Asset } from "@/lib/api";
+import { postFile } from "@/lib/upload";
 import type { MediaKind } from "@/lib/catalog/types";
 import { slotCaption } from "@/lib/composer";
 import { cn } from "@/lib/utils";
@@ -55,14 +56,8 @@ export const kindOfFile = (f: File): MediaKind => {
 export const wrongKindMessage = (kind: MediaKind) =>
   ({ image: "Image only — drop a photo here", video: "Video only — drop a clip here", audio: "Audio only — drop a sound file here", text: "Text only — drop a .txt or .srt file here", model3d: "3D only — drop a .glb file here" })[kind];
 
-async function upload(file: File, signal?: AbortSignal): Promise<Asset> {
-  const form = new FormData();
-  form.append("file", file);
-  const res = await fetch("/api/uploads", { method: "POST", body: form, signal });
-  const body = (await res.json().catch(() => ({}))) as Asset & { error?: string };
-  if (!res.ok) throw new Error(body.error ?? `Upload failed (${res.status})`);
-  return body;
-}
+/** The file as it is: the server streams it (src/lib/upload.ts), and its error is the toast. */
+const upload = (file: File, signal?: AbortSignal): Promise<Asset> => postFile(file, signal);
 
 /**
  * Upload a File and stream state changes back: a local preview first (`uploading: true`), then

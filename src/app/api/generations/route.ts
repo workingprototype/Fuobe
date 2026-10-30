@@ -1,9 +1,16 @@
 import { connection } from "next/server";
 import { CONNECT_GPU_HEADER, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
+import { graphLoras } from "@/lib/catalog/character-swap";
+import { missingFilesMessage } from "@/lib/missing-files";
 import { accountGpu, requestAccount, requestViewer } from "@/server/auth";
 import { OPERATION_LABELS } from "@/lib/catalog/types";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "@/server/account-files";
+import { accountInputProblem } from "@/server/account-inputs";
+import { checkAccountLoras } from "@/server/account-loras";
+import { db } from "@/server/db";
 import { accountRun, asVisitor, createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
+import { hit, unhit } from "@/server/rate";
 import { GenerationRequestSchema } from "@/server/request-schema";
 import { gateGeneration, GPU_SETUP_HEADER } from "@/server/gpu/gate";
 import { gpuTargetFor } from "@/server/gpu/target";
@@ -22,9 +29,33 @@ export async function GET(request: Request) {
   return Response.json({ items: listGenerations({ ...listOptionsFrom(new URL(request.url).searchParams), account: account?.id }) });
 }
 
+/** An account's runs going now (queued or running), counted as runs: a run's jobs and chain steps share a batch. */
+function activeRuns(accountId: string): number {
+  const r = db()
+    .prepare(
+      "SELECT COUNT(DISTINCT COALESCE(batch_id, id)) AS n FROM generations WHERE status IN ('queued', 'running') AND json_extract(request_json, '$.account') = ?",
+    )
+    .get(accountId) as { n: number };
+  return r.n;
+}
+
+const refuse = (status: number, error: string, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}) =>
+  Response.json({ error, ...extra }, { status, headers: { "Cache-Control": "no-store", ...headers } });
+
 /** Start a generation; `?preview=1` only says what it would run as (model, operation, jobs, outputs, cost). */
 export async function POST(request: Request) {
-  const body: unknown = await request.json().catch(() => null);
+  const viewer = requestViewer(request);
+  const account = viewer.kind === "account" ? viewer.account : null;
+  const preview = new URL(request.url).searchParams.get("preview") === "1";
+  // An account's run request is words and file paths (files are uploaded first): small.
+  const limitBody = !!account && !preview;
+  if (limitBody && Number(request.headers.get("content-length") ?? 0) > ACCOUNT_LIMITS.runBodyBytes) return refuse(413, ACCOUNT_MESSAGES.bodyTooBig);
+  const text = await request.text().catch(() => "");
+  if (limitBody && Buffer.byteLength(text) > ACCOUNT_LIMITS.runBodyBytes) return refuse(413, ACCOUNT_MESSAGES.bodyTooBig);
+  let body: unknown = null;
+  try {
+    body = JSON.parse(text);
+  } catch {}
   const parsed = GenerationRequestSchema.safeParse(body);
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
@@ -33,17 +64,33 @@ export async function POST(request: Request) {
   // so: previewGeneration and createGenerations move it (generations.ts currentRequest, replaced.ts).
   const asked = parsed.data as Parameters<typeof createGenerations>[0];
   // Public sign-up: an account runs on its own ComfyUI only (the open engine), never the install's providers.
-  const viewer = requestViewer(request);
-  const account = viewer.kind === "account" ? viewer.account : null;
-  const req = account ? { ...asked, account: account.id, engine: "open" as const } : { ...asked, account: undefined };
+  let req = account ? { ...asked, account: account.id, engine: "open" as const } : { ...asked, account: undefined };
   const own = account ? accountRun(account.id, "comfyui") : undefined;
-  const preview = new URL(request.url).searchParams.get("preview") === "1";
   if (own && "error" in own && !preview) {
     return Response.json({ error: own.error, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
   }
   const onOwn = <T,>(fn: () => T): T => (own && "run" in own ? own.run(fn) : fn());
-  // A visitor's price check: priced as it would run, on its own GPU (none yet: the open engine, no demo).
-  const priced = <T,>(fn: () => T): T => (viewer.kind === "owner" ? fn() : asVisitor(account ? accountGpu(account.id) : null, fn));
+  // A visitor's price check: priced as it would run, as that visitor, on its own GPU (none yet: the open engine, no demo).
+  const priced = <T,>(fn: () => T): T => (viewer.kind === "owner" ? fn() : asVisitor(account ? accountGpu(account.id) : null, fn, account?.id));
+  const notes: string[] = [];
+  if (account && !preview) {
+    // Room on the server, room in the account's files, and a fair share of runs.
+    if (!diskHasRoom()) return refuse(503, ACCOUNT_MESSAGES.diskLow);
+    if (accountUsage(account.id).total >= ACCOUNT_LIMITS.totalBytes) return refuse(413, ACCOUNT_MESSAGES.filesFull);
+    if (activeRuns(account.id) >= ACCOUNT_LIMITS.activeRuns) return refuse(429, ACCOUNT_MESSAGES.activeRuns, {}, { "Retry-After": "30" });
+    const rate = hit(`run:${account.id}`, ACCOUNT_LIMITS.runsPerHour, 60 * 60_000);
+    if (!rate.ok) return refuse(429, ACCOUNT_MESSAGES.runRate, {}, { "Retry-After": String(rate.retryAfterS) });
+    if ((req.params?.numOutputs ?? 1) > ACCOUNT_LIMITS.outputsPerRun) {
+      req = { ...req, params: { ...req.params, numOutputs: ACCOUNT_LIMITS.outputsPerRun } };
+      notes.push(ACCOUNT_MESSAGES.outputsCapped);
+    }
+    // Only files it uploaded here, or its own results (no links, no data: URIs, nobody else's).
+    const problem = accountInputProblem(req, account.id);
+    if (problem) {
+      unhit(`run:${account.id}`);
+      return refuse(problem.status, problem.error, { code: problem.code });
+    }
+  }
   try {
     if (preview) {
       const { model, ...p } = priced(() => previewGeneration(req));
@@ -63,19 +110,36 @@ export async function POST(request: Request) {
         // A 3D model from someone else's ComfyUI is finished on this server (decimate, web GLB, turntable): accounts
         // don't get Image to 3D until that finish runs under an account's own limits.
         if (account && outputKind(planned.op, planned.model) === "model3d") {
+          unhit(`run:${account.id}`);
           return Response.json({ error: OWN_GPU_TOOL_MESSAGE, code: "own-gpu-tool" }, { status: 403 });
         }
         const skip = (body as { gpuCheck?: unknown } | null)?.gpuCheck === "skip";
         const gate = await gateGeneration(gpuTargetFor(request, "read"), { request: req, route: planned.route, op: planned.op, modelId: planned.model.id, skip, actor: account?.id ?? "owner" });
-        if (!gate.ok) return Response.json({ error: gate.message, code: "gpu-setup", ref: gate.ref, plan: gate.plan }, { status: 409, headers: { [GPU_SETUP_HEADER]: "1" } });
+        if (!gate.ok) {
+          if (account) unhit(`run:${account.id}`);
+          return Response.json({ error: gate.message, code: "gpu-setup", ref: gate.ref, plan: gate.plan }, { status: 409, headers: { [GPU_SETUP_HEADER]: "1" } });
+        }
         gpuWarning = gate.warning;
+      }
+    }
+    if (account) {
+      // The LoRAs this run adds must be on the account's ComfyUI: say which to download before anything is queued.
+      const fix = await onOwn(async () => {
+        const p = previewGeneration(req);
+        if (p.route.provider !== "comfyui") return null;
+        return checkAccountLoras([...p.loras.applied, ...graphLoras(p.route.endpoint, req.params?.extra)], p.route.endpoint);
+      });
+      if (fix) {
+        unhit(`run:${account.id}`);
+        return refuse(409, missingFilesMessage(fix), { code: "comfy_missing_model", fix });
       }
     }
     const items = onOwn(() => createGenerations(req));
     // What the run leaves out or changes (a model that replaced a retired one, a LoRA that runs only on a GPU, a length the API rounds).
-    const notes = [...new Set(items.flatMap((g) => g.notes ?? []))];
-    return Response.json({ items, ...(notes.length && { notes }), ...(gpuWarning && { gpuWarning }) }, { status: 201 });
+    const all = [...new Set([...notes, ...items.flatMap((g) => g.notes ?? [])])];
+    return Response.json({ items, ...(all.length && { notes: all }), ...(gpuWarning && { gpuWarning }) }, { status: 201 });
   } catch (e) {
+    if (account) unhit(`run:${account.id}`);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 }

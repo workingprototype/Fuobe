@@ -12,6 +12,9 @@ export type MaskFormat = "white" | "black" | "alpha";
 const SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 4: 2, 6: 4 };
 
+/** The largest picture decodePng takes (40 megapixels: 160 MB of RGBA). */
+export const MAX_PNG_PIXELS = 40_000_000;
+
 interface Decoded {
   width: number;
   height: number;
@@ -44,7 +47,10 @@ export function decodePng(buf: Buffer): Decoded {
   }
   const ch = CHANNELS[type];
   if (depth !== 8 || !ch || interlace) throw new Error("Unsupported PNG (need 8-bit, non-interlaced, no palette)");
-  const raw = zlib.inflateSync(Buffer.concat(idat));
+  // Refused before anything is inflated: a few kilobytes can claim gigabytes of pixels.
+  if (!width || !height || width * height > MAX_PNG_PIXELS) throw new Error(`That picture is over ${MAX_PNG_PIXELS / 1e6} megapixels`);
+  // Never more than the picture needs (a row of filter byte + pixels, per row).
+  const raw = zlib.inflateSync(Buffer.concat(idat), { maxOutputLength: height * (width * ch + 1) });
   const stride = width * ch;
   const px = Buffer.alloc(stride * height);
   for (let y = 0; y < height; y++) {
