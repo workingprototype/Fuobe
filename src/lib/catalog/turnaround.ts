@@ -272,8 +272,10 @@ export interface TurnaroundInput {
   prompt?: string;
   /** The character's name, for the title. */
   name?: string;
-  /** Where the takes are filed (the feature of every step); default "turnaround". */
+  /** Where the film is filed (its feature); default "turnaround". */
   feature?: string;
+  /** The feature of the pictures drawn first (a helper "-step" feature by default, so feeds show the film, not its parts). */
+  stepFeature?: string;
   seed?: number;
 }
 
@@ -384,6 +386,7 @@ export function planTurnaround(input: TurnaroundInput, ctx: TurnaroundContext = 
   const info = TURN_ROUTES[route];
   const model = getModel(info.modelId)!;
   const feature = input.feature ?? "turnaround";
+  const stepFeature = input.stepFeature ?? "turnaround-step";
   const views: Partial<Record<TurnSide, string>> = {};
   for (const s of TURN_SIDES) if (input.views?.[s]) views[s] = input.views[s];
   const sheet = input.sheet || undefined;
@@ -402,7 +405,7 @@ export function planTurnaround(input: TurnaroundInput, ctx: TurnaroundContext = 
     steps.push({
       key: "front",
       request: {
-        feature,
+        feature: stepFeature,
         modelId: m.id,
         op: "edit",
         prompt: SHEET_FRONT_PROMPT,
@@ -418,9 +421,9 @@ export function planTurnaround(input: TurnaroundInput, ctx: TurnaroundContext = 
     const horizontal = anglesHorizontal(side);
     const request: GenerationRequest =
       engine === "cloud"
-        ? { feature, modelId: fillModel.id, op: "edit", prompt: FILL_KEEP, params: { numOutputs: 1, extra: { horizontal_angle: horizontal, vertical_angle: 0, zoom: 5 } } }
+        ? { feature: stepFeature, modelId: fillModel.id, op: "edit", prompt: FILL_KEEP, params: { numOutputs: 1, extra: { horizontal_angle: horizontal, vertical_angle: 0, zoom: 5 } } }
         : {
-            feature,
+            feature: stepFeature,
             modelId: fillModel.id,
             op: "edit",
             prompt: `<sks> ${poseWords({ horizontal, vertical: 0, zoom: 5 })}. ${FILL_KEEP}`,
