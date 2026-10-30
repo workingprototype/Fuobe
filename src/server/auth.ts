@@ -43,6 +43,10 @@ export interface Account {
   /** scrypt hash of the password ("salt:hash", hex), as the install password's. */
   hash: string;
   createdAt: number;
+  /** The last sign-up or log-in. */
+  lastLoginAt?: number;
+  /** Switched off by the owner (Settings → Accounts): signed out, and can't log in. */
+  disabled?: boolean;
 }
 
 interface AuthFile {
@@ -159,7 +163,7 @@ export function sessionViewer(value: string | undefined): Viewer | null {
   if (!same(Buffer.from(mac), Buffer.from(sign(d.secret, parts.slice(0, -1).join("."))))) return null;
   if (parts.length === 2) return { kind: "owner" };
   const account = d.accounts?.find((a) => a.id === parts[1]);
-  return account ? { kind: "account", account } : null;
+  return account && !account.disabled ? { kind: "account", account } : null;
 }
 
 /** The owner's session (the install password's): what Settings → Security and the tokens need. */
@@ -191,7 +195,7 @@ export function createAccount(email: string, password: string): Account {
   if (password.length < 8) throw new AccountError("Use at least 8 characters", 400);
   const d = withSecret(read());
   if (d.accounts?.some((a) => a.email === e)) throw new AccountError("An account with this email already exists. Log in instead.", 409);
-  const account: Account = { id: crypto.randomBytes(9).toString("hex"), email: e, hash: hashPassword(password), createdAt: Date.now() };
+  const account: Account = { id: crypto.randomBytes(9).toString("hex"), email: e, hash: hashPassword(password), createdAt: Date.now(), lastLoginAt: Date.now() };
   write({ ...d, accounts: [...(d.accounts ?? []), account] });
   return account;
 }
@@ -204,6 +208,61 @@ export function checkAccount(email: string, password: string): Account | null {
   const account = e ? read().accounts?.find((a) => a.email === e) : undefined;
   const ok = verifyHash(password, account?.hash ?? (dummy ??= hashPassword(crypto.randomBytes(12).toString("hex"))));
   return account && ok ? account : null;
+}
+
+/** Remember a log-in (Settings → Accounts shows it). */
+export function recordLogin(id: string): void {
+  const d = read();
+  write({ ...d, accounts: d.accounts?.map((a) => (a.id === id ? { ...a, lastLoginAt: Date.now() } : a)) });
+}
+
+/** What the owner sees of an account (Settings → Accounts): never the password hash. */
+export interface AccountInfo {
+  id: string;
+  email: string;
+  createdAt: number;
+  lastLoginAt: number | null;
+  disabled: boolean;
+  /** Its own ComfyUI is connected ("Your GPU"). */
+  gpu: boolean;
+}
+
+export function listAccounts(): AccountInfo[] {
+  return (read().accounts ?? [])
+    .map((a) => ({ id: a.id, email: a.email, createdAt: a.createdAt, lastLoginAt: a.lastLoginAt ?? null, disabled: !!a.disabled, gpu: "gpu" in a && !!(a as { gpu?: unknown }).gpu }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Switch an account off (it is signed out at once) or on again. */
+export function setAccountDisabled(id: string, disabled: boolean): void {
+  const d = read();
+  if (!d.accounts?.some((a) => a.id === id)) throw new AccountError("No such account", 404);
+  write({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, disabled } : a)) });
+}
+
+/** Delete an account (its sessions stop working at once). */
+export function deleteAccount(id: string): void {
+  const d = read();
+  if (!d.accounts?.some((a) => a.id === id)) throw new AccountError("No such account", 404);
+  write({ ...d, accounts: d.accounts.filter((a) => a.id !== id) });
+}
+
+/** The owner: the install password's session or an API token (everyone while no password is set). */
+export function isOwnerRequest(request: Request, cookie: string | undefined): boolean {
+  return !authEnabled() || validSession(cookie) || validToken(request.headers.get("authorization"));
+}
+
+/** A CSV cell: quoted when it needs to be, and never read as a formula by a spreadsheet. */
+function csvCell(v: string | number | boolean | null): string {
+  let s = v === null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+}
+
+export function accountsCsv(items = listAccounts()): string {
+  const iso = (t: number | null) => (t ? new Date(t).toISOString() : null);
+  const rows = [["email", "created", "last_login", "gpu_connected", "disabled"], ...items.map((a) => [a.email, iso(a.createdAt), iso(a.lastLoginAt), a.gpu, a.disabled])];
+  return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
 // ---------------------------------------------------------------------------

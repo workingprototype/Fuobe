@@ -58,6 +58,16 @@ An account is signed in, but it sees the owner's studio as a guest does:
   generation, an AI helper, a retry) answers 403 with `code: "connect-gpu"`, and the studio shows a
   "Connect your GPU to run this" card. An account's own GPU connection comes in a later change.
 
+## Managing accounts
+
+The owner sees everyone who signed up in **Settings → Accounts**: email, when the account was
+created, its last log-in, whether its own GPU is connected, and the total. The owner can switch an
+account off (it is signed out at once and can't log in) or delete it, and export the list as CSV.
+The API is `GET /api/admin/accounts` (`?format=csv` for the file), `PATCH /api/admin/accounts/<id>`
+with `{ "disabled": true | false }`, and `DELETE /api/admin/accounts/<id>`, for the owner only.
+
+An account can delete itself: `DELETE /api/auth/me` with `{ "password" }`.
+
 `GET /api/auth/me` (open to everyone) says who is looking: `{ signedIn, owner, publicSignup,
 account? }`.
 
