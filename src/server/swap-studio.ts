@@ -47,7 +47,7 @@ import type { Engine, Generation, PixelPoint } from "@/lib/catalog/types";
 import { ACCESS_PLACE } from "@/lib/model-access";
 import { createPipeline } from "./chains";
 import { asSystem } from "./access/actor";
-import { rowOwner, runAsOwner } from "./access/permissions";
+import { AccountOffError, rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { cancelGeneration, getGeneration, previewChained } from "./generations";
 import { isOffered, offeredLoras } from "./model-access";
@@ -350,6 +350,8 @@ export function ensureSwapStudioRunner(): void {
           // Waiting takes launch as the person who started the project.
           runAsOwner(rowOwner(r), () => advanceProject(r.id));
         } catch (e) {
+          // Its owner was turned off: the takes wait (their steps fail with the reason) until they're back.
+          if (e instanceof AccountOffError) continue;
           console.error(`[swap-studio] ${r.id}:`, (e as Error).message);
         }
       }

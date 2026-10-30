@@ -79,7 +79,7 @@ import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types"
 import { DocxError, docxText } from "./assist/docx";
 import { PdfError, pdfText } from "./assist/pdf";
 import { asSystem } from "./access/actor";
-import { rowOwner, runAsOwner } from "./access/permissions";
+import { AccountOffError, rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained } from "./generations";
@@ -1159,7 +1159,8 @@ function sweep(): void {
       // Stage two starts as the person who started the episode.
       runAsOwner(rowOwner(r), () => settle(toEpisode(r)));
     } catch (e) {
-      console.warn(`[faceless] couldn't continue ${r.id}: ${(e as Error).message}`);
+      if (e instanceof AccountOffError) updateEpisodeRow(r.id, { status: "failed", error: e.message });
+      else console.warn(`[faceless] couldn't continue ${r.id}: ${(e as Error).message}`);
     }
   }
 }

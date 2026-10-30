@@ -134,6 +134,18 @@ describe("Assist", () => {
     expect(seen[0]).toEqual({ userId: "u_owner", via: "runner" });
   });
 
+  it("ends a chat whose author was turned off with the plan's words, and leaves it idle", async () => {
+    const t = agent.createThread({ engine: "cloud", agent: "claude", title: "Off" });
+    agent.addMessage(t.id, "Make an ad");
+    updatePerson("u_owner", { status: "disabled" });
+    const seen: unknown[] = [];
+    await agent.run(t.id, done(seen));
+    expect(seen).toEqual([]);
+    const { thread } = agent.getThread(t.id)!;
+    expect(thread.status).toBe("idle");
+    expect(thread.items.at(-1)).toMatchObject({ role: "notice", tone: "error", text: "Paused: the account that started this is off." });
+  });
+
   it("runs a scheduled task as the person who owns it, from the server's sweep", async () => {
     const T = (s: string) => Date.parse(s);
     const s = sched.createSchedule(

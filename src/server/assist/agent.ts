@@ -26,8 +26,8 @@ import {
   type SkillMeta,
 } from "@/lib/assist";
 import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
-import { currentActor } from "../access/actor";
-import { rowOwner, runAsOwner } from "../access/permissions";
+import { currentActor, runAs, type Actor } from "../access/actor";
+import { AccountOffError, ownerActor, rowOwner } from "../access/permissions";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { offeredDefault } from "../model-access";
@@ -1288,16 +1288,28 @@ const MODELS: Record<AssistThread["agent"], ModelCall> = { claude, ollama, offli
 /**
  * Run the agent until it ends its turn or waits for approval. Call it right after addMessage or
  * answerApproval: it claims the thread synchronously, so the "running" status they saved stays valid.
- */
-/**
- * Carry the chat on until the agent stops (or asks for approval). The turn acts for the chat's author (§7.10), whoever's
- * request or schedule carried it on: tools it runs, generations it starts and what it spends are theirs.
+ * The turn acts for the chat's author (docs/research/accounts-8.md §7.11), whoever's request or schedule carried it
+ * on: the tools it runs, the generations it starts and what they spend are theirs.
  */
 export async function run(id: string, model?: ModelCall): Promise<void> {
   if (runs.has(id)) return;
   const row = db().prepare("SELECT * FROM assist_threads WHERE id = ?").get(id) as Row | undefined;
   if (!row) return;
-  return runAsOwner(rowOwner(row), () => turn(id, model));
+  let owner: Actor;
+  try {
+    owner = ownerActor(rowOwner(row));
+  } catch (e) {
+    if (!(e instanceof AccountOffError)) throw e;
+    // The chat's author was turned off: say so in the chat instead of leaving it "running".
+    const s = load(id);
+    if (s) {
+      push(s, { role: "notice", tone: "error", text: e.message });
+      s.thread.status = "idle";
+      save(s);
+    }
+    return;
+  }
+  return runAs(owner, () => turn(id, model));
 }
 
 async function turn(id: string, model?: ModelCall): Promise<void> {
