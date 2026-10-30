@@ -1,12 +1,15 @@
 import { handleMcp } from "@/server/mcp";
 import { currentActor } from "@/server/access/actor";
-import { handler } from "@/server/access/route";
+import { handler, type TokenScope } from "@/server/access/route";
 
 /**
  * MCP endpoint (streamable HTTP, stateless, JSON responses). Point an MCP client at
  * http(s)://<host>/api/mcp; with a password set, send `Authorization: Bearer fuobe_…`.
+ * Every token scope may call it: a Read-only token is offered the read tools only (handleMcp).
  */
-export const POST = handler({ access: "signed-in" }, async (request: Request) => {
+const READ_AND_UP: TokenScope[] = ["read", "generate", "admin"];
+
+export const POST = handler({ access: "signed-in", scopes: READ_AND_UP }, async (request: Request) => {
   // Browsers send Origin: a web page on another site must not reach this server through the
   // user's browser (DNS rebinding, required by the MCP spec). Native clients send none.
   const origin = request.headers.get("origin");
@@ -22,10 +25,10 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
 });
 
 /** No server-initiated stream: this server only answers requests. */
-export const GET = handler({ access: "signed-in" }, () => {
+export const GET = handler({ access: "signed-in", scopes: READ_AND_UP }, () => {
   return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
 });
 
-export const DELETE = handler({ access: "signed-in" }, () => {
+export const DELETE = handler({ access: "signed-in", scopes: READ_AND_UP }, () => {
   return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
 });
