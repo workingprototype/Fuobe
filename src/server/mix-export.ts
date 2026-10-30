@@ -88,7 +88,7 @@ export function receiveMixPart(o: { id?: string | null; offset: number; data: Bu
     file = partPath(id);
     let size: number;
     try {
-      size = fs.statSync(file).size;
+      size = fs.statSync(/*turbopackIgnore: true*/ file).size;
     } catch {
       throw new MixExportError("That export expired — export the mix again", 404);
     }
@@ -97,7 +97,7 @@ export function receiveMixPart(o: { id?: string | null; offset: number; data: Bu
     if (size + o.data.length > total) throw new MixExportError("That's more audio than the WAV header says", 413);
     fs.appendFileSync(file, o.data);
   }
-  const received = fs.statSync(file).size;
+  const received = fs.statSync(/*turbopackIgnore: true*/ file).size;
   if (received > total) {
     fs.rmSync(file, { force: true });
     throw new MixExportError("That's more audio than the WAV header says", 413);
