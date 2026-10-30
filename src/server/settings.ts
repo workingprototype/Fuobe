@@ -37,6 +37,11 @@ export const SETTINGS = {
   comfyLorasDir: { key: "comfyui.lorasDir", env: "COMFYUI_LORAS_DIR" },
   /** civitai API key: downloads the civitai LoRAs of a recipe (civitai answers 401 without one). Never sent to fal or Replicate. */
   civitaiKey: { key: "civitai.key", env: "CIVITAI_API_KEY", secret: true },
+  /**
+   * Hugging Face access token: downloads the LoRAs of gated Hugging Face repos (Lightricks' Restore and Detail Refine
+   * IC-LoRAs) once their licence is accepted with that account. Used for nothing else; never sent to fal or Replicate.
+   */
+  hfToken: { key: "huggingface.token", env: "HF_TOKEN", secret: true },
   /** AI-Toolkit UI (ostris/ai-toolkit, port 8675) for open-source character LoRA training. */
   aiToolkitUrl: { key: "aitk.url", env: "AI_TOOLKIT_URL" },
   aiToolkitToken: { key: "aitk.token", env: "AI_TOOLKIT_AUTH", secret: true },

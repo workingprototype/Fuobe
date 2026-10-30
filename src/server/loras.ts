@@ -107,11 +107,22 @@ function recordCopy(c: Omit<LoraCopy, "createdAt">): void {
 /** The civitai key, as set in Settings or CIVITAI_API_KEY. */
 const civitaiKey = () => getSetting("civitaiKey");
 
-/** A URL as it may be shown or stored: never with a token in it. */
+/** The Hugging Face token (Settings or HF_TOKEN): used only to download gated Hugging Face files. */
+const hfToken = () => getSetting("hfToken");
+
+/** Whether a Hugging Face token is set (gated downloads need one). */
+export const hasHfToken = (): boolean => !!hfToken();
+
+/** A URL as it may be shown or stored: never with a token in it (the civitai key or the Hugging Face token). */
 export function redact(text: string, token = civitaiKey()): string {
   let out = text.replace(/([?&]token=)[^&\s"']+/gi, "$1•••");
-  if (token) out = out.split(token).join("•••");
+  for (const t of [token, hfToken()]) if (t) out = out.split(t).join("•••");
   return out;
+}
+
+/** What to do when a gated file has no token to download it with. */
+export function gatedHint(name: string, page?: string): string {
+  return `${name} is in a gated Hugging Face repo: accept its licence${page ? ` on ${page}` : ""} with your Hugging Face account, then add an access token in Settings → LoRAs (huggingface.co/settings/tokens) so Fuobe can download it`;
 }
 
 const withToken = (url: string, token: string) => `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
@@ -144,8 +155,8 @@ export async function civitaiPermissions(modelId: string): Promise<string[] | nu
 }
 
 /** What Hugging Face says about a file before the download: its SHA256 (x-linked-etag), size and the commit it's at. */
-async function hfFacts(url: string): Promise<{ sha256?: string; sizeBytes?: number; revision?: string }> {
-  const res = await fetch(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(30_000) }).catch(() => null);
+async function hfFacts(url: string, token?: string): Promise<{ sha256?: string; sizeBytes?: number; revision?: string }> {
+  const res = await fetch(url, { method: "HEAD", redirect: "manual", headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(30_000) }).catch(() => null);
   if (!res) return {};
   const etag = res.headers.get("x-linked-etag")?.replace(/"/g, "");
   const size = Number(res.headers.get("x-linked-size"));
@@ -184,9 +195,10 @@ export async function downloadLora(ref: LoraRef, dir: string, onProgress?: (mess
   const name = loraName(ref);
   const url = entry?.url ?? ref.url;
   if (!url) throw new LoraError(`${name} has no download address — put ${ref.file} in ComfyUI/models/loras`);
-  if (entry?.download === "hf-gated") {
-    throw new LoraError(`${name} is in a gated Hugging Face repo: accept its licence on ${entry.page}, then put ${ref.file} in ComfyUI/models/loras`);
-  }
+  // A gated Hugging Face file downloads with the user's token (only there: never to fal, Replicate or civitai).
+  const gatedFile = entry?.download === "hf-gated";
+  const token = gatedFile ? hfToken() : "";
+  if (gatedFile && !token) throw new LoraError(`${gatedHint(name, entry?.page)}, or put ${ref.file} in ComfyUI/models/loras yourself`);
   const dest = lorasPath(dir, ref.file);
   let expect: { sha256?: string; sizeBytes?: number } = {};
   let version: string | null = null;
@@ -204,7 +216,7 @@ export async function downloadLora(ref: LoraRef, dir: string, onProgress?: (mess
     if (!expect.sha256) throw unchecked();
     fetchUrl = withToken(url, token);
   } else {
-    const facts = await hfFacts(url);
+    const facts = entry?.sha256 ? {} : await hfFacts(url, token || undefined);
     expect = entry?.sha256 ? { sha256: entry.sha256, sizeBytes: entry.sizeBytes } : facts;
     version = entry?.version ?? facts.revision ?? null;
     // A Hugging Face file always states its SHA256; other hosts (a trained LoRA on fal storage) state none.
@@ -213,13 +225,18 @@ export async function downloadLora(ref: LoraRef, dir: string, onProgress?: (mess
   onProgress?.(`Downloading ${name}${expect.sizeBytes ? ` (${mb(expect.sizeBytes)})` : ""}`);
   let res: Response;
   try {
-    res = await fetch(fetchUrl, { redirect: "follow", signal: AbortSignal.timeout(60 * 60_000) });
+    // The token goes to huggingface.co only: fetch drops Authorization when the file redirects to Hugging Face's CDN.
+    res = await fetch(fetchUrl, { redirect: "follow", headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(60 * 60_000) });
   } catch (e) {
     throw new LoraError(`Couldn't reach ${new URL(url).host} to download ${name} (${redact((e as Error).message)})`);
   }
   if (res.status === 401 || res.status === 403) {
     throw new LoraError(
-      needsToken(url) ? `civitai refused the download of ${name} (${res.status}): check your civitai key in Settings → LoRAs` : `${new URL(url).host} refused the download of ${name} (${res.status})`,
+      needsToken(url)
+        ? `civitai refused the download of ${name} (${res.status}): check your civitai key in Settings → LoRAs`
+        : gatedFile
+          ? `Hugging Face refused the download of ${name} (${res.status}): accept its licence on ${entry?.page ?? "its model page"} with the account your token belongs to, and check the token in Settings → LoRAs`
+          : `${new URL(url).host} refused the download of ${name} (${res.status})`,
     );
   }
   if (!res.ok || !res.body) throw new LoraError(`Downloading ${name} failed: ${new URL(url).host} answered ${res.status}`);
@@ -371,15 +388,18 @@ export async function prepareCloudLoras(
       out.push(l);
       continue;
     }
-    if (gated(l)) throw new LoraError(`${name} is in a gated Hugging Face repo, so it can't be sent to ${host}: it runs on your GPU once you've accepted its licence`);
-    if (!l.url || !needsToken(l.url)) throw new LoraError(`${name} can't be sent to ${host}: it exists only as a file on your ComfyUI`);
+    const locked = gated(l);
+    if (!l.url || (!needsToken(l.url) && !locked)) throw new LoraError(`${name} can't be sent to ${host}: it exists only as a file on your ComfyUI`);
     const cached = getCopy(l.file, target);
     if (cached?.hostedUrl && Date.now() - cached.createdAt < MIRROR_TTL_MS[target]) {
       out.push({ ...l, hostedUrl: cached.hostedUrl });
       continue;
     }
-    const civitai = { ...l, url: l.url };
-    out.push(await mirrorOnce(l, target, () => mirrorCivitai(civitai, entry, target, upload, onProgress)));
+    // A gated Hugging Face file: Fuobe downloads it once with the user's token and copies it to the provider's storage
+    // (the token never leaves this server), as it does for a civitai file.
+    if (locked && !hfToken()) throw new LoraError(`${gatedHint(name, entry?.page)}. A cloud run gets Fuobe's copy of the file, never your token`);
+    const source = { ...l, url: l.url };
+    out.push(await mirrorOnce(l, target, () => mirrorCivitai(source, entry, target, upload, onProgress)));
   }
   return out;
 }
@@ -397,8 +417,10 @@ async function mirrorCivitai(
   // The hosting right is read again before a copy is made (civitai permissions can change) and recorded with the copy.
   // It decides only while the admin keeps GPU-only LoRAs on the GPU: then no answer, or no "Rent", means no copy.
   const version = l.version ?? entry?.version ?? civitaiVersion(l.url);
-  const strict = !!l.keepOnGpu;
-  const modelId = entry?.civitaiModel ?? (version ? (await civitaiVersionFacts(version)).modelId : undefined);
+  // A gated Hugging Face file has no civitai permissions: its licence snapshot is the research's (hostedOk on record).
+  const civitai = needsToken(l.url);
+  const strict = !!l.keepOnGpu && civitai;
+  const modelId = civitai ? (entry?.civitaiModel ?? (version ? (await civitaiVersionFacts(version)).modelId : undefined)) : undefined;
   const now = modelId ? await civitaiPermissions(modelId) : null;
   if (strict && !now) throw new LoraError(`Couldn't confirm on civitai that ${name} may run on a hosted service, so it isn't copied to ${host} (Settings → Models & licences keeps LoRAs licensed for your GPU only off the cloud). Try again in a moment, or run it on your GPU`);
   if (strict && !now!.includes("Rent")) {
@@ -433,7 +455,7 @@ async function mirrorCivitai(
     hostedUrl,
     sha256: facts?.sha256 ?? crypto.createHash("sha256").update(data).digest("hex"),
     sizeBytes: data.length,
-    licence: { ...licenceSnapshot(l, entry, now), ...(hostingNote(now) && { hosting: hostingNote(now) }) },
+    licence: { ...licenceSnapshot(l, entry, now), ...(civitai && hostingNote(now) && { hosting: hostingNote(now) }), ...(!civitai && { hosting: "a gated Hugging Face file, downloaded once with your token; its licence allows hosted use (the research's snapshot)" }) },
   });
   return { ...l, hostedUrl };
 }
@@ -608,6 +630,24 @@ export function withoutMissingOnComfy(loras: LoraRef[], listed: string[] | null)
 }
 
 /** Test the civitai key (Settings → Save & test): civitai's /me answers 200 for a good key. */
+/** Settings → LoRAs' Save & test for the Hugging Face token: who it belongs to (whoami), and whether it can read. */
+export async function testHfToken(): Promise<{ ok: boolean; detail: string }> {
+  const token = hfToken();
+  if (!token) return { ok: false, detail: "No token set" };
+  let res: Response;
+  try {
+    res = await fetch("https://huggingface.co/api/whoami-v2", { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
+  } catch (e) {
+    return { ok: false, detail: `Can't reach Hugging Face (${redact((e as Error).message)})` };
+  }
+  if (res.status === 401 || res.status === 403) return { ok: false, detail: `Token rejected (${res.status})` };
+  if (!res.ok) return { ok: false, detail: `Couldn't check the token: Hugging Face answered ${res.status}. Try again in a moment` };
+  const me = (await res.json().catch(() => ({}))) as { name?: string; auth?: { accessToken?: { role?: string } } };
+  const role = me.auth?.accessToken?.role;
+  const who = me.name ? `Signed in as ${me.name}` : "Token accepted";
+  return { ok: true, detail: `${who}${role ? ` (${role} token)` : ""}. Accept each gated LoRA's licence on its Hugging Face page with this account` };
+}
+
 export async function testCivitaiKey(): Promise<{ ok: boolean; detail: string }> {
   const token = civitaiKey();
   if (!token) return { ok: false, detail: "No key set" };

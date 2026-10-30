@@ -172,10 +172,11 @@ function fitSlots(field: LoraField, loras: LoraRef[]): { kept: LoraRef[]; over: 
 
 /**
  * A cloud API can be sent this LoRA: not local-only, and with a URL it can fetch (a mirror or a public file),
- * a civitai file Fuobe mirrors before the run, or the user's own trained LoRA (Fuobe sends its copy). Not a gated
- * Hugging Face file (no HF token here) nor a file that exists only on the user's ComfyUI.
+ * a civitai file or a gated Hugging Face file Fuobe mirrors before the run (with the user's civitai key or Hugging Face
+ * token, which never leave the server: src/server/loras.ts), or the user's own trained LoRA (Fuobe sends its copy).
+ * Not a file that exists only on the user's ComfyUI.
  */
-const sendable = (l: LoraRef) => !localOnly(l) && (!!cloudPath(l) || (!!l.url && needsToken(l.url)) || (!!l.own && (!!l.url || !!l.file)));
+const sendable = (l: LoraRef) => !localOnly(l) && (!!cloudPath(l) || (!!l.url && (needsToken(l.url) || gated(l))) || (!!l.own && (!!l.url || !!l.file)));
 const sendableToCloud = (loras: LoraRef[]) => loras.filter(sendable);
 
 /** fal's `/lora` endpoints before FieldMap.loras was generated: loras [{path, scale}]. */
@@ -204,7 +205,8 @@ const list = (names: string[]) => (names.length < 2 ? names.join("") : `${names.
  * The LoRAs a cloud run carries, and what it says about the ones it leaves out:
  * - a LoRA licensed for the user's GPU only (civitai "RentCivit" only) is sent and said, unless Settings → Models &
  *   licences keeps such LoRAs on the GPU (localOnly): then this run leaves it out;
- * - a gated Hugging Face LoRA (accept its licence first) runs only on the user's GPU;
+ * - a gated Hugging Face LoRA is copied to the provider once with the user's Hugging Face token (the server says
+ *   what to do when there is none);
  * - a LoRA that exists only as a file on the user's ComfyUI (an open-engine training) can't be sent;
  * - beyond the API's maximum (3 on Z-Image, Qwen, FLUX.2 [klein] and LTX-2.3 quality; one per expert on
  *   Replicate's Wan 2.2), the first ones win. planGeneration puts the user's own LoRAs (an @character's
@@ -216,9 +218,7 @@ export function fitLoras(loras: LoraRef[], route: Pick<ModelRoute, "provider" | 
   const notes: string[] = [];
   const local = [...new Set(loras.filter(localOnly).map(loraName))];
   if (local.length) notes.push(`${list(local)} ${local.length > 1 ? "are" : "is"} licensed for your GPU only and Settings → Models & licences keeps such LoRAs off the cloud, so this run leaves ${local.length > 1 ? "them" : "it"} out`);
-  const locked = loras.filter((l) => !localOnly(l) && !l.hostedUrl && gated(l));
-  if (locked.length) notes.push(`${list(locked.map(loraName))} ${locked.length > 1 ? "are" : "is"} in a gated Hugging Face repo, so this cloud run leaves ${locked.length > 1 ? "them" : "it"} out (on your GPU ${locked.length > 1 ? "they run" : "it runs"} once you've accepted the licence)`);
-  const unsent = loras.filter((l) => !localOnly(l) && !gated(l) && !sendable(l));
+  const unsent = loras.filter((l) => !localOnly(l) && !sendable(l));
   if (unsent.length) notes.push(`${list(unsent.map(loraName))} ${unsent.length > 1 ? "exist" : "exists"} only on your ComfyUI, so this cloud run leaves ${unsent.length > 1 ? "them" : "it"} out`);
   const cloud = sendableToCloud(loras);
   const field = routeLoraField(route);

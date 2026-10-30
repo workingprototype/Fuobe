@@ -22,6 +22,7 @@ export const GET = handler({ access: "signed-in" }, async () => {
     folder: folder || null,
     ...(problem && { folderProblem: problem }),
     civitaiKey: !!getSetting("civitaiKey"),
+    hfToken: !!getSetting("hfToken"),
     loras: LORA_LIBRARY.map((e) => ({
       key: e.key,
       name: e.name,

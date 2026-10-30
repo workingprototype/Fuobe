@@ -84,7 +84,9 @@ export type Operation =
   // round 5 (O11)
   | "face-mosaic" // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
   // N7-5
-  | "camera-path"; // image + params.cameraPath (+ inputs.video: the open engine's render along the path) → the camera following the path
+  | "camera-path" // image + params.cameraPath (+ inputs.video: the open engine's render along the path) → the camera following the path
+  // archive-restore
+  | "restore-video"; // archive video (+ prompt: period, place, light; negative: what not to invent) → the same shot clean, in colour, larger
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -153,6 +155,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   overlay: "Overlay image",
   "face-mosaic": "Pixelate faces",
   "camera-path": "Fly path",
+  "restore-video": "Restore & colourise",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -223,6 +226,7 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   overlay: "image",
   "face-mosaic": "image",
   "camera-path": "video",
+  "restore-video": "video",
 };
 
 /**

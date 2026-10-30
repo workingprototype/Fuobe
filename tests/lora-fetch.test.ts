@@ -298,16 +298,35 @@ describe("Before a cloud run", () => {
     expect(net.calls.filter((c) => c.url.includes("/api/download/"))).toEqual([]);
   });
 
-  it("leaves a gated Hugging Face LoRA out of a cloud run with a note, never failing the run", async () => {
+  it("sends a gated Hugging Face LoRA through Fuobe's mirror: with the HF token it is copied once, without one the run says what to do", async () => {
     const relight = loraRef(loraEntry("ltx-2-3-22b-ic-lora-relight-1-0")!);
     const fpv = loraRef(loraEntry("ltx2-3-fpv-motion")!);
     const ltx = { provider: "fal" as const, map: { loras: { shape: "items" as const, key: "loras", required: true } }, loraEndpoint: "fal-ai/ltx-2.3-22b/image-to-video/lora" };
+    // The fit keeps it (a copy is made before the run), and route choice counts it as something to carry.
     const fitted = fitLoras([relight, fpv], ltx);
-    expect(fitted.loras).toEqual([fpv]);
-    expect(fitted.notes).toEqual([`${loraEntry("ltx-2-3-22b-ic-lora-relight-1-0")!.name} is in a gated Hugging Face repo, so this cloud run leaves it out (on your GPU it runs once you've accepted the licence)`]);
-    // It counts as nothing to carry when routes are compared, and is refused by name if it gets this far.
-    expect(lorasFit({ provider: "replicate", map: { loras: { shape: "single", weights: "w", scale: "s" } } }, [relight])).toBe(true);
-    await expect(prepareCloudLoras([relight], "fal", upload().fn)).rejects.toThrow(/gated Hugging Face repo, so it can't be sent to fal\.ai/);
+    expect(fitted.loras).toEqual([relight, fpv]);
+    expect(fitted.notes).toEqual([]);
+    // No token: refused by name, with where to accept the licence and where the token goes; nothing is fetched.
+    setSetting("hfToken", "");
+    net = network({});
+    await expect(prepareCloudLoras([relight], "fal", upload().fn)).rejects.toThrow(/gated Hugging Face repo: accept its licence on https:\/\/huggingface\.co\/Lightricks\/LTX-2\.3-22b-IC-LoRA-Relight .*Settings → LoRAs/);
+    expect(net.calls).toEqual([]);
+    net.restore();
+    // With the token: downloaded once with it (Authorization to huggingface.co, never in a URL), copied to fal, recorded.
+    const HF = "hf_secret0123456789abcdef";
+    setSetting("hfToken", HF);
+    const body = Buffer.from("relight".repeat(64));
+    const pinned = { ...relight, file: relight.file };
+    net = network({ [loraEntry("ltx-2-3-22b-ic-lora-relight-1-0")!.url]: () => new Response(new Uint8Array(body), { status: 200, headers: { "content-length": String(body.length) } }) });
+    const up = upload();
+    // The library pins the real file's SHA256, which this stand-in doesn't match: the copy is refused, not sent.
+    await expect(prepareCloudLoras([pinned], "fal", up.fn)).rejects.toThrow(/doesn't match what huggingface\.co says it is/);
+    const get = net.calls.find((c) => c.method === "GET")!;
+    expect(get.headers.authorization).toBe(`Bearer ${HF}`);
+    expect(get.url).not.toContain(HF);
+    expect(up.sent).toEqual([]);
+    expect(redact(`failed with ${HF}`)).toBe("failed with •••");
+    setSetting("hfToken", "");
   });
 
   it("mirrors the pinned bytes, not a same-named file of other bytes in the LoRA folder", async () => {

@@ -13,7 +13,7 @@ import type {
 } from "./types";
 import { sourceSeconds } from "./clip-windows";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
-import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
+import { cloudPath, fitLoras, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
 import { anglesPrompt, anglesWords, ANGLES_ORIGINAL } from "./open-tools";
 import { askedSize, numFramesValue, sizeValue } from "./payload";
 import { characterScale, CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
@@ -154,6 +154,8 @@ const PROMPTLESS = new Set<Operation>([
   "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop", "audio-join", "scene-3d", "splat", "rig-3d", "extract-frames", "images-to-video", "overlay",
   // round 5 (O11): the face mosaic names the faces itself ("face")
   "face-mosaic",
+  // archive-restore: the scene's words help (period, place, light) but a run without them gets a neutral one
+  "restore-video",
 ]);
 
 /**
@@ -537,6 +539,7 @@ const NEEDS: Partial<
   keyframes: { images: 1, msg: "Add the keyframes, in order" },
   "sdr-to-hdr": { video: true, msg: "Add the video to convert" },
   "face-mosaic": { images: 1, msg: "Add the picture whose faces to pixelate" },
+  "restore-video": { video: true, msg: "Add the archive clip to restore" },
   "export-video": { video: true, msg: "Add the video to export" },
   ocr: { images: 1, msg: "Add the image to read" },
   "still-motion": { images: 1, msg: "Add the still to move over" },
@@ -679,7 +682,6 @@ export function routeLoras(route: Pick<ModelRoute, "provider" | "map" | "loraEnd
   const field = routeLoraField(route);
   const why = (l: LoraRef) => {
     if (localOnly(l)) return "it is licensed for your GPU only, and Settings → Models & licences keeps such LoRAs off the cloud";
-    if (gated(l) && !l.hostedUrl) return "it is in a gated Hugging Face repo, so it runs only on your GPU";
     if (!cloudPath(l) && !needsToken(l.url) && !l.own) return "no URL to send to the LoRA endpoint";
     if (!field) return "this route takes no LoRAs";
     return field.shape === "experts" ? "this API takes one LoRA per expert" : `this API takes up to ${loraCapacity(field)} LoRAs`;
