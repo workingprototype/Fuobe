@@ -107,9 +107,7 @@ export function isPriceCheck(method: string, pathname: string, search: string): 
  * the MCP endpoint…) is refused with "Connect your GPU": it never spends the owner's keys or GPU.
  */
 const LIBRARY_CHANGES: [methods: string, path: RegExp][] = [
-  ["POST", /^\/api\/uploads$/],
-  ["POST", /^\/api\/media\/probe$/],
-  // Split soundtrack's Export mix: a WAV saved to the Library as an asset, in parts.
+  // Split soundtrack's Export mix: a WAV saved, in parts, as an asset of the owner's Library (no account's upload).
   ["POST", /^\/api\/audio-tools\/export$/],
   ["POST", /^\/api\/folders$/],
   ["PATCH DELETE", /^\/api\/folders\/[^/]+$/],
@@ -142,8 +140,9 @@ const GENERATION = /^\/api\/generations\/(?!(?:facets|trash|stream|zip|bulk|loca
 
 /** The generation an account's request is about (its own runs: the proxy checks it made it), or undefined. */
 export function accountGeneration(method: string, pathname: string): string | undefined {
-  const cancel = /^\/api\/generations\/([^/]+)\/cancel$/.exec(pathname);
-  if (method === "POST" && cancel) return cancel[1];
+  // Cancel, and Fuobe Soul's finished picture for its own result.
+  const step = /^\/api\/generations\/([^/]+)\/(cancel|finish)$/.exec(pathname);
+  if (method === "POST" && step) return step[1];
   const one = GENERATION.exec(pathname);
   return one && (method === "GET" || method === "HEAD" || method === "DELETE") ? one[1] : undefined;
 }
@@ -159,12 +158,17 @@ export function accountOwnRead(pathname: string): boolean {
 /** GPU pre-flight reads: each answers for the account's own GPU only (src/server/gpu/target.ts). */
 const GPU_READS = new Set(["/api/gpu/readiness", "/api/gpu/badges", "/api/gpu/plan"]);
 
-/** A change an account may send: signing out, its own GPU and its check, and price checks (reads go by guestRead, as a guest's). */
+/**
+ * A change an account may send: signing out, its own GPU and its check, price checks (reads go by guestRead, as a
+ * guest's), an upload (the route checks it: src/app/api/uploads, which the proxy's matcher leaves out) and a look at its
+ * own clip's header (the route reads only its own files).
+ */
 export function accountMayChange(method: string, pathname: string, search: string): boolean {
   if (method === "POST" && pathname === "/api/auth/logout") return true;
   if ((method === "PUT" || method === "DELETE") && pathname === "/api/account/gpu") return true;
   // GPU pre-flight: checking its own ComfyUI (reads only; the routes check the target and the request themselves).
   if ((method === "POST" && pathname === "/api/gpu/check") || (method === "PUT" && pathname === "/api/gpu/inventory")) return true;
+  if (method === "POST" && (pathname === "/api/uploads" || pathname === "/api/media/probe")) return true;
   return isPriceCheck(method, pathname, search);
 }
 
@@ -177,15 +181,16 @@ export const ACCOUNT_LIBRARY_MESSAGE = "This studio's library is its owner's. Fr
 export const LIBRARY_MESSAGE = "Free accounts can't save to this studio's library yet.";
 
 /**
- * Runs an account may start once it has connected its own ComfyUI ("Your GPU"): the studios' generations, which
- * the route sends to that ComfyUI only (src/app/api/generations/route.ts, generations.ts accountRun). Other tools
- * plan with the install's AI helpers or its own ComfyUI, so they stay refused.
+ * Runs an account may start once it has connected its own ComfyUI ("Your GPU"): the studios' generations, camera
+ * motions, effects and apps, which the route sends to that ComfyUI only, with only its own uploaded files
+ * (src/app/api/generations/route.ts, generations.ts accountRun). Other tools plan with the install's AI helpers or
+ * its own ComfyUI, so they stay refused.
  */
 export function ownGpuRun(method: string, pathname: string): boolean {
   return method === "POST" && pathname === "/api/generations";
 }
 
-export const OWN_GPU_TOOL_MESSAGE = "This tool doesn't run on your own GPU yet. The Image, Video and Audio studios do: pick an open-source model there.";
+export const OWN_GPU_TOOL_MESSAGE = "This tool doesn't run on your own GPU yet. Camera motions, effects, apps and the Image, Video and Audio studios do.";
 
 /** Set on an account's refused run: the client shows "Connect your GPU to run this". */
 export const CONNECT_GPU_HEADER = "x-fuobe-connect-gpu";

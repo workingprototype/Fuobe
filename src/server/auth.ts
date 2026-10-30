@@ -240,6 +240,19 @@ export function listAccounts(): AccountInfo[] {
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/**
+ * The ids of the accounts, read from the auth file itself: throws when it can't be read or parsed, or has no secret
+ * (every auth file that ever held an account has one). The account sweep removes the files of accounts missing from
+ * it, so a read that failed for a moment must never look like "no accounts".
+ */
+export function readAccountIds(): Set<string> {
+  const data = JSON.parse(fs.readFileSync(FILE, "utf8")) as Partial<AuthFile> | null;
+  if (!data || typeof data !== "object" || typeof data.secret !== "string" || !data.secret || (data.accounts !== undefined && !Array.isArray(data.accounts))) {
+    throw new Error("The auth file can't be read");
+  }
+  return new Set((data.accounts ?? []).map((a) => a?.id).filter((id): id is string => typeof id === "string" && !!id));
+}
+
 /** Switch an account off (it is signed out at once) or on again. */
 export function setAccountDisabled(id: string, disabled: boolean): void {
   const d = read();

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { z } from "zod";
 import { authEnabled, checkAccount, deleteAccount, publicSignup, SESSION_COOKIE, sessionViewer, validToken } from "@/server/auth";
+import { purgeAccount } from "@/server/account-sweep";
 
 /** Who is looking: the owner, an account, or a guest; and whether sign-up is open. Open to everyone. */
 export async function GET(request: Request) {
@@ -30,5 +31,7 @@ export async function DELETE(request: Request) {
   if (!parsed.success || !checkAccount(session.account.email, parsed.data.password)) return Response.json({ error: "Wrong password" }, { status: 403 });
   deleteAccount(session.account.id);
   jar.delete(SESSION_COOKIE);
+  // Its runs and files go with it (running ones are stopped first).
+  await purgeAccount(session.account.id);
   return new Response(null, { status: 204 });
 }

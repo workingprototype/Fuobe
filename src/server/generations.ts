@@ -51,9 +51,16 @@ import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
-import { comfyLoraFiles, onOwnGpu, outputFetch, probeComfy } from "./providers/comfyui";
+import { comfyLoraFiles, onOwnGpu, outputFetch, outsideOwnGpu, OWN_OUTPUT_LIMITS, ownGpu, probeComfy } from "./providers/comfyui";
 import { accountGpu } from "./auth";
-import { CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
+import { CONNECT_GPU_MESSAGE, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
+import { outsideTenant, runAsTenant, tenant, tenantAccount } from "./tenant";
+import { generationAccount } from "./account-library";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "./account-files";
+import { checkAccountLoras } from "./account-loras";
+import { missingFilesMessage, type MissingFiles } from "@/lib/missing-files";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
 import { ACCESS_PLACE } from "@/lib/model-access";
@@ -63,9 +70,10 @@ import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
 import { modelToFinish, startModelFinish, startTurntable, stopModelFinish, type OutputStore } from "./model3d-finish";
 import { convertMask, decodePng, encodePng } from "./png";
-import { engineMode, getSetting, withCandidates } from "./settings";
-import { fetchRemoteToFile } from "./remote-fetch";
-import { adoptFile, contentTypeFor, deleteAsset, localHead, readRef, saveFile, scratchDir } from "./storage";
+import { engineMode, getSetting, withCandidates, withoutCandidates } from "./settings";
+import { blockedForAccounts, discardBody, fetchRemoteToFile, RemoteFetchError } from "./remote-fetch";
+import { accountSend } from "./account-send";
+import { absolutePath, adoptFile, contentTypeFor, deleteAsset, localHead, readRef, saveFile, scratchDir } from "./storage";
 
 interface Row {
   id: string;
@@ -566,6 +574,12 @@ function sizedMixedFrame(plan: ReturnType<typeof planGeneration>, req: Generatio
   return fit ? { ...plan, params: { ...plan.params, extra: { ...plan.params.extra, image_size: fit } } } : plan;
 }
 
+/**
+ * The elements "@Name" can mention: the owner's. An account's run or a visitor's price check has none, so "@Name" stays
+ * words there (an owner's element photo or LoRA never reaches someone else's run).
+ */
+export const mentionElements = () => (tenant() ? [] : listElements());
+
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
@@ -579,7 +593,7 @@ function prepare(original: GenerationRequest) {
   const allowed = found && offeredFor(found, onSide);
   const model = allowed && dualEngine(allowed) ? onEngine(allowed, engineFor(allowed, onSide)) : allowed;
   const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
-  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
+  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, mentionElements()).request, model).request, model) : worded;
   let plan = sizedMixedFrame(planGeneration(req, lookup, getPreset), req);
   if (mode !== "both" && plan.model.engine !== mode) {
     throw new Error(
@@ -719,7 +733,26 @@ export interface CreateOptions {
 
 const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
 
-export function createGenerations(asked: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+/**
+ * Public sign-up: inside an account's run (accountRun) every request it makes, and every step its chains queue, is
+ * stamped as the account's own, on the open engine. A request stamped for another account, a step that waits for
+ * someone else's run, a run on an account's GPU outside its account, and a guest's run are refused.
+ */
+function stampTenant(asked: GenerationRequest, opts: CreateOptions): GenerationRequest {
+  if (tenant()?.kind === "guest") throw new Error(GUEST_RUN_MESSAGE);
+  const who = tenantAccount();
+  if (!who) {
+    if (ownGpu()) throw new Error("A run on an account's own GPU must be that account's run.");
+    return asked;
+  }
+  if (asked.account && asked.account !== who) throw new Error("That run belongs to another account.");
+  const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
+  if (deps.some((d) => generationAccount(d) !== who)) throw new Error("An earlier step of this run isn't yours.");
+  return { ...asked, account: who, engine: "open" };
+}
+
+export function createGenerations(given: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+  const asked = stampTenant(given, opts);
   // A retired model or operation (a retry, an old script, a saved project) runs on what replaced it, and says so.
   const moved = currentRequest(asked);
   const original = moved.request;
@@ -730,6 +763,8 @@ export function createGenerations(asked: GenerationRequest, opts: CreateOptions 
   const catalogModel = getModel(original.modelId);
   const found = catalogModel && offeredFor(catalogModel, original.engine);
   const shotModel = found && dualEngine(found) ? onEngine(found, engineFor(found, original.engine)) : found;
+  // An account's 3D model would be finished on this server, outside its own limits: not yet (the route refuses first).
+  if (original.account && shotModel?.kind === "model3d") throw new Error(OWN_GPU_TOOL_MESSAGE);
   if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
     return createShotFilm(original, shotModel);
   }
@@ -1115,9 +1150,13 @@ async function advanceDependents(): Promise<void> {
     }
     submitting().add(r.id);
     let handedOff = false;
+    // An account's step reads its inputs, and is planned, as its run was: as that account, on its own ComfyUI.
+    const own = stored.account ? accountRun(stored.account, "comfyui") : undefined;
+    const asRun = <T,>(fn: () => T): T => (own && "run" in own ? own.run(fn) : fn());
     try {
+      if (own && "error" in own) throw new Error(own.error);
       // The planned op (r.op), not request.op: a translate whose op was inferred still gets the cue list.
-      const values = await Promise.all(outputs.map((o, i) => chainValue(pickOutput(o, slots[i]), slots[i], r.op)));
+      const values = await asRun(() => Promise.all(outputs.map((o, i) => chainValue(pickOutput(o, slots[i]), slots[i], r.op))));
       const missing = values.findIndex((u) => !u);
       if (missing >= 0) {
         fail(`${earlier} has no ${slotNoun(slots[missing])} to use`);
@@ -1127,7 +1166,8 @@ async function advanceDependents(): Promise<void> {
       // the engine it runs on, ComfyUI taken as answering: one on the cloud doesn't use it, so doesn't wait for it.
       const model = getModel(request.modelId);
       const runs = model && dualEngine(model) ? onEngine(model, pickEngine(model, request.engine, engineMode(), () => true)) : model;
-      if (runs?.routes.some((x) => x.provider === "comfyui") && !(await probeComfy()) && deps.some((d) => d!.provider === "comfyui")) {
+      // (An account's step looks at its own ComfyUI, never the install's: inside its run, probeComfy says yes and the run finds out.)
+      if (runs?.routes.some((x) => x.provider === "comfyui") && !(await asRun(() => probeComfy())) && deps.some((d) => d!.provider === "comfyui")) {
         // The earlier steps ran for real on ComfyUI: one missed check (a server busy finishing them, or restarting)
         // mustn't make this one a demo, which chainMode fails. Look again at once (one forced look a sweep), then wait
         // for the next sweeps (COMFY_WAIT from the first miss) before chainMode has its say.
@@ -1145,10 +1185,7 @@ async function advanceDependents(): Promise<void> {
       // Filled with the slots that have an input; stored with its whole chain (and what was skipped) for a retry.
       const filled = withChainInputs({ ...request, chain: slots }, values as string[]);
       const original: GenerationRequest = { ...filled, chain: request.chain, chainFilled: true };
-      // An account's step is planned as its run was: on its own ComfyUI.
-      const own = original.account ? accountRun(original.account, "comfyui") : undefined;
-      if (own && "error" in own) throw new Error(own.error);
-      const prepared = own ? own.run(() => prepare(original)) : prepare(original);
+      const prepared = asRun(() => prepare(original));
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[], original);
       if (mode.error) throw new Error(mode.error);
       const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
@@ -1196,15 +1233,59 @@ export function accountRun(accountId: string, providerId: string): { run: <T>(fn
   const gpu = accountGpu(accountId);
   if (!gpu) return { error: CONNECT_GPU_MESSAGE };
   if (providerId !== "comfyui") return { error: OWN_GPU_ONLY };
-  return { run: (fn) => onOwnGpu(gpu, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn)) };
+  // As the account (tenant.ts: only its own files and runs), on its own ComfyUI, the open engine, no demo outputs.
+  return { run: (fn) => runAsTenant({ kind: "account", id: accountId }, () => onOwnGpu(gpu, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn))) };
 }
 
 /**
- * Plan (and price) as a visitor's run would go: on its own ComfyUI (none yet: an empty address that
- * reaches nothing), the open engine, no demo outputs. For previews; a run goes through accountRun.
+ * The LoRA files an account's run needs that its own ComfyUI doesn't have (call it inside accountRun): the run's own,
+ * and those of the step that makes its start frame first (a Fuobe DoP relight or Mixed Media effect, which
+ * createRelitClip queues as a step of its own). Null when nothing is missing, or the list couldn't be read.
  */
-export function asVisitor<T>(gpu: { url: string; token?: string } | null, fn: () => T): T {
-  return onOwnGpu(gpu ?? { url: "" }, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn));
+export async function accountLoraFix(req: GenerationRequest): Promise<MissingFiles | null> {
+  const p = previewGeneration(req);
+  const asks: { loras: LoraRef[]; endpoint: string }[] = [];
+  if (p.route.provider === "comfyui") asks.push({ loras: [...p.loras.applied, ...graphLoras(p.route.endpoint, req.params?.extra)], endpoint: p.route.endpoint });
+  const pre = relightStep(req, p.model);
+  if (pre) {
+    try {
+      const { step } = pre;
+      const s = previewGeneration({
+        feature: req.feature,
+        account: req.account,
+        engine: pre.engine,
+        modelId: step.modelId,
+        op: step.op,
+        prompt: step.prompt,
+        inputs: { images: (req.inputs?.images ?? []).slice(0, 1) },
+        ...(step.loras?.length && { loras: step.loras }),
+        ...(step.params && { params: step.params }),
+      });
+      if (s.route.provider === "comfyui") asks.push({ loras: [...s.loras.applied, ...graphLoras(s.route.endpoint, step.params?.extra)], endpoint: s.route.endpoint });
+    } catch {
+      // The step says what's wrong when it is created.
+    }
+  }
+  const items: MissingFiles["items"] = [];
+  let workflowId: string | undefined;
+  for (const a of asks) {
+    const f = await checkAccountLoras(a.loras, a.endpoint);
+    if (!f) continue;
+    workflowId ??= f.workflowId;
+    for (const i of f.items) if (!items.some((x) => x.file === i.file)) items.push(i);
+  }
+  return items.length ? { code: "comfy_missing_model", ...(workflowId && { workflowId }), items } : null;
+}
+
+/**
+ * Plan (and price) as a visitor's run would go: as that visitor (an account, or a guest), on its own ComfyUI (none
+ * yet: an empty address that reaches nothing), the open engine, no demo outputs. For previews; a run goes through
+ * accountRun.
+ */
+export function asVisitor<T>(gpu: { url: string; token?: string } | null, fn: () => T, accountId?: string): T {
+  return runAsTenant(accountId ? { kind: "account", id: accountId } : { kind: "guest" }, () =>
+    onOwnGpu(gpu ?? { url: "" }, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn)),
+  );
 }
 
 const accountOf = (r: Pick<Row, "request_json">): string | undefined => {
@@ -1235,39 +1316,69 @@ async function submitNow(
 ): Promise<void> {
   const adapter = provider(providerId);
   submitting().add(id);
+  /** Why the run failed, once it has: its files still waiting to be sent are not sent. */
+  let failed: { error: unknown } | undefined;
   try {
+    // An account's run on its own ComfyUI: every LoRA it adds must be there first (nothing is sent before this check).
+    if (req.account && providerId === "comfyui") {
+      const fix = await checkAccountLoras([...plan.loras, ...graphLoras(route.endpoint, plan.params.extra)], route.endpoint, route);
+      if (fix) throw Object.assign(new Error(missingFilesMessage(fix)), { fix });
+    }
+    // An account's files go to its ComfyUI one at a time, a few across the server (account-send.ts). A file whose turn
+    // comes after another input failed, or after a cancel, isn't read or sent.
+    const gate = <T,>(fn: () => Promise<T>): Promise<T> => {
+      if (!req.account) return fn();
+      return accountSend(req.account, async () => {
+        if (failed) throw failed.error;
+        if (statusOf(id) === "canceled") throw new Error("Stopped");
+        try {
+          return await fn();
+        } catch (e) {
+          failed ??= { error: e };
+          throw e;
+        }
+      });
+    };
     const prep = async (ref?: string) => {
       if (!ref) return undefined;
-      const f = await readRef(ref);
-      return adapter.prepareFile(f.data, f.contentType, f.name, route);
+      return gate(async () => {
+        const f = await readRef(ref);
+        return adapter.prepareFile(f.data, f.contentType, f.name, route);
+      });
     };
     // The input clip's header (size, frame rate, length): upscalers that take a factor and frame-count routes read it.
     let source: Pick<GenInput, "sourceSize" | "sourceFps" | "sourceDuration"> = {};
     const prepVideo = async (ref?: string) => {
       if (!ref) return undefined;
-      const f = await readRef(ref);
-      const facts = mediaFacts(f.data);
-      source = {
-        ...(facts.width && facts.height ? { sourceSize: { width: facts.width, height: facts.height } } : {}),
-        ...(facts.fps ? { sourceFps: facts.fps } : {}),
-        ...(facts.duration ? { sourceDuration: facts.duration } : {}),
-      };
-      return adapter.prepareFile(f.data, f.contentType, f.name, route);
+      return gate(async () => {
+        const f = await readRef(ref);
+        const facts = mediaFacts(f.data);
+        source = {
+          ...(facts.width && facts.height ? { sourceSize: { width: facts.width, height: facts.height } } : {}),
+          ...(facts.fps ? { sourceFps: facts.fps } : {}),
+          ...(facts.duration ? { sourceDuration: facts.duration } : {}),
+        };
+        return adapter.prepareFile(f.data, f.contentType, f.name, route);
+      });
     };
     // A talking avatar is as long as its voice (fal's InfiniteTalk and Wan 2.2 S2V take a frame count): the voice's header.
     const prepVoice = async (ref?: string) => {
       if (!ref) return undefined;
-      const f = await readRef(ref);
-      const facts = mediaFacts(f.data);
-      if (facts.duration && !source.sourceDuration) source = { ...source, sourceDuration: facts.duration };
-      return adapter.prepareFile(f.data, f.contentType, f.name, route);
+      return gate(async () => {
+        const f = await readRef(ref);
+        const facts = mediaFacts(f.data);
+        if (facts.duration && !source.sourceDuration) source = { ...source, sourceDuration: facts.duration };
+        return adapter.prepareFile(f.data, f.contentType, f.name, route);
+      });
     };
     const prepMask = async (ref?: string) => {
       if (!ref) return undefined;
-      const f = await readRef(ref);
-      const fmt = route.map?.maskFormat;
-      const data = fmt && fmt !== "white" && f.contentType === "image/png" ? convertMask(f.data, fmt) : f.data;
-      return adapter.prepareFile(data, f.contentType, f.name, route);
+      return gate(async () => {
+        const f = await readRef(ref);
+        const fmt = route.map?.maskFormat;
+        const data = fmt && fmt !== "white" && f.contentType === "image/png" ? convertMask(f.data, fmt) : f.data;
+        return adapter.prepareFile(data, f.contentType, f.name, route);
+      });
     };
     let prompt = plan.prompt;
     if (req.params?.enhancePrompt && prompt) {
@@ -1354,6 +1465,7 @@ async function submitNow(
       recordSubmission(id, now);
     })();
   } catch (e) {
+    failed ??= { error: e };
     // A cancel during the hand-over stays a cancel. What the GPU was missing (a model, a node class) is kept, so the
     // tile offers "Fix it", and the account's GPU check counts as stale.
     const fix = (e as { fix?: GenerationFix }).fix;
@@ -1393,10 +1505,23 @@ declare global {
 }
 
 /**
+ * Run `fn` as the owner's background work: outside any account's run (its tenant, its ComfyUI, the open-engine settings
+ * it runs with). Timers started inside inherit where they were started, so the runner, often first started by a run, is
+ * started this way: every tick then polls each row in that row's own context.
+ */
+export function outsideRuns<T>(fn: () => T): T {
+  return outsideTenant(() => outsideOwnGpu(() => withoutCandidates(fn)));
+}
+
+/**
  * Start the background runner (once per process; started at boot by src/instrumentation.ts).
  * Also installs the live-update hooks and primes the reachability probes routing reads.
  */
 export function ensureRunner(): void {
+  outsideRuns(startRunner);
+}
+
+function startRunner(): void {
   watchGenerations(db());
   const cur = globalThis.__fuobeRunner;
   if (cur) {
@@ -1462,10 +1587,13 @@ async function tick(): Promise<void> {
   state.busy = true;
   try {
     sweepInterrupted();
+    // The owner's jobs first. An account's ComfyUI may be slow to answer: its polls run on their own, so they never hold
+    // up the owner's (pollGuarded never polls one row twice at once).
     const active = db()
-      .prepare("SELECT * FROM generations WHERE status IN ('queued','running') AND external_id IS NOT NULL ORDER BY created_at ASC LIMIT 50")
+      .prepare(`SELECT * FROM generations WHERE status IN ('queued','running') AND external_id IS NOT NULL ORDER BY ${ACCOUNT_LAST}, created_at ASC LIMIT 100`)
       .all() as Row[];
-    await Promise.all([...active.map(pollGuarded), pollTrainings().catch(() => {}), advanceDependents().catch(() => {})]);
+    for (const r of active) if (accountOf(r)) void pollGuarded(r);
+    await Promise.all([...active.filter((r) => !accountOf(r)).map(pollGuarded), pollTrainings().catch(() => {}), advanceDependents().catch(() => {})]);
   } finally {
     state.busy = false;
   }
@@ -1478,7 +1606,7 @@ async function fastTick(): Promise<void> {
   try {
     const rows = db()
       .prepare(
-        "SELECT g.*, r.started_at AS run_started_at FROM generations g LEFT JOIN generation_runs r ON r.id = g.id WHERE g.status = 'running' AND g.external_id IS NOT NULL AND g.progress IS NOT NULL ORDER BY g.created_at ASC LIMIT 50",
+        `SELECT g.*, r.started_at AS run_started_at FROM generations g LEFT JOIN generation_runs r ON r.id = g.id WHERE g.status = 'running' AND g.external_id IS NOT NULL AND g.progress IS NOT NULL ORDER BY ${ACCOUNT_LAST.replace("request_json", "g.request_json")}, g.created_at ASC LIMIT 50`,
       )
       .all() as (Row & { run_started_at: number | null })[];
     const now = Date.now();
@@ -1489,11 +1617,16 @@ async function fastTick(): Promise<void> {
       const ran = r.run_started_at ? r.updated_at - r.run_started_at : 0;
       return ran > 0 && p > 0 && (p * (now - r.run_started_at!)) / ran >= 0.9;
     });
-    await Promise.all(nearlyDone.slice(0, 20).map(pollGuarded));
+    const soon = nearlyDone.slice(0, 20);
+    for (const r of soon) if (accountOf(r)) void pollGuarded(r);
+    await Promise.all(soon.filter((r) => !accountOf(r)).map(pollGuarded));
   } finally {
     state.fastBusy = false;
   }
 }
+
+/** Order by: the owner's rows (no account in the request) before accounts'. */
+const ACCOUNT_LAST = "(json_extract(request_json, '$.account') IS NOT NULL)";
 
 function runRoute(model: NonNullable<ReturnType<typeof getModel>>, r: Pick<Row, "op" | "provider">): ModelRoute {
   return model.routes.find((x) => x.op === r.op && (x.provider === r.provider || r.provider === "mock")) ?? model.routes[0];
@@ -1531,10 +1664,13 @@ async function pollOne(r: Row): Promise<void> {
   } catch (e) {
     pollError = e;
   }
+  // An account's job waits at most 30 minutes in its own ComfyUI's queue.
+  const account = accountOf(r);
+  const queueMs = account ? ACCOUNT_LIMITS.queueMs : QUEUE_TIMEOUT_MS;
   if (!res || res.state === "queued" || res.state === "running") {
     // A job that has just left the queue gets its full running time from now.
     const startsNow = res?.state === "running" && !run.started_at;
-    const overdue = run.started_at ? now - run.started_at > TIMEOUT_MS : !startsNow && now - run.submitted_at > QUEUE_TIMEOUT_MS;
+    const overdue = run.started_at ? now - run.started_at > TIMEOUT_MS : !startsNow && now - run.submitted_at > queueMs;
     if (overdue) {
       // Stop the provider's job too, so it doesn't keep rendering (or billing) for nothing.
       await provider(r.provider)
@@ -1542,7 +1678,11 @@ async function pollOne(r: Row): Promise<void> {
         .catch(() => {});
       update(r.id, {
         status: "failed",
-        error: run.started_at ? `Timed out after ${TIMEOUT_MS / 60_000} minutes` : `Timed out waiting ${QUEUE_TIMEOUT_MS / 3_600_000} hours in the provider's queue`,
+        error: run.started_at
+          ? `Timed out after ${TIMEOUT_MS / 60_000} minutes`
+          : account
+            ? `Timed out waiting ${queueMs / 60_000} minutes in your ComfyUI's queue`
+            : `Timed out waiting ${QUEUE_TIMEOUT_MS / 3_600_000} hours in the provider's queue`,
         completed_at: now,
         message: null,
       });
@@ -1560,6 +1700,9 @@ async function pollOne(r: Row): Promise<void> {
   // Mark first so a slow download isn't polled twice.
   update(r.id, { status: "running", progress: 0.99, message: "Saving results" });
   const outputs: OutputFile[] = [];
+  // An account's job keeps at most 16 outputs, and a result it can't save fails the job (never a link to its ComfyUI).
+  const dropped = account && res.outputs.length > ACCOUNT_LIMITS.outputsPerJob ? res.outputs.length - ACCOUNT_LIMITS.outputsPerJob : 0;
+  if (dropped) res = { ...res, outputs: res.outputs.slice(0, ACCOUNT_LIMITS.outputsPerJob) };
   // Remove background: of a cut-out and its mask (BiRefNet's answer), the one asked for (params.matteOutput).
   const matte = r.op === "bg-remove-video" ? (JSON.parse(r.request_json) as GenerationRequest).params?.matteOutput : undefined;
   // The face mosaic's cloud step answers with the faces' masks: the result is the picture, pixelated under them.
@@ -1576,6 +1719,12 @@ async function pollOne(r: Row): Promise<void> {
       try {
         outputs.push(await persistOutput(o, r.id));
       } catch (e) {
+        if (account) {
+          for (const kept of outputs) if (kept.assetId) deleteAsset(kept.assetId);
+          const why = e instanceof AccountFilesFull ? e.message : `Couldn't save a result from your ComfyUI: ${(e as Error).message}`;
+          update(r.id, { status: "failed", error: why, completed_at: Date.now(), message: null });
+          return;
+        }
         outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...inlineText(o.text, o.meta), ...(o.draftId ? { draftId: o.draftId } : {}) });
         console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
       }
@@ -1603,7 +1752,7 @@ async function pollOne(r: Row): Promise<void> {
     status: "succeeded",
     outputs_json: JSON.stringify(outputs),
     progress: 1,
-    message: null,
+    message: dropped ? `Kept the first ${ACCOUNT_LIMITS.outputsPerJob} results (your ComfyUI made ${ACCOUNT_LIMITS.outputsPerJob + dropped})` : null,
     completed_at: Date.now(),
   });
 }
@@ -1611,9 +1760,12 @@ async function pollOne(r: Row): Promise<void> {
 /** Start (or keep running) the 3D finish of a job whose outputs are stored; it marks the job done when it ends. */
 function resumeFinish(r: Row): void {
   const outputs = JSON.parse(r.outputs_json || "[]") as OutputFile[];
+  // An account's model: one account finish at a time, and no turntable on the server (its browser records one).
+  const account = accountOf(r);
   startModelFinish(r.id, outputs, {
     op: r.op,
     provider: r.provider,
+    account,
     onMessage: (message) => update(r.id, { message }),
     done: (finished) => {
       const now = db().prepare("SELECT status, external_meta_json FROM generations WHERE id = ?").get(r.id) as Pick<Row, "status" | "external_meta_json"> | undefined;
@@ -1623,7 +1775,7 @@ function resumeFinish(r: Row): void {
       delete meta.finishing;
       update(r.id, { status: "succeeded", outputs_json: JSON.stringify(finished), external_meta_json: JSON.stringify(meta), progress: 1, message: null, completed_at: Date.now() });
       // The model can be opened and downloaded now; its turntable is rendered after and added to the result.
-      startTurntable(r.id, outputStore(r.id));
+      if (!account) startTurntable(r.id, outputStore(r.id));
     },
   });
 }
@@ -1742,7 +1894,8 @@ async function keepLink(v: unknown, label: string, generationId: string): Promis
       return saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
     }
     const dest = path.join(scratchDir(), `${generationId}-${label}-${nanoid(6)}`);
-    const res = await fetchRemoteToFile(v, dest);
+    // An account's run: 1 GB at most, and never this machine or its networks.
+    const res = await fetchRemoteToFile(v, dest, tenantAccount() ? { maxBytes: ACCOUNT_LIMITS_FILE_BYTES, blocked: blockedForAccounts } : {});
     const name = new URL(res.url).pathname.split("/").pop() || undefined;
     const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
     return adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
@@ -1765,8 +1918,96 @@ function relinkMain(meta: Record<string, unknown> | undefined, from: string, to:
   return out;
 }
 
+/** The most one file of an account's run may weigh (a result, or a file it links to). */
+const ACCOUNT_LIMITS_FILE_BYTES = 2 ** 30;
+
+/** An account's files are full (ACCOUNT_LIMITS.totalBytes): the job fails with this message. */
+class AccountFilesFull extends Error {}
+
+/** Types an account's result is stored as; any other is stored as application/octet-stream (.bin), never served as a page. */
+const ACCOUNT_OUTPUT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/flac",
+  "audio/mp4",
+  "audio/aac",
+  "audio/webm",
+  "model/gltf-binary",
+  "text/plain",
+  "application/x-subrip",
+  "text/vtt",
+]);
+
+const accountType = (t: string) => {
+  const bare = t.split(";")[0].trim().toLowerCase();
+  return ACCOUNT_OUTPUT_TYPES.has(bare) ? bare : "application/octet-stream";
+};
+
+/** Before an account's file is kept: refuse it (and remove `file`, when given) when its files would pass 3 GB. */
+function roomFor(account: string, bytes: number, file?: string): void {
+  if (accountUsage(account).total + bytes <= ACCOUNT_LIMITS.totalBytes) return;
+  if (file) fs.rmSync(file, { force: true });
+  throw new AccountFilesFull(ACCOUNT_MESSAGES.filesFull);
+}
+
+/**
+ * An account's result from its own ComfyUI: streamed to disk (1 GB at most, outputFetch, and never more than its files
+ * have room for), checked against its storage, stored as a type from the allowlist. Nothing is fetched while the
+ * server is short of space. A download that fails leaves no file behind.
+ */
+async function persistAccountOutput(o: RichOutput, generationId: string, account: string, linked: Record<string, unknown> | undefined): Promise<OutputFile> {
+  const left = ACCOUNT_LIMITS.totalBytes - accountUsage(account).total;
+  if (left <= 0) throw new AccountFilesFull(ACCOUNT_MESSAGES.filesFull);
+  if (!diskHasRoom()) throw new Error(ACCOUNT_MESSAGES.diskLow);
+  const quotaCapped = left < OWN_OUTPUT_LIMITS.maxBytes;
+  // A result over what the account has room for says so, not the size of one answer.
+  const full = (e: unknown) => (quotaCapped && e instanceof RemoteFetchError && /^The answer was over/.test(e.message) ? new AccountFilesFull(ACCOUNT_MESSAGES.filesFull) : e);
+  let res: Response;
+  try {
+    res = await outputFetch(o.url, { headers: o.headers }, { maxBytes: left });
+  } catch (e) {
+    throw full(e);
+  }
+  if (!res.ok || !res.body) {
+    discardBody(res);
+    throw new Error(`download ${res.status}`);
+  }
+  const dest = path.join(scratchDir(), `${generationId}-out-${nanoid(8)}`);
+  try {
+    await pipeline(Readable.fromWeb(res.body as import("node:stream/web").ReadableStream<Uint8Array>), fs.createWriteStream(dest));
+  } catch (e) {
+    fs.rmSync(dest, { force: true });
+    throw full(e);
+  }
+  roomFor(account, fs.statSync(dest).size, dest);
+  const header = res.headers.get("content-type")?.split(";")[0];
+  const given = o.contentType ?? (header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url));
+  const asset = adoptFile({ from: dest, contentType: accountType(given), source: "generation", generationId, accountId: account });
+  const meta = relinkMain(linked, o.url, asset.url);
+  const text = o.text ?? (asset.kind === "text" && asset.size <= MAX_INLINE_TEXT * 4 ? fs.readFileSync(absolutePath(asset.relPath), "utf8") : undefined);
+  return {
+    url: asset.url,
+    kind: asset.contentType === "application/octet-stream" ? (o.kind ?? asset.kind) : asset.kind,
+    contentType: asset.contentType,
+    assetId: asset.id,
+    ...inlineText(text, meta),
+    ...(o.draftId ? { draftId: o.draftId } : {}),
+  };
+}
+
 async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
   const linked = await persistArtifacts(o.meta, generationId, o.url);
+  const account = tenantAccount();
+  if (account && o.url && /^https?:\/\//.test(o.url)) return persistAccountOutput(o, generationId, account, linked);
   let data: Buffer;
   let contentType = o.contentType;
   if (!o.url && o.text !== undefined) {
@@ -1786,6 +2027,10 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     data = Buffer.from(await res.arrayBuffer());
     const header = res.headers.get("content-type")?.split(";")[0];
     contentType ??= header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url);
+  }
+  if (account) {
+    roomFor(account, data.length);
+    contentType = accountType(contentType!);
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
   const meta = relinkMain(linked, o.url, asset.url);

@@ -87,6 +87,11 @@ export function withCandidates<T>(values: Partial<Record<SettingName, string>>, 
   return candidates.run(values, fn);
 }
 
+/** Run `fn` with the saved settings only (outside any withCandidates). */
+export function withoutCandidates<T>(fn: () => T): T {
+  return candidates.exit(fn);
+}
+
 /** Inside withCandidates: whether `name` is being tried with an unsaved value. */
 export function isCandidate(name: SettingName): boolean {
   return candidates.getStore()?.[name] !== undefined;

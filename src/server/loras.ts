@@ -6,6 +6,7 @@ import { cloudPath, civitaiVersion, gated, libraryEntry, localOnly, loraByFile, 
 import type { LoraRef } from "@/lib/catalog/types";
 import { DATA_DIR, db } from "./db";
 import { getSetting } from "./settings";
+import { tenant } from "./tenant";
 
 /**
  * LoRA files for both engines. Nothing here is committed to the repo: files are fetched when a run needs them.
@@ -302,6 +303,8 @@ const licenceSnapshot = (ref: LoraRef, entry: LoraEntry | undefined, permissions
  * with what to do. `listed` is ComfyUI's own list (GET /models/loras), null when it can't be read.
  */
 export async function ensureLorasOnComfy(loras: LoraRef[] | undefined, listed: string[] | null, onProgress?: (m: string) => void): Promise<void> {
+  // Never for an account's run: this writes to the install's own LoRA folder (account-loras.ts checks its ComfyUI instead).
+  if (tenant()) throw new Error("LoRAs are never downloaded for a run on someone's own GPU");
   if (!loras?.length) return;
   const dir = getSetting("comfyLorasDir");
   // A list ComfyUI couldn't give says nothing: without a folder to check, ComfyUI's own check has the last word.
@@ -569,6 +572,8 @@ export function filesInLoraFolder(): { files: Set<string>; problem?: string } {
  * never carries it (fitLoras leaves it out and says so).
  */
 export function withoutUnreachableCivitai(loras: LoraRef[], target: MirrorTarget): { loras: LoraRef[]; notes: string[] } {
+  // An account's run: the install's civitai key and LoRA folder say nothing about its ComfyUI (account-loras.ts checks that).
+  if (tenant()) return { loras, notes: [] };
   const civitai = loras.filter((l) => !l.hostedUrl && needsToken(l.url) && (target === "comfyui" || !localOnly(l)));
   if (!civitai.length || civitaiKey()) return { loras, notes: [] };
   const folder = target === "comfyui" && getSetting("comfyLorasDir") ? filesInLoraFolder().files : null;
@@ -593,7 +598,8 @@ export function withoutUnreachableCivitai(loras: LoraRef[], target: MirrorTarget
  * nothing is left out, ComfyUI's own check has the last word).
  */
 export function withoutMissingOnComfy(loras: LoraRef[], listed: string[] | null): { loras: LoraRef[]; notes: string[] } {
-  if (!loras.length || !listed || getSetting("comfyLorasDir")) return { loras, notes: [] };
+  // An account's run: account-loras.ts names what its ComfyUI lacks.
+  if (tenant() || !loras.length || !listed || getSetting("comfyLorasDir")) return { loras, notes: [] };
   const have = new Set(listed.map((f) => f.replace(/\\/g, "/")));
   const missing = loras.filter((l) => l.file && !have.has(l.file));
   if (!missing.length) return { loras, notes: [] };

@@ -5,8 +5,10 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   experimental: {
-    // The sign-in proxy buffers request bodies (10 MB by default): uploads take up to 200 MB plus the form overhead.
-    proxyClientMaxBodySize: "210mb",
+    // The sign-in proxy buffers request bodies (10 MB by default). Uploads skip it (src/proxy.ts matcher), so this is
+    // the largest other body: a Soul finish or a Layers render (64 MB) plus the form overhead. A body over it reaches
+    // the route cut short, with no error.
+    proxyClientMaxBodySize: "66mb",
   },
   async headers() {
     return [

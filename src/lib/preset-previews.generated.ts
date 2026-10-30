@@ -67,9 +67,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-ai-stylist": {
     "poster": "/previews/presets/app-ai-stylist.jpg",
+    "video": "/previews/presets/app-ai-stylist.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-angles": {
@@ -130,9 +131,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-breakdown": {
     "poster": "/previews/presets/app-breakdown.jpg",
+    "video": "/previews/presets/app-breakdown.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-brick-cube": {
@@ -186,23 +188,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-change-background": {
     "poster": "/previews/presets/app-change-background.jpg",
+    "video": "/previews/presets/app-change-background.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-character-swap": {
     "poster": "/previews/presets/app-character-swap.jpg",
+    "video": "/previews/presets/app-character-swap.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-click-to-ad": {
     "poster": "/previews/presets/app-click-to-ad.jpg",
+    "video": "/previews/presets/app-click-to-ad.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-clipcut": {
@@ -221,16 +226,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-color-grading": {
     "poster": "/previews/presets/app-color-grading.jpg",
+    "video": "/previews/presets/app-color-grading.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-colorize": {
     "poster": "/previews/presets/app-colorize.jpg",
+    "video": "/previews/presets/app-colorize.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-comic-book": {
@@ -242,9 +249,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-commercial-faces": {
     "poster": "/previews/presets/app-commercial-faces.jpg",
+    "video": "/previews/presets/app-commercial-faces.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-dance": {
@@ -270,9 +278,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-face-swap": {
     "poster": "/previews/presets/app-face-swap.jpg",
+    "video": "/previews/presets/app-face-swap.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-figurine": {
@@ -291,9 +300,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-game-dump": {
     "poster": "/previews/presets/app-game-dump.jpg",
+    "video": "/previews/presets/app-game-dump.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-ghoulgao": {
@@ -319,9 +329,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-glitter-sticker": {
     "poster": "/previews/presets/app-glitter-sticker.jpg",
+    "video": "/previews/presets/app-glitter-sticker.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-graffiti-ad": {
@@ -340,9 +351,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-hairstyle-try-on": {
     "poster": "/previews/presets/app-hairstyle-try-on.jpg",
+    "video": "/previews/presets/app-hairstyle-try-on.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-headshot-generator": {
@@ -350,14 +362,15 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
     "video": "/previews/presets/app-headshot-generator.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "minimax-h3",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-hook-frame": {
     "poster": "/previews/presets/app-hook-frame.jpg",
+    "video": "/previews/presets/app-hook-frame.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-hug": {
@@ -397,9 +410,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-japanese-show": {
     "poster": "/previews/presets/app-japanese-show.jpg",
+    "video": "/previews/presets/app-japanese-show.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-kick-ad": {
@@ -446,9 +460,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-makeup-studio": {
     "poster": "/previews/presets/app-makeup-studio.jpg",
+    "video": "/previews/presets/app-makeup-studio.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-mascot": {
@@ -460,16 +475,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-match-colors": {
     "poster": "/previews/presets/app-match-colors.jpg",
+    "video": "/previews/presets/app-match-colors.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-match-lighting": {
     "poster": "/previews/presets/app-match-lighting.jpg",
+    "video": "/previews/presets/app-match-lighting.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-melting-doodle": {
@@ -481,16 +498,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-meme-generator": {
     "poster": "/previews/presets/app-meme-generator.jpg",
+    "video": "/previews/presets/app-meme-generator.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-micro-beasts": {
     "poster": "/previews/presets/app-micro-beasts.jpg",
+    "video": "/previews/presets/app-micro-beasts.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-mugshot": {
@@ -523,44 +542,50 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-object-remover": {
     "poster": "/previews/presets/app-object-remover.jpg",
+    "video": "/previews/presets/app-object-remover.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-outfit-shot": {
     "poster": "/previews/presets/app-outfit-shot.jpg",
+    "video": "/previews/presets/app-outfit-shot.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-outfit-swap": {
     "poster": "/previews/presets/app-outfit-swap.jpg",
+    "video": "/previews/presets/app-outfit-swap.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-outfit-vending": {
     "poster": "/previews/presets/app-outfit-vending.jpg",
+    "video": "/previews/presets/app-outfit-vending.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-packshot": {
     "poster": "/previews/presets/app-packshot.jpg",
+    "video": "/previews/presets/app-packshot.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-paint-app": {
     "poster": "/previews/presets/app-paint-app.jpg",
+    "video": "/previews/presets/app-paint-app.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-pixel-game": {
@@ -572,9 +597,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-plushies": {
     "poster": "/previews/presets/app-plushies.jpg",
+    "video": "/previews/presets/app-plushies.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-poster": {
@@ -593,16 +619,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-product-placement": {
     "poster": "/previews/presets/app-product-placement.jpg",
+    "video": "/previews/presets/app-product-placement.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-product-shot": {
     "poster": "/previews/presets/app-product-shot.jpg",
+    "video": "/previews/presets/app-product-shot.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-rap-god": {
@@ -621,16 +649,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-relight": {
     "poster": "/previews/presets/app-relight.jpg",
+    "video": "/previews/presets/app-relight.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-remove-background": {
     "poster": "/previews/presets/app-remove-background.jpg",
+    "video": "/previews/presets/app-remove-background.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-renaissance": {
@@ -642,9 +672,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-restore-photo": {
     "poster": "/previews/presets/app-restore-photo.jpg",
+    "video": "/previews/presets/app-restore-photo.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-roller-coaster": {
@@ -670,9 +701,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-similarity-score": {
     "poster": "/previews/presets/app-similarity-score.jpg",
+    "video": "/previews/presets/app-similarity-score.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-simlife": {
@@ -684,9 +716,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-sketch-to-real": {
     "poster": "/previews/presets/app-sketch-to-real.jpg",
+    "video": "/previews/presets/app-sketch-to-real.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-skibidi": {
@@ -698,9 +731,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-skin-enhancer": {
     "poster": "/previews/presets/app-skin-enhancer.jpg",
+    "video": "/previews/presets/app-skin-enhancer.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-social-media-icon": {
@@ -712,9 +746,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-steal-the-look": {
     "poster": "/previews/presets/app-steal-the-look.jpg",
+    "video": "/previews/presets/app-steal-the-look.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-sticker-match-cut": {
@@ -726,9 +761,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-sticker-pack": {
     "poster": "/previews/presets/app-sticker-pack.jpg",
+    "video": "/previews/presets/app-sticker-pack.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-storm-creature": {
@@ -740,23 +776,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-style-snap": {
     "poster": "/previews/presets/app-style-snap.jpg",
+    "video": "/previews/presets/app-style-snap.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-style-transfer": {
     "poster": "/previews/presets/app-style-transfer.jpg",
+    "video": "/previews/presets/app-style-transfer.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-text-edit": {
     "poster": "/previews/presets/app-text-edit.jpg",
+    "video": "/previews/presets/app-text-edit.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-this-is-fine": {
@@ -789,9 +828,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-upscale": {
     "poster": "/previews/presets/app-upscale.jpg",
+    "video": "/previews/presets/app-upscale.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-urban-cuts": {
@@ -803,9 +843,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-vectorize": {
     "poster": "/previews/presets/app-vectorize.jpg",
+    "video": "/previews/presets/app-vectorize.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-victory-card": {
@@ -831,9 +872,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-virtual-try-on": {
     "poster": "/previews/presets/app-virtual-try-on.jpg",
+    "video": "/previews/presets/app-virtual-try-on.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "ideogram4+qwen-image-2.1-edit",
     "variant": "lean-json"
   },
   "app-volcano-ad": {

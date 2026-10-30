@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { OutputFile } from "@/lib/catalog/types";
 import { absolutePath, deleteAsset, getAsset, saveFile } from "./storage";
+import { inTurn } from "./account-send";
 
 /**
  * The finish every image-to-3D GLB from ComfyUI gets on this server, in two steps:
@@ -72,13 +73,45 @@ function killTree(child: ChildProcess): void {
 
 type Run = { code: number | null; stdout: string; stderr: string };
 
-function runScript(script: string, args: string[], o: { timeoutMs: number; signal: AbortSignal; lowPriority?: boolean; onLine?: (line: string) => void }): Promise<Run> {
+/** The only variables finish-glb.mjs and render-turntable.mjs read (and what Node, Chromium and ffmpeg need to start). */
+const SCRIPT_ENV = [
+  "PATH",
+  "Path",
+  "SYSTEMROOT",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "HOME",
+  "USERPROFILE",
+  "LOCALAPPDATA",
+  "APPDATA",
+  "LANG",
+  "FFMPEG_PATH",
+  "CHROMIUM_PATH",
+  "FUOBE_CHROMIUM",
+  "PLAYWRIGHT_BROWSERS_PATH",
+];
+
+/**
+ * The environment the scripts run with: a short list, never the server's own (its keys, passwords and tokens stay in
+ * this process, whatever a model file makes a script do).
+ */
+export function scriptEnv(): NodeJS.ProcessEnv {
+  const env = {} as NodeJS.ProcessEnv;
+  for (const k of SCRIPT_ENV) if (process.env[k] !== undefined) env[k] = process.env[k]!;
+  env.FUOBE_PARENT_PIPE = "1";
+  return env;
+}
+
+function runScript(script: string, args: string[], o: { timeoutMs: number; signal: AbortSignal; cwd: string; lowPriority?: boolean; onLine?: (line: string) => void }): Promise<Run> {
   return new Promise((resolve, reject) => {
     if (o.signal.aborted) return reject(new Error("Stopped"));
-    // stdin stays open and unused: the script stops when it closes (this server went away).
+    // stdin stays open and unused: the script stops when it closes (this server went away). It runs in the job's
+    // own temp folder, with a short environment.
     const child = spawn(process.execPath, [path.join(SCRIPTS, script), ...args], {
-      cwd: /*turbopackIgnore: true*/ process.cwd(),
-      env: { ...process.env, FUOBE_PARENT_PIPE: "1" },
+      cwd: o.cwd,
+      env: scriptEnv(),
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -141,6 +174,17 @@ function oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+// One finish for accounts (public sign-up) at a time across the server: a model from someone else's ComfyUI waits its
+// turn, so many accounts can't keep every CPU core busy at once. The accounts take turns (account-send.ts), so one
+// with many models waiting never holds up another's.
+const oneAccountAtATime = <T,>(account: string, fn: () => Promise<T>): Promise<T> => inTurn("finish", 1, account, fn);
+
+/** An account's raw GLB over this is kept as it is, with no finish. */
+export const ACCOUNT_FINISH_MAX_BYTES = 300 * 2 ** 20;
+
+/** What an account's finished model says of its turntable: none on the server; the 3D page records one in the browser. */
+export const ACCOUNT_TURNTABLE = "skipped: record it in your browser";
+
 /**
  * Step 1 (see the header): the web GLB. Returns the outputs to store: the model output with meta.web and
  * meta.finish (turntable "queued" when there's a web GLB to render).
@@ -148,7 +192,7 @@ function oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
 export async function finishModel(
   generationId: string,
   outputs: OutputFile[],
-  o: { op: string; provider: string; onMessage?: (m: string) => void; signal?: AbortSignal },
+  o: { op: string; provider: string; onMessage?: (m: string) => void; signal?: AbortSignal; account?: string },
 ): Promise<OutputFile[]> {
   const signal = o.signal ?? new AbortController().signal;
   const i = modelToFinish(o, outputs);
@@ -157,15 +201,25 @@ export async function finishModel(
   const asset = getAsset(mesh.assetId!);
   if (!asset) return outputs;
   const raw = absolutePath(asset.relPath);
-  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fuobe-3d-"));
   const finish: Record<string, unknown> = { version: MODEL_FINISH_VERSION };
   const meta: Record<string, unknown> = { ...mesh.meta };
+  if (o.account && asset.size > ACCOUNT_FINISH_MAX_BYTES) {
+    finish.error = "web GLB: the model is over 300 MB, so it is kept as it is";
+    return outputs.map((x, j) => (j === i ? { ...mesh, meta: { ...meta, finish } } : x));
+  }
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "fuobe-3d-"));
   try {
     o.onMessage?.("Finishing the 3D model");
     const webFile = path.join(tmp, "web.glb");
     let stats: FinishStats | null = null;
     try {
-      const run = await runScript("finish-glb.mjs", ["--in", raw, "--out", webFile], { timeoutMs: FINISH_TIMEOUT_MS, signal });
+      // An account's model: below the server's own work, one thread for its pictures, their sizes checked first.
+      const run = await runScript("finish-glb.mjs", ["--in", raw, "--out", webFile, ...(o.account ? ["--limits", "account"] : [])], {
+        timeoutMs: FINISH_TIMEOUT_MS,
+        signal,
+        cwd: tmp,
+        lowPriority: !!o.account,
+      });
       stats = run.code === 0 && fs.existsSync(webFile) ? lastJsonLine<FinishStats>(run.stdout) : null;
       if (!stats) finish.error = `web GLB: ${tail(run.stderr) || `exit ${run.code}`}`;
     } catch (e) {
@@ -175,7 +229,7 @@ export async function finishModel(
     if (stats) {
       const web = saveFile({ data: await fs.promises.readFile(webFile), contentType: "model/gltf-binary", name: "model-web.glb", source: "derived", generationId });
       meta.web = web.url;
-      Object.assign(finish, { material: stats.material, triangles: stats.triangles, rawBytes: stats.bytesIn, webBytes: stats.bytesOut, webAsset: web.id, turntable: "queued" });
+      Object.assign(finish, { material: stats.material, triangles: stats.triangles, rawBytes: stats.bytesIn, webBytes: stats.bytesOut, webAsset: web.id, turntable: o.account ? ACCOUNT_TURNTABLE : "queued" });
     }
   } finally {
     await removeDir(tmp);
@@ -196,12 +250,14 @@ export function finishing(generationId: string): boolean {
 export function startModelFinish(
   generationId: string,
   outputs: OutputFile[],
-  o: { op: string; provider: string; onMessage?: (m: string) => void; done: (outputs: OutputFile[]) => void },
+  o: { op: string; provider: string; onMessage?: (m: string) => void; done: (outputs: OutputFile[]) => void; account?: string },
 ): void {
   if (finishing(generationId)) return;
   const ctl = new AbortController();
   running().set(generationId, ctl);
-  void finishModel(generationId, outputs, { ...o, signal: ctl.signal })
+  const run = () => (ctl.signal.aborted ? Promise.reject(new Error("Stopped")) : finishModel(generationId, outputs, { ...o, signal: ctl.signal }));
+  // An account's finish waits for the one before it (oneAccountAtATime).
+  void (o.account ? oneAccountAtATime(o.account, run) : run())
     .catch((e) => {
       if (ctl.signal.aborted) return null;
       console.warn(`[fuobe] 3D finish for ${generationId} failed: ${(e as Error).message}`);
@@ -295,6 +351,7 @@ async function renderTurntable(generationId: string, mesh: OutputFile, store: Ou
         return runScript("render-turntable.mjs", ["--glb", absolutePath(web.relPath), "--out", video, "--poster", posterFile, "--material", finish.material ?? "auto"], {
           timeoutMs: TURNTABLE_TIMEOUT_MS,
           signal,
+          cwd: tmp,
           lowPriority: true,
           // "frame 12/96" after each frame.
           onLine: (line) => {

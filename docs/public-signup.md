@@ -50,8 +50,8 @@ An account is signed in, but it sees the owner's studio as a guest does:
 - **The owner's library stays the owner's.** An account opens every page and the catalog, but the
   owner's results, files, uploads, folders, shares, projects (Layers, Cinema, Canvas, storyboards,
   elements…) and Assist threads are hidden: the lists come back empty, and other reads answer 403.
-  Every change to them (create, rename, move, share, delete, upload) answers 403 with
-  `code: "library"`. Accounts have only their own runs (below), no uploads or projects yet.
+  Every change to them (create, rename, move, share, delete) answers 403 with `code: "library"`.
+  Accounts have their own uploads and runs (below), but no projects yet.
 - **Settings, keys and tokens are the owner's.** Changing settings or model switches, the password,
   API tokens, Public sign-up, LoRA downloads, Assist connectors and the MCP endpoint answer 403 for
   an account.
@@ -61,8 +61,11 @@ An account is signed in, but it sees the owner's studio as a guest does:
   to run this" card.
 - **Its own runs are its own.** The runs an account starts on its GPU appear in its own lists
   (`GET /api/generations`), and it can open, cancel and delete them and download their files. They
-  stay out of the owner's lists, and no other account can open them. The live-updates stream isn't
-  sent to accounts: their studios poll instead.
+  stay out of the owner's lists, and no other account can open them. An account's delete is for
+  good (it has no Trash), so its space comes back at once. The live-updates stream isn't sent to
+  accounts: their studios poll instead.
+- **Its own uploads are its own.** Only the account that uploaded a file can open it or use it in a
+  run. See [Uploads](#uploads).
 
 ## Managing accounts
 
@@ -72,7 +75,9 @@ account off (it is signed out at once and can't log in) or delete it, and export
 The API is `GET /api/admin/accounts` (`?format=csv` for the file), `PATCH /api/admin/accounts/<id>`
 with `{ "disabled": true | false }`, and `DELETE /api/admin/accounts/<id>`, for the owner only.
 
-An account can delete itself: `DELETE /api/auth/me` with `{ "password" }`.
+An account can delete itself: `DELETE /api/auth/me` with `{ "password" }`. When an account is
+deleted (by itself or by the owner), its runs are stopped and removed, and its uploads and results
+are deleted with it.
 
 ## Your GPU
 
@@ -99,16 +104,41 @@ cloudflared tunnel --url http://localhost:8188   # or: ngrok http 8188
 - **Server-side requests.** Addresses on the server itself, on private networks or link-local
   addresses are refused. The check runs again on the address each connection actually uses, so a
   name that is later pointed at the server can't reach the studio's own ComfyUI. The studio's own
-  ComfyUI address is refused too. `FUOBE_ALLOW_PRIVATE_URLS=1` allows private addresses, for a LAN
-  install.
-- **Runs.** The Image, Video and Audio studios' generations (`POST /api/generations`) run on the
-  account's ComfyUI with the open-source engine. Polls, uploads, outputs and cancels go there too,
-  and nothing falls back to the studio's own providers. If the account's ComfyUI can't be reached,
-  the run fails and says so. A cloud model, an AI helper or the studio's local LLM is refused. Other
-  tools (Canvas, Cinema, Assist…) answer 403 with `code: "own-gpu-tool"`, because they plan with
-  the studio's own AI helpers. A LoRA must already be on the account's ComfyUI: the studio
-  downloads LoRAs only into its own folder. Accounts can't upload files yet, so runs that start
-  from a picture or a clip aren't available to them.
+  ComfyUI address is refused too, and so are IPv6 addresses that wrap an IPv4 address.
+  `FUOBE_ALLOW_PRIVATE_URLS=1` allows private addresses, for a LAN install, but never the server's
+  own addresses. Address checks are limited to 10 a minute.
+- **Runs.** Everything that runs through `POST /api/generations` runs on the account's ComfyUI
+  with the open-source engine: the Image, Video and Audio studios (their input modes too: edit,
+  inpaint, extend, lipsync, reframe, upscale, image to video…), every camera motion and effect,
+  and the apps that take a picture, a clip or a sound. Their chained steps (multi-shot films,
+  Frames mode, Extend, relit effects) run there too, as the account's own. Polls,
+  uploads, outputs and cancels go there, and nothing falls back to the studio's own providers. If
+  the account's ComfyUI can't be reached, the run fails and says so. A cloud model, an AI helper or
+  the studio's local LLM is refused; "Enhance prompt" uses Fuobe's offline wording. Other tools
+  (Canvas, Cinema, Shorts, Assist, Marketing…) answer 403 with `code: "own-gpu-tool"`, because they
+  plan with the studio's own AI helpers or keep projects of their own. Image to 3D and text to 3D
+  answer the same for now: a 3D model is finished on the server.
+- **Files a run takes.** A run on your GPU takes only files you uploaded here, or your own results.
+  A link or a `data:` URI answers 400 with `code: "input-not-allowed"`, someone else's file 403
+  (`input-not-yours`), and a file that has expired 404 (`input-gone`, "That file has expired.
+  Upload it again."). A file bigger than an upload of its kind may be (one of your own results,
+  too) answers 413 (`input-too-big`). The server never fetches a link for an account.
+- **LoRAs and model files.** The server never downloads anything onto your machine. A LoRA a run
+  adds (a camera motion's, an effect's, a look's) must already be in your ComfyUI's `models/loras`
+  folder. When one is missing, the run answers 409 with `code: "comfy_missing_model"` and a `fix`
+  that lists each file, the folder it goes in and where to download it ("Your ComfyUI doesn't have
+  2 LoRA files this needs. Download each one into ComfyUI/models/loras, keep the file name, then
+  press Generate again."). The same check runs again when the run is handed to your ComfyUI. A
+  checkpoint or encoder your ComfyUI lacks is named by ComfyUI's own answer.
+- **Limits.** Up to 4 runs at once and 60 an hour; a run makes up to 4 results. A run waits up to
+  30 minutes in your ComfyUI's queue and may run for 45. Your ComfyUI's answers have a deadline and
+  a size cap (a result up to 1 GB in 15 minutes, and no more than your files have room for; 16
+  results a job at most). Each account sends one file to its ComfyUI at a time, and the accounts
+  take turns. The clip check (`POST /api/media/probe`) allows 60 a minute and 2 at once.
+- **Disk space.** Accounts can't upload or run when the server's data disk is short of space
+  (503): it keeps 20 GB free, or a tenth of a smaller disk, and at least 2 GB.
+  `FUOBE_ACCOUNT_DISK_FREE_GB` sets another amount, and the server log says when accounts are
+  refused for space.
 - **What a visitor sees.** For a guest or an account, `GET /api/status` describes its own GPU
   (`viewer`), with the open engine and no Demo mode. It says nothing about the studio's own
   ComfyUI, providers, keys or local AI servers. The sidebar shows **Your GPU · Connect** (a guest
@@ -116,10 +146,35 @@ cloudflared tunnel --url http://localhost:8188   # or: ngrok http 8188
   `GET /api/models` lists the open-source models for a visitor, and the studios price a visitor's
   run as it would go on its own GPU. The studio's own settings page isn't shown to visitors.
 
+## Uploads
+
+An account with its own ComfyUI connected can upload files (`POST /api/uploads`, the file as the
+request body with its type in `Content-Type` and its name in `X-File-Name`; an older page's
+multipart form works up to 26 MB). Without a connected GPU it answers 403 with
+`code: "connect-gpu"`, and a guest gets 401 with the sign-up card.
+
+| What | Types | Largest |
+|---|---|---|
+| Pictures | PNG, JPEG, WebP | 25 MB and 40 megapixels |
+| Sound | MP3, WAV, OGG, FLAC, M4A, WebM | 50 MB |
+| Clips | MP4, MOV, WebM, MKV, AVI | 95 MB (ComfyUI takes up to 100 MB unless started with more) |
+
+- The type is read from the file's first bytes. A file that isn't one of these answers 415.
+- `Content-Length` is required (411), and a file over its size answers 413 before it is read.
+- An account keeps up to 1 GB of uploads and 3 GB of files in all (uploads and results). Past that,
+  uploads and runs answer 413: delete some runs to make room.
+- Up to 60 uploads an hour, 300 a day and 2 at once (429 with `Retry-After`).
+- **How long files stay.** Uploads are removed after 14 days, even when a run still uses them.
+  Runs and their results are removed after 30 days. Everything goes at once when the account is
+  deleted.
+
 `GET /api/auth/me` (open to everyone) says who is looking: `{ signedIn, owner, publicSignup,
 account? }`.
 
 The rules are in `src/lib/guest-access.ts` (which paths guests and accounts may use) and
 `src/proxy.ts` (where they are applied). Your GPU is `src/server/account-gpu.ts`, `onOwnGpu` in
-`src/server/providers/comfyui.ts` and `accountRun` in `src/server/generations.ts`. The tests are in
-`tests/public-signup.test.ts`, `tests/accounts-admin.test.ts` and `tests/account-gpu.test.ts`.
+`src/server/providers/comfyui.ts` and `accountRun` in `src/server/generations.ts`; what an account's
+work may read is `src/server/tenant.ts`. Uploads are `src/app/api/uploads/route.ts` (which makes the
+proxy's checks itself, `src/server/direct-gate.ts`), the limits are in `src/server/account-files.ts`
+and the clean-up in `src/server/account-sweep.ts`. The tests are in `tests/public-signup.test.ts`,
+`tests/accounts-admin.test.ts`, `tests/account-gpu.test.ts` and the `tests/account-*.test.ts` files.

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { AccountError, deleteAccount, isOwnerRequest, listAccounts, SESSION_COOKIE, setAccountDisabled } from "@/server/auth";
+import { purgeAccount } from "@/server/account-sweep";
 
 async function owner(request: Request): Promise<Response | null> {
   return isOwnerRequest(request, (await cookies()).get(SESSION_COOKIE)?.value) ? null : Response.json({ error: "Only the studio's owner manages accounts" }, { status: 403 });
@@ -30,10 +31,13 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/acco
 export async function DELETE(request: Request, ctx: RouteContext<"/api/admin/accounts/[id]">) {
   const denied = await owner(request);
   if (denied) return denied;
+  const { id } = await ctx.params;
   try {
-    deleteAccount((await ctx.params).id);
+    deleteAccount(id);
   } catch (e) {
     return failed(e);
   }
+  // Its runs and files go with it (running ones are stopped first).
+  await purgeAccount(id);
   return new Response(null, { status: 204 });
 }
