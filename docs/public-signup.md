@@ -45,7 +45,10 @@ it names, and only of the asker's own files: a guest owns none.
 - Accounts are stored in `auth.json` in the data folder: the email in lower case, a salted scrypt
   hash of the password (the same scheme as the install password), and the creation time.
 - Sign-up and log-in attempts are rate limited per visitor (set `FUOBE_TRUST_PROXY=1` behind a
-  reverse proxy, so that each visitor gets their own limit).
+  reverse proxy, so that each visitor gets their own limit; an IPv6 address counts by its /64).
+  An email gets 10 log-ins a minute, right or wrong, and after 10 wrong passwords in 15 minutes
+  it is locked for 15 minutes, from any address. Account log-ins and the install password have
+  separate limits, so guessing at one never slows down the other.
 
 An account is signed in, but it sees the owner's studio as a guest does:
 

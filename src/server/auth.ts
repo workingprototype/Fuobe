@@ -124,12 +124,28 @@ function verifyHash(pw: string, stored: string): boolean {
   return same(crypto.scryptSync(pw, Buffer.from(salt, "hex"), 32), Buffer.from(hash, "hex"));
 }
 
+/** scrypt off the main thread: the server keeps answering everyone else while a password is checked. */
+const scrypt = (pw: string, salt: Buffer) => new Promise<Buffer>((resolve, reject) => crypto.scrypt(pw, salt, 32, (e, key) => (e ? reject(e) : resolve(key))));
+
+async function verifyHashAsync(pw: string, stored: string): Promise<boolean> {
+  const [salt, hash] = stored.split(":");
+  if (!salt || !hash) return false;
+  return same(await scrypt(pw, Buffer.from(salt, "hex")), Buffer.from(hash, "hex"));
+}
+
 export function checkPassword(pw: string): boolean {
   const env = envPassword();
   if (env) return same(crypto.createHash("sha256").update(pw).digest(), crypto.createHash("sha256").update(env).digest());
   const stored = read().password;
   if (!stored) return false;
   return verifyHash(pw, stored);
+}
+
+/** {@link checkPassword} for a request: the Settings password's scrypt runs off the main thread. */
+export async function verifyPassword(pw: string): Promise<boolean> {
+  if (envPassword()) return checkPassword(pw);
+  const stored = read().password;
+  return !!stored && (await verifyHashAsync(pw, stored));
 }
 
 /** Set, change or (with null) remove the UI password. Signs every browser out. */
@@ -241,9 +257,30 @@ export function checkAccount(email: string, password: string): Account | null {
   return account && ok ? account : null;
 }
 
-/** Remember a log-in (Settings → Accounts shows it). */
+let dummyAsync: Promise<string> | undefined;
+
+/** {@link checkAccount} for a request: scrypt runs off the main thread, and an unknown email costs the same as a known one. */
+export async function verifyAccount(email: string, password: string): Promise<Account | null> {
+  const e = normalizeEmail(email);
+  const account = e ? read().accounts?.find((a) => a.email === e) : undefined;
+  const stored =
+    account?.hash ??
+    (await (dummyAsync ??= (async () => {
+      const salt = crypto.randomBytes(16);
+      return `${salt.toString("hex")}:${(await scrypt(crypto.randomBytes(12).toString("hex"), salt)).toString("hex")}`;
+    })()));
+  const ok = await verifyHashAsync(password, stored);
+  return account && ok ? account : null;
+}
+
+/** How often a log-in is written down: each write rewrites the whole accounts file. */
+const LOGIN_RECORD_MS = 60 * 60_000;
+
+/** Remember a log-in (Settings → Accounts shows it), at most once an hour per account. */
 export function recordLogin(id: string): void {
   const d = read();
+  const account = d.accounts?.find((a) => a.id === id);
+  if (!account || Date.now() - (account.lastLoginAt ?? 0) < LOGIN_RECORD_MS) return;
   write({ ...d, accounts: d.accounts?.map((a) => (a.id === id ? { ...a, lastLoginAt: Date.now() } : a)) });
 }
 
@@ -479,6 +516,22 @@ export function hostAllowed(host: string | null): boolean {
 // ---------------------------------------------------------------------------
 // Sign-in attempts
 
+/** A visitor's key from its address: IPv4 as it is, IPv6 by its first 64 bits ("2001:db8:1:2::/64"). */
+function clientOf(address: string): string {
+  const a = address.replace(/^\[(.*)\]$/, "$1").toLowerCase();
+  if (!net.isIPv6(a)) return a;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(a);
+  if (mapped) return mapped[1];
+  // A trailing dotted IPv4 part is two groups.
+  const v4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(a);
+  const hex = v4 ? a.slice(0, v4.index) + [((+v4[1] << 8) | +v4[2]).toString(16), ((+v4[3] << 8) | +v4[4]).toString(16)].join(":") : a;
+  const [head, tail] = hex.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail !== undefined && tail ? tail.split(":") : [];
+  const groups = tail === undefined ? left : [...left, ...Array<string>(8 - left.length - right.length).fill("0"), ...right];
+  return `${groups.slice(0, 4).map((g) => (parseInt(g, 16) || 0).toString(16)).join(":")}::/64`;
+}
+
 /**
  * Wrong-password limits. Route handlers can't see the socket address, and Next keeps any
  * X-Forwarded-For a client sends, so that header only identifies a client behind a reverse proxy
@@ -497,11 +550,16 @@ export class LoginGuard {
     private readonly o = { perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, throttleMs: 4_000, maxClients: 5000 },
   ) {}
 
-  /** Who is signing in: the last X-Forwarded-For hop when a trusted proxy sets it, else one shared key. */
+  /**
+   * Who is signing in: the last X-Forwarded-For hop when a trusted proxy sets it, else one shared key. An IPv6 address
+   * counts by its /64 (one home or one server gets a whole /64, so the rest of the address is free to change), and an
+   * IPv4 address written as IPv6 (::ffff:a.b.c.d) as that IPv4 address.
+   */
   static clientKey(headers: Headers, trustProxy = process.env.FUOBE_TRUST_PROXY === "1"): string {
     if (!trustProxy) return LoginGuard.DIRECT;
     const hops = (headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    return hops.at(-1) ?? LoginGuard.DIRECT;
+    const last = hops.at(-1);
+    return last ? clientOf(last) : LoginGuard.DIRECT;
   }
 
   /** Milliseconds until this client may try again (0 = now). */
