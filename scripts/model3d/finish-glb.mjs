@@ -57,10 +57,32 @@ const FINISH = {
 };
 
 const t0 = Date.now();
+// Only a self-contained binary glTF (version 2): every buffer and image inside the file or in a data: URI. A model
+// made on someone else's ComfyUI must never make this script read another file on this machine (a buffer or image
+// URI such as "../../auth.json" would be loaded from disk and baked into the result). Exit 3 means refused.
+const input = fs.readFileSync(a.in);
+function refuse(why) {
+  console.error(why);
+  process.exit(3);
+}
+if (input.length < 20 || input.toString("latin1", 0, 4) !== "glTF" || input.readUInt32LE(4) !== 2) refuse("not a binary glTF 2 file");
+{
+  const jsonLength = input.readUInt32LE(12);
+  if (input.readUInt32LE(16) !== 0x4e4f534a || 20 + jsonLength > input.length) refuse("not a binary glTF 2 file");
+  let gltf;
+  try {
+    gltf = JSON.parse(input.toString("utf8", 20, 20 + jsonLength));
+  } catch {
+    refuse("not a binary glTF 2 file");
+  }
+  const uris = [...(gltf.buffers ?? []), ...(gltf.images ?? [])].map((x) => x?.uri).filter((u) => u !== undefined && u !== null);
+  if (uris.some((u) => typeof u !== "string" || !u.startsWith("data:"))) refuse("external file reference");
+}
 await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready]);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ "meshopt.decoder": MeshoptDecoder, "meshopt.encoder": MeshoptEncoder });
-const bytesIn = fs.statSync(a.in).size;
-const doc = await io.read(a.in);
+const bytesIn = input.length;
+// From the bytes, never from the path: nothing beside the file is ever looked up.
+const doc = await io.readBinary(new Uint8Array(input.buffer, input.byteOffset, input.byteLength));
 // stdout carries only the JSON result line.
 doc.setLogger(new Logger(Logger.Verbosity.ERROR));
 const root = doc.getRoot();

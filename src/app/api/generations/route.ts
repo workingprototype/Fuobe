@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { CONNECT_GPU_HEADER } from "@/lib/guest-access";
+import { CONNECT_GPU_HEADER, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { accountGpu, requestAccount, requestViewer } from "@/server/auth";
 import { OPERATION_LABELS } from "@/lib/catalog/types";
 import { accountRun, asVisitor, createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
@@ -60,6 +60,11 @@ export async function POST(request: Request) {
         // createGenerations says what's wrong with the request.
       }
       if (planned) {
+        // A 3D model from someone else's ComfyUI is finished on this server (decimate, web GLB, turntable): accounts
+        // don't get Image to 3D until that finish runs under an account's own limits.
+        if (account && outputKind(planned.op, planned.model) === "model3d") {
+          return Response.json({ error: OWN_GPU_TOOL_MESSAGE, code: "own-gpu-tool" }, { status: 403 });
+        }
         const skip = (body as { gpuCheck?: unknown } | null)?.gpuCheck === "skip";
         const gate = await gateGeneration(gpuTargetFor(request, "read"), { request: req, route: planned.route, op: planned.op, modelId: planned.model.id, skip, actor: account?.id ?? "owner" });
         if (!gate.ok) return Response.json({ error: gate.message, code: "gpu-setup", ref: gate.ref, plan: gate.plan }, { status: 409, headers: { [GPU_SETUP_HEADER]: "1" } });

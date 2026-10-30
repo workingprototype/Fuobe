@@ -53,7 +53,7 @@ import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
 import { comfyLoraFiles, onOwnGpu, outputFetch, probeComfy } from "./providers/comfyui";
 import { accountGpu } from "./auth";
-import { CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
+import { CONNECT_GPU_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { graphLoras } from "@/lib/catalog/character-swap";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
 import { ACCESS_PLACE } from "@/lib/model-access";
@@ -729,6 +729,8 @@ export function createGenerations(asked: GenerationRequest, opts: CreateOptions 
   const catalogModel = getModel(original.modelId);
   const found = catalogModel && offeredFor(catalogModel, original.engine);
   const shotModel = found && dualEngine(found) ? onEngine(found, engineFor(found, original.engine)) : found;
+  // An account's 3D model would be finished on this server, outside its own limits: not yet (the route refuses first).
+  if (original.account && shotModel?.kind === "model3d") throw new Error(OWN_GPU_TOOL_MESSAGE);
   if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
     return createShotFilm(original, shotModel);
   }
