@@ -136,6 +136,8 @@ export const VIDEO_UPSCALE_STUDIO: StudioConfig = {
   kind: "video",
   hero: "Sharper, bigger, cleaner video",
   subtitle: "Upscale a clip to 1080p, 4K or up to 8K, and restore faces, textures and text.",
+  // Archive footage (scans, tape, black and white) is restored and colourised first: Fuobe Restore rebuilds it, then upscales.
+  related: { href: "/video-tools/restore", label: "Old or black-and-white footage? Restore archive footage first" },
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
   defaultModels: { cloud: "topaz-video", open: "oss-seedvr2" },
   clipFacts: true,

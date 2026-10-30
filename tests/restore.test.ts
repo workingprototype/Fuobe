@@ -3,6 +3,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ARTEFACTS,
+  meanChroma,
+  MONOCHROME_CHROMA,
+  restoreHref,
   cloudPieceFrames,
   cloudShape,
   framesCovered,
@@ -24,6 +27,7 @@ import type { ComfyWorkflow } from "@/lib/comfy";
 import { getModel, getPreset } from "@/lib/catalog";
 import { onEngine } from "@/lib/catalog/engines";
 import { estimateCost, planGeneration } from "@/lib/catalog/plan";
+import { convertEngine, defaultModelForNode, describeNode, inputPorts, nodeEngine, outputType, paletteItems, type CanvasGraph, type CanvasNode } from "@/lib/catalog/canvas";
 
 const research = JSON.parse(fs.readFileSync(path.join(__dirname, "../docs/research/fuobe-originals-recipes-5.json"), "utf8"));
 const record = research.studios.find((s: { id: string }) => s.id === "archive-restore").original;
@@ -311,5 +315,48 @@ describe("Restore & colourise: one run of the GPU graph", () => {
     expect(Object.keys(all).sort()).toEqual(Object.keys(wf).sort());
     const prefixOnly = restoreGraph(wf, { prefix: true, reference: false, deinterlace: false }, ["save"]);
     expect(prefixOnly.sample.inputs).toMatchObject({ positive: ["prefix", 0], negative: ["prefix", 1], latents: ["prefix", 2] });
+  });
+});
+
+describe("Restore & colourise on the canvas", () => {
+  const n = (id: string, type: CanvasNode["type"], data: CanvasNode["data"] = {}): CanvasNode => ({ id, type, position: { x: 0, y: 0 }, data });
+
+  it("a Utilities node on both engines: Fuobe Restore by default, the clip, the words and an optional coloured first frame in, a video out", () => {
+    const item = paletteItems().find((p) => p.id === "restore")!;
+    expect(item).toMatchObject({ type: "restore", label: "Restore & colourise", group: "Utilities" });
+    for (const mode of ["open", "cloud"] as const) {
+      expect(paletteItems(mode).find((p) => p.id === "restore")!.disabled).toBeUndefined();
+      expect(defaultModelForNode({ type: "restore", data: {} }, mode)?.id).toBe(RESTORE.model);
+    }
+    const node = n("r", "restore", { modelId: RESTORE.model, engine: "cloud" });
+    expect(inputPorts(node).map((p) => p.id)).toEqual(["prompt", "images", "video"]);
+    expect(outputType({ nodes: [node], edges: [] }, node)).toBe("video");
+    expect(nodeEngine(node, getModel(RESTORE.model)!)).toBe("cloud");
+  });
+
+  it("runs a clip from the board as one restore-video generation; switching the board's engine keeps the Original", () => {
+    const g: CanvasGraph = {
+      nodes: [n("clip", "video-input", { url: "/api/files/scan.mp4" }), { ...n("r", "restore", { modelId: RESTORE.model, prompt: "a harbour in the 1930s, natural colour" }), position: { x: 300, y: 0 } }],
+      edges: [{ id: "e", source: "clip", sourceHandle: "out", target: "r", targetHandle: "video" }],
+    };
+    const d = describeNode(g, g.nodes[1]);
+    expect(d.error).toBeUndefined();
+    expect(d.plan?.op).toBe("restore-video");
+    const cloud = convertEngine(g, "cloud");
+    expect(cloud.missing).toEqual([]);
+    expect(cloud.graph.nodes[1].data).toMatchObject({ modelId: RESTORE.model, engine: "cloud" });
+  });
+});
+
+describe("Old footage in Shorts and the Explainer", () => {
+  const px = (...rgb: [number, number, number][]) => rgb.flatMap(([r, g, b]) => [r, g, b, 255]);
+  it("reads black-and-white and sepia frames as monochrome, a colour frame not; the Restore link carries the clip", () => {
+    expect(meanChroma(px([10, 10, 10], [200, 200, 200]))).toBe(0);
+    // A sepia-toned print stays under the line; a colour street does not.
+    expect(meanChroma(px([120, 110, 98], [190, 182, 172]))).toBeLessThan(MONOCHROME_CHROMA);
+    expect(meanChroma(px([200, 40, 40], [30, 160, 60]))).toBeGreaterThan(MONOCHROME_CHROMA);
+    expect(meanChroma([])).toBe(0);
+    expect(restoreHref("/api/files/a b.mp4")).toBe("/video-tools/restore?video=%2Fapi%2Ffiles%2Fa%20b.mp4");
+    expect(restoreHref()).toBe("/video-tools/restore");
   });
 });

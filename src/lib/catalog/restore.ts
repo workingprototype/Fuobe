@@ -579,3 +579,26 @@ export const CLOUD_NOTE =
 
 /** The one-time gated download, as the page says it. */
 export const GATED_NOTE = "The Restore IC-LoRA (1.7 GB) is gated on Hugging Face: accept its licence there once, then add your Hugging Face token in Settings → LoRAs.";
+
+// ---------------------------------------------------------------------------
+// Old footage elsewhere (Shorts, Explainer): how much colour a frame carries
+
+/** Mean chroma (max − min of R, G, B, 0–255) over a frame's RGBA pixels: about 0 for black-and-white, low for sepia. */
+export function meanChroma(rgba: ArrayLike<number>): number {
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i + 3 < rgba.length; i += 4) {
+    const r = rgba[i];
+    const g = rgba[i + 1];
+    const b = rgba[i + 2];
+    sum += Math.max(r, g, b) - Math.min(r, g, b);
+    n++;
+  }
+  return n ? sum / n : 0;
+}
+
+/** Below this mean chroma a clip reads as black-and-white or toned (sepia, cyanotype) footage. */
+export const MONOCHROME_CHROMA = 24;
+
+/** The Restore tool, with a clip handed over. */
+export const restoreHref = (url?: string) => (url ? `/video-tools/restore?video=${encodeURIComponent(url)}` : "/video-tools/restore");

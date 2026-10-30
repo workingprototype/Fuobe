@@ -6,6 +6,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { OldFootageOffer } from "@/components/restore/old-footage";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { VideoTrimmer } from "@/components/studio/video-trimmer";
 import { useEngine, useModelAccess } from "@/lib/api";
@@ -437,6 +438,7 @@ function SetupPanel({
             label="Part of the clip to restyle"
             onMeta={source.setBrowserMeta}
           />
+          {clip.url && !clip.uploading && !clip.error && <OldFootageOffer url={clip.url} src={clip.preview} />}
         </div>
       )}
 

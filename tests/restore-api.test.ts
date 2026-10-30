@@ -20,6 +20,8 @@ const { db } = await import("@/server/db");
 const createRoute = await import("@/app/api/restore/route");
 const estimateRoute = await import("@/app/api/restore/estimate/route");
 const promptRoute = await import("@/app/api/restore/prompt/route");
+const tools = await import("@/server/assist/tools");
+const { handleMcp } = await import("@/server/mcp");
 
 const json = (body?: unknown) => new Request("http://x/api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
@@ -132,5 +134,33 @@ describe("Restore: runs in demo mode", () => {
     const ops = batchOf(out.final.id).map((r) => r.op);
     expect(ops).toEqual(expect.arrayContaining(["trim", "frame", "restore-video", "concat", "mux"]));
     expect((await settle(out.final.id)).status).toBe("succeeded");
+  });
+});
+
+describe("Restore: the Assist / MCP tool", () => {
+  const plan = (input: unknown, engine: "cloud" | "open" = "open") => tools.planFor("restore_video", input, { engine });
+
+  it("prices the clip as the tool does and opens in Restore & colourise; GPU-only options refused in the cloud, in words", async () => {
+    const p = plan({ video: clip, hint: "a harbour" });
+    expect(p.studio).toBe("Restore & colourise");
+    expect(p.jobs).toMatchObject([{ tool: "restore_video", modelId: "fuobe-restore", op: "restore-video", costUsd: 0, atomic: true }]);
+    expect(p.jobs[0].note).toMatch(/^3 windows at 1088×1920/);
+    expect(plan({ video: clip, restore_to_4k: true }, "cloud").jobs[0].error).toMatch(/Restore to 4K runs on your GPU/);
+    const est = (await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "estimate_job", arguments: { tool: "restore_video", arguments: { video: clip } } } })) as {
+      result: { structuredContent: { studio?: string; jobs: { error?: string }[] }; isError: boolean };
+    };
+    expect(est.result.isError).toBe(false);
+    expect(est.result.structuredContent.studio).toBe("Restore & colourise");
+  });
+
+  it("runs one restoration with the words written for it; a clip it can't read is one generation in the Library", async () => {
+    const out = await tools.executeTool("restore_video", { video: clip, hint: "fishing boats, 1930s" }, { engine: "open" });
+    const res = JSON.parse(out.content as string);
+    expect(res).toMatchObject({ studio: "Restore & colourise", href: "/video-tools/restore", writtenBy: "offline" });
+    expect(res.prompt).toMatch(/natural colour/);
+    expect((await settle(res.results[0])).status).toBe("succeeded");
+    const lost = plan({ video: "/api/files/uploads/gone.mp4" });
+    expect(lost.fallback).toMatch(/couldn't read this clip/);
+    expect(lost.jobs).toMatchObject([{ modelId: "fuobe-restore", op: "restore-video" }]);
   });
 });
