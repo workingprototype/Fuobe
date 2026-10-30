@@ -12,6 +12,9 @@ import { safeNext } from "@/lib/safe-redirect";
 /** "signup" and "login" are accounts (public sign-up); "owner" is the install password. */
 type Mode = "signup" | "login" | "owner";
 
+/** On a public site the owner's sign-in isn't advertised: production builds open it at /login?owner=1. */
+const OWNER_LINK = process.env.NODE_ENV !== "production";
+
 const COPY: Record<Mode, { title: string; lead: string; button: string }> = {
   signup: { title: "Create your free account", lead: "An email and a password, and you're in. No verification.", button: "Sign up" },
   login: { title: "Welcome back", lead: "Log in with your email and password.", button: "Log in" },
@@ -23,7 +26,7 @@ export function LoginForm() {
   const viewer = useViewer();
   const open = !!viewer.data?.publicSignup;
   const [chosen, setChosen] = useState<Mode | null>(null);
-  const mode: Mode = !open ? "owner" : (chosen ?? (params.get("signup") === "1" ? "signup" : "login"));
+  const mode: Mode = !open ? "owner" : (chosen ?? (params.get("owner") === "1" ? "owner" : params.get("signup") === "1" ? "signup" : "login"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +118,7 @@ export function LoginForm() {
             <Link href={next} className="underline-offset-4 hover:underline">
               Keep browsing as a guest
             </Link>
-            {mode !== "owner" && (
+            {OWNER_LINK && mode !== "owner" && (
               <>
                 {" · "}
                 <button type="button" className="underline-offset-4 hover:underline" onClick={() => choose("owner")}>

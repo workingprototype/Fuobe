@@ -37,8 +37,9 @@ studios can show prices.
 - Sign up at `/login?signup=1` (`POST /api/auth/signup` with `{ "email", "password" }`). The
   password needs at least 8 characters. There is no email verification.
 - Log in at `/login` (`POST /api/auth/login` with `{ "email", "password" }`). The install password
-  still works as before: `POST /api/auth/login` with `{ "password" }`, or **Studio owner** on the
-  login page.
+  still works as before: `POST /api/auth/login` with `{ "password" }`, or the owner's sign-in at
+  `/login?owner=1`. The login page links to it only in development, so a public site doesn't
+  advertise it.
 - Accounts are stored in `auth.json` in the data folder: the email in lower case, a salted scrypt
   hash of the password (the same scheme as the install password), and the creation time.
 - Sign-up and log-in attempts are rate limited per visitor (set `FUOBE_TRUST_PROXY=1` behind a
