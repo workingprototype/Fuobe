@@ -1,0 +1,116 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "turnaround",
+  "title": "Turnaround video · a cast sheet or a character filmed all the way round",
+  "description": "Build plan N7-6 (new-models-7.md §3.7 recipes B and C): POST /api/turnaround, priced by /api/turnaround/estimate, on your pictures of one consenting person or a made-up character in local/turnaround/: front.png, right.png, back.png and left.png (their own right and left: facing them, their right side is on your left; full body, a plain background) and sheet.png (a turnaround sheet of the same character). The open engine films the views as Frames mode's Wan 2.2 14B start/end-frame chain, the sides it has no picture of drawn first by the Angles app's open route; the cloud takes them as MiniMax H3 Max references (Image 1…n), FLUX 3 Max keyframes, or, from the front alone, an H3 Max camera-controls orbit. Identity is ArcFace-style face similarity (AuraFace, or --identity-model buffalo_l) of 8 frames sampled from the film against the person's views; about half the frames show the back, so the face rate is expected near 0.5. A GPU or key run picks the default route per engine from this suite: identity first, then temporal steadiness and prompt match. The words are Fuobe's own.",
+  "original": "fuobe-turnaround",
+  "kind": "video",
+  "targets": {
+    "open": { "models": ["oss-wan22-14b"] },
+    "cloud": { "models": ["minimax-h3-max"] },
+    "demo": { "models": ["oss-wan22-14b"] }
+  },
+  "defaults": { "seeds": [1001], "metrics": ["identity", "temporal", "clip"], "timeoutSeconds": 3600, "candidate": "default" },
+  "variants": {
+    "default": {
+      "description": "Each engine's default route: Frames (Wan 2.2 14B) on your GPU, H3 Max reference-to-video in the cloud"
+    },
+    "keyframes": {
+      "description": "FLUX 3 Max keyframes-to-video: each view at its quarter of the turn (cloud)",
+      "engines": ["cloud"],
+      "models": { "cloud": ["flux-3-max"] }
+    },
+    "camera": {
+      "description": "H3 Max camera controls: an exact clockwise orbit from the front view alone, the sides and back invented (cloud)",
+      "engines": ["cloud"],
+      "models": { "cloud": ["minimax-h3-max-camera"] }
+    }
+  },
+  "cases": [
+    {
+      "id": "turnaround/four-views",
+      "title": "Four views of the person: front, right side, back, left side",
+      "inputs": { "images": ["local/turnaround/front.png", "local/turnaround/right.png", "local/turnaround/back.png", "local/turnaround/left.png"] },
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png", "fixtures/character/drawn-face-2.png", "fixtures/start-frame.png", "fixtures/character/drawn-face-3.png"] },
+      "prompts": [{ "id": "orbit", "text": "The camera orbits 360 degrees around the person at a constant height; the person stands naturally" }],
+      "references": ["local/turnaround/front.png", "local/turnaround/right.png", "local/turnaround/left.png"],
+      "submit": {
+        "route": "/api/turnaround",
+        "estimate": "/api/turnaround/estimate",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "views": { "front": "{{inputs.images.0}}", "right": "{{inputs.images.1}}", "back": "{{inputs.images.2}}", "left": "{{inputs.images.3}}" },
+          "seed": "{{seed}}",
+          "realPerson": true,
+          "consent": true,
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "turnaround/front-and-back",
+      "title": "The front and the back: the sides drawn first by the Angles app",
+      "inputs": { "images": ["local/turnaround/front.png", "local/turnaround/back.png"] },
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png", "fixtures/start-frame.png"] },
+      "prompts": [{ "id": "orbit", "text": "The camera orbits 360 degrees around the person at a constant height; the person stands naturally" }],
+      "references": ["local/turnaround/front.png", "local/turnaround/right.png", "local/turnaround/left.png"],
+      "submit": {
+        "route": "/api/turnaround",
+        "estimate": "/api/turnaround/estimate",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "views": { "front": "{{inputs.images.0}}", "back": "{{inputs.images.1}}" },
+          "fill": true,
+          "seed": "{{seed}}",
+          "realPerson": true,
+          "consent": true,
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "turnaround/front-only",
+      "title": "One front view: every other side drawn first (the camera variant films it alone)",
+      "inputs": { "images": ["local/turnaround/front.png"] },
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png"] },
+      "prompts": [{ "id": "orbit", "text": "The camera orbits 360 degrees around the person at a constant height; the person stands naturally" }],
+      "references": ["local/turnaround/front.png", "local/turnaround/right.png", "local/turnaround/left.png"],
+      "submit": {
+        "route": "/api/turnaround",
+        "estimate": "/api/turnaround/estimate",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "views": { "front": "{{inputs.images.0}}" },
+          "fill": true,
+          "seed": "{{seed}}",
+          "realPerson": true,
+          "consent": true,
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "turnaround/sheet",
+      "title": "A turnaround sheet only: a front view drawn from it first",
+      "inputs": { "images": ["local/turnaround/sheet.png"] },
+      "demoInputs": { "images": ["fixtures/references/warm-1.png"] },
+      "prompts": [{ "id": "orbit", "text": "The camera orbits 360 degrees around the person at a constant height; the person stands naturally" }],
+      "references": ["local/turnaround/front.png", "local/turnaround/right.png", "local/turnaround/left.png"],
+      "engines": ["demo", "open", "cloud"],
+      "submit": {
+        "route": "/api/turnaround",
+        "estimate": "/api/turnaround/estimate",
+        "body": {
+          "engine": "{{engine}}",
+          "modelId": "{{modelId}}",
+          "sheet": "{{inputs.images.0}}",
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    }
+  ]
+}

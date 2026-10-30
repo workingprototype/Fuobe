@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getModel } from "@/lib/catalog";
 import { routesFor } from "@/lib/catalog/plan";
-import { planTurnaround, type TurnaroundContext, type TurnaroundInput, type TurnaroundPlan, type TurnaroundPreview, type TurnStep } from "@/lib/catalog/turnaround";
+import { planTurnaround, routeOfModel, type TurnaroundContext, type TurnaroundInput, type TurnaroundPlan, type TurnaroundPreview, type TurnStep } from "@/lib/catalog/turnaround";
 import type { Generation } from "@/lib/catalog/types";
 import { cancelGeneration, createGenerations, previewChained, previewGeneration } from "./generations";
 import { isOffered } from "./model-access";
@@ -33,6 +33,22 @@ export const TurnaroundSchema = z.object({
   realPerson: z.boolean().optional(),
   consent: z.boolean().optional(),
 });
+
+/** What /api/turnaround and its estimate take: the turnaround, the character it's for, the model named instead of a route. */
+export const TurnaroundBodySchema = TurnaroundSchema.extend({
+  /** Made from a character's page: the film goes into that character's feed. */
+  elementId: z.string().max(40).optional(),
+  /** The model to film it with (the evaluation harness names models): its route, when this engine has one for it. */
+  modelId: z.string().max(80).optional(),
+  /** A repeated requestId (a second click) gets the run the first one started. */
+  requestId: z.string().max(80).optional(),
+});
+
+/** A request body as the server runs it: a character's run filed in its feed, a named model's route. */
+export function turnaroundRun({ elementId, modelId, ...input }: Omit<z.infer<typeof TurnaroundBodySchema>, "requestId">): TurnaroundRequest {
+  const route = input.route ?? routeOfModel(input.engine, modelId);
+  return { ...input, ...(route && { route }), ...(elementId && { feature: `element:${elementId}` }) };
+}
 
 export class TurnaroundError extends Error {
   constructor(

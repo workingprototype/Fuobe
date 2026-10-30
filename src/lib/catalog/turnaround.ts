@@ -337,6 +337,11 @@ export function defaultRoute(engine: Engine, input: Pick<TurnaroundInput, "views
   return routes.includes(want) ? want : (routes[0] ?? want);
 }
 
+/** The route a model runs on this engine (an API client or the evaluation harness names the model, not the route). */
+export function routeOfModel(engine: Engine, modelId: string | undefined): TurnRoute | undefined {
+  return ROUTES_ON[engine].find((r) => TURN_ROUTES[r].modelId === modelId);
+}
+
 /** The duration a route takes: the one asked for when offered, else the nearest it offers. */
 export function turnDuration(route: TurnRoute, asked?: number): number {
   const { durations, duration } = TURN_ROUTES[route];
