@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { deleteProject, getProject, ProjectError, updateProject } from "@/server/assist/projects";
 import { ProjectBody } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 export const GET = handler({ access: "signed-in" }, async (_req: Request, ctx: RouteContext<"/api/assist/projects/[projectId]">) => {
@@ -15,6 +16,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
   try {
     return Response.json(updateProject((await ctx.params).projectId, parsed.data));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof ProjectError ? e.status : 500 });
   }
 });

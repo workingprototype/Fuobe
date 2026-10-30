@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { publicSettings, setSetting, SETTINGS, validateSetting, type SettingName } from "@/server/settings";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 export const GET = handler({ access: "signed-in" }, async () => {
@@ -13,6 +14,7 @@ export const PUT = handler({ access: "perm:install.settings" }, async (request: 
   try {
     entries.forEach(([name, value]) => validateSetting(name, value.trim()));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 400 });
   }
   for (const [name, value] of entries) setSetting(name, value.trim());

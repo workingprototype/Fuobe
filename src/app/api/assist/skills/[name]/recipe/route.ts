@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { recipeFailure } from "@/server/recipe-routes";
 import { recipeView, saveRecipe } from "@/server/recipes";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** A skill's recipe with where it runs and what was checked (engines, ready, needs a re-check). */
@@ -9,6 +10,7 @@ export const GET = handler({ access: "signed-in" }, async (_req: Request, ctx: R
   try {
     return Response.json(recipeView((await ctx.params).name));
   } catch (e) {
+    rethrowAccess(e);
     return recipeFailure(e);
   }
 });
@@ -22,6 +24,7 @@ export const PUT = handler({ access: "signed-in" }, async (request: Request, ctx
     saveRecipe(name, body);
     return Response.json(recipeView(name));
   } catch (e) {
+    rethrowAccess(e);
     return recipeFailure(e);
   }
 });

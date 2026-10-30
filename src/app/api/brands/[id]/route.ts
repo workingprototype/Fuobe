@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { deleteBrand, getBrand, listProducts, updateBrand } from "@/server/brand";
 import { failure, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const list = (max: number, len: number) => z.array(z.string().max(len)).max(max);
@@ -43,6 +44,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
     const brand = updateBrand(id, body);
     return brand ? Response.json(brand) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

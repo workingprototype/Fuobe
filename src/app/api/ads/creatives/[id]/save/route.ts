@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { saveComposite } from "@/server/ads";
 import { failure, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({ url: z.string().startsWith("/api/files/"), ratio: z.enum(["1:1", "4:5", "9:16"]) });
@@ -13,6 +14,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
   try {
     return Response.json(saveComposite(id, body), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return (e as Error).message === "Not found" ? Response.json({ error: "Not found" }, { status: 404 }) : failure(e);
   }
 });

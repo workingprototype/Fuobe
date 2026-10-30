@@ -43,6 +43,7 @@ import {
 import { genreInfo, pickerData, type ChannelSettings, type EpisodeSettings, type NarratorVoice, type TimedText } from "@/lib/catalog/faceless";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { probeMedia } from "@/lib/media-probe";
+import { rethrowAccess } from "./access/errors";
 import { rowOwner, runAsOwner } from "./access/permissions";
 import { authEnabled } from "./auth";
 import { db } from "./db";
@@ -878,6 +879,7 @@ export async function handle(fn: () => Promise<Response> | Response): Promise<Re
   try {
     return await fn();
   } catch (e) {
+    rethrowAccess(e);
     if (e instanceof NeedsUpload) return Response.json({ error: e.message, needsUpload: true }, { status: e.status });
     return facelessHandle(() => {
       throw e;

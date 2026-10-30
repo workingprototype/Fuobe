@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { deleteSchedule, getSchedule, ScheduleError, updateSchedule } from "@/server/assist/schedules";
 import { ScheduleBody } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Patch = ScheduleBody.partial();
@@ -19,6 +20,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
     const s = updateSchedule((await ctx.params).scheduleId, parsed.data);
     return s ? Response.json(s) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof ScheduleError ? e.status : 500 });
   }
 });

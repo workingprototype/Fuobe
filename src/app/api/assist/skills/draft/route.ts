@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { badBody, recipeFailure } from "@/server/recipe-routes";
 import { draftFromGenerations } from "@/server/recipe-builder";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({ generations: z.array(z.string().min(1).max(40)).min(1).max(200) });
@@ -15,6 +16,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(draftFromGenerations(parsed.data.generations));
   } catch (e) {
+    rethrowAccess(e);
     return recipeFailure(e);
   }
 });

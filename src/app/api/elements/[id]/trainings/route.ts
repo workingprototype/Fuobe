@@ -4,6 +4,7 @@ import { targetsFor, TRAINING_TARGETS } from "@/lib/catalog/training";
 import { getElement } from "@/server/elements";
 import { ensureRunner } from "@/server/generations";
 import { describeTargets, listTrainings, startTraining } from "@/server/training";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** The targets this element can train on (each with what stops it, its price and whether it's a demo), and its trainings. */
@@ -29,6 +30,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
     ensureRunner();
     return Response.json(startTraining(id, parsed.data.target, { consent: parsed.data.consent }), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

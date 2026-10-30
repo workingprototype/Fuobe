@@ -1,4 +1,5 @@
 import { ClickToAdBody, failure, readBody, runClickToAd } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Click to Ad: a 9:16 voiced ad with captions from a product kit and a style. */
@@ -8,6 +9,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(await runClickToAd(body), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

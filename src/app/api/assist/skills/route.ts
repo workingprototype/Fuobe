@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { SkillBody } from "@/server/assist/schemas";
 import { createSkill, listSkills, SkillError } from "@/server/skills";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Every skill: built-in (from skills/) and the user's own. */
@@ -16,6 +17,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(createSkill(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof SkillError ? e.status : 500 });
   }
 });

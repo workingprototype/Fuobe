@@ -1,4 +1,5 @@
 import { createStoryboard, StoryboardBodySchema } from "@/server/storyboard";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Popcorn-style storyboard: consecutive frames, each made from the previous one. */
@@ -8,6 +9,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(await createStoryboard(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

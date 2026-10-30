@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { deleteSkill, getSkill, setSkillEnabled, SkillError, updateSkill } from "@/server/skills";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Patch = z.object({
@@ -33,6 +34,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
     if (enabled !== undefined) s = setSkillEnabled(s.name, enabled);
     return Response.json(s);
   } catch (e) {
+    rethrowAccess(e);
     return fail(e);
   }
 });
@@ -42,6 +44,7 @@ export const DELETE = handler({ access: "signed-in" }, async (_req: Request, ctx
     deleteSkill((await ctx.params).name);
     return new Response(null, { status: 204 });
   } catch (e) {
+    rethrowAccess(e);
     return fail(e);
   }
 });

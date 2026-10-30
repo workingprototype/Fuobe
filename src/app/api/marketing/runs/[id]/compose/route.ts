@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { failure, readBody, saveRunComposite } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -20,6 +21,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
   try {
     return Response.json(saveRunComposite(id, body), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return (e as Error).message === "Not found" ? Response.json({ error: "Not found" }, { status: 404 }) : failure(e);
   }
 });

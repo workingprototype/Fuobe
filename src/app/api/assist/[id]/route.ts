@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { AssistBusyError, deleteThread, getThread, updateThread } from "@/server/assist/agent";
 import { ModeChoice } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Patch = z.object({
@@ -25,6 +26,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
     const t = await updateThread((await ctx.params).id, parsed.data);
     return t ? Response.json(t) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof AssistBusyError ? 409 : 400 });
   }
 });

@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { createFolder, LibraryError, listFolders } from "@/server/library";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** `parentId`: a folder's id, or null (or left out) for the library root; "" is refused, not stored as a parent nothing has. */
@@ -19,6 +20,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(createFolder(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof LibraryError ? e.status : 409 });
   }
 });

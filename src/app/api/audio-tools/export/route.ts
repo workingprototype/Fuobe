@@ -1,4 +1,5 @@
 import { MixExportError, PART_MAX, receiveMixPart } from "@/server/mix-export";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /**
@@ -15,6 +16,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     const r = receiveMixPart({ id: q.get("id"), offset, data, last: q.get("last") === "1", name: q.get("name") });
     return Response.json(r, { status: "relPath" in r ? 201 : 200 });
   } catch (e) {
+    rethrowAccess(e);
     if (e instanceof MixExportError) return Response.json({ error: e.message }, { status: e.status });
     console.error("[audio-tools/export]", e);
     return Response.json({ error: (e as Error).message || "Couldn't save the mix" }, { status: 500 });

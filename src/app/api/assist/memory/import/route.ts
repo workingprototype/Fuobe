@@ -2,6 +2,7 @@ import { z } from "zod";
 import { parseMemoryImport } from "@/lib/assist";
 import { importMemories, MemoryError } from "@/server/assist/memory";
 import { MemoryCategorySchema } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -22,6 +23,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(importMemories(items, parsed.data.scope, parsed.data.scope === "project" ? (parsed.data.projectId ?? null) : null));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof MemoryError ? e.status : 500 });
   }
 });

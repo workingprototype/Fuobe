@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { deleteMoodboard, getMoodboard, renameMoodboard } from "@/server/moodboards";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Patch = z.object({ name: z.string().max(200) });
@@ -19,6 +20,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
   try {
     return Response.json(renameMoodboard(id, parsed.data.name));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: /not found/i.test((e as Error).message) ? 404 : 400 });
   }
 });

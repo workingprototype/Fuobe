@@ -1,4 +1,5 @@
 import { importSkill, SkillError } from "@/server/skills";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -14,6 +15,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     const r = importSkill({ name: file.name, data: Buffer.from(await file.arrayBuffer()) }, { replace });
     return Response.json(r, { status: r.replaced ? 200 : 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof SkillError ? e.status : 500 });
   }
 });

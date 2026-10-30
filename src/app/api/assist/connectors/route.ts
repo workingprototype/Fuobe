@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { ConnectorError, createConnector, listConnectors } from "@/server/assist/connectors";
 import { ConnectorBody } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Custom MCP connectors, tokens masked. */
@@ -15,6 +16,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(createConnector(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof ConnectorError ? e.status : 500 });
   }
 });

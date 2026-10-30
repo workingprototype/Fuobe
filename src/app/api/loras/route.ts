@@ -3,6 +3,7 @@ import { LORA_LIBRARY, LORA_LIBRARY_AS_OF } from "@/lib/catalog/lora-library.gen
 import { licenceLine } from "@/lib/catalog/loras";
 import { downloadToComfy, filesInLoraFolder, listLoraCopies, LoraError } from "@/server/loras";
 import { getSetting } from "@/server/settings";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /**
@@ -48,6 +49,7 @@ export const POST = handler({ access: "perm:install.settings" }, async (request:
     const copy = await downloadToComfy(body.file);
     return Response.json({ file: copy.file, sizeBytes: copy.sizeBytes, sha256: copy.sha256 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof LoraError ? 422 : 500 });
   }
 });

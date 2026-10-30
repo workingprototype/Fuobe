@@ -1,5 +1,6 @@
 import { BatchBody, estimateBatch } from "@/server/ads";
 import { readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** The total before the run: ads × price per ad (+ the copy), and which model renders them. */
@@ -9,6 +10,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(estimateBatch(body));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ costUsd: null, total: 0, perAd: null, demo: false, blocker: (e as Error).message });
   }
 });

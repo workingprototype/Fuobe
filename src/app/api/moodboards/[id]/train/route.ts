@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { moodboardTrainingTargets, trainMoodboard } from "@/server/moodboards";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** The style trainings a board can run (each with its price, what stops it and whether it would be a demo). */
@@ -18,6 +19,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
   try {
     return Response.json(trainMoodboard(id, parsed.success ? parsed.data?.target : undefined), { status: 202 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: /not found/i.test((e as Error).message) ? 404 : 409 });
   }
 });

@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { createProduct, listProducts, ProductFields } from "@/server/brand";
 import { failure, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Products: all, a brand's (`?brand=<id>`) or the unassigned ones (`?brand=none`). */
@@ -19,6 +20,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(createProduct({ ...input, price: input.price ?? null }, { force }), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

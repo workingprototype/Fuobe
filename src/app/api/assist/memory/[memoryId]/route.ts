@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { deleteMemory, MemoryError, updateMemory } from "@/server/assist/memory";
 import { MemoryCategorySchema } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Patch = z.object({ text: z.string().trim().min(1).max(500).optional(), category: MemoryCategorySchema.optional() });
@@ -11,6 +12,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
   try {
     return Response.json(updateMemory((await ctx.params).memoryId, parsed.data));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof MemoryError ? e.status : 500 });
   }
 });

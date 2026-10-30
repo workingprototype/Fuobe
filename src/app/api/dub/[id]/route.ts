@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { CueSchema, deleteDubSession, dubView, getDubSession, saveDubDraft } from "@/server/dub";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Patch = z.object({ lang: z.string().min(2).max(12), cues: z.array(CueSchema).max(3000) });
@@ -20,6 +21,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
   try {
     return Response.json(saveDubDraft(id, parsed.data.lang, parsed.data.cues));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: getDubSession(id) ? 422 : 404 });
   }
 });

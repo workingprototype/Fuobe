@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { deleteProject, LayersError, parseDoc, projectView, updateProject } from "@/server/layers";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Patch = z.object({
@@ -31,6 +32,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
     const p = updateProject(id, { name: parsed.data.name, doc, versionId: parsed.data.versionId, cover: parsed.data.cover });
     return p ? Response.json(p) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof LayersError ? e.status : 422 });
   }
 });

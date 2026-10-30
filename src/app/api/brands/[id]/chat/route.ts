@@ -3,6 +3,7 @@ import { z } from "zod";
 import { chat, clearChat, getChat } from "@/server/ads";
 import { getBrand } from "@/server/brand";
 import { failure, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({ text: z.string().trim().min(1).max(2000) });
@@ -22,6 +23,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
   try {
     return Response.json({ messages: await chat(id, body.text) });
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { deleteProduct, getProduct, ProductFields, updateProduct } from "@/server/brand";
 import { failure, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 export const GET = handler({ access: "signed-in" }, async (_req: Request, ctx: RouteContext<"/api/products/[id]">) => {
@@ -18,6 +19,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
     const p = updateProduct(id, body);
     return p ? Response.json(p) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

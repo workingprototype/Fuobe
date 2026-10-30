@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRAINING_FAMILY_IDS, type TrainingFamily } from "@/lib/catalog/training";
 import { attachLora } from "@/server/training";
 import { getElement } from "@/server/elements";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -20,6 +21,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
     await attachLora(id, parsed.data);
     return Response.json(getElement(id));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

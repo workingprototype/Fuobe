@@ -3,6 +3,7 @@ import { OPERATION_LABELS } from "@/lib/catalog/types";
 import { createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
 import { GenerationRequestSchema } from "@/server/request-schema";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /**
@@ -36,6 +37,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     const notes = [...new Set(items.flatMap((g) => g.notes ?? []))];
     return Response.json({ items, ...(notes.length && { notes }) }, { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

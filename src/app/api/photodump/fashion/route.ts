@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createFashion, previewFashion, type FashionRun } from "@/server/photodump";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const File = z.string().startsWith("/api/files/");
@@ -23,6 +24,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(createFashion(input), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

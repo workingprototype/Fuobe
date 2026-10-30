@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { createProject, FileUrl, LayersError, listProjects } from "@/server/layers";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -27,6 +28,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(createProject(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     const status = e instanceof LayersError ? e.status : 422;
     return Response.json({ error: (e as Error).message }, { status });
   }

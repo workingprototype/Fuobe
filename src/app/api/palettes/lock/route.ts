@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createLockedRun, SignatureSchema } from "@/server/palettes";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Hex = z.string().regex(/^#?[0-9a-fA-F]{6}$/);
@@ -41,6 +42,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     const { items } = createLockedRun(parsed.data.request as Parameters<typeof createLockedRun>[0], parsed.data.colors, parsed.data.strength);
     return Response.json({ items }, { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

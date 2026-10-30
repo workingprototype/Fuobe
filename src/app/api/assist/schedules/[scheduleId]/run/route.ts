@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { ScheduleError, startSchedule } from "@/server/assist/schedules";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /**
@@ -14,6 +15,7 @@ export const POST = handler({ access: "signed-in" }, async (_req: Request, ctx: 
     after(() => started.done);
     return Response.json({ threadId: started.threadId }, { status: 202 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof ScheduleError ? e.status : 500 });
   }
 });

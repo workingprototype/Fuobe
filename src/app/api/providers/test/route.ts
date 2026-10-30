@@ -3,6 +3,7 @@ import { testCivitaiKey } from "@/server/loras";
 import { testAiToolkit } from "@/server/training";
 import { PROVIDERS } from "@/server/providers";
 import { validateSetting, withCandidates, type SettingName } from "@/server/settings";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /**
@@ -23,6 +24,7 @@ export const POST = handler({ access: "perm:install.settings" }, async (request:
   try {
     for (const [name, v] of Object.entries(values)) validateSetting(name as SettingName, v);
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ ok: false, detail: (e as Error).message }, { status: 400 });
   }
   const settings: readonly string[] = PROVIDER_SETTINGS[provider];
@@ -35,6 +37,7 @@ export const POST = handler({ access: "perm:install.settings" }, async (request:
     const hint = !res.ok && Object.entries(values).map(([n, v]) => settingProblem(n, v ?? "")).find(Boolean);
     return Response.json(hint && !res.detail.includes(hint) ? { ...res, detail: `${res.detail} — ${hint}` } : res);
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ ok: false, detail: `Couldn't run the test: ${(e as Error).message}` });
   }
 });

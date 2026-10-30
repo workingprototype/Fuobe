@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { readProductLink } from "@/server/brand";
 import { failure, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -20,6 +21,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     const r = await readProductLink(body);
     return Response.json(r, { status: r.products.length ? 201 : 200 });
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

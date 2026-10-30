@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { cancelResearch, retryResearch } from "@/server/brand";
 import { failure } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Run the website research again (Retry research). */
@@ -11,6 +12,7 @@ export const POST = handler({ access: "signed-in" }, async (_req: Request, ctx: 
     after(() => run);
     return Response.json(brand, { status: 202 });
   } catch (e) {
+    rethrowAccess(e);
     return (e as Error).message === "Not found" ? Response.json({ error: "Not found" }, { status: 404 }) : failure(e);
   }
 });

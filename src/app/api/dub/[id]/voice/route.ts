@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CueSchema, getDubSession, previewVoiceDub, voiceDub } from "@/server/dub";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -20,6 +21,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
     if (new URL(request.url).searchParams.get("preview") === "1") return Response.json(previewVoiceDub(id, parsed.data.lang, opts));
     return Response.json(voiceDub(id, parsed.data.lang, opts), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

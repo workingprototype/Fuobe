@@ -1,5 +1,6 @@
 import { enhancePrompt } from "@/server/enhance";
 import type { MediaKind, Operation } from "@/lib/catalog/types";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 export const POST = handler({ access: "signed-in" }, async (request: Request) => {
@@ -8,6 +9,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json({ prompt: await enhancePrompt(prompt, kind ?? "image", op ?? "t2i") });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 502 });
   }
 });

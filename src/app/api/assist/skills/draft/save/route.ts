@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SkillBody } from "@/server/assist/schemas";
 import { badBody, recipeFailure } from "@/server/recipe-routes";
 import { saveDraft } from "@/server/recipes";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = SkillBody.extend({ recipe: z.unknown() });
@@ -13,6 +14,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(await saveDraft(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return recipeFailure(e);
   }
 });

@@ -5,6 +5,7 @@ import { PASSWORD_SIGN_IN_MAX } from "@/server/identity/password";
 import { listTokens } from "@/server/identity/tokens";
 import { signInRequired } from "@/server/mode";
 import { currentActor } from "@/server/access/actor";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /**
@@ -38,6 +39,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     await changeOwnerPassword(password, { actorId: actor.userId, via: actor.via });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 400 });
   }
   const headers = new Headers({ "Cache-Control": "no-store" });

@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { failure, listRuns, MarketingBody, readBody, runMarketing } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Feature = z.enum(["marketing", "click-to-ad", "ad-multiplier"]);
@@ -21,6 +22,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(await runMarketing(body), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { deleteForever, moveToFolder, restoreGenerations, setFavorites, setPinned, setReview, trashGenerations } from "@/server/library";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -33,6 +34,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
                   : setFavorites(ids, action === "favorite");
     return Response.json({ count });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

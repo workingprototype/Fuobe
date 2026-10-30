@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { createProject, listProjects, ProjectError } from "@/server/assist/projects";
 import { ProjectBody } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 export const GET = handler({ access: "signed-in" }, async () => {
@@ -14,6 +15,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(createProject(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof ProjectError ? e.status : 500 });
   }
 });

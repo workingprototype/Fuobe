@@ -55,3 +55,11 @@ export class ReauthRequiredError extends AccessError {
     super(message, 403, "REAUTH");
   }
 }
+
+/**
+ * For code that catches errors to answer them itself (a route's `catch (e)`, a studio's `handle()`): pass a refusal on
+ * to handler(), which answers it with its status and audits it. Call it first in the catch block.
+ */
+export function rethrowAccess(e: unknown): void {
+  if (e instanceof AccessError) throw e;
+}

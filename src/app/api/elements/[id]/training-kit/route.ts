@@ -1,5 +1,6 @@
 import { AITK_FAMILIES, type TrainingFamily } from "@/lib/catalog/training";
 import { trainingKit } from "@/server/training";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Dataset + AI-Toolkit config + README, to train the element's LoRA on any GPU (?family= picks the base; Z-Image Turbo by default). */
@@ -13,6 +14,7 @@ export const GET = handler({ access: "signed-in" }, async (req: Request, ctx: Ro
       headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${kit.name}"` },
     });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

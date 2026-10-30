@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MAX_CLOTHING, MAX_DIRECTION } from "@/lib/influencer";
 import { createInfluencer, previewInfluencer, type InfluencerBody } from "@/server/influencer";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const File = z.string().startsWith("/api/files/").max(500);
@@ -39,6 +40,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(createInfluencer(body), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

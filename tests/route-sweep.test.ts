@@ -71,6 +71,25 @@ describe("every route goes through handler()", () => {
     expect(bad).toEqual([]);
   });
 
+  it("passes refusals on: a catch that answers errors itself starts with rethrowAccess, or rethrows what it doesn't answer", () => {
+    const bad: string[] = [];
+    for (const f of FILES) {
+      const lines = fs.readFileSync(f, "utf8").split("\n");
+      lines.forEach((l, i) => {
+        const m = /^(\s*)\}\s*catch\s*\((\w+)\)\s*\{\s*$/.exec(l);
+        if (!m) return;
+        const body: string[] = [];
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim().startsWith("}") && lines[j].search(/\S/) <= m[1].length) break;
+          body.push(lines[j].trim());
+        }
+        if (body[0] === `rethrowAccess(${m[2]});` || body.at(-1) === `throw ${m[2]};`) return;
+        bad.push(`${rel(f)}:${i + 1}`);
+      });
+    }
+    expect(bad).toEqual([]);
+  });
+
   it("names the four install-config routes as needing install.settings", () => {
     const needs = (file: string, method: string) =>
       new RegExp(`export\\s+const\\s+${method}\\s*=\\s*handler\\(\\{\\s*access:\\s*"perm:install\\.settings"`).test(fs.readFileSync(path.join(ROOT, file), "utf8"));

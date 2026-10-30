@@ -1,4 +1,5 @@
 import { estimateStoryboard, StoryboardBodySchema } from "@/server/storyboard";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** What a board costs before it runs ("Free" on your GPU): every frame, the look's model for frame 1. */
@@ -8,6 +9,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(estimateStoryboard(parsed.data));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

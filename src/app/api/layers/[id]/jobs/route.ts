@@ -1,4 +1,5 @@
 import { JobInputSchema, LayersError, startJob } from "@/server/layers";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /**
@@ -13,6 +14,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
   try {
     return Response.json(startJob(id, parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof LayersError ? e.status : 422 });
   }
 });

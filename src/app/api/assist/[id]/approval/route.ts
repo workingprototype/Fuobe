@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { z } from "zod";
 import { answerApproval, AssistBusyError, run } from "@/server/assist/agent";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({ approve: z.boolean() });
@@ -16,6 +17,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
     after(() => reply);
     return Response.json(thread);
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof AssistBusyError ? 409 : 404 });
   }
 });

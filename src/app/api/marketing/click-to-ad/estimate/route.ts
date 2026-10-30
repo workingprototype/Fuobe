@@ -1,4 +1,5 @@
 import { ClickToAdBody, estimateClickToAd, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 export const POST = handler({ access: "signed-in" }, async (request: Request) => {
@@ -7,6 +8,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(estimateClickToAd(body));
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ costUsd: null, demo: false, steps: [], notes: [], runs: 0, blocker: (e as Error).message });
   }
 });

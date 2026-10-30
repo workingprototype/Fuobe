@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { ONE_SHOT_MODELS } from "@/lib/av/dub";
 import { createDubSession, listDubSessions, previewDub } from "@/server/dub";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -35,6 +36,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     if (new URL(request.url).searchParams.get("preview") === "1") return Response.json(previewDub(parsed.data));
     return Response.json(createDubSession(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

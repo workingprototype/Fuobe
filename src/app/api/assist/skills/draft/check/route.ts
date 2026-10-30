@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { badBody, recipeFailure } from "@/server/recipe-routes";
 import { checkDraft } from "@/server/recipes";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -17,6 +18,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(await checkDraft(parsed.data.recipe, parsed.data.level, parsed.data.title || undefined));
   } catch (e) {
+    rethrowAccess(e);
     return recipeFailure(e);
   }
 });

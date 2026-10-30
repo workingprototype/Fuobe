@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { folderZipEntries, LibraryError, ZIP_MAX_BYTES } from "@/server/library";
 import { zipSize, zipStream } from "@/server/zip";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /**
@@ -16,6 +17,7 @@ export const GET = handler({ access: "signed-in" }, async (request: Request, ctx
   try {
     zip = folderZipEntries(id, { steps: sp.get("steps") === "1" });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof LibraryError ? e.status : 500 });
   }
   if (!zip) return Response.json({ error: "That folder doesn't exist anymore" }, { status: 404 });

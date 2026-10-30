@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { deleteFolder, getFolder, LibraryError, updateFolder } from "@/server/library";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Patch = z.object({
@@ -27,6 +28,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
     const f = updateFolder(id, parsed.data);
     return f ? Response.json(f) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof LibraryError ? e.status : 409 });
   }
 });

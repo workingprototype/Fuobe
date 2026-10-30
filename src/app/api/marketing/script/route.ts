@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { clickToAdScript, failure, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.object({
@@ -17,6 +18,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     return Response.json(await clickToAdScript(body));
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

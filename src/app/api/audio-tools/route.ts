@@ -1,4 +1,5 @@
 import { AudioToolBody, AudioToolError, previewAudioTool, runAudioTool } from "@/server/audio-tools";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** What a field that doesn't check out means, in words the page shows. */
@@ -24,6 +25,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     if (new URL(request.url).searchParams.get("preview") === "1") return Response.json(await previewAudioTool(parsed.data));
     return Response.json(await runAudioTool(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     if (e instanceof AudioToolError) return Response.json({ error: e.message }, { status: 422 });
     console.error("[audio-tools]", e);
     return Response.json({ error: (e as Error).message || "Something went wrong" }, { status: 500 });

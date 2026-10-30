@@ -2,6 +2,7 @@ import { after, connection } from "next/server";
 import { z } from "zod";
 import { createBrandFromWebsite, createManualBrand, listBrands } from "@/server/brand";
 import { failure, readBody } from "@/server/marketing";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Body = z.union([
@@ -35,6 +36,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     }
     return Response.json(await createManualBrand(body), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return failure(e);
   }
 });

@@ -1,5 +1,6 @@
 import { ConnectorError, deleteConnector, updateConnector } from "@/server/assist/connectors";
 import { ConnectorBody } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Rename, change the URL, replace the token ("" removes it; leave it out to keep it), switch on or off. */
@@ -10,6 +11,7 @@ export const PATCH = handler({ access: "signed-in" }, async (request: Request, c
     const c = updateConnector((await ctx.params).connectorId, parsed.data);
     return c ? Response.json(c) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: e instanceof ConnectorError ? e.status : 500 });
   }
 });

@@ -2,6 +2,7 @@ import { after, connection } from "next/server";
 import { z } from "zod";
 import { addMessage, availability, createThread, listThreads, resolveAgent, resolveMode, run } from "@/server/assist/agent";
 import { AssistMessage, ModeChoice } from "@/server/assist/schemas";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 const Create = AssistMessage.extend({
@@ -31,6 +32,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
   try {
     thread = createThread({ engine, autoApprove, agent: r.agent, projectId: projectId ?? null, mode: r.mode, model: r.model, effort: r.effort });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 404 });
   }
   const updated = addMessage(thread.id, text, attachments);

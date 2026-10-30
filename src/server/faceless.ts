@@ -79,6 +79,7 @@ import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types"
 import { DocxError, docxText } from "./assist/docx";
 import { PdfError, pdfText } from "./assist/pdf";
 import { asSystem } from "./access/actor";
+import { rethrowAccess } from "./access/errors";
 import { AccountOffError, rowOwner, runAsOwner } from "./access/permissions";
 import { db } from "./db";
 import { listElements } from "./elements";
@@ -1534,6 +1535,7 @@ export async function handle(fn: () => Promise<Response> | Response): Promise<Re
   try {
     return await fn();
   } catch (e) {
+    rethrowAccess(e);
     if (e instanceof FacelessError) return Response.json({ error: e.message }, { status: e.status });
     console.error("[faceless]", e);
     return Response.json({ error: (e as Error).message || "Something went wrong" }, { status: 500 });

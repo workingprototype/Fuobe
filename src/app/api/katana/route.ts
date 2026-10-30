@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { createKatana, KatanaBody, listKatana, previewKatana } from "@/server/katana";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Recent Katana runs with the state of every step. */
@@ -21,6 +22,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request) =>
     if (new URL(request.url).searchParams.get("preview") === "1") return Response.json(previewKatana(parsed.data));
     return Response.json(createKatana(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
 });

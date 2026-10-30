@@ -1,5 +1,6 @@
 import { badBody, recipeFailure, RunBody } from "@/server/recipe-routes";
 import { estimateRecipe } from "@/server/recipes";
+import { rethrowAccess } from "@/server/access/errors";
 import { handler } from "@/server/access/route";
 
 /** Price a run of a skill's recipe, or many (`rows` or `csv`, priced together with a total). Starts nothing. */
@@ -10,6 +11,7 @@ export const POST = handler({ access: "signed-in" }, async (request: Request, ct
     const { engine, ...input } = parsed.data;
     return Response.json(estimateRecipe((await ctx.params).name, input, engine));
   } catch (e) {
+    rethrowAccess(e);
     return recipeFailure(e);
   }
 });
