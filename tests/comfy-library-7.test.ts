@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { GenInput } from "@/lib/catalog/types";
 import type { ComfyWorkflow, Manifest } from "@/lib/comfy";
+import { getModel } from "@/lib/catalog";
+import { sizeValue } from "@/lib/catalog/payload";
 import { compileMoss } from "@/lib/layout-prompt";
 
 // Research #7 (docs/research/new-models-7.md §4.4, §4.6): MOSS-Image's core-node graph in the ComfyUI library, its pinned
@@ -29,7 +31,11 @@ describe("moss-image-t2i in the manifest", () => {
     expect(Object.keys(entry.bindings).sort()).toEqual(["cfg", "filenamePrefix", "height", "negativePrompt", "prompt", "sampler", "scheduler", "seed", "steps", "unet", "width"]);
     expect(entry.limits).toEqual({ maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 });
     expect(entry.defaults).toEqual({ width: 1024, height: 1024, steps: 25, cfg: 2.5, sampler: "er_sde", scheduler: "simple", unet: "moss_image_sft_int8_convrot.safetensors" });
-    expect(entry.license).toBe("Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder)");
+    // §4.5: every file's licence, the optional Fast file's too, and where the small decoder's bytes come from.
+    expect(entry.license).toBe(
+      "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; " +
+        "Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
+    );
     expect(entry.outputs).toEqual([{ node: "10", kind: "image" }]);
     expect(entry.notes).toMatch(/vramGb 16 is a guess/);
     expect(entry.notes).toMatch(/CUDA 13 \(cu130\): comfy\/quant_ops\.py/);
@@ -95,6 +101,27 @@ describe("the provider fills moss-image-t2i", () => {
     const fast = await prepare({ prompt: "a poster", extra: { steps: 8, cfg: 1, sampler: "euler", unet: "moss_image_sft_8stepdmd_int8_convrot.safetensors" } });
     expect(fast["1"].inputs.unet_name).toBe("moss_image_sft_8stepdmd_int8_convrot.safetensors");
     expect(fast["8"].inputs).toMatchObject({ steps: 8, cfg: 1 });
+  });
+
+  it("fits an asked canvas to the graph's grid and 2048 px limit, the size the cloud sends for it", async () => {
+    const fal = getModel("moss-image")!.routes[0].map!.size!;
+    for (const [w, h] of [
+      [2560, 1000],
+      [1000, 1000],
+      [4096, 1024],
+      [1536, 1024],
+      [1250, 3000],
+    ]) {
+      const wf = await prepare({ prompt: "a poster", extra: { width: w, height: h, layout: { summary: {}, items: [] } } });
+      const got = wf["6"].inputs as { width: number; height: number };
+      expect(got.width % 16, `${w}x${h}`).toBe(0);
+      expect(got.height % 16, `${w}x${h}`).toBe(0);
+      expect(Math.max(got.width, got.height), `${w}x${h}`).toBeLessThanOrEqual(2048);
+      // Past 512 a side both engines render one size, so a layout compiled at it lands where it was drawn.
+      if (Math.min(w, h) >= 512) expect({ width: got.width, height: got.height }, `${w}x${h}`).toEqual(sizeValue(fal, undefined, undefined, { width: w, height: h }));
+    }
+    const wide = await prepare({ prompt: "a poster", extra: { width: 2560, height: 1000 } });
+    expect(wide["6"].inputs).toMatchObject({ width: 2048, height: 800 });
   });
 
   it("keeps a wide shape within 2048 px on the 16-pixel grid", async () => {

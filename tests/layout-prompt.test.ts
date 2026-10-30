@@ -180,6 +180,22 @@ describe("parseLayout", () => {
     expect(p.draft.aspect).toBe("3:2");
   });
 
+  it("reads a compiled prompt without the root's bbox fields as centred, as decodeMoss does", () => {
+    const bare = '{"summary":{"caption":"x"},"items":[{"label":"text","caption":"t","text":"HI","bbox":[-416,-384,-288,384]}]}';
+    const p = parseLayout(bare)!;
+    expect(p.from).toBe("compiled");
+    expect(p.draft.items[0].box).toEqual([0.125, 0.09375, 0.875, 0.21875]);
+    expect(p.draft.items).toEqual(decodeMoss(bare, 1024, 1024)!.items);
+    // No negative edge and no size of its own: still the centre's (only LinXce drafts carry their size).
+    const quadrant = parseLayout('{"items":[{"label":"object","caption":"c","bbox":[0,0,256,512]}]}')!;
+    expect(quadrant.from).toBe("compiled");
+    expect(quadrant.draft.items[0].box).toEqual([0.5, 0.5, 1, 0.75]);
+    // A sized draft with top-left boxes and no root fields stays LinXce's.
+    const sized = parseLayout({ width: 1024, height: 1024, items: [{ label: "object", caption: "c", bbox: [128, 288, 896, 640] }] })!;
+    expect(sized.from).toBe("linxce");
+    expect(sized.draft.items[0].box).toEqual(px([128, 288, 896, 640], 1024, 1024));
+  });
+
   it("converts a legacy scene prompt (scene_type / gen_brief / elements / must_not)", () => {
     const scene = {
       scene_type: "Movie poster",

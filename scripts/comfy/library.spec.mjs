@@ -677,7 +677,10 @@ export const SPEC = [
     limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
     optionalModels: ['moss_image_sft_8stepdmd_int8_convrot.safetensors'],
     vramGb: 16,
-    license: 'Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder)',
+    // §4.5: each file's licence, the optional Fast file's too (Spectrallic's card is Apache-2.0).
+    license:
+      "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; " +
+      "Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
     notes:
       'Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org\'s template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. ' +
       'The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; ' +

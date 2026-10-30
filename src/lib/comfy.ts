@@ -251,6 +251,25 @@ export function computeDimensions(
   return { width: roundTo(height * ratio, multiple), height: roundTo(height, multiple) };
 }
 
+/**
+ * A canvas the request names (params.extra.width / height: a layout's, Soul's exact sizes) on the workflow's grid and
+ * inside its maxWidth / maxHeight, the shape kept: rounded to the grid, then scaled down whole when a side is past its
+ * limit. The cloud fits the same canvas the same way (payload.ts sizeValue), so 2560 × 1000 is 2048 × 800 on both.
+ */
+export function fitCanvas(width: number, height: number, limits: Record<string, number> | undefined): { width: number; height: number } {
+  const multiple = Number(limits?.dimensionMultiple ?? 16) || 16;
+  const maxW = Number(limits?.maxWidth ?? Infinity);
+  const maxH = Number(limits?.maxHeight ?? Infinity);
+  let w = roundTo(width, multiple);
+  let h = roundTo(height, multiple);
+  const k = Math.min(1, maxW / w, maxH / h);
+  if (k < 1) {
+    w = Math.min(Math.max(multiple, Math.floor(maxW / multiple) * multiple), roundTo(w * k, multiple));
+    h = Math.min(Math.max(multiple, Math.floor(maxH / multiple) * multiple), roundTo(h * k, multiple));
+  }
+  return { width: w, height: h };
+}
+
 /** Frame count for a duration. Wan/Hunyuan want 4n+1, LTX wants 8n+1. */
 export function computeFrames(durationSec: number, fps: number, step = 4, maxFrames?: number): number {
   let frames = Math.round((durationSec * fps) / step) * step + 1;

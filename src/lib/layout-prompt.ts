@@ -364,6 +364,19 @@ const sideOf = (v: unknown, fallback: number) => {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
 };
 
+/**
+ * Whether a pixel layout's boxes are MOSS's centred yxyx (a compiled prompt) or a LinXce draft's top-left xyxy: what its
+ * root says, else centred when a box has a negative edge (only the centre is an origin that gives one) or when it carries
+ * no size of its own (LinXce drafts always do) — as decodeMoss reads a prompt with the root's fields missing.
+ */
+function centredBoxes(v: Record<string, unknown>): boolean {
+  if (v.bbox_coord_space === MOSS_COORD_SPACE || v.bbox_format === MOSS_BBOX_FORMAT) return true;
+  if (v.bbox_coord_space === "abs" || v.bbox_format === "xyxy") return false;
+  const sized = num(v.width) > 0 && num(v.height) > 0;
+  const negative = (Array.isArray(v.items) ? v.items : []).some((it) => isObj(it) && (finiteBox(it.bbox) ?? []).some((n) => n < 0));
+  return negative || !sized;
+}
+
 function fromLayoutValue(v: Record<string, unknown> | unknown[], width: number, height: number): ParsedLayout | null {
   if (Array.isArray(v)) return { draft: fromElements(v), width, height, from: "elements" };
   const w = sideOf(v.width, width);
@@ -374,7 +387,7 @@ function fromLayoutValue(v: Record<string, unknown> | unknown[], width: number, 
   }
   const own = readLayout(v);
   if (own) return { draft: own, width: w, height: h, from: "fuobe" };
-  const compiled = v.bbox_coord_space === MOSS_COORD_SPACE || v.bbox_format === MOSS_BBOX_FORMAT;
+  const compiled = centredBoxes(v);
   const items = fromPixels(Array.isArray(v.items) ? v.items : [], w, h, compiled);
   return { draft: { summary: readSummary(v.summary), items }, width: w, height: h, from: compiled ? "compiled" : "linxce" };
 }

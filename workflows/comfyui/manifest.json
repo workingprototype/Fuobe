@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-29T23:00:06.691Z",
+  "generatedAt": "2026-10-30T09:34:19.291Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -1321,7 +1321,7 @@
       ],
       "customNodes": [],
       "vramGb": 16,
-      "license": "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder)",
+      "license": "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
       "validated": true,
       "notes": "Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org's template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; width / height are the layout's canvas (multiples of 16, up to 2048). Standard = the template: 25 steps, CFG 2.5, er_sde / simple, skip-layer guidance on layer 22 for the first half; Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic's SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested). vramGb 16 is a guess: there is no official figure; about 13 GB of files (DiT 5.4 + encoder 7.3 + VAE 0.25) and ComfyUI offloads. The int8 / w4a8 files run through comfy-kitchen's kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. Validated by /prompt on the CPU library server only: no render, speed or text accuracy measured here."
     },

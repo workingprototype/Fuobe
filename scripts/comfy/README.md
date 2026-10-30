@@ -394,6 +394,11 @@ node validate-workflows.mjs moss-image-t2i --shared
   `optionalModels`). All Apache-2.0. The Workflows page's install commands fetch them; nothing is downloaded at build time.
 - **Settings**: Standard is the Comfy template's (25 steps, CFG 2.5, er_sde / simple), Best OpenMOSS's guide (50, 3, euler),
   Fast the DMD file at 8 steps and CFG 1 (`ModelOptions.controls[].sets` on `oss-moss-image` writes them).
+- **Canvas**: a size the request names (`params.extra.width` / `height`, a layout's canvas) is fitted to the 16-pixel grid
+  and 2048 px a side with its shape kept (`fitCanvas` in `src/lib/comfy.ts`), as fal's `image_size` is, so both engines
+  render one size (2560 × 1000 becomes 2048 × 800 on both).
+- **Licences, as information**: all Apache-2.0, the optional Fast file's too; the small decoder is byte-identical to BFL's
+  Apache-2.0 FLUX.2-small-decoder (the manifest's `license` says so, and Settings → Models & licences shows it).
 - **Not installed on purpose**: LinXce's Comfyui-Moss-LayoutPrompt (its `MOSSImageLayoutPrompt` id collides with core's) and
   OpenMOSS's loader pack (core's native path is what its own README recommends). Fuobe compiles layouts itself
   (`src/lib/layout-prompt.ts`).

@@ -10,6 +10,7 @@ import {
   bypassNode,
   bypassReference,
   computeDimensions,
+  fitCanvas,
   computeFrames,
   dropBranch,
   dropLoadedSound,
@@ -1147,6 +1148,12 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (b.channels) values.channels = dbsChannelsFor(extra.channels, sourceChannels);
   for (const k of ["separationModel", "channels", "sourceChannels"]) delete extra[k];
   for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
+  // A canvas the request names (a layout's, Soul's exact sizes) stays on the graph's grid and inside its limits, as the
+  // cloud fits the same canvas (FieldMap.size): both engines render one size, the size a layout is compiled at.
+  if (b.width && b.height && (extra.width !== undefined || extra.height !== undefined)) {
+    const [w, h] = [Number(values.width), Number(values.height)];
+    if (w > 0 && h > 0 && Number.isFinite(w * h)) Object.assign(values, fitCanvas(w, h, manifest.limits));
+  }
   if (audio2 && ctx.op !== "dialogue" && ctx.op !== "voice-change") values.audio2 = audio2;
   // Soundtrack mix: a silent bed as long as the video, so neither track cuts the other short.
   if (ctx.op === "mux" && b.duration) {
