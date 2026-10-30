@@ -1,4 +1,13 @@
 {
+  "ComfyUI-DBS": {
+    "repo": "https://github.com/hiroki-abe-58/ComfyUI-DBS",
+    "commit": "f656e53434b5485c148a2866fbd6ddc6b6152ed6",
+    "registry": { "id": "dbs-soundtrack-separation", "version": "" },
+    "requirementsTxt": true,
+    "isolated": false,
+    "subdir": null,
+    "folders": ["dbs"]
+  },
   "ComfyUI-Frame-Interpolation": {
     "repo": "https://github.com/Fannovel16/ComfyUI-Frame-Interpolation",
     "commit": "26545cc2dd95bc3d27f056016300673bdeee78f5",
