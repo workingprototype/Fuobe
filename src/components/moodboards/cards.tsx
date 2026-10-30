@@ -7,9 +7,8 @@ import { DrawnTile } from "@/components/photodump/covers";
 import { STATUS_LABEL, type CuratedMoodboard, type Moodboard } from "./logic";
 
 /**
- * A curated look's cover: Higgsfield's preview when its live list loaded (a key is set), otherwise
- * drawn in the look's hue and treatment — grain for black and white, a flash hotspot, gels… (no
- * Higgsfield images are hot-linked without a key); its name on top.
+ * A curated look's cover: a rendered cover once the evaluation harness made one (Fuobe's own renders), otherwise
+ * drawn in the look's hue and treatment — grain for black and white, a flash hotspot, gels…; its name on top.
  */
 export function CuratedCover({ m, className }: { m: Pick<CuratedMoodboard, "name" | "hue" | "preview" | "tone">; className?: string }) {
   return (

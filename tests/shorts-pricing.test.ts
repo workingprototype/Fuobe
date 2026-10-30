@@ -80,7 +80,7 @@ describe("restyled segments stay in sync with the original sound", () => {
       modelId: "wan-2-7",
       ...over,
     });
-    const cloud = planMixed(mm({}));
+    const cloud = planMixed(mm({ mode: "fast" }));
     expect(cloud.steps.find((s) => s.key === "render")!.request.params!.duration).toBe(1.4);
     const open = planMixed(mm({ engine: "open", modelId: "oss-mixed-media", range: { start: 0, end: 10 } }));
     expect(open.steps[0].request.params!.extra).toMatchObject({ frames: 80 });

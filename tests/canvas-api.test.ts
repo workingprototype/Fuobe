@@ -63,15 +63,15 @@ describe("canvas API", () => {
     let res = await list.POST(req("POST", {}));
     expect(res.status).toBe(201);
     const blank = (await res.json()) as Canvas;
-    expect(blank).toMatchObject({ name: "Untitled canvas", graph: { nodes: [], edges: [] }, runs: {}, editedAt: null });
+    expect(blank).toMatchObject({ name: "Untitled canvas", pages: [{ id: "page-1", name: "Page 1", graph: { nodes: [], edges: [] } }], runs: {}, editedAt: null });
     id = blank.id;
 
     res = await one.PATCH(req("PATCH", { name: "Fox film", graph: board }), ctx(id));
     expect(res.status).toBe(200);
     const saved = (await res.json()) as Canvas;
     expect(saved.name).toBe("Fox film");
-    expect(saved.graph.nodes).toHaveLength(4);
-    expect(saved.graph.edges).toHaveLength(3);
+    expect(saved.pages[0].graph.nodes).toHaveLength(4);
+    expect(saved.pages[0].graph.edges).toHaveLength(3);
     expect(saved.editedAt).not.toBeNull();
 
     // Media must come from Fuobe's own storage; bad graphs are refused.
@@ -79,7 +79,7 @@ describe("canvas API", () => {
     expect(res.status).toBe(400);
     // Edges into inputs a node doesn't have are dropped on save.
     res = await one.PATCH(req("PATCH", { graph: { ...board, edges: [...board.edges, { id: "bad", source: "p", target: "vid", targetHandle: "audio" }] } }), ctx(id));
-    expect(((await res.json()) as Canvas).graph.edges.map((e) => e.id)).toEqual(["e1", "e2", "e3"]);
+    expect(((await res.json()) as Canvas).pages[0].graph.edges.map((e) => e.id)).toEqual(["e1", "e2", "e3"]);
 
     res = await list.GET();
     const items = ((await res.json()) as { items: CanvasSummary[] }).items;
@@ -137,7 +137,7 @@ describe("canvas API", () => {
     res = await run.POST(req("POST", { graph: edited, targets: ["img"] }), ctx(id));
     body = (await res.json()) as typeof body;
     expect(body.ran).toEqual(["img"]);
-    expect(body.canvas.graph.nodes[0].data.text).toBe("A grey wolf in fresh snow");
+    expect(body.canvas.pages[0].graph.nodes[0].data.text).toBe("A grey wolf in fresh snow");
     await settle(body.items[0].id);
   }, 60_000);
 
@@ -173,16 +173,16 @@ describe("canvas API", () => {
     let res = await one.PATCH(req("PATCH", { graph: long }), ctx(id));
     expect(res.status).toBe(200);
     const saved = (await res.json()) as Canvas;
-    expect(saved.graph.nodes[0].data.text).toHaveLength(10_000);
-    expect(saved.graph.nodes[2].data.prompt).toHaveLength(10_000);
-    expect(saved.graph.nodes[1].data.label).toHaveLength(80);
+    expect(saved.pages[0].graph.nodes[0].data.text).toHaveLength(10_000);
+    expect(saved.pages[0].graph.nodes[2].data.prompt).toHaveLength(10_000);
+    expect(saved.pages[0].graph.nodes[1].data.label).toHaveLength(80);
 
     // Element handles keep letters, digits, _ and - only (they end up in prompts as @handle).
     const odd = structuredClone(board);
     odd.nodes.push({ id: "el", type: "element", position: { x: 0, y: 300 }, data: { handle: "a(b", elementId: "x" } });
     odd.edges.push({ id: "e4", source: "el", sourceHandle: "out", target: "img", targetHandle: "elements" });
     res = await one.PATCH(req("PATCH", { graph: odd }), ctx(id));
-    expect(((await res.json()) as Canvas).graph.nodes.find((n) => n.id === "el")!.data.handle).toBe("ab");
+    expect(((await res.json()) as Canvas).pages[0].graph.nodes.find((n) => n.id === "el")!.data.handle).toBe("ab");
     // Planning a board with an odd handle never throws (it used to build a RegExp from it).
     res = await run.POST(req("POST", { graph: odd, targets: ["out"] }), ctx(id));
     expect(res.status).toBeLessThan(500);
@@ -215,7 +215,7 @@ describe("canvas API", () => {
       let res = await list.POST(req("POST", { templateId: "image-animate", engine: "cloud" }));
       const c = (await res.json()) as Canvas;
       expect(c.name).toBe("Image → Animate");
-      expect(c.graph.nodes.filter((n) => n.data.modelId).map((n) => n.data.modelId)).toEqual(["oss-z-image-turbo", "oss-wan22-14b-fast"]);
+      expect(c.pages[0].graph.nodes.filter((n) => n.data.modelId).map((n) => n.data.modelId)).toEqual(["oss-z-image-turbo", "oss-wan22-14b-fast"]);
       // Cloud nodes are refused with a reason.
       res = await run.POST(req("POST", { graph: board }), ctx(id));
       expect(res.status).toBe(422);
@@ -238,7 +238,7 @@ describe("canvas API", () => {
     expect(res.status).toBe(201);
     const copy = (await res.json()) as Canvas;
     expect(copy.name).toBe("Copy of Fox film");
-    expect(copy.graph.nodes).toHaveLength(4);
+    expect(copy.pages[0].graph.nodes).toHaveLength(4);
     expect(Object.keys(copy.runs).sort()).toEqual(["img", "vid"]);
 
     res = await one.DELETE(req("DELETE"), ctx(copy.id));
@@ -265,7 +265,7 @@ describe("canvas API", () => {
     expect(renamed.handle).not.toBe(el.handle);
     // The board shows the element's name now, and a run mentions its new @handle.
     const view = (await (await one.GET(req("GET"), ctx(created.id))).json()) as { canvas: Canvas };
-    expect(view.canvas.graph.nodes[0].data).toMatchObject({ handle: renamed.handle, name: "Maya Lee" });
+    expect(view.canvas.pages[0].graph.nodes[0].data).toMatchObject({ handle: renamed.handle, name: "Maya Lee" });
     const body = (await (await run.POST(req("POST", { graph }), ctx(created.id))).json()) as { items: Generation[] };
     expect(body.items[0].request.prompt).toContain(`@${renamed.handle}`);
     // …which the server resolves to the element (it has no photos: its name goes into the prompt).

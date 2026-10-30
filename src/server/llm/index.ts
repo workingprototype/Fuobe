@@ -63,6 +63,17 @@ export function localLabel(): string {
   return pinned ? LOCAL_LABELS[pinned] : (pick(localServers())?.server.label ?? "a local model");
 }
 
+/**
+ * The model local text steps run on now, for its licence: the ready server's (cached answers only: never
+ * asks), else the model the pinned server is set to, else Ollama's. `model` is "" when the server picks one.
+ */
+export function localModelInUse(): { label: string; model: string } {
+  const ready = pick(localServers());
+  if (ready?.status.model) return { label: ready.server.label, model: ready.status.model };
+  const s = localServer(pinnedKind() ?? "ollama");
+  return { label: s.label, model: s.model };
+}
+
 /** What to connect, in a sentence: the pinned server, or any of the three. */
 export const localWhat = (): string => {
   const pinned = pinnedKind();
@@ -245,6 +256,29 @@ export async function testLocal(kind?: LocalKind | null): Promise<{ ok: boolean;
   } catch (e) {
     return { ok: false, detail: (e as Error).message };
   }
+}
+
+/**
+ * Settings → Save & test for a local server's URL, model or key: does it answer, and has it the model
+ * Settings names? Reads its model list only (no call, nothing loaded), so it is quick. Without
+ * `kind`: the server text steps would use.
+ */
+export async function checkLocal(kind?: LocalKind | null): Promise<{ ok: boolean; detail: string }> {
+  const servers = kind ? [localServer(kind)] : localServers();
+  await refresh(servers, true);
+  const need = llmContext();
+  const ready = pick(servers);
+  if (!ready) {
+    const said = servers.map((s) => statusOf(s, need)).find((st) => st?.problem && (st.up || servers.length === 1));
+    return { ok: false, detail: said?.problem ?? `Nothing answers at ${servers.map((s) => s.url).join(", ")}. Start Ollama, LM Studio or Unsloth Studio, or set your server's URL.` };
+  }
+  const { server, status } = ready;
+  // Ollama answers without the model too (a call would name it): here that is a failed check.
+  if (server.kind === "ollama" && status.warning) {
+    return { ok: false, detail: status.models.length ? `Ollama answers, but ${server.model} isn't pulled — run: ollama pull ${server.model}` : status.warning };
+  }
+  const detail = `${cap(server.label)} · ${status.model ?? "its loaded model"} ready`;
+  return { ok: true, detail: status.warning ? `${detail} · ${status.warning}` : detail };
 }
 
 /** What /api/status says about the local model (no keys). */

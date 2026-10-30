@@ -75,10 +75,31 @@
 //   frameWidth                            (reference brief: width the clip's frames are scaled to, px)
 // Keys added with round 4 (engine seams):
 //   curveMode, filterSpeckle, colorPrecision (VTracer: spline | polygon | none curves, specks dropped (px), colour precision bits)
+// Keys added by the remove-object package (round 4):
+//   colormap*                             (Video Depth Anything's colour map: gray | inferno; params.colormap grayscale → gray)
+//   sideBySide                            (depth maps: the original clip next to the depth map)
+// Keys added with the round-4 video-finish workflows (FPS Boost, chunked upscaling, HDR formats). * = the provider fills it:
+//   every*                                (FPS Boost: keep every n-th interpolated frame; source fps x multiplier / every = the target)
+//   slowdown*                             (FPS Boost: slow-motion factor, params.slowdown; the output fps is divided by it)
+//   shortSide*                            (chunked upscalers: the output's shorter edge in px, params.resolution: 1080p -> 1080)
+//   colorSpace*                           (SDR to HDR: CreateVideo color space, "HDR" = BT.2020 HLG, "HDR PQ" = BT.2020 PQ (HDR10): params.format)
+// Keys added with Fuobe Soul (Originals O2):
+//   megapixels*                           (image to image: the picture scaled to about this many megapixels, Soul's tier: 1 = 720p, 2 = 1080p)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
-// "brief"). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
-// segment per caption cue before submitting).
+// "brief" | "mask" (a painted eraser's last tracked frame, white = the object) | "cutout" | "matte" (a matte graph's transparent
+// and black-and-white videos: params.matteOutput keeps one)). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
+// segment per caption cue before submitting), "timeline", "videos" / "audios" (one loader per clip in inputs.videos / audios),
+// optionalModels (files a model control can pick instead of the graph's own,
+// listed in the manifest with optional: true so missing-model help can name their download),
+// packs (node packs the validation server lacks, see PACK_CLASSES; listed in customNodes), modelUrls (a file's
+// download at a pinned revision for this workflow, over KNOWN_MODELS).
+// Keys added with Genjutsu's Character swap (O5, docs/research/openjutsu-6.md). * = the provider fills it:
+//   quality*                              (H3 PrepareVideo resolution "480" | "768": params.resolution 480p / 768p)
+//   selection, subjectIndex               (who to swap: largest | leftmost | rightmost | index, and the index)
+//   positiveCoords*, negativeCoords*      (SAM3_Detect clicks: JSON [{"x","y"}] in the prepared first frame's pixels: params.points)
+//   audioGuide, useMask                   (H3 audio guide; masked regeneration off = the whole frame)
+//   windowFrames, historyFrames           (H3 window plan: "124" / "18", strings of the pack's combos)
 
 import fs from 'node:fs';
 
@@ -108,14 +129,27 @@ export const CUSTOM_NODE_REPOS = {
   // isolated worker only (process-wide side effects / old pins), see scripts/comfy/README.md
   'ComfyUI-LatentSyncWrapper': 'https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper',
   'ComfyUI-ThinkSound_Wrapper': 'https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper',
+  // Genjutsu's Character swap (docs/research/openjutsu-6.md): Akatz Labs' H3 nodes, GPL-3.0. Not installed on the
+  // validation server (entries list them with `packs`); install-comfyui.sh pins both.
+  h3_character_swap: 'https://github.com/akatz-labs/h3-character-swap-tool/tree/0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b/worker_nodes/h3_character_swap',
+  'h3-relay': 'https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220',
+};
+
+// Node classes of the packs entries list in `packs` (packs the validation server doesn't have installed): the build
+// expects them instead of reporting "not installed", and the entry's customNodes name the pack.
+export const PACK_CLASSES = {
+  h3_character_swap: /^H3CharacterSwap/,
+  'h3-relay': /^(H3Relay|LabsH3)/,
 };
 
 // Model download locations for files that the source workflow does not annotate
 // (UI templates usually carry node.properties.models; custom-node examples do not).
 export const KNOWN_MODELS = {
+  'ltx-2.3-22b-distilled-fp8.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors' },
+  'gemma_3_12B_it_fp4_mixed.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors' },
   'RealESRGAN_x4plus.safetensors': { folder: 'upscale_models', url: 'https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged/resolve/main/RealESRGAN_x4plus.safetensors' },
   'birefnet.safetensors': { folder: 'background_removal', url: 'https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors' },
-  'film_net_fp16.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/frame_interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors' },
+  'film_net_fp16.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/Frame-Interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors' },
   'rife_v4.26.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/frame_interpolation/resolve/main/frame_interpolation/rife_v4.26.safetensors' },
   'inswapper_128.onnx': { folder: 'insightface', url: 'https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/inswapper_128.onnx' },
   'GFPGANv1.4.pth': { folder: 'facerestore_models', url: 'https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/GFPGANv1.4.pth' },
@@ -151,6 +185,15 @@ export const KNOWN_MODELS = {
   'lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors' },
   'Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/WanMove/Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors' },
   'sam3.1_multiplex_fp16.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+  // MiniMax H3 for the Character swap, at the revisions docs/research/openjutsu-6.md §6 read (sizes and SHA-256 there).
+  'minimax_h3_ref2va_pruned_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors' },
+  'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' },
+  'minimax_h3_video_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_video_vae_fp16.safetensors' },
+  'minimax_h3_audio_vae_fp32.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/vae/minimax_h3_audio_vae_fp32.safetensors' },
+  'minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/3ec17a324ced54151364f24f8b5fb6bf7e26414f/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors' },
+  'h3_character_swap_v1.5.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/d06323b7c8e70e97cdab48b78a1e05f786c8cba9/h3_character_swap_v1.5.safetensors' },
+  'h3_character_swap_pro4500_1000.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/a665bb7e3bb9804e487d2925f67744f554c8ad49/h3_character_swap_pro4500_1000.safetensors' },
+  'H3-Person-Remover-V1.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA/resolve/fe136b3dc93aea993b9f194d48ea9859fdc2de14/H3-Person-Remover-V1.safetensors' },
   'depth_anything_3_mono_large.safetensors': { folder: 'geometry_estimation', url: 'https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors' },
   // comfyui-oss-3 additions (docs/research/comfyui-oss-3.json, sizes from the Hugging Face tree API)
   'z_image_turbo_bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
@@ -186,6 +229,7 @@ export const KNOWN_MODELS = {
   'qwen3.5_4b_bf16.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen3.5/resolve/main/text_encoders/qwen3.5_4b_bf16.safetensors' },
   'gemma4_e4b_it_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors' },
   'trellis_2_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/diffusion_models/trellis_2_int8_convrot.safetensors' },
+  'pixal3d_multiview_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/diffusion_models/pixal3d_multiview_int8_convrot.safetensors' },
   'trellis_2_shape_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_shape_vae_bf16.safetensors' },
   'trellis_2_texture_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_texture_vae_bf16.safetensors' },
   'dino_v3_L_naf_fp32.safetensors': { folder: 'clip_vision', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/clip_vision/dino_v3_L_naf_fp32.safetensors' },
@@ -208,6 +252,9 @@ export const KNOWN_MODELS = {
   'dino_v3_vit_h.safetensors': { folder: 'clip_vision', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/clip_vision/dino_v3_vit_h.safetensors' },
   'triposplat_vae_decoder_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/vae/triposplat_vae_decoder_fp16.safetensors' },
   'triposplat_fp16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/diffusion_models/triposplat_fp16.safetensors' },
+  // round 4 (r4/video-finish): the chunked SeedVR2 graph is hand-built, so its files are named here (same files as the template).
+  'seedvr2_3b_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors' },
+  'seedvr2_ema_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors' },
 };
 
 const WAN_NEG_EN =
@@ -1694,8 +1741,8 @@ export const SPEC = [
     handBuilt: 'hand-built/video-bg-remove-birefnet.json',
     bindings: { video: [b('1', 'file')] },
     outputs: [
-      { node: '7', kind: 'video' },
-      { node: '10', kind: 'video' },
+      { node: '7', kind: 'video', role: 'cutout' },
+      { node: '10', kind: 'video', role: 'matte' },
     ],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1703,7 +1750,8 @@ export const SPEC = [
     notes:
       'Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). ' +
       'Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs "images" (animated: true), not "videos": classify by the .webm extension / the declared kind. ' +
-      'Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For "keep only X" use video-bg-remove-sam3.',
+      'Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For "keep only X" use video-bg-remove-sam3. ' +
+      'Roles: node 7 "cutout", node 10 "matte"; params.matteOutput ("cutout" | "matte", on a Remove background job: op bg-remove-video) makes the provider drop the other save node (Video tools → Remove background: Cutout video / Alpha mask).',
   },
   {
     id: 'video-bg-remove-sam3',
@@ -1714,20 +1762,26 @@ export const SPEC = [
       video: [b('1', 'file')],
       prompt: [b('4', 'text')],
     },
-    outputs: [{ node: '9', kind: 'video' }],
+    outputs: [
+      { node: '9', kind: 'video', role: 'cutout' },
+      { node: '12', kind: 'video', role: 'matte' },
+    ],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 6,
     license: 'Meta SAM License (royalty-free, commercial use allowed; attribution + acceptable-use terms)',
     notes:
       'prompt = what to KEEP ("person", "red car"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices "" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). ' +
-      'Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history "images" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead.',
+      'Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history "images" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead. ' +
+      'Second output (node 12, role "matte", added by the remove-object package) = the black-and-white matte .mp4 of what was kept (MaskToImage -> CreateVideo at the source fps); ' +
+      'params.matteOutput ("cutout" | "matte", on a Remove background job: op bg-remove-video) makes the provider drop the other save node, so only the chosen one is encoded.',
   },
   {
     id: 'video-depth-da3',
     title: 'Video Depth Map (Depth Anything 3 Mono)',
     capability: 'depth-video',
     handBuilt: 'hand-built/video-depth-da3.json',
-    bindings: { video: [b('1', 'file')] },
+    bindings: { video: [b('1', 'file')], sideBySide: [b('9', 'value')] },
+    defaults: { sideBySide: false },
     outputs: [{ node: '7', kind: 'video' }],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1741,7 +1795,8 @@ export const SPEC = [
     title: 'Video Depth Map (Video Depth Anything Small, temporally stable)',
     capability: 'depth-video',
     handBuilt: 'hand-built/video-depth-vda-small.json',
-    bindings: { video: [b('1', 'file')] },
+    bindings: { video: [b('1', 'file')], colormap: [b('5', 'colormap')], sideBySide: [b('9', 'value')] },
+    defaults: { colormap: 'gray', sideBySide: false },
     outputs: [{ node: '7', kind: 'video' }],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1749,7 +1804,9 @@ export const SPEC = [
     autoDownloads: ['LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Small video_depth_anything_vits.pth (0.12 GB) into models/videodepthanything on first run'],
     notes:
       'yuvraj108c/ComfyUI-Video-Depth-Anything: LoadVideoDepthAnythingModel(model video_depth_anything_vits.pth - pass it explicitly, the declared default ".safetensors" is not in its own option list) -> ' +
-      'VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped.',
+      'VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped. ' +
+      'colormap = gray | inferno (the only two VideoDepthAnythingOutput offers; turbo / magma / viridis would need a LUT step). sideBySide true = the original clip on the left, ' +
+      'the depth map scaled to the clip\'s size on the right (ImageStitch; an even width for the encoder), through a lazy ComfySwitchNode (remove-object package).',
   },
 
   // ---- palette / colour lock ----------------------------------------------
@@ -1954,6 +2011,81 @@ export const SPEC = [
       'One job = generate + lock. The provider writes paletteText from params.palette ("Color palette: #.., #..") and renders paletteImage, a swatch PNG with one band per colour, server-side. ' +
       'strength 0 = prompt only; 0.5-0.8 = lock; 1.0 = full statistics transfer (shifts skin tones). method mkl_lab (default, keeps contrast), reinhard_lab (softer), histogram (strongest). ' +
       'palette-transfer-image / -video do the same lock as a post-step for any model (cloud outputs too).',
+  },
+
+  // ---- Fuobe Soul (Originals O2): restyle a picture with a look ----------------------
+  {
+    id: 'z-image-turbo-i2i',
+    title: 'Z-Image Turbo image to image (Fuobe Soul edit: the look and its LoRAs on your picture)',
+    capability: 'edit',
+    handBuilt: 'hand-built/z-image-turbo-i2i.json',
+    bindings: {
+      image: [b('1', 'image')], megapixels: [b('2', 'megapixels')], prompt: [b('14', 'text')], seed: [b('17', 'seed')], steps: [b('17', 'steps')],
+      strength: [b('17', 'denoise')], shift: [b('13', 'shift')],
+    },
+    outputs: [{ node: '19', kind: 'image' }],
+    defaults: { steps: 8, shift: 3, strength: 0.6, megapixels: 1 },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 12,
+    license: 'Apache-2.0 (Z-Image Turbo)',
+    notes:
+      'Fuobe Soul\'s edit route (Soul 2.0 image-to-image): the picture scaled to Soul\'s tier (megapixels 1 = 720p, 2 = 1080p) on the 16-pixel grid, VAE-encoded, then the Soul sampler ' +
+      '(8 steps, cfg 1, res_multistep, shift 3) at denoise = strength (0.6 like fal\'s z-image/turbo/image-to-image; about 0.17 would be Higgsfield\'s refiner pass, an experiment until the evaluation harness measures it). ' +
+      'The look\'s LoRAs are injected after the UNETLoader (LoraLoaderModelOnly), as on z-image-turbo-t2i. The result keeps the picture\'s shape.',
+  },
+
+  // ---- Fuobe DoP (Originals O4): LTX-2.3 camera moves, FPV and transitions with LoRAs ------------
+  {
+    id: 'ltx23-i2v-lora',
+    title: 'LTX-2.3 22B distilled image to video + LoRAs (Fuobe DoP · LTX)',
+    capability: 'i2v',
+    handBuilt: 'hand-built/ltx23-i2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')], image: [b('31', 'image')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'From the official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, one pass of 8 manual sigmas, cfg 1, Euler ancestral) without the end-frame guide: the start frame is a ' +
+      'first-frame guide at strength 1 (the template uses 0.7 for both ends), resized and centre-cropped to width x height. A motion\'s LoRAs (FPV, Wind to Face, the transition LoRA) are ' +
+      'injected after the CheckpointLoaderSimple (LoraLoaderModelOnly). Silent like a DoP clip: the audio latent rides through the audio-video sampler but is not decoded. frames = seconds*fps+1 (8n+1), 24 fps.',
+  },
+  {
+    id: 'ltx23-flf2v-lora',
+    title: 'LTX-2.3 22B distilled start and end frame to video + LoRAs (Fuobe DoP · LTX transitions)',
+    capability: 'flf2v',
+    handBuilt: 'hand-built/ltx23-flf2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')], image: [b('31', 'image')], endImage: [b('39', 'image')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'The official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, first- and last-frame guides at strength 0.7, 8 manual sigmas, cfg 1) with plain size, frame and fps values ' +
+      'and the joyfox LTX-2.3 Transition LoRA (or any LTX-2.3 LoRA) injected after the CheckpointLoaderSimple. Both frames are resized and centre-cropped to width x height. Silent (the audio is not decoded).',
+  },
+  {
+    id: 'ltx23-t2v-lora',
+    title: 'LTX-2.3 22B distilled text to video + LoRAs',
+    capability: 't2v',
+    handBuilt: 'hand-built/ltx23-t2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'ltx23-i2v-lora without the start frame: the empty latent takes width x height directly. LoRAs injected after the CheckpointLoaderSimple. Silent (the audio is not decoded). ' +
+      'Not used by a catalog model yet (build plan O4 lists it for LTX camera LoRAs without a start frame).',
   },
 
   // ---- Shorts Studio / Mixed Media: trim, segment, restyle ------------------------
@@ -2187,7 +2319,7 @@ export const SPEC = [
     autoDownloads: ['Apply Whisper downloads large-v3-turbo.pt (1.62 GB) into models/stt/whisper on first run'],
     notes:
       'All-ComfyUI alternative that transcribes and burns in one job (word-by-word captions from words_alignment). One style per run (font, size, colour, border, centred). ' +
-      'Because of the NC code licence the default open route is captions-qwen3-asr + captions-burnin, and install-comfyui.sh only installs ComfyUI-Whisper with NC_PACKS=1. Save SRT (not an output node) is dropped; the transcript text is kept. ' +
+      'The default open route is captions-qwen3-asr + captions-burnin (chosen because of this NC code licence, which is now information: Settings → Models & licences); install-comfyui.sh installs ComfyUI-Whisper unless NC_PACKS=0. Save SRT (not an output node) is dropped; the transcript text is kept. ' +
       'VHS_LoadVideo decodes the whole clip and Add Subtitles To Frames copies it (about 2.5 copies of the frames in RAM): the provider refuses clips that would need more than half of the ComfyUI server\'s RAM and points to the chunked route. ' +
       'sourceLanguage takes Whisper\'s own names (the provider maps ISO codes: tl/fil -> Tagalog, he -> Hebrew).',
   },
@@ -2306,7 +2438,9 @@ export const SPEC = [
     },
     outputs: [{ node: '322', kind: 'model3d' }],
     vramGb: 16,
-    license: 'Pixal3D weights, DINOv3-NAF and TRELLIS VAEs as repackaged by Comfy-Org (licence not reviewed yet); MoGe-2 and BiRefNet as in their own entries',
+    license:
+      'MIT (Pixal3D weights by TencentARC, as the multi-view weights; TRELLIS.2 VAEs as repackaged by Comfy-Org, BiRefNet, microsoft/MoGe 2); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
+      '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
     notes: 'Template 3d_pixal3d_trellis2_image_to_model, Pixal3D branch (the default image-to-3D route): MoGe-2 (geometry_estimation/moge_2_vitl_normal_fp16, resolution_level 9) estimates the camera from the cut-out, MoGeGeometryToFOV (horizontal, degrees) -> Pixal3DConditioning (camera_angle_x) with the DINOv3 encoder, UNet pixal3d_int8_convrot; ImageCropToMask pad_factor 1.1 (as the node asks for Pixal3D). BiRefNet cut-out -> ImageCropToMask 1024 -> structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> RemeshMesh (768, sign_mode solid, fill 20, band 1, smooth 20) -> DecimateMesh (250,000 faces, midpoint) -> smooth normals -> UV unwrap -> base colour / metallic / roughness baked at textureSize, normal map 2048 and AO 1024 baked from the dense remeshed mesh onto the decimated one -> GLB (Save3DAdvanced, history ui "3d"). No turntable in the graph: after the job the Fuobe server finishes the GLB (scripts/model3d/finish-glb.mjs: roughness floor by material, pivot at the bottom centre, meshopt + WebP 2048 web GLB as meta.web; the raw GLB stays the download) and renders a 96-frame 24 fps turntable on the CPU (scripts/model3d/render-turntable.mjs, model-viewer on SwiftShader) when Chromium and ffmpeg are available (src/server/model3d-finish.ts). GPU validation 2026-10-23 (RTX 5090, the same graph run end to end): 114-185 s per object, 25-35 MB raw GLB at ~250k triangles (was 8M triangles / 317 MB before the decimate step), web GLB 1.6-3.6 MB; more faithful to the photo than TRELLIS.2 (209-238 s). The origin is the camera-aligned volume centre, hence the pivot fix. Surfaces can show faint planar facets from the shape decode (no graph setting removes them).',
   },
   {
@@ -2319,8 +2453,36 @@ export const SPEC = [
     },
     outputs: [{ node: '322', kind: 'model3d' }],
     vramGb: 16,
-    license: 'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet)',
+    license:
+      'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
+      '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
     notes: 'Template 3d_pixal3d_trellis2_image_to_model, TRELLIS.2 branch (the fallback image-to-3D route; Pixal3D is the default): Trellis2Conditioning with the DINOv3 encoder, UNet trellis_2_int8_convrot; ImageCropToMask pad_factor 1.0. BiRefNet cut-out -> ImageCropToMask 1024 -> structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> RemeshMesh (768, sign_mode solid, fill 20, band 1, smooth 20) -> DecimateMesh (250,000 faces, midpoint) -> smooth normals -> UV unwrap -> base colour / metallic / roughness baked at textureSize, normal map 2048 and AO 1024 baked from the dense remeshed mesh onto the decimated one -> GLB (Save3DAdvanced, history ui "3d"). No turntable in the graph: after the job the Fuobe server finishes the GLB (scripts/model3d/finish-glb.mjs: roughness floor by material, pivot at the bottom centre, meshopt + WebP 2048 web GLB as meta.web; the raw GLB stays the download) and renders a 96-frame 24 fps turntable on the CPU (scripts/model3d/render-turntable.mjs, model-viewer on SwiftShader) when Chromium and ffmpeg are available (src/server/model3d-finish.ts). GPU validation 2026-10-23: 209-238 s, 28-43 MB raw GLB at ~250k triangles. The 36-view RotateMesh + RenderMesh turntable (unlit, aliased, 12 fps) was removed.',
+  },
+  {
+    id: 'image-to-3d-trellis2-multiview',
+    title: 'Photos of 2-4 sides to textured 3D (Pixal3D multi-view on TRELLIS.2, PBR GLB) + a 36-view turntable video',
+    capability: 'image-to-3d',
+    handBuilt: 'hand-built/image-to-3d-trellis2-multiview.json',
+    bindings: {
+      image: [b('360', 'image')], image2: [b('361', 'image')], image3: [b('362', 'image')], image4: [b('363', 'image')],
+      seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')], turntableFps: [b('701', 'fps')], fovX: [b('381', 'fov_x_degrees')],
+    },
+    outputs: [{ node: '372', kind: 'model3d' }, { node: '702', kind: 'video', role: 'turntable' }],
+    vramGb: 16,
+    license:
+      'MIT (Pixal3D multi-view weights by TencentARC, TRELLIS.2 VAEs as repackaged by Comfy-Org, BiRefNet, microsoft/MoGe 2); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
+      '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
+    notes:
+      'Template 3d_pixal3d_multi_views (2026-09-09) with the turnaround-sheet loader and its crops replaced by one upload per side: image = front, image2 = left, image3 = back, image4 = right ' +
+      '(Pixal3DMultiViewConditioning, a fixed orbit rig 90 degrees apart, Z up: the left view is the object\'s own left, the camera at +90 degrees azimuth from the front, i.e. the photographer walks to their right; ' +
+      'every side but the front is optional and the provider drops the branch of a side with no photo). ' +
+      'Each side: BiRefNet cut-out -> crop to mask (1024, pad 1.1) -> the view. Then TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) on Pixal3D multi-view ' +
+      '-> decimate to 700k faces -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB, plus a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps; the Fuobe server then finishes the GLB (web GLB as meta.web) and, when Chromium and ffmpeg are there, replaces that turntable with its CPU render (src/server/model3d-finish.ts). ' +
+      'The views\' horizontal field of view as framed (Pixal3DMultiViewConditioning.fov) is measured on the front crop: MoGe 2 (LoadMoGeModel -> MoGeInference -> MoGeGeometryToFOV, horizontal, degrees), ' +
+      'as the node\'s tooltip says for photos and as the official single-view template 3d_pixal3d_trellis2_image_to_model feeds Pixal3DConditioning; the multi-view template keeps the rig value 20, ' +
+      'which suits rendered turnaround sheets but not phone photos, whose crops are usually wider. fovX (degrees, 0 = estimate, the default) fixes MoGe\'s lens instead, ' +
+      'so MoGeGeometryToFOV passes it on (20 for a generated turnaround sheet). ' +
+      'Weights: pixal3d_multiview_int8_convrot 5.58 GB + moge_2_vitl_normal_fp16 0.66 GB + the TRELLIS.2 VAEs, DINOv3-NAF and BiRefNet the single-view graph already uses. VRAM unverified (as the single-view graph: 16 GB). Validated by /prompt only.',
   },
   {
     id: 'image-to-3d-hunyuan3d-21',
@@ -2552,7 +2714,10 @@ export const SPEC = [
       maskGrow: [b('11', 'expand')], prompt: [b('16', 'text')], negativePrompt: [b('17', 'text')], checkpoint: [b('20', 'unet_name')],
       loraStrength: [b('21', 'strength_model')], shift: [b('22', 'shift')], seed: [b('23', 'seed')], steps: [b('23', 'steps')], cfg: [b('23', 'cfg')],
     },
-    outputs: [{ node: '38', kind: 'video' }],
+    outputs: [
+      { node: '38', kind: 'video' },
+      { node: '77', kind: 'image', role: 'mask' },
+    ],
     defaults: { checkpoint: 'wan2.1_vace_14B_fp16.safetensors' },
     limits: { maxWidth: 1280, maxHeight: 1280, maxFrames: 81, dimensionMultiple: 16 },
     vramGb: 24,
@@ -2563,7 +2728,10 @@ export const SPEC = [
       'The mask is scaled to the work size like the frames (not cropped), so any PNG size lines up. ' +
       'Everything else as video-inpaint-wan-vace: windows in seconds (startTime, duration; at most 81 frames, the largest 4n+1 decoded), width x height = the work-size budget in the clip\'s shape, ' +
       'paste-back into the original frames, the window\'s sound kept. ' +
-      'For a window after the first, the mask must be painted on (or tracked to) that window\'s first frame. Validated by /prompt only (no GPU here).',
+      'For a window after the first, the mask must be painted on (or tracked to) that window\'s first frame: the second output (node 77, role "mask", added by the remove-object package) ' +
+      'is the tracked mask of the window\'s LAST frame (SAM3_TrackToMask before GrowMask, at the work size, white = the object), which Fuobe feeds to the next window as its mask, so the object is followed across windows. ' +
+      'The provider keeps node 77 only when params.extra.handOffMask is true (a window another one waits on); otherwise it is dropped, so a single or last window saves just the video. ' +
+      'Validated by /prompt only (no GPU here).',
   },
   {
     id: 'video-erase-void',
@@ -2642,6 +2810,156 @@ export const SPEC = [
       'Window rules (startTime / duration in seconds, at most 81 frames), the work-size budget, paste-back and the kept sound as video-inpaint-wan-vace. Validated by /prompt only (no GPU here).',
   },
 
+  // ---- Genjutsu Character swap (O5, docs/research/openjutsu-6.md): MiniMax H3 + Akatz Labs' Character Swap LoRA ----
+  // Openjutsu's graph (Comfy Org, MIT; derived from Akatz Labs' MIT workflow at 0670e4f) on the UNPATCHED h3_character_swap
+  // pack: the resolution goes as the string "480" / "768". The pack is not installed on the validation server, so these
+  // graphs are checked statically (core nodes against /object_info) and validate only where the pack is installed.
+  {
+    id: 'video-character-swap-h3',
+    title: 'Character swap: SAM 3.1 picks the person, MiniMax H3 + the Character Swap LoRA regenerate only them (h3_character_swap pack)',
+    capability: 'video-character-swap',
+    handBuilt: 'hand-built/video-character-swap-h3.json',
+    packs: ['h3_character_swap'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    optionalModels: ['h3_character_swap_pro4500_1000.safetensors'],
+    bindings: {
+      video: [b('30', 'file')], image: [b('9', 'image')], image2: [b('anchor_image', 'image')],
+      startTime: [b('trim', 'start_time')], duration: [b('trim', 'duration'), b('31', 'duration_seconds')], quality: [b('31', 'resolution')],
+      prompt: [b('801', 'prompt')], seed: [b('801', 'seed')], steps: [b('801', 'steps')], cfg: [b('801', 'cfg')], audioGuide: [b('801', 'audio_guide')],
+      maskPrompt: [b('101', 'text')], selection: [b('104', 'selection')], subjectIndex: [b('104', 'index')], maskGrow: [b('110', 'expansion_px')],
+      positiveCoords: [b('103', 'positive_coords')], negativeCoords: [b('103', 'negative_coords')], useMask: [b('803', 'use_mask')],
+      windowFrames: [b('805', 'window_frames')], historyFrames: [b('805', 'history_frames')],
+      lora: [b('850', 'lora_name')], loraStrength: [b('850', 'strength_model')], filenamePrefix: [b('809', 'filename_prefix')],
+    },
+    outputs: [{ node: '809', kind: 'video' }],
+    defaults: { quality: '768', maskPrompt: 'person', selection: 'largest', subjectIndex: 0, maskGrow: 64, audioGuide: true, useMask: true, windowFrames: '124', historyFrames: '18', lora: 'h3_character_swap_v1.5.safetensors' },
+    limits: { maxDurationSec: 30, maxFrames: 3592 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Character Swap LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · FL2V Turbo LoRA Apache-2.0 at the pinned revision · h3_character_swap nodes GPL-3.0 (Akatz Labs; NVIDIA INT8 kernel derivative Apache-2.0)',
+    notes:
+      'Genjutsu "Character swap" on the open engine (Openjutsu, comfy-openjutsu @ 70ec62d; Akatz Labs h3-character-swap-tool @ 0670e4f). video = the clip, image = the character, image2 = the anchor first frame ' +
+      '(absent: the provider deletes anchor_image and anchor_fit, unlinks 803.anchor and sets 803.use_anchor false); startTime / duration pick the part (trim and 31.duration_seconds both get the length, 5-15 s; up to 30 s plans more windows, beyond H3\'s trained range). ' +
+      'quality "480" | "768" (strings: the unpatched pack; Openjutsu\'s patched pack takes integers). prompt in H3\'s reference tags (<Video 1> the clip, <Picture 1> the character, <Picture 2> the anchor). ' +
+      'Who to swap: maskPrompt (SAM words, "person"), selection largest | leftmost | rightmost | index with subjectIndex, or clicks as positiveCoords / negativeCoords (JSON pixel points on the prepared first frame). ' +
+      'lora V1.5 (h3_character_swap_v1.5) or V1 (h3_character_swap_pro4500_1000); "none" deletes node 850 and feeds 800.model from the Turbo LoRA (node 4). 8 steps, CFG 1, er_sde / normal for the FL2V Turbo LoRA; windows 124 frames with 18 of history (17n+5 / 0, 1, 17n+1). ' +
+      'The clip\'s own sound is put back by the pack (807) and kept by CreateVideo; the pack also writes its own MP4 under output/H3-Character-Swap. Needs FFmpeg and FFprobe on PATH. ' +
+      'Tested by its authors on a 96 GB RTX PRO 6000 (Comfy) and a 24 GB RTX 4090 with 128 GB RAM and model offloading (Akatz); NVFP4 text encoding runs natively on compute capability 10+ (Blackwell), slower elsewhere. 46.33 GB of weights. ' +
+      'Not validated here: the h3_character_swap nodes are not installed on this server (the 22 core nodes were checked against /object_info, docs/research/openjutsu-6.md §3.3).',
+  },
+  {
+    id: 'video-character-swap-h3-relay',
+    title: 'Character swap on H3 Relay 2.0: SAM 3.1 subject, MiniMax H3 + the Character Swap LoRA in native loop windows (h3-relay pack)',
+    capability: 'video-character-swap',
+    handBuilt: 'hand-built/video-character-swap-h3-relay.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    optionalModels: ['h3_character_swap_pro4500_1000.safetensors'],
+    bindings: {
+      video: [b('source', 'file')], image: [b('reference', 'image')],
+      startTime: [b('trim', 'start_time')], duration: [b('trim', 'duration'), b('prepare', 'duration_seconds')], quality: [b('prepare', 'resolution')],
+      prompt: [b('reference_conditioning', 'prompt')], seed: [b('plan', 'seed')], steps: [b('schedule', 'steps')], cfg: [b('guider', 'cfg')], audioGuide: [b('history', 'target_audio_guide')],
+      maskPrompt: [b('subject', 'text')], selection: [b('select', 'selection')], subjectIndex: [b('select', 'index')], maskGrow: [b('expand_mask', 'expansion_px')],
+      positiveCoords: [b('detect', 'positive_coords')], negativeCoords: [b('detect', 'negative_coords')],
+      windowFrames: [b('plan', 'window_frames')], historyFrames: [b('plan', 'history_frames')],
+      lora: [b('adapter', 'lora_name')], loraStrength: [b('adapter', 'strength_model')], filenamePrefix: [b('save', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video' }],
+    defaults: { quality: '768', maskPrompt: 'person', selection: 'largest', subjectIndex: 0, maskGrow: 64, audioGuide: true, windowFrames: '124', historyFrames: '18', lora: 'h3_character_swap_v1.5.safetensors' },
+    limits: { maxDurationSec: 30, maxFrames: 3592 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Character Swap LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · FL2V Turbo LoRA Apache-2.0 at the pinned revision · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors; vendored Context Loop and Spectrum GPL-3.0); the graph is H3 Relay\'s example workflow (GPL-3.0 repository)',
+    notes:
+      'Akatz Labs\' newer route for the same swap (h3-relay @ e2a7665b, 2.0.1; example_workflows/toolkit/H3-Character-Swap.api.json, which Akatz\'s tool ships at 5f83374). Changed: a Trim Video node picks the part, the mask preview is removed, the adapter loads the V1.5 file by its Hugging Face name. ' +
+      'Bindings as video-character-swap-h3 without an anchor frame or a masked-generation switch; lora "none" deletes the adapter and feeds its users from the Turbo LoRA. H3 Relay registers HTTP routes and an in-memory H3 layout compatibility layer on import: run it on the isolated worker if you prefer (install-comfyui.sh installs it with H3_RELAY=1). ' +
+      'Needs FFmpeg and FFprobe on PATH. Not validated here: the pack is not installed on this server.',
+  },
+  // Remove object's "Remove a person (H3)" (docs/research/openjutsu-6.md §4.4, §11.1 item 9): H3 Relay 2.0's Person Removal
+  // example (akatz-ai/h3-relay @ e2a7665b, GPL-3.0) with Akatz Labs' Person Remover V1 LoRA, started from a clean first
+  // frame the app makes (the person already gone). The clip comes in at 24 fps on the 32-pixel grid (Fuobe's fit step).
+  {
+    id: 'video-person-remove-h3-relay',
+    title: 'Remove a person on H3 Relay 2.0: SAM 3.1 marks them green, MiniMax H3 + the Person Remover LoRA rebuilds the background from a clean first frame (h3-relay pack)',
+    capability: 'remove-object',
+    handBuilt: 'hand-built/video-person-remove-h3-relay.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    bindings: {
+      video: [b('source', 'file')], image: [b('anchor', 'image')],
+      maskPrompt: [b('subject', 'text')], maskGrow: [b('grow_mask', 'expand')], seed: [b('plan', 'seed')], steps: [b('schedule', 'steps')],
+      windowFrames: [b('plan', 'window_frames')], historyFrames: [b('plan', 'history_frames')],
+      lora: [b('adapter', 'lora_name')], loraStrength: [b('adapter', 'strength_model')], filenamePrefix: [b('save', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video' }],
+    defaults: { maskPrompt: 'person', maskGrow: 5, steps: 12, windowFrames: '22', historyFrames: '18', lora: 'H3-Person-Remover-V1.safetensors', loraStrength: 1 },
+    limits: { maxDurationSec: 60, maxFrames: 3592 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Person Remover V1 LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors; vendored Context Loop and Spectrum GPL-3.0); the graph is H3 Relay\'s example workflow (GPL-3.0 repository)',
+    notes:
+      'H3 Relay\'s toolkit H3-Person-Removal.api.json at e2a7665b (Akatz Labs\' tool ships the same file). Changed: the clean first frame goes through an ImageScale (centre crop) to the video\'s exact size, so an edit that came back a little larger or smaller still fits; SAM 3.1\'s words default to "person"; the save prefix. ' +
+      'video = the part already fitted to 24 fps on the 32-pixel grid (oss-fit-clip), image = the clean first frame (the app makes it with Qwen-Image-Edit from the part\'s first frame). 22-frame windows with 18 of history, 12 steps, er_sde / simple, CFG 1, LoRA 1.0, mask grown 5 px, seed 904234 by default (Akatz\'s settings). The output is silent: the app puts the clip\'s sound back. ' +
+      'Needs the h3-relay pack (H3_RELAY=1) and FFmpeg. Not validated here: the pack is not installed on this server.',
+  },
+
+  // Character Swap Studio (o/h3-studio; docs/research/openjutsu-6.md §4.2): Akatz Labs' H3 Character Swap workbench for whole
+  // clips. A segment is one H3 Relay 2.0 pass ("segment" schedule) over its frames plus the history before it; the
+  // previous take's lossless master supplies that history (Akatz's continuation masters), the approved mask replaces
+  // SAM's own when there is one, and an anchor is Picture 2 (Picture 3 after the boundary). The mask graph is the same
+  // SAM 3.1 chain on any frame of a shot, spliced into the version it corrects.
+  {
+    id: 'video-character-swap-h3-segment',
+    title: 'Character Swap Studio segment: one H3 Relay 2.0 pass with the approved mask, an anchor and the previous take\'s lossless master as history (h3-relay pack)',
+    capability: 'video-character-swap',
+    handBuilt: 'hand-built/video-character-swap-h3-segment.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    optionalModels: ['h3_character_swap_pro4500_1000.safetensors'],
+    bindings: {
+      video: [b('source', 'file')], image: [b('reference', 'image')], image2: [b('anchor_image', 'image')],
+      startTime: [b('trim', 'start_time')], duration: [b('trim', 'duration'), b('prepare', 'duration_seconds')], quality: [b('prepare', 'resolution')],
+      prompt: [b('reference_conditioning', 'prompt')], seed: [b('plan', 'seed')], steps: [b('schedule', 'steps')], cfg: [b('guider', 'cfg')], audioGuide: [b('history', 'target_audio_guide')],
+      maskPrompt: [b('subject', 'text')], selection: [b('select', 'selection')], subjectIndex: [b('select', 'index')], maskGrow: [b('expand_mask', 'expansion_px')],
+      positiveCoords: [b('detect', 'positive_coords')], negativeCoords: [b('detect', 'negative_coords')],
+      windowFrames: [b('plan', 'window_frames')], historyFrames: [b('plan', 'history_frames')],
+      historyVideo: [b('history_source', 'file')], historyStart: [b('history_tail', 'batch_index')], historyLength: [b('history_tail', 'length')],
+      lora: [b('adapter', 'lora_name')], loraStrength: [b('adapter', 'strength_model')], filenamePrefix: [b('save', 'filename_prefix'), b('save_master', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video' }, { node: 'save_master', kind: 'video', role: 'master' }],
+    defaults: { quality: '768', maskPrompt: 'person', selection: 'largest', subjectIndex: 0, maskGrow: 64, audioGuide: true, windowFrames: '124', historyFrames: '18', lora: 'h3_character_swap_v1.5.safetensors' },
+    limits: { maxDurationSec: 30, maxFrames: 703 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Character Swap LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · FL2V Turbo LoRA Apache-2.0 at the pinned revision · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors; vendored Context Loop and Spectrum GPL-3.0); the graph is built from H3 Relay\'s example workflow (GPL-3.0 repository)',
+    notes:
+      'One segment of Character Swap Studio on your GPU, built from video-character-swap-h3-relay: the window plan runs H3 Relay\'s "segment" schedule (one pass, at most 362 frames with its continuation boundary). ' +
+      'video = the clip at 24 fps (oss-fit-clip), startTime / duration = the segment and the history frames before it (the app starts half a frame early and runs a quarter frame long, so Trim Video and PrepareVideo keep exactly those frames), image = the character, image2 = the anchor (absent: the provider deletes it, unlinks the window\'s anchor, drops Picture 2 and the first-frame guide unless there is history). ' +
+      'historyVideo = the previous take\'s lossless master (save_master, 16-bit FFV1), historyStart / historyLength = its last frames, which become initial_history on the plan, the window and the append (Akatz\'s H3RelayLoadHistory route, with frames instead of an NPZ); absent: the provider deletes that branch. With history and an anchor the anchor is Picture 3 (the window\'s anchor output is then the generated boundary). ' +
+      'The approved mask (params.extra.maskVideo, a whole-shot mask at 24 fps from video-mask-h3-relay) is added by the provider: Trim Video at maskStart for the same duration, fitted to the canvas, red channel to a mask, into the expansion instead of SAM\'s own chain; useMask false bypasses the edit mask (the whole frame is regenerated). ' +
+      'Outputs: the segment (H.264) and its lossless master (role master) for the next segment. Needs the h3-relay pack (H3_RELAY=1), VideoHelperSuite and FFmpeg. Not validated here: the pack is not installed on this server.',
+  },
+  {
+    id: 'video-mask-h3-relay',
+    title: 'Character Swap Studio mask: SAM 3.1 finds the person on any frame of a shot (words, largest / leftmost / rightmost / #n, or clicks), follows them to the end of the shot or redoes one frame, spliced into the mask it corrects (h3-relay pack)',
+    capability: 'person-mask',
+    handBuilt: 'hand-built/video-mask-h3-relay.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    bindings: {
+      video: [b('source', 'file')], startTime: [b('trim', 'start_time')], duration: [b('trim', 'duration'), b('prepare', 'duration_seconds')], quality: [b('prepare', 'resolution')],
+      maskPrompt: [b('subject', 'text')], selection: [b('select', 'selection')], subjectIndex: [b('select', 'index')],
+      positiveCoords: [b('detect', 'positive_coords')], negativeCoords: [b('detect', 'negative_coords')],
+      keyFrame: [b('key_frame', 'batch_index'), b('span', 'batch_index'), b('head', 'length')], spanFrames: [b('span', 'length'), b('recover', 'source_frames')],
+      tailStart: [b('tail', 'batch_index')], tailFrames: [b('tail', 'length')], prevMask: [b('prev_source', 'file')],
+      filenamePrefix: [b('save', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video', role: 'matte' }],
+    defaults: { quality: '768', maskPrompt: 'person', selection: 'largest', subjectIndex: 0, keyFrame: 0, spanFrames: 120 },
+    limits: { maxDurationSec: 150, maxFrames: 3592 },
+    vramGb: 6,
+    license: 'SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors)',
+    notes:
+      'Who to swap in one shot, as a black-and-white mask video at H3\'s canvas size and 24 fps (white = the person): the shot is prepared like a segment (H3 Relay\'s PrepareSource), SAM 3.1 detects on frame keyFrame from the words (maskPrompt) and the clicks (positiveCoords / negativeCoords, moved into the canvas by the provider; a click makes its detection first, so selection becomes index 0), H3RelaySelectMask picks largest / leftmost / rightmost / #n as the swap graphs do, SAM 3.1 tracks it for spanFrames (the rest of the shot for Track shot, 1 for Update frame) and recovers empty frames. ' +
+      'prevMask = the version it corrects: its frames before (head) and after (tail) the new part are spliced around it; without one the provider links the new part straight to the video (and puts blank frames before a track that starts mid-shot). Akatz Labs\' app does the same with its own nodes (mask versions, Update frame, Track shot). Needs the h3-relay pack. Not validated here: the pack is not installed on this server.',
+  },
+
   // ---- Faceless "Frame by frame": Ken Burns over a still ------------------------------
   {
     id: 'kenburns-still',
@@ -2669,6 +2987,47 @@ export const SPEC = [
       'Ran here (shared CPU server, two sessions, 64x64 still, 2 s 320x180 25 fps, chunks of 20): 50 frames, 2.000 s H.264 in 8.5-9.3 s (easeInOut 1) and 7.6-11.2 s (0); ' +
       'the two match at the first, middle and last frame and differ in between, and the eased one barely moves over its first and last frames. ' +
       'Crops are whole pixels, so a tiny still steps visibly (the first frame after zoom 1 jumps by one source pixel); supersample and a still larger than the output hide it.',
+  },
+  {
+    id: 'video-concat-encoded',
+    title: 'Join clips the open engine encoded, packet by packet in constant memory (core ConcatenateVideo, no decode)',
+    capability: 'concat',
+    handBuilt: 'hand-built/video-concat-encoded.json',
+    bindings: { video: [b('1', 'file')], video2: [b('2', 'file')] },
+    outputs: [{ node: '4', kind: 'video' }],
+    expand: 'videos',
+    limits: { maxClips: 100 },
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core)',
+    notes:
+      'The Faceless / Explainer "Frame by frame" join (r4/faceless-plus): the Ken Burns scenes (kenburns-still, and the pieces of scenes over 10 s), and joins of those joins, one after another in input order. ' +
+      'The template joins two clips (video, video2); the provider rewrites it per request (expand "videos", expandVideoJoinWorkflow): one LoadVideo per inputs.videos entry, wired to ConcatenateVideo videos.video0..N-1 (at most 100). ' +
+      'ConcatenateVideo copies the encoded packets when every clip has the same codec, extradata, size, bit depth, colour space and sound layout (clips ComfyUI\'s CreateVideo / SaveVideo made at one size and fps), ' +
+      'so RAM stays flat however long the film is (video-concat-{2,3,4} decode every frame as float32: about 11 MB a frame at 720p, 20 GB for a 60 s film at 30 fps); otherwise it re-encodes one clip at a time to the first clip\'s settings ' +
+      '(still constant memory), and clips of different sizes fail with "could not be encoded compatibly". Unlike video-concat-{2,3,4} it neither scales, crops nor retimes: the clips must share one size and frame rate. ' +
+      'Sound tracks are kept as they are (the Ken Burns clips have none; the mux adds the voice and the bed).',
+  },
+
+  {
+    id: 'video-fit-clip',
+    title: 'One clip cut, retimed and framed for a packet-copy join: start/length at a set fps, centre crop, its sound or silence (VHS meta-batch, no model)',
+    capability: 'trim',
+    handBuilt: 'hand-built/video-fit-clip.json',
+    bindings: {
+      video: [b('1', 'video')], startTime: [b('8', 'value')], duration: [b('9', 'value')], fps: [b('5', 'value')],
+      width: [b('3', 'width')], height: [b('3', 'height')], framesPerBatch: [b('2', 'frames_per_batch')], filenamePrefix: [b('4', 'filename_prefix')],
+    },
+    outputs: [{ node: '4', kind: 'video' }],
+    defaults: { fps: 30, width: 1280, height: 720 },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 2 },
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core + VideoHelperSuite GPL-3.0 code)',
+    notes:
+      'The Canvas Video concatenator (r4/canvas-plus), one job per clip, then video-concat-encoded joins them: every clip comes out at the film\'s size (width x height, scaled to cover and centre-cropped), ' +
+      'at fps (30) and as H.264 + AAC from VHS, so ConcatenateVideo can copy the packets. VHS_LoadVideo resamples to fps and skips round(startTime x fps) frames, keeping round(duration x fps) ' +
+      '(duration 0 = to the end); its sound is cut to the same window (VHS lazy audio: start = skipped frames / fps, length = kept frames / fps), so picture and sound stay in sync. ' +
+      'framesPerBatch frames per pass (64): memory stays flat however long the clip. Muted clips and clips with no sound: the provider replaces the combine\'s audio with an EmptyAudio as long as the window ' +
+      '(silenceVhsAudio), so every clip of a film has a sound track; when the window\'s length is unknown (no header, no end) the sound is dropped instead.',
   },
 
   // ---- Music beds and audio joins --------------------------------------------------------
@@ -2702,11 +3061,14 @@ export const SPEC = [
     handBuilt: 'hand-built/audio-join-crossfade.json',
     bindings: { audio: [b('1', 'audio')], audio2: [b('2', 'audio')], fadeCurve: [b('3', 'audio')], crossfade: [b('5', 'value')] },
     outputs: [{ node: '17', kind: 'audio' }],
+    expand: 'audios',
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core audio nodes; VideoHelperSuite loader, GPL-3.0 code)',
     notes:
       'audio then audio2, overlapped by crossfade seconds (params.crossfade, > 0; 0.02 gives a click-free hard join). fadeCurve = the same curve WAV as audio-loop-crossfade, crossfade seconds long, written by the provider. ' +
-      'More clips (params.audios in order): fold, i.e. join 1+2, then that result + 3, and so on. The output runs at the higher sample rate of the two (AudioConcat resamples) and is saved as FLAC. ' +
+      'More clips (params.audios in order): the provider rewrites the graph for all of them in one prompt (expand "audios", expandAudioJoinWorkflow, r4/faceless-plus): every clip but the last is read by a VHS loader ' +
+      '(for its length), the first gives its body, each middle clip its head, middle and tail, the last its head and the rest, and each seam is tail x fade-out + next head x fade-in, all concatenated in order; ' +
+      'middle clips must be longer than 2 x crossfade. The output runs at the highest sample rate of the clips (AudioConcat resamples) and is saved as FLAC. ' +
       'Clips placed at exact times are audio-timeline\'s job. ' +
       'Ran here (CPU, two sessions): 3 s 44.1 kHz tones + 2 s 48 kHz noise, crossfade 0.5 s -> FLAC 4.500 s at 48 kHz stereo in 0.2-2.1 s; the tones keep their level (-9.0 dB RMS) up to 2.5 s, ' +
       'the overlap ramps over 0.5 s and the noise follows at its own level (-15.2 dB): no headroom is taken off here.',
@@ -2738,15 +3100,18 @@ export const SPEC = [
     title: 'SDR to HDR: expand to Rec.2020 HLG and save 10-bit H.264 (core ImageSDRToHDR, no model)',
     capability: 'sdr-to-hdr',
     handBuilt: 'hand-built/video-sdr-to-hdr.json',
-    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')] },
+    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')], colorSpace: [b('4', 'color_space')] },
     outputs: [{ node: '5', kind: 'video' }],
+    defaults: { colorSpace: 'HDR' },
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core)',
     notes:
       'An algorithmic inverse tone map (Lottes-style curve blended with a log-gain curve), not a learned model: the open stand-in for Topaz\'s SDR to HDR. peakNits = the target peak white (650 by default, 0 = the calibrated rendering). ' +
-      'CreateVideo writes BT.2020 HLG at 10 bits (color_space HDR) and SaveVideo an H.264 High 10 MP4; the sound is kept. params.format "hlg" is this graph; PQ would be color_space "HDR PQ" on node 4 (not bound). ' +
+      'CreateVideo writes BT.2020 HLG at 10 bits (color_space HDR) and SaveVideo an H.264 High 10 MP4; the sound is kept. params.format hlg_10bit is this graph as built; pq_10bit binds colorSpace "HDR PQ" ' +
+      '(BT.2020 PQ, HDR10\'s transfer, still H.264 High 10: core ComfyUI has no H.265 encoder); exr -> video-sdr-to-hdr-exr. ' +
       'The learned alternative is the LTX-2.5 SDR-To-HDR IC-LoRA (LTX community licence, not built). Decodes the whole clip: RAM grows with the length. ' +
-      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.2-1.5 s): H.264 High 10, yuv420p10le, bt2020nc / bt2020 / arib-std-b67 (HLG), 16 frames, AAC kept.',
+      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.2-1.5 s): H.264 High 10, yuv420p10le, bt2020nc / bt2020 / arib-std-b67 (HLG), 16 frames, AAC kept. ' +
+      'Through Fuobe with colorSpace HDR PQ (r4/video-finish, 3 s 320x180 25 fps clip with sound): H.264 High 10, yuv420p10le, smpte2084 / bt2020, 75 frames, AAC.',
   },
   {
     id: 'video-export-exr',
@@ -2754,14 +3119,16 @@ export const SPEC = [
     capability: 'export-video',
     handBuilt: 'hand-built/video-export-exr.json',
     bindings: { video: [b('1', 'file')] },
-    outputs: [{ node: '3', kind: 'image', role: 'frames' }],
+    outputs: [{ node: '5', kind: 'video', role: 'preview' }, { node: '3', kind: 'image', role: 'frames' }],
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core)',
     notes:
       'params.format "exr" of the export-video operation. One half-float .exr per frame (role frames, in frame order); input_color_space sRGB applies the inverse sRGB curve, so the files are scene-linear Rec.709. ' +
+      'Node 5 saves an H.264 preview with the clip\'s sound (role preview, added by r4/video-finish): the result shown in the feed; the provider zips the frames onto it (meta.artifacts.exr). ' +
       'The app zips the sequence. No sound. Decodes the whole clip: RAM grows with the length. Storage: /view serves .exr as image/aces, which storage.ts has no extension for, ' +
       'so each frame is saved as an image .bin until EXT_BY_TYPE / TYPE_BY_EXT know exr (feature package; the zip is the deliverable anyway). ' +
-      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer.',
+      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer. ' +
+      'With the preview (r4/video-finish, through Fuobe, 2 s 160x96 30 fps clip with sound): 60 .exr files zipped (2.6 MB, stored) onto an H.264 preview with AAC.',
   },
 
   // ---- Still to clip, ad end card ---------------------------------------------------------
@@ -2897,5 +3264,102 @@ export const SPEC = [
       'The open side of Recraft Vectorize / fal image2svg (the Vectorize app). ComfyUI-ToSVG\'s colour VTracer node (stacked layers, spline curves; curveMode polygon gives straight edges) ' +
       'returns the SVG as text, TS_SVGStringToSVGBytesIO wraps it and core SaveSVGNode writes fuobe/<id>_*.svg (reported under "images", so the provider collects it as an image output). ' +
       'filterSpeckle drops specks up to that many pixels, colorPrecision (1-8 bits per channel) sets how many colours are kept. Best on logos, icons and flat art; photos give very many paths. Runs on CPU in about a second.',
+  },
+
+  // ---- round 4 (r4/video-finish): FPS Boost to exact targets, chunked upscaling and export, HDR EXR ------------------
+  {
+    id: 'interpolate-rife-fps',
+    title: 'FPS Boost and slow motion to an exact frame rate: interpolate by m, keep every n-th frame (core FrameInterpolate)',
+    capability: 'interpolate',
+    handBuilt: 'hand-built/interpolate-rife-fps.json',
+    bindings: {
+      video: [b('1', 'file')], checkpoint: [b('5', 'model_name')], multiplier: [b('6', 'value')], every: [b('8', 'value')], slowdown: [b('10', 'value')],
+    },
+    outputs: [{ node: '13', kind: 'video' }],
+    defaults: { checkpoint: 'rife_v4.26.safetensors' },
+    // oss-rife's Model control: FILM for large motion.
+    optionalModels: ['film_net_fp16.safetensors'],
+    limits: { maxMultiplier: 16 },
+    vramGb: 2,
+    license: 'RIFE 4.26 and FILM weights from Comfy-Org/frame_interpolation (MIT / Apache-2.0); VideoHelperSuite (GPL-3.0 code) for Select Every Nth',
+    notes:
+      'Higgsfield\'s FPS Boost targets (24 / 30 / 60 / 90 / 120 fps) and slow motion on the open engine. The provider picks m (multiplier, 2-16) and n (every) from the clip\'s own frame rate (its header) so that ' +
+      'source fps x m / n = target x slowdown (src/lib/av/fps.ts: 24 -> 30 m5 n4, 24 -> 60 m5 n2, 24 -> 90 m15 n4, 24 -> 120 m5, 30 -> 60 m2, 60 -> 90 m3 n2, 60 -> 120 m2; a target the source rate is a whole multiple of (60 -> 30: m1 n2) only drops frames, ' +
+      'and then the provider links FrameInterpolate out; other lower targets still interpolate (30 -> 24: m4 n5)). The output fps is computed in the graph from the decoded frame rate (source fps x m / (n x slowdown)); m and n need the header\'s rate, so the provider refuses a clip without one rather than guess. ' +
+      'The last frame is held once more before interpolating, so the clip keeps its length (N frames become N x m + 1, about one output frame longer than the source) instead of losing a source frame. ' +
+      'slowdown > 1 stretches the clip (2 = twice as long); the provider then drops the sound link (it would no longer match). checkpoint film_net_fp16.safetensors runs FILM (better on large motion, about 31x slower on CPU). ' +
+      'Holds the whole interpolated clip in memory (the source frames, their copy with the last frame held, and source frames x m; the selection is a view): the provider refuses clips that need more than half the server\'s RAM. ' +
+      'Ran here through Fuobe (CPU, a random-weight RIFE file standing in for the weights): 24 fps 2 s 320x180 -> 60 fps = 121 frames, 2.017 s (m 5, n 2); 25 fps 3 s with sound -> 30 fps at 2x slow motion = 181 frames, 6.03 s, no sound track; 30 fps 2 s with sound -> 24 fps = 49 frames, 2.04 s, sound kept (m 4, n 5).',
+  },
+  {
+    id: 'upscale-video-esrgan-chunked',
+    title: 'Video Upscale (Real-ESRGAN 4x) in passes of a few frames: memory stays flat whatever the length (VHS meta-batch)',
+    capability: 'upscale-video',
+    handBuilt: 'hand-built/upscale-video-esrgan-chunked.json',
+    bindings: {
+      video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], upscaleModel: [b('3', 'model_name')], shortSide: [b('5', 'resize_type.shorter_size')],
+    },
+    outputs: [{ node: '7', kind: 'video' }],
+    defaults: { shortSide: 1080 },
+    limits: { maxWidth: 3840, maxHeight: 3840 },
+    vramGb: 4,
+    license: 'Real-ESRGAN weights (BSD-3-Clause); VideoHelperSuite GPL-3.0 code',
+    notes:
+      'R4-38: upscale-video-esrgan decodes the whole film (about 38 GB of float frames for 30 s at 480p before the 4x model). This one decodes framesPerBatch frames per pass (VHS_BatchManager re-queues the prompt ' +
+      'until the clip is done, as mixed-media-zimage-frames does), upscales them with the model (tiled), scales them so the shorter edge is shortSide px (params.resolution: 1080p -> 1080, the shape kept) and pipes them ' +
+      'into one ffmpeg H.264 encode that stays open across passes; the last pass writes the file with the source\'s sound at the source frame rate. The provider follows the passes by their filename prefix. ' +
+      'framesPerBatch: the provider sizes it from the clip\'s header so a pass holds about 1.5 GB of frames (16 by default). Any spandrel model in models/upscale_models works as upscaleModel (x2 / x4). ' +
+      'Ran here (CPU, a random-weight x4 ESRGAN file standing in for the weights): 30 s 256x144 25 fps with sound -> 1920x1080, 750 frames, AAC, 47 passes of 16 frames in 417 s, ComfyUI\'s RSS peaked 0.87 GB above idle (upscale-video-esrgan on 10 s of the same clip, 4x to 1024x576 only, peaked 3.0 GB above idle); through Fuobe a silent 2 s 24 fps clip -> 1280x720, 48 frames, no audio link.',
+  },
+  {
+    id: 'upscale-video-seedvr2-chunked',
+    title: 'Video Upscale / Restore (SeedVR2 3B int8) in passes of 4n+1 frames: memory stays flat (VHS meta-batch)',
+    capability: 'upscale-video',
+    handBuilt: 'hand-built/upscale-video-seedvr2-chunked.json',
+    bindings: {
+      video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], shortSide: [b('3', 'resize_type.shorter_size')], seed: [b('9', 'seed')],
+    },
+    outputs: [{ node: '13', kind: 'video' }],
+    defaults: { shortSide: 1080 },
+    limits: { maxWidth: 3840, maxHeight: 3840 },
+    vramGb: 16,
+    license: 'SeedVR2 (Apache-2.0); VideoHelperSuite GPL-3.0 code',
+    notes:
+      'The native SeedVR2 nodes of upscale-video-seedvr2 (same files, same settings) run on framesPerBatch frames per pass (33 by default; SeedVR2 pads a pass to 4n+1 frames and crops the padding back) and the ' +
+      'passes are piped into one H.264 encode with the source\'s sound, so a long clip no longer needs the whole film in memory (the template is capped at 20 s). The frames are first scaled so the shorter edge is ' +
+      'shortSide px. Each pass is restored on its own: there is no temporal context across a pass boundary, so a seam every framesPerBatch frames is possible (not measured: no GPU here). Validated by /prompt only.',
+  },
+  {
+    id: 'video-export-pro-chunked',
+    title: 'Pro codec export in passes (ProRes 422 HQ / 4444, H.265 10-bit, FFV1, H.264): memory stays flat (VHS meta-batch)',
+    capability: 'export-video',
+    handBuilt: 'hand-built/video-export-pro-chunked.json',
+    bindings: { video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], format: [b('4', 'format')], profile: [b('4', 'profile')] },
+    outputs: [{ node: '4', kind: 'video' }],
+    defaults: { format: 'video/ProRes', profile: 'hq' },
+    vramGb: 0,
+    license: 'n/a (no model; VideoHelperSuite GPL-3.0 code and the system ffmpeg\'s prores_ks / libx265 / ffv1 / libx264 encoders)',
+    notes:
+      'video-export-pro with VHS_LoadVideo decoding framesPerBatch frames per pass (64 by default) into one VHS_VideoCombine encode that stays open across passes, at the source frame rate, with the source\'s sound: ' +
+      'the export Fuobe\'s Export mode runs (video-export-pro decodes the whole clip). Same params.format mapping (prores_422_hq -> video/ProRes + hq, prores_4444 -> + 4444, h265_10bit -> video/h265-mp4 (yuv420p10le), ' +
+      'ffv1 -> video/ffv1-mkv, h264 -> video/h264-mp4; exr -> video-export-exr). VHS lists only <prefix>_00001-audio.<ext> when the clip has sound, <prefix>_00001.<ext> otherwise, on the last pass. ' +
+      'Caveat: VHS\'s ProRes "hq" profile leaves the pixel format to prores_ks, which picks yuv444p10le for the RGB frames, so "ProRes 422 HQ" is the HQ profile (apch) carrying 4:4:4 10-bit samples ' +
+      '(FFmpeg decodes it; a strict 4:2:2 file needs a VHS format with -pix_fmt yuv422p10le, which would be a change to the node pack). The same holds for video-export-pro. ' +
+      'Ran here (CPU, r4/video-finish, 3 s 320x180 25 fps clip with sound): ProRes apch / yuv444p10le / PCM and H.265 Main 10 yuv420p10le with AAC; on a silent 2 s 24 fps clip FFV1 gbrap16le .mkv, 48 of 48 frames; each ffprobe-checked.',
+  },
+  {
+    id: 'video-sdr-to-hdr-exr',
+    title: 'SDR to HDR as OpenEXR frames (scene-linear Rec.2020, half float) plus a 10-bit HLG preview (core, no model)',
+    capability: 'sdr-to-hdr',
+    handBuilt: 'hand-built/video-sdr-to-hdr-exr.json',
+    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')] },
+    outputs: [{ node: '6', kind: 'video', role: 'preview' }, { node: '4', kind: 'image', role: 'frames' }],
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core)',
+    notes:
+      'params.format exr of the sdr-to-hdr operation (Higgsfield\'s "EXR 16-bit: uncompressed frame sequence for compositing"). The same ImageSDRToHDR expansion as video-sdr-to-hdr; SaveImageAdvanced writes each ' +
+      'frame as a half-float EXR with input_color_space HDR, i.e. the inverse HLG curve: scene-linear light in Rec.2020 primaries, highlights above 1.0 kept. Node 6 saves the 10-bit HLG MP4 with the clip\'s sound as ' +
+      'the result to watch (role preview); the provider zips the frames (role frames) onto it as meta.artifacts.exr. Decodes the whole clip: RAM grows with the length (the provider refuses what the server can\'t hold). ' +
+      'Ran here through Fuobe (CPU, 2 s 160x96 30 fps clip with sound): 60 half-float EXR frames zipped onto an H.264 High 10 HLG (arib-std-b67, bt2020) preview with AAC.',
   },
 ];

@@ -27,6 +27,7 @@ const BOX = { w: 280, h: 150 };
 
 const BOX_COLOR: Partial<Record<CanvasNodeType, string>> = {
   prompt: "var(--chart-2)",
+  table: "var(--chart-2)",
   "image-input": "var(--chart-5)",
   "video-input": "var(--chart-4)",
   "audio-input": "var(--chart-3)",
@@ -95,6 +96,7 @@ function CanvasCard({ c, onRename, onDelete }: { c: CanvasSummary; onRename: () 
         <h3 className="mt-2 truncate pr-9 text-[14px] font-medium">{c.name}</h3>
         <p className="text-[12px] text-muted-foreground">
           {c.editedAt ? `Edited ${timeAgo(c.editedAt)}` : "Never edited"} · {c.nodeCount} node{c.nodeCount === 1 ? "" : "s"}
+          {c.pageCount > 1 && ` · ${c.pageCount} pages`}
         </p>
       </Link>
       <DropdownMenu>
@@ -155,7 +157,7 @@ function TemplateCard({ t, engine, onUse, busy }: { t: TemplateCardData; engine:
           <h3 className="text-[14px] font-medium">{t.name}</h3>
           <p className="text-[13px] text-muted-foreground">{t.description}</p>
         </div>
-        <p className="flex items-start gap-1.5 text-[12px] text-subtle-foreground">
+        <p className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
           {engine === "open" ? <Cpu className="mt-px size-3.5 shrink-0" /> : <Cloud className="mt-px size-3.5 shrink-0" />}
           <span className="line-clamp-2">{models.join(" · ")}</span>
         </p>

@@ -1,9 +1,9 @@
 "use client";
 
-import { ArchiveRestore, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Globe, Heart, Loader2, MoreHorizontal, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AssetCard, cardRatio, type CardApi } from "@/components/library/asset-card";
 import { FilterBar, filterFields, filtersFor, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
@@ -12,6 +12,8 @@ import { ReviewMenuItems } from "@/components/library/review";
 import { UploadDeleteProvider } from "@/components/library/upload-delete";
 import { useViewPrefs, ViewOptions, type ViewPrefs } from "@/components/library/view-options";
 import { PageShell } from "@/components/page-shell";
+import { useShare } from "@/components/share/share-provider";
+import { SharedLinks } from "@/components/share/shared-links";
 import { downloadUrl, ForeverConfirmProvider, useConfirmForever } from "@/components/studio/result-actions";
 import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { Viewer } from "@/components/studio/viewer";
@@ -25,16 +27,26 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useUploads, type Asset, type FeedFilter } from "@/lib/api";
-import type { Generation, MediaKind } from "@/lib/catalog/types";
-import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
+import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useShares, useUploads, type Asset, type FeedFilter } from "@/lib/api";
+import type { Generation, MediaKind, ReviewStatus } from "@/lib/catalog/types";
+import { keyCombo, useModKey } from "@/lib/keys";
+import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, toggleAll, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
 import { isLayered, shownOutputs } from "@/lib/output-actions";
+import { isExpired } from "@/lib/share";
 import { cn } from "@/lib/utils";
 
-type TabId = "all" | "images" | "videos" | "audio" | "text" | "3d" | "favorites" | "uploads" | "trash";
+type TabId = "all" | "images" | "videos" | "audio" | "text" | "3d" | "favorites" | "uploads" | "shared" | "trash";
 
 const TABS: { id: TabId; label: string; kinds?: MediaKind[] }[] = [
   { id: "all", label: "All" },
@@ -45,6 +57,7 @@ const TABS: { id: TabId; label: string; kinds?: MediaKind[] }[] = [
   { id: "3d", label: "3D", kinds: ["model3d"] },
   { id: "favorites", label: "Favorites" },
   { id: "uploads", label: "Uploads" },
+  { id: "shared", label: "Shared" },
   { id: "trash", label: "Trash" },
 ];
 
@@ -143,9 +156,11 @@ const GAP = 8;
 function Masonry({ entries, size, render }: { entries: LibraryEntry[]; size: number; render: (e: LibraryEntry) => React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  useEffect(() => {
+  // Measured before the first paint: a guessed column count, corrected a frame later, moved every card (CLS 0.42 on a phone).
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    setWidth(Math.round(el.getBoundingClientRect().width));
     const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
     ro.observe(el);
     return () => ro.disconnect();
@@ -213,6 +228,8 @@ function Inner() {
   const folderId = sp.get("folder") ?? undefined;
   const trash = tab.id === "trash";
   const uploadsTab = tab.id === "uploads";
+  // Library → Shared: the share links, not results (no search, selection or filters there).
+  const sharedTab = tab.id === "shared";
   const [q, setQ] = useState("");
   const dq = useDebounced(q.trim(), 250);
   const [chosen, setFilters] = useState<Filters>(NO_FILTERS);
@@ -242,9 +259,11 @@ function Inner() {
     [tab, trash, folderId, subtree, dq, filters],
   );
   // Pinned results sit above the rest of the view (not in the Trash or Uploads); the Pinned filter shows only them.
-  const split = !trash && !uploadsTab && !filters.pinned;
+  const split = !trash && !uploadsTab && !sharedTab && !filters.pinned;
   const pinnedLib = useLibrary(useMemo(() => ({ ...filter, pinned: true, limit: 200 }), [filter]), { enabled: split });
-  const lib = useLibrary(useMemo(() => (trash || uploadsTab ? filter : { ...filter, pinned: filters.pinned }), [filter, trash, uploadsTab, filters.pinned]));
+  const lib = useLibrary(useMemo(() => (trash || uploadsTab ? filter : { ...filter, pinned: filters.pinned }), [filter, trash, uploadsTab, filters.pinned]), { enabled: !sharedTab });
+  const shares = useShares();
+  const share = useShare();
   const uploads = useUploads();
   const pinnedItems = useMemo(() => (split ? (pinnedLib.data?.pages.flat() ?? []) : []), [split, pinnedLib.data]);
   const mainItems = useMemo(() => {
@@ -268,6 +287,7 @@ function Inner() {
   // --- Selection ---------------------------------------------------------------------------
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const mod = useModKey();
   const order = useMemo(() => sections.flatMap((s) => s.items.flatMap((e) => [e, ...(e.type === "stack" && expanded.has(e.key) ? e.items.map((g) => ({ type: "single" as const, key: g.id, g })) : [])])), [sections, expanded]);
   const latest = useRef({ order, selected, items });
   useEffect(() => {
@@ -347,7 +367,8 @@ function Inner() {
       if (e.key === "Escape" && (selecting || latest.current.selected.size)) {
         e.preventDefault();
         clear();
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && selecting) {
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && (selecting || latest.current.selected.size)) {
+        // In selection mode ⌘/Ctrl+A takes every result loaded under the filters (elsewhere it selects text as usual).
         e.preventDefault();
         setSelected(new Set(latest.current.items.map((g) => g.id)));
       }
@@ -411,6 +432,7 @@ function Inner() {
     const f = facets.data;
     if (!f) return undefined;
     if (t.id === "trash") return f.trash || undefined;
+    if (t.id === "shared") return shares.data?.items.filter((x) => !x.gone && !isExpired(x)).length || undefined;
     if (t.id === "favorites") return f.favorites || undefined;
     if (t.kinds) return f.kinds[t.kinds[0]] || undefined;
     return undefined;
@@ -420,13 +442,17 @@ function Inner() {
   const allPinned = selectedGens.length > 0 && selectedGens.every((g) => g.pinnedAt);
   // The bulk bar's review menu checks a status only when every selected result has it.
   const sameReview = selectedGens.length && selectedGens.every((g) => (g.review ?? null) === (selectedGens[0].review ?? null)) ? (selectedGens[0].review ?? null) : undefined;
+  // The bar's Like, Pin and Review (as buttons, or in ⋯ on phones).
+  const like = () => void actions.favoriteMany(selectedGens, !allFav);
+  const pinAll = () => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`));
+  const review = (r: ReviewStatus | null) => void actions.review(selectedGens, r).then((n) => n && toast(r ? `Marked ${n} as ${reviewInfo(r)?.label}` : `Cleared the review status of ${n}`));
 
   const empty = () => {
     if (dq) {
       return (
         <Empty title={`No matches for “${dq}”`}>
           Try another word.{" "}
-          <button onClick={() => setQ("")} className="text-brand-text hover:underline">
+          <button onClick={() => setQ("")} className="text-brand-text underline underline-offset-2">
             Clear search
           </button>
         </Empty>
@@ -436,7 +462,7 @@ function Inner() {
       return (
         <Empty title="Nothing pinned here yet">
           Pin results from their ⋯ menu (or select some and choose Pin) to keep them at the top.{" "}
-          <button onClick={() => setFilters({ ...filters, pinned: false })} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters({ ...filters, pinned: false })} className="text-brand-text underline underline-offset-2">
             Show everything
           </button>
         </Empty>
@@ -445,7 +471,7 @@ function Inner() {
     if (hasFilters(filters)) {
       return (
         <Empty title="Nothing matches your filters">
-          <button onClick={() => setFilters(NO_FILTERS)} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters(NO_FILTERS)} className="text-brand-text underline underline-offset-2">
             Clear filters
           </button>
         </Empty>
@@ -456,7 +482,7 @@ function Inner() {
       return (
         <Empty title="Nothing here directly">
           What&apos;s in this folder is in the folders above.{" "}
-          <button onClick={() => setFilters({ ...filters, subfolders: true })} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters({ ...filters, subfolders: true })} className="text-brand-text underline underline-offset-2">
             Show their results here
           </button>
         </Empty>
@@ -468,7 +494,7 @@ function Inner() {
     return (
       <Empty title="Your creations will appear here">
         Generate something and it lands here.{" "}
-        <Link href="/image" className="text-brand-text hover:underline">
+        <Link href="/image" className="text-brand-text underline underline-offset-2">
           Create an image
         </Link>
       </Empty>
@@ -491,7 +517,7 @@ function Inner() {
             <p className="mt-1 max-w-2xl text-[15px] text-muted-foreground">Everything you make, across cloud and open-source runs.</p>
           </div>
         )}
-        <div className="flex w-full items-center gap-2 sm:w-auto">
+        <div className={cn("flex w-full items-center gap-2 sm:w-auto", sharedTab && "hidden")}>
           <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -513,8 +539,8 @@ function Inner() {
           {!uploadsTab && (
             <button
               onClick={() => (selecting ? clear() : setSelecting(true))}
-              aria-pressed={selecting}
-              aria-label="Select"
+              // Named for what a press does, and with the word it shows ("Done" while selecting).
+              aria-label={selecting ? "Done selecting" : "Select"}
               title={selecting ? "Done selecting" : "Select several"}
               className={cn(
                 "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors",
@@ -563,7 +589,7 @@ function Inner() {
               >
                 {t.label}
                 {n ? (
-                  <span className="font-mono text-[11px] text-muted-foreground" aria-label={`${n} items`}>
+                  <span className="min-w-4 font-mono text-[11px] text-muted-foreground tabular-nums" aria-label={`${n} items`}>
                     {n}
                   </span>
                 ) : null}
@@ -573,13 +599,23 @@ function Inner() {
         </div>
       )}
 
-      {(tab.id === "all" && !folderId && (folders.data?.length || !loading)) || (folder && !trash) ? (
+      {/* The folder row has its place from the first paint: arriving later, it pushed the filters and the cards down. */}
+      {(tab.id === "all" && !folderId) || (folder && !trash) ? (
         <div className="mb-4">
-          <FolderStrip all={allFolders} parent={folder ?? null} steps={filters.steps} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
+          {folders.data ? (
+            <FolderStrip all={allFolders} parent={folder ?? null} steps={filters.steps} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
+          ) : (
+            <div className="-mx-1 flex gap-2 overflow-hidden px-1 py-1" aria-busy="true" aria-label="Loading folders">
+              <div className="flex w-[min(44vw,160px)] shrink-0 items-center gap-2.5 rounded-xl border border-dashed p-2">
+                <Skeleton className="size-11 shrink-0 rounded-lg" />
+                <Skeleton className="h-3 w-16" />
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 
-      {!uploadsTab && !missingFolder && (
+      {!uploadsTab && !sharedTab && !missingFolder && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <FilterBar value={filters} onChange={setFilters} facets={facets.data} subfolders={!!folder?.folders} scoped={!!folderId || tab.id !== "all" || !!dq} trash={trash} />
           {trash && (
@@ -595,10 +631,12 @@ function Inner() {
         </div>
       )}
 
-      {missingFolder ? (
+      {sharedTab ? (
+        <SharedLinks />
+      ) : missingFolder ? (
         <Empty title="This folder no longer exists">
           It may have been deleted; what was in it is back in your Library.{" "}
-          <button onClick={() => go({ folder: undefined })} className="text-brand-text hover:underline">
+          <button onClick={() => go({ folder: undefined })} className="text-brand-text underline underline-offset-2">
             Back to Library
           </button>
         </Empty>
@@ -613,12 +651,27 @@ function Inner() {
       ) : (
         <div className={cn("space-y-7 transition-opacity", refreshing && "opacity-70")}>
           {sections.map((s) => (
-            <section key={s.key} aria-label={s.label || "Results"}>
+            <section key={s.key} aria-label={s.label || "Results"} className="group/section">
               {s.label && (
-                <h2 className="mb-2.5 flex items-center gap-1.5 text-[13px] font-medium">
-                  {s.key === -1 && <Pin className="size-3.5 text-muted-foreground" />}
-                  {s.label} <span className="font-mono text-[11px] font-normal text-muted-foreground">{s.items.reduce((n, e) => n + members(e).length, 0)}</span>
-                </h2>
+                <div className="mb-2.5 flex items-center gap-3">
+                  <h2 className="flex items-center gap-1.5 text-[13px] font-medium">
+                    {s.key === -1 && <Pin className="size-3.5 text-muted-foreground" />}
+                    {s.label} <span className="font-mono text-[11px] font-normal text-muted-foreground">{s.items.reduce((n, e) => n + members(e).length, 0)}</span>
+                  </h2>
+                  {/* Select a whole day (or the pinned ones) at once; again to unselect them. */}
+                  {!uploadsTab && (
+                    <SectionSelect
+                      label={s.label}
+                      ids={s.items.flatMap(ids)}
+                      selected={selected}
+                      quiet={!selecting}
+                      onToggle={(list) => {
+                        setSelecting(true);
+                        setSelected((cur) => toggleAll(cur, list));
+                      }}
+                    />
+                  )}
+                </div>
               )}
               <Cards
                 entries={s.items}
@@ -668,20 +721,20 @@ function Inner() {
                 {isFetchingNextPage && <Loader2 className="size-3.5 animate-spin" />} Load more
               </button>
             ) : (
-              <p className="text-[12px] text-subtle-foreground">{items.length > 12 ? "That's everything" : ""}</p>
+              <p className="text-[12px] text-muted-foreground">{items.length > 12 ? "That's everything" : ""}</p>
             )}
           </div>
         </div>
       )}
 
-      {(selecting || selected.size > 0) && !uploadsTab && (
+      {(selecting || selected.size > 0) && !uploadsTab && !sharedTab && (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pl-[var(--sidebar-width,0px)]">
           <div role="toolbar" aria-label="Selection" className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-full border bg-background p-1.5 shadow-strong">
             {/* Phones show just the count, so every action fits at 390 px. */}
             <span className="shrink-0 px-2.5 text-[13px] font-medium whitespace-nowrap">
-              {selected.size ? (
+              {selectedGens.length ? (
                 <>
-                  {selected.size}
+                  {selectedGens.length}
                   <span className="hidden sm:inline"> selected</span>
                 </>
               ) : (
@@ -690,10 +743,21 @@ function Inner() {
                 </>
               )}
             </span>
+            {/* Shown while any result in view is unselected (a search or filter can hide some of the selection). */}
+            {items.some((g) => !selected.has(g.id)) && (
+              <button
+                onClick={() => setSelected(new Set(items.map((g) => g.id)))}
+                className={cn(BAR, "text-brand-text")}
+                aria-label={`Select all ${items.length}`}
+                title={`Select all ${items.length} shown here (${keyCombo("A", { mod })})`}
+              >
+                <CheckCheck className="size-4" /> <span className="hidden sm:inline">Select all</span> <span className="font-mono text-[11px] tabular-nums">{items.length}</span>
+              </button>
+            )}
             {trash ? (
               <>
-                <BarButton icon={ArchiveRestore} label="Restore" disabled={!selected.size} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
-                <BarButton icon={Trash2} label="Delete forever" destructive disabled={!selected.size} onClick={() => confirmForever?.(selectedGens, clear)} />
+                <BarButton icon={ArchiveRestore} label="Restore" disabled={!selectedGens.length} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
+                <BarButton icon={Trash2} label="Delete forever" destructive disabled={!selectedGens.length} onClick={() => confirmForever?.(selectedGens, clear)} />
               </>
             ) : (
               <>
@@ -707,26 +771,53 @@ function Inner() {
                     if (done.length > BULK_MAX) toast(`The zip has the first ${BULK_MAX} of ${done.length}`, { description: "Select the rest and download them as a second zip." });
                   }}
                 />
-                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selected.size} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
-                <BarButton
-                  icon={allPinned ? PinOff : Pin}
-                  label={allPinned ? "Unpin" : "Pin"}
-                  disabled={!selected.size}
-                  onClick={() => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`))}
-                />
+                {/* Like, Pin and Review fold into ⋯ on phones, so the bar fits 390 px with Publish. */}
+                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selectedGens.length} onClick={like} className="max-sm:hidden" />
+                <BarButton icon={allPinned ? PinOff : Pin} label={allPinned ? "Unpin" : "Pin"} disabled={!selectedGens.length} onClick={pinAll} className="max-sm:hidden" />
                 <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild disabled={!selected.size}>
-                    <button className={BAR} disabled={!selected.size} aria-label="Review status" title="Review status">
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={cn(BAR, "max-sm:hidden")} disabled={!selectedGens.length} aria-label="Review status" title="Review status">
                       <CircleDot className="size-4" /> <span className="hidden sm:inline">Review</span>
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="top" align="center" collisionPadding={12} className="min-w-44">
-                    <ReviewMenuItems value={sameReview} onPick={(r) => void actions.review(selectedGens, r).then((n) => n && toast(r ? `Marked ${n} as ${reviewInfo(r)?.label}` : `Cleared the review status of ${n}`))} />
+                    <ReviewMenuItems value={sameReview} onPick={review} />
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild disabled={!selected.size}>
-                    <button className={BAR} disabled={!selected.size}>
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={cn(BAR, "sm:hidden")} disabled={!selectedGens.length} aria-label="Like, pin or review" title="Like, pin or review">
+                      <MoreHorizontal className="size-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="center" collisionPadding={12} className="min-w-44">
+                    <DropdownMenuItem onSelect={like}>
+                      <Heart /> {allFav ? "Unlike" : "Like"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={pinAll}>
+                      {allPinned ? <PinOff /> : <Pin />} {allPinned ? "Unpin" : "Pin to the top"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <CircleDot /> Review status
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="min-w-44">
+                        <ReviewMenuItems value={sameReview} onPick={review} />
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {share && (
+                  <BarButton
+                    icon={Globe}
+                    label="Publish"
+                    disabled={!selectedGens.some((g) => g.status === "succeeded")}
+                    onClick={() => share.publish(selectedGens.filter((g) => g.status === "succeeded"))}
+                  />
+                )}
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={BAR} disabled={!selectedGens.length} aria-label="Move to">
                       <FolderInput className="size-4" /> <span className="hidden sm:inline">Move to</span>
                     </button>
                   </DropdownMenuTrigger>
@@ -738,7 +829,7 @@ function Inner() {
                   icon={Trash2}
                   label="Delete"
                   destructive
-                  disabled={!selected.size}
+                  disabled={!selectedGens.length}
                   onClick={() => {
                     void actions.trash(selectedGens);
                     clear();
@@ -747,7 +838,7 @@ function Inner() {
               </>
             )}
             <span className="mx-1 h-5 w-px shrink-0 bg-border" />
-            <button onClick={clear} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Unselect all">
+            <button onClick={clear} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Unselect all, Esc" aria-keyshortcuts="Escape">
               <X className="size-3.5" /> <span className="hidden sm:inline">Unselect all</span> <Kbd className="hidden sm:inline-flex">Esc</Kbd>
             </button>
           </div>
@@ -800,11 +891,30 @@ function Inner() {
   );
 }
 
-const BAR = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40";
-
-function BarButton({ icon: Icon, label, onClick, disabled, destructive }: { icon: typeof Download; label: string; onClick: () => void; disabled?: boolean; destructive?: boolean }) {
+/** A date header's "Select" / "Unselect": shown on hover from a mouse, always while selecting or on touch. */
+function SectionSelect({ label, ids, selected, quiet, onToggle }: { label: string; ids: string[]; selected: ReadonlySet<string>; quiet: boolean; onToggle: (ids: string[]) => void }) {
+  const all = ids.length > 0 && ids.every((id) => selected.has(id));
   return (
-    <button onClick={onClick} disabled={disabled} aria-label={label} title={label} className={cn(BAR, destructive && "text-destructive")}>
+    <button
+      type="button"
+      onClick={() => onToggle(ids)}
+      aria-label={`${all ? "Unselect" : "Select"} ${label}, ${ids.length}`}
+      className={cn(
+        "inline-flex h-6 items-center gap-1 rounded-full px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+        quiet && "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/section:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
+      )}
+    >
+      {all ? "Unselect" : "Select"}
+    </button>
+  );
+}
+
+// Phones: a little narrower, so the bar keeps every action (and Select all) at 390 px.
+const BAR = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40 max-sm:px-2";
+
+function BarButton({ icon: Icon, label, onClick, disabled, destructive, className }: { icon: typeof Download; label: string; onClick: () => void; disabled?: boolean; destructive?: boolean; className?: string }) {
+  return (
+    <button onClick={onClick} disabled={disabled} aria-label={label} title={label} className={cn(BAR, destructive && "text-destructive", className)}>
       <Icon className="size-4" /> <span className="hidden sm:inline">{label}</span>
     </button>
   );

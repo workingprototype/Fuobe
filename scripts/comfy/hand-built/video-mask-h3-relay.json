@@ -1,0 +1,336 @@
+{
+  "source": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "source.mp4"
+    },
+    "_meta": {
+      "title": "LoadVideo"
+    }
+  },
+  "trim": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "source",
+        0
+      ],
+      "start_time": 0,
+      "duration": 5.0,
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "The chosen part"
+    }
+  },
+  "prepare": {
+    "class_type": "H3RelayPrepareSource",
+    "inputs": {
+      "video": [
+        "trim",
+        0
+      ],
+      "resolution": "768",
+      "duration_seconds": 5.0,
+      "missing_audio": "silence"
+    },
+    "_meta": {
+      "title": "H3RelayPrepareSource"
+    }
+  },
+  "dimensions": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "prepare",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "GetImageSize"
+    }
+  },
+  "sam": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "CheckpointLoaderSimple"
+    }
+  },
+  "subject": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "sam",
+        1
+      ],
+      "text": "person"
+    },
+    "_meta": {
+      "title": "CLIPTextEncode"
+    }
+  },
+  "key_frame": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "prepare",
+        0
+      ],
+      "batch_index": 0,
+      "length": 1
+    },
+    "_meta": {
+      "title": "The frame you clicked"
+    }
+  },
+  "detect": {
+    "class_type": "SAM3_Detect",
+    "inputs": {
+      "model": [
+        "sam",
+        0
+      ],
+      "image": [
+        "key_frame",
+        0
+      ],
+      "conditioning": [
+        "subject",
+        0
+      ],
+      "threshold": 0.35,
+      "refine_iterations": 2,
+      "individual_masks": true,
+      "positive_coords": "",
+      "negative_coords": ""
+    },
+    "_meta": {
+      "title": "SAM3_Detect"
+    }
+  },
+  "select": {
+    "class_type": "H3RelaySelectMask",
+    "inputs": {
+      "masks": [
+        "detect",
+        0
+      ],
+      "selection": "largest",
+      "index": 0
+    },
+    "_meta": {
+      "title": "H3RelaySelectMask"
+    }
+  },
+  "span": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "prepare",
+        0
+      ],
+      "batch_index": 0,
+      "length": 120
+    },
+    "_meta": {
+      "title": "Frames to track"
+    }
+  },
+  "track": {
+    "class_type": "SAM3_VideoTrack",
+    "inputs": {
+      "model": [
+        "sam",
+        0
+      ],
+      "images": [
+        "span",
+        0
+      ],
+      "initial_mask": [
+        "select",
+        0
+      ],
+      "conditioning": [
+        "subject",
+        0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 1,
+      "detect_interval": 1
+    },
+    "_meta": {
+      "title": "SAM3_VideoTrack"
+    }
+  },
+  "mask": {
+    "class_type": "SAM3_TrackToMask",
+    "inputs": {
+      "track_data": [
+        "track",
+        0
+      ],
+      "object_indices": ""
+    },
+    "_meta": {
+      "title": "SAM3_TrackToMask"
+    }
+  },
+  "recover": {
+    "class_type": "H3RelayRecoverMasks",
+    "inputs": {
+      "masks": [
+        "mask",
+        0
+      ],
+      "images": [
+        "span",
+        0
+      ],
+      "source_frames": 120,
+      "model": [
+        "sam",
+        0
+      ],
+      "conditioning": [
+        "subject",
+        0
+      ],
+      "selection": [
+        "select",
+        1
+      ],
+      "recover_empty_frames": true
+    },
+    "_meta": {
+      "title": "H3RelayRecoverMasks"
+    }
+  },
+  "new_images": {
+    "class_type": "MaskToImage",
+    "inputs": {
+      "mask": [
+        "recover",
+        0
+      ]
+    }
+  },
+  "prev_source": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "previous-mask.mp4"
+    },
+    "_meta": {
+      "title": "The mask it corrects"
+    }
+  },
+  "prev_frames": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "prev_source",
+        0
+      ]
+    }
+  },
+  "prev_fit": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "prev_frames",
+        0
+      ],
+      "upscale_method": "nearest-exact",
+      "width": [
+        "dimensions",
+        0
+      ],
+      "height": [
+        "dimensions",
+        1
+      ],
+      "crop": "center"
+    }
+  },
+  "head": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "prev_fit",
+        0
+      ],
+      "batch_index": 0,
+      "length": 1
+    },
+    "_meta": {
+      "title": "Before the new part"
+    }
+  },
+  "tail": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "prev_fit",
+        0
+      ],
+      "batch_index": 2,
+      "length": 1
+    },
+    "_meta": {
+      "title": "After the new part"
+    }
+  },
+  "join_head": {
+    "class_type": "ImageBatch",
+    "inputs": {
+      "image1": [
+        "head",
+        0
+      ],
+      "image2": [
+        "new_images",
+        0
+      ]
+    }
+  },
+  "join_tail": {
+    "class_type": "ImageBatch",
+    "inputs": {
+      "image1": [
+        "join_head",
+        0
+      ],
+      "image2": [
+        "tail",
+        0
+      ]
+    }
+  },
+  "video": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "join_tail",
+        0
+      ],
+      "fps": 24.0
+    }
+  },
+  "save": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "video",
+        0
+      ],
+      "filename_prefix": "fuobe/character-swap-mask",
+      "format": "mp4",
+      "format.codec": "h264",
+      "format.codec.encoding": "re-encode",
+      "format.codec.encoding.crf": 10
+    }
+  }
+}

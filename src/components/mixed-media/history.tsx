@@ -14,7 +14,7 @@ import { chainState } from "@/lib/catalog/shorts";
 import type { Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { downloadHref, downloadName, userTitle } from "@/lib/library";
-import { renderSteps, useMixedActions } from "./hooks";
+import { isFrameRender, renderSteps, useFramesProgress, useMixedActions } from "./hooks";
 
 /** The finished videos and their helper steps (a failed render shows the failing step's own error). */
 const FILTER = { features: [MIXED_FEATURE, MIXED_STEP_FEATURE], limit: 150 };
@@ -85,8 +85,14 @@ export function MixedHistory({ onStart }: { onStart: () => void }) {
                   <PendingTile g={state.status === "working" ? (chain.find((x) => x.status !== "succeeded") ?? g) : g} ratio={1} />
                 ) : (
                   <div className="flex size-full flex-col justify-center gap-1 border border-dashed p-3">
-                    <p className="text-[13px] font-medium">{heading}</p>
-                    {reason && reason !== heading && <p className="line-clamp-4 text-[12px] break-words text-muted-foreground">{reason}</p>}
+                    {g.status !== "canceled" && isFrameRender(chain) ? (
+                      <FrameFailure id={g.id} heading={heading} reason={reason} />
+                    ) : (
+                      <>
+                        <p className="text-[13px] font-medium">{heading}</p>
+                        {reason && reason !== heading && <p className="line-clamp-4 text-[12px] break-words text-muted-foreground">{reason}</p>}
+                      </>
+                    )}
                     <button
                       type="button"
                       onClick={() => retry(g.id)}
@@ -114,6 +120,22 @@ export function MixedHistory({ onStart }: { onStart: () => void }) {
         })}
       </div>
       {open && <Viewer generation={open} index={0} onClose={() => setOpen(null)} />}
+    </>
+  );
+}
+
+/**
+ * A per-frame render that failed: the frame that failed and why (the steps after it only say an earlier step didn't
+ * finish). When no frame failed on its own (the cut or the extraction did), the failing step's error stands.
+ */
+function FrameFailure({ id, heading, reason }: { id: string; heading: string; reason?: string | null }) {
+  const failed = useFramesProgress(id, "once").data?.failed;
+  const title = failed ? `${failed.label} failed` : heading;
+  const why = failed?.error ?? reason;
+  return (
+    <>
+      <p className="text-[13px] font-medium">{title}</p>
+      {why && why !== title && <p className="line-clamp-4 text-[12px] break-words text-muted-foreground">{why}</p>}
     </>
   );
 }

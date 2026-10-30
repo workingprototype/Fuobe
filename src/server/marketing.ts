@@ -7,6 +7,8 @@ import {
   brandLine,
   CLICK_TO_AD,
   cueLines,
+  END_CARD,
+  endCardSteps,
   estimateCues,
   fitScript,
   FORMATS,
@@ -16,6 +18,7 @@ import {
   mentionsFor,
   MULTIPLIER,
   MULTIPLIER_MODELS,
+  MULTIPLIER_WINDOW,
   multiplierResolution,
   OPEN_SOUND_JOIN,
   overlayLayout,
@@ -41,15 +44,18 @@ import {
 } from "@/lib/catalog/marketing";
 import { routesFor } from "@/lib/catalog/plan";
 import { probeMedia } from "@/lib/media-probe";
+import { themeFrom } from "@/components/ads/layout";
 import type { ChainSlot, Engine, GenerationRequest, ModelDef, Operation } from "@/lib/catalog/types";
 import { getBrand, getProduct } from "./brand";
 import { createPipeline, type PipelineStep } from "./chains";
 import { db } from "./db";
 import { llmText } from "./enhance";
 import { createGenerations, getGeneration, listGenerations, previewChained, recordLocalGeneration } from "./generations";
-import { provider } from "./providers";
+import { isOffered } from "./model-access";
+import { keepOffered } from "@/lib/model-access";
 import { engineMode } from "./settings";
-import { readRef } from "./storage";
+import { encodePng } from "./png";
+import { readRef, saveFile } from "./storage";
 
 /**
  * Marketing Studio (templates → product shots, posters, ads, product motion, UGC presenters),
@@ -104,6 +110,11 @@ export const ClickToAdBody = z.object({
   voice: z.string().max(80).optional(),
   voiceSample: FILE.optional(),
   avatar: FILE.optional(),
+  /**
+   * End on the brand: a logo card after the ad, held 2–3 s. `image` is the card the page drew (brand colour,
+   * logo, product name, CTA); without it the cloud puts the kit's logo on its main colour (the open engine needs it).
+   */
+  endCard: z.object({ image: FILE.optional(), seconds: z.number().min(END_CARD.minSeconds).max(END_CARD.maxSeconds).optional() }).optional(),
 });
 export type ClickToAdInput = z.infer<typeof ClickToAdBody>;
 
@@ -205,7 +216,6 @@ function textLine(f: FormatDef, open: boolean, headline?: string, cta?: string, 
 export interface PlanContext {
   product?: Product | null;
   brand?: BrandKit | null;
-  higgsfield: boolean;
   /** The words the presenter says (UGC). */
   script?: string;
 }
@@ -231,7 +241,8 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
       throw new PlanError(f.id === "product-with-model" ? "Attach reference or product" : f.id === "poster" ? "Add a prompt or a product" : "Add a prompt, a product or a website");
     }
   }
-  const choices = formatModels(f, input.engine, { product: hasProduct, avatar: !!input.avatar, higgsfield: ctx.higgsfield });
+  // Models switched off in Settings → Models & licences aren't picked while another choice is on.
+  const choices = keepOffered(formatModels(f, input.engine, { product: hasProduct, avatar: !!input.avatar }), (c) => isOffered(c.id, input.engine));
   const name = tpl?.name ?? f.name;
   const title = [name, product?.name ?? brand?.name].filter(Boolean).join(" · ");
   const meta: MarketingRunMeta = { format: f.id, templateId: tpl?.id, productId: product?.id ?? null, brandId: brand?.id ?? null };
@@ -645,7 +656,60 @@ export function clickToAdSeconds(engine: Engine, presenter: boolean): { voice: n
   return { voice: Math.max(4, Math.min(CLICK_TO_AD.maxSeconds, shots.reduce((a, b) => a + b, 0)) - 0.6), broll: 0 };
 }
 
-export function planClickToAd(input: ClickToAdInput, ctx: { product: Product; brand?: BrandKit | null; script: string }): RunPlan {
+/** A raster logo overlay-image can place (an SVG can't be read there), else undefined. */
+const rasterLogo = (brand?: BrandKit | null) => (brand?.logo && !isSvg(brand.logo) ? brand.logo : undefined);
+
+/**
+ * Who encoded a step's clip: video-append-endcard copies the ad's packets, so it only takes a clip ComfyUI made
+ * (every open Click to Ad final today); anything else gets still-to-clip + the sound-keeping join.
+ */
+export function adEncoder(step: Pick<Step, "request"> | undefined): "comfyui" | "other" {
+  const m = step && getModel(step.request.modelId);
+  const op = step?.request.op;
+  return m && op && routesFor(m, op).length && routesFor(m, op).every((r) => r.provider === "comfyui") ? "comfyui" : "other";
+}
+
+/**
+ * The ad, then its logo end card: the ad's last step becomes a helper and the card's join is the result
+ * (endCardSteps: cloud ken-burns + a silent track + merge-videos, open video-append-endcard).
+ */
+function withEndCard(plan: RunPlan, input: ClickToAdInput, ctx: { brand?: BrandKit | null; background?: string; silence?: string }): RunPlan {
+  if (!input.endCard) return plan;
+  const ad = plan.finals[0];
+  const card = endCardSteps({
+    engine: plan.engine,
+    ad,
+    adEncodedBy: plan.engine === "open" ? adEncoder(plan.steps.find((s) => s.key === ad)) : undefined,
+    card: input.endCard.image,
+    background: ctx.background,
+    logo: rasterLogo(ctx.brand),
+    silence: ctx.silence,
+    seconds: input.endCard.seconds,
+    feature: plan.feature,
+    title: plan.title,
+    aspectRatio: CLICK_TO_AD.aspect,
+    resolution: input.quality ?? "480p",
+  });
+  const steps = plan.steps.map((s) => {
+    if (s.key !== ad) return s;
+    const request = { ...s.request, feature: `${plan.feature}-step` };
+    delete request.title;
+    return { ...s, request };
+  });
+  const seconds = Math.max(END_CARD.minSeconds, Math.min(END_CARD.maxSeconds, input.endCard.seconds ?? END_CARD.seconds));
+  const notes = [...plan.notes, `Ends on your logo card for ${seconds} s${input.endCard.image ? "" : " (the kit's logo on its main colour)"}`];
+  return { ...plan, steps: [...steps, ...card.steps], finals: [card.final], meta: { ...plan.meta, endCard: input.endCard.image ?? null }, notes };
+}
+
+export function planClickToAd(input: ClickToAdInput, ctx: { product: Product; brand?: BrandKit | null; script: string; background?: string; silence?: string }): RunPlan {
+  try {
+    return withEndCard(planAd(input, ctx), input, ctx);
+  } catch (e) {
+    throw e instanceof PlanError ? e : new PlanError((e as Error).message);
+  }
+}
+
+function planAd(input: ClickToAdInput, ctx: { product: Product; brand?: BrandKit | null; script: string }): RunPlan {
   const style = styleById(input.styleId);
   if (!style) throw new PlanError("Pick a style");
   const images = input.images?.length ? input.images : ctx.product.images;
@@ -725,15 +789,16 @@ export function planClickToAd(input: ClickToAdInput, ctx: { product: Product; br
 // ---------------------------------------------------------------------------
 // Ad Multiplier: a reference ad (4–30 s) → new versions (whole ad, or a new hook / CTA around it)
 
-export function multiplierModel(input: Pick<MultiplierInput, "engine" | "modelId">, higgsfield: boolean): ModelDef {
-  const choices = MULTIPLIER_MODELS[input.engine];
-  const fallback = input.engine === "cloud" && !higgsfield ? "kling-o3" : choices[0].id;
-  const id = input.modelId && choices.some((c) => c.id === input.modelId) ? input.modelId : fallback;
+/** How each cloud edit model is asked to keep the reference's own soundtrack. */
+const KEEP_SOUND: Record<string, Record<string, unknown>> = { "kling-o3": { keep_audio: true }, "happy-horse-video-edit": { audio_setting: "origin" } };
+
+export function multiplierModel(input: Pick<MultiplierInput, "engine" | "modelId">): ModelDef {
+  const choices = keepOffered(MULTIPLIER_MODELS[input.engine], (c) => isOffered(c.id, input.engine));
+  const id = input.modelId && choices.some((c) => c.id === input.modelId) ? input.modelId : choices[0].id;
   return need(id);
 }
 
 export interface MultiplierContext {
-  higgsfield: boolean;
   extractFrame?: boolean;
   /** The reference has a soundtrack (null or missing: its header couldn't be read). */
   referenceSound?: boolean | null;
@@ -744,10 +809,9 @@ export interface MultiplierContext {
 export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): RunPlan {
   const open = input.engine === "open";
   const start = Math.max(0, input.start ?? 0);
-  const end = Math.min(input.duration, input.end ?? input.duration);
-  const length = end - start;
+  const asked = Math.min(input.duration, input.end ?? input.duration);
+  const length = asked - start;
   if (length < MULTIPLIER.minSeconds - 0.05 || length > MULTIPLIER.maxSeconds + 0.05) throw new PlanError("Video duration: 4-30 seconds");
-  const trimmed = start > 0.05 || end < input.duration - 0.05;
   const images = input.images ?? [];
   const text = multiplierText({ mode: input.mode, prompt: input.prompt, hook: input.hook, cta: input.cta });
   if (input.mode === "sections" && input.hook == null && input.cta == null) throw new PlanError("Turn on Change hook or Change CTA");
@@ -757,14 +821,20 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
   const notes: string[] = [];
   const steps: Step[] = [];
   const resolution = multiplierResolution(input.quality, input.engine);
+  // A cloud edit model that recreates a shorter part than the one selected gets its first seconds (MULTIPLIER_WINDOW).
+  const editModel = input.mode === "prompt" ? multiplierModel(input) : undefined;
+  const window = !open && editModel ? MULTIPLIER_WINDOW[editModel.id] : undefined;
+  const end = window && length > window + 0.05 ? start + window : asked;
+  if (end < asked) notes.push(`${editModel!.name} recreates up to ${window} s: the first ${window} s of your selection are used (move the selection for another part)`);
+  const trimmed = start > 0.05 || end < input.duration - 0.05;
   if (trimmed) {
     steps.push({ key: "clip", label: "Trimming the reference", request: { feature: step, modelId: M.trim, op: "trim", inputs: { video: input.video }, params: { startTime: round(start), endTime: round(end) } } });
   }
   const source = (slot: "video"): { inputs?: GenerationRequest["inputs"]; after?: string[]; chain?: ChainSlot[] } =>
     trimmed ? { after: ["clip"], chain: [{ slot }] } : { inputs: { video: input.video } };
 
-  if (input.mode === "prompt") {
-    const model = multiplierModel(input, ctx.higgsfield);
+  if (editModel) {
+    const model = editModel;
     const title = `Recreated ad · ${model.name}`;
     if (open) {
       // Wan Animate: the first image takes over the reference's performance; the original sound is laid back on.
@@ -776,6 +846,8 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
         label: "Recreating",
         request: {
           feature: trimmed ? "ad-multiplier" : step,
+          // Fuobe Genjutsu's Original runs on both engines: this is its open half.
+          engine: "open",
           modelId: model.id,
           op: "motion-transfer",
           prompt: lead.prompt,
@@ -796,8 +868,9 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
       }
       if (images.length > 1) notes.push("Wan Animate uses one image (the first you mention)");
     } else {
-      const max = model.options.maxImages ?? 0;
-      const m = mentionsFor(text, images, model.id, model.routes.some((r) => r.op === "v2v" && r.map?.images) ? max : 0);
+      // A model whose edit route takes no images (Gemini Omni Flash) edits from the prompt alone.
+      const max = model.routes.some((r) => r.op === "v2v" && r.map?.images) ? (model.options.maxImages ?? 0) : 0;
+      const m = mentionsFor(text, images, model.id, max);
       if (m.dropped && images.length) notes.push(max ? `${model.name} takes ${max} images — the first ${max} you mention are used` : `${model.name} edits from the prompt alone; pick Kling O3 to use your images`);
       const src = source("video");
       steps.push({
@@ -809,14 +882,15 @@ export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): 
           op: "v2v",
           prompt: m.prompt,
           inputs: { ...src.inputs, ...(m.images.length && { images: m.images }) },
-          params: { resolution, ...(model.id === "kling-o3" && { extra: { keep_audio: true } }) },
+          // The clip's length prices the edit (a v2v route sends none); the reference's own sound is kept (Kling's
+          // keep_audio, Happy Horse's audio_setting "origin").
+          params: { resolution, duration: round(end - start), ...(KEEP_SOUND[model.id] && { extra: KEEP_SOUND[model.id] }) },
           chain: src.chain,
           title,
           batchTitle: title,
         },
         after: src.after,
       });
-      if (model.id === "seedance-2-5" && !ctx.higgsfield) notes.push("Seedance 2.5 edit runs on Higgsfield — connect a Higgsfield key in Settings");
     }
     return { feature: "ad-multiplier", engine: input.engine, title, steps, finals: [steps[steps.length - 1].key], meta, notes };
   }
@@ -965,13 +1039,11 @@ export function deleteRun(id: string): boolean {
   return db().prepare("DELETE FROM marketing_runs WHERE id = ?").run(id).changes > 0;
 }
 
-const higgsfieldReady = () => provider("higgsfield").isConfigured();
-
 function context(input: { productId?: string; brandId?: string }) {
   const product = input.productId ? getProduct(input.productId) : null;
   if (input.productId && !product) throw new PlanError("This product is no longer available. Choose another one.");
   const brand = input.brandId ? getBrand(input.brandId) : product?.brandId ? getBrand(product.brandId) : null;
-  return { product, brand, higgsfield: higgsfieldReady() };
+  return { product, brand };
 }
 
 /** The shortest talking part a UGC film gets, however short the length asked for. */
@@ -1023,7 +1095,46 @@ export function estimateClickToAd(input: ClickToAdInput): RunEstimate {
   const ctx = context({ productId: input.productId });
   const presenter = input.presenter ?? styleById(input.styleId)?.presenter ?? false;
   const script = input.script?.trim() || Array(wordBudget(clickToAdSeconds(input.engine, presenter).voice)).fill("word").join(" ");
-  return estimatePlan(planClickToAd(input, { product: ctx.product!, brand: ctx.brand, script }));
+  return estimatePlan(planClickToAd(input, { product: ctx.product!, brand: ctx.brand, script, background: "/api/files/placeholder.png", silence: "/api/files/placeholder.wav" }));
+}
+
+/**
+ * The end card's background when the page drew none: the kit's accent at the card's size (cloud: the logo goes on
+ * it), the colour the page's card uses (themeFrom), so a white logo isn't put on a white first colour.
+ */
+export function cardBackground(brand?: BrandKit | null): string {
+  const hex = themeFrom(brand).accent;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const { w, h } = END_CARD.size;
+  const data = Buffer.alloc(w * h * 4);
+  for (let i = 0; i < data.length; i += 4) data.set([r, g, b, 255], i);
+  return saveFile({ data: encodePng({ width: w, height: h, data }), contentType: "image/png", source: "generation", name: "end-card-background.png" }).url;
+}
+
+/** A silent 16-bit stereo WAV `seconds` long (44.1 kHz). */
+export function silentWav(seconds: number, rate = 44100): Buffer {
+  const frames = Math.round(seconds * rate);
+  const bytes = frames * 4;
+  const buf = Buffer.alloc(44 + bytes);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + bytes, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(2, 22);
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 4, 28);
+  buf.writeUInt16LE(4, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(bytes, 40);
+  return buf;
+}
+
+/** The cloud end card's sound track: silence as long as the card. */
+function cardSilence(seconds?: number): string {
+  const s = Math.max(END_CARD.minSeconds, Math.min(END_CARD.maxSeconds, seconds ?? END_CARD.seconds));
+  return saveFile({ data: silentWav(s), contentType: "audio/wav", source: "generation", name: "end-card-silence.wav" }).url;
 }
 
 export async function clickToAdScript(input: Pick<ClickToAdInput, "engine" | "productId" | "styleId" | "presenter" | "instructions">): Promise<{ script: string; by: "llm" | "rules"; seconds: number }> {
@@ -1040,7 +1151,17 @@ export async function runClickToAd(input: ClickToAdInput): Promise<{ run: Market
   const presenter = input.presenter ?? styleById(input.styleId)?.presenter ?? false;
   const seconds = clickToAdSeconds(input.engine, presenter).voice;
   const script = input.script?.trim() ? fitScript(input.script, seconds) : (await clickToAdScript(input)).script;
-  const plan = planClickToAd(input, { product: ctx.product, brand: ctx.brand, script });
+  // Checked first with stand-ins, so a plan that can't run writes no file.
+  const cloudCard = !!input.endCard && input.engine === "cloud";
+  const fallback = cloudCard && !input.endCard?.image;
+  if (cloudCard) planClickToAd(input, { product: ctx.product, brand: ctx.brand, script, background: "/api/files/placeholder.png", silence: "/api/files/placeholder.wav" });
+  const plan = planClickToAd(input, {
+    product: ctx.product,
+    brand: ctx.brand,
+    script,
+    background: fallback ? cardBackground(ctx.brand) : undefined,
+    silence: cloudCard ? cardSilence(input.endCard?.seconds) : undefined,
+  });
   estimatePlan(plan);
   return { run: launch(plan, { ...input, script }), script };
 }
@@ -1069,7 +1190,7 @@ export async function referenceFacts(ref: string): Promise<{ sound: boolean | nu
 
 async function multiplierContext(input: MultiplierInput): Promise<MultiplierContext> {
   const facts = await referenceFacts(input.video);
-  return { higgsfield: higgsfieldReady(), referenceSound: facts.sound, referenceAspect: facts.aspect };
+  return { referenceSound: facts.sound, referenceAspect: facts.aspect };
 }
 
 export async function estimateMultiplier(input: MultiplierInput): Promise<RunEstimate> {

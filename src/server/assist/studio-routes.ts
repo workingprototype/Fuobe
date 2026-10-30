@@ -7,7 +7,7 @@ import { DUB_STEP_MODELS, prepareSteps, translateKey, type OneShotModel } from "
 import { getModel } from "@/lib/catalog";
 import { routesFor } from "@/lib/catalog/plan";
 import { defaultSettings, genreInfo, PART_LABELS, type EpisodeAspect, type EpisodeSettings, type NarratorVoice, type StepPart } from "@/lib/catalog/faceless";
-import { AD_RATIOS, emptyKit, type AdRatio, type BrandKit, type Product } from "@/lib/catalog/marketing";
+import { AD_RATIOS, emptyKit, type BrandKit, type Product } from "@/lib/catalog/marketing";
 import { lookFromPreset, SHORTS, SHORTS_MODELS, type ShortsLook } from "@/lib/catalog/shorts";
 import type { Engine, GenerationRequest, MediaKind, Operation } from "@/lib/catalog/types";
 import { modeHref } from "@/lib/hubs";
@@ -20,6 +20,7 @@ import { createDubSession, previewDub, videoLength, type CreateDubInput } from "
 import { createChannel, createEpisode, estimateEpisode, listChannels } from "../faceless";
 import { chooseRoute } from "../generations";
 import { createProject, deleteProject, FileUrl, jobSteps, startJob } from "../layers";
+import { firstOn } from "../model-access";
 import { engineMode } from "../settings";
 import { createSession, estimateWith, sourceInfo, type ShortsBody, type SourceInfo } from "../shorts";
 import { absolutePath, getAsset } from "../storage";
@@ -111,7 +112,7 @@ function layersJob(i: LayersToolInput, ctx: ToolContext): Checked<{ input: Layer
   if (!size) return { problem: "Layers couldn't read that image's size (PNG, JPEG, WebP, GIF or SVG)" };
   const models = TOOL_MODELS.decompose[engine];
   if (i.model_id && !models.includes(i.model_id)) return { problem: `${getModel(i.model_id)?.name ?? i.model_id} isn't one of Layers' decomposition models on this engine` };
-  const modelId = i.model_id ?? models[0];
+  const modelId = i.model_id ?? firstOn(models, engine)!;
   const layers = clampLayers(modelId, i.layers ?? defaultLayers("decompose", modelId));
   return {
     width: size.width,
@@ -210,7 +211,7 @@ const shortsRoute: StudioRoute<RestyleToolInput> = {
   plan: (i, ctx) => {
     const { body, info, notes } = ok(shortsJob(i, ctx));
     const est = estimateWith(body, info);
-    const modelId = body.modelId ?? SHORTS_MODELS[body.engine][0];
+    const modelId = body.modelId ?? firstOn(SHORTS_MODELS[body.engine], body.engine)!;
     const job: PlannedJob = {
       tool: "restyle_footage",
       modelId,
@@ -494,12 +495,9 @@ function adsJob(i: AdsToolInput, ctx: ToolContext): Checked<{ input: BatchInput;
   const input: BatchInput = {
     brandId: kit?.id ?? "draft",
     engine,
-    // Several formats, or words to use as given, need Fuobe's compositor (every ad in 1:1, 4:5 and 9:16, its
-    // headline and call to action editable); Higgsfield renders one format per ad and writes its own copy into the picture.
-    ...((ratios.length > 1 || !!i.headline?.trim() || !!i.cta?.trim()) && { route: "fuobe" as const }),
+    // Every ad comes in 1:1, 4:5 and 9:16 from Fuobe's compositor, its headline and call to action editable.
     items: [{ productId: draftProduct.id, count: Math.max(1, Math.min(8, i.count ?? 4)) }],
     direction,
-    ratio: ratios[0] as AdRatio,
   };
   try {
     estimateBatch(input, { brand: draftBrand, product: draftProduct });
@@ -540,17 +538,14 @@ const adsRoute: StudioRoute<AdsToolInput> = {
     const job: PlannedJob = {
       tool: "create_ads",
       modelId: est.modelId,
-      modelName: est.route === "higgsfield" ? "Higgsfield Ads Studio" : est.modelName,
+      modelName: est.modelName,
       kind: "image",
       op: draft.product?.images.length ? "edit" : "t2i",
       prompt: i.brief,
       count: est.total,
       costUsd: est.costUsd,
       demo: est.demo,
-      note:
-        est.route === "higgsfield"
-          ? `${est.total} finished ad${est.total === 1 ? "" : "s"} in ${input.ratio}`
-          : `${est.total} ad${est.total === 1 ? "" : "s"} · copy by ${est.copyBy === "llm" ? "the AI copywriter" : "the offline copywriter"} · each in 1:1, 4:5 and 9:16`,
+      note: `${est.total} ad${est.total === 1 ? "" : "s"} · copy by ${est.copyBy === "llm" ? "the AI copywriter" : "the offline copywriter"} · each in 1:1, 4:5 and 9:16`,
       atomic: true,
     };
     return [job];

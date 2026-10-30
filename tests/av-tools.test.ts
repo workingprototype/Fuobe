@@ -109,7 +109,7 @@ describe("3D viewer data flow", () => {
     expect(model3dRequest({ engine: "cloud", photo: "p.png" })).toEqual({ feature: "image-to-3d", modelId: "hunyuan-3d-3-1-pro", op: "image-to-3d", inputs: { images: ["p.png"] } });
     expect(model3dRequest({ engine: "open", photo: "p.png", modelId: "trellis-2" }).modelId).toBe("oss-pixal3d");
     expect(model3dRequest({ engine: "cloud", photo: "p.png", modelId: "tripo-h3-1" }).modelId).toBe("tripo-h3-1");
-    for (const m of [...MODELS_3D.cloud, ...MODELS_3D.open]) expect(getModel(m.id)?.routes.some((r) => r.op === "image-to-3d"), m.id).toBe(true);
+    for (const m of [...MODELS_3D.image.cloud, ...MODELS_3D.image.open]) expect(getModel(m.id)?.routes.some((r) => r.op === "image-to-3d"), m.id).toBe(true);
   });
 
   it("a cloud GLB with formats and a preview → viewer, downloads, and Animate the spin from the photo", () => {

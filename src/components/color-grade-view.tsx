@@ -134,8 +134,10 @@ function Grader() {
   const initial = sp.get("video") ? { url: sp.get("video")!, kind: "video" as const } : sp.get("image") ? { url: sp.get("image")!, kind: "image" as const } : null;
   const [input, setInput] = useState<{ url: string; kind: "image" | "video" } | null>(initial);
   const [source, setSource] = useState<Source | null>(null);
-  const [grade, setGrade] = useState<Grade>(NEUTRAL);
-  const [preset, setPreset] = useState<string | undefined>();
+  // A clip handed over with its grade (?preset=, a Fuobe DoP colour-grade effect) opens with that grade picked.
+  const handed = PRESETS.find((p) => p.id === sp.get("preset"));
+  const [grade, setGrade] = useState<Grade>(() => (handed ? applyPreset(handed) : NEUTRAL));
+  const [preset, setPreset] = useState<string | undefined>(handed?.id);
   const [holding, setHolding] = useState(false);
   const [saving, setSaving] = useState<null | "image" | number>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -503,7 +505,7 @@ function Grader() {
             </div>
             {saved && (
               <div className="flex gap-2 text-[12px]">
-                <Link href="/library" className="text-brand-text hover:underline">
+                <Link href="/library" className="text-brand-text underline underline-offset-2">
                   Open library
                 </Link>
                 <a href={`${saved}?download=graded.${input?.kind === "video" ? "webm" : "png"}`} className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">

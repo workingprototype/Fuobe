@@ -127,11 +127,11 @@ describe("katana steps", () => {
       ["cut0", "oss-segment", "trim"],
       ["frame0", "oss-extract-frame", "frame"],
       ["key0", "oss-qwen-edit", "edit"],
-      ["move0", "oss-wan22-animate", "motion-transfer"],
+      ["move0", "fuobe-genjutsu-motion", "motion-transfer"],
       ["cut1", "oss-segment", "trim"],
       ["frame1", "oss-extract-frame", "frame"],
       ["key1", "oss-qwen-edit", "edit"],
-      ["move1", "oss-wan22-animate", "motion-transfer"],
+      ["move1", "fuobe-genjutsu-motion", "motion-transfer"],
       ["join", "oss-join-clips", "concat"],
       ["final", "oss-mux", "mux"],
     ]);
@@ -248,7 +248,7 @@ describe("katana runs (demo mode)", () => {
     const tool = getTool("katana")!;
     expect(tool.gated).toBe(true);
     const [job] = tool.plan!({ reference, photos: [photo], segment_seconds: 4 }, { engine: "open" });
-    expect(job).toMatchObject({ tool: "katana", kind: "video", modelId: "oss-wan22-animate" });
+    expect(job).toMatchObject({ tool: "katana", kind: "video", modelId: "fuobe-genjutsu-motion" });
     expect(job.error).toBeUndefined();
     expect(tool.plan!({ reference: "nope", photos: [] }, { engine: "cloud" })[0].error).toBeTruthy();
   });

@@ -15,8 +15,10 @@ import { VideoTrimmer } from "@/components/studio/video-trimmer";
 import { initialClip, mentionedImages, MULTIPLIER, MULTIPLIER_MODELS, multiplierResolution, type ClipRange as Range, type MarketingRun, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
 import { probeBlob, probeUrl } from "@/lib/media-probe";
+import { useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
-import { addRuns, send, useEstimate, useStatusFlags } from "@/components/marketing/hooks";
+import { addRuns, send, useEstimate } from "@/components/marketing/hooks";
 import type { ModelInfo } from "@/components/marketing/model-info";
 import { RunsList } from "@/components/marketing/runs";
 import { EmptyIcon, MarketingHeader, useMarketingEngine } from "@/components/marketing/shell";
@@ -172,7 +174,7 @@ function MentionImages({ value, onChange, onMention, max }: { value: string[]; o
 export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) {
   const qc = useQueryClient();
   const { engine, setEngine } = useMarketingEngine();
-  const { higgsfield } = useStatusFlags();
+  const access = useModelAccess();
   const [video, setVideo] = useState<SlotValue | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [range, setRange] = useState<Range | null>(null);
@@ -190,9 +192,9 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const sections = hookOn || ctaOn;
-  const choices = MULTIPLIER_MODELS[engine];
-  const fallback = engine === "cloud" && !higgsfield ? "kling-o3" : choices[0].id;
-  const modelId = picked && choices.some((c) => c.id === picked) ? picked : fallback;
+  // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const choices = useMemo(() => keepOffered(MULTIPLIER_MODELS[engine], (c) => offered(access, c.id, engine)), [access, engine]);
+  const modelId = picked && choices.some((c) => c.id === picked) ? picked : choices[0].id;
   const model = models[modelId];
   const maxImages = engine === "open" ? 1 : (model?.maxImages ?? 0);
   const cut = range ?? (duration ? initialClip(duration) : null);
@@ -426,7 +428,6 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
                       {choices.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
                           {models[c.id]?.name ?? c.id}
-                          {c.id === "seedance-2-5" && !higgsfield ? " · needs Higgsfield" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -471,7 +472,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
             <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4">
               <p className="mr-auto text-[12px] text-muted-foreground">{est.data?.steps.length ? est.data.steps.map((s) => s.label).join(" → ") : "New versions keep the reference's length and framing"}</p>
               {cost && <span className="font-mono text-[13px] text-muted-foreground">{cost}</span>}
-              <Button size="lg" onClick={() => void generate()} aria-disabled={!!blocker || !!busy} className={cn(blocker && "bg-muted text-subtle-foreground hover:bg-muted")} title={blocker}>
+              <Button size="lg" onClick={() => void generate()} aria-disabled={!!blocker || !!busy} className={cn(blocker && "bg-muted text-muted-foreground hover:bg-muted")} title={blocker}>
                 {busy ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy ?? (versions > 1 ? `Generate ${versions} versions` : "Generate")}
               </Button>
             </div>
@@ -491,8 +492,8 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
             }
           />
         </div>
-        <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-subtle-foreground">
-          <Sparkles className="size-3" /> Cloud: Seedance 2.5 edit (Higgsfield), Kling O3 edit, Gemini Omni Flash · Open source: Wan 2.2 Animate, Wan 2.2 clips joined around your ad
+        <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-muted-foreground">
+          <Sparkles className="size-3" /> Cloud: Kling O3 edit, Happy Horse edit, Gemini Omni Flash · Open source: Fuobe Genjutsu (Wan Animate), Wan 2.2 clips joined around your ad
         </p>
       </div>
     </div>

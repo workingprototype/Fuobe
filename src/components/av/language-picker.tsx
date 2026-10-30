@@ -86,7 +86,7 @@ export function TargetLanguages({
                   const ok = available(l);
                   return (
                     <CommandItem key={l.code} value={`${l.name} ${l.code}`} disabled={!ok && !on} onSelect={() => toggle(l.code)} className="justify-between">
-                      <span className={cn(!ok && "text-subtle-foreground")}>
+                      <span className={cn(!ok && "text-muted-foreground")}>
                         {l.name}
                         {!ok && <span className="ml-1.5 text-[11px]">· not on this route</span>}
                       </span>

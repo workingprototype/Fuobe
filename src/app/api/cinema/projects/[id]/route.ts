@@ -3,15 +3,15 @@ import { CinemaError, deleteProject, getProject, listFolders, spentUsd, updatePr
 import { ProjectPatch, body, handle } from "@/server/cinema-schemas";
 import { cinemaContext } from "@/server/cinema-generate";
 
-/** The project with its folders, its estimated spend and what this install can run (Higgsfield key or not). */
+/** The project with its folders, its estimated spend and what this install can run (cloud models allowed, a civitai key). */
 export async function GET(_req: Request, ctx: RouteContext<"/api/cinema/projects/[id]">) {
   await connection();
   return handle(async () => {
     const { id } = await ctx.params;
     const project = getProject(id);
     if (!project) throw new CinemaError("Project not found", 404);
-    const { higgsfield, cloudAllowed } = cinemaContext();
-    return Response.json({ project, folders: listFolders(id), spentUsd: spentUsd(id), context: { higgsfield, cloudAllowed } });
+    const { cloudAllowed, civitai } = cinemaContext();
+    return Response.json({ project, folders: listFolders(id), spentUsd: spentUsd(id), context: { cloudAllowed, civitai } });
   });
 }
 

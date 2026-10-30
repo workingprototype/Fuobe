@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Box,
   CalendarDays,
   Clapperboard,
   ExternalLink,
@@ -47,6 +48,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FailedTile, MediaThumb, PendingTile, downloadName, tileRatio } from "@/components/studio/feed";
+import { useSoulFinish } from "@/components/studio/soul-finish";
 import { Viewer } from "@/components/studio/viewer";
 import { getModel } from "@/lib/catalog";
 import type { CinemaFolder } from "@/lib/catalog/cinema";
@@ -72,6 +74,7 @@ interface Prefs {
   hideFailed: boolean;
 }
 
+const CINEMA_KEY = ["cinema"] as const;
 const DEFAULT_PREFS: Prefs = { layout: "square", split: true, fit: false, type: "all", date: "all", status: "all", hideFailed: false };
 const PREFS_KEY = "fuobe.cinema.feed";
 const prefListeners = new Set<() => void>();
@@ -108,13 +111,14 @@ function usePrefs(): [Prefs, (p: Partial<Prefs>) => void] {
   return [prefs, set];
 }
 
-/** One tile: a pending/failed take, one output of a take, or a tile cut from a grid sheet. */
+/** One tile: a pending/failed take, one output of a take, a tile cut from a grid sheet, or a 3D scene (shown by its still). */
 interface Unit {
   key: string;
   g: CinemaGeneration;
   output?: OutputFile;
   index: number;
   tile?: { row: number; col: number };
+  scene?: boolean;
 }
 
 const active = (g: Generation) => g.status === "queued" || g.status === "running";
@@ -124,6 +128,12 @@ function units(items: CinemaGeneration[]): Unit[] {
   for (const g of items) {
     if (g.status !== "succeeded") {
       out.push({ key: g.id, g, index: 0 });
+      continue;
+    }
+    // A 3D scene is one tile showing its still; it opens in the 3D viewer.
+    if (g.feature === "cinema-scene") {
+      const still = g.request.inputs?.images?.[0];
+      out.push({ key: g.id, g, output: still ? { url: still, kind: "image" } : g.outputs[0], index: 0, scene: true });
       continue;
     }
     // Open-source grids return the sheet first, then its tiles.
@@ -146,9 +156,10 @@ function dayLabel(ts: number): string {
   return d.toLocaleDateString(undefined, { weekday: diff < 7 ? "long" : undefined, month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 }
 
-const promptOf = (g: CinemaGeneration) => g.take?.prompt?.trim() || g.request.prompt?.trim() || g.prompt || "Untitled";
+const FEATURE_TITLES: Record<string, string> = { "cinema-scene": "3D scene", "cinema-recompose": "Recomposed view" };
+const promptOf = (g: CinemaGeneration) => g.take?.prompt?.trim() || FEATURE_TITLES[g.feature] || g.request.prompt?.trim() || g.prompt || "Untitled";
 
-const STEP_HINT: Record<string, string> = { "cinema-cast": "Cast", "cinema-location": "Location", "cinema-grid": "Grid" };
+const STEP_HINT: Record<string, string> = { "cinema-cast": "Cast", "cinema-location": "Location", "cinema-grid": "Grid", "cinema-scene": "3D scene", "cinema-recompose": "Recomposed" };
 
 function Badge({ children, className }: { children: React.ReactNode; className?: string }) {
   return <span className={cn("inline-flex h-5 items-center rounded-full bg-black/50 px-1.5 text-[10.5px] font-medium text-white backdrop-blur", className)}>{children}</span>;
@@ -160,6 +171,11 @@ export interface FeedHandlers {
   onAnimate: (url: string) => void;
   onReference: (url: string, kind: OutputFile["kind"]) => void;
   onSaveElement: (g: CinemaGeneration, url: string, kind: "character" | "location") => void;
+  /** "Create 3D scene" from a still (asks first, with the price). */
+  onCreateScene: (g: CinemaGeneration, url: string) => void;
+  onOpenScene: (g: CinemaGeneration) => void;
+  /** What building a scene costs on the current engine ("Free", "≈ $0.03"). */
+  scenePrice: string;
 }
 
 /** A grid contact sheet and its tiles are one take: deleting any of them deletes the lot. */
@@ -185,11 +201,21 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
-        <DropdownMenuItem onClick={() => handlers.onLoad(u.g)}>
-          <RotateCcw /> Load into prompt bar
-        </DropdownMenuItem>
-        {o?.kind === "image" && (
+        {/* A scene has no prompt to load: it opens in the 3D viewer instead. */}
+        {u.scene ? (
+          <DropdownMenuItem onClick={() => handlers.onOpenScene(u.g)}>
+            <Box /> Open 3D scene
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem onClick={() => handlers.onLoad(u.g)}>
+            <RotateCcw /> Load into prompt bar
+          </DropdownMenuItem>
+        )}
+        {o?.kind === "image" && !u.scene && (
           <>
+            <DropdownMenuItem onClick={() => handlers.onCreateScene(u.g, o.url)}>
+              <Box /> Create 3D scene <span className="ml-auto text-[11.5px] text-muted-foreground">{handlers.scenePrice}</span>
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handlers.onAnimate(o.url)}>
               <Clapperboard /> Animate (start frame)
             </DropdownMenuItem>
@@ -214,13 +240,21 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
             </DropdownMenuItem>
           </>
         )}
-        {o && (
-          <DropdownMenuItem asChild>
-            <a href={`${o.url}?download=${encodeURIComponent(downloadName(u.g, o, u.index))}`}>
-              <Download /> Download
-            </a>
-          </DropdownMenuItem>
-        )}
+        {u.scene
+          ? u.g.outputs.slice(0, 1).map((f) => (
+              <DropdownMenuItem key={f.url} asChild>
+                <a href={`${f.url}?download=${encodeURIComponent(downloadName(u.g, f, 0))}`}>
+                  <Download /> {f.kind === "model3d" ? "Download the 3D mesh (.glb)" : "Download the depth map"}
+                </a>
+              </DropdownMenuItem>
+            ))
+          : o && (
+              <DropdownMenuItem asChild>
+                <a href={`${o.url}?download=${encodeURIComponent(downloadName(u.g, o, u.index))}`}>
+                  <Download /> Download
+                </a>
+              </DropdownMenuItem>
+            )}
         <DropdownMenuItem onClick={() => void actions.favorite([u.g.id], !u.g.favorite).catch((e) => toast.error((e as Error).message))}>
           <Heart /> {u.g.favorite ? "Unlike" : "Like"}
         </DropdownMenuItem>
@@ -364,7 +398,7 @@ function TileView({
   const overlay = (clickable || selecting) && (
     <button
       type="button"
-      aria-label={selecting ? `${selected ? "Unselect" : "Select"}: ${promptOf(g)}` : `Open ${step ? `${step}: ` : ""}${promptOf(g)}`}
+      aria-label={selecting ? `${selected ? "Unselect" : "Select"}: ${promptOf(g)}` : u.scene ? "Open 3D scene" : `Open ${step ? `${step}: ` : ""}${promptOf(g)}`}
       aria-pressed={selecting ? selected : undefined}
       onClick={(e) => {
         if (selecting || e.metaKey || e.ctrlKey || e.shiftKey) onToggle(e.shiftKey);
@@ -395,6 +429,11 @@ function TileView({
       {checkbox}
       <div className="pointer-events-none absolute top-2 right-2 flex items-center gap-1">
         {g.favorite && <Heart className="size-4 fill-highlight text-highlight drop-shadow" />}
+        {u.scene && (
+          <span className="inline-flex h-6 items-center gap-1 rounded-full bg-black/55 px-2 text-[11.5px] font-medium text-white backdrop-blur" aria-hidden>
+            <Box className="size-3.5" /> 3D
+          </span>
+        )}
       </div>
       {g.status === "succeeded" && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 bg-gradient-to-t from-black/65 to-transparent p-2 pt-8 opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within/tile:opacity-100 sm:group-hover/tile:opacity-100">
@@ -413,15 +452,36 @@ function TileView({
                 <TooltipContent>Extend · Prequel · Edit</TooltipContent>
               </Tooltip>
             )}
-            {u.output?.kind === "image" && (
+            {u.scene ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => handlers.onAnimate(u.output!.url)} className="grid size-7 place-items-center rounded-lg text-white/90 hover:bg-white/20 hover:text-white" aria-label="Animate">
-                    <Clapperboard className="size-4" />
+                  <button type="button" onClick={() => handlers.onOpenScene(g)} className="grid size-7 place-items-center rounded-lg text-white/90 hover:bg-white/20 hover:text-white" aria-label="Open 3D scene">
+                    <Box className="size-4" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>Animate: use as the start frame</TooltipContent>
+                <TooltipContent>Open the 3D scene: fly, frame, capture</TooltipContent>
               </Tooltip>
+            ) : (
+              u.output?.kind === "image" && (
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button type="button" onClick={() => handlers.onAnimate(u.output!.url)} className="grid size-7 place-items-center rounded-lg text-white/90 hover:bg-white/20 hover:text-white" aria-label="Animate">
+                        <Clapperboard className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Animate: use as the start frame</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button type="button" onClick={() => handlers.onCreateScene(g, u.output!.url)} className="grid size-7 place-items-center rounded-lg text-white/90 hover:bg-white/20 hover:text-white" aria-label={`Create 3D scene · ${handlers.scenePrice}`}>
+                        <Box className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Create 3D scene · {handlers.scenePrice}</TooltipContent>
+                  </Tooltip>
+                </>
+              )
             )}
             <TileMenu u={u} folders={folders} projectId={projectId} handlers={handlers} onDelete={onDelete} />
           </div>
@@ -498,6 +558,8 @@ export function CinemaFeed({
   const [prefs, setPrefs] = usePrefs();
   const actions = useItemActions(projectId);
   const qc = useQueryClient();
+  // Stills on Fuobe Soul Cinema and Soul Location's Movie look finish in the browser (the 21:9 crop, the grade).
+  useSoulFinish(items, CINEMA_KEY);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -507,7 +569,8 @@ export function CinemaFeed({
   const filtered = useMemo(() => {
     const age = { today: 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000 } as const;
     return items.filter((g) => {
-      if (prefs.type !== "all" && !(g.outputs.some((o) => o.kind === prefs.type) || (g.status !== "succeeded" && g.kind === prefs.type))) return false;
+      // A 3D scene is neither an image nor a video (its depth map is an image output): it shows under All types.
+      if (prefs.type !== "all" && (g.feature === "cinema-scene" || !(g.outputs.some((o) => o.kind === prefs.type) || (g.status !== "succeeded" && g.kind === prefs.type)))) return false;
       if (prefs.date === "today" && dayLabel(g.createdAt) !== "Today") return false;
       if (prefs.date !== "all" && prefs.date !== "today" && now - g.createdAt > age[prefs.date]) return false;
       if (prefs.status === "liked" && !g.favorite) return false;
@@ -518,7 +581,7 @@ export function CinemaFeed({
     });
   }, [items, prefs, now]);
   const all = useMemo(() => units(filtered), [filtered]);
-  const viewable = all.filter((u) => u.g.status === "succeeded");
+  const viewable = all.filter((u) => u.g.status === "succeeded" && !u.scene);
   const pos = open ? viewable.findIndex((u) => u.key === open) : -1;
   const ids = useMemo(() => [...new Set(all.map((u) => u.g.id))], [all]);
   const live = [...selected].filter((id) => ids.includes(id));
@@ -705,10 +768,10 @@ export function CinemaFeed({
           {groups.map((grp) => (
             <section key={grp.label || "all"} className="space-y-2.5">
               {grp.label && (
-                <h3 className="flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
+                <h2 className="flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
                   {grp.label}
-                  <span className="font-mono text-[11px] text-subtle-foreground">{grp.units.length}</span>
-                </h3>
+                  <span className="font-mono text-[11px] text-muted-foreground">{grp.units.length}</span>
+                </h2>
               )}
               <div className={layoutCls}>
                 {grp.units.map((u) => (
@@ -720,7 +783,7 @@ export function CinemaFeed({
                     selected={selected.has(u.g.id)}
                     selecting={selecting}
                     onToggle={(shift) => toggle(u.g.id, shift)}
-                    onOpen={() => setOpen(u.key)}
+                    onOpen={() => (u.scene ? handlers.onOpenScene(u.g) : setOpen(u.key))}
                     projectId={projectId}
                     folders={folders}
                     handlers={handlers}

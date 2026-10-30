@@ -409,7 +409,15 @@ export const APPS: Preset[] = [
     userPrompt: "required",
     placeholder: "Who are they? e.g. “a 26-year-old surfer and photographer from Lisbon, freckles, sun-bleached curls”",
     prompt: "{prompt}",
-    cloud: { modelId: "ai-influencer", op: "t2i" },
+    // Nano Banana Pro draws the sheet in the cloud, as the AI Influencer builder does (build plan O7; O10 moves it to
+    // Fuobe Soul's sheet).
+    cloud: {
+      modelId: "nano-banana-pro",
+      op: "t2i",
+      params: { aspectRatio: "16:9" },
+      promptTemplate:
+        "A character sheet of an original character: {prompt}. Front, three-quarter, profile and back views side by side on a plain light studio background, full body, the same face, hairstyle and outfit in every view, photorealistic, high detail.",
+    },
     // The Soul Cast sheet workflow: Z-Image Turbo draws the turnaround (front, three-quarter, profile, back) and
     // cuts it into the four views, which make a better character element than one wide sheet.
     open: {

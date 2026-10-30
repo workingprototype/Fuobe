@@ -3,7 +3,12 @@
  * blocker messages, attachment placement and model-picker grouping. No catalog import here, so
  * nothing in this file pulls the model list into the browser bundle.
  */
-import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation, Preset } from "./catalog/types";
+import { FORMAT_INFO } from "./av/formats";
+import { fpsPlan, fpsSummary } from "./av/fps";
+import { targetShortEdge, upscaledSize, upscaleFactorFor, upscaleTier } from "./av/upscale";
+import { wholeClipProblem, wholeClipTool } from "./av/video-finish";
+import { addFrameAt, frameTimes, framesInputs, removeFrameAt, spread, type FrameSupport } from "./catalog/keyframes";
+import { COLORMAPS, type Engine, type GenParams, type InputSlot, type MatteOutput, type MediaKind, type ModelDef, type Operation, type Preset, type VideoFormat } from "./catalog/types";
 import { spokenLanguageName } from "./speech-languages";
 
 // ---------------------------------------------------------------------------
@@ -12,7 +17,7 @@ import { spokenLanguageName } from "./speech-languages";
 /** Operations that transform one input into one result — no batch count. */
 export const SINGLE_TAKE = new Set<Operation>([
   "lipsync", "avatar", "upscale-video", "upscale-image", "dub", "extend", "reframe", "finalize", "v2a", "interpolate",
-  "bg-remove", "bg-remove-video", "depth-video", "concat", "color-match", "frame",
+  "bg-remove", "bg-remove-video", "depth-video", "concat", "color-match", "frame", "sdr-to-hdr", "export-video",
 ]);
 
 export const durationLabel = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}s` : `${v}s`);
@@ -32,6 +37,18 @@ export interface SettingsShape {
   negativePrompt: boolean;
   /** The spoken languages a transcriber can be told (unset = it detects): the "Spoken language" picker. */
   sourceLanguages: string[] | null;
+  /** Remove background: the cut-out or its alpha mask, as far as the model makes them (one is still shown, with a note). */
+  matteOutput: MatteOutput[] | null;
+  /** Depth maps: the colour maps the model draws (grayscale alone is still shown, with where the others are). */
+  colormap: string[] | null;
+  /** Depth maps: the original clip next to the map. */
+  sideBySide: boolean;
+  /** Frame rates to reach (FPS Boost, upscalers): `original` adds the clip's own rate as the first choice. */
+  fps: { values: number[]; original: boolean } | null;
+  /** Slow-motion factors (1 = off). */
+  slowdown: number[] | null;
+  /** Output formats (SDR to HDR, export): the model's, or every format the studio's models write. */
+  formats: VideoFormat[] | null;
 }
 
 /**
@@ -40,16 +57,20 @@ export interface SettingsShape {
  * transforms (Lipsync), there's still no batch count.
  */
 export function settingsShape(
-  model: Pick<ModelDef, "options"> | undefined,
+  model: Pick<ModelDef, "options" | "defaults"> | undefined,
   op: Operation | undefined,
   kind: MediaKind,
   showPrompt: boolean,
   params: GenParams = {},
   studioOps: Operation[] = [],
+  studioFormats?: VideoFormat[],
 ): SettingsShape {
   const o = model?.options ?? {};
+  const formats = studioFormats?.length ? studioFormats : o.formats;
   const many = <T,>(xs: T[] | undefined) => (xs && xs.length > 1 ? xs : null);
   const single = op ? SINGLE_TAKE.has(op) : studioOps.length > 0 && studioOps.every((x) => SINGLE_TAKE.has(x));
+  // The operation, or the studio's only one before anything is attached (Video tools → Depth map).
+  const is = (x: Operation) => op === x || (!op && studioOps.length > 0 && studioOps.every((y) => y === x));
   return {
     aspect: op === "i2v" || op === "flf2v" ? null : many(o.aspectRatios),
     resolution: many(o.resolutions),
@@ -62,7 +83,48 @@ export function settingsShape(
     sliders: !!o.sliders?.length,
     negativePrompt: !!o.negativePrompt,
     sourceLanguages: o.sourceLanguages?.length ? o.sourceLanguages : null,
+    matteOutput: is("bg-remove-video") && model ? (o.matteOutputs ?? ["cutout"]) : null,
+    colormap: is("depth-video") && model ? (o.colormaps ?? ["grayscale"]) : null,
+    sideBySide: is("depth-video") && !!o.sideBySide,
+    fps: o.fpsTargets?.length ? { values: o.fpsTargets, original: model?.defaults?.targetFps === undefined } : null,
+    slowdown: many(o.slowdowns),
+    formats: formats && formats.length > 0 ? formats : null,
   };
+}
+
+/**
+ * Frames mode's settings: the strip has its own length control, frames and shots don't mix, and the open
+ * chain makes one film (its clips are the jobs), so it has no batch count.
+ */
+export function framesShape(shape: SettingsShape, chained: boolean): SettingsShape {
+  return { ...shape, duration: null, multiShot: false, count: shape.count && !chained };
+}
+
+export const MATTE_OUTPUT_LABELS: Record<MatteOutput, string> = { cutout: "Cutout video", matte: "Alpha mask" };
+export const colormapLabel = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+
+/**
+ * What a Remove background or Depth map model can't make, said under its picker (Higgsfield offers five colour
+ * maps and both outputs on one model; here they depend on the model and the engine).
+ */
+export function videoToolNote(model: Pick<ModelDef, "name" | "engine" | "options">, what: "matte" | "colormap"): string | null {
+  const o = model.options;
+  if (what === "matte") {
+    const outs = o.matteOutputs ?? ["cutout"];
+    if (outs.length > 1) return null;
+    if (outs[0] === "cutout") return `${model.name} makes the cut-out only — BiRefNet and SAM also make the alpha mask.`;
+    return model.engine === "cloud"
+      ? "The cloud gives the alpha mask of what you name — cut it out by words with SAM 3 on your ComfyUI, or cut out the whole subject with BiRefNet or Bria."
+      : `${model.name} makes the alpha mask only.`;
+  }
+  const maps = o.colormaps ?? ["grayscale"];
+  if (maps.length >= COLORMAPS.length) return null;
+  if (model.engine === "open") {
+    return maps.length > 1
+      ? `The open engine draws ${maps.map(colormapLabel).join(" and ")} — Turbo, Magma and Viridis need the cloud engine.`
+      : `${model.name} draws grayscale only — Video Depth Anything adds Inferno; Turbo, Magma and Viridis need the cloud engine.`;
+  }
+  return `${model.name} draws ${maps.map(colormapLabel).join(", ")}.`;
 }
 
 /** The parts of the summary chip label, in reading order. */
@@ -80,10 +142,147 @@ export function settingsSummary(shape: SettingsShape, params: GenParams, model?:
   if (shape.multiShot && !params.shots && params.multiShot === "auto") parts.push("Multi-shot");
   if (shape.draft && params.draft) parts.push("Draft");
   if (shape.audio && params.generateAudio === false) parts.push("No audio");
+  if (shape.fps) {
+    const fps = params.targetFps ?? d.targetFps;
+    if (fps) parts.push(`${fps} fps`);
+    else if (!shape.fps.original) parts.push(`${shape.fps.values[0]} fps`);
+  }
+  if (shape.slowdown && (params.slowdown ?? 1) > 1) parts.push(`${params.slowdown}× slow`);
+  if (shape.formats) {
+    const f = formatOf(params, model, shape.formats);
+    if (f) parts.push(FORMAT_INFO[f]?.short ?? f);
+  }
   if (shape.enhance && params.enhancePrompt) parts.push("Enhance");
   // Detecting the language is the default, so only a picked one is worth a word.
   if (shape.sourceLanguages && params.sourceLanguage) parts.push(spokenLanguageName(params.sourceLanguage));
+  if (shape.matteOutput) parts.push(MATTE_OUTPUT_LABELS[params.matteOutput && shape.matteOutput.includes(params.matteOutput) ? params.matteOutput : shape.matteOutput[0]]);
+  if (shape.colormap) parts.push(colormapLabel(params.colormap ?? shape.colormap[0]));
+  if (shape.sideBySide && params.sideBySide) parts.push("Side by side");
   return parts;
+}
+
+/**
+ * Whether the composer shows the prompt box: not for a preset or model that takes no prompt; in a studio
+ * that hides it, only for a model that reads an optional prompt when the studio words one (`modelPrompt`).
+ */
+export function showsPrompt(
+  studio: { hidePrompt?: boolean; modelPrompt?: string },
+  options: Pick<ModelDef["options"], "promptless" | "promptOptional"> | undefined,
+  presetPrompt?: "none" | "optional" | "required",
+): boolean {
+  if (presetPrompt === "none" || options?.promptless) return false;
+  return !studio.hidePrompt || (!!studio.modelPrompt && !!options?.promptOptional);
+}
+
+/** The output format a request writes: the one picked, else the model's default or first, else the studio's first. */
+export function formatOf(params: GenParams, model: Pick<ModelDef, "options" | "defaults"> | undefined, studio: VideoFormat[] = []): VideoFormat | undefined {
+  return params.format ?? model?.defaults?.format ?? model?.options.formats?.[0] ?? studio[0];
+}
+
+// ---------------------------------------------------------------------------
+// What a video tool makes of the attached clip (Upscale hub), from its header.
+
+const clipSeconds = (n: number) => (n >= 60 ? `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, "0")}` : `${Math.round(n * 10) / 10} s`);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * One line under the clip saying what comes out: "1280×720 → 3840×2160", "24 → 60 fps · 2× slow motion ·
+ * 5 s → 10 s", "1920×1080 · 12 s → ProRes 422 HQ (.mov)". Null when the header told nothing (or the tool isn't one of these).
+ */
+export function clipOutcome(
+  op: Operation | undefined,
+  facts: { width?: number; height?: number; fps?: number; duration?: number } | undefined,
+  params: GenParams,
+  model: (Pick<ModelDef, "engine" | "options" | "defaults"> & Partial<Pick<ModelDef, "name" | "routes">>) | undefined,
+): string | null {
+  if (!facts || !model) return null;
+  const { width, height, fps, duration } = facts;
+  const size = width && height ? `${width}×${height}` : "";
+  const length = duration ? clipSeconds(duration) : "";
+  // "LTX 2.3 HDR", not "LTX 2.3 HDR (EXR frames)".
+  const name = model.name?.replace(/\s*\([^)]*\)$/, "");
+  // The route's field-map rules (the browser's catalog keeps them as `preview`).
+  const rules = (o: Operation) => {
+    const r = model.routes?.find((x) => x.op === o);
+    return r?.map ?? r?.preview;
+  };
+  if (op === "upscale-video") {
+    if (!size) return null;
+    const res = params.resolution ?? model.defaults?.resolution;
+    const rate = params.targetFps ? ` · ${params.targetFps} fps` : "";
+    if (res?.toLowerCase() === "original") return `${size}, cleaned up at its own size${rate}`;
+    const short = Math.min(width!, height!);
+    // A tier that wouldn't enlarge the clip: a default moves up (as the server does), a picked one is refused.
+    const tier = upscaleTier(res, model.options.resolutions, { width: width!, height: height! }, params.resolution !== undefined);
+    if ("error" in tier) return tier.error;
+    const moved = tier.resolution !== res ? ` · ${tier.resolution}, as the clip is already ${short}p` : "";
+    if (tier.resolution?.toLowerCase() === "original") return `${size}, cleaned up at its own size${moved}${rate}`;
+    // An API that takes a factor keeps it within its range: say what that makes, not the tier.
+    const range = rules("upscale-video")?.upscaleFactor;
+    const target = targetShortEdge(tier.resolution);
+    const factor = range ? upscaleFactorFor(tier.resolution, { width: width!, height: height! }, range.min, range.max) : undefined;
+    const out = upscaledSize({ width: width!, height: height! }, tier.resolution, factor);
+    if (!out) return null;
+    const clamped = factor !== undefined && target ? Math.abs(factor - target / short) > 0.01 : false;
+    const why = clamped ? ` (${name ?? "this model"} upscales ${factor! > target! / short ? "at least" : "at most"} ${factor}×)` : "";
+    return `${size} → ${out.width}×${out.height}${why}${moved}${rate}`;
+  }
+  if (op === "interpolate") {
+    const slowdown = Math.max(1, params.slowdown ?? 1);
+    const longer = duration && slowdown > 1 ? ` · ${clipSeconds(duration)} → ${clipSeconds(duration * slowdown)}` : "";
+    const target = params.targetFps ?? model.defaults?.targetFps;
+    // A route with no frame-rate field (hosted RIFE) doubles the frames at the clip's speed.
+    if (!model.options.fpsTargets?.length) return fps ? `Twice the frames: ${round2(fps)} → ${round2(fps * 2)} fps` : null;
+    if (!target) return null;
+    // The open engine reaches the target as source × m / n: say so when this clip's rate doesn't divide into it.
+    if (model.engine === "open" && fps) {
+      const plan = fpsPlan(fps, target, slowdown);
+      if (!plan.exact) return `${round2(fps)} → about ${plan.fps} fps (the nearest this clip's rate allows)${slowdown > 1 ? ` · ${slowdown}× slow motion` : ""}${longer}`;
+    }
+    return `${fpsSummary(fps, target, slowdown)}${longer}`;
+  }
+  if (op === "sdr-to-hdr" || op === "export-video") {
+    const f = formatOf(params, model);
+    const info = f ? FORMAT_INFO[f] : undefined;
+    const head = [size, length].filter(Boolean).join(" · ");
+    if (!head) return null;
+    // EXR frames: every frame of the clip, or what a frame-count route renders (LTX 2.3 HDR: 24 fps, 481 at most).
+    let frames = "";
+    const count = rules(op)?.numFrames;
+    if (f === "exr" && duration && count) {
+      const rate = params.fps && params.fps > 0 ? params.fps : count.fps;
+      const want = duration * rate;
+      const n = Math.round(Math.max(count.min ?? 1, Math.min(count.max ?? Infinity, want)));
+      frames = ` (${n} frames at ${rate} fps${n < want - 0.5 ? `: only the first ${clipSeconds(n / rate)}, the most ${name ?? "it"} takes` : ""})`;
+    } else if (f === "exr" && duration && fps) frames = ` (${Math.round(duration * fps)} frames)`;
+    return info ? `${head} → ${info.short}${frames}, .${info.ext}` : head;
+  }
+  return null;
+}
+
+
+/**
+ * What the attached clip's header rules out before Generate, in the server's words (Upscale hub): a tier that
+ * wouldn't enlarge the clip (one picked; a default moves up), or an open tool that holds the whole clip (FPS
+ * Boost, SDR to HDR, EXR export) in more memory than half the ComfyUI's RAM (`ramBytes`, when it said).
+ */
+export function clipBlocker(
+  op: Operation | undefined,
+  facts: { width?: number; height?: number; fps?: number; duration?: number } | undefined,
+  params: GenParams,
+  model: Pick<ModelDef, "engine" | "options" | "defaults"> | undefined,
+  ramBytes: number | undefined,
+): string | null {
+  if (!facts?.width || !facts.height || !model) return null;
+  if (op === "upscale-video") {
+    const tier = upscaleTier(params.resolution ?? model.defaults?.resolution, model.options.resolutions, { width: facts.width, height: facts.height }, params.resolution !== undefined);
+    return "error" in tier ? tier.error : null;
+  }
+  if (model.engine !== "open" || !ramBytes || !facts.duration || !facts.fps) return null;
+  const target = params.targetFps ?? model.defaults?.targetFps;
+  const m = op === "interpolate" && target ? fpsPlan(facts.fps, target, Math.max(1, params.slowdown ?? 1)).multiplier : 1;
+  const tool = wholeClipTool(op, formatOf(params, model), m);
+  return tool ? wholeClipProblem(tool, facts, ramBytes) : null;
 }
 
 /** How many settings differ from their defaults beyond what the summary shows (seed, negative prompt, sliders). */
@@ -131,6 +330,19 @@ export function slotMessage(label: string): string {
   return `Add ${VOWEL.test(word) ? "an" : "a"} ${word}`;
 }
 
+const GENERIC_NOUN = /^(photo|image|picture|frame|clip|video|file|shot)s?$/i;
+
+/**
+ * A filled tile's caption, in the slot's own words without the generic noun the thumbnail already
+ * shows: "Target photo" → "Target", "Start frame" → "Start", "Face" → "Face". Labels that would
+ * lose their meaning ("Your clip", "Image") stay whole.
+ */
+export function slotCaption(label: string): string {
+  const words = label.trim().split(/\s+/);
+  if (words.length > 1 && GENERIC_NOUN.test(words[words.length - 1]) && !DETERMINER.test(words[0])) return words.slice(0, -1).join(" ");
+  return words.join(" ");
+}
+
 type SlotValues = Partial<Record<InputSlot["key"], { ref: string; uploading?: boolean } | null>>;
 
 /** A missing input: one required slot, or (`group`) a set of optional slots of which one is needed ("a portrait or a video"). */
@@ -161,10 +373,14 @@ export function missingMessage(m: MissingSlot): string {
   return `Add ${orList(m.group.map((s) => slotMessage(s.label).replace(/^Add /, "")))}`;
 }
 
+const WRITE_PROMPT = "Write a prompt first";
+
 export interface Blocker {
   message: string;
-  /** The attachment to point at (pulse) when Generate is pressed ("mask": the Paint area tile). */
-  slot?: InputSlot["key"];
+  /** The attachment to point at (pulse) when Generate is pressed ("mask": the Paint area tile; "frames": Frames mode's Add frame tile). */
+  slot?: InputSlot["key"] | "frames";
+  /** Passes by itself or is plain to see (loading, uploading, the empty prompt box): never spelled out under the composer. */
+  quiet?: boolean;
 }
 
 /**
@@ -193,20 +409,36 @@ export function blockerFor(s: {
   model: boolean;
   engineError?: string | null;
   missing?: MissingSlot;
+  /** Frames mode: the start frame to add, or a model that can't follow frames (framesBlocker in catalog/keyframes.ts). */
+  frames?: Blocker | null;
   uploading: boolean;
   maskMissing?: boolean;
   planError?: string | null;
   promptMissing: boolean;
 }): Blocker | null {
-  if (s.loading) return { message: s.loading };
+  if (s.loading) return { message: s.loading, quiet: true };
   if (!s.model) return { message: "Pick a model" };
   if (s.engineError) return { message: s.engineError };
+  if (s.frames) return s.frames;
   if (s.missing) return { message: missingMessage(s.missing), slot: s.missing.key };
-  if (s.uploading) return { message: "Uploading…" };
+  if (s.uploading) return { message: "Uploading…", quiet: true };
   if (s.maskMissing) return { message: "Paint the area to change", slot: "mask" };
-  if (s.planError) return { message: s.planError };
-  if (s.promptMissing) return { message: "Write a prompt first" };
+  // The planner says "Write a prompt first" too (an empty prompt on a model that needs one): as quiet as the composer's own.
+  if (s.planError) return s.planError === WRITE_PROMPT ? { message: WRITE_PROMPT, quiet: true } : { message: s.planError };
+  if (s.promptMissing) return { message: WRITE_PROMPT, quiet: true };
   return null;
+}
+
+/**
+ * Where the composer spells its blocker out in a line under the toolbar ("Add a target photo",
+ * which opens that tile when tapped): wherever the tiles it points at are folded away (docked and
+ * collapsed: "always"), else only where the Generate button's tooltip can't be seen (no hover:
+ * phones and tablets, "touch", which the page decides with a media query so the server's HTML is
+ * the same). Never for a quiet blocker.
+ */
+export function blockerLine(b: Blocker | null, collapsed: boolean): "always" | "touch" | null {
+  if (!b || b.quiet) return null;
+  return collapsed ? "always" : "touch";
 }
 
 /**
@@ -268,17 +500,85 @@ export function placeAttachment<T extends Attachment>(
  * replaced it meanwhile, nothing changes: a finished upload never brings a removed item back.
  */
 export function replaceAttachment<T extends Attachment>(
-  state: { slots: Partial<Record<InputSlot["key"], T | null>>; refs: T[] },
+  state: { slots: Partial<Record<InputSlot["key"], T | null>>; refs: T[]; frames?: FrameAttachment<T>[] },
   id: string,
   v: T | null,
-): { slots?: Partial<Record<InputSlot["key"], T | null>>; refs?: T[] } | null {
+): { slots?: Partial<Record<InputSlot["key"], T | null>>; refs?: T[]; frames?: FrameAttachment<T>[] } | null {
   for (const [k, s] of Object.entries(state.slots) as [InputSlot["key"], T | null][]) {
     if (s?.id === id) return { slots: { ...state.slots, [k]: v ? { ...v, id } : null } };
   }
   if (state.refs.some((r) => r.id === id)) {
     return { refs: v ? state.refs.map((r) => (r.id === id ? { ...v, id } : r)) : state.refs.filter((r) => r.id !== id) };
   }
+  // A frame keeps its place in the clip when its upload finishes; a failed one leaves the strip.
+  const f = state.frames?.findIndex((x) => x.value.id === id) ?? -1;
+  if (f >= 0) return { frames: v ? state.frames!.map((x, i) => (i === f ? { ...x, value: { ...v, id } } : x)) : removeFrame(state.frames!, f) };
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Frames mode (Video studio): up to 10 stills, each at its own place in the clip
+
+/** A frame: its still, and where it sits in the clip (0 = the start, 1 = the end; see src/lib/catalog/keyframes.ts). */
+export interface FrameAttachment<T extends Attachment = Attachment> {
+  value: T;
+  at: number;
+}
+
+/** One more frame at the end (evenly spaced frames stay evenly spaced, placed ones keep their places). */
+export function addFrame<T extends Attachment>(frames: FrameAttachment<T>[], value: T): FrameAttachment<T>[] {
+  const ats = addFrameAt(frames.map((f) => f.at));
+  return [...frames, { value, at: 1 }].map((f, i) => ({ ...f, at: ats[i] }));
+}
+
+/** Frame i taken out; the next one becomes the start frame when the first goes. */
+export function removeFrame<T extends Attachment>(frames: FrameAttachment<T>[], i: number): FrameAttachment<T>[] {
+  const ats = removeFrameAt(frames.map((f) => f.at), i);
+  return frames.filter((_, j) => j !== i).map((f, j) => ({ ...f, at: ats[j] }));
+}
+
+/** Frames mode on: the start and end frames already attached become the first frames (a drawing on the start frame goes). */
+export function enterFrames<T extends Attachment>(slots: Partial<Record<InputSlot["key"], T | null>>): { frames: FrameAttachment<T>[]; slots: Partial<Record<InputSlot["key"], T | null>> } {
+  const values = [slots.image, slots.endImage].filter((v): v is T => !!v);
+  const ats = spread(values.length);
+  return { frames: values.map((value, i) => ({ value, at: ats[i] })), slots: { ...slots, image: null, endImage: null, mask: null, sketch: null } };
+}
+
+/**
+ * What Frames mode sends: the stills in order at their times (or the first and last as start and end
+ * frame, as the model takes them), at the strip's length. Every frame at its time is a keyframes run
+ * (`op`, so a camera motion preset's own operation doesn't replace it). A frame still uploading has no
+ * ref yet and is left out here, so the composer holds Generate ("Uploading…") until every frame is in.
+ */
+export function framesRequest(
+  frames: FrameAttachment[],
+  ctx: { support: FrameSupport; duration: number; chained: boolean },
+): { op?: "keyframes"; images: string[]; endImage?: string; params: Pick<GenParams, "duration" | "keyframeTimes" | "shots" | "multiShot" | "numOutputs"> } {
+  const times = frameTimes(frames.map((f) => f.at), ctx.duration);
+  const kept = frames.map((f, i) => ({ ref: f.value.ref, time: times[i] })).filter((f) => !!f.ref);
+  const sent = framesInputs(kept.map((f) => f.ref), kept.map((f) => f.time), ctx.support);
+  // Frames and shots don't mix; the open chain makes one film (its clips are the jobs).
+  return {
+    ...(sent.keyframeTimes && { op: "keyframes" as const }),
+    images: sent.images ?? [],
+    endImage: sent.endImage,
+    params: { duration: ctx.duration, keyframeTimes: sent.keyframeTimes, shots: undefined, multiShot: undefined, ...(ctx.chained && { numOutputs: 1 }) },
+  };
+}
+
+/** Frames mode has its own strip: the studio's start and end frame tiles (a camera motion's too) aren't asked for. */
+export const framesSlots = <S extends Pick<InputSlot, "key">>(slots: S[]): S[] => slots.filter((s) => s.key !== "image" && s.key !== "endImage");
+
+/** Frames still uploading: Generate waits for them, as it does for any other attachment. */
+export const framesUploading = (frames: FrameAttachment[] | undefined): boolean => !!frames?.some((f) => f.value.uploading);
+
+/**
+ * Frames mode off: the first frame is the start frame again and the last (with two or more) the end
+ * frame. `dropped` counts the frames in between that have no slot to go to (the composer offers Undo).
+ */
+export function leaveFrames<T extends Attachment>(frames: FrameAttachment<T>[], slots: Partial<Record<InputSlot["key"], T | null>>): { slots: Partial<Record<InputSlot["key"], T | null>>; dropped: number } {
+  const end = frames.length > 1 ? frames[frames.length - 1].value : null;
+  return { slots: { ...slots, image: frames[0]?.value ?? null, endImage: end, mask: null, sketch: null }, dropped: Math.max(0, frames.length - 2) };
 }
 
 /**
@@ -343,7 +643,7 @@ export function acceptedKinds(slots: InputSlot[], multiRef?: { kind?: MediaKind 
 // Hand-off params ("/video?image=…") arriving after the first paint
 
 /** The URL params a studio prefills its draft from; anything else in the query is ignored. */
-export const HANDOFF_PARAMS = ["image", "ref", "video", "audio", "prompt", "preset", "model"] as const;
+export const HANDOFF_PARAMS = ["image", "ref", "video", "audio", "prompt", "preset", "model", "format"] as const;
 
 /** A stable key for the hand-off part of a query string ("" when there's none). */
 export function handoffKey(search: string | URLSearchParams | null | undefined): string {
@@ -371,6 +671,95 @@ export interface DraftShape {
 
 const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const sameAttachment = (a: Attachment | null | undefined, b: Attachment | null | undefined) => (a ?? null) === (b ?? null) || (!!a && !!b && a.id === b.id && a.ref === b.ref);
+
+type PresetRoutes = Pick<Preset, "type" | "open" | "cloud">;
+
+/**
+ * The model a camera motion or effect runs on by default on an engine (Fuobe DoP, or the route its move names: a
+ * camera LoRA in the cloud runs on Fuobe DoP · LTX; a move with nothing of the Original's own in the cloud keeps its
+ * partner model there). Undefined for apps (their model is pinned) and without a preset.
+ */
+export function presetModel(preset: PresetRoutes | undefined, engine: Engine): string | undefined {
+  if (!preset || (preset.type !== "motion" && preset.type !== "effect")) return undefined;
+  return (engine === "open" ? preset.open : preset.cloud)?.modelId;
+}
+
+/**
+ * The Original a camera motion or effect moves the composer to when it is picked or linked (Fuobe DoP on this engine).
+ * Never a partner route (a move Fuobe DoP has nothing of its own for in the cloud): the person's model stays.
+ */
+export function presetOriginal(preset: PresetRoutes | undefined, engine: Engine): string | undefined {
+  const route = preset && presetModel(preset, engine) ? (engine === "open" ? preset.open : preset.cloud) : undefined;
+  return route && !route.partner ? route.modelId : undefined;
+}
+
+/**
+ * The settings a preset's route starts the composer with on its model (Focus Change: 6 s, 720p, silent), over the
+ * model's defaults. Only plain values the composer shows: the route's extra (a camera LoRA, a pose) stays the
+ * preset's, so the next preset picked on the same model doesn't inherit it.
+ */
+export function presetParams(preset: PresetRoutes | undefined, engine: Engine): GenParams {
+  const route = preset && presetModel(preset, engine) ? (engine === "open" ? preset.open : preset.cloud) : undefined;
+  const plain: GenParams = { ...route?.params };
+  delete plain.extra;
+  return plain;
+}
+
+/**
+ * What the engine switch (or a model change) does to the composer's model: the model id to move to, or undefined to
+ * keep it. A model that doesn't run on the engine gives way to the preset's model there (an app's pinned route), else
+ * the studio's default. A camera motion or effect on its model for the other engine follows its move to this one's
+ * (Jib Up: Fuobe DoP on the GPU, Fuobe DoP · LTX in the cloud), but only when the engine has just changed: the sibling
+ * model picked on purpose on the same engine stays.
+ */
+export function engineSwitchModel(o: {
+  model: Pick<ModelDef, "id" | "engine">;
+  preset: PresetRoutes | undefined;
+  engine: Engine;
+  /** The engine the composer was on before (the same one when only the model changed). */
+  from: Engine;
+  defaults: Partial<Record<Engine, string>>;
+}): string | undefined {
+  const { model, preset, engine } = o;
+  const want = presetModel(preset, engine);
+  const other = presetModel(preset, engine === "open" ? "cloud" : "open");
+  const follows = o.from !== engine && !!want && want !== model.id && model.id === other;
+  if (model.engine === engine && !follows) return undefined;
+  if (preset?.type === "app") return engine === "open" ? preset.open?.modelId : preset.cloud?.modelId;
+  return want ?? o.defaults[engine];
+}
+
+/**
+ * The settings an Original takes on another engine (Fuobe DoP: 480p on the GPU, 720p in the cloud): each one whose
+ * default differs there moves to the new default when the person left it at the old one. Undefined when nothing moves.
+ */
+export function followEngineParams(params: GenParams, from: GenParams, to: GenParams): GenParams | undefined {
+  const keys = (Object.keys({ ...from, ...to }) as (keyof GenParams)[]).filter((k) => k !== "extra" && !same(from[k], to[k]));
+  const moved = keys.filter((k) => params[k] === undefined || same(params[k], from[k]));
+  if (!moved.length) return undefined;
+  return { ...params, ...Object.fromEntries(moved.map((k) => [k, to[k]])) };
+}
+
+/**
+ * What a step before the clip adds to its price (Fuobe DoP relights a start frame first), when the run is on the
+ * preset's own model: a partner model runs the effect's words alone.
+ */
+export function prestepCost(preset: Pick<Preset, "type" | "open" | "cloud" | "prestep"> | undefined, modelId: string | undefined, engine: Engine): number {
+  if (!preset?.prestep || !modelId || presetModel(preset, engine) !== modelId) return 0;
+  return preset.prestep[engine].usd ?? 0;
+}
+
+/**
+ * The draft a hand-off compares with, after the page's own model swap: the engine is read after hydration (or
+ * switched while the page loads), and the composer swaps an untouched draft's studio default for that engine's
+ * default. That swap isn't the person's pick, so the base follows it and the hand-off's model (?model=) still
+ * applies; without this, a link opened on the open engine kept the open default (Z-Image Turbo).
+ */
+export function followEngineDefault<D extends DraftShape>(base: D, current: D, defaults: Partial<Record<Engine, string>>, engine: Engine): D {
+  const own = Object.values(defaults).filter(Boolean);
+  if (current.modelId === base.modelId || !own.includes(base.modelId) || current.modelId !== defaults[engine]) return base;
+  return { ...base, modelId: current.modelId, params: current.params };
+}
 
 /**
  * Apply a draft computed from hand-off params (`next`) to the live draft (`current`) without
@@ -406,6 +795,62 @@ export function mergeHandoff<D extends DraftShape>(base: D, current: D, next: D)
     patch.mix = next.mix;
   }
   return patch;
+}
+
+// ---------------------------------------------------------------------------
+// Home's Start: "/image?prompt=…&go=<token>" runs the handed-over prompt once
+
+/** The query flag that asks a studio to run its handed-over draft once (Home's Start). Its value is a one-time token. */
+export const START_PARAM = "go";
+
+/** Where this tab keeps the token Home's Start just issued (sessionStorage, with a copy in memory). */
+const START_TOKEN_KEY = "fuobe:start";
+let startToken: string | null = null;
+
+/**
+ * Home's Start: a one-time token for `go=<token>`, kept in this tab. A studio runs the hand-off
+ * only when `go` carries it, so a link from anywhere else (another site, an email, a chat) with a
+ * `go` flag only prefills the studio and never starts a job on the user's keys. It is random, not
+ * a counter: a tab that came from elsewhere can't guess one Home left behind.
+ */
+export function issueStartToken(): string {
+  // getRandomValues, not randomUUID: it also works on a plain-http LAN address.
+  const token = Array.from(crypto.getRandomValues(new Uint32Array(3)), (n) => n.toString(36)).join("");
+  startToken = token;
+  try {
+    sessionStorage.setItem(START_TOKEN_KEY, token);
+  } catch {}
+  return token;
+}
+
+/** Whether a `go` value is the token this tab's Home issued. The token is used up either way, so it runs once. */
+export function claimStartToken(value: string | null | undefined): boolean {
+  let stored: string | null = null;
+  try {
+    stored = sessionStorage.getItem(START_TOKEN_KEY);
+    sessionStorage.removeItem(START_TOKEN_KEY);
+  } catch {}
+  const issued = [startToken, stored];
+  startToken = null;
+  return !!value && issued.includes(value);
+}
+
+/** The same address without the start flag, so a reload or Back doesn't run it again. */
+export function withoutStart(href: string): string {
+  const u = new URL(href, "http://x");
+  u.searchParams.delete(START_PARAM);
+  const rest = `${u.pathname}${u.search}${u.hash}`;
+  return /^https?:\/\//.test(href) ? `${u.origin}${rest}` : rest;
+}
+
+/**
+ * What a studio does with a start request now: wait while models, presets or uploads are still
+ * loading (their blockers are temporary), run when nothing blocks, else explain — the blocker's
+ * toast names what's missing and points at its slot (Edit and Video's photo).
+ */
+export function startStep(s: { settling: boolean; blocker: Blocker | null }): "wait" | "run" | "explain" {
+  if (s.settling) return "wait";
+  return s.blocker ? "explain" : "run";
 }
 
 // ---------------------------------------------------------------------------

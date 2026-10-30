@@ -3,6 +3,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  BookmarkPlus,
   Brush,
   ChevronLeft,
   ChevronRight,
@@ -63,7 +64,9 @@ import {
 import { cn } from "@/lib/utils";
 import { Field } from "./bits";
 import { costLabel, modelsFor, TOOL_FOR_JOB, useEditor } from "./editor-context";
+import { useKeepAlpha } from "./keep-alpha";
 import { downloadLayer, loadImage, sizeOf } from "./render";
+import { SaveElementDialog } from "./save-element";
 
 /**
  * A layer's thumbnail showing just the part of its image it uses (its crop), on a mid-grey
@@ -106,14 +109,14 @@ async function layerFromImage(url: string, name: string, doc: { width: number; h
 }
 
 function AddLayer() {
-  const { doc, commit, select, run, engine, models, isDemo } = useEditor();
+  const { doc, commit, select, run, engine, models, offeredIds, isDemo } = useEditor();
   const file = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [ref, setRef] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const options = modelsFor(models, TOOL_MODELS["generate-layer"][engine]);
+  const options = modelsFor(models, offeredIds(TOOL_MODELS["generate-layer"][engine]));
   const [modelId, setModelId] = useState<string | undefined>();
   const model = options.find((m) => m.id === modelId) ?? options[0];
 
@@ -330,6 +333,7 @@ function LayerRow({
   const { doc, commit, select, busyJob, failedJob, openTool, setSplitTarget, setMode, mode } = useEditor();
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(node.name);
+  const [savingElement, setSavingElement] = useState(false);
   const job = busyJob(node.id);
   // A failed run stays on its row until it's dismissed (its layer card or tool form says why).
   const failed = busy ? undefined : failedJob(node.id);
@@ -439,6 +443,9 @@ function LayerRow({
             <DropdownMenuItem onSelect={() => void downloadLayer(doc, node).catch(() => toast.error("Could not download the layer."))}>
               <Download /> Download
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(() => setSavingElement(true))}>
+              <BookmarkPlus /> Save as element
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={() => {
@@ -477,20 +484,21 @@ function LayerRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {savingElement && <SaveElementDialog node={node} open onOpenChange={setSavingElement} />}
     </li>
   );
 }
 
 /** Per-layer AI: “Layer edit prompt” + reference → Generate / Regenerate, and the layer's revisions. */
 function SelectedLayer({ node }: { node: LayerNode }) {
-  const { doc, commit, run, engine, models, isDemo, endJob, busyJob, failedJob, showJob, tool } = useEditor();
+  const { doc, commit, run, engine, models, offeredIds, isDemo, endJob, busyJob, failedJob, showJob, tool } = useEditor();
   const [prompt, setPrompt] = useState(node.prompt ?? "");
   const [ref, setRef] = useState<string | null>(node.refSrc ?? null);
-  const options = modelsFor(models, TOOL_MODELS.regenerate[engine]);
+  const options = modelsFor(models, offeredIds(TOOL_MODELS.regenerate[engine]));
   const [modelId, setModelId] = useState<string | undefined>();
   const model = options.find((m) => m.id === modelId) ?? options[0];
-  // Layers cut out of a picture keep their transparency; the bottom layer is usually a full picture.
-  const [keepAlpha, setKeepAlpha] = useState(node.z > 0);
+  // Layers cut out of a picture keep their transparency; full pictures (the bottom layer, a whole-image result) don't.
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(node);
   const [starting, setStarting] = useState(false);
   const running = busyJob(node.id);
   // The newest failed run on this layer, whichever tool started it (its form can try again).
@@ -514,7 +522,7 @@ function SelectedLayer({ node }: { node: LayerNode }) {
     <div className="space-y-3 border-t px-3 pt-3 pb-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="truncate text-[13px] font-medium">{node.name}</h3>
-        <span className="shrink-0 font-mono text-[11px] text-subtle-foreground">
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
           {Math.round(node.w)} × {Math.round(node.h)}
         </span>
       </div>
@@ -811,7 +819,7 @@ export function LayersPanel() {
           </Button>
         )}
         <h2 className="text-[13px] font-semibold">Layers</h2>
-        <span className="font-mono text-[12px] text-subtle-foreground">{doc.nodes.length}</span>
+        <span className="font-mono text-[12px] text-muted-foreground">{doc.nodes.length}</span>
         <div className="ml-auto">
           <AddLayer />
         </div>

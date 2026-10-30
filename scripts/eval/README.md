@@ -1,0 +1,505 @@
+# Fuobe evaluation harness
+
+`scripts/eval` measures the Fuobe Originals. You give it a suite of cases. It runs each case through a
+running Fuobe's REST API, downloads what comes back, scores it and writes a report. The report holds
+timing, cost, memory, metrics and a blind A/B review page. Runs are kept, so you can compare them.
+
+The rule it serves: **an Original's recipe becomes a default only after the harness has measured
+it** (see [The promote rule](#the-promote-rule)). The harness never changes a default by itself. A
+person does that in a reviewed commit.
+
+It works against any Fuobe, on three engines:
+
+| `--engine` | What runs | Cost |
+| --- | --- | --- |
+| `demo` | The demo provider's media. It checks the harness itself, with no keys and no GPU. | Free |
+| `open` | Your ComfyUI (the open engine), with the recipe's LoRAs. | Free (your GPU) |
+| `cloud` | Hosted open models on fal / Replicate that take LoRA URLs. Partner models run where a suite asks. | Priced before anything starts, under a spend cap (default $5) |
+
+## Quick start
+
+```bash
+pnpm dev                                              # or any running Fuobe
+pnpm eval:run --suite selftest --engine demo          # about 30 s, free: submit, wait, download, score, report
+pnpm eval:report latest                               # score again and rewrite the report
+open scripts/eval/results/<runId>/report.html          # the contact sheet
+```
+
+A real look on your GPU, A/B against the same words without LoRAs and at half strength:
+
+```bash
+pnpm eval:run --suite soul --engine open --looks v1-general,v2-y2k-studio \
+  --variants recipe,prompt-only,half-strength --dry-run   # lists the jobs, the LoRAs and the spend; starts nothing
+pnpm eval:run --suite soul --engine open --looks v1-general,v2-y2k-studio --variants recipe,prompt-only,half-strength
+pnpm eval:review latest                               # rate the pairs blind, with the keyboard
+pnpm eval:promote latest                              # does the recipe win?
+```
+
+`fuobe eval <command>` runs the same commands from the `fuobe` CLI (from a Fuobe checkout). It finds
+the server and token the way every `fuobe` command does, so the token `fuobe login` saved goes only to
+the server it was saved for, even when `--url` names another one.
+
+### Which Fuobe it talks to
+
+The harness finds its server the way `bin/fuobe.mjs` does: `--url` / `--token`, then `FUOBE_URL` /
+`FUOBE_TOKEN`, then what `fuobe login` saved. A Fuobe with a password needs an API token from
+**Settings → Security → API tokens**. The token goes only to that server. Everything goes through
+the public API (`/api/generations`, `/api/uploads`, `/api/elements`, the studio routes), so the
+harness measures what a user gets.
+
+- `--engine demo` needs **Settings → Demo mode** on Auto or On. A job that would run for real is
+  skipped.
+- `--engine open` / `cloud` refuse a server whose engine mode excludes them. A job that would come
+  back as demo media is skipped and says why: Demo mode is On, no ComfyUI is connected, or there is
+  no cloud key.
+- **The model it names.** A job the server would run on another model than the one the case names
+  (a studio's default maker, or a retired model the server runs on the Original that replaced it) is
+  skipped, since it wouldn't measure that model.
+- **Your Library stays yours.** Every generation the harness starts has the feature `eval`, a helper
+  like a studio's steps: the Library and Home feeds leave it out unless **Show steps** is on. A studio
+  route's steps (Genjutsu, Mixed Media) carry that studio's feature instead. `pnpm eval:trash <runId>`
+  moves a run's generations, studio steps included, to that Fuobe's Trash.
+- On the open engine the harness also reads ComfyUI directly (`--comfy-url`, default `COMFYUI_URL`
+  or `http://127.0.0.1:8188`). It uses three read-only endpoints: `/system_stats` for memory,
+  `/history` for ComfyUI's own timings, and `/object_info/LoraLoader` to name the LoRAs ComfyUI
+  doesn't have yet. It never queues or cancels anything there.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `pnpm eval:run --suite <s> --engine demo\|open\|cloud` | Runs a suite, then scores it and writes the report (`--no-metrics`, `--no-report` to stop earlier) |
+| `pnpm eval:report <runId\|latest>` | Scores again (only what changed) and rewrites `summary.json`, `report.html` and the history lines |
+| `pnpm eval:review <runId>` | Serves the blind A/B page and saves ratings next to the run |
+| `pnpm eval:compare <runA> <runB>` | Wins, losses and mean gain per metric. Exits 1 when a guarded metric regresses |
+| `pnpm eval:promote <runId>` | Applies the promote rule. `--record` writes the verdicts into the research JSON; `--apply-strengths` also lowers over-cooked strengths there |
+| `pnpm eval:covers <runId>` | Turns each promoted case's best render into its preset's cover (`public/previews/`, `src/lib/preset-previews.generated.ts`) |
+| `pnpm eval:covers --from-masters <dir> --run <name>` | Turns rendered masters (one folder per preset id) into covers, merged into the same file |
+| `pnpm eval:history` | Lists runs, newest first, and the per-case scores of one case (`--case soul/v1-general`) |
+| `pnpm eval:validate` | Checks every case file, and that the generated suites match the research |
+| `pnpm eval:setup` | Creates the metrics venv with uv (`--identity`, `--download`, `--dinov2`, `--torch-backend`) |
+| `pnpm eval:trash <runId>` | Moves the run's generations to the Trash of the Fuobe it ran on (`--dry-run` counts them). The run's folder here keeps its outputs and scores |
+
+Every command takes `--json`. Runs are named by id, by path, or as `latest`, `latest~1` (the run
+before) and so on. `pnpm eval:<command> --help` lists each command's options.
+
+Useful `run` options:
+
+- `--looks v1-general,"Flash editorial"`: looks by slug, name or id.
+- `--cases dop/motion-*`, `--tags v1,civitai`, `--limit 5`, `--prompts 1`, `--seeds 1,2`: run fewer
+  jobs.
+- `--variants recipe,prompt-only` or `all`: the recipe variants to run. Each suite has a default.
+- `--model <id>`: one model id for every job, instead of the suite's targets.
+- `--max-usd 2`: the cloud spend cap. The run is priced first, training included. It refuses to start
+  over the cap, and it starts no job that would go over it: each job reserves its price before it
+  starts, and its real cost replaces the reservation when it ends. A resumed run counts what its earlier
+  attempts spent (every attempt that reached the server, and any training).
+- A cloud job or training the server can't price is skipped, because the cap can't cover it.
+  `--allow-unpriced` runs it anyway: it holds whatever is left of the cap while it runs, so nothing
+  starts beside it, and its cost counts once the server reports it. Such a job can take the run over
+  the cap by its own cost.
+- `--concurrency`: open 1, others 4.
+- `--resume <runId>`: runs only the failed and missing jobs again. Ctrl+C stops new jobs from
+  starting; the jobs already running finish on the server.
+- `--allow-fixtures`: uses the synthetic fixtures where your own inputs are missing.
+- `--label "after the LoRA strength change"`: a note kept with the run.
+
+## Suites
+
+One JSON file per Original in `cases/`. Later Original packages add their own files here.
+
+| Suite | Measures | Cases | Variants (default first) | Main metrics |
+| --- | --- | --- | --- | --- |
+| `selftest` | the harness itself | 5 small tools (trim, palette lock, join, frame, image) | — | temporal, clip |
+| `soul` | Fuobe Soul, the 139 looks | 139 looks × 3 subjects, pinned seeds | `recipe`, `prompt-only`, `half-strength`, `plain`, `original` | clip, aesthetic, style |
+| `soul-cinema` | Soul Cinema's one film look | 6 scenes, pinned seeds | `recipe`, `prompt-only`, `plain`, `original` | clip, aesthetic, style |
+| `soul-hex` | Soul HEX palettes | 3 Fuobe palettes × 2 subjects | `words`, `lock` (open), `base`, `palette-model` (open), `plain` | palette, clip, aesthetic |
+| `soul-id` | character and look training | your photos → train per family (Fuobe Soul, Soul Cinema, Soul HD, FLUX.1 [dev]) → scenes; a moodboard → a look | `trained`, `half-strength`, `references` | identity (style for the look), clip, aesthetic |
+| `dop` | Fuobe DoP motions and effects | the 69 the research gives a LoRA, and the 20 camera moves it gives a Fun Camera pose or an LTX camera LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
+| `dop-mix` | Fuobe DoP's Mix | 5 move + effect pairs | `mix` (the candidate), `first` (the move alone) | temporal, clip |
+| `genjutsu` | Genjutsu move / swap / restyle / Character swap | 7: Motion transfer and Object swap (each also on the Lite tier), Restyle, and Character swap with and without the first frame (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
+| `mixed-media` | Mixed Media | 5 looks on one clip (through `/api/mixed-media`) | `studio` | temporal, style |
+| `shorts` | Shorts restyle | 1 | `restyle` | temporal, style, clip |
+| `speak` | talking portraits | 1 portrait + voice | `infinitetalk`, `s2v` | lipsync, temporal, identity |
+| `cinema` | Fuobe Cinema (O6) | 3 Director scenes (the prompt Cinema compiles), 4 camera moves as LTX-2.3's `camera_lora` (cloud), 2 films of 3 shots | `original`, `words` (no camera LoRA), `expansion` (fal's prompt expansion on), `wan` (Wan 2.2 A14B hosted), `partner` (Seedance 2.5); all but `original` cloud only | clip, temporal, continuity |
+
+`soul.json`, `soul-cinema.json`, `soul-hex.json`, `dop.json` and `dop-mix.json` are **generated** from the research. They come from
+`docs/research/higgsfield-image-studios.json` (the look ids) and
+`docs/research/fuobe-originals-recipes-5.json` (recipes, LoRAs, Soul Cinema's recipe, the motion map).
+`soul-hex`'s palettes are Fuobe's own. Run
+`node scripts/eval/gen-cases.mjs` after the research changes, and don't edit the generated files by
+hand. `pnpm eval:validate` fails when they are out of date. The subject prompts are Fuobe's own. No
+Higgsfield prompt or preview is used anywhere.
+
+Soul variants, all on the same subjects and seeds:
+
+- **recipe**: the look's template, its LoRA triggers, and its LoRAs at the listed strengths.
+- **prompt-only**: the same words without LoRAs. Does each LoRA earn its slot?
+- **half-strength**: every LoRA at half strength. This is the over-cooking check.
+- **plain**: the base model with the subject alone.
+- **original**: the shipped `fuobe-soul` Original (O2), which applies the look on the server. The look
+  goes as its Fuobe id in `presetId` (`v1-general`, the slug `--looks` takes); a Higgsfield look id never
+  leaves the harness. A lettering look (Graffiti) runs on `fuobe-soul-hd`. Every request names the engine
+  the run is on (`engine`), so an Original that runs on both takes that one. Its grade and overlay are
+  applied in the browser after generation, so the scores are of the raw picture.
+
+Soul Cinema's variants are the same idea for its one look: **recipe** (the research's LoRAs with their
+triggers, then the `cine` tail), **prompt-only** (the tail alone), **plain** and **original**
+(`fuobe-soul-cinema`). Soul HEX's: **words** (the palette sentence the Color signature adds, on Fuobe
+Soul: the cloud's HEX), **lock** (the same, then `POST /api/palettes/lock`: the open engine's HEX),
+**base** (the words on today's base), **palette-model** (Z-Image Turbo · Palette) and **plain** (no
+palette words, the control). A variant can carry fixed `words` after the prompt and its own `submit`
+route; `{{request}}` in a route body is the job's own request.
+
+DoP variants, on your start frame with two seeds:
+
+- **catalog**: the preset as it ships, with today's open LoRA if it has one.
+- **prompt-only**: preset strength 0, so the preset's words without its LoRAs. The server leaves the
+  LoRA's trigger word out too, since it means nothing without the LoRA.
+- **research**: the research's LoRA map at the listed strengths, its trigger words in front of the
+  words (`trigger, prompt`, as a Soul look's).
+- **partner**: the preset's words on Kling 2.5 Turbo (cloud only).
+
+A variant that would send the server the same request as an earlier variant of the same case, prompt
+and seed (model, route, final prompt, LoRAs, settings and inputs) is skipped and names the one it
+repeats. Most DoP presets have no open LoRA in today's catalog, so their prompt-only run would repeat
+the catalog run.
+
+### Licence rules in the runs
+
+The recipe's licence flags go with every job, following the research's "Licence rules for
+Originals":
+
+- Licences are information (Settings → Models & licences): a LoRA licensed for the GPU only goes to the
+  cloud engine like any other, unless the install keeps such LoRAs on the GPU there.
+- A civitai link is left out on the cloud until a mirrored copy exists, because civitai answers 401
+  without your token.
+- A non-commercial LoRA is noted on the verdict; with `--licence-hold`, a recipe that uses one isn't
+  promoted.
+- A LoRA link (your own variant's included) must be on Hugging Face, civitai, fal or Replicate: the API
+  refuses other hosts, since the server may download an unknown file from it before a ComfyUI run.
+
+A job records which LoRAs it asked for, which ones the route actually loaded, and which ones were
+left out and why.
+
+## Your own inputs: `scripts/eval/local/`
+
+Inputs the repo can't ship live in `scripts/eval/local/`, which is git-ignored and never committed.
+That covers photos of people, reference clips, licensed style references and voices. Cases name them
+as `local/…`. A job whose local input is missing is skipped and names the file. Demo runs use the
+small synthetic files in `fixtures/` instead.
+
+```
+scripts/eval/local/
+  references/soul/<look-slug>/*.jpg   # style references per look (your own or licensed images; never Higgsfield previews)
+  references/mixed-media/<look>/*     # what each Mixed Media look should look like
+  characters/default/*.jpg            # 20+ photos (80 at most) of ONE consenting person (soul-id)
+  styles/default/*.jpg                # 20+ images in one style, a moodboard (soul-id/look)
+  dop/start.png, dop/end.png          # a start frame (a person on a bridge fits the prompts), an end frame for transitions
+  genjutsu/dance.mp4, character.png, style.png
+  genjutsu/street.mp4, object.png     # street.mp4 at least 720 px on each side (Kling O3's edit, the cloud partner)
+  mixed-media/clip.mp4
+  shorts/clip.mp4, shorts/frame0.png
+  speak/portrait.png, speak/voice.wav
+```
+
+**Training needs consent.** `soul-id.json` ships with `"consent": false`, so a character's training
+refuses to start. Copy the file to `local/soul-id.json`. In your copy, set `"consent": true` only
+when the person in the photos agreed: the runner then sends Fuobe the consent line with the training,
+as the Train dialog does. A look (`"kind": "style"`) needs no consent. Then run it with
+`--suite scripts/eval/local/soul-id.json`. To reuse a character you already trained, put its element
+id in `"element"` instead of training again. Each case trains its own element (a Soul ID runs on the
+models of the base it was trained on), so a full cloud run trains five times: about $1.70 + $1.70 +
+$1.50 + $6.00 for the four character cases (Soul Cinema trains Fuobe Soul's family again unless its
+`"element"` names the character case's element) and $3.39 for the look, priced before anything
+starts. A training the server would run as a demo (no fal.ai key or AI-Toolkit connected, or Demo
+mode On) is skipped with its case, so a "trained" result is always a trained LoRA. The look case runs
+the trained style as the board's own look (`"presetId": "own-style"`), as a trained moodboard does in
+the app.
+
+## The case format
+
+A suite file follows `cases/case.schema.json`, which editors use for completion. The schema is
+written from `lib/schema.mjs`.
+
+```jsonc
+{
+  "$schema": "./case.schema.json",
+  "suite": "my-original",
+  "title": "Fuobe Something",
+  "description": "What it measures and what it needs.",
+  "original": "fuobe-something",                  // the Original(s) measured
+  "kind": "image",                                // image | video | audio
+  "recipe": "none",                               // soul-look | motion | none: where a case's recipe comes from
+  "targets": {                                    // model ids per engine, in order of preference:
+    "open":  { "models": ["fuobe-something", "oss-z-image-turbo"] },   // the first one this Fuobe has is used
+    "cloud": { "models": ["z-image-turbo-cloud"], "extra": { "num_inference_steps": 8 } },
+    "demo":  { "models": ["oss-z-image-turbo"] }
+  },
+  "defaults": { "seeds": [1001], "metrics": ["clip", "aesthetic"], "timeoutSeconds": 1800 },
+  "variants": {
+    "recipe": { "description": "The recipe as researched", "loras": "recipe" },
+    "half":   { "description": "Half strength", "loras": "recipe", "loraScale": 0.5 },
+    "mine":   { "loras": [{ "file": "my-lora.safetensors", "url": "https://huggingface.co/…", "strength": 0.8, "trigger": "myword" }] },
+    "partner": { "models": { "cloud": ["kling-2-5-turbo"] }, "engines": ["cloud"] }   // engines: where the variant runs
+  },
+  "cases": [
+    {
+      "id": "my-original/portrait",
+      "title": "A portrait",
+      "prompts": [{ "id": "p1", "text": "a woman reading by a window", "seed": 1001 }],
+      "references": "local/references/my-original/portrait",   // a folder or a list of files
+      "inputs": { "images": ["local/my-original/face.png"] },  // images, video, videos, audio, endImage, mask…
+      "demoInputs": { "images": ["fixtures/start-frame.png"] },
+      "params": { "aspectRatio": "3:4" }
+    }
+  ]
+}
+```
+
+Other case fields:
+
+- `look` / `motion`: a Soul look id, or a motion or effect name. The recipe comes from the
+  research.
+- `presetId`: a catalog preset.
+- `models` / `op`: per-case models, and the operation.
+- `variantModels`: a variant's models for this case (`{"partner": {"cloud": ["kling-o3"]}}`), over
+  the variant's own. Each Genjutsu mode names its own partner this way.
+- `shots`: a film's shots. Continuity is measured across them.
+- `train`: photos, a target per engine, `kind` (`character` or `style`), `consent`, and `minPhotos`.
+- `submit`: a studio route and its body, with `{{inputs.video}}`, `{{source:inputs.video}}`,
+  `{{prompt}}`, `{{seed}}`, `{{engine}}` and `{{requestId}}` filled in.
+- `engines`: the engines the case runs on.
+- `tags`, `metrics` and `note`.
+
+Paths can start with:
+
+- `local/…`: your own inputs.
+- `fixtures/…`: the synthetic fixtures.
+- `samples/…`: `public/samples`.
+- Anything else is a path relative to the case file, an absolute path, or a link.
+
+Run `pnpm eval:validate` after editing.
+
+## What a run records
+
+Everything goes to `scripts/eval/results/` (git-ignored; move it with `--out` or `FUOBE_EVAL_RESULTS`):
+
+```
+results/
+  history.jsonl                 # one line per run × case × variant: mean scores (pnpm eval:history)
+  <runId>/
+    run.json                    # suite, engine, filters, variants and the candidate, the server and ComfyUI it ran on,
+                                #   git commit, the research files' hashes, spend cap, the training estimate and the spend
+    elements.json               # training cases: the element made or trained, its training and what it cost
+    jobs.jsonl                  # one row per job, appended as each one ends (see below)
+    outputs/<jobId>/…           # the downloaded results
+    metrics.json                # scores per job (and per film), which model made them, at which revision, under which licence
+    summary.json                # means per variant, variant-against-variant wins, blind ratings, failures
+    report.html                 # the contact sheet: every case × variant with its scores (light and dark, phone-friendly)
+    review/index.html           # the blind A/B page; review/key.json (which side was which) is never served
+    review/ratings.json         # your ratings
+    promote.json                # the promote verdicts
+```
+
+Each row in `jobs.jsonl` records:
+
+- the case, prompt, seed and variant;
+- the model id asked for and the one that ran;
+- the route (`provider`, `endpoint`) and the final prompt;
+- the recipe: look or motion, template, the LoRAs with their strengths, which LoRAs the route loaded
+  and which it dropped and why, the sampler settings, and the licence flags;
+- the generation ids and the downloaded files;
+- the time: submitted, finished, wall clock;
+- the cost: the estimate before running and the cost after;
+- on the open engine: peak memory from `/system_stats` (CPU ComfyUIs are marked as RAM, not VRAM)
+  and ComfyUI's own execution time from `/history`;
+- notes and errors.
+
+## Metrics
+
+The metrics are written in Python (`metrics/fuobe_metrics`). Each metric is a small module with
+tests on tiny fixtures. They run on the CPU by default (`--device cuda|mps|auto` to change that).
+`pnpm eval:setup` creates the venv with [uv](https://docs.astral.sh/uv/) from the pinned
+`metrics/requirements.txt`, which is compiled from `requirements.in` with CPU torch.
+`--download` fetches the weights now; otherwise they download on first use. Every weight is pinned
+to a Hugging Face revision, and its licence is recorded with every result. Without Python, a run
+still has its timing and cost, and the report says why the scores are missing.
+
+| Metric | Key(s) | Better | How | Model and licence |
+| --- | --- | --- | --- | --- |
+| Prompt adherence | `clip` | higher | CLIPScore (100·cos) between the output and the case's own words. Clips are sampled at 4 frames | open_clip ViT-B/32 laion2B, **MIT** (`--clip-model clip-l14`: OpenAI ViT-L/14, MIT) |
+| Aesthetic | `aesthetic` | higher | LAION improved aesthetic predictor v2 on CLIP ViT-L/14 embeddings, about 1–10 | head **Apache-2.0** (christophschuhmann/improved-aesthetic-predictor), CLIP MIT |
+| Style vs references | `style`, `styleNearest` | higher | cosine of the output's embedding to the centroid of the look's reference set, and to the nearest reference | CLIP (default), or `--style-model dinov2`: DINOv2 ViT-S/14 via timm, **Apache-2.0** |
+| Identity | `identity`, `faceRate` | higher | ArcFace-style face embeddings of the output against the person's photos; the share of frames with a face | **AuraFace v1**'s recognition model (fal, **Apache-2.0**, trained for commercial use), with faces found and aligned by **YuNet** (OpenCV Zoo, **MIT**). The SCRFD detector AuraFace's repo ships comes from insightface's model zoo (released for non-commercial research; the licence is unclear), so it runs only with `--face-detector scrfd`. insightface's `buffalo_l` is **non-commercial research only** (recorded with the result): pick it with `--identity-model buffalo_l`; `--commercial-only` refuses it |
+| Temporal consistency | `drift`, `driftMax`, `warp` | lower | frame-to-frame CLIP embedding drift (mean and worst jump), and a warp error: Farneback optical flow with a forward-backward occlusion mask | CLIP, OpenCV (Apache-2.0) |
+| Lip-sync | `lipsync`, `lipsyncOffset` | higher | a proxy: mouth-region motion against the voice's loudness, with the best lag as the A/V offset | the identity metric's face detector for the face box when identity is installed, else a fixed lower-centre region |
+| SyncNet (optional) | `syncnet` | higher | runs only when `FUOBE_EVAL_SYNCNET_CMD` points at your own SyncNet. It isn't bundled because its weights' licence isn't stated | yours |
+| Shot continuity | `continuity` | higher | CLIP similarity between consecutive shots of a film | CLIP |
+| Palette | `paletteFit`, `paletteCover` | lower, higher | the mean ΔE (CIE76, Lab) from each pixel to the nearest colour of the palette the request sent (`params.palette`, or the palette lock's colours), and the share of the palette's colours that are nearest for at least 3% of the pixels | none (numpy) |
+| Time, cost, memory | `seconds`, `costUsd`, `vramGb` | lower | from the runner | — |
+
+Identity needs `pnpm eval:setup --identity`, which installs insightface and onnxruntime (MIT
+libraries). `metrics.json` records the face detector apart from the recognition model, each with its
+licence, and compare warns when two runs used different detectors. Re-scoring is incremental: a job whose outputs and settings haven't changed keeps its
+scores. `--metrics clip,style` re-scores only those families and keeps the others. `--force`
+re-scores everything.
+
+The metrics are signals, not verdicts. CLIP rewards literal prompt matches. The aesthetic predictor
+has its own taste. Style needs references that really show the look. That is why promotion also
+needs people's ratings.
+
+## Blind A/B review
+
+`pnpm eval:review <runId>` writes `review/index.html` and serves it at `http://127.0.0.1:4173`. The
+page shows two results side by side. Their order comes from a hash, and nothing on the page names
+the variant, model or file.
+
+- `--against variants` is the default when the run has two or more variants. It pairs the run's
+  candidate (see [the promote rule](#the-promote-rule)) with each of the others on the same case,
+  prompt and seed.
+- `--against references` is the default otherwise. It pairs each output with one of your references
+  from `local/references/…`.
+- `--against <otherRunId>` pairs the same jobs across two runs, for example before and after a
+  change.
+
+Use **←** / **1** for the left result, **→** / **2** for the right one, **↓** / **0** / **Space**
+for "about the same", **S** to skip and **U** / **Backspace** to undo. Space and Enter on a focused
+button press that button. On a phone, use the three buttons. The server answers only on 127.0.0.1 /
+localhost, and saves ratings only from its own page. Ratings save to `review/ratings.json` as you go. Opened as a plain file, the page keeps
+them in the browser and offers a download. `pnpm eval:report` unblinds the ratings with
+`review/key.json` and adds the preference per variant pair to `summary.json`.
+
+## Comparing runs and catching regressions
+
+```bash
+pnpm eval:compare latest~1 latest                                  # wins / losses / ties and mean gain per metric
+pnpm eval:compare base-run new-run --fail-on clip,style --threshold 5%   # exit 1 when either mean drops by more than 5 %
+pnpm eval:compare run:prompt-only run:recipe --fail-on style       # two variants of one run
+pnpm eval:compare a b --fail-on warp --per-case                    # also fail on any single case's regression
+```
+
+Compare matches jobs on case, prompt, seed and variant. `--threshold` can be an absolute amount in
+the metric's units, or a percentage of A's mean. Without it, each metric's own noise band applies
+(`lib/metric-info.mjs`). A guarded metric with no scores in both runs counts as a failure, so the
+check can't pass just because the metric never ran. Every report appends its per-case means to
+`results/history.jsonl`, and `pnpm eval:history --case soul/v1-general` shows a case over time.
+
+## The promote rule
+
+The candidate is the variant a suite names in `defaults.candidate` (DoP: `research`), else `recipe`
+when the run has it, else the run's first variant; `--candidate` picks another. It is **eligible** to
+become the default only when one run, on the same prompts and seeds, shows all of the following for
+the case:
+
+1. **Complete**: none of the recipe's LoRAs was left out on that engine. Its licences are information:
+   a non-commercial LoRA (or one licensed for the GPU only, on a cloud run) is a note on the verdict, and
+   holds the recipe only with `--licence-hold`.
+2. **Enough results**: at least 3 for the case.
+3. **Metrics**: against every alternative in the run (prompt only, half strength, the bare base,
+   today's default), it scores at least as well on the case's main metric: the first of style (a look
+   with references), lip-sync, identity, aesthetic, CLIP (a DoP motion's words) and warp error that the
+   case has scores for. It also gives up no more than 1.0 CLIP, 0.15 aesthetic, and on clips 0.002 warp
+   error and 0.004 drift.
+4. **People**: at least 6 blind ratings of this case's own pairs against the alternatives (every pair
+   the review offered, when it offered fewer), with at least 55 % of the non-tie ratings going to the
+   candidate. Ratings of other looks don't count.
+
+If half strength wins, the verdict is **lower strengths**, not another recipe: the LoRAs over-cook,
+so lower them in the research JSON and run again. When the candidate and an alternative ran on
+different endpoints (fal's Z-Image runs LoRAs on `/lora`), the verdict says so. Demo runs never
+promote anything. A run on one engine says to check the other engine too.
+
+`pnpm eval:promote <runId>` writes `promote.json`. `--record` also writes each case's verdict into
+the research JSON (`docs/research/fuobe-originals-recipes-5.json`). The verdict goes in the `eval`
+list of the entry it measured: a Soul look's `presets[]` entry, or a motion's `motionsEffects[]`
+entry. Each record holds:
+
+- the run, the engine and the date;
+- the verdict and the reasons for it;
+- the main metric against each alternative;
+- the LoRAs it ran, and the strengths to try when half strength won.
+
+A newer record for the same engine and case replaces the older one. The file keeps its format, so
+the diff shows only the records. Recording alone never changes a recipe, a strength or a default.
+
+`--record --apply-strengths` does lower strengths that over-cook: where half strength won, the entry's
+LoRAs take the strengths that variant ran, and the record lists each change (`appliedStrengths`). It
+still lands as a diff for a person to review. Defaults stay code changes that a person reviews:
+
+1. Review the research JSON's diff (or edit it).
+2. Regenerate the catalog (`pnpm gen:catalog`).
+3. Measure both engines again.
+
+## Covers: the renders become the preview media
+
+`pnpm eval:covers <runId>` takes the best render of each **promoted** case (best on the case's main
+metric) and makes it that preset's cover. A still becomes a JPEG of at most 768 px; a clip becomes its
+first 4 seconds, muted, at most 512 px, with its first frame as the poster. They go to
+`public/previews/<suite>/`, and `src/lib/preset-previews.generated.ts` lists them by preset id (a
+DoP preset, `effect-thunder-god`) or look id (`v1-general`). The gallery cards play a listed cover
+instead of their procedural preview.
+
+- `--variant catalog` takes that variant's renders for every case instead, such as what ships today.
+- `--dry-run` lists what it would pick.
+- Only Fuobe's own renders become covers: a demo run never does. A render whose LoRAs aren't commercial
+  becomes one with its licence noted (`licence` in the result); `--commercial-only` leaves it out. No
+  Higgsfield preview is used anywhere.
+- It needs ffmpeg. Look at the media and the generated file's diff before committing them.
+
+### Covers from rendered masters
+
+Preview renders made outside a run (the gallery renders made in ComfyUI) become covers the same way:
+
+```sh
+pnpm eval:covers --from-masters <dir> --run comfyui-previews-2026-10 --engine comfyui --model ideogram4 --video-model minimax-h3 --variant lean-json
+```
+
+- `<dir>` has one folder per preset id (`effect-set-on-fire/`). A folder's `clip.mp4` becomes a clip
+  cover (first 4 seconds, its first frame as the poster). The cards play a clip in a loop, so its last 6
+  frames are crossfaded into its first ones and the loop has no jump (every clip cover is made this way,
+  also `eval:covers` from a run). A folder without a clip uses its `start.png` as a still cover (a 4:2:0
+  JPEG at most 768 px). A folder with neither is skipped.
+- The covers go to `public/previews/presets/` (`--suite` names another folder).
+- Each cover records the run, the engine, the model and the variant: `--model` for stills, `--video-model`
+  for clips. A folder's `meta.json` can name its own `model` and `variant`.
+- The manifest is merged. Covers that other runs wrote stay, and only the ids found in `<dir>` are
+  replaced. An id whose cover another run made in another folder (a measured `eval:covers` cover) is
+  skipped and listed, so re-running the masters never undoes a measured cover; `--replace` takes it over
+  and removes its old files. A manifest that can't be read stops the run instead of being overwritten.
+- Run it again as new masters land. A cover that is newer than its master is kept, so only new or
+  changed masters are encoded (`--force` encodes all of them). `--only id,id` limits the run to those
+  presets. A preset whose cover changes from a clip to a still loses its old clip.
+- `--dry-run` lists what it would make. Review the media and the manifest diff before committing them.
+
+## Tests
+
+- `tests/eval-harness.test.ts` (Vitest) covers several areas:
+  - The runner runs end to end against Fuobe's real route handlers, served over HTTP, with the demo
+    provider: plan, price, upload, submit, wait, download and record.
+  - A studio route (Genjutsu), and a training case.
+  - The engine checks, the spend cap, `--resume` and the dry run.
+  - Case-file validation.
+  - Report, blind review, compare (with its exit codes), promote and `--record`.
+- `tests/eval-api.test.ts` covers the API seams the harness needs: a recipe's LoRAs on
+  `POST /api/generations`, and a preview that says which LoRAs the route loads.
+- `tests/eval-metrics.test.ts` runs the Python tests (`metrics/tests`, pytest) in the metrics venv,
+  or through uv. Without either, they are skipped. The maths tests use numpy only. The media tests
+  need ffmpeg. The model tests run when their weights are cached.
+- `tests/e2e/eval-review.mjs` checks the report and review pages in a browser at 1440 and 390 px,
+  light and dark, and rates every pair with the keyboard.
+
+```bash
+pnpm vitest run tests/eval-harness.test.ts tests/eval-api.test.ts tests/eval-metrics.test.ts
+cd scripts/eval/metrics && .venv/bin/python -m pytest -q tests
+```
+
+## Adding an Original's cases
+
+1. Add `cases/<original>.json`. Use `selftest.json` or `genjutsu.json` as a model, depending on
+   whether the Original runs through `/api/generations` or through a studio route.
+2. Name targets per engine. Put the Original's model id first and today's base model after it, so
+   the suite runs now and switches to the Original once it exists.
+3. Put inputs the repo can't ship under `local/…`, with small `demoInputs` from `fixtures/`.
+4. Choose metrics. Add references if style or identity matter.
+5. Run `pnpm eval:validate`, then `pnpm eval:run --suite <original> --engine demo`.

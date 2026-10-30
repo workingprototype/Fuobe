@@ -9,7 +9,7 @@ import { CuratedCover } from "@/components/moodboards/cards";
 import { useMoodboards } from "@/components/moodboards/hooks";
 import { curatedLook, curatedPick, soulPick, toPick } from "@/components/moodboards/logic";
 import { MoodboardPanel } from "@/components/moodboards/moodboard-panel";
-import { cardStrip, type MoodboardPick, type Signature } from "@/lib/catalog/palettes";
+import { cardStrip, type Signature } from "@/lib/catalog/palettes";
 import type { Engine } from "@/lib/catalog/types";
 import { ColorSignaturePanel, toPalettePick } from "./color-signature-panel";
 import { usePalettes } from "./hooks";
@@ -53,31 +53,18 @@ export default function SignatureChips({
   value,
   onChange,
   engine,
-  presetSource,
-  styleId,
-  onStyleIdTaken,
+  lockByDefault,
 }: {
   value: Signature | undefined;
   onChange: (update: (s: Signature | undefined) => Signature) => void;
   engine: Engine;
-  /** The model's own preset list (options.presets.source): the Moodboard panel opens on it ("soul-v1" = Soul's styles). */
-  presetSource?: string;
-  /** A Soul `style_id` in the draft's settings (a reused Soul run): shown and kept as the Moodboard pick. */
-  styleId?: string;
-  onStyleIdTaken?: () => void;
+  /** The model locks a picked palette unless it's turned off (Fuobe Soul's HEX on the open engine). */
+  lockByDefault?: boolean;
 }) {
   const [colorOpen, setColorOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const pal = value?.palette;
   const mb = value?.moodboard;
-  // Soul's style picker is this chip: a style id restored by Reuse becomes the curated pick (a picked moodboard wins).
-  useEffect(() => {
-    if (!styleId) return;
-    // A live Higgsfield style the built-in list doesn't know still shows (and clears) as one.
-    const pick: MoodboardPick = soulPick(styleId) ?? { id: styleId, kind: "curated", name: "Soul style", status: "complete", ...(presetSource === "soul-v1" && { source: "soul-v1" as const }) };
-    onChange((s) => (s?.moodboard ? { ...s } : { ...s, moodboard: pick }));
-    onStyleIdTaken?.();
-  }, [styleId, presetSource, onChange, onStyleIdTaken]);
   return (
     <>
       <Suspense fallback={null}>
@@ -100,6 +87,7 @@ export default function SignatureChips({
           <ColorSignaturePanel
             value={pal}
             engine={engine}
+            lockByDefault={lockByDefault}
             onPick={(p) => {
               onChange((s) => ({ ...s, palette: p }));
               // Toggling the lock keeps the panel open; picking a palette closes it.
@@ -130,7 +118,6 @@ export default function SignatureChips({
         >
           <MoodboardPanel
             value={mb}
-            presetSource={presetSource}
             onPick={(m) => {
               onChange((s) => ({ ...s, moodboard: m }));
               setBoardOpen(false);

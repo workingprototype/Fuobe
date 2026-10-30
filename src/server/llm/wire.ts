@@ -46,6 +46,7 @@ export function ollamaBody(req: ChatRequest, model: string, context: number, wit
       content: m.content,
       ...(m.toolCalls?.length && { tool_calls: m.toolCalls.map((c) => ({ function: { name: c.name, arguments: c.input } })) }),
       ...(m.toolName && { tool_name: m.toolName }),
+      ...(m.images?.length && { images: m.images.map((i) => i.data) }),
     })),
     ...(tools?.length && { tools }),
     ...(withJson && req.json && { format: req.json === "object" ? "json" : req.json.schema }),
@@ -74,8 +75,10 @@ export function parseOllama(j: OllamaReply, model: string): ChatResult {
 // ---------------------------------------------------------------------------
 // OpenAI-compatible: POST {base}/chat/completions
 
+type WirePart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 type WireMessage =
-  | { role: "system" | "user"; content: string }
+  | { role: "system" | "user"; content: string | WirePart[] }
   | { role: "assistant"; content: string | null; tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
@@ -87,6 +90,10 @@ function wireMessage(m: ChatMessage): WireMessage {
       : { role: "assistant", content: m.content };
   }
   if (m.role === "tool") return { role: "tool", tool_call_id: m.toolCallId ?? "", content: m.content };
+  // Pictures as data URLs before the words (OpenAI's vision format, which LM Studio and llama-server read).
+  if (m.role === "user" && m.images?.length) {
+    return { role: "user", content: [...m.images.map((i): WirePart => ({ type: "image_url", image_url: { url: `data:${i.contentType};base64,${i.data}` } })), { type: "text", text: m.content }] };
+  }
   return { role: m.role, content: m.content };
 }
 

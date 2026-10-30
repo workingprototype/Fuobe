@@ -3,8 +3,8 @@
  * Higgsfield's limits and exact copy, the status a board shows while its cover job runs, which
  * images best represent a board, and the 2×2 collages open-source style models take.
  */
-import { SOUL_CATEGORIES, SOUL_PRESETS, type SoulPreset, type SoulPresetModel } from "@/lib/catalog/higgsfield-presets.generated";
-import { coverTone, getSoulPreset, hueOf, spreadHue, type CoverTone } from "@/lib/catalog/packs";
+import { coverTone, hueOf, spreadHue, type CoverTone } from "@/lib/catalog/packs";
+import { lookCard, lookSet, type SoulLookCard } from "@/lib/catalog/soul-cards";
 import { kmeans, suggestName, type MoodboardPick, type MoodboardStatus, type RGB } from "@/lib/catalog/palettes";
 import type { Engine, Generation } from "@/lib/catalog/types";
 
@@ -24,8 +24,8 @@ export interface Moodboard {
   styleId: string | null;
   error: string | null;
   generationId: string | null;
-  /** The style element trained from this board (Z-Image Turbo LoRA). */
-  lora: { elementId: string; handle: string; status: "none" | "training" | "ready" | "failed" } | null;
+  /** The style element trained from this board (a Z-Image Turbo LoRA, its Fuobe look); "demo" = a demo training's stand-in. */
+  lora: { elementId: string; handle: string; status: "none" | "training" | "ready" | "failed" | "demo" } | null;
   createdAt: number;
 }
 
@@ -39,75 +39,55 @@ export interface CuratedMoodboard {
   tone?: CoverTone;
   /** Soul's styles: every category the preset is in (Soul 2.0's looks have one). */
   categories?: string[];
-  /** Whose preset: Soul 2.0's looks (the default) or Soul's styles. */
-  source?: SoulPresetModel;
-  /** Higgsfield's preview image (only when a Higgsfield key is set; otherwise the cover is drawn). */
+  /** Whose look: Soul 2.0's looks (the default) or Soul's. */
+  source?: CuratedSource;
+  /** A rendered cover, once the evaluation harness made one (otherwise the cover is drawn). */
   preview?: string;
 }
 
-const toCurated = (p: SoulPreset, i: number): CuratedMoodboard => ({
-  id: p.id,
-  name: p.name,
-  category: p.categories[0] ?? "All presets",
-  categories: p.categories,
-  description: p.description,
+/** The curated sets: Fuobe Soul's Soul 2.0 looks and its Soul (v1) looks. */
+export type CuratedSource = "soul-v1" | "soul-v2";
+
+const toCurated = (c: SoulLookCard, i: number): CuratedMoodboard => ({
+  id: c.id,
+  name: c.name,
+  category: c.categories[0] ?? "All presets",
+  categories: c.categories,
+  description: c.description,
   hue: spreadHue(i),
-  tone: coverTone(p.name, p.description),
-  ...(p.model === "soul-v1" && { source: p.model }),
+  tone: coverTone(c.name, c.description),
+  ...(c.family === "v1" && { source: "soul-v1" as const }),
 });
 
 /**
- * The curated sets of the Moodboard panel, from the built-in list: Soul 2.0's 33 looks, and Soul's
- * 106 styles. Each is `style_id` on its own model and its description as words on every other model
- * (the open route's prompt template).
+ * The curated sets of the Moodboard panel: Fuobe Soul's looks (src/lib/catalog/soul-cards.ts), Soul 2.0's 33 and
+ * Soul's 106. On Fuobe Soul a pick is the look itself (its words and LoRAs); on every other model its words.
  */
-export const CURATED_SETS: Record<SoulPresetModel, CuratedMoodboard[]> = {
-  "soul-v2": SOUL_PRESETS.filter((p) => p.model === "soul-v2").map(toCurated),
-  "soul-v1": SOUL_PRESETS.filter((p) => p.model === "soul-v1").map(toCurated),
+export const CURATED_SETS: Record<CuratedSource, CuratedMoodboard[]> = {
+  "soul-v2": lookSet("v2").items.map(toCurated),
+  "soul-v1": lookSet("v1").items.map(toCurated),
 };
 export const SOUL_STYLES = CURATED_SETS["soul-v1"];
 
 const LOOKS = new Map([...CURATED_SETS["soul-v2"], ...CURATED_SETS["soul-v1"]].map((c) => [c.id, c]));
 /** A curated look's drawn cover by id (the composer chip's dot); unknown ids get a hue of their own. */
 export const curatedLook = (id: string): { hue: number; tone: CoverTone } => {
-  const c = LOOKS.get(id);
+  const c = LOOKS.get(lookCard(id)?.id ?? id);
   return c ? { hue: c.hue, tone: c.tone ?? "plain" } : { hue: hueOf(id), tone: "plain" };
 };
 
-/** What GET /api/providers/higgsfield/presets returns (Higgsfield's live list, or the built-in one as `fallback`). */
-export interface LivePresets {
-  items?: { id: string; name: string; preview?: string }[];
-  fallback?: boolean;
-}
-
-/**
- * A curated set with Higgsfield's live list on top (a Higgsfield key is set and the list loaded):
- * its preview images, and any preset it has that the built-in list doesn't, at the end.
- */
-export function withLive(base: CuratedMoodboard[], live: LivePresets | undefined, source: SoulPresetModel): CuratedMoodboard[] {
-  if (!live?.items?.length || live.fallback) return base;
-  const byId = new Map(live.items.map((p) => [p.id, p]));
-  const known = new Set(base.map((b) => b.id));
-  return [
-    ...base.map((b) => (byId.get(b.id)?.preview ? { ...b, preview: byId.get(b.id)!.preview } : b)),
-    ...live.items
-      .filter((p) => !known.has(p.id))
-      .map((p) => ({ id: p.id, name: p.name, category: "All presets", categories: [], description: "", hue: hueOf(p.id), preview: p.preview, ...(source === "soul-v1" && { source }) })),
-  ];
-}
-
 /** The category pills of each curated set ("All presets" first). */
-export const CURATED_TABS: Record<SoulPresetModel, string[]> = {
-  "soul-v2": ["All presets", ...SOUL_CATEGORIES["soul-v2"]],
-  "soul-v1": ["All presets", ...SOUL_CATEGORIES["soul-v1"]],
+export const CURATED_TABS: Record<CuratedSource, string[]> = {
+  "soul-v2": ["All presets", ...lookSet("v2").categories],
+  "soul-v1": ["All presets", ...lookSet("v1").categories],
 };
 
 export const inCuratedTab = (c: Pick<CuratedMoodboard, "category" | "categories">, tab: string) => tab === "All presets" || (c.categories ?? [c.category]).includes(tab);
 
-/** Any Soul preset (either model) as a curated pick, by Higgsfield's style id (a reused run's `style_id`). */
+/** A Fuobe Soul look as a curated pick, by its id (or Higgsfield's old style id: a run or a link saved before the Originals). */
 export function soulPick(id: string): MoodboardPick | undefined {
-  const p = getSoulPreset(id);
-  return p && { id: p.id, kind: "curated", name: p.name, description: p.description, status: "complete", ...(p.model === "soul-v1" && { source: p.model }) };
+  const c = lookCard(id);
+  return c && { id: c.id, kind: "curated", name: c.name, description: c.description, status: "complete", ...(c.family === "v1" && { source: "soul-v1" as const }) };
 }
 
 export const MOODBOARD_LIMITS = { min: 5, max: 80, minPx: 256, nameMax: 100, refs: 10, collages: 2 } as const;

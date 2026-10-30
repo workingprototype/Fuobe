@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAssets, type Asset } from "@/lib/api";
 import type { MediaKind } from "@/lib/catalog/types";
+import { slotCaption } from "@/lib/composer";
 import { cn } from "@/lib/utils";
 import type { SketchMode, Stroke } from "./sketch-editor";
 
@@ -223,6 +224,7 @@ export function MediaSlot({
   size = "md",
   onFile,
   slotKey,
+  caption,
 }: {
   label: string;
   kind: MediaKind;
@@ -234,6 +236,8 @@ export function MediaSlot({
   onFile?: (f: File) => void;
   /** Marks the tile so the composer can point at it ("Add a start frame"). */
   slotKey?: string;
+  /** Filled, keep the slot's role on the thumbnail ("Target", "Face"), so two photos can be told apart. */
+  caption?: boolean;
 }) {
   const handleFile = (f: File) => {
     // A tile takes its own kind only (a clip dropped on the Image tile would land as a video there).
@@ -268,6 +272,11 @@ export function MediaSlot({
           {value ? (
             <div className="size-full overflow-hidden rounded-xl border bg-muted">
               <SlotPreview value={value} />
+              {caption && (
+                <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 truncate rounded-b-xl bg-black/50 px-1 py-px text-center text-[10px] leading-tight font-medium text-white">
+                  {slotCaption(label)}
+                </span>
+              )}
               {value.uploading && (
                 <div className="absolute inset-0 grid place-items-center rounded-xl bg-background/60" role="status" aria-label="Uploading">
                   <Loader2 className="size-4 animate-spin" />

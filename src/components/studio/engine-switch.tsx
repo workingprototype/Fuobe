@@ -15,21 +15,22 @@ const OPTIONS: { value: Engine; label: string; icon: typeof Cloud; tip: string }
 
 /**
  * Segmented control with a sliding white thumb (Liner-style). `md` (page headers) turns
- * icon-only below the sm breakpoint so titles keep their line on phones; the tooltips and
- * aria labels still name each engine.
+ * icon-only below the sm breakpoint so titles keep their line on phones (`compact` does the same
+ * for `sm`, e.g. in Assist's one-row footer); the tooltips and aria labels still name each engine.
  */
 export function EngineSwitch({
   value,
   onChange,
   size = "md",
+  compact = size === "md",
 }: {
   value: Engine;
   onChange: (e: Engine) => void;
   size?: "sm" | "md";
+  compact?: boolean;
 }) {
   const mode = useEngineMode();
   const idx = OPTIONS.findIndex((o) => o.value === value);
-  const compact = size === "md";
   if (mode !== "both") {
     const o = OPTIONS.find((x) => x.value === mode)!;
     const text = mode === "open" ? "Open source only" : "Cloud only";
@@ -82,11 +83,15 @@ export function EngineSwitch({
               )}
             >
               <o.icon className="size-3.5" />
-              <span className={cn(compact && "hidden sm:inline")}>{size === "sm" && o.value === "open" ? "Open" : o.label}</span>
+              {/* One name at every size ("Open" alone read like a verb next to Home's send button). */}
+              <span className={cn(compact && "hidden sm:inline")}>{o.label}</span>
             </button>
           </TooltipTrigger>
           <TooltipContent>
-            <span className="font-medium">{o.label}</span> · {o.tip}
+            {/* One span: the tooltip lays its children out in a row. */}
+            <span>
+              <span className="font-medium">{o.label}</span> · {o.tip}
+            </span>
           </TooltipContent>
         </Tooltip>
       ))}

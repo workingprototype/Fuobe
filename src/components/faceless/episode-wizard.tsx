@@ -142,8 +142,15 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
 
   if (error && /not found/i.test((error as Error).message)) return <NotFoundState title="This channel doesn't exist" />;
 
+  // Next waits for a topic (or a pasted script); the line beside it says so and takes you to the topics.
+  const ready = !!topic || (scriptMode === "pasted" && !!script.trim());
+  const focusTopics = () => {
+    const el = document.querySelector<HTMLElement>('[aria-label="Suggested topics"] [role="radio"][tabindex="0"]') ?? document.getElementById(ownId);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    el?.focus({ preventScroll: true });
+  };
   const next = () => {
-    if (!topic && !(scriptMode === "pasted" && script.trim())) return void toast("Pick a topic, or write your own", { id: "faceless-blocker" });
+    if (!ready) return void toast("Pick a topic, or write your own", { id: "faceless-blocker" });
     setStep(2);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -356,8 +363,16 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
               </>
             ) : (
               <>
-                <p className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{topic ? `Topic: ${topic}` : "Pick a topic to continue"}</p>
-                <Button onClick={next} className="rounded-full">
+                {ready ? (
+                  <p className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{topic ? `Topic: ${topic}` : "Your script is ready to split"}</p>
+                ) : (
+                  <p className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
+                    <button type="button" onClick={focusTopics} className="underline decoration-border-strong underline-offset-2 hover:text-foreground hover:decoration-current">
+                      Pick a topic to continue
+                    </button>
+                  </p>
+                )}
+                <Button onClick={next} disabled={!ready} className="rounded-full">
                   Next <ArrowRight />
                 </Button>
               </>

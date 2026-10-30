@@ -59,7 +59,7 @@ describe("marketing catalog", () => {
   it("routes every format to models that exist and do the job, on both engines", () => {
     for (const id of Object.keys(FORMATS) as FormatId[]) {
       for (const engine of ["cloud", "open"] as const) {
-        for (const has of [{ product: true, avatar: false, higgsfield: true }, { product: false, avatar: true, higgsfield: false }]) {
+        for (const has of [{ product: true, avatar: false }, { product: false, avatar: true }]) {
           const list = formatModels(FORMATS[id], engine, has);
           expect(list.length, `${id}/${engine}`).toBeGreaterThan(0);
           for (const c of list) {

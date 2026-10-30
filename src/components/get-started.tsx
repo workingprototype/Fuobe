@@ -1,0 +1,215 @@
+"use client";
+
+import { useQueryClient } from "@tanstack/react-query";
+import { AudioLines, Bot, Clapperboard, Cloud, Copy, Cpu, ExternalLink, ImageIcon, Megaphone, Mic2, Sparkles, Video, Wand2, X } from "lucide-react";
+import Link from "next/link";
+import { useId, useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { ConnectField, useSettings } from "@/components/connect-field";
+import { saveSettings, useEngineMode, type StatusInfo } from "@/lib/api";
+import { copyWithToast } from "@/lib/clipboard";
+import { COMFY_INSTALL_COMMAND, COMFY_INSTALL_DOCS, FAL_KEYS_URL, nothingConnected } from "@/lib/connections";
+import { cn } from "@/lib/utils";
+
+/**
+ * "What do you want to do?" — Liner's first-run question, as one tap to the right place. Image and
+ * Edit switch Home's composer (Edit's Start then asks for the photo); "Animate a photo" opens Video
+ * itself, where the Start frame is, since Home's Video mode would run text-to-video without one.
+ */
+const INTENTS = [
+  { label: "Make an image", href: "/image", icon: ImageIcon, mode: "image" },
+  { label: "Animate a photo", href: "/video", icon: Video },
+  { label: "Edit a photo", href: "/edit", icon: Wand2, mode: "edit" },
+  { label: "Advertise a product", href: "/marketing", icon: Megaphone },
+  { label: "A talking avatar", href: "/lipsync", icon: Mic2 },
+  { label: "A faceless video", href: "/faceless", icon: Clapperboard },
+  { label: "Voice or music", href: "/audio", icon: AudioLines },
+  { label: "Plan it with Assist", href: "/assist", icon: Bot },
+] as const;
+
+export type IntentMode = "image" | "video" | "edit";
+
+function GuideCard({ icon: Icon, title, cost, children }: { icon: typeof Cloud; title: string; cost: string; children: React.ReactNode }) {
+  return (
+    <section aria-label={title} className="flex min-w-0 flex-col gap-3 rounded-xl border bg-background p-4 text-left">
+      <div className="flex items-center gap-2.5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-brand-faint text-brand-text">
+          <Icon className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <h3 className="text-[14px] font-medium">{title}</h3>
+          <p className="text-[12px] text-muted-foreground">{cost}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * The first-run guide: three ways to make things for real (a paid API key, your own GPU, or the
+ * demo), each finished without leaving the page, then Liner's "What do you want to do?" chips.
+ * It shows while nothing is connected and it wasn't dismissed (showFirstRun); connecting something
+ * or "Hide" remembers that on the server, so it doesn't come back in another browser.
+ */
+export function GetStarted({
+  status,
+  prices,
+  onDemo,
+  onHide,
+  onMode,
+  intents = true,
+  className,
+}: {
+  /** Undefined while it loads (Home's static shell): the guide is drawn for this browser's engine mode. */
+  status?: StatusInfo;
+  /** What a first image and clip cost on the paid route (starterPriceLine on the server). */
+  prices?: string;
+  /** "Just try it": after the guide is put away (Home focuses its composer). */
+  onDemo?: () => void;
+  /** After Hide or "Try the demo" put it away (Settings closes a guide it reopened). */
+  onHide?: () => void;
+  /** An image / video / edit chip: Home switches its composer instead of leaving the page. */
+  onMode?: (mode: IntentMode) => void;
+  /** Show the "What do you want to do?" chips. */
+  intents?: boolean;
+  className?: string;
+}) {
+  const qc = useQueryClient();
+  // Not in Home's static shell (no status yet): a returning visitor's guide is gone once the status
+  // arrives, so it shouldn't cost a settings read on every Home visit.
+  const settings = useSettings(!!status).data;
+  const get = (n: string) => settings?.find((s) => s.name === n);
+  const [hiding, setHiding] = useState(false);
+  const titleId = useId();
+  const cachedMode = useEngineMode();
+  const mode = status?.engineMode ?? cachedMode;
+
+  const hide = async () => {
+    setHiding(true);
+    try {
+      await saveSettings({ onboarded: "1" });
+      await qc.invalidateQueries({ queryKey: ["status"] });
+      onHide?.();
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message);
+      return false;
+    } finally {
+      setHiding(false);
+    }
+  };
+  const connected = (what: string) => (r: { detail: string }) => toast.success(`${what} connected`, { description: r.detail });
+
+  return (
+    <section className={cn("w-full animate-fade-up rounded-2xl border bg-muted/40 p-4 text-left sm:p-5", className)} aria-labelledby={titleId}>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 id={titleId} className="font-heading text-[24px] leading-tight">
+            Get started
+          </h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {!status || nothingConnected(status)
+              ? "Nothing is connected yet, so every run is a free demo with placeholder results. Connect a model to make the real thing:"
+              : "Three ways to make things with Fuobe. Connect another one, or check one you set up:"}
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" className="-mt-1 -mr-2 shrink-0 text-muted-foreground" disabled={hiding} onClick={() => void hide()} aria-label="Hide the setup guide">
+          <X /> <span className="hidden sm:inline">Hide</span>
+        </Button>
+      </div>
+
+      <div className={cn("mt-4 grid gap-3", mode === "both" ? "lg:grid-cols-3" : "md:grid-cols-2")}>
+        {mode !== "open" && (
+          <GuideCard icon={Cloud} title="Use paid models" cost={prices ? `Pay per run with your own key: ${prices}` : "Pay per run with your own key"}>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">The Fuobe Originals hosted on open weights, plus Nano Banana, Seedance, Kling, Veo and many more, through one fal.ai key. A Replicate token works too (Settings).</p>
+            <ConnectField
+              name="falKey"
+              setting={get("falKey")}
+              provider="fal"
+              label="fal.ai API key"
+              placeholder="key_id:key_secret"
+              onConnected={connected("fal.ai")}
+              hint={
+                <a href={FAL_KEYS_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text underline-offset-2 hover:underline">
+                  Get a key at fal.ai <ExternalLink className="size-3" />
+                </a>
+              }
+            />
+          </GuideCard>
+        )}
+        {mode !== "cloud" && (
+          <GuideCard icon={Cpu} title="Use your GPU" cost="Free: open-source models run on your machine">
+            <p className="text-[13px] leading-relaxed text-muted-foreground">Point Fuobe at a running ComfyUI. Each workflow lists the model files it needs.</p>
+            <ConnectField
+              name="comfyUrl"
+              setting={get("comfyUrl")}
+              provider="comfyui"
+              label="ComfyUI address"
+              placeholder="http://127.0.0.1:8188"
+              idleLabel="Connect"
+              onConnected={connected("ComfyUI")}
+              hint={
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <Link href="/workflows" className="text-brand-text underline-offset-2 hover:underline">
+                    Models per workflow
+                  </Link>
+                  <a href={COMFY_INSTALL_DOCS} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text underline-offset-2 hover:underline">
+                    Install ComfyUI <ExternalLink className="size-3" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => void copyWithToast(COMFY_INSTALL_COMMAND, "Install command copied")}
+                    className="inline-flex max-w-full items-center gap-1 rounded-md bg-background px-1.5 py-0.5 font-mono text-[11px] text-foreground ring-1 ring-border hover:bg-accent"
+                    aria-label={`Copy the install command: ${COMFY_INSTALL_COMMAND}`}
+                  >
+                    <span className="truncate">{COMFY_INSTALL_COMMAND}</span> <Copy className="size-3 shrink-0" />
+                  </button>
+                </span>
+              }
+            />
+          </GuideCard>
+        )}
+        <GuideCard icon={Sparkles} title="Just try it" cost="Free: no keys, no GPU">
+          <p className="text-[13px] leading-relaxed text-muted-foreground">Click through every studio with clearly labelled placeholder results. You can connect a model later in Settings.</p>
+          <Button
+            variant="outline"
+            className="mt-auto w-full sm:w-fit"
+            disabled={hiding}
+            onClick={async () => {
+              if (await hide()) onDemo?.();
+            }}
+          >
+            Try the demo
+          </Button>
+        </GuideCard>
+      </div>
+
+      {intents && (
+        <div className="mt-5">
+          <h3 className="text-[13px] font-medium">What do you want to do?</h3>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {INTENTS.map((i) => {
+              const cls = "inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+              const pick = "mode" in i && onMode ? i.mode : null;
+              return (
+                <li key={i.label}>
+                  {pick ? (
+                    <button type="button" className={cls} onClick={() => onMode?.(pick)}>
+                      <i.icon className="size-3.5" /> {i.label}
+                    </button>
+                  ) : (
+                    <Link href={i.href} className={cls}>
+                      <i.icon className="size-3.5" /> {i.label}
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}

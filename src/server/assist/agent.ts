@@ -1,6 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
+import { getModel } from "@/lib/catalog";
 import { AUDIO_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, MUSIC_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
 import {
   ASSIST_EFFORTS,
@@ -30,9 +31,12 @@ import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { activeLocal, aiHelper, chatLocal, emptyReply, localLabel, localProblem, pinnedKind, toChatMessages, type Ready } from "../llm";
+import { offeredDefault } from "../model-access";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
 import { readRef } from "../storage";
+import { spendOf, withinCap } from "@/lib/assist-schedule";
+import { activeConnectors, connectorName, MCP_BETA, mcpParams, withoutMissingServers, type Connector } from "./connectors";
 import { canUseSkill, chatFacts } from "./context";
 import { getProject, touchProject } from "./projects";
 import { apiTools, cardTitle, executeTool, getTool, planFor, validateInput, type ToolContext } from "./tools";
@@ -63,6 +67,8 @@ export interface ModelRequest {
   settings?: { model?: string | null; effort?: AssistEffort | null };
   /** Skills loaded in the chat (the offline planner uses their hints). */
   skills?: SkillMeta[];
+  /** Custom MCP connectors (Settings → Assist): Claude gets them through the MCP connector; other agents can't use them. */
+  connectors?: Connector[];
 }
 export type ModelCall = (req: ModelRequest) => Promise<Anthropic.Beta.BetaMessage>;
 
@@ -105,6 +111,10 @@ interface StateRow {
   skills_json: string;
   context: string | null;
   sent_json: string | null;
+  schedule_id: string | null;
+  cap_usd: number | null;
+  spent_usd: number | null;
+  connectors: number | null;
 }
 
 /** Per-chat state beside the transcript (assist_thread_state). */
@@ -118,6 +128,13 @@ interface Ext {
   context: string | null;
   /** The facts the model has seen, to send only what changed. */
   sent: Record<string, string> | null;
+  /** The scheduled task that started this chat. */
+  scheduleId: string | null;
+  /** With auto-run on: the most generations may cost without asking (USD), and what they have cost. */
+  capUsd: number | null;
+  spentUsd: number;
+  /** Whether Claude gets the custom MCP connectors here (every chat, except a scheduled run whose task leaves them off). */
+  connectors: boolean;
 }
 
 interface State {
@@ -142,11 +159,24 @@ function loadExt(id: string): Ext {
     skills: r ? (JSON.parse(r.skills_json) as string[]) : [],
     context: r?.context ?? null,
     sent: r?.sent_json ? (JSON.parse(r.sent_json) as Record<string, string>) : null,
+    scheduleId: r?.schedule_id ?? null,
+    capUsd: r?.cap_usd ?? null,
+    spentUsd: r?.spent_usd ?? 0,
+    connectors: r?.connectors !== 0,
   };
 }
 
 function withExt(t: AssistThread, e: Ext): AssistThread {
-  return { ...t, projectId: e.projectId, mode: e.mode ?? (t.agent === "claude" ? "smart" : "free"), model: e.model, effort: e.effort, skills: e.skills };
+  return {
+    ...t,
+    projectId: e.projectId,
+    mode: e.mode ?? (t.agent === "claude" ? "smart" : "free"),
+    model: e.model,
+    effort: e.effort,
+    skills: e.skills,
+    ...(e.scheduleId && { scheduleId: e.scheduleId }),
+    ...(e.capUsd !== null && { capUsd: e.capUsd, spentUsd: e.spentUsd }),
+  };
 }
 
 function load(id: string): State | null {
@@ -208,10 +238,11 @@ function save(s: State): void {
       });
     db()
       .prepare(
-        `INSERT INTO assist_thread_state (thread_id, project_id, mode, model, effort, skills_json, context, sent_json)
-         VALUES (@thread_id, @project_id, @mode, @model, @effort, @skills_json, @context, @sent_json)
+        `INSERT INTO assist_thread_state (thread_id, project_id, mode, model, effort, skills_json, context, sent_json, schedule_id, cap_usd, spent_usd, connectors)
+         VALUES (@thread_id, @project_id, @mode, @model, @effort, @skills_json, @context, @sent_json, @schedule_id, @cap_usd, @spent_usd, @connectors)
          ON CONFLICT(thread_id) DO UPDATE SET project_id = @project_id, mode = @mode, model = @model, effort = @effort,
-           skills_json = @skills_json, context = @context, sent_json = @sent_json`,
+           skills_json = @skills_json, context = @context, sent_json = @sent_json, schedule_id = @schedule_id, cap_usd = @cap_usd, spent_usd = @spent_usd,
+           connectors = @connectors`,
       )
       .run({
         thread_id: s.thread.id,
@@ -222,6 +253,10 @@ function save(s: State): void {
         skills_json: JSON.stringify(s.ext.skills),
         context: s.ext.context,
         sent_json: s.ext.sent ? JSON.stringify(s.ext.sent) : null,
+        schedule_id: s.ext.scheduleId,
+        cap_usd: s.ext.capUsd,
+        spent_usd: s.ext.spentUsd,
+        connectors: s.ext.connectors ? 1 : 0,
       });
   })();
 }
@@ -324,6 +359,7 @@ export async function updateThread(id: string, patch: ThreadPatch): Promise<Assi
     s.ext.model = r.model;
     s.ext.effort = r.effort;
     if (r.note) push(s, { role: "notice", tone: "info", text: r.note });
+    connectorNote(s);
   }
   save(s);
   return s.thread;
@@ -420,6 +456,18 @@ export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<R
   return { mode: "manual", agent: "offline", model: null, effort: null };
 }
 
+/** The connectors Claude gets in this chat: none on other agents, or in a scheduled run that leaves them off. */
+const chatConnectors = (s: State): Connector[] => (s.thread.agent === "claude" && s.ext.connectors ? activeConnectors() : []);
+
+/** Connectors need Claude: a chat on a local model or the offline planner (that would otherwise use them) says so once. */
+function connectorNote(s: State): void {
+  if (s.thread.agent === "claude" || !s.ext.connectors || s.thread.items.some((i) => i.role === "notice" && i.text.startsWith(CONNECTOR_NOTE))) return;
+  const names = activeConnectors().map((c) => c.name);
+  if (!names.length) return;
+  push(s, { role: "notice", tone: "info", text: `${CONNECTOR_NOTE} (${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}); this chat runs on ${s.thread.agent === "local" ? "a local model" : "the offline planner"}, so it can't use them.` });
+}
+const CONNECTOR_NOTE = "Connectors work in Claude chats";
+
 export function createThread(opts: {
   engine: Engine;
   /** "ollama" is the local agent's old name. */
@@ -430,6 +478,13 @@ export function createThread(opts: {
   mode?: AssistMode | null;
   model?: string | null;
   effort?: AssistEffort | null;
+  /** A scheduled run: the task that started it, and auto-run's cost cap for it. */
+  scheduleId?: string | null;
+  capUsd?: number | null;
+  /** false: Claude doesn't get the custom MCP connectors here (a scheduled run that leaves them off). */
+  connectors?: boolean;
+  /** A quiet line at the top of the chat (a scheduled run says which task it is). */
+  note?: string;
 }): AssistThread {
   const now = Date.now();
   if (opts.projectId && !getProject(opts.projectId)) throw new Error("That project doesn't exist anymore");
@@ -437,8 +492,22 @@ export function createThread(opts: {
     thread: { id: nanoid(12), title: opts.title ?? "New chat", status: "idle", agent: normalizeAgent(opts.agent) ?? "offline", engine: opts.engine, autoApprove: !!opts.autoApprove, items: [], createdAt: now, updatedAt: now },
     messages: [],
     pending: null,
-    ext: { projectId: opts.projectId ?? null, mode: opts.mode ?? null, model: opts.model ?? null, effort: opts.effort ?? null, skills: [], context: null, sent: null },
+    ext: {
+      projectId: opts.projectId ?? null,
+      mode: opts.mode ?? null,
+      model: opts.model ?? null,
+      effort: opts.effort ?? null,
+      skills: [],
+      context: null,
+      sent: null,
+      scheduleId: opts.scheduleId ?? null,
+      capUsd: opts.capUsd ?? null,
+      spentUsd: 0,
+      connectors: opts.connectors !== false,
+    },
   };
+  if (opts.note) push(s, { role: "notice", tone: "info", text: opts.note });
+  connectorNote(s);
   save(s);
   if (opts.projectId) touchProject(opts.projectId);
   return s.thread;
@@ -545,11 +614,17 @@ const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude
  */
 export const maxTokensFor = (effort: AssistEffort): number => (effort === "xhigh" || effort === "max" ? 64_000 : 32_000);
 
-export const claude: ModelCall = async ({ system, messages, tools, settings }) => {
+export const claude: ModelCall = async ({ system, messages, tools, settings, connectors }) => {
   const client = new Anthropic({ apiKey: getSetting("anthropicKey") });
   const model = settings?.model && CLAUDE_MODELS.some((m) => m.id === settings.model) ? settings.model : DEFAULT_CLAUDE_MODEL;
   const fallback = FALLBACK_MODELS.has(model);
   const effort = settings?.effort ?? DEFAULT_EFFORT;
+  // Custom MCP connectors: Anthropic's servers call them; their tools come after Fuobe's own. Under
+  // mcp-client-2025-11-20 each request lists the servers' tools again; a connector switched on, off or
+  // deleted mid-chat changes `tools` (and a deleted one's history is rewritten below), so Claude's
+  // earlier thinking in that chat is dropped (drop_block) and re-done — a cost, not an error.
+  const mcp = mcpParams(connectors ?? []);
+  const history = withoutMissingServers(messages, new Set(mcp?.mcp_servers.map((m) => m.name)));
   // Streamed, so long thinking at high effort never runs into an HTTP timeout; only the final
   // message is used (the UI shows the reply once it's complete).
   const stream = client.beta.messages.stream({
@@ -559,7 +634,7 @@ export const claude: ModelCall = async ({ system, messages, tools, settings }) =
     // before contexts were frozen) is dropped instead of failing the request.
     thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
     output_config: { effort },
-    betas: [...(fallback ? (["server-side-fallback-2026-07-01"] as const) : []), "thinking-binding-controls-2026-08-01"],
+    betas: [...(fallback ? (["server-side-fallback-2026-07-01"] as const) : []), "thinking-binding-controls-2026-08-01", ...(mcp ? [MCP_BETA] : [])],
     ...(fallback && { fallbacks: "default" as const }),
     // The fixed instructions and the chat's frozen context are cached; so is the conversation so far.
     cache_control: { type: "ephemeral" },
@@ -567,8 +642,9 @@ export const claude: ModelCall = async ({ system, messages, tools, settings }) =
       { type: "text", text: system.stable, cache_control: { type: "ephemeral" } },
       { type: "text", text: system.turn, cache_control: { type: "ephemeral" } },
     ],
-    tools,
-    messages: await hydrate(messages),
+    tools: mcp ? [...tools, ...mcp.toolsets] : tools,
+    ...(mcp && { mcp_servers: mcp.mcp_servers }),
+    messages: await hydrate(history),
   });
   return stream.finalMessage();
 };
@@ -616,7 +692,32 @@ export const offline: ModelCall = async ({ messages, ctx, skills }) => {
     const body = results.map((r) => (typeof r.content === "string" ? r.content : "")).join(" ");
     if (results.some((r) => r.is_error)) return reply([text(/declined/i.test(body) ? "Okay, I won't run that. Tell me what to change." : `That didn't start: ${body.replace(/^.*"error":"([^"]+)".*$/, "$1")}`)], "end_turn");
     if (/"saved":/.test(body)) return reply([text("Saved to memory — every chat will follow it from now on.")], "end_turn");
+    // A pick-the-best plan started its stills: say again how to choose the one that moves.
+    const planned = messages.findLast((m) => m.role === "assistant" && typeof m.content !== "string" && m.content.some((b) => b.type === "tool_use"));
+    const use = planned && typeof planned.content !== "string" ? planned.content.find((b) => b.type === "tool_use") : undefined;
+    if (String((use?.input as { summary?: unknown } | undefined)?.summary ?? "").startsWith(PICK_SUMMARY)) {
+      return reply([text(`On it. When the stills are in, ${PICK_ASK}: reply "animate 2" (they're numbered in order), or open one and press Animate.`)], "end_turn");
+    }
     return reply([text(`On it — the results will appear here as they finish. ${FOLLOW_UP[startedKind(body)]}`)], "end_turn");
+  }
+  // "animate 2" after a set of stills (or a bare "2" when asked which one): animate that take.
+  const picked = pickedTake(said);
+  if (picked && (picked.animate || askedToPick(messages))) {
+    const { stills, waiting } = latestStills(messages);
+    // 1-based; "the last one" is the last, and "animate it" the only one.
+    const index = picked.take === -1 ? stills.length : picked.take === 0 ? (stills.length === 1 && !waiting ? 1 : 0) : picked.take;
+    const chosen = index > 0 ? stills[index - 1] : undefined;
+    if (chosen) {
+      const plan = animateTake(chosen, index, ctx.engine, said);
+      return reply(
+        [text(plan.say), { type: "tool_use", id: `toolu_offline_${nanoid(10)}`, name: plan.tool, input: plan.input, caller: { type: "direct" } } as unknown as Anthropic.Beta.BetaToolUseBlock],
+        "tool_use",
+      );
+    }
+    if (waiting) return reply([text("They're still rendering — tell me which one to animate once they're in.")], "end_turn");
+    if (stills.length && picked.take === 0) return reply([text(`There are ${stills.length} stills — ${PICK_ASK}: reply "animate 2" (they're numbered in order).`)], "end_turn");
+    if (stills.length) return reply([text(`Pick a number from 1 to ${stills.length}.`)], "end_turn");
+    // No stills in this chat: read it as a new request.
   }
   const hint = skills?.find((s) => s.offline)?.offline;
   const plan = offlinePlan(said, ctx.engine, hint);
@@ -640,10 +741,16 @@ const FOLLOW_UP: Record<MediaKind, string> = {
   model3d: "Want another take, or a model from a different photo?",
 };
 
+/**
+ * The generation ids a tool result started, in order: every id of each `"started": [...]` list (on
+ * the open engine 4 takes are 4 generations of one job) and each `"id": "..."`.
+ */
+const startedIds = (body: string) =>
+  [...body.matchAll(/"started":\s*\[([^\]]*)\]|"(?:started|id)":\s*"([\w-]+)"/g)].flatMap((m) => (m[2] ? [m[2]] : [...m[1].matchAll(/"([\w-]+)"/g)].map((x) => x[1])));
+
 /** The kind of the last generation a tool result started (the end of a chain), image when unknown. */
 function startedKind(body: string): MediaKind {
-  const ids = [...body.matchAll(/"(?:started|id)":\s*\[?\s*"([\w-]+)"/g)].map((m) => m[1]);
-  for (const id of ids.reverse()) {
+  for (const id of startedIds(body).reverse()) {
     const g = getGeneration(id);
     if (g) return g.kind;
   }
@@ -652,13 +759,89 @@ function startedKind(body: string): MediaKind {
 
 const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
 const NUM = "(\\d|one|two|three|four|five|six|seven|eight)";
-const num = (s: string) => NUMBER_WORDS[s] ?? Number(s);
+const num = (s: string) => NUMBER_WORDS[s.toLowerCase()] ?? Number(s);
+
+/** Nouns a count can come before ("4 portraits", "three vertical videos", "a 6-frame heist"). */
+const COUNTED = "images?|pictures?|photos?|portraits?|headshots?|avatars?|stills?|posters?|thumbnails?|logos?|icons?|looks?|renders?|versions?|takes?|variations?|options?|videos?|clips?|frames?|panels?|scenes?";
+const COUNT = new RegExp(`\\b${NUM}(?:-|\\s+(?:([\\w-]+)\\s+)?)(${COUNTED})\\b`, "i");
+const COUNTS = new RegExp(COUNT.source, "gi");
+/** Nouns that only ever count takes ("4 versions", "two takes"), wherever they are in a request. */
+const TAKE_NOUN = /^(?:takes?|versions?|variations?|options?)$/i;
+/** Words that start a phrase about what's in the picture: a count after one ("a card with 3 icons", "a collage of 3 photos") is part of it. */
+const CONTENT_WORD = /\b(?:with|of|showing|featuring|containing|including|holding|having|and|plus|from|in|on)\b/i;
+/** What a still can be called, singular or plural, before "then animate it". */
+const STILL = /\b(stills?|photos?|pictures?|images?|portraits?|headshots?|posters?|frames?|shots?|renders?|key ?visuals?)\b/i;
+/** "… then pick the best and animate it": the person chooses which take moves. */
+const PICK_WORDS = /\b(best|favou?rite|pick|choose|select|strongest|one of them)\b/;
+
+const singular = (noun: string) => noun.replace(/([^s])s$/i, "$1");
 
 /**
- * Read a request into one tool call: counts ("3 vertical videos", "4 portraits"), formats,
- * attachments, multi-shot ("a 3-shot ad"), a still that is then animated (two chained jobs),
- * storyboards, music and voice-overs, translations and scripts, and "remember that …".
- * A loaded skill's offline hints (its kind, format, count and style) fill in what the words leave open.
+ * The count that says how many takes to make: "4 portraits of …", "make three posters", "a fox,
+ * 2 versions". A count inside the description ("a birthday card with 3 icons", "a collage of 3
+ * photos") is what the picture shows: it stays in the prompt and makes no extra takes.
+ */
+function takeCount(text: string): RegExpExecArray | null {
+  for (const m of text.matchAll(COUNTS)) {
+    if (TAKE_NOUN.test(m[3]) || !CONTENT_WORD.test(text.slice(0, m.index))) return m as RegExpExecArray;
+  }
+  return null;
+}
+
+/**
+ * One take's prompt: "Make 4 moody portraits of a keeper" → "Moody portrait of a keeper". The take
+ * count (takeCount) goes to `outputs`; left in the prompt, each image could come back as a grid of
+ * four. Other numbers stay as written.
+ */
+function oneTake(text: string, take: RegExpExecArray | null): string {
+  // "4 moody portraits" → "moody portrait"; "3 versions of a logo" → "a logo".
+  const meta = !!take && TAKE_NOUN.test(take[3]);
+  const after = take ? text.slice(take.index + take[0].length) : "";
+  const counted = take ? `${text.slice(0, take.index)}${meta ? "" : `${take[2] ? `${take[2]} ` : ""}${singular(take[3])}`}${meta ? after.replace(/^\s+of\b/i, "") : after}` : text;
+  const s = counted
+    .replace(/^\s*(?:please\s+)?(?:make|create|generate|give me|draw|shoot|render|design)(?:\s+me)?\s+/i, "")
+    .replace(new RegExp(`\\b${NUM}[- ]shots?\\s*`, "i"), "")
+    .replace(/\s+([,;.])/g, "$1")
+    .replace(/([,;])(?:\s*[,;])+/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .replace(/[\s,;:—–-]+$/, "")
+    .trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** "a 10-second video", "into a 5 s clip": the length asked for, in seconds. */
+function secondsAsked(t: string): number | undefined {
+  const m = /\b(\d{1,3})\s*-?\s*(?:s|secs?|seconds?)\b/.exec(t);
+  return m ? Number(m[1]) : undefined;
+}
+
+/** The model's own length closest to the one asked for (a model that lists none takes it as it is). */
+function fitDuration(modelId: string, seconds: number | undefined): number | undefined {
+  if (!seconds) return undefined;
+  const listed = getModel(modelId)?.options.durations;
+  if (!listed?.length) return seconds;
+  return listed.reduce((best, d) => (Math.abs(d - seconds) < Math.abs(best - seconds) ? d : best), listed[0]);
+}
+
+/** Whether a model can make its own soundtrack ("with sound"). */
+const makesSound = (modelId: string) => !!getModel(modelId)?.routes.some((r) => r.map?.generateAudio);
+
+/** How every pick-the-best plan's card title starts (the follow-up reply reads it back). */
+const PICK_SUMMARY = "Pick the best";
+/** The question a pick-the-best plan asks; a bare "2" answers it. */
+const PICK_ASK = "tell me which one to animate";
+
+const engineFor = (preferred: Engine): Engine => {
+  const mode = engineMode();
+  return mode === "both" ? preferred : mode;
+};
+
+/**
+ * Read a request into one tool call: counts ("3 vertical videos", "4 portraits"), formats, lengths,
+ * attachments, multi-shot ("a 3-shot ad"), a still that is then animated (two chained jobs), several
+ * stills to pick the best from before animating, storyboards, music and voice-overs, translations and
+ * scripts, and "remember that …". A loaded skill's offline hints (its kind, format, count and style)
+ * fill in what the words leave open.
  */
 export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta["offline"]): { tool: string; input: Record<string, unknown>; say: string } | null {
   const [body, attached = ""] = message.split(/\n\nAttached files[^\n]*\n/);
@@ -667,8 +850,7 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
   const files = [...attached.matchAll(/^- (image|video|audio|text|model3d) \d+: (\S+)$/gm)].map((m) => ({ kind: m[1], url: m[2] }));
   const images = files.filter((f) => f.kind === "image").map((f) => f.url);
   const t = text.toLowerCase();
-  const mode = engineMode();
-  const engine: Engine = mode === "both" ? preferred : mode;
+  const engine = engineFor(preferred);
 
   // "Remember that I always want 9:16" → a memory (approved like a plan in ask-first mode).
   const memory = /^(?:please\s+)?(?:remember|note|keep in mind)(?:\s+that)?[:,]?\s+(.{4,})$/is.exec(text);
@@ -678,47 +860,68 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
     return { tool: "remember", input: { text: sentence, category: guessCategory(what) }, say: "I'll remember that for every chat." };
   }
 
-  const count = (() => {
-    const m = new RegExp(
-      `\\b${NUM}\\s+(?:[\\w-]+\\s+)?(images?|pictures?|photos?|portraits?|headshots?|avatars?|stills?|posters?|thumbnails?|logos?|icons?|looks?|renders?|versions?|takes?|variations?|options?|videos?|clips?|frames?|panels?|scenes?)\\b`,
-    ).exec(t);
-    return m ? num(m[1]) : hint?.outputs;
-  })();
+  // Any count: a storyboard's frames ("a 6-frame heist"). The take count: how many pictures to make.
+  const counted = COUNT.exec(t);
+  const count = counted ? num(counted[1]) : hint?.outputs;
+  const take = takeCount(text);
+  const takes = take ? num(take[1]) : hint?.outputs;
   // "a 3-shot ad", "in 4 shots": one clip cut into shots, not several clips.
   const shots = (() => {
     const m = new RegExp(`\\b${NUM}[- ]shots?\\b`).exec(t) ?? new RegExp(`\\bin\\s+${NUM}\\s+shots\\b`).exec(t);
     return m ? Math.max(2, Math.min(6, num(m[1]))) : undefined;
   })();
   const aspect = /\b(vertical|portrait|9:16|reels?|tiktok|stories|story format)\b/.test(t) ? "9:16" : /\b(square|1:1)\b/.test(t) ? "1:1" : /\b(wide|landscape|16:9|widescreen)\b/.test(t) ? "16:9" : hint?.aspect;
-  const pick = (d: { cloud: string; open: string }) => (engine === "open" && d.open ? d.open : d.cloud);
+  const seconds = secondsAsked(t);
+  const withSound = /\b(with|plus|and) (sound|audio|sfx|sound effects)\b/.test(t);
+  // A studio's default, or the next model that is on when Settings → Models & licences switched it off.
+  const pick = (d: { cloud: string; open: string }) => offeredDefault(engine === "open" && d.open ? d.open : d.cloud, engine === "open" && d.open ? "open" : "cloud")!;
   const textModel = engine === "open" ? "oss-text-llm" : "text-llm";
   const styled = (p: string) => (hint?.style ? `${p}. ${hint.style}` : p);
+  // The video settings a clip takes from the words: its length (one the model lists) and its own sound.
+  const clipParams = (modelId: string) => {
+    const duration = shots ? undefined : fitDuration(modelId, seconds);
+    return { ...(duration && { duration }), ...(withSound && makesSound(modelId) && { generate_audio: true }) };
+  };
 
   // "… hero still, then animate it": the image first, then a video made from it (one plan, two chained jobs).
   const thenAnimate = /\bthen\b[^.?!]*\b(animate|animated|animation|bring (it|them) to life|make (it|them) move|turn (it|them) into an? (video|clip))\b/.test(t);
-  const [beforeThen] = text.split(/[,;]?\s*\bthen\b/i);
-  if (thenAnimate && /\b(still|photo|picture|image|portrait|poster|frame|shot|render|key ?visual)\b/i.test(beforeThen)) {
-    const subject = beforeThen
-      .replace(new RegExp(`\\b${NUM}[- ]shots?\\s*`, "i"), "")
-      .replace(/\s{2,}/g, " ")
-      .replace(/[\s,;:—–-]+$/, "")
-      .trim();
-    const still = { model_id: pick(images.length ? EDIT_STUDIO.defaultModels : IMAGE_STUDIO.defaultModels), prompt: styled(subject), ...(images.length && { images: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }) };
-    const clip = {
-      model_id: pick(VIDEO_STUDIO.defaultModels),
-      prompt: `${subject}. The still comes to life: smooth, cinematic camera motion, natural movement.`,
-      after: 0,
-      ...(shots && { shots }),
-      ...(aspect && { aspect_ratio: aspect }),
-    };
+  const [beforeThen, ...rest] = text.split(/[,;]?\s*\bthen\b/i);
+  const afterThen = rest.join(" then ").toLowerCase();
+  if (thenAnimate && STILL.test(beforeThen)) {
+    const stills = takeCount(beforeThen);
+    const subject = oneTake(beforeThen, stills);
+    const n = Math.max(1, Math.min(4, stills ? num(stills[1]) : 1));
+    const stillModel = pick(images.length ? EDIT_STUDIO.defaultModels : IMAGE_STUDIO.defaultModels);
+    const clipModel = pick(VIDEO_STUDIO.defaultModels);
+    const still = { model_id: stillModel, prompt: styled(subject), ...(images.length && { images: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }) };
+    const motion = `${subject}. The still comes to life: smooth, cinematic camera motion, natural movement.`;
+    const clip = (after: number) => ({ model_id: clipModel, prompt: motion, after, ...(shots && { shots }), ...(aspect && { aspect_ratio: aspect }), ...clipParams(clipModel) });
+    // Several stills: the person picks the one to animate ("animate 2"), unless they asked to animate them all.
+    const all = /\b(them all|all of them|each|every one|both)\b/.test(afterThen) || (/\bthem\b/.test(afterThen) && !PICK_WORDS.test(afterThen));
+    if (n > 1 && all) {
+      const pairs = Math.min(3, n);
+      return {
+        tool: "generate",
+        input: { summary: `${pairs} stills, each animated: ${subject.slice(0, 60)}`, jobs: Array.from({ length: pairs }, (_, i) => [still, clip(i * 2)]).flat() },
+        say: `I'll make ${pairs} stills and animate each one — every video starts by itself as soon as its still is ready.`,
+      };
+    }
+    if (n > 1 || PICK_WORDS.test(afterThen)) {
+      const takes = Math.max(2, n);
+      return {
+        tool: "generate",
+        input: { summary: `${PICK_SUMMARY} of ${takes} stills, then animate it: ${subject.slice(0, 60)}`, jobs: [{ ...still, outputs: takes }] },
+        say: `I'll make ${takes} stills first. Once they're in, ${PICK_ASK} — reply "animate 2" (they're numbered in order), or open one and press Animate.`,
+      };
+    }
     return {
       tool: "generate",
-      input: { summary: `Still, then animated: ${subject.slice(0, 70)}`, jobs: [still, clip] },
+      input: { summary: `Still, then animated: ${subject.slice(0, 70)}`, jobs: [still, clip(0)] },
       say: `I'll make the still first, then animate it${shots ? ` as a ${shots}-shot clip` : ""} — the video starts by itself as soon as the still is ready.`,
     };
   }
 
-  if (/\b(storyboard|comic|panels|shot list)\b/.test(t) || (count && /\b(frames|scenes|panels)\b/.test(t))) {
+  if (/\b(storyboard|comic|panels|shot list)\b/.test(t) || (count && /\b(frames|scenes|panels)\b/.test(t)) || (counted && /^(frame|scene|panel)s?$/i.test(counted[3]))) {
     const frames = Math.max(1, Math.min(8, count ?? 4));
     return {
       tool: "create_storyboard",
@@ -762,22 +965,105 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
     };
   }
   const studio = isVideo ? VIDEO_STUDIO : images.length ? EDIT_STUDIO : IMAGE_STUDIO;
-  const n = Math.max(1, Math.min(4, count ?? (isVideo ? 1 : 2)));
+  const n = Math.max(1, Math.min(4, takes ?? (isVideo ? 1 : 2)));
   const multi = isVideo && shots ? shots : undefined;
+  const modelId = pick(studio.defaultModels);
   const job = {
-    model_id: pick(studio.defaultModels),
-    prompt: styled(text),
+    model_id: modelId,
+    prompt: styled(take ? oneTake(text, take) : text),
     ...(images.length && { images: images.slice(0, isVideo ? 1 : 4) }),
     ...(aspect && { aspect_ratio: aspect }),
     ...(n > 1 && { outputs: n }),
     ...(multi && { shots: multi }),
+    ...(isVideo && clipParams(modelId)),
   };
   const what = isVideo
-    ? `${images.length ? "animate your image" : "make the video"}${multi ? ` as ${multi} shots` : ""}`
+    ? `${images.length ? "animate your image" : `make ${n > 1 ? `${n} videos` : "the video"}`}${multi ? ` as ${multi} shots` : ""}`
     : images.length
       ? "edit your image"
       : `make ${n} take${n === 1 ? "" : "s"}`;
   return { tool: "generate", input: { summary: `${isVideo ? "Video" : images.length ? "Edit" : "Image"}: ${text.slice(0, 80)}`, jobs: [job] }, say: `I'll ${what} with the default ${isVideo ? "video" : "image"} model.` };
+}
+
+// ---------------------------------------------------------------------------
+// Picking a take to animate ("animate 2")
+
+const ORDINALS: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, last: -1 };
+const ORDINAL = /(?:#|\b)(\d)(?:st|nd|rd|th)?\b|\b(first|second|third|fourth|fifth|sixth|seventh|eighth|last)\b/;
+
+/** "animate it", "now bring that one to life": motion for the still, without naming which. */
+const ANIMATE_IT = /^(?:(?:now|ok|okay|great|nice|please|cool)[,!]?\s+)*(?:animate (?:it|that|this)|bring (?:it|that|this)(?: one)? to life|make (?:it|that|this)(?: one)? move)\b/;
+
+/**
+ * Which take a short reply names: "animate 2", "the second one", "#3", "go with the last one".
+ * 1-based; -1 is the last; 0 is "animate it" (the only still, or a question when there are more).
+ * `animate` says the reply asked for motion itself; a bare "2" only answers a pick-the-best plan's
+ * question. Lengths, formats and times aren't take numbers ("for 5 seconds", "in 9:16", "at 24
+ * fps"). Null for anything else, a new request included.
+ */
+export function pickedTake(message: string): { take: number; animate: boolean } | null {
+  const t = message.trim().toLowerCase().replace(/[.!?]+$/, "");
+  if (!t || t.length > 60 || COUNT.test(t)) return null;
+  const animate = /\b(animate|bring (it|that one|this one) to life|make (it|that one|this one) move)\b/.test(t);
+  const numbers = t
+    .replace(/\b\d+\s*:\s*\d+\b/g, " ")
+    .replace(/\b\d+(?:\.\d+)?\s*-?\s*(?:s|secs?|seconds?|mins?|minutes?|fps|k|p|x|%)(?![\w])/g, " ")
+    .replace(/\b(?:for|in|at|to|by|of|under|over)\s+\d+\b/g, " ");
+  const m = ORDINAL.exec(numbers);
+  if (!m) return animate && ANIMATE_IT.test(t) ? { take: 0, animate } : null;
+  const take = m[1] ? Number(m[1]) : ORDINALS[m[2]];
+  if (!take) return null;
+  const bare = new RegExp(
+    `^(?:(?:let'?s|i'?ll|i'?d)\\s+)?(?:(?:go with|use|pick|choose|take|like|want|prefer|animate)\\s+)?(?:the\\s+)?(?:number\\s+|no\\.?\\s*|take\\s+|image\\s+|still\\s+)?(?:${ORDINAL.source})(?:\\s+(?:one|image|still|take|pic(?:ture)?|photo))?(?:,?\\s+please)?$`,
+  ).test(t);
+  return animate || bare ? { take, animate } : null;
+}
+
+type MessageList = MessageParam[];
+
+/** The words of a message (its text blocks). */
+const wordsOf = (c: MessageParam["content"]) => (typeof c === "string" ? c : c.map((b) => (b.type === "text" ? b.text : "")).join("\n"));
+
+/** Did the assistant's last words ask which take to animate? */
+function askedToPick(messages: MessageList): boolean {
+  const last = messages.findLast((m) => m.role === "assistant" && wordsOf(m.content).trim());
+  return !!last && wordsOf(last.content).includes(PICK_ASK);
+}
+
+/**
+ * The stills of the latest tool result that made images, numbered as the chat shows them (each
+ * generation's outputs in order). `waiting`: some are still rendering.
+ */
+function latestStills(messages: MessageList): { stills: { url: string; g: Generation }[]; waiting: boolean } {
+  for (const m of [...messages].reverse()) {
+    if (m.role !== "user" || typeof m.content === "string") continue;
+    for (const b of [...m.content].reverse()) {
+      if (b.type !== "tool_result" || typeof b.content !== "string") continue;
+      const gens = startedIds(b.content)
+        .map((id) => getGeneration(id))
+        .filter((g): g is Generation => !!g && g.kind === "image");
+      if (!gens.length) continue;
+      const stills = gens.flatMap((g) => (g.status === "succeeded" ? g.outputs.filter((o) => o.kind === "image").map((o) => ({ url: o.url, g })) : []));
+      return { stills, waiting: gens.some((g) => g.status === "queued" || g.status === "running") };
+    }
+  }
+  return { stills: [], waiting: false };
+}
+
+/** Animate one picked still with the default video model. */
+function animateTake(still: { url: string; g: Generation }, take: number, preferred: Engine, said: string): { tool: string; input: Record<string, unknown>; say: string } {
+  const engine = engineFor(preferred);
+  const modelId = offeredDefault(engine === "open" ? VIDEO_STUDIO.defaultModels.open : VIDEO_STUDIO.defaultModels.cloud, engine)!;
+  const subject = (still.g.request.prompt ?? "").trim().replace(/[.\s]+$/, "") || "The picture";
+  const duration = fitDuration(modelId, secondsAsked(said.toLowerCase()));
+  return {
+    tool: "generate",
+    input: {
+      summary: `Animate take ${take}: ${subject.slice(0, 70)}`,
+      jobs: [{ model_id: modelId, prompt: `${subject}. The still comes to life: smooth, cinematic camera motion, natural movement.`, images: [still.url], ...(duration && { duration }) }],
+    },
+    say: `I'll animate take ${take} with the default video model.`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -812,8 +1098,16 @@ function ordered(results: ToolResult[], order: string[]): ToolResult[] {
  * The chat's system prompt and, when something changed since the model last looked, the
  * "Context update" message to append. The first call freezes the context into the system prompt.
  */
-function contextFor(s: State): { system: ModelRequest["system"]; update: MessageParam | null; sent: Record<string, string> } {
-  const facts = chatFacts({ engine: s.thread.engine, autoApprove: s.thread.autoApprove, projectId: s.ext.projectId, skills: s.ext.skills });
+function contextFor(s: State, connectors: Connector[]): { system: ModelRequest["system"]; update: MessageParam | null; sent: Record<string, string> } {
+  const facts = chatFacts({
+    engine: s.thread.engine,
+    autoApprove: s.thread.autoApprove,
+    projectId: s.ext.projectId,
+    skills: s.ext.skills,
+    capUsd: s.ext.capUsd,
+    scheduleId: s.ext.scheduleId,
+    connectors: connectors.map((c) => c.name),
+  });
   const sent = factMap(facts);
   if (!s.ext.context) {
     s.ext.context = renderContext(facts);
@@ -825,9 +1119,24 @@ function contextFor(s: State): { system: ModelRequest["system"]; update: Message
   return { system: { stable: STABLE_SYSTEM, turn: s.ext.context }, update: text ? { role: "system", content: text } : null, sent };
 }
 
+/** "Notion · search_pages": each connector tool Claude used in a reply, marked when it failed. */
+function connectorItems(s: State, content: Anthropic.Beta.BetaContentBlock[]): void {
+  const shown = new Map<string, AssistItem>();
+  for (const b of content) {
+    if (b.type === "mcp_tool_use") {
+      const name = connectorName(b.server_name);
+      shown.set(b.id, push(s, { role: "tool", text: `${name} · ${b.name}`, connector: name }));
+    } else if (b.type === "mcp_tool_result" && b.is_error) {
+      const item = shown.get(b.tool_use_id);
+      if (item?.role === "tool") item.failed = true;
+    }
+  }
+}
+
 async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
   const ctx = toolCtx(s);
-  const { system, update, sent } = contextFor(s);
+  const connectors = chatConnectors(s);
+  const { system, update, sent } = contextFor(s, connectors);
   const active = s.ext.skills.map((n) => getSkill(n)).filter((x): x is NonNullable<typeof x> => !!x);
   const res = await model({
     system,
@@ -836,6 +1145,7 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     ctx,
     settings: { model: s.ext.model, effort: s.ext.effort },
     skills: active,
+    ...(connectors.length && { connectors }),
   });
 
   if (res.stop_reason === "refusal") {
@@ -853,6 +1163,7 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     s.ext.sent = sent;
   }
   s.messages.push({ role: "assistant", content: res.content });
+  connectorItems(s, res.content);
   const text = res.content
     .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
     .map((b) => b.text)
@@ -875,23 +1186,39 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
 
   const results: ToolResult[] = [];
   const gated: Pending["gated"] = [];
+  // Why auto-run left a plan for the user: it would pass this chat's cost cap.
+  const held: string[] = [];
   // The rule-based planner says so in a quiet line under its plan (or under the jobs it started).
   const offlineNote = () => {
     if (model === offline) push(s, { role: "notice", tone: "info", text: OFFLINE_NOTE });
   };
   for (const u of uses) {
-    if (getTool(u.name)?.gated && !s.thread.autoApprove) {
-      // Malformed arguments (common from small local models) go straight back as an error the model can fix, not onto an approval card.
-      const invalid = validateInput(u.name, u.input);
-      if (invalid) {
-        results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: invalid });
+    let price: number | null = null;
+    if (getTool(u.name)?.gated) {
+      let ask = !s.thread.autoApprove;
+      // Auto-run with a cap (a scheduled run): what fits starts on its own, the rest waits for the user.
+      if (!ask && s.ext.capUsd !== null) {
+        price = spendOf(planFor(u.name, u.input, ctx).jobs);
+        const fits = withinCap(s.ext.capUsd, s.ext.spentUsd, price);
+        if (!fits.ok) {
+          ask = true;
+          held.push(fits.reason);
+        }
+      }
+      if (ask) {
+        // Malformed arguments (common from small local models) go straight back as an error the model can fix, not onto an approval card.
+        const invalid = validateInput(u.name, u.input);
+        if (invalid) {
+          results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: invalid });
+          continue;
+        }
+        gated.push({ id: u.id, name: u.name, input: u.input });
         continue;
       }
-      gated.push({ id: u.id, name: u.name, input: u.input });
-      continue;
     }
     const { result, items } = await runTool(u.name, u.input, ctx);
     results.push({ ...result, tool_use_id: u.id });
+    if (price && !result.is_error) s.ext.spentUsd = Math.round((s.ext.spentUsd + price) * 1000) / 1000;
     for (const it of items) push(s, it);
   }
   const order = uses.map((u) => u.id);
@@ -904,6 +1231,7 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     // Two calls that fall back for the same reason say it once.
     const notes = [...new Set(plans.flatMap((p) => (p.fallback ? [`${p.fallback}.`] : [])))];
     const item = push(s, { role: "approval", summary, jobs, totalUsd: total, status: "pending", ...(opens.length && { opens }), ...(notes.length && { notes }) });
+    if (held.length) push(s, { role: "notice", tone: "info", text: `Waiting for you: ${[...new Set(held)].join("; ")}. Auto-run only starts what fits the cap.` });
     offlineNote();
     s.pending = { approvalItemId: item.id, results, gated, order };
     s.thread.status = "waiting";
@@ -961,6 +1289,7 @@ function refreshFlags(s: State): void {
 function errorText(e: unknown): string {
   if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → API keys.";
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limited right now. Try again in a minute.";
+  if (e instanceof Anthropic.BadRequestError && /\bmcp\b|connector/i.test(e.message)) return `A connector didn't work: ${e.message}. Check it in Settings → Assist connectors, or switch it off.`;
   if (e instanceof Anthropic.APIError) return `Claude returned an error (${e.status ?? "network"}): ${e.message}`;
   if (e instanceof DOMException && e.name === "TimeoutError") return "The model took too long to answer. Try again, or pick a smaller model.";
   return (e as Error).message || "Something went wrong";
@@ -979,7 +1308,8 @@ export function addMessage(id: string, text: string, attachments: string[] = [])
   const titles = slash.skills.map((n) => getSkill(n)?.title ?? n);
   // With only "/katana" (and files), the model still needs words to act on.
   const words = slash.text || (slash.skills.length ? `Use the ${titles.join(" and ")} skill${titles.length > 1 ? "s" : ""}${attachments.length ? " with the attached files" : ""}.` : text);
-  if (!s.thread.items.some((i) => i.role === "user")) s.thread.title = threadTitle(slash.text || titles.join(", ") || text);
+  // The first message names the chat, unless it was started with a name (a scheduled run's).
+  if (!s.thread.items.some((i) => i.role === "user") && s.thread.title === "New chat") s.thread.title = threadTitle(slash.text || titles.join(", ") || text);
   // Tool results first: they answer the assistant's last turn.
   const results = s.pending ? decline(s, "The user replied with new instructions instead of approving; follow them.") : [];
   if (!results.length) closeDanglingToolUses(s.messages);

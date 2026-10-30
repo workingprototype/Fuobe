@@ -104,10 +104,16 @@ export function generationRequest({ prompt, modelId, values: v, uploaded = new M
     if (PARAMS.has(key)) params[key] = value;
     else (params.extra ??= {})[key] = value;
   }
+  if (v["look-strength"] !== undefined && !(v["look-strength"] >= 0 && v["look-strength"] <= 1)) throw new UsageError("--look-strength is a number from 0 to 1", "generate");
   const text = prompt?.trim();
   return {
     feature: "cli",
     modelId,
+    // A Fuobe Original runs on both engines: --engine picks one (other models ignore it; checkEngine says so).
+    ...(v.engine && { engine: v.engine }),
+    // A Fuobe Soul look (fuobe-soul, fuobe-soul-hd) and how strongly its LoRAs apply.
+    ...(v.look && { presetId: v.look }),
+    ...(v["look-strength"] !== undefined && { presetStrength: v["look-strength"] }),
     ...(v.op && { op: v.op }),
     ...(text && { prompt: text }),
     ...(v.negative && { negativePrompt: v.negative }),

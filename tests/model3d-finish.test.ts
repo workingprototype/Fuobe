@@ -106,7 +106,7 @@ describe("image-to-3D graphs", () => {
 
 describe("image-to-3D routes", () => {
   it("Pixal3D is the default open model; TRELLIS.2 stays as the fallback", () => {
-    expect(MODELS_3D.open.map((m) => m.id).slice(0, 2)).toEqual(["oss-pixal3d", "oss-trellis2"]);
+    expect(MODELS_3D.image.open.map((m) => m.id).slice(0, 2)).toEqual(["oss-pixal3d", "oss-trellis2"]);
     expect(model3dRequest({ engine: "open", photo: "p.png" }).modelId).toBe("oss-pixal3d");
     expect(model3dRequest({ engine: "open", photo: "p.png", modelId: "oss-trellis2" }).modelId).toBe("oss-trellis2");
     expect(getModel("oss-pixal3d")?.routes[0]).toMatchObject({ provider: "comfyui", endpoint: "image-to-3d-pixal3d", op: "image-to-3d" });

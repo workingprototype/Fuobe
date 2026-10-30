@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import { getModel, getPreset } from "@/lib/catalog";
 import { castName, randomizeCast, SOUL_CAST_FIELDS } from "@/lib/catalog/cinema";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
-import { PHOTODUMP_PACKS, SOUL_DEFAULT, SOUL_PRESETS } from "@/lib/catalog/higgsfield-presets.generated";
+import { onEngine } from "@/lib/catalog/engines";
+import fs from "node:fs";
+import { PHOTODUMP_PACKS } from "@/lib/catalog/studio-packs.generated";
+import { SOUL_LEGACY_IDS } from "@/lib/catalog/soul-looks.generated";
+import { lookCard } from "@/lib/catalog/soul-cards";
 import {
   castFieldVisible,
   castNameFor,
   castSheetModel,
   coverTone,
   customPack,
-  CURATED_MOODBOARDS,
   FASHION,
   FASHION_START,
   fashionBaseRequest,
@@ -18,13 +21,9 @@ import {
   fashionPhotosetRequests,
   fashionReducer,
   getPack,
-  inTab,
   PACKS,
   photodumpModel,
   planPhotodump,
-  presetFallback,
-  presetPrompt,
-  presetTabs,
   randomCast,
   sheetFromReference,
   shotPrompt,
@@ -44,6 +43,7 @@ import {
   rng,
   samplePixels,
   SIGNATURE_MODELS,
+  styleWords,
   suggestName,
   type MoodboardPick,
   type PalettePick,
@@ -72,7 +72,6 @@ import {
   representativeOrder,
   SOUL_STYLES,
   soulPick,
-  withLive,
 } from "@/components/moodboards/logic";
 
 // The caps GET /api/palettes sends (src/server/palettes.ts signatureCaps, checked against the catalog in image-studios-api.test.ts).
@@ -90,6 +89,12 @@ const ctx = { caps: CAPS, getModel };
 const plan = (r: GenerationRequest) => planGeneration(r, getModel, getPreset);
 /** The prompt as the server runs it: the user's words plus the signature's sentences. */
 const said = (s: { request: GenerationRequest }) => withSignatureWords(s.request).prompt;
+/** A look described in words after the user's prompt (how a model without Fuobe Soul's looks gets one). */
+const lookPrompt = (look: { name: string; description?: string }, prompt: string) => `${prompt}. ${styleWords(look)}`;
+/** Soul's 139 presets as the research recorded them (their ids are the old style ids). */
+const SOUL_RESEARCH = (JSON.parse(fs.readFileSync("docs/research/higgsfield-image-studios.json", "utf8")) as { soulPresets: { id: string; name: string; model: string; description: string }[] }).soulPresets.filter(
+  (p) => p.model === "soul-v1" || p.model === "soul-v2",
+);
 
 const fill = (rgb: RGB, n: number): RGB[] => Array.from({ length: n }, () => [...rgb] as RGB);
 const PAL: PalettePick = { id: "p1", name: "Teal Dusk", colors: ["#102030", "#2A9D8F", "#E9C46A", "#F4A261"], background: "#264653", slug: null };
@@ -192,8 +197,8 @@ describe("palettes: routing per model", () => {
     expect(ideo.request.params?.extra).toBeUndefined();
   });
 
-  it("writes the hex list into the prompt for other cloud models (Soul 2.0, Nano Banana Pro)", () => {
-    for (const id of ["nano-banana-pro", "soul-2", "gpt-image-2-5"]) {
+  it("writes the hex list into the prompt for other cloud models (Nano Banana Pro, GPT Image)", () => {
+    for (const id of ["nano-banana-pro", "imagen-4", "gpt-image-2-5"]) {
       const r = applySignature(req(id), { palette: PAL }, ctx);
       expect(r.modelId).toBe(id);
       // The user's words stay in the prompt; the server adds the palette sentence when it plans the run.
@@ -204,10 +209,11 @@ describe("palettes: routing per model", () => {
     }
   });
 
-  it("passes a built-in palette's slug to Cinema Studio 4.0", () => {
-    const r = applySignature({ feature: "video", modelId: "cinema-studio-4", prompt: "a chase" }, { palette: CINEMA_PAL }, ctx);
-    expect(r.request.params?.extra?.color_palette).toBe("static-noon");
+  it("gives Fuobe Cinema a built-in palette's colours in words: its slug is sent nowhere", () => {
+    const r = applySignature({ feature: "video", modelId: "fuobe-cinema", engine: "cloud", prompt: "a chase" }, { palette: CINEMA_PAL }, ctx);
+    expect(r.request.params?.extra?.color_palette).toBeUndefined();
     expect(r.request.prompt).toBe("a chase");
+    expect(said(r)).toMatch(/^a chase\. Color palette: use only these colors/);
   });
 
   it("moves open Z-Image Turbo to Z-Image Turbo · Palette, and locks other open models with a post-step", () => {
@@ -236,18 +242,23 @@ describe("palettes: routing per model", () => {
 describe("moodboards: routing per model", () => {
   const refs = Array.from({ length: 12 }, (_, i) => `/api/files/uploads/r${i}.png`);
   const board: MoodboardPick = { id: "mb1", kind: "personal", name: "Neon Haze", status: "complete", refs: refs.slice(0, 10), collages: ["/api/files/uploads/c1.jpg", "/api/files/uploads/c2.jpg"] };
-  const curated: MoodboardPick = { id: CURATED_MOODBOARDS[0].id, kind: "curated", name: CURATED_MOODBOARDS[0].name, description: "Soul 2.0's neutral default look", status: "complete" };
+  const curated: MoodboardPick = { id: CURATED_SETS["soul-v2"][0].id, kind: "curated", name: CURATED_SETS["soul-v2"][0].name, description: CURATED_SETS["soul-v2"][0].description, status: "complete" };
   const req = (modelId: string, images?: string[]): GenerationRequest => ({ feature: "image", modelId, prompt: "a rooftop party", inputs: images ? { images } : undefined, params: { numOutputs: 1 } });
 
-  it("curated looks are Soul 2.0's style_id on soul-2, words elsewhere (the open route's prompt template)", () => {
-    const soul = applySignature(req("soul-2"), { moodboard: curated }, ctx);
-    expect(soul.request.params?.extra?.style_id).toBe(curated.id);
+  it("curated looks are Fuobe Soul looks: the look itself on Fuobe Soul, its words elsewhere", () => {
+    const soul = applySignature(req("fuobe-soul"), { moodboard: curated }, ctx);
+    expect(soul.request.presetId).toBe("v2-general");
     expect(soul.request.prompt).toBe("a rooftop party");
     expect(soul.request.signature?.words).toBeUndefined();
+    expect(soul.notes).toEqual([]);
+    // A partner model gets the words, and a hint where the look runs whole.
+    const nano = applySignature(req("nano-banana-pro"), { moodboard: curated }, ctx);
+    expect(nano.request.params?.extra?.style_id).toBeUndefined();
+    expect(nano.notes[0]).toMatch(/General is a Fuobe Soul look — described in words on Nano Banana Pro .*Fuobe Soul applies it with its LoRAs/);
     const open = applySignature(req("oss-z-image-turbo"), { moodboard: curated }, ctx);
     expect(open.modelId).toBe("oss-z-image-turbo");
     expect(open.request.prompt).toBe("a rooftop party");
-    expect(said(open)).toBe(presetPrompt({ name: curated.name, description: curated.description! }, "a rooftop party"));
+    expect(said(open)).toBe(lookPrompt({ name: curated.name, description: curated.description! }, "a rooftop party"));
   });
 
   it("personal boards: style references on multi-reference cloud models, Nano Banana Pro for the rest", () => {
@@ -257,10 +268,10 @@ describe("moodboards: routing per model", () => {
     expect(said(nano)).toMatch(/Use images 2–7 only as a style reference/);
     expect(plan(nano.request).op).toBe("edit");
 
-    const soul = applySignature(req("soul-2"), { moodboard: board }, ctx);
-    expect(soul.modelId).toBe("nano-banana-pro");
-    expect(soul.notes[0]).toMatch(/can't take style references/);
-    expect(soul.request.inputs?.images).toHaveLength(6);
+    const imagen = applySignature(req("imagen-4"), { moodboard: board }, ctx);
+    expect(imagen.modelId).toBe("nano-banana-pro");
+    expect(imagen.notes[0]).toMatch(/can't take style references/);
+    expect(imagen.request.inputs?.images).toHaveLength(6);
   });
 
   it("Recraft models use the board's saved style id, or its 10 images on Recraft V4 Styles", () => {
@@ -292,39 +303,33 @@ describe("moodboards: routing per model", () => {
     expect(said(lora)).toBe("a rooftop party. In the style of @Neon_Haze.");
   });
 
-  it("Soul's 106 styles are curated picks too: style_id on soul-1, words on Soul 2.0 and everything else", () => {
+  it("Soul's 106 looks are curated picks too: the look on Fuobe Soul, words everywhere else", () => {
     expect(SOUL_STYLES).toHaveLength(106);
     expect(CURATED_TABS["soul-v1"]).toEqual(["All presets", "New", "TikTok Core", "Instagram Aesthetics", "Camera Presets", "Beauty", "Mood", "Surreal", "Graphic Art"]);
-    // Soul's presets sit in several categories at once.
+    // Soul's looks sit in several categories at once.
     const sunset = SOUL_STYLES.find((s) => s.name === "Sunset beach")!;
+    expect(sunset.id).toBe("v1-sunset-beach");
     expect(["New", "Camera Presets", "Beauty"].every((c) => inCuratedTab(sunset, c))).toBe(true);
     const pick = curatedPick(sunset);
     expect(pick.source).toBe("soul-v1");
     expect(soulPick(sunset.id)).toEqual(pick);
-    expect(soulPick(CURATED_MOODBOARDS[0].id)?.source).toBeUndefined();
+    // A pick saved with the retired provider's old style id reads as its Fuobe look.
+    const oldGeneral = Object.entries(SOUL_LEGACY_IDS).find(([, id]) => id === "v2-general")![0];
+    expect(soulPick(oldGeneral)?.id).toBe("v2-general");
     expect(soulPick("not-a-preset")).toBeUndefined();
 
-    const soul1 = applySignature(req("soul-1"), { moodboard: pick }, ctx);
-    expect(soul1.request.params?.extra?.style_id).toBe(sunset.id);
-    expect(soul1.notes).toEqual([]);
-    const soul2 = applySignature(req("soul-2"), { moodboard: pick }, ctx);
-    expect(soul2.request.params?.extra?.style_id).toBeUndefined();
-    expect(soul2.notes[0]).toBe("Sunset beach is a Soul preset — described in words on Higgsfield Soul 2.0");
+    const soul = applySignature(req("fuobe-soul"), { moodboard: pick }, ctx);
+    expect(soul.request.presetId).toBe("v1-sunset-beach");
     const turbo = applySignature(req("oss-z-image-turbo"), { moodboard: pick }, ctx);
-    expect(said(turbo)).toBe(presetPrompt(sunset, "a rooftop party"));
+    expect(said(turbo)).toBe(lookPrompt(sunset, "a rooftop party"));
   });
 
-  it("curated sets come from the built-in list, with Higgsfield's live previews (and newer presets) on top", () => {
-    expect(CURATED_SETS["soul-v2"].map((c) => c.id)).toEqual(CURATED_MOODBOARDS.map((p) => p.id));
+  it("curated sets are Fuobe's own looks: Fuobe ids and words, no Higgsfield description or preview", () => {
     const base = CURATED_SETS["soul-v2"];
-    // No key: the route answers with the built-in list as a fallback — nothing changes.
-    expect(withLive(base, { items: [{ id: base[0].id, name: "General", preview: "https://x/p.jpg" }], fallback: true }, "soul-v2")).toBe(base);
-    const live = withLive(base, { items: [{ id: base[1].id, name: base[1].name, preview: "https://x/1.jpg" }, { id: "new-look", name: "Brand new" }] }, "soul-v2");
-    expect(live).toHaveLength(base.length + 1);
-    expect(live[1].preview).toBe("https://x/1.jpg");
-    expect(live[0].preview).toBeUndefined();
-    expect(live.at(-1)).toMatchObject({ id: "new-look", name: "Brand new", category: "All presets" });
-    expect(curatedPick(withLive(CURATED_SETS["soul-v1"], { items: [{ id: "v1-new", name: "New one" }] }, "soul-v1").at(-1)!).source).toBe("soul-v1");
+    expect(base).toHaveLength(33);
+    expect(base.every((c) => c.id.startsWith("v2-") && !c.preview)).toBe(true);
+    const theirs = new Map(SOUL_RESEARCH.filter((p) => p.model === "soul-v2").map((p) => [p.name, p.description]));
+    expect(base.every((c) => c.description !== theirs.get(c.name))).toBe(true);
   });
 
   it("an older run that kept the sentences in its prompt isn't styled twice; Run again doesn't add the board twice", () => {
@@ -337,22 +342,17 @@ describe("moodboards: routing per model", () => {
     expect(again.request.inputs?.images).toEqual(nano.request.inputs?.images);
   });
 
-  it("Soul presets go native wherever the model's own preset list is theirs; Soul Cinema (no presets) gets words", () => {
+  it("a look goes native on every model that takes looks; Fuobe Soul Cinema (one fixed look) gets words", () => {
     const style = SOUL_STYLES[0];
     const pick = curatedPick(style);
-    const cinema = applySignature(req("soul-cinema"), { moodboard: pick }, ctx);
-    expect(cinema.request.params?.extra?.style_id).toBeUndefined();
-    expect(cinema.notes[0]).toBe(`Higgsfield Soul Cinema has one fixed look and no presets — ${style.name} is described in words`);
+    const cinema = applySignature(req("fuobe-soul-cinema"), { moodboard: pick }, ctx);
+    expect(cinema.request.presetId).toBeUndefined();
+    expect(cinema.notes[0]).toBe(`Fuobe Soul Cinema has one fixed look — ${style.name} is described in words`);
     expect(said(cinema)).toMatch(/In the style of/);
-    // A model whose preset picker is Soul's list takes the style id natively, whatever its id.
-    const soul1 = getModel("soul-1")!;
-    const twin = { ...soul1, id: "soul-twin", options: { ...soul1.options, presets: { ...soul1.options.presets!, param: "style_id" } } };
-    const ctx2 = { caps: CAPS, getModel: (id: string) => (id === "soul-twin" ? twin : getModel(id)) };
-    const native = applySignature(req("soul-twin"), { moodboard: pick }, ctx2);
-    expect(native.request.params?.extra?.style_id).toBe(style.id);
-    expect(native.request.prompt).toBe("a rooftop party");
-    expect(native.request.signature?.words).toBeUndefined();
-    expect(native.notes).toEqual([]);
+    const hd = applySignature(req("fuobe-soul-hd"), { moodboard: pick }, ctx);
+    expect(hd.request.presetId).toBe(style.id);
+    expect(hd.request.signature?.words).toBeUndefined();
+    expect(hd.notes).toEqual([]);
   });
 
   it("Recraft V4 Styles keeps your own images first and fills up to 10 with the board's", () => {
@@ -420,37 +420,22 @@ describe("style signature: the request record and Reuse", () => {
     expect(back.signature.moodboard?.id).toBe("mb1");
 
     const look = curatedPick(CURATED_SETS["soul-v2"][3]);
-    const soul = applySignature(req("soul-2"), { moodboard: look }, ctx);
-    expect(soul.request.params?.extra?.style_id).toBe(look.id);
+    const soul = applySignature(req("fuobe-soul"), { moodboard: look }, ctx);
+    expect(soul.request.presetId).toBe(look.id);
     const soulBack = reuseSignature(soul.request)!;
     expect(soulBack.params.extra).toBeUndefined();
     expect(soulBack.signature.moodboard).toEqual(look);
     // A run without a signature isn't touched.
-    expect(reuseSignature(req("soul-2"))).toBeNull();
+    expect(reuseSignature(req("fuobe-soul"))).toBeNull();
   });
 });
 
-describe("Soul presets fallback", () => {
-  it("maps the researched list per source with Higgsfield's categories", () => {
-    const v1 = presetFallback("soul-v1")!;
-    expect(v1.items).toHaveLength(106);
-    expect(v1.categories).toEqual(["New", "TikTok Core", "Instagram Aesthetics", "Camera Presets", "Beauty", "Mood", "Surreal", "Graphic Art"]);
-    const tabs = presetTabs(v1.items, v1.categories);
-    expect(tabs[0]).toBe("All");
-    expect(v1.items.filter((p) => inTab(p, "Graphic Art")).map((p) => p.name)).toContain("Glitch");
-    expect(v1.items.filter((p) => inTab(p, "New"))).toHaveLength(10);
-    expect(v1.items.find((p) => p.id === SOUL_DEFAULT["soul-v1"])?.name).toBe("General");
-    const v2 = presetFallback("soul-v2")!;
-    expect(v2.items).toHaveLength(33);
-    expect(v2.categories).toEqual(["Mood", "Styles", "Camera"]);
-    expect(v2.items.every((p) => p.hue >= 0 && p.hue < 360)).toBe(true);
-    expect(presetFallback("genjutsu-restyle")).toBeNull();
-    expect(new Set(SOUL_PRESETS.map((p) => p.id)).size).toBe(SOUL_PRESETS.length);
-  });
-
-  it("turns a preset into a prompt template for the open route", () => {
-    expect(presetPrompt({ name: "Retro BW", description: "Grainy black-and-white film portrait" }, "a dancer ")).toBe("a dancer. In the style of “Retro BW”: grainy black-and-white film portrait.");
-    expect(presetPrompt({ name: "Retro BW", description: "" }, "")).toBe("A photo. In the style of “Retro BW”.");
+describe("Soul's old style ids", () => {
+  it("open their Fuobe look, one way: all 139 from the research, and nothing else", () => {
+    expect(SOUL_RESEARCH).toHaveLength(139);
+    for (const p of SOUL_RESEARCH) expect(lookCard(p.id)?.id, p.name).toMatch(p.model === "soul-v1" ? /^v1-/ : /^v2-/);
+    expect(Object.keys(SOUL_LEGACY_IDS)).toHaveLength(139);
+    expect(lookCard("not-a-style")).toBeUndefined();
   });
 });
 
@@ -484,39 +469,50 @@ describe("Photodump packs and planning", () => {
 
   it("plans one single-image request per photo, on the identity's own model when it has one", () => {
     const pack = getPack("winter-special")!;
-    const cloud = planPhotodump({ pack, subject: maya, engine: "cloud", aspectRatio: "3:4" }, { higgsfield: false });
+    const cloud = planPhotodump({ pack, subject: maya, engine: "cloud", aspectRatio: "3:4" }, {});
     expect(cloud.modelId).toBe("nano-banana-pro");
     expect(cloud.requests).toHaveLength(9);
     expect(cloud.requests[2].step).toEqual({ label: "Photo 3 of 9", index: 2, of: 9 });
     expect(cloud.requests.every((r) => r.params?.numOutputs === 1 && r.params.aspectRatio === "3:4" && r.feature === "photodump")).toBe(true);
 
-    const soulMaya: PhotoSubject = { ...maya, loras: [{ engine: "cloud", modelId: "soul-2", file: "", trigger: "", referenceId: "ref-123" }] };
-    expect(planPhotodump({ pack, subject: soulMaya, engine: "cloud" }, { higgsfield: true }).modelId).toBe("soul-2");
-    const noKey = planPhotodump({ pack, subject: soulMaya, engine: "cloud", modelId: "soul-2" }, { higgsfield: false });
-    expect(noKey.modelId).toBe("nano-banana-pro");
-    expect(noKey.notes[0]).toMatch(/Higgsfield key/);
-    expect(planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "seedream-5-pro" }, { higgsfield: false }).modelId).toBe("seedream-5-pro");
+    // A trained Soul ID (build plan O3): Fuobe Soul with the character's LoRA on either engine; Higgsfield's is gone.
+    const soulMaya: PhotoSubject = { ...maya, loras: [{ engine: "cloud", modelId: "fuobe-soul", family: "z-image-turbo", file: "fuobe/maya-a1.safetensors", url: "https://v3.fal.media/maya.safetensors", own: true, trigger: "mayfz" }] };
+    for (const engine of ["cloud", "open"] as const) {
+      const run = planPhotodump({ pack, subject: soulMaya, engine }, {});
+      expect(run.modelId).toBe("fuobe-soul");
+      expect(run.requests.every((r) => r.engine === engine)).toBe(true);
+    }
+    const oldSoulId: PhotoSubject = { ...maya, loras: [{ engine: "cloud", modelId: "soul-2", file: "", trigger: "", referenceId: "ref-123" }] };
+    expect(planPhotodump({ pack, subject: oldSoulId, engine: "cloud" }, {}).modelId).toBe("nano-banana-pro");
+    const untrained = planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "fuobe-soul" }, {});
+    expect(untrained.modelId).toBe("nano-banana-pro");
+    expect(untrained.notes[0]).toMatch(/No Soul ID yet/);
+    expect(planPhotodump({ pack, subject: soulMaya, engine: "cloud", modelId: "seedream-5-pro" }, {}).modelId).toBe("seedream-5-pro");
+    expect(planPhotodump({ pack, subject: maya, engine: "cloud", modelId: "seedream-5-pro" }, {}).modelId).toBe("seedream-5-pro");
 
+    // A LoRA trained before O3 for plain Z-Image Turbo is the same family: it runs on Fuobe Soul too.
     const loraMaya: PhotoSubject = { ...maya, loras: [{ engine: "open", modelId: "oss-z-image-turbo", file: "maya.safetensors", trigger: "mayfz" }] };
-    expect(planPhotodump({ pack, subject: loraMaya, engine: "open" }, { higgsfield: false }).modelId).toBe("oss-z-image-turbo");
-    const qwen = planPhotodump({ pack, subject: selfie, engine: "open", aspectRatio: "auto" }, { higgsfield: false });
+    expect(planPhotodump({ pack, subject: loraMaya, engine: "open" }, {}).modelId).toBe("fuobe-soul");
+    // A GPU-only LoRA (no copy Fuobe can send) stays off the cloud: reference photos there.
+    expect(planPhotodump({ pack, subject: loraMaya, engine: "cloud" }, {}).modelId).toBe("nano-banana-pro");
+    const qwen = planPhotodump({ pack, subject: selfie, engine: "open", aspectRatio: "auto" }, {});
     expect(qwen.modelId).toBe("oss-qwen-edit");
     expect(qwen.requests[0].inputs?.images).toEqual([selfie.url]);
     expect(qwen.requests[0].params?.aspectRatio).toBeUndefined();
 
     const mine = customPack({ id: "user-1", name: "Mine", refs: ["/api/files/uploads/a.png", "/api/files/uploads/b.png"] });
-    const custom = planPhotodump({ pack: mine, subject: selfie, engine: "cloud" }, { higgsfield: true });
+    const custom = planPhotodump({ pack: mine, subject: selfie, engine: "cloud" }, {});
     expect(custom.requests.map((r) => r.inputs?.images)).toEqual([
       [selfie.url, "/api/files/uploads/a.png"],
       [selfie.url, "/api/files/uploads/b.png"],
     ]);
-    expect(() => planPhotodump({ pack, subject: { ...maya, references: [] }, engine: "cloud" }, { higgsfield: false })).toThrow(/Add a photo of Maya/);
+    expect(() => planPhotodump({ pack, subject: { ...maya, references: [] }, engine: "cloud" }, {})).toThrow(/Add a photo of Maya/);
   });
 
   it("each planned photo resolves and plans (mentions become references, LoRAs or a Soul ID)", () => {
     const el = (loras: StudioElement["loras"]): StudioElement => ({ id: "e1", name: "Maya", handle: "Maya", kind: "character", description: null, references: ["/api/files/uploads/m1.png"], loras, status: "ready", createdAt: 0 });
     const check = (subject: PhotoSubject, engine: "cloud" | "open", element: StudioElement) => {
-      const p = planPhotodump({ pack: getPack("zen")!, subject, engine, aspectRatio: "3:4" }, { higgsfield: true });
+      const p = planPhotodump({ pack: getPack("zen")!, subject, engine, aspectRatio: "3:4" }, {});
       const r = p.requests[0];
       const resolved = applyMentions(r, getModel(r.modelId)!, [element]).request;
       return { resolved, plan: plan(resolved) };
@@ -524,23 +520,33 @@ describe("Photodump packs and planning", () => {
     const refs = check(maya, "cloud", el([]));
     expect(refs.plan.op).toBe("edit");
     expect(refs.resolved.inputs?.images).toEqual(["/api/files/uploads/m1.png"]);
-    const soulLoras = [{ engine: "cloud" as const, modelId: "soul-2", file: "", trigger: "", referenceId: "ref-1" }];
-    const soul = check({ ...maya, loras: soulLoras }, "cloud", el(soulLoras));
-    expect(soul.resolved.params?.extra?.custom_reference_id).toBe("ref-1");
-    expect(soul.plan.model.id).toBe("soul-2");
-    const turbo = [{ engine: "open" as const, modelId: "oss-z-image-turbo", file: "maya.safetensors", trigger: "mayfz" }];
-    const lora = check({ ...maya, loras: turbo }, "open", el(turbo));
-    expect(lora.plan.loras[0].file).toBe("maya.safetensors");
-    expect(lora.plan.prompt).toMatch(/mayfz Maya/);
+    // The Soul ID's LoRA on Fuobe Soul, first in its slots, on the engine the run asked for.
+    const trained = [{ engine: "cloud" as const, modelId: "fuobe-soul", family: "z-image-turbo" as const, file: "fuobe/maya-a1.safetensors", url: "https://v3.fal.media/maya.safetensors", own: true as const, trigger: "mayfz" }];
+    for (const engine of ["cloud", "open"] as const) {
+      const p = planPhotodump({ pack: getPack("zen")!, subject: { ...maya, loras: trained }, engine, aspectRatio: "3:4" }, {});
+      const r = p.requests[0];
+      const model = onEngine(getModel(r.modelId)!, r.engine!);
+      const resolved = applyMentions(r, model, [el(trained)]).request;
+      const planned = planGeneration(resolved, (id) => (id === model.id ? model : getModel(id)), getPreset);
+      expect(planned.model).toMatchObject({ id: "fuobe-soul", engine });
+      expect(planned.loras[0]).toMatchObject({ file: "fuobe/maya-a1.safetensors", own: true });
+      expect(planned.prompt).toMatch(/mayfz Maya/);
+      expect(resolved.inputs?.images).toBeUndefined();
+    }
   });
 });
 
 describe("Photodump: model choice and retries", () => {
   const selfie: PhotoSubject = { kind: "selfie", url: "/api/files/uploads/me.png" };
+
   it("says why a pick that can't run ends up on another model", () => {
-    expect(photodumpModel(selfie, "open", { higgsfield: false }, "oss-z-image-turbo")).toEqual({ modelId: "oss-qwen-edit", note: "Z-Image Turbo + LoRA needs a character with a trained LoRA — Qwen-Image-Edit works from your photo" });
-    expect(photodumpModel(selfie, "open", { higgsfield: false }, "oss-z-image-turbo", true).note).toMatch(/Your own packs recreate each reference photo/);
-    expect(photodumpModel(selfie, "open", { higgsfield: false }).note).toBeUndefined();
+    expect(photodumpModel(selfie, "open", {}, "fuobe-soul")).toEqual({ modelId: "oss-qwen-edit", note: "Fuobe Soul needs a character with a trained Soul ID — Qwen-Image-Edit works from your photo" });
+    expect(photodumpModel(selfie, "cloud", {}, "fuobe-soul").note).toMatch(/Nano Banana Pro works from your photo/);
+    expect(photodumpModel(selfie, "open", {}, "fuobe-soul", true).note).toMatch(/Your own packs recreate each reference photo/);
+    expect(photodumpModel(selfie, "open", {}).note).toBeUndefined();
+    // A demo training's stand-in isn't a Soul ID.
+    const demo: PhotoSubject = { kind: "element", handle: "Maya", name: "Maya", references: ["/a.png"], loras: [{ engine: "cloud", modelId: "fuobe-soul", family: "z-image-turbo", file: "fuobe/x.safetensors", trigger: "t", demo: true }] };
+    expect(photodumpModel(demo, "open", {}).modelId).toBe("oss-qwen-edit");
   });
 
   it("a retried base shot or outfit takes the failed one's place in the wizard", () => {
@@ -563,10 +569,10 @@ describe("Fashion Factory", () => {
 
   it("plans the three generating steps on both engines", () => {
     const t = FASHION[0];
-    const base = fashionBaseRequest(t, maya, "cloud", { higgsfield: false });
+    const base = fashionBaseRequest(t, maya, "cloud", {});
     expect(base).toMatchObject({ modelId: "nano-banana-pro", params: { aspectRatio: "3:4", numOutputs: 4 } });
     expect(base.prompt).toMatch(/@Maya in a bold, saturated colour-blocked studio set/);
-    expect(fashionBaseRequest(t, maya, "open", { higgsfield: false }).modelId).toBe("oss-qwen-edit");
+    expect(fashionBaseRequest(t, maya, "open", {}).modelId).toBe("oss-qwen-edit");
 
     const outfit = fashionOutfitRequest(t, "/api/files/base.png", "/api/files/shirt.png", "cloud");
     expect(outfit).toMatchObject({ modelId: "fashn-tryon", op: "edit", inputs: { images: ["/api/files/base.png", "/api/files/shirt.png"] } });
@@ -632,11 +638,12 @@ describe("Character Sheet", () => {
     expect(() => plan(open.request)).not.toThrow();
   });
 
-  it("Build from scratch runs on Soul 2.0 / Nano Banana Pro or the Soul Cast sheet workflow", () => {
-    expect(castSheetModel("cloud", { higgsfield: true })).toBe("soul-2");
-    expect(castSheetModel("cloud", { higgsfield: false })).toBe("nano-banana-pro");
-    expect(castSheetModel("open", { higgsfield: false, has: () => true })).toBe("oss-zimage-soul-cast");
-    expect(castSheetModel("open", { higgsfield: false, has: () => false })).toBe("oss-z-image-turbo");
+  it("Build from scratch runs on Fuobe Soul (Nano Banana Pro when it is switched off) or the Soul Cast sheet workflow", () => {
+    expect(castSheetModel("cloud", {})).toBe("fuobe-soul");
+    expect(castSheetModel("cloud", { has: () => true })).toBe("fuobe-soul");
+    expect(castSheetModel("cloud", { has: (id) => id !== "fuobe-soul" })).toBe("nano-banana-pro");
+    expect(castSheetModel("open", { has: () => true })).toBe("oss-zimage-soul-cast");
+    expect(castSheetModel("open", { has: () => false })).toBe("oss-z-image-turbo");
   });
 
   it("randomizes and names a cast like Cinema Studio", () => {

@@ -1,8 +1,9 @@
-import { CLOUD_MODELS } from "./cloud-models.generated";
-import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
+import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
 import { pricingAt } from "./plan";
+import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
-import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
+import { CINEMA_CROP, SOUL_ASPECTS, SOUL_TIERS } from "./soul";
+import { LAST_FRAME_CHAIN, type ModelDef, type ModelOptions, type ModelRoute, type Operation } from "./types";
 
 /*
  * Model catalog.
@@ -25,11 +26,19 @@ const CHATTERBOX_SLIDERS = [
   { param: "temperature", label: "Variety", min: 0.05, max: 2, step: 0.05, default: 0.8 },
 ];
 
+/**
+ * Frames mode on the open engine (Kling 4.0's up to 10 keyframes): one Wan 2.2 start/end-frame clip
+ * per pair of frames, as long as the gap between them, then joined (createKeyframeFilm in src/server/chains.ts).
+ */
+const KEYFRAME_FILM: ModelRoute = { ...comfy("keyframes", "wan22-flf2v-14b", "one start/end-frame clip per pair of frames, joined"), chained: true };
+
 /** Open models have no multi-shot of their own: each shot renders separately, then the clips are joined. */
 const CONCAT_SHOTS = { mode: "concat", maxShots: 4 } as const;
 
 const IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"];
 const VID_AR = ["16:9", "9:16", "1:1"];
+/** Open video upscalers: the result's shorter edge (1080p = 1080 px in any shape). */
+const VIDEO_UPSCALE_TIERS = ["720p", "1080p", "1440p", "2160p"];
 
 
 // ---------------------------------------------------------------------------
@@ -225,6 +234,17 @@ const open: ModelDef[] = [
     },
   }),
   o({
+    // Layers' Edit text on the open engine (Florence-2 / Ideogram on the cloud): the lines and their boxes.
+    id: "oss-ocr-lines",
+    name: "OvisOCR3",
+    vendor: "ATH-MaaS",
+    family: "qwen-llm",
+    kind: "text",
+    tagline: "Every line of text in an image, with its box · 3 GB GPU · Apache-2.0",
+    routes: [comfy("ocr", "ocr-lines-qwen35", "OvisOCR3 0.8B (a Qwen3.5 OCR fine-tune) on core TextGenerate; boxes come back 0–1000")],
+    options: { promptless: true, maxImages: 1 },
+  }),
+  o({
     id: "oss-seedvr2-image",
     name: "SeedVR2 (image)",
     vendor: "ByteDance Seed",
@@ -254,7 +274,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Best open video model with Lightx2v 4-step LoRAs — minutes, not hours",
     badges: ["fast", "top"],
-    routes: [comfy("t2v", "wan22-t2v-14b-lightx2v", "Lightx2v 4-step"), comfy("i2v", "wan22-i2v-14b-lightx2v", "Lightx2v 4-step"), comfy("flf2v", "wan22-flf2v-14b")],
+    routes: [comfy("t2v", "wan22-t2v-14b-lightx2v", "Lightx2v 4-step"), comfy("i2v", "wan22-i2v-14b-lightx2v", "Lightx2v 4-step"), comfy("flf2v", "wan22-flf2v-14b"), KEYFRAME_FILM],
     options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
@@ -265,7 +285,7 @@ const open: ModelDef[] = [
     family: "wan",
     kind: "video",
     tagline: "Full-quality Wan 2.2 (20 steps) — text, image and start/end frame",
-    routes: [comfy("t2v", "wan22-t2v-14b"), comfy("i2v", "wan22-i2v-14b"), comfy("flf2v", "wan22-flf2v-14b")],
+    routes: [comfy("t2v", "wan22-t2v-14b"), comfy("i2v", "wan22-i2v-14b"), comfy("flf2v", "wan22-flf2v-14b"), KEYFRAME_FILM],
     options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5, 7], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
@@ -393,15 +413,18 @@ const open: ModelDef[] = [
     options: { aspectRatios: VID_AR, seed: true, negativePrompt: true },
     defaults: { aspectRatio: "9:16" },
   }),
+  // Video upscalers run in passes of a few frames (VHS meta-batch), so memory stays flat whatever the clip's
+  // length (the whole-clip graphs held about 38 GB of frames for 30 s at 480p). params.resolution = the shorter edge.
   o({
     id: "oss-seedvr2",
     name: "SeedVR2 (video)",
     vendor: "ByteDance Seed",
     family: "seedvr",
     kind: "video",
-    tagline: "One-step diffusion upscaler for video",
-    routes: [comfy("upscale-video", "upscale-video-seedvr2")],
-    options: { seed: true },
+    tagline: "One-step diffusion restoration and upscale, in passes so long clips fit",
+    routes: [comfy("upscale-video", "upscale-video-seedvr2-chunked", "33 frames per pass; each pass restored on its own")],
+    options: { seed: true, resolutions: VIDEO_UPSCALE_TIERS },
+    defaults: { resolution: "1080p" },
   }),
   o({
     id: "oss-upscale-video-esrgan",
@@ -409,19 +432,57 @@ const open: ModelDef[] = [
     vendor: "Open source",
     family: "esrgan",
     kind: "video",
-    tagline: "Fast frame-by-frame 4x upscale",
-    routes: [comfy("upscale-video", "upscale-video-esrgan")],
-    options: {},
+    tagline: "Fast frame-by-frame 4x upscale, in passes: any length fits in memory",
+    routes: [comfy("upscale-video", "upscale-video-esrgan-chunked", "Real-ESRGAN x4, then scaled to the size asked for")],
+    options: { resolutions: VIDEO_UPSCALE_TIERS },
+    defaults: { resolution: "1080p" },
   }),
+  // FPS Boost: interpolate by m and keep every n-th frame (src/lib/av/fps.ts), for an exact target and slow motion.
   o({
     id: "oss-rife",
     name: "RIFE interpolation",
     vendor: "Open source",
     family: "rife",
     kind: "video",
-    tagline: "Smooth slow motion and 2x/4x frame rate",
-    routes: [comfy("interpolate", "interpolate-rife")],
-    options: {},
+    tagline: "FPS Boost to 24–120 fps and slow motion; FILM for large motion",
+    routes: [comfy("interpolate", "interpolate-rife-fps", "frame rate from the clip's header: interpolate by m, keep every n-th")],
+    options: {
+      fpsTargets: [...FPS_TARGETS],
+      slowdowns: [...SLOW_MOTION],
+      controls: [
+        {
+          param: "checkpoint",
+          label: "Model",
+          values: ["rife_v4.26.safetensors", "film_net_fp16.safetensors"],
+          default: "rife_v4.26.safetensors",
+          labels: { "rife_v4.26.safetensors": "RIFE 4.26 (fast)", "film_net_fp16.safetensors": "FILM (large motion, slower)" },
+        },
+      ],
+    },
+    defaults: { targetFps: DEFAULT_FPS_TARGET },
+  }),
+  // SDR to HDR and pro export formats (core ComfyUI and VideoHelperSuite, no model weights).
+  o({
+    id: "oss-sdr-to-hdr",
+    name: "SDR to HDR",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "SDR footage expanded to 10-bit HDR: HLG or HDR10 (PQ) MP4, or 16-bit EXR frames",
+    routes: [comfy("sdr-to-hdr", "video-sdr-to-hdr", "an inverse tone map (core ImageSDRToHDR), not a learned model")],
+    options: { formats: ["hlg_10bit", "pq_10bit", "exr"], sliders: [{ param: "peakNits", label: "Peak brightness (nits)", min: 200, max: 2000, step: 50, default: 650 }] },
+    defaults: { format: "hlg_10bit" },
+  }),
+  o({
+    id: "oss-export-video",
+    name: "Pro export",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "ProRes 422 HQ or 4444, H.265 10-bit, lossless FFV1 or 16-bit EXR frames, made on your machine",
+    routes: [comfy("export-video", "video-export-pro-chunked", "VideoHelperSuite with the server's ffmpeg, in passes; EXR: core SaveImageAdvanced")],
+    options: { formats: ["prores_422_hq", "prores_4444", "h265_10bit", "ffv1", "h264", "exr"] },
+    defaults: { format: "prores_422_hq" },
   }),
   o({
     id: "oss-mmaudio",
@@ -521,9 +582,10 @@ const open: ModelDef[] = [
     vendor: "ZhengPeng7",
     family: "birefnet",
     kind: "video",
-    tagline: "Cut the subject out of every frame — transparent WebM plus a matte",
+    tagline: "Cut the subject out of every frame — a transparent WebM, or its alpha mask",
     routes: [comfy("bg-remove-video", "video-bg-remove-birefnet")],
-    options: {},
+    // The graph saves both; params.matteOutput keeps one (Video tools → Remove background: Cutout video / Alpha mask).
+    options: { promptless: true, matteOutputs: ["cutout", "matte"] },
   }),
   o({
     id: "oss-video-matte-sam3",
@@ -531,9 +593,9 @@ const open: ModelDef[] = [
     vendor: "Meta",
     family: "sam",
     kind: "video",
-    tagline: "Keep just the object you name (“the dog”, “the red car”)",
+    tagline: "Keep just what you name (“the dog”, “the red car”) — a transparent WebM, or its alpha mask",
     routes: [comfy("bg-remove-video", "video-bg-remove-sam3")],
-    options: {},
+    options: { keepsNamed: true, matteOutputs: ["cutout", "matte"] },
   }),
   o({
     id: "oss-video-depth-da3",
@@ -541,9 +603,9 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "depth-anything",
     kind: "video",
-    tagline: "Per-frame depth maps for compositing and 3D effects",
+    tagline: "Per-frame depth maps for compositing and 3D effects · grayscale",
     routes: [comfy("depth-video", "video-depth-da3")],
-    options: {},
+    options: { colormaps: ["grayscale"], sideBySide: true },
   }),
   o({
     id: "oss-video-depth-vda",
@@ -551,9 +613,124 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "depth-anything",
     kind: "video",
-    tagline: "Temporally stable, flicker-free depth",
+    tagline: "Temporally stable, flicker-free depth · grayscale or inferno",
     routes: [comfy("depth-video", "video-depth-vda-small")],
-    options: {},
+    // VideoDepthAnythingOutput draws gray or inferno only; turbo, magma and viridis are the cloud's.
+    options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
+  }),
+  // Remove object (Video tools → Remove object; docs/research/comfyui-oss-4.md §b). The prompt names what to remove
+  // (the provider sends the objects in it to SAM 3.1 as maskPrompt; the scene the gap is filled with is
+  // params.extra.prompt or a neutral default). One window per job: src/lib/catalog/remove-object.ts tiles longer clips
+  // and joins them; run on its own (a Canvas node) a job does the first window only, which the taglines say.
+  o({
+    id: "oss-vace-remove",
+    name: "Wan 2.1 VACE Remove",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Name what to remove: SAM 3.1 follows it, VACE fills the gap, every other pixel stays the original · 81 frames a run (Video tools → Remove object does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-inpaint-wan-vace", "SAM 3.1 text track + Wan 2.1 VACE 14B with the lightx2v 4-step LoRA; up to 81 frames per window")],
+    options: { seed: true, negativePrompt: true },
+  }),
+  o({
+    id: "oss-vace-remove-painted",
+    name: "Wan 2.1 VACE Remove (painted)",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Paint what to remove on the first frame: SAM 3.1 follows it, VACE fills the gap · 81 frames a run (Video tools → Remove object does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-inpaint-wan-vace-painted", "first-frame mask (white = remove) tracked by SAM 3.1; the last frame's mask starts the next window")],
+    options: { seed: true, negativePrompt: true, requires: { mask: true, msg: "Paint what to remove on the first frame" } },
+  }),
+  o({
+    id: "oss-void-remove",
+    name: "VOID Remove",
+    vendor: "Netflix",
+    family: "void",
+    kind: "video",
+    tagline: "Removes the object and what it causes — shadows, reflections, things it moves · 197 frames a run (Video tools → Remove object does whole clips) · 24–40 GB GPU (unverified) · CogVideoX License: commercial use needs registration",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-erase-void", "SAM 3.1 text track + VOID (CogVideoX-5B fine-tune), two passes; up to 197 frames per window")],
+    options: { seed: true, negativePrompt: true },
+  }),
+  // Genjutsu's Object swap and Insert on the open engine (docs/research/comfyui-oss-4.md §c). Swap: params.extra.maskPrompt
+  // names what goes (else the "replace … with" part of the prompt, see swapTarget), the first reference image is what comes
+  // in, the prompt describes the result. Insert: a painted region held for the whole window. One window per job, as the
+  // eraser: src/lib/catalog/genjutsu.ts tiles longer clips and joins them.
+  o({
+    id: "oss-vace-swap",
+    name: "Wan 2.1 VACE Swap",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Name what to swap: SAM 3.1 follows it, VACE paints your reference in its place, every other pixel stays the original · 81 frames a run (Genjutsu does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("video-swap", "video-swap-wan-vace", "SAM 3.1 text track + Wan 2.1 VACE 14B with the first reference image; up to 81 frames per window")],
+    options: { seed: true, negativePrompt: true, maxImages: 1 },
+  }),
+  o({
+    id: "oss-vace-insert",
+    name: "Wan 2.1 VACE Insert",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Paint where it goes on the first frame: VACE adds your reference there, held for the whole shot (a still or slow camera) · 81 frames a run (Genjutsu does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("video-insert", "video-insert-wan-vace", "painted region (white = where it goes) held for every frame + Wan 2.1 VACE 14B with the first reference image")],
+    options: { seed: true, negativePrompt: true, maxImages: 1, requires: { mask: true, msg: "Paint where it goes on the first frame" } },
+  }),
+  // H3 Relay 2.0 (akatz-ai/h3-relay): Akatz Labs' newer node pack for the same Character swap, native loops instead of the
+  // pack's controller (Genjutsu's Character swap lists it as an alternative). It needs the pack installed (H3_RELAY=1).
+  o({
+    id: "oss-h3-character-swap-relay",
+    name: "H3 Character Swap · Relay 2.0",
+    vendor: "MiniMax × Akatz Labs",
+    family: "minimax-h3",
+    kind: "video",
+    tagline: "The same H3 swap on Akatz Labs' H3 Relay 2.0 nodes (native loops, no anchor frame) · 24 GB GPU with offloading, 48 GB+ advised",
+    badges: ["new"],
+    routes: [comfy("video-swap", "video-character-swap-h3-relay", "H3 Relay toolkit: SAM 3.1 subject, 124-frame windows with 18 frames of history, the clip's sound kept")],
+    options: { seed: true, resolutions: ["480p", "768p"], maxImages: 1 },
+  }),
+  // Remove object's "Remove a person (H3)" (docs/research/openjutsu-6.md §11.1): H3 Relay's Person Removal with Akatz
+  // Labs' Person Remover LoRA, from a clean first frame (Remove object makes it, fits the clip to 24 fps, puts the sound back).
+  o({
+    id: "oss-h3-person-remove",
+    name: "H3 Person Removal · Relay 2.0",
+    vendor: "MiniMax × Akatz Labs",
+    family: "minimax-h3",
+    kind: "video",
+    tagline: "Name the person to remove: SAM 3.1 marks them, MiniMax H3 with Akatz Labs' Person Remover LoRA rebuilds what was behind them from a clean first frame · 24 GB GPU with offloading (Video tools → Remove object makes the clean frame and keeps the sound)",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-person-remove-h3-relay", "H3 Relay Person Removal: the person painted green, 22-frame windows with 18 of history from the clean first frame (image), 12 steps, silent")],
+    options: { seed: true, maxImages: 1 },
+  }),
+  // Character Swap Studio (/character-swap, o/h3-studio): Akatz Labs' workbench for whole clips. A segment is one H3 Relay
+  // pass (its approved mask, anchor and the previous take's lossless master as history); a mask is SAM 3.1 on any frame
+  // of a shot, spliced into the version it corrects. Both run through the studio, not the composer.
+  o({
+    id: "oss-h3-swap-segment",
+    name: "H3 Character Swap · studio segment",
+    vendor: "MiniMax × Akatz Labs",
+    family: "minimax-h3",
+    kind: "video",
+    tagline: "One Character Swap Studio segment: a single H3 Relay pass with the approved mask, an anchor and the previous take's lossless master as history · 24 GB GPU with offloading, 48 GB+ advised",
+    routes: [comfy("video-swap", "video-character-swap-h3-segment", "H3 Relay segment schedule; saves the segment and its 16-bit FFV1 master")],
+    options: { seed: true, resolutions: ["480p", "768p"], maxImages: 2 },
+    hidden: true,
+  }),
+  o({
+    id: "oss-h3-person-mask",
+    name: "SAM 3.1 person mask · H3 Relay",
+    vendor: "Meta × Akatz Labs",
+    family: "sam",
+    kind: "video",
+    tagline: "Who to swap in a shot: SAM 3.1 finds them on any frame (words, largest / leftmost / rightmost / #n, or clicks) and follows them; corrections splice into the mask",
+    routes: [comfy("bg-remove-video", "video-mask-h3-relay", "a black-and-white mask video at H3's canvas size, 24 fps")],
+    options: { keepsNamed: true, matteOutputs: ["matte"] },
+    hidden: true,
   }),
   o({
     id: "oss-qwen-relight",
@@ -799,6 +976,19 @@ const open: ModelDef[] = [
     routes: [comfy("trim", "video-trim")],
     options: {},
   }),
+  // Canvas Video Concatenator: each clip cut, framed, retimed to 30 fps and given its sound (or silence) in one
+  // streamed pass, so video-concat-encoded can join the clips packet by packet.
+  o({
+    id: "oss-fit-clip",
+    name: "Fit clip",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Cuts a clip and fits it to one size and frame rate, with its sound or silence · CPU",
+    routes: [comfy("trim", "video-fit-clip", "VHS loader in passes: start, length, frame rate; centre crop; sound, or silence when muted")],
+    options: {},
+    hidden: true,
+  }),
   o({
     id: "oss-segment",
     name: "Cut segment (resampled)",
@@ -964,7 +1154,7 @@ const open: ModelDef[] = [
     vendor: "OpenAI × yuvraj108c",
     family: "whisper",
     kind: "video",
-    tagline: "Transcribes and burns word-by-word captions in one job, short clips (whole clip in RAM) · 6 GB GPU · non-commercial node pack, installed only with NC_PACKS=1",
+    tagline: "Transcribes and burns word-by-word captions in one job, short clips (whole clip in RAM) · 6 GB GPU · non-commercial node pack (CC BY-NC-SA)",
     routes: [comfy("captions", "captions-whisper-burnin", "Whisper large-v3-turbo + ComfyUI-Whisper (CC-BY-NC-SA code)")],
     options: { sliders: [{ param: "fontSize", label: "Text size (px)", min: 30, max: 160, step: 5, default: 90 }], sourceLanguages: Object.keys(WHISPER_LANGUAGES) },
   }),
@@ -988,6 +1178,18 @@ const open: ModelDef[] = [
     tagline: "Speech straight to translated text, no timings (voice-over dubs) · 12 GB GPU · Apache-2.0",
     routes: [comfy("translate", "speech-translate-gemma4")],
     options: { seed: true },
+    hidden: true,
+  }),
+  // Content Factory "Use as reference": the clip's frames and its sound in one Gemma 4 call → a JSON style brief.
+  o({
+    id: "oss-reference-brief",
+    name: "Reference brief (Gemma 4)",
+    vendor: "Google",
+    family: "gemma",
+    kind: "text",
+    tagline: "Watches a reference clip (a frame a second and its sound) and writes its style brief as JSON · 12 GB GPU · Apache-2.0",
+    routes: [comfy("write", "reference-brief-gemma4", "first 30 s at 24 fps (every 24th frame read, 384 px wide) with the soundtrack; startTime skips ahead")],
+    options: { seed: true, promptless: true },
     hidden: true,
   }),
   o({
@@ -1040,13 +1242,59 @@ const open: ModelDef[] = [
     options: {},
     hidden: true,
   }),
-  // Product 3D, try-on. Every image-to-3D route on ComfyUI (Pixal3D, TRELLIS.2, Hunyuan3D 2.1) ends in the
+  // Faceless / Explainer "Frame by frame" and the Audio hub's Loop / extend and Join (r4/faceless-plus): core nodes, no model.
+  o({
+    id: "oss-ken-burns",
+    name: "Ken Burns",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "A slow pan and zoom over a still, up to 10 s a clip · no model, runs on CPU",
+    routes: [comfy("still-motion", "kenburns-still", "zoom + pan, eased or linear; 10 s per job, longer scenes are split and joined")],
+    options: { aspectRatios: VID_AR, resolutions: ["480p", "720p", "1080p"], maxImages: 1, promptless: true },
+    defaults: { aspectRatio: "16:9", resolution: "720p" },
+    hidden: true,
+  }),
+  o({
+    id: "oss-join-encoded",
+    name: "Join clips (copy)",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Joins clips the open engine made, packet by packet: no decode, flat memory · CPU",
+    routes: [comfy("concat", "video-concat-encoded", "one loader per clip; the clips share one size and frame rate")],
+    options: {},
+    hidden: true,
+  }),
+  o({
+    id: "oss-audio-loop",
+    name: "Crossfade loop",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "audio",
+    tagline: "Extends a clip to any length up to 10 minutes, crossfading every seam and fading out at the end · CPU",
+    routes: [comfy("audio-loop", "audio-loop-crossfade", "equal-power seams; the fade curve is written per job")],
+    options: { promptless: true },
+    hidden: true,
+  }),
+  o({
+    id: "oss-audio-join",
+    name: "Crossfade join",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "audio",
+    tagline: "Clips one after another with a crossfade at every seam · CPU",
+    routes: [comfy("audio-join", "audio-join-crossfade", "every clip in one job")],
+    options: { maxAudios: 10, promptless: true },
+    hidden: true,
+  }),
+  // Product 3D, try-on. Every image-to-3D route on ComfyUI (Pixal3D, TRELLIS.2 from one photo or several, Hunyuan3D 2.1) ends in the
   // server's finish (src/server/model3d-finish.ts): a web GLB and, when Chromium and ffmpeg are there, a
   // CPU-rendered turntable video.
   o({
     id: "oss-pixal3d",
     name: "Pixal3D",
-    vendor: "Pixal3D",
+    vendor: "Tencent ARC",
     family: "trellis",
     kind: "model3d",
     tagline: "A textured 3D model (.glb) that stays true to your photo (camera-aware), plus a turntable video · 16 GB GPU",
@@ -1074,6 +1322,64 @@ const open: ModelDef[] = [
     tagline: "Untextured 3D shape from a photo · 10 GB GPU · licence excludes the EU, UK and South Korea",
     routes: [comfy("image-to-3d", "image-to-3d-hunyuan3d-21")],
     options: { seed: true },
+  }),
+  // Round 4 (r4/3d-plus): Image to 3D's other modes on the open engine.
+  o({
+    id: "oss-trellis2-multi",
+    name: "TRELLIS.2 Multi-view",
+    vendor: "Tencent ARC × Microsoft",
+    family: "trellis",
+    kind: "model3d",
+    tagline: "One textured 3D model (.glb) from photos of 2–4 sides of an object, plus a turntable video · 16 GB GPU · MIT",
+    badges: ["new"],
+    // params.extra.views names each photo's side ("front", "left", "back", "right"); the front is needed.
+    routes: [comfy("image-to-3d", "image-to-3d-trellis2-multiview", "Pixal3D multi-view on TRELLIS.2; the front, then any of left, back and right")],
+    options: { seed: true, minImages: 2, maxImages: 4 },
+  }),
+  o({
+    id: "oss-text-trellis2",
+    name: "Z-Image Turbo → TRELLIS.2",
+    vendor: "Alibaba Tongyi × Microsoft",
+    family: "trellis",
+    kind: "model3d",
+    tagline: "Describe one object: Z-Image Turbo draws it on a plain background, then TRELLIS.2 builds the textured 3D model and a turntable · 16 GB GPU · Apache-2.0 + MIT",
+    badges: ["new"],
+    // Built on the server as two steps: a Z-Image Turbo still, then image-to-3d-trellis2 on it (src/server/chains.ts).
+    routes: [{ op: "text-to-3d", provider: "comfyui", endpoint: "image-to-3d-trellis2", chained: true, note: "a Z-Image Turbo still → TRELLIS.2" }],
+    options: { seed: true },
+  }),
+  o({
+    id: "oss-triposplat",
+    name: "TripoSplat",
+    vendor: "Tripo (VAST)",
+    family: "tripo",
+    kind: "model3d",
+    tagline: "A Gaussian splat (.spz) of the subject in one photo, background removed, plus an orbit video · 8 GB GPU · MIT · Built with DINOv3",
+    badges: ["new"],
+    routes: [comfy("splat", "image-to-splat-triposplat", "BiRefNet cut-out → TripoSplat → .spz + a 3 s orbit")],
+    options: {
+      seed: true,
+      maxImages: 1,
+      sliders: [{ param: "numGaussians", label: "Gaussians", min: 32768, max: 1048576, step: 32768, default: 262144 }],
+    },
+  }),
+  // Round 4 (r4/cinema-3d): Cinema Studio's "Create 3D scene". The mesh is in the photo's own camera space
+  // (glTF axes, metres), so the viewer starts where the photo was taken.
+  o({
+    id: "oss-scene-moge",
+    name: "MoGe 2 scene",
+    vendor: "Microsoft",
+    family: "moge",
+    kind: "model3d",
+    tagline: "The whole photo as a textured 3D mesh to fly a camera through, plus its depth map · runs on a CPU too (a minute or two) · MIT",
+    badges: ["new"],
+    routes: [comfy("scene-3d", "scene-mesh-moge", "MoGe 2 point map → textured GLB of the whole frame + a depth PNG")],
+    options: {
+      sliders: [
+        { param: "resolutionLevel", label: "Detail", min: 0, max: 9, step: 1, default: 9 },
+        { param: "decimation", label: "Mesh thinning (1 = every pixel)", min: 1, max: 4, step: 1, default: 1 },
+      ],
+    },
   }),
   o({
     id: "oss-tryon-klein",
@@ -1227,38 +1533,172 @@ function withLastFrameExtend(m: ModelDef): ModelDef {
   return { ...m, routes: [...m.routes, { op: "extend", provider: "fal", endpoint: LAST_FRAME_CHAIN, note: "last frame → Kling image-to-video → joined" }] };
 }
 
-/**
- * Higgsfield's AI Influencer character sheet. Not in Higgsfield's docs catalog (console docs and
- * the pricing API only — docs/research/higgsfield-api.json), so it's defined here, not generated.
- */
-const AI_INFLUENCER: ModelDef = {
-  id: "ai-influencer",
-  name: "AI Influencer",
-  vendor: "Higgsfield",
-  family: "soul",
-  engine: "cloud",
-  kind: "image",
-  tagline: "An original character sheet from a short brief — human or creature",
-  badges: ["new"],
-  routes: [{ op: "t2i", provider: "higgsfield", endpoint: "higgsfield/ai-influencer", map: { prompt: "brief", seed: "seed", seedRange: [1, 1000000] } }],
-  options: {
-    seed: true,
-    controls: [{ param: "tier", label: "Look", values: ["normal", "freak", "total", "insects", "frogs", "cats", "dogs", "capybaras", "birds"], default: "normal" }],
-  },
-  pricing: { unit: "image", usd: 0.05 },
-};
-
 /** A launch price while it lasts, the list price after (FLUX 3 Max); read once, when the catalog loads. */
 const withCurrentPrice = (m: ModelDef): ModelDef => (m.pricing?.promo ? { ...m, pricing: pricingAt(m.pricing) } : m);
 
-/** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
-const cloud: ModelDef[] = [
-  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m))
-    .map(withLastFrameExtend)
-    .map(withCurrentPrice),
-  ...HIGGSFIELD_MODELS,
-  AI_INFLUENCER,
-  ...cloudTools,
+/** Cloud models (fal and Replicate) and the cloud tools. */
+const cloud: ModelDef[] = [...CLOUD_MODELS.map(withLastFrameExtend).map(withCurrentPrice), ...cloudTools];
+
+// ---------------------------------------------------------------------------
+// Fuobe Originals: one model on both engines
+
+const ORIGINAL_HALVES = new Map(ORIGINAL_CLOUD.map((m) => [m.id, m]));
+
+/**
+ * A Fuobe Original (build plan O2+): its ComfyUI routes on the user's GPU and its cloud half on hosted open weights
+ * (generated from the research by scripts/gen-cloud-models.py), as one model that runs on both engines. The open
+ * engine is listed first: it's free. The options are the Original's own (the same on both engines).
+ */
+function original(spec: { id: string; open: ModelRoute[]; options: ModelOptions; tagline?: string }): ModelDef {
+  const cloud = ORIGINAL_HALVES.get(spec.id);
+  if (!cloud) throw new Error(`${spec.id} has no cloud half in cloud-models.generated.ts (run pnpm gen:catalog)`);
+  return {
+    ...cloud,
+    engine: "open",
+    engines: ["open", "cloud"],
+    tagline: spec.tagline ?? cloud.tagline,
+    badges: ["new"],
+    routes: [...spec.open, ...cloud.routes],
+    options: spec.options,
+  };
+}
+
+/** Fuobe DoP on both engines: a start frame (and an end frame for a transition), 3 or 5 s (49 or 81 frames at 16 fps on Wan). */
+const DOP_OPTIONS: ModelOptions = {
+  aspectRatios: ["auto", ...VID_AR],
+  durations: [3, 5],
+  resolutions: ["480p", "720p"],
+  seed: true,
+  negativePrompt: true,
+  endFrame: true,
+  maxImages: 1,
+  requires: { images: 1, msg: "Add a start frame: Fuobe DoP moves the camera through your picture" },
+};
+
+/** Soul's options on both engines (research §4.3): 7 shapes, a 720p (about 1 MP) and a 1080p (about 2 MP) tier, 1–4 images. */
+const SOUL_OPTIONS: ModelOptions = { aspectRatios: SOUL_ASPECTS, resolutions: SOUL_TIERS, seed: true, maxOutputs: 4 };
+
+/** Fuobe Soul, Soul HD and Soul Cinema (src/lib/catalog/soul.ts applies the look). */
+const originals: ModelDef[] = [
+  original({
+    id: "fuobe-soul",
+    open: [
+      comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the look's LoRAs"),
+      // Restyle a picture with the look (Soul 2.0's image to image); it keeps the picture's shape.
+      comfy("edit", "z-image-turbo-i2i", "Z-Image Turbo image to image with the look's LoRAs"),
+    ],
+    options: { ...SOUL_OPTIONS, looks: { label: "Look" }, maxImages: 1 },
+  }),
+  original({
+    id: "fuobe-soul-hd",
+    open: [comfy("t2i", "qwen-image-2512-t2i", "Qwen-Image 2512: the look's words, clean lettering")],
+    options: { ...SOUL_OPTIONS, looks: { label: "Look" }, negativePrompt: true },
+  }),
+  original({
+    id: "fuobe-soul-cinema",
+    open: [comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the film-still LoRAs")],
+    // 21:9 is a crop of the 16:9 picture, made after generation (research §4.5).
+    options: { ...SOUL_OPTIONS, aspectRatios: [...SOUL_ASPECTS, CINEMA_CROP] },
+  }),
+  // Fuobe DoP (O4): camera motions, Mix and effects (src/lib/catalog/dop.ts maps each preset to its LoRAs). Higgsfield's
+  // DoP makes 3 or 5 s clips from a start frame; "auto" keeps the picture's shape.
+  {
+    ...original({
+      id: "fuobe-dop",
+      open: [
+        // A pose Wan 2.2 Fun Camera makes natively (params.extra.cameraMotion) runs on wan22-fun-camera-14b instead.
+        comfy("i2v", "wan22-i2v-14b", "Wan 2.2 14B with the motion's LoRAs on their experts, or Fun Camera's pose"),
+        comfy("flf2v", "wan22-flf2v-14b", "Wan 2.2 14B start and end frame with the effect's LoRAs"),
+        // Frames mode: one start/end-frame clip per pair of frames, the motion's LoRAs on each, then joined.
+        KEYFRAME_FILM,
+      ],
+      tagline: "Camera motions and effects with their LoRAs on Wan 2.2 · free on your GPU (24 GB), or hosted on fal",
+      options: DOP_OPTIONS,
+    }),
+    // 480p on the user's GPU (720p takes about three times as long); 720p in the cloud, where a run with LoRAs costs the same.
+    engineDefaults: { open: { resolution: "480p" } },
+  },
+  {
+    ...original({
+      id: "fuobe-dop-ltx",
+      open: [
+        comfy("i2v", "ltx23-i2v-lora", "LTX-2.3 22B distilled with the motion's LoRAs"),
+        comfy("flf2v", "ltx23-flf2v-lora", "LTX-2.3 22B distilled, start and end frame, with the transition LoRA"),
+      ],
+      // The graphs load the 22B fp8 checkpoint (29.5 GB) and the Gemma text encoder: 32 GB of VRAM (the manifest's vramGb).
+      tagline: "FPV, wind and transitions on LTX-2.3 with its camera LoRAs · free on your GPU (32 GB), or hosted on fal",
+      options: { ...DOP_OPTIONS, resolutions: ["720p"], audio: true },
+    }),
+    // Sound in the cloud only (fal's generate_audio): the open LTX-2.3 graphs decode no audio, so no toggle there.
+    engineOptions: { open: { audio: false } },
+  },
+  // Fuobe Cinema (O6): Cinema Studio 4.0's Original (src/lib/catalog/cinema.ts compiles the Director into the prompt and
+  // turns a camera move into a camera LoRA, a Fun Camera pose or LTX-2.3's camera_lora). On the user's GPU it is Wan 2.2
+  // 14B Lightning, 3 or 5 s at 16 fps (extend and edit run on Wan 2.2 Fun VACE, sound on LTX-2.5); in the cloud LTX-2.3
+  // 22B with sound, up to 20 s at 24 fps, extend and edit included.
+  {
+    ...original({
+      id: "fuobe-cinema",
+      open: [
+        comfy("t2v", "wan22-t2v-14b-lightx2v", "Wan 2.2 14B Lightning with the Director's prompt"),
+        // A camera pose (params.extra.cameraMotion) runs on wan22-fun-camera-14b instead; a move's camera LoRA is injected.
+        comfy("i2v", "wan22-i2v-14b-lightx2v", "Wan 2.2 14B Lightning with the move's camera LoRA, or Fun Camera's pose"),
+        comfy("flf2v", "wan22-flf2v-14b", "Wan 2.2 14B start and end frame"),
+      ],
+      tagline: "Cinema Studio's Director on open weights · Wan 2.2 Lightning free on your GPU (24 GB), or LTX-2.3 with sound on fal",
+      options: ORIGINAL_HALVES.get("fuobe-cinema")?.options ?? {},
+    }),
+    engineDefaults: { open: { resolution: "480p", duration: 5, generateAudio: false } },
+    // Wan 2.2 Lightning: 3 or 5 s, three shapes, 480p or 720p, no sound; several shots render one clip each, then join.
+    engineOptions: { open: { durations: [3, 5], aspectRatios: VID_AR, resolutions: ["480p", "720p"], audio: false, multiShot: CONCAT_SHOTS } },
+  },
+  // Fuobe Genjutsu (O5): Higgsfield's Genjutsu rebuilt on open weights, one model per mode on both engines, and Lite as the
+  // cheaper, faster tier of the same Original (src/lib/catalog/genjutsu.ts plans the pieces, masks, looks and sound).
+  original({
+    id: "fuobe-genjutsu-motion",
+    open: [comfy("motion-transfer", "wan-animate2", "Wan Animate 2: the whole selection in 81-frame fragments, the clip's fps and sound kept")],
+    tagline: "Your character performs the clip's moves · Wan Animate 2 free on your GPU (24 GB), Wan 2.2 Animate on fal",
+    options: { seed: true, resolutions: ["480p", "720p"], maxImages: 1, promptOptional: true },
+  }),
+  original({
+    id: "fuobe-genjutsu-motion-lite",
+    open: [comfy("motion-transfer", "wan-animate2", "Wan Animate 2 at 480p with 4 distilled steps")],
+    tagline: "The quick tier: 480p · Wan Animate 2 in 4 steps on your GPU, Wan 2.2 Animate turbo on fal",
+    options: { seed: true, resolutions: ["480p"], maxImages: 1, promptOptional: true },
+  }),
+  {
+    ...original({
+      id: "fuobe-genjutsu-swap",
+      open: [comfy("video-swap", "video-swap-wan-vace", "SAM 3.1 follows what you name, Wan 2.1 VACE 14B paints your first reference in; 81 frames per window")],
+      tagline: "Swap a thing, a person or an outfit for your reference · Wan VACE + SAM 3.1 free on your GPU (24 GB), or hosted on fal",
+      options: { seed: true, negativePrompt: true, resolutions: ["480p", "720p"], maxImages: 4 },
+    }),
+    engineOptions: { open: { maxImages: 1 } },
+  },
+  {
+    ...original({
+      id: "fuobe-genjutsu-swap-lite",
+      open: [comfy("video-swap", "video-swap-wan-vace", "SAM 3.1 + Wan 2.1 VACE 14B at 480p")],
+      tagline: "The quick tier: 480p · Wan VACE + SAM 3.1 on your GPU, accelerated Wan VACE on fal",
+      options: { seed: true, negativePrompt: true, resolutions: ["480p"], maxImages: 4 },
+    }),
+    engineOptions: { open: { maxImages: 1 } },
+  },
+  original({
+    id: "fuobe-genjutsu-restyle",
+    open: [comfy("v2v", "video-restyle-wan22-fun-vace", "the restyled first frame, then every frame with depth; 5 s segments at 16 fps")],
+    tagline: "Every frame takes a Fuobe look, motion and framing kept · Wan 2.2 Fun VACE free on your GPU (24 GB), or hosted on fal",
+    options: { seed: true, negativePrompt: true, resolutions: ["480p", "720p"], maxImages: 4 },
+  }),
+  // Character swap (Openjutsu, Akatz Labs' H3 Character Swap): MiniMax H3 with the Character Swap LoRA. On your GPU the
+  // h3_character_swap graph finds the person with SAM 3.1 and regenerates only them in 124-frame windows, keeping the
+  // clip's own sound; on fal, H3 reference-to-video with the same LoRA (no mask), the clip's sound put back.
+  original({
+    id: "fuobe-character-swap",
+    open: [comfy("video-swap", "video-character-swap-h3", "SAM 3.1 picks the person on the part's first frame; H3 regenerates them in 124-frame windows, 18 frames of history")],
+    tagline: "The person in your clip becomes your character · MiniMax H3 free on your GPU (48 GB+ advised), or hosted on fal",
+    options: { seed: true, resolutions: ["480p", "768p"], maxImages: 2 },
+  }),
 ];
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */
@@ -1303,6 +1743,31 @@ const local: ModelDef[] = [
     defaults: { aspectRatio: "9:16", resolution: "480p" },
     hidden: true,
   }),
+  // Click to Ad's logo end card (r4/marketing-mixed): core nodes, no model, CPU.
+  o({
+    id: "oss-append-endcard",
+    name: "Append end card",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Ends an ad on a still (its logo card) and keeps the ad's sound; the ad's picture is copied, not re-encoded · CPU",
+    routes: [comfy("concat", "video-append-endcard", "the ad (inputs.video) + the card (images[0]) at the ad's own size and frame rate; only for clips the open engine made")],
+    options: { maxImages: 1, promptless: true },
+    defaults: { duration: 2.5 },
+    hidden: true,
+  }),
+  o({
+    id: "oss-still-to-clip",
+    name: "Still to clip",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Holds a still (an end card) for a few seconds, with a silent sound track · no model, CPU",
+    routes: [comfy("still-motion", "still-to-clip", "centre-cropped to the clip size; joined after clips the open engine didn't make")],
+    options: { aspectRatios: VID_AR, resolutions: ["480p", "720p", "1080p"], maxImages: 1, promptless: true },
+    defaults: { aspectRatio: "9:16", resolution: "480p", duration: 2.5 },
+    hidden: true,
+  }),
   o({
     id: "oss-join-sound2",
     name: "Join clips (keep the second clip's sound)",
@@ -1317,4 +1782,4 @@ const local: ModelDef[] = [
   }),
 ];
 
-export const MODELS: ModelDef[] = [...cloud, ...open, ...local];
+export const MODELS: ModelDef[] = [...originals, ...cloud, ...open, ...local];

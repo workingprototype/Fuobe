@@ -1,0 +1,272 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "cinema",
+  "title": "Fuobe Cinema · Director, camera moves and shot lists",
+  "description": "Fuobe Cinema (O6), Cinema Studio 4.0's Original: on the GPU Wan 2.2 14B Lightning, in the cloud LTX-2.3 22B on fal with prompt expansion off. Director cases carry the prompt Cinema compiles from the Director's Panel; camera-move cases also carry the move as LTX-2.3's camera_lora (cloud only); shot lists render each shot as its own clip with the same seed, so continuity across shots can be compared. Variants: the Original as it ships, the camera move in words only (camera_lora none), fal's prompt expansion on, Wan 2.2 A14B hosted instead of LTX-2.3, and Seedance 2.5 as the partner reference. Nothing here comes from Higgsfield: the scenes are Fuobe's own.",
+  "original": "fuobe-cinema",
+  "kind": "video",
+  "targets": {
+    "open": {
+      "models": [
+        "fuobe-cinema",
+        "oss-wan22-14b-fast"
+      ],
+      "op": "t2v",
+      "params": {
+        "aspectRatio": "16:9",
+        "duration": 5,
+        "resolution": "480p"
+      }
+    },
+    "cloud": {
+      "models": [
+        "fuobe-cinema",
+        "ltx-2-3-22b-cloud"
+      ],
+      "op": "t2v",
+      "params": {
+        "aspectRatio": "16:9",
+        "duration": 5,
+        "resolution": "720p"
+      }
+    },
+    "demo": {
+      "models": [
+        "fuobe-cinema",
+        "oss-wan22-14b-fast"
+      ],
+      "op": "t2v",
+      "params": {
+        "aspectRatio": "16:9",
+        "duration": 5
+      }
+    }
+  },
+  "defaults": {
+    "seeds": [
+      1001
+    ],
+    "metrics": [
+      "clip",
+      "temporal",
+      "continuity"
+    ],
+    "candidate": "original",
+    "timeoutSeconds": 3600
+  },
+  "variants": {
+    "original": {
+      "description": "Fuobe Cinema as Cinema runs it: the compiled Director prompt, the move as camera_lora in the cloud, prompt expansion off"
+    },
+    "words": {
+      "description": "The same without LTX-2.3's camera LoRA (camera_lora none): does the camera LoRA beat the move's words?",
+      "extra": {
+        "camera_lora": "none"
+      },
+      "engines": [
+        "cloud"
+      ]
+    },
+    "expansion": {
+      "description": "The same with fal's prompt expansion on: does rewriting the compiled prompt help or hurt?",
+      "extra": {
+        "enable_prompt_expansion": true
+      },
+      "engines": [
+        "cloud"
+      ]
+    },
+    "wan": {
+      "description": "Wan 2.2 A14B hosted on fal instead of LTX-2.3 (the cloud base Fuobe DoP uses)",
+      "models": {
+        "cloud": [
+          "wan-2-2-a14b-cloud"
+        ]
+      },
+      "engines": [
+        "cloud"
+      ]
+    },
+    "partner": {
+      "description": "Seedance 2.5 (Cinema Studio 4.0's engine) for reference",
+      "models": {
+        "cloud": [
+          "seedance-2-5"
+        ]
+      },
+      "engines": [
+        "cloud"
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "cinema/director-noir",
+      "title": "Director: noir, 80s, 35mm anamorphic, window light, a palette",
+      "prompts": [
+        {
+          "id": "p1",
+          "text": "A detective lights a match in the rain under a flickering streetlight. Noir film: hard shadow and high contrast. Set in the 1980s: saturation and lens character of 1980s production. Shot on 35mm Film (grain, tonal response, analog warmth), with an anamorphic lens (oval bokeh, horizontal flares, slight barrel distortion), 50mm focal length (normal: close to the human eye, honest proportions). Lighting: window, single directional daylight source through a window; architecture decides light and shadow. Colour grade following the \"Neon Rain at Midnight\" palette #0c0c0e, #334d4e, #7b3612, #655254, #676650, #497197, #708986, #b3978e, #95b0c2, #bebc9d, #f3e04e, #446bc7 (shadows to highlights, accent #446bc7)."
+        }
+      ],
+      "tags": [
+        "director"
+      ],
+      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-original.test.ts checks it against planCinema)."
+    },
+    {
+      "id": "cinema/director-epic",
+      "title": "Director: epic, 2020s, modern clean lens at 24mm, deep focus, contre-jour",
+      "prompts": [
+        {
+          "id": "p1",
+          "text": "A lone rider crosses a vast salt flat at sunrise, dust trailing behind the horse. Epic film: wide compositions, environment as part of the subject, light across the frame. Set in the 2020s: contemporary, unmodified digital look. Shot on a modern digital cinema camera (clean, high-resolution contemporary digital), with a clean sharp lens (maximum resolution, minimum aberration), 24mm focal length (wide: the place is part of the shot), f/11 aperture (whole scene sharp front to back). Lighting: contre jour, shooting into the light, like Silhouette but with more spill and flare."
+        }
+      ],
+      "tags": [
+        "director"
+      ],
+      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-original.test.ts checks it against planCinema)."
+    },
+    {
+      "id": "cinema/director-comedy",
+      "title": "Director: comedy, 60s, 8mm warm vintage, calm, practicals, a palette",
+      "prompts": [
+        {
+          "id": "p1",
+          "text": "Two old friends argue over the last slice of cake at a crowded birthday party. Comedy film: open framing, comic timing at shot level, room to react. Set in the 1960s: grain, colour response and lens character of 1960s film stock. Montage pacing: calm, long takes, cut only once a moment has played out. Shot on 8mm Film (soft, low-resolution home-movie texture), with a warm vintage lens (diffusion, warmth, blooming highlights, gentle skin). Lighting: practicals, lights the scene only from visible in-frame sources (lamps, candles, signage). Colour grade following the \"Bubblegum Boulevard\" palette #181415, #2f3973, #62382f, #6b524e, #957a70, #878894, #b48f60, #65b0cb, #c3b0a9, #81d7f9, #e5e0df, #aa637e (shadows to highlights, accent #aa637e)."
+        }
+      ],
+      "tags": [
+        "director"
+      ],
+      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-original.test.ts checks it against planCinema)."
+    },
+    {
+      "id": "cinema/move-dolly-in",
+      "title": "Camera move: Dolly In",
+      "prompts": [
+        {
+          "id": "p1",
+          "text": "A violinist plays alone on an empty theatre stage, a single spotlight above her. Camera: the camera performs a smooth, steady dolly in toward the subject, gradually tightening the framing."
+        }
+      ],
+      "extra": {
+        "camera_lora": "dolly_in"
+      },
+      "engines": [
+        "cloud",
+        "demo"
+      ],
+      "tags": [
+        "move"
+      ],
+      "note": "Cloud only: the move as LTX-2.3's camera_lora, as Cinema sends it (on the GPU the move is a Wan LoRA or a Fun Camera pose, measured by the dop suite)."
+    },
+    {
+      "id": "cinema/move-truck-left",
+      "title": "Camera move: Truck Left",
+      "prompts": [
+        {
+          "id": "p1",
+          "text": "A night market street lined with food stalls, steam rising, people browsing. Camera: the camera trucks sideways to the left, parallel to the subject, with strong parallax."
+        }
+      ],
+      "extra": {
+        "camera_lora": "dolly_left"
+      },
+      "engines": [
+        "cloud",
+        "demo"
+      ],
+      "tags": [
+        "move"
+      ],
+      "note": "Cloud only: the move as LTX-2.3's camera_lora, as Cinema sends it (on the GPU the move is a Wan LoRA or a Fun Camera pose, measured by the dop suite)."
+    },
+    {
+      "id": "cinema/move-crane-up",
+      "title": "Camera move: Crane Up",
+      "prompts": [
+        {
+          "id": "p1",
+          "text": "A small fishing village on a rocky coast at dawn, boats tied in the harbour. Camera: the camera cranes up smoothly, rising above the subject to reveal the scene from above."
+        }
+      ],
+      "extra": {
+        "camera_lora": "jib_up"
+      },
+      "engines": [
+        "cloud",
+        "demo"
+      ],
+      "tags": [
+        "move"
+      ],
+      "note": "Cloud only: the move as LTX-2.3's camera_lora, as Cinema sends it (on the GPU the move is a Wan LoRA or a Fun Camera pose, measured by the dop suite)."
+    },
+    {
+      "id": "cinema/move-static",
+      "title": "Camera move: Static",
+      "prompts": [
+        {
+          "id": "p1",
+          "text": "A cat sleeps on a sunlit windowsill while rain streaks the glass. Camera: locked-off static tripod shot; only the subject moves."
+        }
+      ],
+      "extra": {
+        "camera_lora": "static"
+      },
+      "engines": [
+        "cloud",
+        "demo"
+      ],
+      "tags": [
+        "move"
+      ],
+      "note": "Cloud only: the move as LTX-2.3's camera_lora, as Cinema sends it (on the GPU the move is a Wan LoRA or a Fun Camera pose, measured by the dop suite)."
+    },
+    {
+      "id": "cinema/lighthouse",
+      "title": "The lighthouse keeper (3 shots)",
+      "shots": [
+        {
+          "id": "establish",
+          "prompt": "Wide establishing shot of a lighthouse on a rocky cliff at dusk, waves breaking below, the camera slowly pushes in"
+        },
+        {
+          "id": "keeper",
+          "prompt": "Medium shot inside the lighthouse: an old keeper in a wool sweater climbs the spiral stairs holding a lantern, warm light"
+        },
+        {
+          "id": "lamp",
+          "prompt": "Close-up of the keeper's face lit by the turning lamp, he looks out to sea, the beam sweeps across the dark water"
+        }
+      ],
+      "tags": [
+        "shots"
+      ]
+    },
+    {
+      "id": "cinema/chase",
+      "title": "Rooftop chase (3 shots)",
+      "shots": [
+        {
+          "id": "run",
+          "prompt": "Handheld tracking shot of a courier in a yellow jacket running across wet rooftops at night, neon below"
+        },
+        {
+          "id": "jump",
+          "prompt": "Low angle: the courier leaps the gap between two buildings, slow motion, rain in the air"
+        },
+        {
+          "id": "land",
+          "prompt": "Wide shot from above as the courier lands and rolls on the next roof, the city glowing behind"
+        }
+      ],
+      "tags": [
+        "shots"
+      ]
+    }
+  ]
+}

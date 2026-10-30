@@ -1,11 +1,13 @@
 "use client";
 
-import { AudioLines, Box, FileText, Layers } from "lucide-react";
+import { AudioLines, Box, Download, FileText, Film, Layers } from "lucide-react";
 import { createElement, useEffect, useState } from "react";
 import { loadModelViewer, useViewerSrc, viewerLook } from "@/components/model3d/model-viewer";
-import { viewerGlb } from "@/lib/av/model3d";
-import type { Generation, OutputFile } from "@/lib/catalog/types";
-import { cuesOf, cueTime, isLayered, layerInfo, modelPreview, textOf } from "@/lib/output-actions";
+import { FORMAT_INFO } from "@/lib/av/formats";
+import { splatFormatOf, viewerGlb } from "@/lib/av/model3d";
+import type { Generation, OutputFile, VideoFormat } from "@/lib/catalog/types";
+import { extensionOf } from "@/lib/library";
+import { cuesOf, cueTime, editOnlyFormat, isLayered, layerInfo, modelPreview, textOf, videoPoster } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
 /** Any result as a tile picture: image, video (plays on hover), audio, text card, 3D preview. */
@@ -19,8 +21,8 @@ export function MediaThumb({
   inset,
 }: {
   output: OutputFile;
-  /** The generation it belongs to (3D models show a sibling turntable or poster). */
-  g?: Pick<Generation, "outputs">;
+  /** The generation it belongs to (3D models show a sibling turntable or poster; a clip, its start frame as poster; pro exports a file card). */
+  g?: Pick<Generation, "outputs"> & Partial<Pick<Generation, "op" | "request">>;
   className?: string;
   autoPlay?: boolean;
   /** Letterbox instead of crop (Library "Fit"). */
@@ -32,21 +34,10 @@ export function MediaThumb({
 }) {
   const object = fit ? "object-contain" : "object-cover";
   if (output.kind === "video") {
-    return (
-      <video
-        src={`${output.url}#t=0.1`}
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        autoPlay={autoPlay}
-        onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-        onMouseLeave={(e) => {
-          if (!autoPlay) e.currentTarget.pause();
-        }}
-        className={cn("size-full", object, className)}
-      />
-    );
+    const pro = editOnlyFormat(g, output);
+    if (pro) return <VideoFileCard output={output} format={pro} className={className} />;
+    // With a poster the clip isn't fetched until it plays (a grid of clips no longer loads every one's metadata).
+    return <TileVideo output={output} poster={videoPoster(g, output)} autoPlay={autoPlay} className={cn("size-full", object, className)} />;
   }
   if (output.kind === "audio") {
     return (
@@ -76,6 +67,43 @@ export function MediaThumb({
   }
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={output.url} alt="" loading="lazy" decoding="async" className={cn("size-full", object, className)} />;
+}
+
+/** A muted tile video that plays on hover; a file card when the browser can't decode it (a 10-bit or HEVC file). */
+function TileVideo({ output, poster, autoPlay, className }: { output: OutputFile; poster?: string; autoPlay?: boolean; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <VideoFileCard output={output} className={className} />;
+  return (
+    <video
+      src={`${output.url}#t=0.1`}
+      poster={poster}
+      muted
+      loop
+      playsInline
+      preload={poster ? "none" : "metadata"}
+      autoPlay={autoPlay}
+      onError={() => setFailed(true)}
+      onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+      onMouseLeave={(e) => {
+        if (!autoPlay) e.currentTarget.pause();
+      }}
+      className={className}
+    />
+  );
+}
+
+/** A video the browser doesn't play (ProRes, FFV1, some 10-bit files) as what it is: a file for an editor or player. */
+export function VideoFileCard({ output, format, className }: { output: Pick<OutputFile, "url" | "kind">; format?: VideoFormat; className?: string }) {
+  const info = format ? FORMAT_INFO[format] : undefined;
+  return (
+    <div className={cn("flex size-full flex-col items-center justify-center gap-1.5 bg-muted p-4 text-center text-muted-foreground", className)}>
+      <Film className="size-7" aria-hidden />
+      <span className="text-[13px] font-medium text-foreground">{info?.label ?? "Video file"}</span>
+      <span className="max-w-56 text-[12px] leading-snug">
+        .{extensionOf(output)} · {info ? "made for your editor; browsers don't play it. Download it to use it" : "this browser can't play it here. Download it to watch"}
+      </span>
+    </div>
+  );
 }
 
 /** A 56 px thumbnail for list rows: media where it reads at that size, an icon where it doesn't. */
@@ -161,15 +189,21 @@ export function LayersStack({ g, className, bare }: { g: Generation; className?:
   );
 }
 
-/** A .glb in an orbitable viewer. @google/model-viewer (with three.js) loads only when one is opened. */
+/**
+ * A .glb in an orbitable viewer. @google/model-viewer (with three.js) loads only when one is opened. A Gaussian
+ * splat (.ply / .spz / .ksplat), which it can't load, shows its orbit video or picture and the file to download.
+ * A rigged character plays its animation instead of turning.
+ */
 export function ModelViewer({ output, g }: { output: OutputFile; g: Generation }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [viewer, setViewer] = useState<HTMLElement | null>(null);
+  const splat = splatFormatOf(output);
   // The web GLB (meshopt, WebP) when the server made one, else (older results, or if it fails to load) the original.
   const src = useViewerSrc(viewer, viewerGlb(output), output.url);
   const material = (output.meta?.finish as { material?: unknown } | undefined)?.material;
   useEffect(() => {
+    if (splat) return;
     let live = true;
     loadModelViewer().then(
       () => live && setReady(true),
@@ -178,8 +212,9 @@ export function ModelViewer({ output, g }: { output: OutputFile; g: Generation }
     return () => {
       live = false;
     };
-  }, []);
-  const { poster } = modelPreview(g, output);
+  }, [splat]);
+  const { poster, video } = modelPreview(g, output);
+  if (splat) return <SplatPreview output={output} format={splat} poster={poster} video={video} />;
   if (failed) return <p className="text-[13px] text-white/80">Couldn&apos;t load the 3D viewer. Download the .glb to open it.</p>;
   if (!ready) {
     return (
@@ -197,9 +232,32 @@ export function ModelViewer({ output, g }: { output: OutputFile; g: Generation }
     loading: "lazy",
     reveal: "auto",
     "camera-controls": "",
-    "auto-rotate": "",
+    // A rigged character plays its animation; a still model turns.
+    ...(output.meta?.rigged === true ? { autoplay: "" } : { "auto-rotate": "" }),
     "touch-action": "pan-y",
     ...viewerLook(typeof material === "string" ? material : undefined),
     style: { width: "100%", height: "100%", background: "transparent" },
   });
+}
+
+/** A splat in the full-screen viewer: its orbit video or picture, what Fuobe can't do yet, and the file. */
+function SplatPreview({ output, format, poster, video }: { output: OutputFile; format: string; poster?: string; video?: string }) {
+  return (
+    <div className="flex size-full flex-col items-center justify-center gap-3 p-4 text-center text-white/80">
+      {video ? (
+        <video src={video} controls autoPlay loop muted playsInline aria-label="Orbit video of the splat" className="max-h-[70%] max-w-full" />
+      ) : poster ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={poster} alt="The subject the splat was made from" className="max-h-[70%] max-w-full object-contain" />
+      ) : (
+        <Box className="size-10" aria-hidden />
+      )}
+      <p className="max-w-md text-[13px]">
+        Fuobe doesn&apos;t draw Gaussian splats yet. Download the .{format} and open it in a splat viewer (SuperSplat, for one) to look around it.
+      </p>
+      <a href={output.url} download className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white/15 px-4 text-[13px] font-medium text-white hover:bg-white/25">
+        <Download className="size-4" aria-hidden /> .{format}
+      </a>
+    </div>
+  );
 }

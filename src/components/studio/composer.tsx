@@ -1,27 +1,77 @@
 "use client";
 
-import { ArrowUp, AtSign, Loader2, Sparkles, X } from "lucide-react";
+import { ArrowUp, AtSign, GalleryHorizontalEnd, Loader2, Sparkles, X } from "lucide-react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
-import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "@/lib/catalog/types";
-import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
+import type { Engine, GenerationRequest, MediaKind, ModelDef, Operation, Preset, VideoFormat } from "@/lib/catalog/types";
+import { dualEngine } from "@/lib/catalog/engines";
+import { locksByDefault } from "@/lib/catalog/palettes";
+import { DEFAULT_LOOK, lookCard } from "@/lib/catalog/soul-cards";
+import { formatsOf } from "@/lib/av/formats";
+import { enhance, useClipFacts, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape } from "@/lib/composer";
+import {
+  chainGapProblem,
+  chainTiming,
+  frameSupport,
+  framesBlocker,
+  framesDuration,
+  framesDurations,
+  framesNote,
+  FRAMES_MODELS,
+  frameTimes,
+  keyframeChain,
+  moveFrameAt,
+  OPEN_MIN_GAP,
+  type FrameSupport,
+} from "@/lib/catalog/keyframes";
+import {
+  blockerFor,
+  blockerLine,
+  clipBlocker,
+  clipOutcome,
+  costLabel,
+  engineSwitchModel,
+  enterFrames,
+  filterModels,
+  firstMissingSlot,
+  followEngineParams,
+  framesRequest,
+  framesShape,
+  framesSlots,
+  framesUploading,
+  leaveFrames,
+  namedImageSlots,
+  needsMask,
+  onImageChange,
+  PLACEHOLDER,
+  presetModel,
+  presetOriginal,
+  presetParams,
+  prestepCost,
+  pushRecent,
+  settingsShape,
+  showsPrompt,
+  startStep,
+} from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
 import { useAttach, useComposerBridge, useUploadReaper } from "./attachments";
 import { DialogueEditor, LanguageChip, VoicePicker } from "./audio-controls";
+import { FramesStrip, type FramesNotice } from "./frames-strip";
 import { loadFullCatalog, useCatalog } from "./catalog";
 import { Chip, chipBase, chipIdle } from "./chip";
 import { MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
-import { ControlsChip, ProviderPresetChip } from "./model-controls";
+import { ControlsChip } from "./model-controls";
 import { ModelPicker } from "./model-picker";
 import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
 import { radioKeys, radioTab } from "./radio-keys";
@@ -29,7 +79,7 @@ import { SettingsChip } from "./settings-panel";
 import { ShotsEditor } from "./shots-editor";
 import { SketchTools } from "./sketch-tools";
 import { RECENT_MODELS, useStoredList } from "./stored-list";
-import { useStudio, type Draft } from "./studio-context";
+import { useStartRequest, useStudio, type Draft } from "./studio-context";
 import { useEdgeFade } from "./use-edge-fade";
 import { useSignature } from "../palettes/use-signature";
 
@@ -38,6 +88,11 @@ const EMPTY: StudioElement[] = [];
 /** The motion / effect picker (and its preset icons) is its own chunk: only video studios load it. */
 const PresetChips = dynamic(() => import("./preset-chips"), {
   loading: () => <span aria-hidden className="h-8 w-32 shrink-0 animate-pulse rounded-full bg-secondary" />,
+});
+
+/** Fuobe Soul's Look picker (the look cards): its own chunk. */
+const LookChip = dynamic(() => import("./look-chip"), {
+  loading: () => <span aria-hidden className="h-8 w-28 shrink-0 animate-pulse rounded-full bg-secondary" />,
 });
 
 /** Color signature + Moodboard chips (studios with `signature`): their own chunk too. */
@@ -56,40 +111,70 @@ const defaultLines = (m: ModelDef) => {
 
 // ---------------------------------------------------------------------------
 
+/** Frames mode, as the request needs it: what the model does with frames, the clip's length, and whether it's the open chain. */
+interface FramesContext {
+  support: FrameSupport;
+  duration: number;
+  chained: boolean;
+}
+
 function buildRequest(
   feature: string,
-  draft: Pick<Draft, "slots" | "refs" | "presetId" | "modelId" | "prompt" | "negativePrompt" | "params" | "presetOptions" | "presetStrength" | "mix">,
+  draft: Pick<Draft, "slots" | "refs" | "presetId" | "modelId" | "prompt" | "negativePrompt" | "params" | "presetOptions" | "presetStrength" | "mix" | "frames">,
   op: Operation | undefined,
   promptSuffix?: string,
   refKind: MediaKind = "image",
+  frames?: FramesContext,
+  /**
+   * The model's needs: a Fuobe Original (runs on both engines) names the engine switched to; a model that takes
+   * looks (Fuobe Soul) takes the look's strength with its default look too (no presetId).
+   */
+  target: { engine?: Engine; looks?: boolean } = {},
 ): GenerationRequest {
   const s = draft.slots;
   const refs = draft.refs.filter((x) => !!x?.ref).map((x) => x.ref);
-  const images = [s.image, s.image2, s.image3].filter((x): x is SlotValue => !!x?.ref).map((x) => x.ref).concat(refKind === "image" ? refs : []);
+  let images = [s.image, s.image2, s.image3].filter((x): x is SlotValue => !!x?.ref).map((x) => x.ref).concat(refKind === "image" ? refs : []);
   const videos = refKind === "video" ? refs : [];
+  let endImage = s.endImage?.ref || undefined;
+  let params = draft.params;
+  let pinned = op;
+  // Frames mode: the stills in order at their times (or the first and last as start and end frame), at the strip's length.
+  if (draft.frames && frames) {
+    const sent = framesRequest(draft.frames, frames);
+    images = sent.images;
+    endImage = sent.endImage;
+    params = { ...params, ...sent.params };
+    pinned = op ?? sent.op;
+  }
   return {
     feature,
     presetId: draft.presetId,
     modelId: draft.modelId,
-    op,
+    op: pinned,
     prompt: promptSuffix && draft.prompt.trim() ? `${draft.prompt.trim().replace(/[.\s]+$/, "")}. ${promptSuffix}` : draft.prompt,
     negativePrompt: draft.negativePrompt || undefined,
     inputs: {
       images: images.length ? images : undefined,
-      endImage: s.endImage?.ref || undefined,
+      endImage,
       mask: s.mask?.ref || undefined,
       sketch: s.sketch?.ref || undefined,
       voiceAudio: s.voiceAudio?.ref || undefined,
       voiceAudio2: s.voiceAudio2?.ref || undefined,
       video: s.video?.ref || undefined,
       audio: s.audio?.ref || undefined,
-      videos: videos.length ? videos : undefined,
+      videos: videos.length && !draft.frames ? videos : undefined,
     },
-    params: draft.params,
+    params,
     presetOptions: draft.presetOptions,
-    ...(draft.presetId && draft.presetStrength !== undefined && draft.presetStrength < 1 && { presetStrength: draft.presetStrength }),
+    ...((draft.presetId || target.looks) && draft.presetStrength !== undefined && draft.presetStrength < 1 && { presetStrength: draft.presetStrength }),
     ...(draft.presetId && draft.mix && { mix: draft.mix }),
+    ...(target.engine && { engine: target.engine }),
   };
+}
+
+/** Leaving a model that takes looks (Fuobe Soul) for one that doesn't: the look (its presetId) doesn't come along. */
+function lookCleared(from: ModelDef | undefined, to: ModelDef): Partial<Draft> {
+  return from?.options.looks && !to.options.looks ? { presetId: undefined, presetStrength: undefined } : {};
 }
 
 /** Docked and collapsed, the composer hides its tiles: this event asks it to open first. */
@@ -116,10 +201,15 @@ function pulseSlot(root: HTMLElement | null, key: string, retried = false) {
   );
 }
 
+/** An empty attachment tile's upload button (focus it, or click it from a toast action to open the file picker). */
+function slotButton(root: HTMLElement | null, key: string) {
+  return root?.querySelector<HTMLButtonElement>(`[data-slot-key="${key}"] button[aria-label$=": upload"]`) ?? null;
+}
+
 export function Composer({ docked }: { docked: boolean }) {
-  const { config, draft, setDraft, setSlot } = useStudio();
+  const { config, draft: typed, setDraft, setSlot } = useStudio();
   const catalog = useCatalog();
-  const [engine, setEngine] = useEngine();
+  const [engine, setEngine, engineMode] = useEngine();
   const create = useCreateGeneration();
   const [enhancing, setEnhancing] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -129,6 +219,13 @@ export function Composer({ docked }: { docked: boolean }) {
   const hydrated = useHydrated();
   const liveStatus = useStatus().data;
   const status = hydrated ? liveStatus : undefined;
+  // Upscale hub: the attached clip's header (length, size, frame rate). Its length prices per-second tools and
+  // travels with the request (params.sourceDuration); a clip swapped since a Reuse never keeps the old one's.
+  const facts = useClipFacts(config.clipFacts && !typed.slots.video?.uploading ? typed.slots.video?.ref : undefined).data;
+  const draft = useMemo(
+    () => (config.clipFacts ? { ...typed, params: { ...typed.params, sourceDuration: typed.slots.video?.ref ? facts?.duration : undefined } } : typed),
+    [config.clipFacts, typed, facts?.duration],
+  );
   const liveElements = useElements().data;
   const elements = (hydrated && liveElements) || EMPTY;
   const [, setRecent] = useStoredList(RECENT_MODELS);
@@ -146,12 +243,29 @@ export function Composer({ docked }: { docked: boolean }) {
     return () => el?.removeEventListener(EXPAND_EVENT, expand);
   }, []);
 
-  const preset: Preset | undefined = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
-  const lockedModel = preset?.type === "app";
   const pickerOps = config.pickerOps ?? config.ops;
   const models = useMemo(() => filterModels(catalog.models, { kind: config.kind, ops: pickerOps }), [catalog.models, config.kind, pickerOps]);
   const model: ModelDef | undefined = catalog.getModel(draft.modelId);
-  const presetLoading = !!draft.presetId && !preset && !catalog.complete;
+  // Fuobe Soul's presetId is a look (its own chip), not an app, motion or effect.
+  const takesLook = !!model?.options.looks;
+  const preset: Preset | undefined = draft.presetId && !takesLook ? catalog.getPreset(draft.presetId) : config.preset;
+  const lockedModel = preset?.type === "app";
+  const presetLoading = !!draft.presetId && !takesLook && !preset && !catalog.complete;
+  /** What the request names for its model: the engine (only a model that runs on both, a Fuobe Original), and whether it takes looks. */
+  const targetFor = (id: string) => {
+    const m = catalog.getModel(id);
+    return { engine: dualEngine(m) ? engine : undefined, looks: !!m?.options.looks };
+  };
+
+  // A curated moodboard on a model that takes looks is a look: it moves to the Look chip, so the chip shows what
+  // runs (a /moodboards link, or a pick in the Moodboard panel, would otherwise override the chip unseen).
+  const curatedId = draft.signature?.moodboard?.kind === "curated" ? draft.signature.moodboard.id : undefined;
+  useEffect(() => {
+    const card = takesLook && curatedId ? lookCard(curatedId) : undefined;
+    if (!card) return;
+    setDraft((d) => ({ presetId: card.id === DEFAULT_LOOK ? undefined : card.id, signature: { ...d.signature, moodboard: undefined } }));
+    toast(`${card.name} is a Fuobe Soul look: it's on the Look chip`);
+  }, [takesLook, curatedId, setDraft]);
 
   // Presets handed over in the URL, a Mix, or a model outside this studio's slice: fetch the full catalog.
   const needsFull = presetLoading || (!!draft.mix && !catalog.getPreset(draft.mix.presetId)) || (catalog.ready && !model);
@@ -159,13 +273,69 @@ export function Composer({ docked }: { docked: boolean }) {
     if (needsFull) void loadFullCatalog();
   }, [needsFull]);
 
-  // Keep the selected model in sync with the engine switch.
+  // Keep the selected model in sync with the engine switch. A camera motion or effect keeps its Original (Fuobe DoP),
+  // moving to the model its move names on this engine (Jib Up: Fuobe DoP on the GPU, Fuobe DoP · LTX in the cloud) when
+  // the engine changes; the same Original on the other engine takes that engine's defaults (480p on the GPU, 720p in the
+  // cloud) for the settings the person left alone.
+  const seen = useRef<{ engine: Engine; model?: ModelDef }>({ engine, model });
   useEffect(() => {
-    if (!model || model.engine === engine) return;
-    const next = lockedModel ? (engine === "open" ? preset?.open?.modelId : preset?.cloud?.modelId) : config.defaultModels[engine];
+    const before = seen.current;
+    seen.current = { engine, model };
+    if (!model) return;
+    const next = engineSwitchModel({ model, preset, engine, from: before.engine, defaults: config.defaultModels });
     const m = next ? catalog.getModel(next) : undefined;
-    if (m) setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt } }));
-  }, [engine, model, lockedModel, preset, config.defaultModels, setDraft, catalog]);
+    if (!m) {
+      if (before.engine === engine || before.model?.id !== model.id || before.model === model) return;
+      const from = before.model.defaults ?? {};
+      const to = model.defaults ?? {};
+      setDraft((d) => {
+        const params = d.modelId === model.id ? followEngineParams(d.params, from, to) : undefined;
+        return params ? { params } : {};
+      });
+      return;
+    }
+    // Only the model this effect saw: a hand-off applied in the same commit (?model=, a layout effect) already
+    // replaced it, and swapping it for the engine's default would undo the link (it landed on Z-Image Turbo).
+    const route = m.id === presetModel(preset, engine) ? presetParams(preset, engine) : {};
+    setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
+  }, [engine, model, preset, config.defaultModels, setDraft, catalog]);
+
+  // Settings → Models & licences switched the model off (a default, a remembered pick, a Reuse, a link): the composer
+  // moves to the studio's default on this engine, else the first model of its list that is on, and says so. With
+  // none on, Generate says what to turn on (accessError).
+  const offModel = model && !catalog.offered(model.id, engine) ? model : undefined;
+  const fallback = offModel ? [config.defaultModels[engine], ...models.filter((m) => m.engine === engine).map((m) => m.id)].find((id) => !!id && catalog.offered(id, engine) && !!catalog.getModel(id)) : undefined;
+  useEffect(() => {
+    if (!offModel || !fallback || lockedModel) return;
+    const m = catalog.getModel(fallback)!;
+    setDraft((d) => (d.modelId !== offModel.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(offModel, m) }));
+    toast(`${offModel.name} is turned off in Settings → Models & licences, so this uses ${m.name}`, { id: "model-access" });
+  }, [offModel, fallback, lockedModel, catalog, setDraft]);
+
+  // A camera motion or effect runs on its Original on this engine (Fuobe DoP): picking one moves the composer there,
+  // with the move's own settings (Focus Change: 6 s, silent). Another video model can be picked after it; it takes
+  // the move's words. A move whose cloud route is a partner model's words leaves the person's model as it is.
+  const pickPreset = (id?: string) => {
+    if (!id) return setDraft({ presetId: undefined, mix: undefined, presetStrength: undefined });
+    const picked = catalog.getPreset(id);
+    const want = presetOriginal(picked, engine);
+    const m = want && want !== model?.id ? catalog.getModel(want) : undefined;
+    if (!m) return setDraft({ presetId: id });
+    const route = presetParams(picked, engine);
+    setDraft((d) => ({ presetId: id, modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
+  };
+  // A motion handed over in the link (?preset= from the Motions gallery) is known once the presets load: it moves the
+  // studio's untouched default model to its Original, once per preset.
+  const adoptedPreset = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const want = presetOriginal(preset, engine);
+    if (!preset || !want || !model || adoptedPreset.current === preset.id) return;
+    adoptedPreset.current = preset.id;
+    if (model.id === want || model.id !== config.defaultModels[engine]) return;
+    const m = catalog.getModel(want);
+    const route = presetParams(preset, engine);
+    if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
+  }, [preset, engine, model, config.defaultModels, catalog, setDraft]);
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
   const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
@@ -185,6 +355,14 @@ export function Composer({ docked }: { docked: boolean }) {
       : Math.min(config.multiRef.max, Math.max(0, (opts.maxImages ?? 1) - slots.filter((s) => s.accept === "image").length));
   const attach = useAttach(slots, refMax);
 
+  // Frames mode (Video studio): up to 10 stills at their times, as the picked model can take them.
+  const framesOn = !!config.frames && !!draft.frames;
+  const framesCtx: FramesContext | undefined =
+    framesOn && model ? { support: frameSupport(model), duration: framesDuration(model, draft.params.duration), chained: !!keyframeChain(model) } : undefined;
+  const framesAt = framesCtx && draft.frames ? frameTimes(draft.frames.map((f) => f.at), framesCtx.duration) : [];
+  // The open chain's gaps (and one frame's clip) must be clips its model makes; the planner checks two or more frames too.
+  const framesGap = framesCtx?.chained && model && framesAt.length ? chainGapProblem(framesAt, framesCtx.duration, chainTiming(model)) : null;
+
   // The page's drop zone hands its files to this composer.
   useEffect(() => {
     if (!bridgeRef) return;
@@ -197,7 +375,7 @@ export function Composer({ docked }: { docked: boolean }) {
   // A picked palette / moodboard routes the request (and can move it to another model) before anything else.
   const signature = useSignature(!!config.signature, draft.signature);
   const prepare = (d: typeof draft) => {
-    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind));
+    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind, framesCtx, targetFor(d.modelId)));
     // Planned with the signature's sentences in the prompt (as the server runs it); sent with them apart.
     const raw = signed.worded;
     const m = catalog.getModel(raw.modelId) ?? model;
@@ -212,9 +390,17 @@ export function Composer({ docked }: { docked: boolean }) {
   // operation are known up front and the blocker can name the slot in the studio's own words.
   // Studios that need one of several inputs (Lipsync: a portrait or a video) name the group.
   const anyOf = preset?.inputs ? undefined : config.anyOf;
-  const missing = firstMissingSlot(slots, draft.slots, anyOf);
-  const uploading = Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading);
-  const engineError = lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null;
+  // Frames mode has its own strip: the start frame is frame 1 (a camera motion's start frame tile isn't asked for).
+  const askedSlots = framesOn ? framesSlots(slots) : slots;
+  const missing = firstMissingSlot(askedSlots, draft.slots, anyOf);
+  const uploading = Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading) || (framesOn && framesUploading(draft.frames));
+  // Export without a ComfyUI to write it (none connected, or the install runs cloud APIs only): say so and offer the cloud route.
+  // A cloud-only install refuses open models, and with demo mode off nothing else runs it, so Generate says why.
+  const comfyMissing = !!config.comfyOnly && !!status && (engineMode === "cloud" || !status.providers.comfyui?.configured);
+  const comfyBlock = comfyMissing && model?.engine === "open" && (engineMode === "cloud" || status?.demoMode === "off") ? "Needs ComfyUI: see the note below" : null;
+  const accessError = offModel && (!fallback || lockedModel) ? `${offModel.name} is turned off in Settings → Models & licences` : null;
+  const engineError =
+    (lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null) ?? accessError ?? comfyBlock;
   let op: Operation | undefined;
   let cost: number | null = null;
   let planError: string | null = null;
@@ -222,27 +408,41 @@ export function Composer({ docked }: { docked: boolean }) {
     try {
       const stand = (v: SlotValue | null | undefined, kind: MediaKind): SlotValue | null | undefined => (v?.uploading ? { ...v, ref: PLACEHOLDER[kind] } : v);
       const planSlots: Draft["slots"] = Object.fromEntries(Object.entries(draft.slots).map(([k, v]) => [k, stand(v, v?.kind ?? "image")]));
-      for (const s of slots) if (s.required && !planSlots[s.key]?.ref) planSlots[s.key] = { ref: PLACEHOLDER[s.accept], preview: "", kind: s.accept };
+      for (const s of askedSlots) if (s.required && !planSlots[s.key]?.ref) planSlots[s.key] = { ref: PLACEHOLDER[s.accept], preview: "", kind: s.accept };
       for (const g of anyOf ?? []) {
         const first = slots.find((s) => s.key === g[0]);
         if (first && !g.some((k) => planSlots[k]?.ref)) planSlots[first.key] = { ref: PLACEHOLDER[first.accept], preview: "", kind: first.accept };
       }
-      const { request: planned } = prepare({ ...draft, slots: planSlots, refs: draft.refs.map((r) => stand(r, r.kind) as SlotValue) });
+      const { request: planned } = prepare({
+        ...draft,
+        slots: planSlots,
+        refs: draft.refs.map((r) => stand(r, r.kind) as SlotValue),
+        frames: draft.frames?.map((f) => ({ ...f, value: stand(f.value, "image") as SlotValue })),
+      });
       const plan = planGeneration({ ...planned, prompt: planned.prompt || (config.promptOptional ? " " : "") }, catalog.getModel, catalog.getPreset);
       op = plan.op;
-      cost = estimateCost(plan.model, plan.params, plan.jobs);
+      // A run with LoRAs (a Soul look) goes to the route's LoRA endpoint, which has its own price.
+      cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op, plan.loras.length > 0 && routesFor(plan.model, plan.op).some((r) => !!r.loraEndpoint));
+      // A relight effect relights the start frame first (free on the GPU, about $0.04 in the cloud).
+      if (cost !== null) cost += prestepCost(preset, plan.model.id, engine);
     } catch (e) {
       planError = (e as Error).message;
     }
   }
+  // What the clip's header rules out before Generate (as the server does): an upscale that wouldn't enlarge it,
+  // an open tool that holds the whole clip in more RAM than the ComfyUI can spare.
+  const clipProblem = config.clipFacts ? clipBlocker(studioOp ?? op, facts, draft.params, model, status?.providers.comfyui?.ramBytes) : null;
+  if (clipProblem && !planError) planError = clipProblem;
   if (signed.blocker) planError = signed.blocker;
   // Models that take no prompt (try-on, 3D, transcription, upscalers), or can run without one, never ask for one.
   const promptMissing =
     !config.promptOptional && !opts.promptless && !opts.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
   const blocker = blockerFor({
-    loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
+    // A model outside the studio's slice (remembered, or handed over) is known once the full catalog arrives: loading until then, not "Pick a model".
+    loading: !catalog.ready || (!model && !catalog.complete) ? "Loading models…" : presetLoading ? "Loading presets…" : null,
     model: !!model,
     engineError,
+    frames: framesOn && model ? (framesBlocker(model, draft.frames!.length) ?? (framesGap ? { message: framesGap } : null)) : null,
     missing,
     uploading,
     maskMissing: needsMask(model, config.sketch, draft.slots),
@@ -254,9 +454,11 @@ export function Composer({ docked }: { docked: boolean }) {
     if (blocker || create.isPending || signature.lock.isPending) {
       if (blocker) {
         // One blocker toast at a time (pressing Generate again replaces it), gone once a run starts.
-        toast(blocker.message, { id: "composer-blocker" });
+        // A missing photo or clip: the toast's Upload opens the file picker (a click, so the browser allows it).
+        const slot = blocker.slot;
+        toast(blocker.message, { id: "composer-blocker", action: slot ? { label: "Upload", onClick: () => slotButton(root.current, slot)?.click() } : undefined });
         // Point at the tile to fill: the missing slot, or the clip list of a tool that only takes clips.
-        const target = blocker.slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
+        const target = slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
         if (target) pulseSlot(root.current, target);
       }
       return;
@@ -265,7 +467,7 @@ export function Composer({ docked }: { docked: boolean }) {
     setRecent((r) => pushRecent(r, draft.modelId));
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
     // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
-    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind));
+    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx, targetFor(draft.modelId)));
     // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
     if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
     create.mutate(sent.request, {
@@ -303,12 +505,32 @@ export function Composer({ docked }: { docked: boolean }) {
       else extra[key] = v;
       return { params: { ...d.params, extra: Object.keys(extra).length ? extra : undefined } };
     });
-  // Studios with the Moodboard chip pick Soul's styles there (its Curated tab), not in a second Style chip.
-  const soulStyles = !!config.signature && (opts.presets?.source === "soul-v1" || opts.presets?.source === "soul-v2");
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
-  const showPrompt = promptShown(config.hidePrompt, preset?.userPrompt, model?.options.promptless);
+  // Booleans in, not the model's options object: the React Compiler keeps the memos above.
+  const showPrompt = showsPrompt({ hidePrompt: config.hidePrompt, modelPrompt: config.modelPrompt }, { promptless: !!opts.promptless, promptOptional: !!opts.promptOptional }, preset?.userPrompt);
   const effectiveOp = studioOp ?? op;
-  const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops);
+  // SDR to HDR, Export: every format the studio's models on this engine write; picking one this model doesn't
+  // write moves the request to the model that does (EXR frames → LTX 2.3 HDR on the cloud).
+  const engineModels = useMemo(() => models.filter((m) => m.engine === (model?.engine ?? engine)), [models, model?.engine, engine]);
+  const studioFormats = useMemo(() => (config.formatPicker ? formatsOf(engineModels) : undefined), [config.formatPicker, engineModels]);
+  const writerOf = (f: VideoFormat) => (model?.options.formats?.includes(f) ? model : engineModels.find((m) => m.options.formats?.includes(f)));
+  const pickFormat = (f: VideoFormat) => {
+    const m = writerOf(f);
+    if (!m || m.id === model?.id) return setP({ format: f });
+    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, format: f, numOutputs: d.params.numOutputs, seed: d.params.seed } }));
+  };
+  const formatVia = (f: VideoFormat) => {
+    const m = writerOf(f);
+    // "via LTX 2.3 HDR": the name without what it makes in brackets (the format already says it).
+    return m && m.id !== model?.id ? `via ${m.name.replace(/\s*\([^)]*\)$/, "")}` : undefined;
+  };
+  // Enhance writes a scene; a tool's optional words (FLUX.3 Upscale's details) stay as typed.
+  const baseShape = settingsShape(model, effectiveOp, config.kind, showPrompt && !config.hidePrompt, p, config.ops, studioFormats);
+  const shape = framesCtx ? framesShape(baseShape, framesCtx.chained) : baseShape;
+  const outcome = config.clipFacts && draft.slots.video?.ref ? clipOutcome(effectiveOp, facts, p, model) : null;
+  const video = draft.slots.video?.ref;
+  const alternative = config.comfyOnly?.alternative;
+  const alternativeHref = alternative && `${alternative.href}${video?.startsWith("/api/files/") ? `&video=${encodeURIComponent(video)}` : ""}`;
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
   const costText = costLabel({ demo, cost }, formatCost);
 
@@ -317,16 +539,114 @@ export function Composer({ docked }: { docked: boolean }) {
   const hasAttachment = slots.some((s) => draft.slots[s.key]) || draft.refs.length > 0;
   // Tools whose only input is a list of clips (Join clips) keep their "Add clip" tile in view.
   const showAttachments =
-    (slots.length > 0 || !!config.multiRef) && (hasAttachment || !!missing || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt));
+    framesOn ||
+    ((slots.length > 0 || !!config.multiRef) && (hasAttachment || !!missing || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt)));
   const collapsed = docked && !focused;
   // Docked and not focused, the tiles fold into one chip on the toolbar (the composer stays one line).
-  const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs].filter((v): v is SlotValue => !!v);
+  const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs, ...(draft.frames ?? []).map((f) => f.value)].filter((v): v is SlotValue => !!v);
+
+  // Phones can't hover Generate for its tooltip, and a folded composer hides the tile it points at:
+  // there the blocker is a line under the toolbar (blockerLine), and tapping it opens that tile (the
+  // file picker, or the paint tool), as the tap is the click the browser needs for a picker.
+  const line = blockerLine(blocker, collapsed);
+  const blockerSlot = blocker?.slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
+  const openBlocked = (key: string) => {
+    flushSync(() => setFocused(true));
+    const tile = root.current?.querySelector<HTMLElement>(`[data-slot-key="${key}"]`);
+    const control = tile?.matches("button") ? tile : tile?.querySelector<HTMLButtonElement>('button[aria-label$=": upload"]');
+    pulseSlot(root.current, key);
+    // The focus moves into the tile (the press itself didn't take it), so leaving the composer folds it again.
+    const target = control ?? tile?.querySelector<HTMLElement>("button");
+    if (target) {
+      target.focus({ preventScroll: true });
+      control?.click();
+      return;
+    }
+    // Nothing to focus: the next press outside the composer folds it.
+    const fold = (e: PointerEvent) => {
+      if (root.current?.contains(e.target as Node) || root.current?.contains(document.activeElement)) return;
+      document.removeEventListener("pointerdown", fold, true);
+      setFocused(false);
+    };
+    document.addEventListener("pointerdown", fold, true);
+  };
 
   // A blocker toast goes away once it's out of date: the photo attached, the prompt typed (or the next blocker is a different one).
   const blocking = blocker?.message;
   useEffect(() => {
     toast.dismiss("composer-blocker");
   }, [blocking]);
+
+  // Home's Start (go=<token>): run the handed-over prompt once the models and uploads have settled. A
+  // blocker (Edit's photo) gets the usual toast, and its slot is pointed at, instead.
+  const startRequest = useStartRequest();
+  const startedFor = useRef(0);
+  const submitRef = useRef(submit);
+  useLayoutEffect(() => {
+    submitRef.current = submit;
+  });
+  const settling = !catalog.ready || presetLoading || uploading || (needsFull && !catalog.complete);
+  const step = startRequest ? startStep({ settling, blocker }) : "wait";
+  const blockedSlot = blocker?.slot;
+  useEffect(() => {
+    if (step === "wait" || startRequest <= startedFor.current) return;
+    startedFor.current = startRequest;
+    // After the blocker toast above was cleared for this render.
+    submitRef.current();
+    // Nothing ran: the missing tile gets the focus, so Enter opens the file picker.
+    if (step === "explain" && blockedSlot) requestAnimationFrame(() => slotButton(root.current, blockedSlot)?.focus({ preventScroll: true }));
+  }, [step, startRequest, blockedSlot]);
+
+  const pickModel = (m: ModelDef) => {
+    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
+    if (m.engine !== engine) setEngine(m.engine);
+  };
+
+  // Frames on: the start and end frames already attached become the first frames. Off: the first and last frames
+  // go back to start and end (the ones in between can come back with Undo).
+  const framesLength = framesCtx?.duration ?? (model ? framesDuration(model, p.duration) : p.duration);
+  const toggleFrames = () => {
+    if (!draft.frames) {
+      setDraft((d) => {
+        const entered = enterFrames(d.slots);
+        const cleared = onImageChange(d, entered.slots);
+        return { frames: entered.frames, slots: cleared.slots, params: { ...(cleared.params ?? d.params), shots: undefined, multiShot: undefined, duration: framesLength } };
+      });
+      setFocused(true);
+      return;
+    }
+    const before = { frames: draft.frames, slots: draft.slots, params: draft.params };
+    const { slots: back, dropped } = leaveFrames(draft.frames, draft.slots);
+    // A length only the open chain makes goes back to the nearest one the model makes on its own.
+    const lengths = opts.durations;
+    const duration = lengths?.length && p.duration !== undefined && !lengths.includes(p.duration) ? lengths.reduce((a, b) => (Math.abs(b - p.duration!) < Math.abs(a - p.duration!) ? b : a)) : p.duration;
+    setDraft({ frames: undefined, slots: back, params: { ...p, duration } });
+    if (dropped) toast(`Frames off — frames 1 and ${draft.frames.length} are your start and end frames`, { action: { label: "Undo", onClick: () => setDraft(before) } });
+  };
+
+  // What the model does with the frames, said under the strip before anything runs (with the model that takes them all).
+  let framesNotice: FramesNotice | null = null;
+  if (framesCtx && model && draft.frames) {
+    const alt = catalog.getModel(FRAMES_MODELS[model.engine].id);
+    const action = alt && alt.id !== model.id ? { label: `Use ${alt.name}`, onClick: () => pickModel(alt) } : undefined;
+    const count = draft.frames.length;
+    // On the open chain, a last frame far enough from the end gets a clip of its own after it.
+    const tail = framesCtx.chained && count > 0 && framesCtx.duration - framesAt[count - 1] >= OPEN_MIN_GAP - 1e-6;
+    const note = framesNote(model, count, draft.frames.at(-1)?.at, { suggested: alt, tail });
+    if (framesCtx.support === "start" || framesCtx.support === "none") framesNotice = { text: `${framesBlocker(model, count)!.message}.`, tone: "warn", action };
+    else if (framesGap) framesNotice = { text: `${framesGap}.`, tone: "warn" };
+    else if (note) framesNotice = { text: note, tone: "info", action };
+  }
+  const framesChip = config.frames ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Chip icon={GalleryHorizontalEnd} active={framesOn} aria-pressed={framesOn} onClick={toggleFrames}>
+          Frames
+        </Chip>
+      </TooltipTrigger>
+      <TooltipContent>{framesOn ? "Back to a start and an end frame" : "Up to 10 frames, each at its own time"}</TooltipContent>
+    </Tooltip>
+  ) : null;
 
   // Voice, language, motion, style and Director chips: inline from sm up; on phones they live in the settings sheet, so the toolbar fits.
   const voiceChips = (
@@ -370,7 +690,7 @@ export function Composer({ docked }: { docked: boolean }) {
           presetId={draft.presetId}
           strength={draft.presetStrength ?? 1}
           mix={draft.mix}
-          onPreset={(id) => setDraft(id ? { presetId: id } : { presetId: undefined, mix: undefined, presetStrength: undefined })}
+          onPreset={pickPreset}
           onMix={(patch) => setDraft(patch)}
         />
       )}
@@ -379,17 +699,32 @@ export function Composer({ docked }: { docked: boolean }) {
           value={draft.signature}
           onChange={(update) => setDraft((d) => ({ signature: update(d.signature) }))}
           engine={engine}
-          presetSource={opts.presets?.source}
-          styleId={soulStyles ? (p.extra?.[opts.presets!.param] as string | undefined) : undefined}
-          onStyleIdTaken={() => setExtra(opts.presets!.param, undefined)}
+          lockByDefault={locksByDefault(model?.id)}
         />
       )}
-      {opts.presets && !soulStyles && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
-      {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
+      {opts.looks && (
+        <LookChip
+          value={draft.presetId}
+          strength={draft.presetStrength ?? 1}
+          onChange={(id, look) => {
+            // A lettering look runs best on Fuobe Soul HD: move there when it's in this studio and can run what this
+            // run does (Soul HD makes new pictures only: with a picture attached, Fuobe Soul edits it with the look's words).
+            const hd = look?.hd && model?.id !== "fuobe-soul-hd" ? catalog.getModel("fuobe-soul-hd") : undefined;
+            const fits = !!hd && routesFor(hd, effectiveOp ?? "t2i").length > 0;
+            if (hd && fits) toast(`${look!.name} runs on Fuobe Soul HD (cleaner lettering)`);
+            else if (hd) toast(`${look!.name} is made for Fuobe Soul HD, which doesn't edit pictures: here it uses its words`);
+            // The strength stays as it was set (it scales whichever look runs, the General look too).
+            setDraft({ presetId: id, ...(hd && fits && { modelId: hd.id }) });
+          }}
+          onStrength={(v) => setDraft({ presetStrength: v })}
+        />
+      )}
+      {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} title={config.controlsTitle} />}
     </>
   );
   const hasSecondary =
-    (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.presets || !!opts.controls)) ||
+    !!config.frames ||
+    (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.controls || !!opts.looks)) ||
     !!config.presetPicker ||
     !!config.signature ||
     preset?.type === "motion" ||
@@ -418,7 +753,28 @@ export function Composer({ docked }: { docked: boolean }) {
         }
       }}
     >
-      {showAttachments && !collapsed && (
+      {framesOn && !collapsed && draft.frames && (
+        <FramesStrip
+          frames={draft.frames}
+          duration={framesCtx?.duration ?? p.duration ?? 5}
+          durations={model ? framesDurations(model) : [5]}
+          onDuration={(duration) => setP({ duration })}
+          onMove={(i, seconds) =>
+            setDraft((d) => {
+              if (!d.frames || !framesCtx) return {};
+              const ats = moveFrameAt(d.frames.map((f) => f.at), i, seconds, framesCtx.duration);
+              return { frames: d.frames.map((f, j) => ({ ...f, at: ats[j] })) };
+            })
+          }
+          onFrame={attach.setFrameValue}
+          onFrameFile={attach.uploadToFrame}
+          onAddFile={(f) => attach.attachFiles([f])}
+          onAddPick={attach.attach}
+          onClose={toggleFrames}
+          notice={framesNotice}
+        />
+      )}
+      {showAttachments && !collapsed && !framesOn && (
         <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1.5 pb-2">
           {slots.map((s) => (
             <MediaSlot
@@ -427,6 +783,7 @@ export function Composer({ docked }: { docked: boolean }) {
               label={s.label}
               kind={s.accept}
               required={s.required}
+              caption
               value={draft.slots[s.key] ?? null}
               onChange={(v) => attach.setSlotValue(s.key, v)}
               onFile={(f) => attach.uploadToSlot(s.key, f, s.accept)}
@@ -472,7 +829,7 @@ export function Composer({ docked }: { docked: boolean }) {
           value={draft.prompt}
           onChange={(v) => setDraft({ prompt: v })}
           onSubmit={submit}
-          placeholder={preset?.promptPlaceholder ?? config.placeholder}
+          placeholder={preset?.promptPlaceholder ?? (config.hidePrompt && config.modelPrompt ? config.modelPrompt : config.placeholder)}
           elements={elements}
           collapsed={collapsed}
         />
@@ -574,10 +931,7 @@ export function Composer({ docked }: { docked: boolean }) {
                   engine={engine}
                   onEngineChange={setEngine}
                   defaultModels={config.defaultModels}
-                  onChange={(m) => {
-                    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed } }));
-                    if (m.engine !== engine) setEngine(m.engine);
-                  }}
+                  onChange={pickModel}
                 />
               ) : (
                 <Chip icon={Loader2} disabled className="[&>svg]:animate-spin">
@@ -614,7 +968,10 @@ export function Composer({ docked }: { docked: boolean }) {
               <TooltipContent>Add a character, location or prop · type @</TooltipContent>
             </Tooltip>
           )}
-          <span className="contents max-sm:hidden">{voiceChips}</span>
+          <span className="contents max-sm:hidden">
+            {framesChip}
+            {voiceChips}
+          </span>
           <SettingsChip
             model={model}
             op={op}
@@ -628,10 +985,13 @@ export function Composer({ docked }: { docked: boolean }) {
             enhancing={enhancing}
             onRewrite={runEnhance}
             opNote={opNote}
+            onFormat={pickFormat}
+            formatVia={formatVia}
             className="max-sm:order-1"
             extras={
               hasSecondary ? (
                 <>
+                  {framesChip}
                   {voiceChips}
                   {styleChips}
                 </>
@@ -660,7 +1020,8 @@ export function Composer({ docked }: { docked: boolean }) {
               onClick={submit}
               disabled={create.isPending || signature.lock.isPending}
               aria-label={blocker ? `Generate — ${blocker.message}` : "Generate"}
-              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")}
+              // Blocked, it stays the brand colour (paler, the arrow still 3:1 or more): pressing it still says what's missing and points at it.
+              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-primary/70 hover:bg-primary/80")}
             >
               {create.isPending || signature.lock.isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
             </Button>
@@ -675,6 +1036,50 @@ export function Composer({ docked }: { docked: boolean }) {
           </TooltipContent>
         </Tooltip>
       </div>
+      <div aria-live="polite">
+        {line && blocker && (
+          // Focused from the keyboard, it stays (the composer unfolding must not hide what has the focus).
+          <p className={cn("px-2 text-[12px] text-muted-foreground", line === "touch" && "[@media(hover:hover)]:hidden [@media(hover:hover)]:focus-within:block")}>
+            {blockerSlot ? (
+              <button
+                type="button"
+                // A mouse press would focus the composer and unfold it under the pointer before the click lands.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => openBlocked(blockerSlot)}
+                className="inline-flex min-h-6 items-center text-left underline decoration-border-strong underline-offset-2 hover:text-foreground hover:decoration-current"
+              >
+                {blocker.message}
+              </button>
+            ) : (
+              <span className="inline-flex min-h-6 items-center">{blocker.message}</span>
+            )}
+          </p>
+        )}
+      </div>
+      {outcome && (
+        <p className="px-2 pt-1 text-[12px] text-muted-foreground tabular-nums" aria-live="polite">
+          {outcome}
+        </p>
+      )}
+      {comfyMissing && (
+        <div role="note" className="mx-1 mt-2 space-y-1 rounded-xl border border-dashed px-3 py-2 text-[12px] leading-snug text-muted-foreground">
+          <p>
+            {engineMode === "cloud"
+              ? "This install runs paid cloud APIs only (Settings → Engine mode), and no cloud API re-encodes a finished clip: export formats are written by ComfyUI on your own machine."
+              : config.comfyOnly!.note}{" "}
+            <Link href="/settings" className="font-medium text-brand-text underline-offset-2 hover:underline">
+              Open Settings
+            </Link>
+          </p>
+          {alternative && alternativeHref && engineMode !== "open" && (
+            <p>
+              <Link href={alternativeHref} onClick={() => setEngine("cloud")} className="font-medium text-brand-text underline-offset-2 hover:underline">
+                {alternative.label}
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
       {sketched.note && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{sketched.note}</p>}
       {signed.notes.length > 0 && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{signed.notes.join(" · ")}</p>}
       {model && op && model.options.endFrame === undefined && draft.slots.endImage?.ref && (

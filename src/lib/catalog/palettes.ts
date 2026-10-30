@@ -8,13 +8,13 @@
  *
  * Routing (docs/research/higgsfield-image-studios.md §4, §5):
  * - Palette → models with a palette field (Recraft V4.1 / Pro / Styles: ≤10 colours, Ideogram 3.0):
- *   `params.palette` (+ the background colour in its own field); Cinema Studio 4.0: the built-in
- *   palette's slug as `color_palette`; every other model: the hex list written into the prompt. Open
+ *   `params.palette` (+ the background colour in its own field); every other model: the hex list written into
+ *   the prompt (Fuobe Cinema too: a built-in palette's slug is no longer sent anywhere). Open
  *   engine: Z-Image Turbo becomes Z-Image Turbo · Palette (hex in the prompt + a ColorTransfer lock to
  *   a swatch); other open models can add a palette-transfer post-step (oss-palette-image, chained).
- * - Moodboard → curated: the Soul preset's `style_id` on a model whose own preset picker is that list
- *   (options.presets.source: Soul 2.0's 33 looks on soul-2, Soul's 106 styles on soul-1), its
- *   description as words on every other model (the open route; Soul Cinema ignores style ids).
+ * - Moodboard → curated: a Fuobe Soul look (Soul 2.0's 33, Soul's 106; src/lib/catalog/soul-cards.ts). On a model
+ *   that takes looks (Fuobe Soul, Soul HD: options.looks) it is the look itself (presetId: its words and its LoRAs);
+ *   on every other model its words. Picks saved with Higgsfield's old style ids still find their look.
  *   Personal: cloud = the board's Recraft style id (Recraft models) or its most representative images
  *   as style references (Nano Banana Pro and other multi-reference models); open = the board's collages
  *   on Qwen-Image-Edit Style Reference (or the style-reference model picked), or its trained style LoRA
@@ -23,6 +23,8 @@
  * `request.prompt`: they ride in `request.signature.words`, which the server adds when it plans the
  * run, so feeds, Library titles and Reuse keep the user's own words.
  */
+import { DEFAULT_LOOK, lookCard, OWN_LOOK, SOUL_MODEL_IDS } from "./soul-cards";
+import { familyOfModel } from "./training";
 import type { GenerationRequest, GenParams, ModelDef, Operation } from "./types";
 
 export type RGB = [number, number, number];
@@ -381,6 +383,13 @@ export interface SignedRequest {
   lock?: { colors: string[] };
 }
 
+/**
+ * Fuobe Soul's HEX palette (Soul, Soul HD, Soul Cinema): the colours in the prompt on both engines, and on the open
+ * engine the palette lock after it unless it was turned off (research §4.4: the lock is the open engine's HEX; fal has
+ * no colour-match step). Other open models lock only when asked.
+ */
+export const locksByDefault = (modelId: string | undefined): boolean => !!modelId && (Object.values(SOUL_MODEL_IDS) as string[]).includes(modelId);
+
 /** Models a signature can move a request to; studios that offer the chips keep them in their model slice. */
 export const SIGNATURE_MODELS = {
   cloudRefs: "nano-banana-pro",
@@ -389,10 +398,9 @@ export const SIGNATURE_MODELS = {
   openStyle: "oss-style-qwen-edit",
   openPalette: "oss-zimage-palette",
   openTurbo: "oss-z-image-turbo",
+  /** A personal moodboard trained as a style LoRA runs here, the LoRA as its look (both engines). */
+  soul: SOUL_MODEL_IDS.soul,
   paletteLock: "oss-palette-image",
-  soul2: "soul-2",
-  soul1: "soul-1",
-  cinema: "cinema-studio-4",
 } as const;
 
 const NOT_READY = "This moodboard is still training. Try again once it is ready.";
@@ -420,18 +428,27 @@ export function styleLegend(from: number, to: number): string {
   return `Use ${which} only as a style reference: match their colour palette, light, texture, grain and mood, but don't copy their subjects or layout.`;
 }
 
+/** Takes a Fuobe Soul look as its presetId (Fuobe Soul, Soul HD); a look id means nothing to any other model. */
+const lookOf = (r: GenerationRequest, m: ModelDef) => (m.options.looks && r.presetId ? lookCard(r.presetId) : undefined);
+
 function swap(request: GenerationRequest, to: ModelDef, from: ModelDef): GenerationRequest {
   if (to.id === from.id) return request;
   const p = request.params ?? {};
   // Keep what the new model takes; drop the old model's own settings.
   const aspect = p.aspectRatio && (!to.options.aspectRatios || to.options.aspectRatios.includes(p.aspectRatio)) ? p.aspectRatio : to.defaults?.aspectRatio;
   const resolution = p.resolution && to.options.resolutions?.includes(p.resolution) ? p.resolution : to.defaults?.resolution;
-  return {
+  const out: GenerationRequest = {
     ...request,
     modelId: to.id,
     op: undefined,
     params: { ...to.defaults, aspectRatio: aspect, resolution, numOutputs: p.numOutputs, seed: p.seed, enhancePrompt: p.enhancePrompt, palette: p.palette, extra: undefined },
   };
+  // A Soul look is Fuobe Soul's own (its presetId): it doesn't go to a model that takes no looks.
+  if (from.options.looks && !to.options.looks) {
+    delete out.presetId;
+    delete out.presetStrength;
+  }
+  return out;
 }
 
 const setExtra = (r: GenerationRequest, key: string, value: unknown): GenerationRequest => ({ ...r, params: { ...r.params, extra: { ...r.params?.extra, [key]: value } } });
@@ -473,8 +490,11 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
   const move = (id: string, why: string) => {
     const to = ctx.getModel(id);
     if (!to || !model || to.id === model.id) return false;
+    const look = !to.options.looks ? lookOf(r, model) : undefined;
     r = swap(r, to, model);
     notes.push(why.replace("{model}", to.name));
+    // The moodboard's style wins over the look (it moved the run); say the look isn't used.
+    if (look && look.id !== DEFAULT_LOOK) notes.push(`The ${look.name} look is Fuobe Soul's own, so it isn't used on ${to.name}`);
     model = to;
     return true;
   };
@@ -484,16 +504,16 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
   if (mb) {
     if (mb.kind === "personal" && mb.status !== "complete") return { request: req, modelId: req.modelId, notes: [], blocker: mb.status === "failed" ? "This moodboard failed to build — retry it on the Moodboards page" : NOT_READY };
     if (mb.kind === "curated") {
-      const source = mb.source ?? "soul-v2";
-      // Native wherever the model's own preset picker is this preset's list (Soul's styles, Soul 2.0's looks).
-      const presets = model.options.presets;
-      if (presets?.source === source) r = setExtra(r, presets.param, mb.id);
+      // A look picked before the Originals carries Higgsfield's old id: it reads as its Fuobe look.
+      const card = lookCard(mb.id);
+      const look = card ? { ...mb, id: card.id, name: card.name, description: card.description } : mb;
+      if (model.options.looks && card) r = { ...r, presetId: card.id };
       else {
-        words.push(styleWords(mb));
+        words.push(styleWords(look));
         notes.push(
-          model.family === "soul" && !presets
-            ? `${model.name} has one fixed look and no presets — ${mb.name} is described in words`
-            : `${mb.name} is a ${source === "soul-v1" ? "Soul" : "Soul 2.0"} preset — described in words on ${model.name}`,
+          model.id === SOUL_MODEL_IDS.cinema
+            ? `${model.name} has one fixed look — ${look.name} is described in words`
+            : `${look.name} is a Fuobe Soul look — described in words on ${model.name} (Fuobe Soul applies it with its LoRAs)`,
         );
       }
       styled = true;
@@ -503,8 +523,20 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
       const collages = mb.collages?.length ? mb.collages : refs.slice(0, 2);
       // A request that already carries the board's images (Run again of an older run): nothing to add.
       const carried = [...refs, ...collages].some((u) => r.inputs?.images?.includes(u));
+      // A board trained as a style LoRA is a Fuobe look (build plan O3): on Fuobe Soul (and plain Z-Image Turbo, whose
+      // family the LoRA is) on either engine, and on the open engine instead of collages for any model but a
+      // style-reference one. A partner model in the cloud keeps the board's images as style references.
+      const zFamily = familyOfModel(model.id) === "z-image-turbo";
+      const asLook = !!mb.loraHandle && (zFamily || (model.engine === "open" && model.family !== "style-reference"));
       if (carried) {
         // Leave the request as it is.
+      } else if (asLook) {
+        // Soul Cinema's film look is fixed: the board's look runs on Fuobe Soul, on the engine the run was on.
+        const engine = r.engine ?? model.engine;
+        if (!zFamily || model.id === SOUL_MODEL_IDS.cinema) move(SIGNATURE_MODELS.soul, `Runs on {model} with the trained “${mb.name}” style as its look`);
+        r = { ...r, engine };
+        if (model.options.looks) r = { ...r, presetId: OWN_LOOK };
+        words.push(`In the style of @${mb.loraHandle}.`);
       } else if (model.engine === "cloud") {
         if (model.family === "recraft" && mb.styleId) {
           move(SIGNATURE_MODELS.recraftSaved, `Runs on {model} with the saved “${mb.name}” Recraft style`);
@@ -527,9 +559,6 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
           r = { ...r, op: "edit", inputs: { ...r.inputs, images: [...(r.inputs?.images ?? []), ...take] } };
           words.push(styleLegend(existing + 1, existing + take.length));
         }
-      } else if (mb.loraHandle && (model.id === SIGNATURE_MODELS.openTurbo || model.family !== "style-reference")) {
-        move(SIGNATURE_MODELS.openTurbo, `Runs on {model} with the trained “${mb.name}” style LoRA`);
-        words.push(`In the style of @${mb.loraHandle}.`);
       } else {
         if (model.family !== "style-reference") move(SIGNATURE_MODELS.openStyle, `Runs on {model} with the “${mb.name}” collages`);
         const max = model.options.maxImages ?? 2;
@@ -558,12 +587,10 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
       if (pal.background && nativeNow.background) r = setExtra(r, nativeNow.background, pal.background.toUpperCase());
     } else if (model.id === SIGNATURE_MODELS.openPalette) {
       r = { ...r, params: { ...r.params, palette: all } };
-    } else if (model.id === SIGNATURE_MODELS.cinema && pal.slug) {
-      r = setExtra(r, "color_palette", pal.slug);
     } else {
       words.push(palettePrompt(pal));
       r = { ...r, params: { ...r.params, palette: all.slice(0, 16) } };
-      if (model.engine === "open" && pal.lock) {
+      if (model.engine === "open" && (pal.lock ?? locksByDefault(model.id))) {
         lock = { colors: all };
         notes.push(`Then recoloured to “${pal.name}” by a palette-transfer step`);
       }

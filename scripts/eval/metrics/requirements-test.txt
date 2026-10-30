@@ -1,0 +1,4 @@
+# The metric maths tests need only these (the model tests skip without torch and open_clip).
+numpy==2.5.4
+pillow==13.0.0
+pytest==9.1.1

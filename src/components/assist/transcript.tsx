@@ -1,6 +1,6 @@
 "use client";
 
-import { AppWindow, ArrowUpRight, AudioLines, Box, Brain, Captions, Check, CircleAlert, Clapperboard, Film, FileText, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Scissors, Search, Sparkles, Video } from "lucide-react";
+import { AppWindow, ArrowUpRight, AudioLines, Box, Brain, Captions, Check, CircleAlert, Clapperboard, Film, FileText, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Plug, Scissors, Search, Sparkles, Video } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -190,16 +190,38 @@ export function GenerationCards({ ids, all, storyboard, onOpen }: { ids: string[
   const create = useCreateGeneration();
   const gens = ids.map((id) => all.get(id)).filter((g): g is Generation => !!g);
   if (!gens.length) return null;
+  // Several stills are numbered, so "animate 2" names one (the offline planner reads it the same way).
+  const stills = gens.filter((g) => g.status === "succeeded" && g.kind === "image").reduce((n, g) => n + g.outputs.filter((o) => o.kind === "image").length, 0);
+  let take = 0;
   const tiles = gens.flatMap((g) => {
     const ratio = tileRatio(g);
     if (g.status === "succeeded") {
-      return g.outputs.map((o, i) => (
-        <button key={`${g.id}-${i}`} onClick={() => onOpen(g, i)} className="group relative overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }} aria-label={`Open ${g.request.prompt?.slice(0, 60) || "result"}`}>
-          {/* A text card says "Demo" in its own header row: on a narrow tile a corner badge would cover its label. */}
-          <MediaThumb output={o} className="transition duration-300 group-hover:scale-[1.02]" tag={g.provider === "mock" && o.kind === "text" ? "Demo" : undefined} />
-          {g.provider === "mock" && o.kind !== "text" && <span className="absolute top-2 right-2 rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium">Demo</span>}
-        </button>
-      ));
+      return g.outputs.map((o, i) => {
+        const n = stills > 1 && g.kind === "image" && o.kind === "image" ? ++take : 0;
+        return (
+          <button
+            key={`${g.id}-${i}`}
+            onClick={() => onOpen(g, i)}
+            className="group relative overflow-hidden rounded-xl bg-muted"
+            style={{ aspectRatio: ratio }}
+            aria-label={`Open ${n ? `take ${n}: ` : ""}${g.request.prompt?.slice(0, 60) || "result"}`}
+          >
+            {/* A text card says "Demo" in its own header row: on a narrow tile a corner badge would cover its label. */}
+            <MediaThumb output={o} className="transition duration-300 group-hover:scale-[1.02]" tag={g.provider === "mock" && o.kind === "text" ? "Demo" : undefined} />
+            {/* Top right, next to "Demo": the other corners hold the picture's own caption on demo stills. */}
+            {(n > 0 || (g.provider === "mock" && o.kind !== "text")) && (
+              <span className="absolute top-2 right-2 flex items-center gap-1">
+                {n > 0 && (
+                  <span aria-hidden className="grid size-6 place-items-center rounded-full bg-background/85 text-[12px] font-medium tabular-nums shadow-soft">
+                    {n}
+                  </span>
+                )}
+                {g.provider === "mock" && o.kind !== "text" && <span className="rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium">Demo</span>}
+              </span>
+            )}
+          </button>
+        );
+      });
     }
     if (g.status === "failed" || g.status === "canceled") {
       return [<FailedTile key={g.id} g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />];
@@ -268,6 +290,14 @@ export function Transcript({
             );
           case "tool":
             if (item.studio && item.href) return <StudioCard key={item.id} text={item.text} studio={item.studio} href={item.href} />;
+            // A custom MCP connector's tool Claude used (Settings → Assist connectors).
+            if (item.connector)
+              return (
+                <p key={item.id} className={cn("flex items-center gap-1.5 text-[12px]", item.failed ? "text-destructive" : "text-muted-foreground")}>
+                  <Plug className="size-3" aria-hidden /> <span className="sr-only">Connector:</span> {item.text}
+                  {item.failed && " — didn't work"}
+                </p>
+              );
             return item.href ? (
               <Link key={item.id} href={item.href} className="flex w-fit items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground">
                 <Search className="size-3" /> {item.text} <ArrowUpRight className="size-3" />

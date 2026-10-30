@@ -181,9 +181,9 @@ describe("Episodes", () => {
     } finally {
       setSetting("engineMode", "both");
     }
-    // What the render will do differently: two of three style references on the open engine, a short music bed.
+    // What the render will do differently: two of three style references on the open engine, a bed looped past 4 minutes.
     const notes = (await est({ ...open, length: 300, styleRefs: ["/api/files/a.png", "/api/files/b.png", "/api/files/c.png"] })).notes;
-    expect(notes).toEqual(expect.arrayContaining([expect.stringMatching(/first 2 style references/), expect.stringMatching(/at most 4 min/)]));
+    expect(notes).toEqual(expect.arrayContaining([expect.stringMatching(/first 2 style references/), expect.stringMatching(/made 4 min long, then looped with a 3-second crossfade/)]));
   });
 
   it(
@@ -220,13 +220,17 @@ describe("Episodes", () => {
       const ids = timed.episode.plan!.ids;
       expect(timed.timing).toBe("planned");
       expect(timed.episode.plan!.untimed).toBe(true);
-      // Open, frame by frame: 5-second Wan shots, folded joins, music, timed captions.
+      // Open, frame by frame: one Ken Burns move per scene (no video model), one packet-copy join, music, timed captions.
       const clips = Object.keys(ids).filter((k) => k.startsWith("clip-"));
-      expect(clips.length).toBeGreaterThan(6);
+      expect(clips).toHaveLength(6);
       expect(clips).toHaveLength(timed.steps.filter((s) => s.part === "clip").length);
-      expect(Object.keys(ids)).toEqual(expect.arrayContaining(["join", "join-1-1", "narration", "music", "mix", "words", "captions"]));
-      expect(gens.getGeneration(ids[`clip-${blocks[0].id}-1`])!.request.prompt).toMatch(/still illustration/);
-      // The timeline shows the film as the clips make it (Wan's 3- and 5-second shots).
+      expect(Object.keys(ids)).toEqual(expect.arrayContaining(["join", "narration", "music", "mix", "words", "captions"]));
+      const move = gens.getGeneration(ids[`clip-${blocks[0].id}-1`])!;
+      expect(move).toMatchObject({ modelId: "oss-ken-burns", op: "still-motion" });
+      expect(move.request.params).toMatchObject({ zoomFrom: 1, fps: 24, easing: "ease-in-out", resolution: "720p" });
+      expect(move.request.prompt).toMatch(/^Slow push-in toward/);
+      expect(gens.getGeneration(ids.join)!.modelId).toBe("oss-join-encoded");
+      // The timeline shows the film as the clips make it.
       expect(timed.scenes.reduce((n, s) => n + s.seconds, 0)).toBe(clips.reduce((n, k) => n + Number(gens.getGeneration(ids[k])!.request.params?.duration), 0));
 
       const [doneCloud, doneOpen] = await Promise.all([settled(cloudId), settled(openId)]);
@@ -243,14 +247,15 @@ describe("Episodes", () => {
       expect(gens.getGeneration(cloudIds.mix)!.modelId).toBe("ffmpeg-compose");
       expect(gens.getGeneration(cloudIds.level)!.request.inputs?.audio).toBeTruthy();
 
-      // Upscale to 1080p: one step on the finished film (cloud only).
+      // Upscale to 1080p: one step on the finished film, on both engines (the open one upscales in passes of a few frames).
       expect(doneCloud.upscale).toEqual({ costUsd: 0, demo: true });
-      expect(doneOpen.upscale).toBeNull();
+      expect(doneOpen.upscale).toEqual({ costUsd: 0, demo: true });
       const upscaling: EpisodeView = await (await actionRoute.POST(json("POST"), params({ id: cloudId, action: "upscale" }))).json();
       const up = gens.getGeneration(upscaling.episode.plan!.upscaled!)!;
       expect(up).toMatchObject({ op: "upscale-video", modelId: "seedvr-video" });
       expect(up.request.params?.resolution).toBe("1080p");
-      expect((await actionRoute.POST(json("POST"), params({ id: openId, action: "upscale" }))).status).toBe(422);
+      const upscalingOpen: EpisodeView = await (await actionRoute.POST(json("POST"), params({ id: openId, action: "upscale" }))).json();
+      expect(gens.getGeneration(upscalingOpen.episode.plan!.upscaled!)).toMatchObject({ op: "upscale-video", modelId: "oss-upscale-video-esrgan", engine: "open" });
 
       // Timeline editor: change scene 3's picture.
       const target = doneCloud.episode.script.blocks[2].id;
@@ -431,6 +436,57 @@ describe("Explainer", () => {
       expect((await r.json()).error).toBe("Duration must be Auto or a whole number of seconds between 15 and 600");
     }
   });
+
+  it(
+    "makes Ken Burns moves again for clips an older Frame by frame render made with a video model, and refuses a Motion change that keeps the move",
+    async () => {
+      const res = await explainerRoute.POST(json("POST", { prompt: "How lighthouses guide ships", settings: { ...open, music: false, subtitles: false, length: 20 } }));
+      const ep: FacelessEpisode = await res.json();
+      await faceless.scriptWritten(ep.id);
+      const done = await settled(ep.id);
+      expect(done.episode.status).toBe("done");
+      const blocks = done.episode.script.blocks;
+      expect(blocks.length).toBeGreaterThanOrEqual(2);
+      const ids = done.episode.plan!.ids;
+      const clips = Object.keys(ids).filter((k) => k.startsWith("clip-"));
+      expect(clips.every((k) => gens.getGeneration(ids[k])!.modelId === "oss-ken-burns")).toBe(true);
+
+      // Motion in Frame by frame is a camera move: words that read as the move a scene has would remake the same clip.
+      const motion = (instruction: string) => changeRoute.POST(json("POST", { blocks: [blocks[1].id], part: "motion", instruction }), params({ id: ep.id }));
+      for (const words of ["the flags wave in the wind", blocks[1].motion]) {
+        const same = await motion(words);
+        expect(same.status, words).toBe(422);
+        expect((await same.json()).error).toMatch(/^That's the camera move this scene already has\. Name another: zoom in or out, pan left or right/);
+      }
+      // Scene 2 pans by the cycle; a zoom is another move.
+      const zoom = await (await motion("zoom into the lighthouse")).json();
+      expect(zoom.rerun).toEqual([...clips.filter((k) => k.startsWith(`clip-${blocks[1].id}-`)), "join", "mix"]);
+
+      // As an episode rendered before Frame by frame moved a camera: every clip was a Wan 2.2 shot of 5 s.
+      for (const k of clips) {
+        const g = gens.getGeneration(ids[k])!;
+        const request = { ...g.request, modelId: "oss-wan22-14b-fast", op: "i2v", params: { ...g.request.params, duration: 5 } };
+        db().prepare("UPDATE generations SET model_id = ?, op = ?, request_json = ? WHERE id = ?").run("oss-wan22-14b-fast", "i2v", JSON.stringify(request), ids[k]);
+      }
+      // A picture change on scene 1 makes every scene's move again (no old clip is kept under a Ken Burns key).
+      const preview = await (await changeRoute.POST(json("POST", { blocks: [blocks[0].id], part: "picture", instruction: "make it stormy" }), params({ id: ep.id }))).json();
+      expect(preview.rerun).toEqual(expect.arrayContaining([`still-${blocks[0].id}`, ...clips, "join", "mix"]));
+      expect(preview.rerun).not.toContain(`still-${blocks[1].id}`);
+      const applied = await changeRoute.POST(json("POST", { blocks: [blocks[0].id], part: "picture", instruction: "make it stormy", apply: true }), params({ id: ep.id }));
+      expect(applied.status).toBe(201);
+      const redone = await settled(ep.id);
+      expect(redone.episode.status).toBe("done");
+      const now = redone.episode.plan!.ids;
+      for (const k of clips) {
+        expect(now[k], k).not.toBe(ids[k]);
+        expect(gens.getGeneration(now[k])!.request).toMatchObject({ modelId: "oss-ken-burns", op: "still-motion" });
+      }
+      expect(now[`still-${blocks[1].id}`]).toBe(ids[`still-${blocks[1].id}`]);
+      expect(now.narration).toBe(ids.narration);
+      await faceless.deleteEpisode(ep.id);
+    },
+    120_000,
+  );
 
   it("draws open pictures from the attached images", async () => {
     const img = (await import("@/server/storage")).saveFile({ data: Buffer.from("x"), contentType: "image/png", name: "subject.png", source: "upload" }).url;

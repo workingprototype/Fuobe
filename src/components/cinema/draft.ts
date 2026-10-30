@@ -22,6 +22,12 @@ export interface TakeSource {
   url: string;
   kind: "image" | "video";
   label: string;
+  /** What is known about the take (TakeFacts): its model, scene, size and, once the browser has read it, its length. */
+  modelId?: string;
+  prompt?: string;
+  seconds?: number;
+  resolution?: string;
+  aspectRatio?: string;
 }
 
 export interface CinemaDraft {
@@ -61,6 +67,20 @@ export const initialDraft = (): CinemaDraft => ({
   source: null,
 });
 
+/** The selected take as the planner reads it: its file, and the facts the browser has about it. */
+function takeFacts(t: TakeSource, firstFrame?: string): NonNullable<CinemaGenerateInput["source"]> {
+  return {
+    url: t.url,
+    kind: t.kind,
+    ...(firstFrame ? { firstFrame } : {}),
+    ...(t.modelId ? { modelId: t.modelId } : {}),
+    ...(t.prompt?.trim() ? { prompt: t.prompt.trim().slice(0, 4000) } : {}),
+    ...(t.seconds !== undefined && Number.isFinite(t.seconds) && t.seconds > 0 ? { seconds: Math.round(t.seconds * 100) / 100 } : {}),
+    ...(t.resolution ? { resolution: t.resolution } : {}),
+    ...(t.aspectRatio ? { aspectRatio: t.aspectRatio } : {}),
+  };
+}
+
 /** The request body for /generate (and the input planCinema prices live). */
 export function draftToInput(d: CinemaDraft, engine: Engine, settings: DirectorSettings, firstFrame?: string): Omit<CinemaGenerateInput, "brief"> {
   const ready = d.refs.filter((r) => r.ref && !r.uploading);
@@ -82,7 +102,18 @@ export function draftToInput(d: CinemaDraft, engine: Engine, settings: DirectorS
     batch: d.batch,
     audio: d.audio,
     multiShot: d.mode === "video" && d.multiShot.mode !== "off" ? d.multiShot : undefined,
-    source: d.source && action !== "generate" && action !== "grid" ? { url: d.source.url, kind: d.source.kind, ...(firstFrame ? { firstFrame } : {}) } : undefined,
+    source: d.source && action !== "generate" && action !== "grid" ? takeFacts(d.source, firstFrame) : undefined,
     grid: action === "grid" ? d.grid : undefined,
   };
+}
+
+/**
+ * How many of the Director's Panel groups are set (film setup, camera, palette, lighting, emotions),
+ * for the phone's folded "Director" chip. Tempo counts in video mode only, as the panel shows it.
+ */
+export function directorPicks(s: DirectorSettings, mode: CinemaMode): number {
+  const film = !!(s.genre || s.era || (mode === "video" && s.tempo));
+  const camera = !!(s.camera || s.lens || s.focal || s.aperture);
+  const emotions = Object.keys(s.emotions ?? {}).length > 0;
+  return [film, camera, !!s.palette, !!s.lighting, emotions].filter(Boolean).length;
 }

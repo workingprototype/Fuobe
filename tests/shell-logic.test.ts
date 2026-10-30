@@ -5,7 +5,6 @@ import { EFFECTS, MOTIONS } from "@/lib/catalog";
 import { copyText, copyWithToast } from "@/lib/clipboard";
 import { loseContext, releaseVideo } from "@/lib/media-release";
 import { GLYPHS, MOVE_GLYPH, glyphFor } from "@/lib/move-glyphs";
-import { previewFor, toPresetCard } from "@/lib/preset-card-data";
 import {
   CAMERA_MOVES,
   effectFx,
@@ -16,14 +15,15 @@ import {
   stableHash,
   type CameraMove,
 } from "@/lib/preset-cards";
+import { previewFor, toPresetCard } from "@/lib/preset-card-data";
 import { browserPlaybackEnv, createPlaybackStore, HOVER_INTENT, MIN_VISIBLE, SCROLL_SETTLE, type PlaybackEnv } from "@/lib/preview-playback";
 import { pageAfter, progressiveStart, syncProgressive } from "@/lib/progressive";
 import { storyboardName } from "@/lib/storyboard-board";
 
 const toasts = vi.hoisted(() => ({ ok: [] as string[], error: [] as string[] }));
 vi.mock("sonner", () => ({ toast: Object.assign((m: string) => void toasts.ok.push(m), { error: (m: string) => void toasts.error.push(m) }) }));
-// The procedural previews are what these tests look at: no preset has rendered media here.
-vi.mock("@/lib/catalog/preview-media.generated.json", () => ({ default: {} }));
+// The procedural previews are what these tests look at: no preset has a real cover here.
+vi.mock("@/lib/preset-previews.generated", () => ({ PRESET_PREVIEWS: {} }));
 import { capabilityGroup, usedByIndex } from "@/lib/workflow-usage";
 
 describe("workflow 'used by' index", () => {

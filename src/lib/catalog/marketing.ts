@@ -1,4 +1,4 @@
-import type { Engine, Generation } from "./types";
+import type { ChainSlot, Engine, Generation, GenerationRequest } from "./types";
 
 /**
  * Marketing Studio, Ads Studio, Ad Multiplier and Click to Ad: the shared catalog (formats,
@@ -582,6 +582,129 @@ export const styleById = (id?: string | null) => AD_STYLES.find((s) => s.id === 
 export const CLICK_TO_AD = { aspect: "9:16", maxSeconds: 12, shots: 3 } as const;
 
 // ---------------------------------------------------------------------------
+// The logo end card a Click to Ad video ends on
+
+/**
+ * The card is drawn in the browser (brand colour, logo, product name, CTA; components/marketing/end-card.ts)
+ * at the ad's 9:16 size, then held for 2–3 s: a gentle push-in on the cloud (fal image-to-video, zoom 1 → 1.05),
+ * a still on the open engine. Without a drawn card the cloud puts the logo on the brand colour itself.
+ */
+export const END_CARD = { seconds: 2.5, minSeconds: 2, maxSeconds: 3, zoomTo: 1.05, fps: 24, size: { w: 720, h: 1280 }, cta: "Shop now" } as const;
+
+export const END_CARD_MODELS = {
+  cloud: { art: "overlay-image", clip: "ken-burns", sound: "merge-audio-video", join: "join-clips" },
+  open: { append: "oss-append-endcard", clip: "oss-still-to-clip", join: "oss-join-sound1" },
+} as const;
+
+export interface EndCardStep {
+  key: string;
+  label: string;
+  request: GenerationRequest;
+  after?: string[];
+  chain?: ChainSlot[];
+}
+
+export interface EndCardInput {
+  engine: Engine;
+  /** The step whose clip the card follows (the finished ad). */
+  ad: string;
+  /** The card the page drew (/api/files/…). */
+  card?: string;
+  /** Cloud, no drawn card: the brand-colour background and the logo overlay-image puts on it. */
+  background?: string;
+  logo?: string;
+  /**
+   * Cloud: a silent WAV as long as the card (the server writes it). The card clip gets it as its sound track, so
+   * both clips merge-videos joins carry sound and the ad's voiceover goes through the join.
+   */
+  silence?: string;
+  seconds?: number;
+  feature: string;
+  title: string;
+  aspectRatio: string;
+  resolution?: string;
+  /**
+   * Open engine: who encoded the ad. video-append-endcard copies the ad's packets and only takes clips ComfyUI
+   * encoded (every open step does); others get still-to-clip + the join that keeps the first clip's sound.
+   */
+  adEncodedBy?: "comfyui" | "other";
+}
+
+/**
+ * The steps that make the end card and put it after the ad, and the key of the finished video. Cloud:
+ * [overlay-image: the logo on the brand colour →] ken-burns (zoom 1 → 1.05) → a silent sound track under it
+ * (merge-audio-video) → merge-videos after the ad. Open: video-append-endcard (the ad's sound kept, padded with
+ * silence under the card), or still-to-clip + oss-join-sound1 for a clip the open engine didn't make.
+ */
+export function endCardSteps(o: EndCardInput): { steps: EndCardStep[]; final: string } {
+  const seconds = Math.max(END_CARD.minSeconds, Math.min(END_CARD.maxSeconds, o.seconds ?? END_CARD.seconds));
+  const result = { feature: o.feature, title: o.title, batchTitle: o.title };
+  const helper = { feature: `${o.feature}-step` };
+  if (o.engine === "open") {
+    if (!o.card) throw new Error("The open engine needs the end card drawn on the page — turn End card off, or make the ad from Click to Ad");
+    const M = END_CARD_MODELS.open;
+    if ((o.adEncodedBy ?? "comfyui") === "comfyui") {
+      return {
+        final: "endcard",
+        steps: [
+          {
+            key: "endcard",
+            label: "End card",
+            request: { ...result, modelId: M.append, op: "concat", prompt: o.title, inputs: { images: [o.card] }, params: { duration: seconds } },
+            after: [o.ad],
+            chain: [{ slot: "video" }],
+          },
+        ],
+      };
+    }
+    return {
+      final: "endcard",
+      steps: [
+        { key: "endcardClip", label: "End card", request: { ...helper, modelId: M.clip, op: "still-motion", inputs: { images: [o.card] }, params: { duration: seconds, fps: 25, aspectRatio: o.aspectRatio, ...(o.resolution && { resolution: o.resolution }) } } },
+        {
+          key: "endcard",
+          label: "Adding the end card",
+          request: { ...result, modelId: M.join, op: "concat", prompt: o.title, params: { aspectRatio: o.aspectRatio, ...(o.resolution && { resolution: o.resolution }) } },
+          after: [o.ad, "endcardClip"],
+          chain: [{ slot: "videos" }, { slot: "videos" }],
+        },
+      ],
+    };
+  }
+  const M = END_CARD_MODELS.cloud;
+  if (!o.silence) throw new Error("The end card needs its silent sound track");
+  const steps: EndCardStep[] = [];
+  if (!o.card) {
+    if (!o.background || !o.logo) throw new Error("Add a logo to the brand kit for the end card, or turn End card off");
+    steps.push({ key: "endcardArt", label: "End card", request: { ...helper, modelId: M.art, op: "overlay", inputs: { images: [o.background, o.logo] }, params: { position: { x: 0.5, y: 0.45 }, scale: 1 } } });
+  }
+  const move = { duration: seconds, fps: END_CARD.fps, zoomFrom: 1, zoomTo: END_CARD.zoomTo, panFrom: { x: 0.5, y: 0.5 }, panTo: { x: 0.5, y: 0.5 }, easing: "ease-in-out" as const };
+  steps.push({
+    key: "endcardClip",
+    label: "End card motion",
+    request: { ...helper, modelId: M.clip, op: "still-motion", ...(o.card ? { inputs: { images: [o.card] } } : {}), params: move },
+    ...(o.card ? {} : { after: ["endcardArt"], chain: [{ slot: "images" as const }] }),
+  });
+  // The card's clip has no sound: give it silence, so merge-videos joins two clips that both have sound (whether it
+  // keeps the first clip's voiceover when the second has no audio stream at all is unknown).
+  steps.push({
+    key: "endcardSound",
+    label: "End card sound",
+    request: { ...helper, modelId: M.sound, op: "mux", inputs: { audio: o.silence } },
+    after: ["endcardClip"],
+    chain: [{ slot: "video" }],
+  });
+  steps.push({
+    key: "endcard",
+    label: "Adding the end card",
+    request: { ...result, modelId: M.join, op: "concat", prompt: o.title, params: { aspectRatio: o.aspectRatio } },
+    after: [o.ad, "endcardSound"],
+    chain: [{ slot: "videos" }, { slot: "videos" }],
+  });
+  return { steps, final: "endcard" };
+}
+
+// ---------------------------------------------------------------------------
 // Ads Studio
 
 export const MAX_ADS_PER_PRODUCT = 20;
@@ -632,11 +755,11 @@ export interface AdCreative extends AdConcept {
   message?: string | null;
   error?: string | null;
   generationId?: string | null;
-  /** The rendered visual (or the whole ad on the Higgsfield route). */
+  /** The rendered visual (or, for a baked ad, the whole ad). */
   image?: string | null;
-  /** The visual already holds the text (Higgsfield Ads Studio): don't draw over it. */
+  /** The visual already holds the text (an ad drawn whole in one call before build plan O7): don't draw over it. */
   baked?: boolean;
-  /** A baked creative's one format (Higgsfield renders a single ratio per ad). */
+  /** A baked creative's one format. */
   ratio?: "1:1" | "4:5" | "9:16";
   layout?: string | null;
   engine: Engine;
@@ -703,12 +826,13 @@ export function mentionedImages(prompt: string): number[] {
 
 /**
  * The images a model gets, and the prompt rewritten for it: the mentioned images first (then the
- * rest) up to the model's limit, renumbered; Kling reads "@Image1", the others "image 1".
+ * rest) up to the model's limit, renumbered; Kling and Happy Horse bind "@Image1" (their prompt
+ * fields say so), the others read "image 1".
  */
 export function mentionsFor(prompt: string, images: string[], modelId: string, max: number): { prompt: string; images: string[]; dropped: number } {
   const order = [...mentionedImages(prompt).filter((n) => n <= images.length), ...images.map((_, i) => i + 1)].filter((n, i, a) => a.indexOf(n) === i);
   const used = order.slice(0, Math.max(0, max));
-  const kling = modelId.startsWith("kling");
+  const kling = modelId.startsWith("kling") || modelId.startsWith("happy-horse");
   const text = prompt.replace(/@image_(\d{1,2})\b/g, (all, d: string) => {
     const at = used.indexOf(Number(d));
     if (at < 0) return "the reference";
@@ -812,12 +936,12 @@ export function shotPlan(seconds: number, allowed: number[] | undefined): number
 
 export interface ModelChoice {
   id: string;
-  /** Why it's the pick ("exact text", "Higgsfield's own"). */
+  /** Why it's the pick ("exact text", "keeps the product pixel-exact"). */
   note?: string;
 }
 
 /** The models a Marketing Studio format can use on an engine, the default first. */
-export function formatModels(format: FormatDef, engine: Engine, has: { product: boolean; avatar: boolean; higgsfield: boolean }): ModelChoice[] {
+export function formatModels(format: FormatDef, engine: Engine, has: { product: boolean; avatar: boolean }): ModelChoice[] {
   if (engine === "open") {
     switch (format.pipeline) {
       case "motion":
@@ -829,15 +953,14 @@ export function formatModels(format: FormatDef, engine: Engine, has: { product: 
         return [{ id: "oss-qwen-edit", note: format.text ? "Qwen-Image-Edit; your text is set on top" : "Qwen-Image-Edit with your references" }];
     }
   }
-  const hf: ModelChoice[] = has.higgsfield ? [{ id: "marketing-studio-image", note: "Higgsfield's own" }] : [];
   switch (format.id) {
     case "product-standalone":
-      return [{ id: "bria-product-shot", note: "Keeps the product pixel-exact" }, { id: "nano-banana-pro" }, ...hf, { id: "gpt-image-2-5" }, { id: "product-photography", note: "One-tap studio shot" }];
+      return [{ id: "bria-product-shot", note: "Keeps the product pixel-exact" }, { id: "nano-banana-pro" }, { id: "gpt-image-2-5" }, { id: "product-photography", note: "One-tap studio shot" }];
     case "product-with-model":
-      return [{ id: "nano-banana-pro", note: "Product + person references" }, ...hf, { id: "gpt-image-2-5" }];
+      return [{ id: "nano-banana-pro", note: "Product + person references" }, { id: "gpt-image-2-5" }];
     case "ads":
     case "marketplace":
-      return [{ id: "gpt-image-2-5", note: "Exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }, ...hf];
+      return [{ id: "gpt-image-2-5", note: "Exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }];
     case "poster":
       return has.product
         ? [{ id: "gpt-image-2-5", note: "Exact text" }, { id: "nano-banana-pro" }, { id: "ideogram-4-5" }]
@@ -846,7 +969,7 @@ export function formatModels(format: FormatDef, engine: Engine, has: { product: 
     case "tiktok":
       return [{ id: "omnihuman-2", note: "Full-body presenter" }, { id: "kling-avatar" }];
     default:
-      return [{ id: "seedance-2-5", note: "Higgsfield's default video model" }, { id: "kling-o3" }, { id: "gemini-omni-flash" }];
+      return [{ id: "seedance-2-5", note: "Multi-shot with sound" }, { id: "kling-o3" }, { id: "gemini-omni-flash" }];
   }
 }
 
@@ -871,12 +994,19 @@ export const OPEN_SOUND_JOIN = { first: "oss-join-sound1", second: "oss-join-sou
 /** The models the Ad Multiplier can recreate with, per engine (the first that's usable is the default). */
 export const MULTIPLIER_MODELS: Record<Engine, ModelChoice[]> = {
   cloud: [
-    { id: "seedance-2-5", note: "Seedance 2.5 edit — what Higgsfield runs (needs a Higgsfield key)" },
-    { id: "kling-o3", note: "Kling O3 edit, up to 4 @images" },
+    { id: "kling-o3", note: "Kling O3 edit, up to 4 @images, keeps the sound · 15 s at most" },
+    { id: "happy-horse-video-edit", note: "Happy Horse video edit, up to 4 @images, keeps the sound · 15 s at most" },
     { id: "gemini-omni-flash", note: "Gemini Omni Flash edit, prompt only" },
   ],
-  open: [{ id: "oss-wan22-animate", note: "Wan Animate: your @image_1 takes over the performance" }],
+  open: [{ id: "fuobe-genjutsu-motion", note: "Fuobe Genjutsu · Motion (Wan Animate 2): your @image_1 takes over the performance" }],
 };
+
+/**
+ * The longest part of the reference a cloud edit model recreates (docs/research/paid-model-apis-3/4.json): Kling O3's
+ * edit takes 3–15 s clips; Happy Horse's takes up to 60 s but returns at most the first 15 s (and bills the input
+ * seconds too). A longer selection is cut to its first seconds, and the run says so.
+ */
+export const MULTIPLIER_WINDOW: Readonly<Record<string, number>> = { "kling-o3": 15, "happy-horse-video-edit": 15 };
 
 /** Ad Multiplier quality → the resolution sent; open models top out at 720p. */
 export const multiplierResolution = (q: string, engine: Engine) => (engine === "open" && q === "1080p" ? "720p" : q);
@@ -913,6 +1043,8 @@ export interface MarketingRunMeta {
   notes?: string[];
   /** What the run was made from, so "Run again" can repeat it. */
   input?: Record<string, unknown>;
+  /** Click to Ad: the logo end card it ends on (the card the page drew; null: the kit's logo on its colour). */
+  endCard?: string | null;
 }
 
 export interface MarketingRun {

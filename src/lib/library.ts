@@ -124,11 +124,12 @@ export function listOrder(f: Pick<FeedFilter, "trashed" | "pinned">): (a: Genera
  * Jobs nobody asked to see on their own: the steps a chain runs before its result (a Shorts cut, a
  * Click to Ad voiceover, an Ad Multiplier hook: every "<studio>-step" feature), and helper jobs a
  * studio starts by itself (a Mixed Media preview frame, a Faceless channel avatar or narrator sample,
- * a moodboard's cover). The Library and the home feed leave them out unless "Show steps" is on; a
- * list that names its features (a studio reading its own steps) gets what it asks for.
+ * a moodboard's cover), and the evaluation harness's runs (scripts/eval: hundreds of test renders). The
+ * Library and the home feed leave them out unless "Show steps" is on; a list that names its features
+ * (a studio reading its own steps) gets what it asks for.
  */
 export const HELPER_SUFFIX = "-step";
-export const HELPER_FEATURES = ["mixed-media-preview", "faceless-avatar", "faceless-voice", "moodboard"] as const;
+export const HELPER_FEATURES = ["mixed-media-preview", "faceless-avatar", "faceless-voice", "moodboard", "eval"] as const;
 
 export function isHelperFeature(feature: string): boolean {
   return feature.endsWith(HELPER_SUFFIX) || (HELPER_FEATURES as readonly string[]).includes(feature);
@@ -300,7 +301,7 @@ export interface AssetUse {
   trashed?: boolean;
 }
 
-const plural = (what: string) => (/(s|x|ch|sh)$/.test(what) ? `${what}es` : `${what}s`);
+const plural = (what: string) => (/series$/.test(what) ? what : /(s|x|ch|sh)$/.test(what) ? `${what}es` : `${what}s`);
 
 /** "2 results (1 in the Trash), the element “Maya” and 3 canvases": where a file is used, in one line. */
 export function describeUses(uses: AssetUse[]): string {
@@ -474,4 +475,18 @@ export function coverOf(items: Generation[]): { g: Generation; o: OutputFile; in
   const film = done.find((g) => g.op === "concat");
   const g = film ?? done[0];
   return g ? { g, o: g.outputs[0], index: 0 } : null;
+}
+
+/**
+ * Select a group of results (a date's, or everything loaded): every one of `ids` when any is
+ * missing, else none of them. Returns a new set; other selected ids stay as they are.
+ */
+export function toggleAll(selected: ReadonlySet<string>, ids: readonly string[]): Set<string> {
+  const next = new Set(selected);
+  const all = ids.length > 0 && ids.every((id) => next.has(id));
+  for (const id of ids) {
+    if (all) next.delete(id);
+    else next.add(id);
+  }
+  return next;
 }

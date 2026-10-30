@@ -1,11 +1,13 @@
 import { connection } from "next/server";
 import { getModel, MODELS } from "@/lib/catalog";
+import { onEngine, runsOn } from "@/lib/catalog/engines";
 import { ENGINE_MODELS } from "@/lib/catalog/faceless";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { findModels, MODEL_KINDS, toModelInfo } from "@/lib/model-list";
 import { AUDIO_STUDIO, DIALOGUE_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
 import { provider } from "@/server/providers";
 import { llmBackends } from "@/server/providers/llm";
+import { offeredDefault, offeredModels } from "@/server/model-access";
 import { engineMode, getSetting } from "@/server/settings";
 
 /** A provider for one of its routes is set up. */
@@ -45,7 +47,8 @@ const DEFAULTS: Record<string, { cloud?: string; open?: string }> = {
  * cloud), op, q (words that must all match), hidden=1 (chain helpers too). Models of an engine the
  * install has switched off (Settings → Engine mode) are left out. `defaults` are the studios' own
  * picks per engine (DEFAULTS); each item says whether its provider is `connected` and how a run
- * goes today (`runs`, which follows Settings → Demo mode).
+ * goes today (`runs`, which follows Settings → Demo mode). Models switched off in Settings → Models & licences
+ * are left out, and a default that is off gives way to the next model that is on.
  */
 export async function GET(request: Request) {
   await connection();
@@ -57,11 +60,18 @@ export async function GET(request: Request) {
   const op = p.get("op") || undefined;
   if (op && !(op in OPERATION_LABELS)) return Response.json({ error: `Unknown operation ${op}` }, { status: 400 });
   const mode = engineMode();
-  const list = findModels(MODELS, { kind: kind as MediaKind | undefined, engine: engine as Engine | undefined, op: op as Operation | undefined, q: p.get("q") ?? undefined, hidden: p.get("hidden") === "1" }).filter(
-    (m) => mode === "both" || m.engine === mode,
-  );
+  // A Fuobe Original runs on both engines: on a list for one engine (asked for, or the install's only one) it is
+  // that engine's model (its routes, its price), else it is listed once with both.
+  const only = (engine as Engine | undefined) ?? (mode === "both" ? undefined : mode);
+  // The install's only engine counts as asked for: an Original's operations there are that engine's.
+  // Settings → Models & licences: what is switched off isn't listed, and each model lists the routes that are on.
+  const list = findModels(offeredModels(MODELS), { kind: kind as MediaKind | undefined, engine: only, op: op as Operation | undefined, q: p.get("q") ?? undefined, hidden: p.get("hidden") === "1" })
+    .filter((m) => mode === "both" || runsOn(m, mode))
+    .map((m) => (only ? onEngine(m, only) : m));
+  // A default that is switched off gives way to the next model that is on and does the same job.
+  const pick = (id: string | undefined, e: Engine) => offeredDefault(id, e);
   const defaults = Object.fromEntries(
-    Object.entries(DEFAULTS).map(([k, ids]) => [k, { ...(mode !== "open" && ids.cloud && { cloud: ids.cloud }), ...(mode !== "cloud" && ids.open && { open: ids.open }) }]),
+    Object.entries(DEFAULTS).map(([k, ids]) => [k, { ...(mode !== "open" && ids.cloud && { cloud: pick(ids.cloud, "cloud") }), ...(mode !== "cloud" && ids.open && { open: pick(ids.open, "open") }) }]),
   );
   const demoMode = getSetting("demoMode");
   return Response.json({ engineMode: mode, demoMode, defaults, items: list.map((m) => ({ ...toModelInfo(m), connected: connected(m), runs: runsAs(m, demoMode) })) });

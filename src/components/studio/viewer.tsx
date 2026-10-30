@@ -10,13 +10,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OPERATION_LABELS, type Generation, type OutputFile } from "@/lib/catalog/types";
 import { formatCost, timeAgo } from "@/lib/format";
+import { PRESETS as GRADE_PRESETS } from "@/lib/grade";
 import { trashDaysLeft, userTitle } from "@/lib/library";
-import { isLayered, layerInfo, outputActions, type OutputAction } from "@/lib/output-actions";
+import { editOnlyFormat, isLayered, layerInfo, outputActions, type OutputAction } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 import { copyWithToast } from "@/lib/clipboard";
 import { CompareSlider } from "./compare-slider";
 import { ACTION_ICONS, downloadUrl, SaveElementForm, useActionRunner } from "./result-actions";
-import { LayersStack, ModelViewer, TextReader } from "./result-media";
+import { LayersStack, ModelViewer, TextReader, VideoFileCard } from "./result-media";
 import { ReviewSelect } from "@/components/library/review";
 
 
@@ -84,7 +85,8 @@ function Details({ g, index }: { g: Generation; index: number }) {
         <Row label="Model" value={g.modelName ?? g.modelId} />
         <Row label="Engine" value={g.provider === "mock" ? "Demo" : g.provider === "local" ? "In your browser" : g.engine === "open" ? "Open source · ComfyUI" : `Cloud · ${g.provider}`} />
         <Row label="Mode" value={OPERATION_LABELS[g.op]} />
-        <Row label="Preset" value={g.presetName} />
+        <Row label={g.modelId.startsWith("fuobe-soul") ? "Look" : "Preset"} value={g.presetName} />
+        <Row label="Finish" value={finishText(g.outputs[index])} />
         <Row label="Step" value={g.request.step?.label} />
         {isLayered(g) && <Row label="Layer" value={`${layerInfo(g.outputs[index], index).name} · ${index + 1} of ${g.outputs.length}`} />}
         <Row label="Stem" value={metaText(g.outputs[index], "stem")} />
@@ -101,6 +103,16 @@ function Details({ g, index }: { g: Generation; index: number }) {
       {g.request.negativePrompt && <p className="text-[12px] text-muted-foreground">Negative: {g.request.negativePrompt}</p>}
     </div>
   );
+}
+
+/** A Fuobe Soul result's post steps: the grade preset and the overlay, applied in the browser (or still to come). */
+function finishText(o: OutputFile | undefined): string | undefined {
+  const m = o?.meta;
+  if (!m || (!m.grade && !m.overlay)) return undefined;
+  const grade = typeof m.grade === "string" ? (GRADE_PRESETS.find((p) => p.id === m.grade)?.name ?? m.grade) : undefined;
+  const overlay = m.overlay === "date-stamp" ? "date stamp" : m.overlay === "cctv" ? "CCTV caption" : m.overlay === "photo-booth" ? "photo-booth print" : undefined;
+  const what = [grade && `${grade} grade`, overlay].filter(Boolean).join(" + ");
+  return m.finished ? what : `${what} (applied when it opens in a studio)`;
 }
 
 function LayerList({ g, index, all, onPick, onAll }: { g: Generation; index: number; all: boolean; onPick: (i: number) => void; onAll: () => void }) {
@@ -149,6 +161,8 @@ export function Viewer({
   const [allLayers, setAllLayers] = useState(layered);
   const [drawer, setDrawer] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A video this browser can't decode (HEVC or 10-bit H.264 on some systems): shown as a file to download instead.
+  const [failedVideo, setFailedVideo] = useState<string | null>(null);
   const run = useActionRunner({ onReuse: onReuse && ((x) => (onReuse(x), onClose())), onCompare: () => setComparing((v) => !v), onDeleted: onClose });
   const list = useMemo(() => outputActions(g, index, { reuse: !!onReuse, compare: !!source, inViewer: true }), [g, index, onReuse, source]);
 
@@ -261,9 +275,16 @@ export function Viewer({
     );
   };
 
+  const pro = editOnlyFormat(g, o);
   const media =
     o.kind === "video" ? (
-      <video key={o.url} src={o.url} controls autoPlay loop playsInline className="max-h-full max-w-full" />
+      pro || failedVideo === o.url ? (
+        <div className="aspect-video w-[min(90%,560px)] overflow-hidden rounded-xl">
+          <VideoFileCard output={o} format={pro} />
+        </div>
+      ) : (
+        <video key={o.url} src={o.url} controls autoPlay loop playsInline onError={() => setFailedVideo(o.url)} className="max-h-full max-w-full" />
+      )
     ) : o.kind === "audio" ? (
       <audio key={o.url} src={o.url} controls autoPlay className="w-[min(90%,560px)]" />
     ) : o.kind === "text" ? (

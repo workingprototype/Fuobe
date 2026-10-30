@@ -1,0 +1,144 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "soul-id",
+  "title": "Fuobe Soul ID · character and look training",
+  "description": "Train a character from a folder of photos you supply (local/characters/<name>/, 20+ photos of one consenting person: no sunglasses, groups, filters or cropped faces, one full-body shot), then make N images of them on each family's model. Identity is measured against the same photos, and A/B'd against the same element used as reference photos on an edit model. Set \"consent\": true in your copy only when the person agreed. The look case trains a moodboard's style (local/styles/<name>/, 20+ images in one style) and measures style against those images. Demo runs don't train (they use reference images on drawn faces). Use Fuobe-owned or licensed photos only, never Higgsfield outputs.",
+  "original": "fuobe-soul-id",
+  "kind": "image",
+  "targets": {
+    "open": { "models": ["fuobe-soul"] },
+    "cloud": { "models": ["fuobe-soul"] },
+    "demo": { "models": ["fuobe-soul"] }
+  },
+  "defaults": {
+    "seeds": [1001],
+    "params": { "aspectRatio": "3:4" },
+    "metrics": ["identity", "clip", "aesthetic"],
+    "candidate": "trained",
+    "timeoutSeconds": 900
+  },
+  "variants": {
+    "trained": { "description": "The trained LoRA, @mentioned in every prompt, at full character strength" },
+    "half-strength": {
+      "description": "The same LoRA at half character strength (scale 0.8): does the likeness hold while the scene follows the prompt better?",
+      "extra": { "characterStrength": 0.5 }
+    },
+    "references": {
+      "description": "No training: the same element's photos as references on an edit model (open) or a partner model (cloud), the bar Soul ID has to clear",
+      "preset": false,
+      "models": { "open": ["oss-qwen-edit"], "cloud": ["nano-banana-pro"], "demo": ["oss-qwen-edit"] }
+    }
+  },
+  "cases": [
+    {
+      "id": "soul-id/character",
+      "title": "Fuobe Soul · your character, eight scenes",
+      "train": {
+        "photos": "local/characters/default",
+        "name": "Eval character",
+        "targets": { "open": "aitk-z-image", "cloud": "fal-z-image" },
+        "minPhotos": 5,
+        "consent": false
+      },
+      "references": "local/characters/default",
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png", "fixtures/character/drawn-face-2.png", "fixtures/character/drawn-face-3.png"] },
+      "prompts": [
+        { "id": "chef", "seed": 1101, "text": "{character} as a chef plating a dish in a busy restaurant kitchen" },
+        { "id": "rain", "seed": 1102, "text": "{character} under a clear umbrella on a rainy street at night" },
+        { "id": "beach", "seed": 1103, "text": "{character} walking barefoot on a beach at sunrise, full body" },
+        { "id": "office", "seed": 1104, "text": "close-up of {character} smiling at a desk in a bright office" },
+        { "id": "hiker", "seed": 1105, "text": "{character} hiking a mountain trail with a backpack, wide shot" },
+        { "id": "cafe", "seed": 1106, "text": "{character} reading a book by the window of a small cafe" },
+        { "id": "stage", "seed": 1107, "text": "{character} singing into a microphone on a stage under coloured lights" },
+        { "id": "profile", "seed": 1108, "text": "a side profile portrait of {character}, soft studio light, plain grey backdrop" }
+      ],
+      "tags": ["z-image-turbo"]
+    },
+    {
+      "id": "soul-id/cinema",
+      "title": "Soul Cinema · the same family's LoRA in film stills",
+      "note": "Trains again unless train.element names the character case's element (its id is in an earlier run's elements.json).",
+      "models": { "open": ["fuobe-soul-cinema"], "cloud": ["fuobe-soul-cinema"], "demo": ["fuobe-soul-cinema"] },
+      "params": { "aspectRatio": "16:9" },
+      "train": {
+        "photos": "local/characters/default",
+        "name": "Eval character",
+        "targets": { "open": "aitk-z-image", "cloud": "fal-z-image" },
+        "minPhotos": 5,
+        "consent": false
+      },
+      "references": "local/characters/default",
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png", "fixtures/character/drawn-face-2.png"] },
+      "prompts": [
+        { "id": "diner", "seed": 1201, "text": "{character} in a booth of an empty diner at 3am, neon through the window" },
+        { "id": "platform", "seed": 1202, "text": "{character} waiting alone on a rain-soaked train platform, wide shot" },
+        { "id": "rooftop", "seed": 1203, "text": "{character} on a rooftop at golden hour, the city behind, medium shot" }
+      ],
+      "tags": ["z-image-turbo"]
+    },
+    {
+      "id": "soul-id/hd",
+      "title": "Fuobe Soul HD · retrained on Qwen-Image 2512, with lettering",
+      "models": { "open": ["fuobe-soul-hd"], "cloud": ["fuobe-soul-hd"], "demo": ["fuobe-soul-hd"] },
+      "train": {
+        "photos": "local/characters/default",
+        "name": "Eval character HD",
+        "targets": { "open": "aitk-qwen-2512", "cloud": "fal-qwen-2512" },
+        "minPhotos": 5,
+        "consent": false
+      },
+      "references": "local/characters/default",
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png", "fixtures/character/drawn-face-2.png"] },
+      "prompts": [
+        { "id": "poster", "seed": 1301, "text": "a concert poster of {character} on stage, the words \"LIVE TONIGHT\" in bold letters across the top" },
+        { "id": "magazine", "seed": 1302, "text": "a magazine cover with {character}, the title \"BLOOM\" at the top, studio portrait" },
+        { "id": "street", "seed": 1303, "text": "{character} in front of a shop sign that reads \"OPEN\", morning light" }
+      ],
+      "tags": ["qwen-image-2512"]
+    },
+    {
+      "id": "soul-id/flux",
+      "title": "FLUX.1 [dev] · retrained for FLUX (non-commercial weights)",
+      "note": "Licences are information: FLUX.1 [dev]'s weights are non-commercial, for the report's reader to weigh, not the harness.",
+      "models": { "open": ["oss-flux1-dev"], "cloud": ["flux-1-dev-lora-cloud"], "demo": ["oss-flux1-dev"] },
+      "train": {
+        "photos": "local/characters/default",
+        "name": "Eval character FLUX",
+        "targets": { "open": "aitk-flux1-dev", "cloud": "fal-flux1-portrait" },
+        "minPhotos": 5,
+        "consent": false
+      },
+      "references": "local/characters/default",
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png", "fixtures/character/drawn-face-2.png"] },
+      "prompts": [
+        { "id": "chef", "seed": 1401, "text": "{character} as a chef plating a dish in a busy restaurant kitchen" },
+        { "id": "beach", "seed": 1403, "text": "{character} walking barefoot on a beach at sunrise, full body" },
+        { "id": "profile", "seed": 1408, "text": "a side profile portrait of {character}, soft studio light, plain grey backdrop" }
+      ],
+      "tags": ["flux1-dev"]
+    },
+    {
+      "id": "soul-id/look",
+      "title": "A moodboard trained as a look on Fuobe Soul",
+      "note": "The trained style is the look (own-style), as the app runs a trained moodboard: none of Soul's own look LoRAs under it.",
+      "models": { "open": ["fuobe-soul"], "cloud": ["fuobe-soul"], "demo": ["fuobe-soul"] },
+      "presetId": "own-style",
+      "metrics": ["style", "clip", "aesthetic"],
+      "train": {
+        "photos": "local/styles/default",
+        "name": "Eval look",
+        "kind": "style",
+        "targets": { "open": "aitk-z-image", "cloud": "fal-z-image-style" },
+        "minPhotos": 5
+      },
+      "references": "local/styles/default",
+      "demoInputs": { "images": ["fixtures/references/warm-1.png", "fixtures/references/warm-2.png"] },
+      "prompts": [
+        { "id": "lighthouse", "seed": 1501, "text": "{character} a lighthouse on a cliff at dusk" },
+        { "id": "fisherman", "seed": 1502, "text": "{character} a portrait of an old fisherman mending a net" },
+        { "id": "lemons", "seed": 1503, "text": "{character} a bowl of lemons on a kitchen table" }
+      ],
+      "tags": ["z-image-turbo", "style"]
+    }
+  ]
+}

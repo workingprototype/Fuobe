@@ -14,6 +14,8 @@ const LOOKUPS: Record<RecordRef["kind"], string> = {
   channel: "SELECT 1 FROM faceless_channels WHERE id = ?",
   episode: "SELECT 1 FROM faceless_episodes WHERE channel_id = ? AND id = ?",
   explainer: "SELECT 1 FROM faceless_episodes WHERE id = ?",
+  series: "SELECT 1 FROM content_series WHERE id = ?",
+  "swap-project": "SELECT 1 FROM swap_projects WHERE id = ?",
 };
 
 /**

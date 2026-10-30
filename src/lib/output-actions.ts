@@ -5,9 +5,11 @@
  * placement: "primary" = the labelled pill (Animate / Extend …), "bar" = icon buttons on tiles
  * (Download, Favorite), "menu" = the ⋯ menu. The viewer shows them all as labelled buttons.
  */
-import type { Generation, OutputFile } from "./catalog/types";
+import type { Generation, OutputFile, VideoFormat } from "./catalog/types";
 import { cueText, type Cue } from "./cues";
 import { downloadHref, downloadName, extensionOf } from "./library";
+import { PRESETS as GRADE_PRESETS } from "./grade";
+import { storedPath } from "./share";
 
 export type OutputActionId =
   | "animate"
@@ -21,7 +23,9 @@ export type OutputActionId =
   | "reframe"
   | "lipsync"
   | "add-sound"
+  | "genjutsu"
   | "voice-change"
+  | "loop-audio"
   | "copy-text"
   | "view-3d"
   | "download"
@@ -29,11 +33,13 @@ export type OutputActionId =
   | "download-srt"
   | "download-vtt"
   | "download-all"
+  | "download-exr"
   | "favorite"
   | "finalize"
   | "compare"
   | "reuse"
   | "copy-prompt"
+  | "share"
   | "pin"
   | "review"
   | "delete"
@@ -93,21 +99,36 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("reference", "Use as reference", `/image?ref=${q(o.url)}`);
       link("grade", "Color grade", `/color-grade?image=${q(o.url)}`);
       link("layers", "Open in Layers", layersHref(g, o.url));
+      link("genjutsu", "Animate with Genjutsu", `/genjutsu?mode=motion&image=${q(o.url)}`);
       out.push({ id: "save-character", label: "Save as character", placement: "menu" });
       break;
-    case "video":
+    case "video": {
       link("extend", "Extend", `/extend?video=${q(o.url)}`, "primary");
-      out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
+      out.push(file);
+      // An HDR or export job's EXR frames ride along on its preview clip (meta.artifacts.exr): a stored zip, or
+      // the provider's own link when it couldn't be kept (unreachable when the job finished; it expires).
+      const exr = (o.meta?.artifacts as Record<string, unknown> | undefined)?.exr;
+      if (typeof exr === "string" && /^(\/api\/files\/|https?:\/\/)/.test(exr)) {
+        const zip = name.replace(/\.[^.]+$/, "-exr.zip");
+        const stored = exr.startsWith("/api/files/");
+        out.push({ id: "download-exr", label: stored ? "Download EXR frames (.zip)" : "Download EXR frames (.zip, provider link)", placement: "bar", href: stored ? downloadHref(exr, zip) : exr, download: zip });
+      }
+      out.push({ id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("reframe", "Reframe", `/reframe?video=${q(o.url)}`);
       link("lipsync", "Lipsync", `/lipsync?video=${q(o.url)}`);
       link("upscale", "Upscale", `/upscale/video?video=${q(o.url)}`);
       link("add-sound", "Add sound", `/audio/video?video=${q(o.url)}`);
-      link("grade", "Color grade", `/color-grade?video=${q(o.url)}`);
+      // A Fuobe DoP colour-grade effect: the clip opens in Color grading with its grade picked (one click to export).
+      const dopGrade = gradeOf(o);
+      link("grade", dopGrade ? `Apply the ${dopGrade.name} grade` : "Color grade", `/color-grade?video=${q(o.url)}${dopGrade ? `&preset=${q(dopGrade.id)}` : ""}`);
+      link("genjutsu", "Use in Genjutsu", `/genjutsu?video=${q(o.url)}`);
       break;
+    }
     case "audio":
       link("lipsync", "Lipsync", `/lipsync?audio=${q(o.url)}`, "primary");
       out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("voice-change", "Change voice", `/audio/voice-change?audio=${q(o.url)}`);
+      link("loop-audio", "Loop / extend", `/audio/loop?audio=${q(o.url)}`);
       break;
     case "text":
       out.push({ id: "copy-text", label: "Copy", placement: "primary" }, file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
@@ -130,10 +151,42 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   if (ctx.compare) out.push({ id: "compare", label: "Compare with original", placement: "menu" });
   if (ctx.reuse) out.push({ id: "reuse", label: "Reuse settings", placement: "menu" });
   if (g.prompt) out.push({ id: "copy-prompt", label: "Copy prompt", placement: "menu" });
+  // A read-only link (src/lib/share.ts): finished results whose files Fuobe keeps.
+  if (g.status === "succeeded" && g.outputs.some((x) => storedPath(x.url))) out.push({ id: "share", label: "Share link…", placement: "menu" });
   // Library: pinned results stay at the top of their view; the review status is a sub-menu of its own.
   out.push({ id: "pin", label: g.pinnedAt ? "Unpin" : "Pin to top", placement: "menu" }, { id: "review", label: "Review status", placement: "menu" });
   out.push({ id: "delete", label: "Delete", placement: "menu", destructive: true });
   return out;
+}
+
+/** The hand-offs offered as next steps under a fresh result, best first (UX-18). */
+const NEXT_STEPS: Partial<Record<OutputFile["kind"], OutputActionId[]>> = {
+  image: ["animate", "upscale", "edit"],
+  video: ["extend", "upscale", "add-sound"],
+  audio: ["lipsync", "voice-change"],
+};
+
+/**
+ * Up to `max` next steps for output `index` (Animate, Upscale, Edit for a picture), taken from
+ * outputActions so they go where the tile's own actions go. Only hand-offs to another studio.
+ */
+export function nextSteps(g: Generation, index: number, max = 3): OutputAction[] {
+  const o = g.outputs[index];
+  if (!o || g.status !== "succeeded") return [];
+  const all = outputActions(g, index);
+  // A clip with a grade still to apply (a Fuobe DoP colour-grade effect) offers it first.
+  const order: OutputActionId[] = o.kind === "video" && gradeOf(o) ? ["grade", ...(NEXT_STEPS.video ?? [])] : (NEXT_STEPS[o.kind] ?? []);
+  return order
+    .map((id) => all.find((a) => a.id === id && a.href))
+    .filter((a): a is OutputAction => !!a)
+    .slice(0, max);
+}
+
+/** The grade a clip still asks for (meta.grade: a Fuobe DoP colour-grade effect), as a Color grading preset. */
+export function gradeOf(o: Pick<OutputFile, "kind" | "meta">): { id: string; name: string } | undefined {
+  const id = o.kind === "video" && typeof o.meta?.grade === "string" ? o.meta.grade : undefined;
+  const p = id ? GRADE_PRESETS.find((x) => x.id === id) : undefined;
+  return p && { id: p.id, name: p.name };
 }
 
 /**
@@ -205,6 +258,34 @@ export function layerInfo(o: Pick<OutputFile, "meta">, index: number): { name: s
 /** A generation whose outputs are the layers of one picture (Layers, text layers). */
 export function isLayered(g: Pick<Generation, "op" | "outputs">): boolean {
   return (g.op === "layers" || g.op === "text-layers" || g.outputs.some((o) => !!(o.meta && ("layer" in o.meta || "z" in o.meta)))) && g.outputs.length > 1;
+}
+
+/**
+ * A still for a clip's tile, shown before it loads (and where the browser can't decode it): the
+ * output's own meta.poster / thumbnail, else, for a clip made from a start frame (image-to-video,
+ * start + end frame), that frame. Undefined when there's nothing better than the clip's first frame.
+ */
+export function videoPoster(g: Partial<Pick<Generation, "op" | "request">> | undefined, o: Pick<OutputFile, "kind" | "meta">): string | undefined {
+  if (o.kind !== "video") return undefined;
+  const m = (o.meta ?? {}) as Record<string, unknown>;
+  const own = ["poster", "thumbnail"].map((k) => m[k]).find((v): v is string => typeof v === "string" && v.length > 0);
+  if (own) return own;
+  if (g?.op !== "i2v" && g?.op !== "flf2v") return undefined;
+  return g.request?.inputs?.images?.[0] || undefined;
+}
+
+/**
+ * A pro export browsers don't play (ProRes in a .mov, FFV1 in a .mkv): its tile is a file card, not a black
+ * player. Judged by the request (an export or HDR job's format) and the file's extension.
+ */
+export function editOnlyFormat(g: Partial<Pick<Generation, "op" | "request">> | undefined, o: Pick<OutputFile, "url" | "kind">): VideoFormat | undefined {
+  if (o.kind !== "video") return undefined;
+  const ext = extensionOf(o);
+  if (ext === "mkv") return "ffv1";
+  const f = g?.request?.params?.format;
+  // A demo run's placeholder is a plain .mp4, whatever the format asked for.
+  if ((g?.op === "export-video" || g?.op === "sdr-to-hdr") && ext === "mov" && (f === "prores_422_hq" || f === "prores_4444")) return f;
+  return undefined;
 }
 
 /** A 3D model's still and turntable: meta.poster / meta.preview, meta.video / meta.turntable, or a sibling output. */

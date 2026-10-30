@@ -1,33 +1,25 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CircleAlert, Cloud, Cpu, ExternalLink, Layers, Loader2, RefreshCw } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { CheckCircle2, CircleAlert, Cloud, Cpu, ExternalLink, Info, Layers, Link2, Loader2, RefreshCw, Scale } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ConnectField, useSettings, type PublicSetting } from "@/components/connect-field";
+import { GetStarted } from "@/components/get-started";
+import { LoraSettings } from "@/components/lora-settings";
+import { useStatus, type StatusInfo } from "@/lib/api";
+import { connectionSummary, ENGINE_MODE_LABEL, FAL_KEYS_URL, showFirstRun } from "@/lib/connections";
 import { cn } from "@/lib/utils";
+import { ConnectorSettings } from "@/components/assist/connectors-settings";
 import { NotificationSettings } from "@/components/notification-settings";
 import { SecuritySettings } from "@/components/security-settings";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
-
-interface PublicSetting {
-  name: string;
-  value: string;
-  secret: boolean;
-  fromEnv: boolean;
-  isSet: boolean;
-}
-
-function useSettings() {
-  return useQuery({
-    queryKey: ["settings"],
-    queryFn: async () => ((await (await fetch("/api/settings")).json()) as { settings: PublicSetting[] }).settings,
-  });
-}
 
 function Section({
   id,
@@ -36,7 +28,7 @@ function Section({
   inactive,
   children,
 }: {
-  id?: string;
+  id: string;
   title: string;
   description: React.ReactNode;
   /** Shown when the current engine mode doesn't use this section. */
@@ -44,10 +36,13 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} aria-labelledby={id ? `${id}-title` : undefined} className="grid scroll-mt-6 grid-cols-[minmax(0,1fr)] gap-6 border-b py-8 first:pt-0 md:grid-cols-[260px_minmax(0,1fr)]">
+    <section id={id} aria-labelledby={`${id}-title`} className="grid scroll-mt-28 grid-cols-[minmax(0,1fr)] gap-6 border-b py-8 last:border-b-0 md:scroll-mt-20 md:grid-cols-[260px_minmax(0,1fr)]">
       <div className="min-w-0">
-        <h2 id={id ? `${id}-title` : undefined} className="text-[15px] font-semibold">
+        <h2 id={`${id}-title`} className="group flex items-center gap-1.5 text-[15px] font-semibold">
           {title}
+          <a href={`#${id}`} aria-label={`Link to ${title}`} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
+            <Link2 className="size-3.5" />
+          </a>
         </h2>
         <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
         {inactive && <p className="mt-2 inline-flex rounded-md bg-muted px-2 py-1 text-[12px] text-muted-foreground">{inactive}</p>}
@@ -63,7 +58,7 @@ const ENGINE_MODES = [
     title: "Open source + paid APIs",
     icon: Layers,
     body: "Every studio gets a Cloud / Open source switch. Use frontier paid models when you want them, your own GPU when you don't.",
-    needs: "A fal.ai, Replicate or Higgsfield key and/or a ComfyUI server",
+    needs: "A fal.ai or Replicate key and/or a ComfyUI server",
   },
   {
     value: "open",
@@ -77,7 +72,7 @@ const ENGINE_MODES = [
     title: "Paid APIs only",
     icon: Cloud,
     body: "Only hosted frontier models (Nano Banana, Seedance, Kling, Veo…). No GPU needed; open-source models are hidden.",
-    needs: "A fal.ai, Replicate or Higgsfield key",
+    needs: "A fal.ai or Replicate key",
   },
 ] as const;
 
@@ -105,7 +100,7 @@ function EngineModePicker({ value, onChange }: { value: string; onChange: (v: st
               {active && <CheckCircle2 className="ml-auto size-4 text-brand-text" />}
             </span>
             <span className="text-[13px] leading-relaxed text-muted-foreground">{m.body}</span>
-            <span className="text-[12px] text-subtle-foreground">Needs: {m.needs}</span>
+            <span className="text-[12px] text-muted-foreground">Needs: {m.needs}</span>
           </button>
         );
       })}
@@ -113,108 +108,93 @@ function EngineModePicker({ value, onChange }: { value: string; onChange: (v: st
   );
 }
 
-/** A provider's connection check (`provider`), or another endpoint's (`url` and `body`) that answers {ok, detail}. */
-function TestButton({ provider, url = "/api/providers/test", body }: { provider?: string; url?: string; body?: Record<string, unknown> }) {
-  const [res, setRes] = useState<{ ok: boolean; detail: string } | null>(null);
-  const m = useMutation({
-    mutationFn: async () =>
-      (await (
-        await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body ?? { provider }),
-        })
-      ).json()) as { ok: boolean; detail: string },
-    onSuccess: setRes,
-  });
-  return (
-    <div className="flex items-center gap-2">
-      <Button variant="outline" size="sm" onClick={() => m.mutate()} disabled={m.isPending}>
-        {m.isPending && <Loader2 className="animate-spin" />} Test connection
-      </Button>
-      {res && (
-        <span className={cn("inline-flex items-center gap-1 text-[12px]", res.ok ? "text-success" : "text-destructive")}>
-          {res.ok ? <CheckCircle2 className="size-3.5" /> : <CircleAlert className="size-3.5" />}
-          {res.detail}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function Field({
-  setting,
+/**
+ * A select whose trigger stays short ("Automatic") at any width; what the picked option does is
+ * the line under it, so nothing is cut off.
+ */
+function ChoiceField({
+  id,
   label,
-  hint,
-  placeholder,
+  value,
   options,
-  onSave,
+  onChange,
 }: {
-  setting?: PublicSetting;
+  id: string;
   label: string;
-  hint?: React.ReactNode;
-  placeholder?: string;
-  /** Suggestions to pick from (the models a server lists); any value can still be typed. */
-  options?: string[];
-  onSave: (v: string) => void;
+  value: string;
+  options: { value: string; label: string; hint: string }[];
+  onChange: (v: string) => void;
 }) {
-  const [v, setV] = useState("");
-  const [editing, setEditing] = useState(false);
-  const id = useId();
-  const shown = editing ? v : setting?.secret ? "" : (setting?.value ?? "");
+  const picked = options.find((o) => o.value === value) ?? options[0];
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-[13px]">
         {label}
       </Label>
-      <div className="flex gap-2">
-        <Input
-          id={id}
-          aria-describedby={`${id}-hint`}
-          autoComplete="off"
-          spellCheck={false}
-          type={setting?.secret ? "password" : "text"}
-          value={shown}
-          placeholder={setting?.secret && setting.isSet ? setting.value : placeholder}
-          list={options?.length ? `${id}-list` : undefined}
-          onChange={(e) => {
-            setEditing(true);
-            setV(e.target.value);
-          }}
-          className="font-mono text-[13px]"
-        />
-        {!!options?.length && (
-          <datalist id={`${id}-list`}>
-            {options.map((o) => (
-              <option key={o} value={o} />
-            ))}
-          </datalist>
-        )}
-        <Button
-          size="sm"
-          className="h-9 shrink-0"
-          disabled={!editing}
-          aria-label={`Save ${label}`}
-          onClick={() => {
-            onSave(v);
-            setEditing(false);
-            setV("");
-          }}
-        >
-          Save
-        </Button>
-        {setting?.isSet && !setting.fromEnv && (
-          <Button size="sm" variant="ghost" className="h-9 shrink-0" aria-label={`Clear ${label}`} onClick={() => onSave("")}>
-            Clear
-          </Button>
-        )}
-      </div>
+      <Select value={picked.value} onValueChange={onChange}>
+        <SelectTrigger id={id} aria-describedby={`${id}-hint`} className="w-full sm:w-auto sm:min-w-56">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <p id={`${id}-hint`} className="text-[12px] text-muted-foreground">
-        {setting?.fromEnv ? "Set from environment variable. " : ""}
-        {hint}
+        {picked.hint}
       </p>
     </div>
   );
+}
+
+/**
+ * What's connected, at a glance and always in view: one chip per connection (green when it works,
+ * each a link to its field) and the engine mode. Also opens the setup guide again.
+ */
+function StatusStrip({ status, onGuide, guideOpen }: { status?: StatusInfo; onGuide: () => void; guideOpen: boolean }) {
+  return (
+    <div className="sticky top-12 z-10 -mx-4 border-b bg-background/90 px-4 py-2.5 backdrop-blur sm:-mx-8 sm:px-8 md:top-0">
+      <nav aria-label="Connections" className="scrollbar-none -my-1 flex items-center gap-1.5 overflow-x-auto py-1">
+        {status ? (
+          <>
+            {connectionSummary(status).map((c) => (
+              <a
+                key={c.id}
+                href={c.href}
+                className={cn(
+                  "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border bg-background px-2.5 text-[12px] whitespace-nowrap transition-colors hover:bg-accent",
+                  c.unused && "opacity-60",
+                )}
+              >
+                <span aria-hidden className={cn("size-1.5 rounded-full", c.ok ? "bg-success" : "bg-muted-foreground/50")} />
+                <span className="font-medium">{c.label}</span>
+                <span className="text-muted-foreground">{c.unused ? "Not used" : c.text}</span>
+              </a>
+            ))}
+            <a href="#engine" className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] whitespace-nowrap transition-colors hover:bg-accent">
+              <span className="text-muted-foreground">Engine</span>
+              <span className="font-medium">{ENGINE_MODE_LABEL[status.engineMode]}</span>
+            </a>
+            {!guideOpen && (
+              <button type="button" onClick={onGuide} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap text-brand-text hover:bg-brand-faint">
+                Setup guide
+              </button>
+            )}
+          </>
+        ) : (
+          <Skeleton className="h-7 w-full max-w-xl rounded-full" />
+        )}
+      </nav>
+    </div>
+  );
+}
+
+function subscribeHash(cb: () => void) {
+  window.addEventListener("hashchange", cb);
+  return () => window.removeEventListener("hashchange", cb);
 }
 
 type LocalKind = "ollama" | "lmstudio" | "unsloth" | "custom";
@@ -255,17 +235,23 @@ const LOCAL_SERVERS: { value: "auto" | LocalKind; title: string }[] = [
 const code = (s: string) => <code className="font-mono text-[11px]">{s}</code>;
 
 /** Each server's settings and how to get it running. */
-const LOCAL_FIELDS: Record<LocalKind, { url: string; urlPlaceholder: string; model: string; modelHint: string; key?: string; keyLabel?: string; keyPlaceholder?: string; setup: React.ReactNode }> = {
+const LOCAL_FIELDS: Record<
+  LocalKind,
+  { url: string; urlPlaceholder: string; urlHint: string; model: string; modelPlaceholder?: string; modelHint: string; key?: string; keyLabel?: string; keyPlaceholder?: string; setup: React.ReactNode }
+> = {
   ollama: {
     url: "ollamaUrl",
     urlPlaceholder: "http://127.0.0.1:11434",
+    urlHint: "Test checks Ollama answers and has the model.",
     model: "ollamaModel",
-    modelHint: "A model with tool calling for Assist, such as qwen3:8b.",
+    modelPlaceholder: "qwen3:8b",
+    modelHint: "A model with tool calling for Assist, such as qwen3:8b. Pull it first: ollama pull qwen3:8b",
     setup: <>Install Ollama, then run {code("ollama pull qwen3:8b")}. Fuobe gives it the context below.</>,
   },
   lmstudio: {
     url: "lmstudioUrl",
     urlPlaceholder: "http://127.0.0.1:1234",
+    urlHint: "Test checks LM Studio answers and has the model.",
     model: "lmstudioModel",
     modelHint: "Empty: the loaded model, else one trained for tool use. A model that isn't loaded is loaded with the context below.",
     key: "lmstudioToken",
@@ -280,6 +266,7 @@ const LOCAL_FIELDS: Record<LocalKind, { url: string; urlPlaceholder: string; mod
   unsloth: {
     url: "unslothUrl",
     urlPlaceholder: "http://127.0.0.1:8888",
+    urlHint: "Test checks Unsloth Studio answers and has a model loaded.",
     model: "unslothModel",
     modelHint: "Empty: the model loaded in Unsloth Studio.",
     key: "unslothKey",
@@ -294,6 +281,7 @@ const LOCAL_FIELDS: Record<LocalKind, { url: string; urlPlaceholder: string; mod
   custom: {
     url: "llmUrl",
     urlPlaceholder: "http://127.0.0.1:8080/v1",
+    urlHint: "Test checks the server answers with a model list.",
     model: "llmModel",
     modelHint: "Empty: the first model the server lists.",
     key: "llmKey",
@@ -309,6 +297,40 @@ function serverLine(s: LocalServerStatus): string {
   if (!s.url) return "Not set up";
   if (s.problem) return s.up ? s.problem : `Not running at ${s.url}`;
   return [s.model, s.loaded ? "loaded" : s.loaded === false ? "loads on first use" : null, s.context ? `${k(s.context)} context` : null].filter(Boolean).join(" · ");
+}
+
+/** A tiny chat call to a local server (POST /api/llm), timed: proves the model answers, not only that the server is up. */
+function TryReply({ kind }: { kind: LocalKind }) {
+  const [res, setRes] = useState<{ ok: boolean; detail: string } | null>(null);
+  const m = useMutation({
+    mutationFn: async () =>
+      (await (await fetch("/api/llm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "test", kind }) })).json()) as { ok: boolean; detail: string },
+    onSuccess: setRes,
+    onError: (e: Error) => setRes({ ok: false, detail: e.message }),
+  });
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          setRes(null);
+          m.mutate();
+        }}
+        disabled={m.isPending}
+      >
+        {m.isPending && <Loader2 className="animate-spin" />} Send a test message
+      </Button>
+      <span role="status" aria-live="polite" className="min-w-0">
+        {res && (
+          <span className={cn("inline-flex items-start gap-1 text-[12px] break-words", res.ok ? "text-success" : "text-destructive")}>
+            {res.ok ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" /> : <CircleAlert className="mt-0.5 size-3.5 shrink-0" />}
+            {res.detail}
+          </span>
+        )}
+      </span>
+    </div>
+  );
 }
 
 /** Settings → AI helper → the local model server: pick one (or Automatic), see what each one answers, set its URL, model and key, and test it. */
@@ -346,7 +368,7 @@ function LocalLlmSettings({ get, set }: { get: (n: string) => PublicSetting | un
   const shown = llm.data?.servers.filter((s) => provider === "auto" || s.kind === provider) ?? [];
 
   return (
-    <div className="space-y-4 rounded-xl border p-4">
+    <div className="min-w-0 space-y-4 rounded-xl border p-4">
       <div className="space-y-1.5">
         <p id="local-llm-label" className="text-[13px] font-medium">
           Local model server
@@ -402,15 +424,24 @@ function LocalLlmSettings({ get, set }: { get: (n: string) => PublicSetting | un
         <p className="text-[13px] font-medium">{editing === "custom" ? "Other server (OpenAI-compatible)" : (status?.label ?? LOCAL_SERVERS.find((o) => o.value === editing)?.title)}</p>
         <p className="text-[12px] leading-relaxed text-muted-foreground">{f.setup}</p>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field key={`${editing}-url`} setting={get(f.url)} label="URL" placeholder={f.urlPlaceholder} onSave={set(f.url)} />
-          <Field key={`${editing}-model`} setting={get(f.model)} label="Model" hint={f.modelHint} options={status?.models.map((m) => m.id)} onSave={set(f.model)} />
+          <ConnectField key={`${editing}-url`} name={f.url} setting={get(f.url)} provider="llm" label="URL" placeholder={f.urlPlaceholder} hint={f.urlHint} />
+          <ConnectField
+            key={`${editing}-model`}
+            name={f.model}
+            setting={get(f.model)}
+            provider="llm"
+            label="Model"
+            placeholder={f.modelPlaceholder}
+            hint={f.modelHint}
+            options={status?.models.map((m) => m.id)}
+          />
         </div>
-        {f.key && <Field key={`${editing}-key`} setting={get(f.key)} label={f.keyLabel ?? "API key"} placeholder={f.keyPlaceholder} onSave={set(f.key)} />}
+        {f.key && <ConnectField key={`${editing}-key`} name={f.key} setting={get(f.key)} provider="llm" label={f.keyLabel ?? "API key"} placeholder={f.keyPlaceholder} hint="Only sent to this server." />}
         {status?.problem && status.up && <p className="text-[12px] text-warning">{status.problem}</p>}
         {status?.problem && !status.up && <p className="text-[12px] text-muted-foreground">{status.problem}</p>}
         {status?.warning && !status.problem && <p className="text-[12px] text-warning">{status.warning}</p>}
         <div className="flex flex-wrap items-center gap-2">
-          <TestButton url="/api/llm" body={{ action: "test", kind: editing }} />
+          <TryReply key={editing} kind={editing} />
           {smallContext && (
             <Button variant="outline" size="sm" onClick={() => reload.mutate(status?.model ?? null)} disabled={reload.isPending}>
               {reload.isPending && <Loader2 className="animate-spin" />} Reload with {k(want)} context
@@ -419,21 +450,28 @@ function LocalLlmSettings({ get, set }: { get: (n: string) => PublicSetting | un
         </div>
       </div>
 
-      <Field
+      <ConnectField
+        name="llmContext"
         setting={get("llmContext")}
+        provider="llm"
+        saveOnly
         label="Context (tokens)"
         placeholder="16384"
         hint="How much text the local model reads at once: Ollama gets it as num_ctx, and LM Studio loads models with it. Assist needs about 16,384. 0 leaves it to the server."
-        onSave={set("llmContext")}
       />
       <p className="text-[12px] text-muted-foreground">The local model shares the GPU with ComfyUI. A 4–8B model leaves room for generations.</p>
     </div>
   );
 }
 
-export function SettingsForm() {
+export function SettingsForm({ prices }: { prices?: string }) {
   const qc = useQueryClient();
+  const router = useRouter();
   const settings = useSettings();
+  const status = useStatus().data;
+  // The setup guide on request: the strip's "Setup guide", or a link to /settings#get-started (Home's demo line).
+  const [guide, setGuide] = useState<boolean | null>(null);
+  const askedByLink = useSyncExternalStore(subscribeHash, () => window.location.hash === "#get-started", () => false);
   const save = useMutation({
     mutationFn: async (patch: Record<string, string>) =>
       (await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })).json(),
@@ -464,9 +502,28 @@ export function SettingsForm() {
       </div>
     );
   const mode = get("engineMode")?.value || "both";
+  // The guide opens by itself on a first run, and on request ("Setup guide") after that.
+  const firstRun = showFirstRun(status);
+  const guideOpen = !!status && (firstRun || (guide ?? askedByLink));
 
   return (
     <div>
+      <StatusStrip status={status} guideOpen={guideOpen} onGuide={() => setGuide(true)} />
+      {guideOpen && status && (
+        <div id="get-started" className="scroll-mt-28 pt-6 md:scroll-mt-20">
+          <GetStarted
+            status={status}
+            prices={prices}
+            intents={false}
+            onDemo={() => router.push("/")}
+            onHide={() => {
+              setGuide(false);
+              if (window.location.hash === "#get-started") history.replaceState(null, "", window.location.pathname);
+            }}
+          />
+        </div>
+      )}
+
       <Section
         id="engine"
         title="Engine mode"
@@ -479,113 +536,110 @@ export function SettingsForm() {
       <Section
         id="cloud"
         title="Paid API configuration"
-        description={
-          <>
-            One fal.ai key unlocks Nano Banana, Seedream, GPT Image, FLUX, Kling, Seedance, Veo 3.1, Wan, MiniMax, avatars and more. Replicate hosts a subset and is used as a fallback (or first, if you prefer it).
-          </>
-        }
+        description="One fal.ai key runs the Fuobe Originals in the cloud (Soul, DoP, Genjutsu, Cinema: open weights with their LoRAs) and the partner models: Nano Banana, Seedream, GPT Image, FLUX, Kling, Seedance, Veo 3.1, Wan, MiniMax, avatars and more. Replicate hosts a subset and is used as a fallback (or first, if you prefer it). Save & test checks a key before saving it."
         inactive={mode === "open" ? "Not used in Open source only mode" : undefined}
       >
-        <Field
+        <ConnectField
+          id="fal"
+          name="falKey"
           setting={get("falKey")}
+          provider="fal"
           label="fal.ai API key"
-          placeholder="fal_…"
-          onSave={set("falKey")}
+          placeholder="key_id:key_secret"
           hint={
-            <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text hover:underline">
+            <a href={FAL_KEYS_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text hover:underline">
               Get a key <ExternalLink className="size-3" />
             </a>
           }
         />
-        <TestButton provider="fal" />
-        <Field
+        <ConnectField
+          id="replicate"
+          name="replicateToken"
           setting={get("replicateToken")}
+          provider="replicate"
           label="Replicate API token"
           placeholder="r8_…"
-          onSave={set("replicateToken")}
           hint={
             <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text hover:underline">
               Get a token <ExternalLink className="size-3" />
             </a>
           }
         />
-        <TestButton provider="replicate" />
-        <Field
-          setting={get("higgsfieldKey")}
-          label="Higgsfield API key"
-          placeholder="KEY_ID:KEY_SECRET"
-          onSave={set("higgsfieldKey")}
-          hint={
-            <span>
-              Unlocks Higgsfield&apos;s own models — Soul 2.0, Soul Cinema, Soul ID, Genjutsu, Cinema Studio, Marketing &amp; Ads Studio — and is another route for Seedance, Kling, Wan and MiniMax.{" "}
-              <a href="https://console.higgsfield.ai" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text hover:underline">
-                Get a key <ExternalLink className="size-3" />
-              </a>
-            </span>
-          }
+        <ChoiceField
+          id="setting-cloud-provider"
+          label="Preferred provider"
+          value={get("cloudProvider")?.value || "auto"}
+          onChange={set("cloudProvider")}
+          options={[
+            { value: "auto", label: "Automatic", hint: "Tries fal.ai, then Replicate when a model is on both. Models only one provider hosts always use that one." },
+            { value: "fal", label: "fal.ai first", hint: "fal.ai whenever it hosts the model. Models only one provider hosts always use that one." },
+            { value: "replicate", label: "Replicate first", hint: "Replicate whenever it hosts the model. Models only one provider hosts always use that one." },
+          ]}
         />
-        <TestButton provider="higgsfield" />
-        <div className="space-y-1.5">
-          <Label htmlFor="setting-cloud-provider" className="text-[13px]">
-            Preferred provider
-          </Label>
-          <Select value={get("cloudProvider")?.value || "auto"} onValueChange={set("cloudProvider")}>
-            <SelectTrigger id="setting-cloud-provider" className="w-full max-w-80">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Automatic (fal.ai, then Replicate, then Higgsfield)</SelectItem>
-              <SelectItem value="fal">Prefer fal.ai</SelectItem>
-              <SelectItem value="replicate">Prefer Replicate</SelectItem>
-              <SelectItem value="higgsfield">Prefer Higgsfield</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-[12px] text-muted-foreground">Used when a model is available on both. Models only one provider hosts always use that one.</p>
-        </div>
       </Section>
 
       <Section
         id="comfyui"
         title="Open-source engine · ComfyUI"
-        description="Run every open-source workflow on your own GPU (or a rented one). Fuobe talks to ComfyUI's HTTP API and uploads inputs for you. See ComfyUI workflows for the models each one needs."
+        description={
+          <>
+            Run every open-source workflow on your own GPU (or a rented one). Fuobe talks to ComfyUI&apos;s HTTP API and uploads inputs for you. See{" "}
+            <Link href="/workflows" className="text-brand-text underline-offset-2 hover:underline">
+              ComfyUI workflows
+            </Link>{" "}
+            for the models each one needs.
+          </>
+        }
         inactive={mode === "cloud" ? "Not used in Paid APIs only mode" : undefined}
       >
-        <Field setting={get("comfyUrl")} label="ComfyUI server URL" placeholder="http://127.0.0.1:8188" onSave={set("comfyUrl")} />
-        <Field setting={get("comfyToken")} label="Auth token (optional)" hint="Sent as a Bearer token, for ComfyUI behind a proxy." onSave={set("comfyToken")} />
-        <Field
+        <ConnectField name="comfyUrl" setting={get("comfyUrl")} provider="comfyui" label="ComfyUI server URL" placeholder="http://127.0.0.1:8188" hint="Where ComfyUI listens; a local install is http://127.0.0.1:8188." />
+        <ConnectField name="comfyToken" setting={get("comfyToken")} provider="comfyui" label="Auth token (optional)" hint="Sent as a Bearer token, for ComfyUI behind a proxy." />
+        <ConnectField
+          name="comfyIsolatedUrl"
           setting={get("comfyIsolatedUrl")}
+          provider="comfyui"
           label="Isolated worker URL (optional)"
           placeholder="http://127.0.0.1:8189"
           hint="A second ComfyUI for LatentSync 1.6 and ThinkSound, whose node packs can't share the main install. scripts/comfy/README.md shows how to start one."
-          onSave={set("comfyIsolatedUrl")}
         />
-        <TestButton provider="comfyui" />
       </Section>
 
       <Section
-        id="ai"
-        title="AI helper"
-        description="The LLM that writes for Fuobe: the Enhance toggle, storyboards, translations and scripts, ad copy, brand research, and the Assist agent. Use Claude, a local model (Ollama, LM Studio, Unsloth Studio or another OpenAI-compatible server: fully open source), or the built-in offline rewriter. In Open source only mode, Automatic skips Claude."
+        id="loras"
+        title="LoRAs · looks, motions and effects"
+        description="Looks, camera moves and effects add LoRA files to open models, on your GPU and in the cloud. Fuobe fetches the pinned version a run needs and shows each file's licence; what may run where is your call in Models & licences."
       >
-        <div className="space-y-1.5">
-          <Label htmlFor="setting-enhancer" className="text-[13px]">
-            Use
-          </Label>
-          {/* "ollama" is the old name of "local". */}
-          <Select value={(get("enhanceProvider")?.value || "auto").replace(/^ollama$/, "local")} onValueChange={set("enhanceProvider")}>
-            <SelectTrigger id="setting-enhancer" className="w-full max-w-80">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Automatic (Claude → local model → offline)</SelectItem>
-              <SelectItem value="anthropic">Claude (Anthropic API)</SelectItem>
-              <SelectItem value="local">Local model only (open source)</SelectItem>
-              <SelectItem value="none">Offline rewriter</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Field setting={get("anthropicKey")} label="Anthropic API key" placeholder="sk-ant-…" onSave={set("anthropicKey")} />
+        <LoraSettings folder={get("comfyLorasDir")} civitaiKey={get("civitaiKey")} />
+      </Section>
+
+      <Section
+        id="text-ai"
+        title="AI helper · Claude or a local model"
+        description="The LLM that writes for Fuobe: the Enhance toggle, storyboards, translations and scripts, ad copy, brand research, and the Assist agent. Use Claude, a local model (Ollama, LM Studio, Unsloth Studio or another OpenAI-compatible server: fully open source), or the built-in offline rewriter. In Open source only mode, Automatic skips Claude. Save & test checks a key or address before saving it."
+      >
+        <ChoiceField
+          id="setting-enhancer"
+          label="Use"
+          // "ollama" is the old name of "local".
+          value={(get("enhanceProvider")?.value || "auto").replace(/^ollama$/, "local")}
+          onChange={set("enhanceProvider")}
+          options={[
+            { value: "auto", label: "Automatic", hint: "Claude when a key is set, then a local model, then the offline rewriter." },
+            { value: "anthropic", label: "Claude", hint: "Claude through your Anthropic key (paid per use)." },
+            { value: "local", label: "Local model only", hint: "A local, open-source model (Ollama, LM Studio, Unsloth Studio or your own server). Claude is never called." },
+            { value: "none", label: "Offline rewriter", hint: "Built-in rules, no LLM. Text steps (translate, write) are off." },
+          ]}
+        />
+        <ConnectField name="anthropicKey" setting={get("anthropicKey")} provider="llm" label="Anthropic API key" placeholder="sk-ant-…" hint="Test checks the key with a free model list call." />
         <LocalLlmSettings get={get} set={set} />
+      </Section>
+
+      <Section
+        id="assist-connectors"
+        title="Assist · connectors"
+        description="Give Claude in Assist the tools of your other apps — docs, tasks, CRM, analytics — through their MCP servers (a URL and, usually, a token). Only Claude chats use them."
+      >
+        <ConnectorSettings claudeReady={!!get("anthropicKey")?.isSet} />
       </Section>
 
       <Section
@@ -604,17 +658,34 @@ export function SettingsForm() {
         <SecuritySettings />
       </Section>
 
-      <Section title="Demo mode" description="Lets you click through everything without keys or a GPU. Demo runs return clearly-labelled placeholder media and cost nothing.">
-        <Select value={get("demoMode")?.value || "auto"} onValueChange={set("demoMode")}>
-          <SelectTrigger aria-label="Demo mode" className="w-full max-w-80">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="auto">Automatic — demo only when a model isn’t connected</SelectItem>
-            <SelectItem value="on">Always demo</SelectItem>
-            <SelectItem value="off">Never — show an error instead</SelectItem>
-          </SelectContent>
-        </Select>
+      <Section id="demo" title="Demo mode" description="Lets you click through everything without keys or a GPU. Demo runs return clearly-labelled placeholder media and cost nothing.">
+        <ChoiceField
+          id="setting-demo"
+          label="Demo mode"
+          value={get("demoMode")?.value || "auto"}
+          onChange={set("demoMode")}
+          options={[
+            { value: "auto", label: "Automatic", hint: "A demo only when the model you picked isn't connected." },
+            { value: "on", label: "Always demo", hint: "Every run is a free placeholder, even with keys or ComfyUI connected." },
+            { value: "off", label: "Never", hint: "A model that isn't connected shows an error instead of a demo." },
+          ]}
+        />
+      </Section>
+
+      <Section
+        id="models"
+        title="Models & licences"
+        description="Every model, LoRA and node pack with its licence, as information. Everything is on: switch off a model, a whole kind of licence (say, all non-commercial ones), a provider or a node pack, and it leaves the pickers and is refused on the server."
+      >
+        <Link href="/settings/models" className="inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-[13px] font-medium transition-colors hover:bg-accent">
+          <Scale className="size-4 text-muted-foreground" /> Open Models &amp; licences
+        </Link>
+      </Section>
+
+      <Section id="about" title="About & licences" description="Fuobe's version, and the licence of every open model it can run — some are non-commercial or exclude some countries.">
+        <Link href="/settings/about" className="inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-[13px] font-medium transition-colors hover:bg-accent">
+          <Info className="size-4 text-muted-foreground" /> Open About & licences
+        </Link>
       </Section>
     </div>
   );

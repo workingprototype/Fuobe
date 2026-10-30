@@ -34,6 +34,14 @@ const EXT_BY_TYPE: Record<string, string> = {
   // Gaussian splats (TripoSplat on fal writes .ply; the open TripoSplat graph writes .spz).
   "model/ply": "ply",
   "model/x-spz": "spz",
+  "model/x-ksplat": "ksplat",
+  // Pro exports: FFV1 in Matroska, EXR frames (ComfyUI's /view says image/aces) and their zip.
+  "video/x-matroska": "mkv",
+  // Character Swap Studio takes AVI clips (Akatz Labs' tool does).
+  "video/x-msvideo": "avi",
+  "image/x-exr": "exr",
+  "image/aces": "exr",
+  "application/zip": "zip",
 };
 
 const TYPE_BY_EXT: Record<string, string> = {
@@ -60,6 +68,11 @@ const TYPE_BY_EXT: Record<string, string> = {
   gltf: "model/gltf+json",
   ply: "model/ply",
   spz: "model/x-spz",
+  ksplat: "model/x-ksplat",
+  mkv: "video/x-matroska",
+  avi: "video/x-msvideo",
+  exr: "image/x-exr",
+  zip: "application/zip",
 };
 
 export function contentTypeFor(fileName: string, fallback = "application/octet-stream"): string {
@@ -122,27 +135,24 @@ function toAsset(r: AssetRow): Asset {
   };
 }
 
-export function saveFile(opts: {
-  data: Buffer;
-  contentType: string;
-  name?: string;
-  source: Asset["source"];
-  generationId?: string;
-}): Asset {
+type NewAsset = { contentType: string; name?: string; source: Asset["source"]; generationId?: string };
+
+/** Store a file under files/<outputs|uploads>/<day>/<id>.<ext>: `put` writes it there, then its row is added. */
+function addAsset(opts: NewAsset, put: (abs: string) => void): Asset {
   const id = nanoid(12);
   const ext = EXT_BY_TYPE[opts.contentType.split(";")[0].trim()] ?? opts.name?.split(".").pop()?.toLowerCase() ?? "bin";
   const day = new Date().toISOString().slice(0, 10);
   const relPath = path.join(/*turbopackIgnore: true*/ opts.source === "generation" ? "outputs" : "uploads", day, `${id}.${ext}`);
   const abs = path.join(FILES_DIR, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, opts.data);
+  put(abs);
   const row: AssetRow = {
     id,
     kind: kindFor(opts.contentType),
     name: opts.name ?? null,
     rel_path: relPath,
     content_type: opts.contentType,
-    size: opts.data.length,
+    size: fs.statSync(abs).size,
     source: opts.source,
     generation_id: opts.generationId ?? null,
     created_at: Date.now(),
@@ -154,6 +164,25 @@ export function saveFile(opts: {
     )
     .run(row);
   return toAsset(row);
+}
+
+export function saveFile(opts: NewAsset & { data: Buffer }): Asset {
+  return addAsset(opts, (abs) => fs.writeFileSync(abs, opts.data));
+}
+
+/**
+ * A file that is already ready on disk (a zip a provider wrote while finishing a job) becomes an asset:
+ * moved into the files folder, not copied. `from` must be on the same file system (scratchDir()).
+ */
+export function adoptFile(opts: NewAsset & { from: string }): Asset {
+  return addAsset(opts, (abs) => fs.renameSync(opts.from, abs));
+}
+
+/** A scratch folder next to the files folder (same file system, so adoptFile can move from it; never served). */
+export function scratchDir(): string {
+  const dir = path.join(DATA_DIR, "tmp");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 export function getAsset(id: string): Asset | null {

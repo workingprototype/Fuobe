@@ -54,8 +54,12 @@ export interface ProviderAdapter {
   submit(ctx: SubmitContext): Promise<SubmitResult>;
   poll(ctx: PollContext): Promise<PollResult>;
   cancel?(ctx: PollContext): Promise<void>;
-  /** Lightweight connectivity check for the settings page. */
-  test?(): Promise<{ ok: boolean; detail: string }>;
+  /**
+   * Lightweight connectivity check for the settings page. `focus` is the setting the person is
+   * checking (the Anthropic key, the isolated worker's address…), for a provider whose settings
+   * reach more than one server; the others ignore it.
+   */
+  test?(opts?: { focus?: string }): Promise<{ ok: boolean; detail: string }>;
 }
 
 export class ProviderError extends Error {

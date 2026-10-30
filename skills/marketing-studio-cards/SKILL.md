@@ -37,7 +37,7 @@ Keep brand and product names exact. If a project source has a brand guide, read 
 - One job per card (op `edit` with the product photo in `images`, so the product stays exact).
   Quote every text element exactly and say "no other text".
 - Models: `nano-banana-pro` (best product fidelity + text), `ideogram-4-5` (best typography),
-  Higgsfield's `marketing-studio-image` when connected. Open source: `oss-qwen-edit`.
+  `gpt-image-2-5` (exact text). Open source: `oss-qwen-edit`.
 - Ratios: 4:5 feed, 9:16 Stories, 1:1 marketplaces, 16:9 banners. For "the full set", 4:5 + 9:16 + 1:1.
 
 ## 4. QC

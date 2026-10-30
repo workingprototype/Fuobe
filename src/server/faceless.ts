@@ -6,6 +6,7 @@ import {
   AUTO_SECONDS,
   blockCount,
   buildEpisodeGraph,
+  CAMERA_WORDS,
   changedKeys,
   channelName,
   defaultSettings,
@@ -17,7 +18,7 @@ import {
   getStyle,
   MAX_SCRIPT,
   MAX_SOURCES,
-  musicLength,
+  musicPlan,
   narrationText,
   normalizeBlocks,
   OFFLINE_NOTE,
@@ -31,6 +32,7 @@ import {
   planRerun,
   previewLine,
   resolveModels,
+  sameCameraMove,
   sceneSpans,
   sceneTiming,
   scriptBrief,
@@ -38,6 +40,7 @@ import {
   scriptSystem,
   splitScript,
   spokenTimes,
+  staleSteps,
   styleRefLimit,
   TIMING_PARTS,
   topicsBrief,
@@ -87,6 +90,7 @@ import { llmBackends, probeLocal } from "./providers/llm";
 import { fetchRemote } from "./remote-fetch";
 import { engineMode, getSetting } from "./settings";
 import { fileUrl, saveFile } from "./storage";
+import { firstOn, offeredModel } from "./model-access";
 
 /**
  * Faceless Studio and the Explainer on the server: channels (genre, saved style, narrator, aspect,
@@ -216,7 +220,9 @@ const TOPICS_TIMEOUT_MS = 25_000;
 /** One answer from the engine's text model, or null (no LLM, AI helper off, demo mode on, or it failed: `onError` hears why). */
 export async function askLlm(engine: Engine, system: string, user: string, o: AskOptions = {}): Promise<string | null> {
   if (getSetting("demoMode") === "on") return null;
-  const model = getModel(ENGINE_MODELS[engine].write);
+  // A text model switched off in Settings → Models & licences gives way to the offline wording, like no LLM at all.
+  const found = getModel(ENGINE_MODELS[engine].write);
+  const model = found && offeredModel(found);
   const route = model?.routes.find((r) => r.op === "write");
   if (!model || !route) return null;
   await probeLocal();
@@ -323,7 +329,7 @@ const NAME_SYSTEM = "You name YouTube channels. Reply with the name only: 2–4 
  * A new channel is there straight away with a name taken from the idea; the LLM's name replaces it when
  * it answers (within 15 s, and only while the channel still has the first name), then the avatar is drawn.
  */
-export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string; avatar?: boolean }): Promise<FacelessChannel> {
+export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string; avatar?: boolean; settings?: Partial<ChannelSettings> }): Promise<FacelessChannel> {
   const idea = input.idea.trim();
   if (!idea) throw new FacelessError("Describe the channel first");
   const reference = input.reference?.trim() ? await readReference(input.reference) : null;
@@ -337,7 +343,7 @@ export async function createChannel(input: { idea: string; genre: FacelessGenre;
     avatar_url: null,
     avatar_job: null,
     reference_json: reference ? JSON.stringify(reference) : null,
-    settings_json: JSON.stringify(ChannelDefaults(input.engine, input.genre)),
+    settings_json: JSON.stringify({ ...ChannelDefaults(input.engine, input.genre), ...input.settings }),
     created_at: now,
     updated_at: now,
   };
@@ -351,7 +357,8 @@ export async function createChannel(input: { idea: string; genre: FacelessGenre;
       if (name) db().prepare("UPDATE faceless_channels SET name = ? WHERE id = ? AND name = ?").run(name, row.id, row.name);
     }
     try {
-      // avatar: false (Assist's channel) leaves the initials and the "Draw an avatar" button.
+      // avatar: false (Assist's channel) leaves the initials and the "Draw an avatar" button; Content Factory
+      // series show their reference instead (no picture to pay for).
       if (input.avatar !== false && channelRow(row.id)) makeAvatar(row.id);
     } catch {
       // No picture model can run right now: the channel shows its initials, and "Draw an avatar" is there.
@@ -455,6 +462,8 @@ export interface EpisodeInput {
   saveLook?: boolean;
   /** A script that's written already, with its pictures (Assist): no writer runs; it's ready to review, or renders at once with autoRender. */
   blocks?: Partial<ScriptBlock>[];
+  /** The title before the script names it (a series' planned episode title). */
+  title?: string;
 }
 
 function cleanSettings(s: EpisodeSettings): EpisodeSettings {
@@ -483,7 +492,7 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
   const sources = (input.sources ?? []).slice(0, MAX_SOURCES);
   settings.sourceImages = sources.filter((s): s is Extract<ExplainerSource, { kind: "image" }> => s.kind === "image").map((s) => s.url);
   const now = Date.now();
-  const title = (topic || pasted || written?.[0]?.narration || "").replace(/\s+/g, " ").slice(0, 80) || "Untitled episode";
+  const title = (input.title?.trim() || topic || pasted || written?.[0]?.narration || "").replace(/\s+/g, " ").slice(0, input.title ? 120 : 80) || "Untitled episode";
   const row: EpisodeRow = {
     id: nanoid(10),
     channel_id: channel?.id ?? null,
@@ -506,7 +515,18 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
     .run(row);
   if (channel && (input.saveLook ?? first)) {
     void updateChannel(channel.id, {
-      settings: { engine: settings.engine, styleId: settings.styleId, styleRefs: settings.styleRefs, voice: settings.voice, aspect: settings.aspect, subtitles: settings.subtitles, music: settings.music, animation: settings.animation, length: settings.length },
+      settings: {
+        engine: settings.engine,
+        styleId: settings.styleId,
+        styleRefs: settings.styleRefs,
+        voice: settings.voice,
+        aspect: settings.aspect,
+        subtitles: settings.subtitles,
+        music: settings.music,
+        animation: settings.animation,
+        length: settings.length,
+        ...(settings.brief && { brief: settings.brief }),
+      },
     });
   }
   if (written) {
@@ -557,7 +577,9 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
   const s = ep.settings;
   const style = getStyle(s.styleId);
   const auto = ep.kind === "explainer" && s.auto;
-  const scenes = blockCount(auto ? AUTO_SECONDS : s.length);
+  // A Content Factory brief sets the pace: shorter scenes (more of them) for a reference that cuts fast.
+  const sceneSecs = s.brief?.sceneSeconds ? Math.max(4, Math.min(10, Math.round(s.brief.sceneSeconds))) : 10;
+  const scenes = s.brief?.sceneSeconds && !auto ? Math.max(1, Math.round(s.length / sceneSecs)) : blockCount(auto ? AUTO_SECONDS : s.length);
   const handles = new Set(s.elements.map((h) => h.toLowerCase()));
   const elements = listElements()
     .filter((e) => e.kind !== "voice" && handles.has(e.handle.toLowerCase()))
@@ -581,13 +603,14 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
       topic,
       genre: ep.kind === "explainer" ? { ...genre, label: "Explainer", hint: "Explain it clearly to someone new to it", tone: genre.tone } : genre,
       scenes,
-      wordsPerScene: wordsFor(10),
+      wordsPerScene: wordsFor(sceneSecs),
       channel: channel ? `${channel.name} — ${channel.idea}` : undefined,
       styleName: style.name,
       elements,
       reference: channel?.reference ? [channel.reference.title, channel.reference.author && `by ${channel.reference.author}`].filter(Boolean).join(" ") || channel.reference.url : undefined,
       sources: textSources,
       auto,
+      style: s.brief?.script,
     });
     const answer = await askLlm(s.engine, scriptSystem, brief, { ...ask, json: scriptSchema(auto ? null : scenes) });
     const parsed = answer ? parseScript(answer) : null;
@@ -595,6 +618,8 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
       script = { source: "ai", title: parsed.title ?? undefined, blocks: parsed.blocks };
     } else {
       const blocks = offlineScript(topic, ep.kind === "explainer" ? "education" : genre.id, scenes);
+      // The offline beats run about 10 s each: a brief's shorter scenes would overshoot the length, so middle beats go.
+      if (s.brief?.sceneSeconds && !auto) while (blocks.length > 1 && totalSeconds(blocks) > s.length * 1.15) blocks.splice(Math.floor(blocks.length / 2), 1);
       if (elements.length) for (const b of blocks) b.visual = `${b.visual}, with ${elements.map((e) => `@${e.handle}`).join(" and ")}`;
       script = { source: "ai", blocks, offline: true, note: failure ? `${OFFLINE_NOTE} (${failure})` : OFFLINE_NOTE };
     }
@@ -696,9 +721,21 @@ function runsAsDemo(modelId: string, op: GenerationRequest["op"]): boolean {
   }
 }
 
+/**
+ * An episode's settings with the video model Settings → Models & licences offers: without a pick, a default that is
+ * switched off gives way to the next video choice that is on (a pick that is off stays, and its run names the switch).
+ */
+export function withOfferedVideo(s: EpisodeSettings): EpisodeSettings {
+  if (s.animation === "frames") return s;
+  const m = ENGINE_MODELS[s.engine];
+  if (s.videoModel && m.videoChoices.includes(s.videoModel)) return s;
+  const id = firstOn([m.video, ...m.videoChoices], s.engine);
+  return !id || id === m.video ? s : { ...s, videoModel: id };
+}
+
 function graphInput(ep: FacelessEpisode, blocks = ep.script.blocks, stillEdits?: StillEdits): GraphInput {
   const genre = genreInfo(ep.channelId ? getChannel(ep.channelId)?.genre : "education");
-  const s = ep.settings;
+  const s = withOfferedVideo(ep.settings);
   const narration = ENGINE_MODELS[s.engine].narration;
   let fallbackVoice: string | undefined;
   if (s.engine === "open" && s.voice?.kind !== "sample") {
@@ -809,7 +846,7 @@ function narrationCues(ep: FacelessEpisode): TimedText[] | null {
 function advance(ep: FacelessEpisode): FacelessEpisode {
   const plan = ep.plan!;
   const blocks = ep.script.blocks;
-  const video = getModel(resolveModels(ep.settings, narrationText(blocks).length, getModel).video);
+  const video = getModel(resolveModels(withOfferedVideo(ep.settings), narrationText(blocks).length, getModel).video);
   const cues = narrationCues(ep);
   const spoken = cues ? spokenTimes(blocks, cues) : null;
   const timing = spoken ? sceneTiming(blocks, spoken, video, plan.timing) : (plan.timing ?? plannedTiming(blocks, video));
@@ -817,15 +854,13 @@ function advance(ep: FacelessEpisode): FacelessEpisode {
   const part = partOf(graph);
   const status = statusMap(plan.ids);
   const moved = new Set(blocks.filter((b) => plan.timing?.[b.id] !== timing[b.id]).map((b) => b.id));
+  // A step kept from before that the graph now asks for differently is made again too: a bed (or its loop)
+  // that no longer fits the film, or a clip made by another model (a Frame by frame episode rendered before
+  // its scenes became Ken Burns moves).
+  const stale = new Set(staleKeys(graph, plan.ids));
   const changed = graph
-    .filter((s) => !plan.ids[s.key] || status[s.key] === "failed" || status[s.key] === "canceled" || (s.part === "clip" && moved.has(blocks[s.block!].id)))
+    .filter((s) => !plan.ids[s.key] || status[s.key] === "failed" || status[s.key] === "canceled" || stale.has(s.key) || (s.part === "clip" && moved.has(blocks[s.block!].id)))
     .map((s) => s.key);
-  // A bed that no longer covers the film is made again.
-  const music = graph.find((s) => s.key === "music");
-  if (music && plan.ids.music && !changed.includes("music")) {
-    const had = getGeneration(plan.ids.music, { includeDeleted: true })?.request.params?.duration ?? 0;
-    if (had < (music.request.params?.duration ?? 0)) changed.push("music");
-  }
   const rerun = planRerun(graph, changed).rerun.filter((k) => !TIMING_PARTS.has(part(k)));
   const ids = prune(relaunch(graph, plan.ids, rerun, plan.batchId), graph);
   const next: EpisodePlan = { ...plan, ids, timing, untimed: !spoken, awaiting: false };
@@ -855,6 +890,9 @@ export function renderEpisode(id: string): FacelessEpisode {
 const statusMap = (ids: Record<string, string>) =>
   Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, getGeneration(id, { includeDeleted: true })?.status])) as Record<string, string | undefined>;
 
+/** Kept steps whose generation isn't what the graph asks for now (another model or op, a clip of another length, a bed that no longer fits). */
+const staleKeys = (graph: GraphStep[], ids: Record<string, string>) => staleSteps(graph, (k) => (ids[k] ? getGeneration(ids[k], { includeDeleted: true })?.request : undefined));
+
 /** Redo the steps that failed (and what waited on them); finished steps are kept. */
 export function retryEpisode(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
@@ -876,6 +914,8 @@ export function retryEpisode(id: string): FacelessEpisode {
     })
     .map((s) => s.key);
   if (!broken.length && !ep.plan.awaiting) return ep;
+  // Kept steps made for an older graph (another model, another length) are redone with what failed.
+  broken.push(...staleKeys(graph, ep.plan.ids).filter((k) => !broken.includes(k)));
   for (const k of planRerun(graph, broken).rerun) if (ep.plan.ids[k]) void cancelGeneration(ep.plan.ids[k]);
   const { ids, awaiting, started } = launch(ep, graph, ep.plan.ids, broken, ep.plan.batchId);
   updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify({ ...ep.plan, ids, awaiting } satisfies EpisodePlan) });
@@ -930,11 +970,21 @@ function changed(ep: FacelessEpisode, c: ChangeInput) {
     }
   }
   const graph = buildGraph(ep, withTiming(blocks, ep.plan.timing), stillEdits);
-  // Steps that failed earlier are redone with the change, so the new version can finish.
+  // Frame by frame: words that read as the move the scene already has would render the same clip again.
+  if (c.part === "motion") {
+    const moves = graph.filter((s) => s.part === "clip" && s.request.op === "still-motion" && ids.includes(blocks[s.block!].id));
+    const same = moves.every((s) => {
+      const g = getGeneration(ep.plan!.ids[s.key] ?? "", { includeDeleted: true });
+      return g?.status === "succeeded" && sameCameraMove(g.request, s.request);
+    });
+    if (moves.length && same) throw new FacelessError(CAMERA_WORDS[ep.settings.engine].same, 422);
+  }
+  // Steps that failed earlier are redone with the change, so the new version can finish; so are kept steps
+  // made for an older graph (another model, another length).
   const status = statusMap(ep.plan.ids);
   const part = partOf(graph);
   const broken = graph.filter((s) => (!status[s.key] && (!ep.plan!.awaiting || TIMING_PARTS.has(part(s.key)))) || status[s.key] === "failed" || status[s.key] === "canceled").map((s) => s.key);
-  const keys = [...changedKeys(graph, ids, c.part), ...broken];
+  const keys = [...new Set([...changedKeys(graph, ids, c.part), ...broken, ...staleKeys(graph, ep.plan.ids)])];
   return { graph, blocks, stillEdits, keys, plan: planRerun(graph, keys), ids };
 }
 
@@ -1021,7 +1071,7 @@ function upscaleOffer(ep: FacelessEpisode, seconds: number): EpisodeView["upscal
   if (!model) return null;
   const demo = runsAsDemo(model.id, "upscale-video");
   const p = model.pricing;
-  const costUsd = demo ? 0 : p?.unit === "megapixel" ? Math.round(p.usd * UPSCALE_MP * UPSCALE_FPS * seconds * 100) / 100 : p?.unit === "second" ? Math.round(p.usd * seconds * 100) / 100 : null;
+  const costUsd = demo || model.engine === "open" ? 0 : p?.unit === "megapixel" ? Math.round(p.usd * UPSCALE_MP * UPSCALE_FPS * seconds * 100) / 100 : p?.unit === "second" ? Math.round(p.usd * seconds * 100) / 100 : null;
   return { costUsd, demo };
 }
 
@@ -1029,7 +1079,7 @@ function upscaleOffer(ep: FacelessEpisode, seconds: number): EpisodeView["upscal
 export function upscaleEpisode(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
   const modelId = ENGINE_MODELS[ep.settings.engine].upscale;
-  if (!modelId) throw new FacelessError("Upscaling runs on the cloud engine: the open-source upscaler holds every frame of the film in memory", 422);
+  if (!modelId) throw new FacelessError("This engine has no video upscaler", 422);
   const final = finalOf(ep);
   if (!ep.plan || !final) throw new FacelessError("Wait for the episode to finish first", 409);
   const had = ep.plan.upscaled ? getGeneration(ep.plan.upscaled) : null;
@@ -1170,7 +1220,7 @@ function graphInputSafe(ep: FacelessEpisode): GraphInput {
   try {
     return graphInput(ep);
   } catch {
-    return { feature: ep.kind, title: ep.title, genre: genreInfo(ep.channelId ? getChannel(ep.channelId)?.genre : "education"), settings: ep.settings, blocks: ep.script.blocks, fallbackVoice: "/api/files/placeholder.wav" };
+    return { feature: ep.kind, title: ep.title, genre: genreInfo(ep.channelId ? getChannel(ep.channelId)?.genre : "education"), settings: withOfferedVideo(ep.settings), blocks: ep.script.blocks, fallbackVoice: "/api/files/placeholder.wav" };
   }
 }
 
@@ -1230,7 +1280,7 @@ export function listEpisodes(o: { channelId?: string; kind?: "faceless" | "expla
 /** What an episode would cost and whether it would run as a demo, before or after the script exists. */
 export function estimateEpisode(input: { kind: "faceless" | "explainer"; settings: EpisodeSettings; blocks?: Partial<ScriptBlock>[]; genre?: FacelessGenre }): EstimateResult {
   const settings = { ...input.settings, styleRefs: input.settings.styleRefs.slice(0, 3) };
-  const blocks = input.blocks?.length ? normalizeBlocks(input.blocks) : placeholderBlocks(settings.auto ? AUTO_SECONDS : settings.length);
+  const blocks = input.blocks?.length ? normalizeBlocks(input.blocks) : placeholderBlocks(settings.auto ? AUTO_SECONDS : settings.length, settings.brief?.sceneSeconds);
   const fake: FacelessEpisode = {
     id: "estimate",
     channelId: null,
@@ -1282,13 +1332,16 @@ export function estimateEpisode(input: { kind: "faceless" | "explainer"; setting
 /** What the render will do differently from what was asked (nothing that stops it). */
 function notesFor(settings: EpisodeSettings, seconds: number): { notes?: string[] } {
   const notes: string[] = [];
-  const m = resolveModels(settings, 0, getModel);
+  const m = resolveModels(withOfferedVideo(settings), 0, getModel);
   const limit = styleRefLimit(settings.engine, getModel);
   if (settings.styleRefs.length > limit) notes.push(`The open-source picture model follows the first ${limit} style references.`);
   if (settings.engine === "open" && settings.styleRefs.length && settings.sourceImages?.length) notes.push("Your style references set the look; the attached images aren't used for the open-source pictures.");
   if (m.music) {
-    const max = musicLength(getModel(m.music), Number.MAX_SAFE_INTEGER);
-    if (seconds > max) notes.push(`The music bed is at most ${Math.floor(max / 60)} min ${max % 60 ? `${max % 60} s ` : ""}long, so the last ${Math.ceil(seconds - max)} s play without music.`);
+    const plan = musicPlan(getModel(m.music), m.loop ? getModel(m.loop) : undefined, seconds);
+    const minutes = (s: number) => `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}`;
+    if (plan.loop?.crossfade) notes.push(`The music is made ${minutes(plan.bed)} long, then looped with a ${plan.loop.crossfade}-second crossfade to cover the film.`);
+    else if (plan.loop) notes.push(`The music is made ${minutes(plan.bed)} long and plays again to cover the film.`);
+    if (plan.short) notes.push(`The music bed goes up to ${minutes(plan.loop?.duration ?? plan.bed)}, so the last ${plan.short} s play without music.`);
   }
   return notes.length ? { notes } : {};
 }
@@ -1418,6 +1471,16 @@ export const EngineSchema = z.enum(["cloud", "open"]);
 /** The research's message for a length outside Auto / 15–600 s. */
 export const DURATION_ERROR = "Duration must be Auto or a whole number of seconds between 15 and 600";
 
+/** A Content Factory brief as it reaches an episode (see BriefLook). */
+export const BriefLookSchema = z.object({
+  script: z.array(z.string().max(600)).max(16),
+  look: z.string().max(600).optional(),
+  camera: z.string().max(400).optional(),
+  music: z.string().max(300).optional(),
+  sceneSeconds: z.number().min(3).max(10).optional(),
+  captions: z.object({ position: z.enum(["top", "center", "bottom"]).optional(), words: z.number().int().min(1).max(8).optional() }).optional(),
+});
+
 export const SettingsSchema = z.object({
   engine: EngineSchema,
   length: z.number(DURATION_ERROR).int(DURATION_ERROR).min(EXPLAINER_MIN, DURATION_ERROR).max(EXPLAINER_MAX, DURATION_ERROR),
@@ -1432,6 +1495,7 @@ export const SettingsSchema = z.object({
   videoModel: z.string().max(60).optional(),
   resolution: z.string().max(10).optional(),
   auto: z.boolean().optional(),
+  brief: BriefLookSchema.optional(),
 });
 
 export const BlockSchema = z.object({

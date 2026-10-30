@@ -1,5 +1,5 @@
 import "server-only";
-import { getSetting, parseContext } from "../settings";
+import { getSetting, isCandidate, parseContext, savedSetting, type SettingName } from "../settings";
 import { LOCAL_KINDS, type LocalKind, type LocalServer } from "./types";
 
 export const LOCAL_LABELS: Record<LocalKind, string> = { ollama: "Ollama", lmstudio: "LM Studio", unsloth: "Unsloth Studio", custom: "your local server" };
@@ -31,12 +31,24 @@ const root = (url: string) =>
     .replace(/\/+$/, "")
     .replace(/\/(?:api\/v[01]|v1|api)$/i, "");
 
+/** The custom server's URL as given, without a trailing slash. */
+const customRoot = (url: string) => url.trim().replace(/\/+$/, "");
+
+/**
+ * A server's key. During Save & test of an address that isn't the saved one, the saved key stays with
+ * the server it was saved for (as ComfyUI's token does): only a key typed for this test goes to the new address.
+ */
+function keyFor(urlName: SettingName, keyName: SettingName, norm: (url: string) => string): string {
+  if (isCandidate(urlName) && !isCandidate(keyName) && norm(getSetting(urlName)) !== norm(savedSetting(urlName))) return "";
+  return getSetting(keyName);
+}
+
 export function localServer(kind: LocalKind): LocalServer {
   const label = LOCAL_LABELS[kind];
   if (kind === "ollama") return { kind, label, url: root(getSetting("ollamaUrl")), model: getSetting("ollamaModel").trim(), key: "" };
-  if (kind === "lmstudio") return { kind, label, url: root(getSetting("lmstudioUrl")), model: getSetting("lmstudioModel").trim(), key: getSetting("lmstudioToken") };
-  if (kind === "unsloth") return { kind, label, url: root(getSetting("unslothUrl")), model: getSetting("unslothModel").trim(), key: getSetting("unslothKey") };
-  return { kind, label, url: getSetting("llmUrl").trim().replace(/\/+$/, ""), model: getSetting("llmModel").trim(), key: getSetting("llmKey") };
+  if (kind === "lmstudio") return { kind, label, url: root(getSetting("lmstudioUrl")), model: getSetting("lmstudioModel").trim(), key: keyFor("lmstudioUrl", "lmstudioToken", root) };
+  if (kind === "unsloth") return { kind, label, url: root(getSetting("unslothUrl")), model: getSetting("unslothModel").trim(), key: keyFor("unslothUrl", "unslothKey", root) };
+  return { kind, label, url: customRoot(getSetting("llmUrl")), model: getSetting("llmModel").trim(), key: keyFor("llmUrl", "llmKey", customRoot) };
 }
 
 /** The servers text steps and Assist may use, in the order they're tried: the pinned one, or all (the custom one when it has a URL). */

@@ -1,13 +1,27 @@
 "use client";
 
 import { Cloud, Cpu, Info, X } from "lucide-react";
-import { PresetPreview, useAutoplay } from "@/components/preset-preview";
+import { useSyncExternalStore } from "react";
+import { PresetPreview, useSaveData } from "@/components/preset-preview";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Preset } from "@/lib/catalog/types";
+// The covers manifest comes with toPresetCard: this component is loaded on its own (next/dynamic in studio-page.tsx).
 import { toPresetCard } from "@/lib/preset-card-data";
 import { presetHowTo, presetRouteLines, previewFlip } from "@/lib/preset-cards";
-import { PREVIEW_SIZES } from "@/lib/preview-media";
 import { cn } from "@/lib/utils";
+
+const REDUCED = "(prefers-reduced-motion: reduce)";
+function useReducedMotion() {
+  return useSyncExternalStore(
+    (cb) => {
+      const mq = window.matchMedia(REDUCED);
+      mq.addEventListener("change", cb);
+      return () => mq.removeEventListener("change", cb);
+    },
+    () => window.matchMedia(REDUCED).matches,
+    () => true,
+  );
+}
 
 /**
  * The card a studio shows above its composer while a preset (app, camera motion, effect) is active
@@ -32,12 +46,14 @@ export function PresetHeader({
   className?: string;
 }) {
   const card = toPresetCard(preset);
-  const autoplay = useAutoplay();
+  const reduced = useReducedMotion();
+  // Not with Save-Data or on 2G either: a clip cover would download as soon as the studio opens.
+  const saveData = useSaveData();
   const routes = presetRouteLines(preset, modelName);
   return (
     <div className={cn("mx-auto flex w-full max-w-[760px] items-center gap-3 rounded-2xl border bg-background p-2 pr-3 text-left shadow-soft", className)}>
       <div className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-32">
-        <PresetPreview preview={card.preview} hue={card.hue} playing={autoplay} flip={previewFlip(card)} card={card} sizes={PREVIEW_SIZES.header} priority />
+        <PresetPreview preview={card.preview} hue={card.hue} playing={!reduced && !saveData} flip={previewFlip(card)} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-heading text-[19px] leading-snug">{preset.name}</p>
@@ -48,10 +64,10 @@ export function PresetHeader({
           <button
             type="button"
             className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-            aria-label={`About ${preset.name}`}
           >
             <Info className="size-3.5" />
-            <span className="hidden sm:inline">Details</span>
+            <span className="max-sm:sr-only">Details</span>
+            <span className="sr-only"> about {preset.name}</span>
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" collisionPadding={12} className="w-[min(92vw,360px)] space-y-2 p-3 text-[13px]">
@@ -61,7 +77,7 @@ export function PresetHeader({
               <li key={r.engine} className="flex items-center gap-2">
                 {r.engine === "cloud" ? <Cloud className="size-3.5 shrink-0" /> : <Cpu className="size-3.5 shrink-0" />}
                 <span className="text-muted-foreground">{r.label}</span>
-                <span className={cn("ml-auto truncate font-medium", !r.model && "font-normal text-subtle-foreground")}>{r.model ?? "Not available yet"}</span>
+                <span className={cn("ml-auto truncate font-medium", !r.model && "font-normal text-muted-foreground")}>{r.model ?? "Not available yet"}</span>
               </li>
             ))}
           </ul>

@@ -3,12 +3,17 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getModel, modelsFor } from "@/lib/catalog";
+import { offeredModels } from "../model-access";
+import { dualEngine, runsOn } from "@/lib/catalog/engines";
+import { currentModelId } from "@/lib/catalog/replaced";
 import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { type PlannedJob, totalCost } from "@/lib/assist";
 import { STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
+import { loraFamily, runsSomewhere, TRAINING_FAMILIES } from "@/lib/catalog/training";
+import type { ElementLora } from "@/lib/catalog/elements";
 import { createPipeline } from "../chains";
 import { listElements } from "../elements";
-import { createGenerations, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
+import { createGenerations, currentRequest, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
 import { provider } from "../providers";
 import { llmBackends, llmLabel } from "../providers/llm";
 import { engineMode } from "../settings";
@@ -39,10 +44,26 @@ function summarize(m: ModelDef) {
     id: m.id,
     name: m.name,
     vendor: m.vendor,
-    engine: m.engine === "open" ? (local ? `open source (${llmLabel({ endpoint: "ollama" })}, on this machine)` : "open source (ComfyUI)") : local ? `Claude (or ${llmLabel({ endpoint: "ollama" })} when no key is set)` : "paid cloud API",
+    engine: dualEngine(m)
+      ? "Fuobe Original: open source on your GPU (ComfyUI) or hosted open weights in the cloud (pass engine to pick one)"
+      : m.engine === "open"
+        ? local
+          ? `open source (${llmLabel({ endpoint: "ollama" })}, on this machine)`
+          : "open source (ComfyUI)"
+        : local
+          ? `Claude (or ${llmLabel({ endpoint: "ollama" })} when no key is set)`
+          : "paid cloud API",
     about: m.tagline,
     does: [...new Set(m.routes.map((r) => r.op))].map((op) => `${op} (${OPERATION_LABELS[op]})`),
-    price: m.engine === "open" ? (local ? "free (your machine)" : "free (your GPU)") : m.pricing ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.note ? ` — ${m.pricing.note}` : ""}` : "unknown",
+    price: dualEngine(m)
+      ? `free on your GPU; in the cloud ${m.pricing ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.withLoras ? ` ($${m.pricing.withLoras} with LoRAs)` : ""}` : "priced per run"}`
+      : m.engine === "open"
+        ? local
+          ? "free (your machine)"
+          : "free (your GPU)"
+        : m.pricing
+          ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.note ? ` — ${m.pricing.note}` : ""}`
+          : "unknown",
     connected: configured,
     ...(o.aspectRatios && { aspectRatios: o.aspectRatios }),
     ...(o.resolutions && { resolutions: o.resolutions }),
@@ -55,7 +76,7 @@ function summarize(m: ModelDef) {
     ...(o.voices?.length && { voices: o.voices.slice(0, 12).map((v) => v.id) }),
     ...(o.voiceClone && { voiceClone: true }),
     ...(o.languages?.length && { languages: o.languages.length > 12 ? `${o.languages.slice(0, 12).join(", ")}…` : o.languages.join(", ") }),
-    ...(o.presets && { needs: o.presets.required ? `a ${o.presets.label} (pick in the studio)` : undefined }),
+    ...(o.looks && { looks: "139 Soul looks: pass a look id as presetId (v1-general, v2-y2k-studio…), presetStrength 0–1 scales its LoRAs" }),
   };
 }
 
@@ -75,7 +96,8 @@ const searchModels = defineTool({
   }),
   async run({ kind, task, query }, ctx) {
     const mode = engineMode();
-    let list = modelsFor({ kind: kind as MediaKind, ops: task ? [task as Operation] : undefined, engine: mode === "both" ? "all" : mode });
+    // Only what Settings → Models & licences offers, each model with the routes that are on.
+    let list = offeredModels(modelsFor({ kind: kind as MediaKind, ops: task ? [task as Operation] : undefined, engine: mode === "both" ? "all" : mode }));
     if (query) {
       const words = query.toLowerCase().split(/\s+/).filter(Boolean);
       const scored = list.map((m) => {
@@ -85,7 +107,7 @@ const searchModels = defineTool({
       if (scored.some((x) => x.s)) list = scored.filter((x) => x.s).sort((a, b) => b.s - a.s).map((x) => x.m);
     }
     // The engine the user picked first, then the rest.
-    list = [...list].sort((a, b) => Number(b.engine === ctx.engine) - Number(a.engine === ctx.engine));
+    list = [...list].sort((a, b) => Number(runsOn(b, ctx.engine)) - Number(runsOn(a, ctx.engine)));
     const shown = list.slice(0, 20);
     return {
       content: JSON.stringify({ engineMode: mode, preferredEngine: ctx.engine, total: list.length, models: shown.map(summarize) }),
@@ -96,6 +118,12 @@ const searchModels = defineTool({
 
 // ---------------------------------------------------------------------------
 // list_elements
+
+/** The models an element's trained LoRA runs on: its family's (a LoRA from before O3 names its one model). */
+const familyModels = (l: ElementLora): string[] => {
+  const f = loraFamily(l);
+  return f ? TRAINING_FAMILIES[f].models : [l.modelId];
+};
 
 const listElementsTool = defineTool({
   name: "list_elements",
@@ -112,7 +140,9 @@ const listElementsTool = defineTool({
           kind: e.kind,
           description: e.description,
           referencePhotos: e.references.length,
-          trainedFor: e.loras.map((l) => l.modelId),
+          // The models its trained LoRAs run on (every model of each family), from LoRAs a run can use: not a demo
+          // training's stand-in or an older Soul ID.
+          trainedFor: [...new Set(e.loras.filter(runsSomewhere).flatMap((l) => familyModels(l)))],
         })),
       ),
       items: [{ id: "", role: "tool", text: `Checked your elements (${els.length})` }],
@@ -250,6 +280,8 @@ const Job = z.object({
       "Index (0-based) of an earlier job in this same call whose result this job uses: it starts by itself when that job finishes. An image becomes the start frame or the image to edit, a video the input video, audio the soundtrack or the recording to re-voice (the voice to clone, for tts), text the prompt.",
     ),
   negative_prompt: z.string().optional(),
+  look: z.string().optional().describe("Fuobe Soul / Soul HD: the look's id from search_models (v1-general, v1-y2k, v2-y2k-studio…). Leave it out for Soul's default look."),
+  engine: z.enum(["open", "cloud"]).optional().describe("Fuobe Originals run on both engines: open = the user's GPU (free), cloud = hosted open weights (paid). Leave it out to follow the user's engine."),
 });
 type JobInput = z.infer<typeof Job>;
 
@@ -269,7 +301,22 @@ function shotList(model: ModelDef | undefined, n: number): { prompt: string; dur
   return Array.from({ length: count }, (_, i) => ({ prompt: SHOT_TYPES[i % SHOT_TYPES.length], duration: each }));
 }
 
-function toRequest(j: JobInput): GenerationRequest {
+/** The engine the user works on (the install's only one when Settings → Engine mode allows one). */
+const engineOf = (ctx: ToolContext): "cloud" | "open" => (engineMode() === "both" ? ctx.engine : (engineMode() as "cloud" | "open"));
+
+/**
+ * A job as a request; `engine` is the user's, which a Fuobe Original (both engines) runs on unless the job names one.
+ * A retired model id or operation (an older plan, an MCP client's saved call) runs where it went (replaced.ts), so the
+ * chain slots and checks below see the model and operation that run.
+ */
+function toRequest(job: JobInput, engine?: "cloud" | "open"): GenerationRequest {
+  const req = currentRequest(asRequest(job)).request;
+  const original = engine && dualEngine(getModel(req.modelId));
+  return { ...req, ...((job.engine ?? (original ? engine : undefined)) && { engine: job.engine ?? engine }) };
+}
+
+/** A job as the request it names, before a retired model or operation is moved (toRequest). */
+function asRequest(j: JobInput): GenerationRequest {
   const inputs = {
     ...(j.images?.length && { images: j.images }),
     ...(j.end_image && { endImage: j.end_image }),
@@ -278,10 +325,11 @@ function toRequest(j: JobInput): GenerationRequest {
     ...(j.background_audio && { audio2: j.background_audio }),
     ...(j.voice_audio && { voiceAudio: j.voice_audio }),
   };
-  const shots = j.shots && j.shots > 1 ? shotList(getModel(j.model_id), j.shots) : undefined;
+  const shots = j.shots && j.shots > 1 ? shotList(getModel(currentModelId(j.model_id)), j.shots) : undefined;
   return {
     feature: "assist",
     modelId: j.model_id,
+    ...(j.look && { presetId: j.look }),
     op: j.op as Operation | undefined,
     prompt: j.prompt,
     negativePrompt: j.negative_prompt,
@@ -326,10 +374,10 @@ interface ChainedJob {
 }
 
 /** Validate and price the jobs of one generate call, wiring `after` into chain slots. Never throws. */
-function chainJobs(jobs: JobInput[]): ChainedJob[] {
+function chainJobs(jobs: JobInput[], engine?: "cloud" | "open"): ChainedJob[] {
   const out: ChainedJob[] = [];
   jobs.forEach((job, i) => {
-    const req = toRequest(job);
+    const req = toRequest(job, engine);
     const after = job.after;
     if (after === undefined) {
       try {
@@ -384,18 +432,18 @@ const generate = defineTool({
   // job has more. Calls are validated with zod (validateInput / planFor / executeTool) instead, and
   // a malformed one goes back to the model as an error it can fix.
   // Chained jobs are one pipeline (all or nothing); separate jobs start one by one.
-  plan: ({ jobs }) => {
+  plan: ({ jobs }, ctx) => {
     const list = jobs.slice(0, 6);
     const atomic = list.some((j) => j.after !== undefined) || undefined;
-    return chainJobs(list).map((c) => ({ ...plannedJob(c), atomic }));
+    return chainJobs(list, engineOf(ctx)).map((c) => ({ ...plannedJob(c), atomic }));
   },
-  async run({ summary, jobs }) {
+  async run({ summary, jobs }, ctx) {
     const list = jobs.slice(0, 6);
     // The plan's jobs share a batch, so the Library stacks them under the plan's summary.
     const batchTitle = summary.trim().slice(0, 200) || undefined;
     if (list.some((j) => j.after !== undefined)) {
       // Chained jobs: one pipeline, created only if every step is valid.
-      const chained = chainJobs(list);
+      const chained = chainJobs(list, engineOf(ctx));
       const bad = chained.findIndex((c) => c.error);
       if (bad >= 0) return { content: JSON.stringify({ error: `Job ${bad}: ${chained[bad].error}` }), isError: true };
       const p = createPipeline(chained.map((c, i) => ({ key: `job${i}`, request: { ...c.req, batchTitle }, ...(c.after !== undefined && { after: `job${c.after}` }) })));
@@ -413,7 +461,7 @@ const generate = defineTool({
     const batch = list.length > 1 ? { batchId: nanoid(10) } : {};
     for (const j of list) {
       try {
-        const gens = createGenerations({ ...toRequest(j), batchTitle }, batch);
+        const gens = createGenerations({ ...toRequest(j, engineOf(ctx)), batchTitle }, batch);
         ids.push(...gens.map((g) => g.id));
         results.push({ model: j.model_id, started: gens.map((g) => g.id), demo: gens.some((g) => g.provider === "mock") || undefined, costUsd: gens.reduce((s, g) => s + (g.costUsd ?? 0), 0) || undefined });
       } catch (e) {

@@ -163,12 +163,14 @@ export function ModePicker({
         <button
           type="button"
           disabled={disabled}
-          className="inline-flex h-8 max-w-[11rem] shrink-0 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground transition-colors hover:bg-accent disabled:opacity-50"
+          // One width for "Smart", "Free" and "Mode": the label can change once availability loads, and the chips after it must not move.
+          // Phones drop the chevron, so the composer's chips fit one row at 390 px.
+          className="inline-flex h-8 max-w-[11rem] min-w-[6.5rem] shrink-0 items-center justify-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground transition-colors hover:bg-accent disabled:opacity-50 max-sm:min-w-[5rem] max-sm:px-2.5"
           aria-label={`Mode: ${label}`}
         >
           <Icon className="size-3.5 shrink-0" />
           <span className="truncate">{label}</span>
-          <ChevronDown className="size-3 shrink-0 opacity-60" />
+          <ChevronDown className="size-3 shrink-0 opacity-60 max-sm:hidden" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" collisionPadding={12} className="w-[min(92vw,360px)] p-3">

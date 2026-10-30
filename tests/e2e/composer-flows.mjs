@@ -6,6 +6,9 @@
 //   3. A pasted image attaches once and stops spinning; one removed while it uploads stays removed.
 //   4. A clip dropped on an Image tile is refused.
 //   5. Phone (390 px): the composer toolbar fits on every studio, the Settings chip is in view, no sideways scroll.
+//   6. A blocked Generate says why in a line under the composer on a phone; a tap opens the missing tile's file
+//      picker (focus inside the composer), and the line moves on to the next input. A desktop composer shows the
+//      line only while its tiles are folded away.
 //
 // Playwright: the `playwright` (or `playwright-core`) package if it resolves, else the global install at
 // /opt/node22/lib/node_modules. Chromium: $CHROMIUM_PATH, else the newest /opt/pw-browsers/chromium-*.
@@ -181,6 +184,55 @@ async function ready(page, url) {
     check(`phone toolbar ${route}`, m.over <= 0 && m.settings && m.page <= 0, `row overflow ${m.over}px, settings in view: ${m.settings}, page overflow ${m.page}px`);
   }
   await ctx.close();
+}
+
+// 6. The blocker line.
+{
+  const lineText = (page) => page.evaluate(() => document.querySelector("[data-composer] [aria-live=polite] button")?.textContent?.trim() ?? "");
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  await ready(page, "/apps/app-face-swap");
+  await page.waitForTimeout(800);
+  const first = await lineText(page);
+  check("phone: a blocked Generate says why under the composer", /^Add an? /.test(first), first || "no line");
+  const png = Buffer.from(
+    await page.evaluate(() => {
+      const c = document.createElement("canvas");
+      c.width = 160;
+      c.height = 120;
+      const x = c.getContext("2d");
+      x.fillStyle = "#cc6633";
+      x.fillRect(0, 0, 160, 120);
+      return c.toDataURL("image/png").split(",")[1];
+    }),
+    "base64",
+  );
+  if (first) {
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser", { timeout: 5000 }).catch(() => null),
+      page.locator("[data-composer] [aria-live=polite] button").first().tap(),
+    ]);
+    const inside = await page.evaluate(() => !!document.activeElement?.closest("[data-composer]"));
+    check("…a tap on it opens that tile's file picker", !!chooser && inside, `picker: ${!!chooser}, focus in the composer: ${inside}`);
+    if (chooser) {
+      await chooser.setFiles({ name: "photo.png", mimeType: "image/png", buffer: png });
+      await page.waitForFunction((was) => (document.querySelector("[data-composer] [aria-live=polite] button")?.textContent?.trim() ?? "") !== was, first, { timeout: 30_000 }).catch(() => {});
+      const next = await lineText(page);
+      check("…and once it's filled the line names the next input", next !== first && /^Add an? /.test(next), `"${first}" → "${next}"`);
+    }
+  }
+  await ctx.close();
+
+  const desk = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await ready(desk, "/apps/app-face-swap");
+  await desk.waitForTimeout(800);
+  const m = await desk.evaluate(() => {
+    const tiles = [...document.querySelectorAll("[data-composer] [data-slot-key]")].some((t) => t.getBoundingClientRect().width > 0);
+    const line = document.querySelector("[data-composer] [aria-live=polite] p");
+    return { tiles, line: !!line && line.getBoundingClientRect().height > 0 };
+  });
+  check("desktop: the line shows only while the tiles are folded away", m.line === !m.tiles, `tiles shown: ${m.tiles}, line shown: ${m.line}`);
+  await desk.close();
 }
 
 await browser.close();

@@ -18,7 +18,8 @@ const VACE = ["startTime", "duration", "width", "height", "maskGrow", "prompt", 
 const ROUND4: Record<string, { capability: string; bindings: string[]; outputs: [string, string?][] }> = {
   "ocr-lines-qwen35": { capability: "ocr", bindings: ["image", "maxSize", "checkpoint", "instruction", "maxTokens", "filenamePrefix"], outputs: [["text", "lines"], ["text", "frame"]] },
   "video-inpaint-wan-vace": { capability: "remove-object", bindings: ["video", "maskPrompt", ...VACE], outputs: [["video"]] },
-  "video-inpaint-wan-vace-painted": { capability: "remove-object", bindings: ["video", "mask", ...VACE], outputs: [["video"]] },
+  // The painted eraser also saves its last tracked frame's mask, which starts the next window (remove-object package).
+  "video-inpaint-wan-vace-painted": { capability: "remove-object", bindings: ["video", "mask", ...VACE], outputs: [["video"], ["image", "mask"]] },
   "video-erase-void": {
     capability: "remove-object",
     bindings: ["video", "startTime", "duration", "width", "height", "maskPrompt", "maskGrow", "prompt", "negativePrompt", "cfg", "steps", "seed", "skipPass2", "filenamePrefix"],
@@ -34,8 +35,9 @@ const ROUND4: Record<string, { capability: string; bindings: string[]; outputs: 
   "audio-loop-crossfade": { capability: "audio-loop", bindings: ["audio", "fadeCurve", "crossfade", "duration", "headroomDb", "filenamePrefix"], outputs: [["audio"]] },
   "audio-join-crossfade": { capability: "audio-join", bindings: ["audio", "audio2", "fadeCurve", "crossfade", "filenamePrefix"], outputs: [["audio"]] },
   "video-export-pro": { capability: "export-video", bindings: ["video", "format", "profile", "filenamePrefix"], outputs: [["video"]] },
-  "video-sdr-to-hdr": { capability: "sdr-to-hdr", bindings: ["video", "peakNits", "filenamePrefix"], outputs: [["video"]] },
-  "video-export-exr": { capability: "export-video", bindings: ["video", "filenamePrefix"], outputs: [["image", "frames"]] },
+  // r4/video-finish: colorSpace picks HLG or PQ (HDR10); the EXR export also saves a preview clip to show in the feed.
+  "video-sdr-to-hdr": { capability: "sdr-to-hdr", bindings: ["video", "peakNits", "colorSpace", "filenamePrefix"], outputs: [["video"]] },
+  "video-export-exr": { capability: "export-video", bindings: ["video", "filenamePrefix"], outputs: [["video", "preview"], ["image", "frames"]] },
   "still-to-clip": { capability: "still-motion", bindings: ["image", "width", "height", "duration", "fps", "filenamePrefix"], outputs: [["video"]] },
   "video-append-endcard": { capability: "concat", bindings: ["video", "image", "width", "height", "fps", "duration", "filenamePrefix"], outputs: [["video"]] },
   "scene-mesh-moge": { capability: "scene-3d", bindings: ["image", "checkpoint", "resolutionLevel", "fovX", "decimation", "filenamePrefix"], outputs: [["model3d", "scene"], ["image", "depth"]] },
@@ -53,7 +55,11 @@ const ROUND4: Record<string, { capability: string; bindings: string[]; outputs: 
 /** Loaders whose input is an upload: every one must be a binding, or the graph points at a researcher's file. */
 const MEDIA: Record<string, string> = { LoadImage: "image", LoadImageMask: "image", LoadVideo: "file", VHS_LoadVideo: "video", LoadAudio: "audio", VHS_LoadAudioUpload: "audio" };
 const ROLES: NonNullable<ManifestOutput["role"]>[] = [
-  "cues", "transcript", "language", "layers", "sheet", "tiles", "first-frame", "turntable", "lines", "frame", "frames", "scene", "depth", "splat", "brief",
+  "cues", "transcript", "language", "layers", "sheet", "tiles", "first-frame", "turntable", "lines", "frame", "frames", "scene", "depth", "splat", "brief", "preview",
+  // remove-object package: the painted eraser's hand-off mask, the matte graphs' two videos.
+  "mask", "cutout", "matte",
+  // Character Swap Studio: a segment's lossless master, which the next segment continues from.
+  "master",
 ];
 
 describe("round-4 ComfyUI workflows", () => {
@@ -78,7 +84,15 @@ describe("round-4 ComfyUI workflows", () => {
   it("keeps the whole library validated, and every output role is a typed role", () => {
     expect(manifest.workflows.length).toBeGreaterThanOrEqual(132);
     expect(new Set(manifest.workflows.map((w) => w.id)).size).toBe(manifest.workflows.length);
-    expect(manifest.workflows.filter((w) => !w.validated).map((w) => w.id)).toEqual([]);
+    // Only the MiniMax H3 graphs wait on node packs this server doesn't have (h3_character_swap, H3 Relay): never
+    // installed here, so their /prompt check names a missing node (tests/comfy-character-swap.test.ts).
+    expect(manifest.workflows.filter((w) => !w.validated).map((w) => w.id)).toEqual([
+      "video-character-swap-h3",
+      "video-character-swap-h3-relay",
+      "video-person-remove-h3-relay",
+      "video-character-swap-h3-segment",
+      "video-mask-h3-relay",
+    ]);
     for (const w of manifest.workflows) for (const o of w.outputs) if (o.role) expect(ROLES, `${w.id} ${o.role}`).toContain(o.role);
   });
 
@@ -189,7 +203,8 @@ for (const id of ["video-inpaint-wan-vace", "video-inpaint-wan-vace-painted", "v
   WINDOWS[id] = {
     cap: 81,
     counts: [[82, 81], [81, 81], [80, 77], [30, 29], [5, 5], [1, 1]],
-    lengthUsers: ["ComfyMathExpression", "ImageFromBatch", ...(id === "video-insert-wan-vace" ? ["RepeatImageBatch"] : []), "WanVaceToVideo"],
+    // The painted eraser also counts back from the window's last frame for the mask it hands on.
+    lengthUsers: ["ComfyMathExpression", "ImageFromBatch", ...(id === "video-insert-wan-vace" ? ["RepeatImageBatch"] : []), ...(id.endsWith("-painted") ? ["ComfyMathExpression"] : []), "WanVaceToVideo"],
     model: "WanVaceToVideo",
     workScales: id.endsWith("-painted") || id === "video-insert-wan-vace" ? 2 : 1,
     sizes: SAMPLE_SIZES.vace,

@@ -37,8 +37,8 @@ export const planRunnable = (jobs: PlannedJob[]): boolean => jobs.some((j) => !j
 export type AssistItem =
   | { id: string; role: "user"; text: string; attachments?: string[]; skills?: string[] }
   | { id: string; role: "assistant"; text: string }
-  /** `studio`: a job a studio took ("Layers"); its card offers "Open in Layers" (href). */
-  | { id: string; role: "tool"; text: string; href?: string; studio?: string }
+  /** `studio`: a job a studio took ("Layers"); its card offers "Open in Layers" (href). `connector`: a tool of a custom MCP connector Claude used. */
+  | { id: string; role: "tool"; text: string; href?: string; studio?: string; connector?: string; failed?: boolean }
   /** `opens`: the studios the plan's jobs open in; `notes`: why a studio job runs in the Library instead. */
   | { id: string; role: "approval"; summary: string; jobs: PlannedJob[]; totalUsd: number | null; status: "pending" | "approved" | "declined"; opens?: string[]; notes?: string[] }
   | { id: string; role: "generations"; ids: string[]; storyboard?: boolean }
@@ -72,6 +72,11 @@ export interface AssistThread {
   effort?: AssistEffort | null;
   /** Skills loaded into this chat (by `/name` or by the agent). */
   skills?: string[];
+  /** The scheduled task that started this chat. */
+  scheduleId?: string;
+  /** Auto-run's cost cap for this chat (a scheduled run's), and what ran without asking has cost. */
+  capUsd?: number;
+  spentUsd?: number;
 }
 
 export interface AssistThreadSummary {
@@ -95,6 +100,17 @@ export function threadTitle(text: string): string {
   const t = text.trim().replace(/\s+/g, " ");
   return t.length > 60 ? `${t.slice(0, 57).replace(/\s+\S*$/, "")}…` : t || "New chat";
 }
+
+/**
+ * The starter requests on Assist's empty page. Each one must plan right without an LLM too
+ * (tests/assist-suggestions.test.ts runs them through the offline planner).
+ */
+export const ASSIST_SUGGESTIONS = [
+  "A 3-shot product ad for a matte black perfume bottle — hero still, then animate it",
+  "Four moody portraits of a lighthouse keeper, 35mm film, then pick the best and animate it",
+  "Storyboard a 6-frame heist in Paris at night",
+  "A 10-second vertical video of a fox running through snow, with sound",
+] as const;
 
 // ---------------------------------------------------------------------------
 // Modes (Supercomputer's Free / Smart / Manual)

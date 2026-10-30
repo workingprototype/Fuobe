@@ -1,12 +1,15 @@
 "use client";
 
 import { Cloud, Cpu, Info, Search } from "lucide-react";
-import { memo, useDeferredValue, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { memo, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useProgressive } from "@/components/use-progressive";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useEngine } from "@/lib/api";
+import Link from "next/link";
+import { useEngine, useModelAccess } from "@/lib/api";
+import { offered } from "@/lib/model-access";
 import type { Engine, MediaKind } from "@/lib/catalog/types";
-import { modelSearchText, type ModelRow } from "@/lib/model-rows";
+import { enginesLabel, modelSearchText, type ModelRow } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Partial<Record<MediaKind, string>> = { image: "Image", video: "Video", audio: "Audio", text: "Text", model3d: "3D" };
@@ -25,12 +28,13 @@ function RouteDetails({ row }: { row: ModelRow }) {
         <button
           type="button"
           className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[12px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label={`Where ${row.name} runs`}
         >
           <Info className="size-3.5" />
-          <span className="hidden sm:inline">
+          {/* The name starts with the visible text ("3 routes"), so speech users can say it. */}
+          <span className="max-sm:sr-only">
             {row.routes.length} route{row.routes.length === 1 ? "" : "s"}
           </span>
+          <span className="sr-only">: where {row.name} runs</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" collisionPadding={12} className="w-[min(92vw,420px)] p-3">
@@ -42,7 +46,7 @@ function RouteDetails({ row }: { row: ModelRow }) {
             </li>
           ))}
         </ul>
-        <p className="mt-2 font-mono text-[11px] text-subtle-foreground">id {row.id}</p>
+        <p className="mt-2 font-mono text-[11px] text-muted-foreground">id {row.id}</p>
       </PopoverContent>
     </Popover>
   );
@@ -53,7 +57,8 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
     <tr className="align-top hover:bg-accent/50">
       <td className="px-3 py-3 sm:px-4">
         <div className="flex flex-wrap items-center gap-1.5 font-medium">
-          {m.engine === "open" ? <Cpu className="size-3.5 shrink-0 md:hidden" aria-label="Open source" /> : <Cloud className="size-3.5 shrink-0 md:hidden" aria-label="Cloud" />}
+          {m.engines.includes("open") && <Cpu className="size-3.5 shrink-0 md:hidden" aria-label="Open source" />}
+          {m.engines.includes("cloud") && <Cloud className="size-3.5 shrink-0 md:hidden" aria-label="Cloud" />}
           {m.name}
           {m.badges.map((b) => (
             <span
@@ -71,16 +76,17 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
         <div className="text-[12px] text-muted-foreground">
           {m.vendor} — {m.tagline}
         </div>
-        {m.note && <div className="mt-0.5 text-[11px] text-subtle-foreground">{m.note}</div>}
-        <div className="mt-1 text-[11px] text-subtle-foreground md:hidden">
+        {m.note && <div className="mt-0.5 text-[11px] text-muted-foreground">{m.note}</div>}
+        <div className="mt-1 text-[11px] text-muted-foreground md:hidden">
           <span className="font-mono text-muted-foreground sm:hidden">{m.price} · </span>
           {m.ops.join(" · ")}
         </div>
       </td>
       <td className="hidden px-4 py-3 whitespace-nowrap md:table-cell">
         <span className="inline-flex items-center gap-1">
-          {m.engine === "open" ? <Cpu className="size-3.5" /> : <Cloud className="size-3.5" />}
-          {m.engine === "open" ? "Open source" : "Cloud"}
+          {m.engines.includes("open") && <Cpu className="size-3.5" />}
+          {m.engines.includes("cloud") && <Cloud className="size-3.5" />}
+          {enginesLabel(m.engines)}
         </span>
       </td>
       <td className="hidden px-4 py-3 text-[12px] text-muted-foreground md:table-cell">{m.ops.join(" · ")}</td>
@@ -92,6 +98,18 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
   );
 });
 
+/**
+ * A link's ?q= (the ⌘K palette's "open this model" for models no studio offers) fills the search.
+ * It reads the URL, so it sits under its own Suspense: the table itself stays in the static page.
+ */
+function UrlQuery({ onQuery }: { onQuery: (q: string) => void }) {
+  const q = useSearchParams().get("q");
+  useEffect(() => {
+    if (q !== null) onQuery(q);
+  }, [q, onQuery]);
+  return null;
+}
+
 export function ModelsTable({ models }: { models: ModelRow[] }) {
   const [engineChoice, setEngine] = useState<Engine | "all">("all");
   const [, , mode] = useEngine();
@@ -99,24 +117,42 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
   const [kind, setKind] = useState<MediaKind | "all">("all");
   const [q, setQ] = useState("");
   const term = useDeferredValue(q.trim().toLowerCase());
-  const index = useMemo(() => models.map((m) => [m, modelSearchText(m)] as const), [models]);
+  // Settings → Models & licences: what is switched off leaves the list (an Original stays for the engine still on).
+  const access = useModelAccess();
+  const on = useMemo(() => (access ? models.filter((m) => offered(access, m.id)) : models), [models, access]);
+  const switchedOff = models.length - on.length;
+  const index = useMemo(() => on.map((m) => [m, modelSearchText(m)] as const), [on]);
   const kinds = useMemo(() => [...new Set(models.map((m) => m.kind))], [models]);
   const list = useMemo(
-    () => index.filter(([m, text]) => (engine === "all" || m.engine === engine) && (kind === "all" || m.kind === kind) && (!term || text.includes(term))).map(([m]) => m),
-    [index, engine, kind, term],
+    () =>
+      index
+        .filter(([m, text]) => (engine === "all" || (m.engines.includes(engine) && offered(access, m.id, engine))) && (kind === "all" || m.kind === kind) && (!term || text.includes(term)))
+        .map(([m]) => m),
+    [index, engine, kind, term, access],
   );
   // 40 rows in the page's HTML, the rest as you scroll.
   const { shown, hasMore, moreFrom, sentinel, left } = useProgressive(list.length, `${engine}|${kind}|${term}`, 40, 60);
   const rows = useRef<HTMLTableSectionElement>(null);
   return (
     <div className="space-y-4">
+      <Suspense fallback={null}>
+        <UrlQuery onQuery={setQ} />
+      </Suspense>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <div className="relative w-full lg:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              // Typing takes over from the link: drop its ?q=, so the same link fills the search again later.
+              if (new URLSearchParams(window.location.search).has("q")) {
+                const url = new URL(window.location.href);
+                url.searchParams.delete("q");
+                window.history.replaceState(null, "", url);
+              }
+            }}
             placeholder={`Search ${models.length} models`}
             aria-label="Search models"
             className="h-9 w-full rounded-full border bg-background pr-3 pl-9 text-[14px] outline-none placeholder:text-subtle-foreground focus:border-primary focus:ring-4 focus:ring-brand-faint"
@@ -139,6 +175,15 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
           {list.length} models
         </span>
       </div>
+      {switchedOff > 0 && (
+        <p className="text-[13px] text-muted-foreground">
+          {switchedOff} {switchedOff === 1 ? "model is" : "models are"} turned off in{" "}
+          <Link href="/settings/models" className="text-brand-text underline-offset-2 hover:underline">
+            Settings → Models &amp; licences
+          </Link>
+          .
+        </p>
+      )}
       <div className="overflow-x-auto rounded-xl border">
         <table className="w-full text-left text-[13px]">
           <thead className="bg-muted/50 text-[12px] text-muted-foreground">

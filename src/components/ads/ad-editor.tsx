@@ -109,7 +109,7 @@ export function AdEditor({
       <DialogContent className="max-h-[94svh] gap-0 overflow-y-auto p-0 sm:max-w-4xl">
         <DialogHeader className="border-b px-5 py-4">
           <DialogTitle className="truncate pr-8">{title}</DialogTitle>
-          <DialogDescription>{baked ? "Made whole by Higgsfield Ads Studio — download it as is." : "Edit the words and layout; every format updates as you type."}</DialogDescription>
+          <DialogDescription>{baked ? "This ad was drawn whole, words included — download it as is." : "Edit the words and layout; every format updates as you type."}</DialogDescription>
         </DialogHeader>
         <div className="grid min-w-0 gap-5 p-5 md:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0">

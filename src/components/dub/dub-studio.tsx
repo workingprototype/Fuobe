@@ -15,7 +15,8 @@ import { SourceLanguageSelect, TargetLanguages } from "@/components/av/language-
 import { MediaDrop } from "@/components/av/media-drop";
 import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
-import { useEngine } from "@/lib/api";
+import { useEngine, useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cueProblems } from "@/lib/av/cue-edit";
 import { BACKGROUND_DB, crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, voiceOnly, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
 import { languageByCode, supportsTarget, type DubRoute } from "@/lib/av/languages";
@@ -93,7 +94,11 @@ function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
   const [video, setVideo] = useState<SlotValue | null>(null);
   const [duration, setDuration] = useState<number | undefined>(undefined);
   const [mode, setMode] = useState<"steps" | "oneshot">("steps");
-  const [model, setModel] = useState<OneShotModel>("heygen-translate");
+  const [picked, setModel] = useState<OneShotModel>("heygen-translate");
+  // One-shot dubbing models switched off in Settings → Models & licences leave the menu; the pick falls back to one that is on.
+  const access = useModelAccess();
+  const oneShotModels = keepOffered(ONE_SHOT_MODELS, (m) => offered(access, m, "cloud"));
+  const model: OneShotModel = oneShotModels.includes(picked) ? picked : oneShotModels[0];
   const [source, setSource] = useState("auto");
   const [targets, setTargets] = useState<string[]>(["es"]);
   const oneShot = mode === "oneshot" && engine === "cloud";
@@ -158,7 +163,7 @@ function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ONE_SHOT_MODELS.map((m) => (
+                  {oneShotModels.map((m) => (
                     <SelectItem key={m} value={m}>
                       {ONE_SHOT[m].name}
                     </SelectItem>
@@ -197,7 +202,7 @@ function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
           </p>
           <div className="flex shrink-0 items-center gap-3 self-end sm:self-auto">
             <PriceNote price={price.data} loading={price.isFetching && !price.data} error={price.error as Error | null} hint={oneShot ? undefined : "Translating costs little; you'll see the voice's price before it speaks"} />
-            <Button size="lg" className={cn("shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={start} disabled={create.isPending} aria-describedby={blocker ? "dub-blocker" : undefined}>
+            <Button size="lg" className={cn("shrink-0 rounded-full", blocker && "bg-muted text-muted-foreground hover:bg-muted")} onClick={start} disabled={create.isPending} aria-describedby={blocker ? "dub-blocker" : undefined}>
               {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               {oneShot ? "Dub it" : "Translate"}
             </Button>
@@ -538,7 +543,7 @@ function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; ti
           <div className="flex items-center gap-3 self-end sm:self-auto">
             <PriceNote price={price.data} loading={price.isFetching && !price.data} error={price.error as Error | null} />
             <Button
-              className={cn("rounded-full", problems.length && "bg-muted text-subtle-foreground hover:bg-muted")}
+              className={cn("rounded-full", problems.length && "bg-muted text-muted-foreground hover:bg-muted")}
               disabled={voice.isPending || stage === "voicing"}
               onClick={() => (problems.length ? toast(problems[0], { id: "dub-blocker" }) : start(cues))}
             >

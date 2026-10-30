@@ -1,3 +1,4 @@
+import { currentModelId } from "@/lib/catalog/replaced";
 import type { ChainSlot, Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { FRAME_MODEL, frameParams } from "./frames";
 
@@ -31,18 +32,27 @@ export interface MotionModel {
 export const MOTION_MODELS: Record<Engine, MotionModel[]> = {
   cloud: [
     { id: "kling-o3", label: "Kling O3 edit", op: "v2v", min: 3, max: 10, maxRefs: 4 },
-    { id: "genjutsu-motion-transfer", label: "Higgsfield Genjutsu motion transfer", op: "motion-transfer", min: 3, max: 10, maxRefs: 8 },
+    { id: "fuobe-genjutsu-motion", label: "Fuobe Genjutsu · Motion (Wan 2.2 Animate on fal)", op: "motion-transfer", min: 3, max: 10, maxRefs: 1 },
     { id: "kling-motion-control", label: "Kling 3.0 Motion Control", op: "motion-transfer", min: 3, max: 10, maxRefs: 1 },
   ],
   open: [
-    { id: "oss-wan22-animate", label: "Wan 2.2 Animate", op: "motion-transfer", min: 1, max: 5, maxRefs: 1 },
+    { id: "fuobe-genjutsu-motion", label: "Fuobe Genjutsu · Motion (Wan Animate 2)", op: "motion-transfer", min: 1, max: 5, maxRefs: 1 },
     { id: "oss-wan22-fun-control", label: "Wan 2.2 Fun Control", op: "motion-transfer", min: 1, max: 5, maxRefs: 1 },
   ],
 };
 
 export const KEYFRAME_MODEL: Record<Engine, string> = { cloud: "nano-banana-pro", open: "oss-qwen-edit" };
 
-export const motionModel = (engine: Engine, id?: string): MotionModel => MOTION_MODELS[engine].find((m) => m.id === id) ?? MOTION_MODELS[engine][0];
+/** Katana's earlier open motion model, now Fuobe Genjutsu's Original (a saved job or an API call may still name it). */
+export const RETIRED_MOTION_MODELS: Record<string, string> = { "oss-wan22-animate": "fuobe-genjutsu-motion" };
+
+/** The motion model a saved job or an API call means: a retired one (src/lib/catalog/replaced.ts too) gives way to what replaced it. */
+export const currentMotionModel = (id: string): string => RETIRED_MOTION_MODELS[id] ?? currentModelId(id);
+
+export const motionModel = (engine: Engine, id?: string): MotionModel => {
+  const want = id && currentMotionModel(id);
+  return MOTION_MODELS[engine].find((m) => m.id === want) ?? MOTION_MODELS[engine][0];
+};
 
 export interface Segment {
   start: number;
@@ -224,7 +234,8 @@ export function katanaSteps(o: KatanaInput): KatanaStep[] {
     const photos = o.engine === "open" ? o.photos.slice(0, 2) : o.photos;
     steps.push({ key: `key${i}`, after: `frame${i}`, chain: [{ slot: "images", position: "first" }], request: { ...base, modelId: KEYFRAME_MODEL[o.engine], op: "edit", prompt: keyframePrompt(o.instructions, photos.length), inputs: { images: photos }, step: label("your subject") } });
     // Open models render as long as they're told (Wan Fun Control defaults to 81 frames ≈ 5 s): ask for the segment's length.
-    const motion: GenerationRequest = { ...base, modelId: m.id, op: m.op, prompt: motionPrompt(o.instructions), params: { aspectRatio: aspect, ...(o.engine === "open" && { resolution: "480p", duration: r2(s.end - s.start) }) }, step: label("motion") };
+    // The engine is named: a Fuobe Original (Genjutsu's motion) runs on both.
+    const motion: GenerationRequest = { ...base, engine: o.engine, modelId: m.id, op: m.op, prompt: motionPrompt(o.instructions), params: { aspectRatio: aspect, ...(o.engine === "open" && { resolution: "480p", duration: r2(s.end - s.start) }) }, step: label("motion") };
     if (m.op === "v2v") {
       // The segment is edited with the new keyframe first among its references, then the photos.
       steps.push({ key: `move${i}`, after: [`cut${i}`, `key${i}`], chain: [{ slot: "video" }, { slot: "images", position: "first" }], request: { ...motion, inputs: { images: o.photos.slice(0, m.maxRefs - 1) } } });

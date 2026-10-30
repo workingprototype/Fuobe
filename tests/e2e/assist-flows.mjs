@@ -88,7 +88,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 
 await step("skill menu, chip and a chat with the skill loaded", async () => {
   await openRoute(page, `${app}/assist`);
-  const box = page.getByRole("combobox", { name: "Message" });
+  const box = page.getByRole("textbox", { name: "Message" });
   await box.click();
   await box.type("/prod");
   await page.getByRole("option", { name: /Product Photographer/ }).waitFor({ timeout: 10_000 });
@@ -108,7 +108,7 @@ await step("skill menu, chip and a chat with the skill loaded", async () => {
 
 await step("remember asks first, then shows on the Memory page", async () => {
   await openRoute(page, `${app}/assist`);
-  const box = page.getByRole("combobox", { name: "Message" });
+  const box = page.getByRole("textbox", { name: "Message" });
   await box.fill("Remember that I always want vertical 9:16 videos");
   await box.press("Enter");
   await page.getByText("Remember this?").waitFor({ timeout: 30_000 });
@@ -135,7 +135,7 @@ await step("a project with instructions and a note; its chats carry it", async (
   await page.getByRole("button", { name: "Add note" }).click();
   await page.getByText("Brand voice").first().waitFor({ timeout: 10_000 });
   await shot(page, "flow-project");
-  const box = page.getByRole("combobox", { name: "Message" });
+  const box = page.getByRole("textbox", { name: "Message" });
   await box.fill("Three sneaker stills on pastel backdrops");
   await box.press("Enter");
   await page.waitForURL(/\/assist\?c=/, { timeout: 20_000 });
@@ -171,14 +171,15 @@ await step("phone: the sidebar opens as a sheet; no sideways scroll", async () =
   const phone = await browser.newContext({ ...PHONE, colorScheme: scheme });
   const p = await phone.newPage();
   p.on("pageerror", (e) => errors.push(e.message));
-  for (const r of ["/assist", "/assist/skills", "/assist/memory"]) {
+  for (const r of ["/assist", "/assist/skills", "/assist/memory", "/assist/scheduled"]) {
     await openRoute(p, app + r);
     const wide = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (wide > 0) throw new Error(`${r} is ${wide}px too wide`);
   }
   await openRoute(p, `${app}/assist`);
-  await p.getByRole("button", { name: "Chats, projects, skills and memory" }).click();
+  await p.getByRole("button", { name: "Chats, projects, skills, memory and scheduled tasks" }).click();
   await p.getByRole("dialog").getByRole("link", { name: "Skills" }).waitFor();
+  await p.getByRole("dialog").getByRole("link", { name: "Scheduled" }).waitFor();
   await shot(p, "flow-phone-rail");
   await phone.close();
 });

@@ -22,10 +22,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EngineSwitch } from "@/components/studio/engine-switch";
-import { useEngine, useStatus } from "@/lib/api";
+import { useEngine } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BoardCover, CuratedCover, StatusBadge } from "./cards";
 import { CreateMoodboardDialog } from "./create-moodboard";
+import { TrainBoardDialog } from "./train-board";
 import { useCuratedSet, useMoodboardActions, useMoodboards } from "./hooks";
 import { COPY, CURATED_TABS, inCuratedTab, MOODBOARD_LIMITS, type Moodboard } from "./logic";
 
@@ -50,9 +51,9 @@ function CreateFromUrl({ onOpen }: { onOpen: () => void }) {
 }
 
 function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => void; onDelete: () => void }) {
-  const { retry, train } = useMoodboardActions();
-  const router = useRouter();
-  // Settings can lock one engine: then there's no other engine to rebuild for, and no open-source LoRA on cloud only.
+  const { retry } = useMoodboardActions();
+  const [training, setTraining] = useState(false);
+  // Settings can lock one engine: then there's no other engine to rebuild for.
   const [, , mode] = useEngine();
   const ready = m.status === "complete";
   return (
@@ -104,25 +105,16 @@ function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => vo
                 <RotateCcw /> {m.status === "failed" ? "Retry" : `Rebuild for ${m.engine === "cloud" ? "open source" : "cloud"}`}
               </DropdownMenuItem>
             )}
-            {mode !== "cloud" && (
-              <DropdownMenuItem
-                disabled={!ready || m.lora?.status === "training"}
-                onSelect={() =>
-                  train.mutate(m.id, {
-                    onSuccess: () => toast.success("Training a style LoRA on your GPU"),
-                    onError: (e) => toast.error((e as Error).message, { action: /Settings/.test((e as Error).message) ? { label: "Settings", onClick: () => router.push("/settings#training") } : undefined }),
-                  })
-                }
-              >
-                <GraduationCap /> {m.lora?.status === "ready" ? "Retrain style LoRA" : "Train a style LoRA"}
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem disabled={!ready || m.lora?.status === "training"} onSelect={() => setTimeout(() => setTraining(true))}>
+              <GraduationCap /> {m.lora?.status === "ready" ? "Retrain as a look…" : "Train as a look…"}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => setTimeout(onDelete)}>
               <Trash2 /> Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <TrainBoardDialog board={m} open={training} onOpenChange={setTraining} />
       </div>
       <div className="mt-2 flex items-baseline justify-between gap-2 px-0.5">
         <p className="min-w-0 truncate text-[13.5px] font-medium">{m.name}</p>
@@ -149,7 +141,7 @@ function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => vo
 export function MoodboardsView() {
   const { data, isLoading } = useMoodboards();
   const { rename, remove } = useMoodboardActions();
-  const [engine, setEngine, mode] = useEngine();
+  const [engine, setEngine] = useEngine();
   const [tab, setTab] = useState<"mine" | "curated">("mine");
   const [cat, setCat] = useState("All presets");
   const [q, setQ] = useState("");
@@ -159,10 +151,8 @@ export function MoodboardsView() {
   const [deleting, setDeleting] = useState<Moodboard | null>(null);
   const needle = q.trim().toLowerCase();
   const mine = useMemo(() => (data?.items ?? []).filter((m) => !needle || m.name.toLowerCase().includes(needle)), [data, needle]);
-  const looks = useCuratedSet("soul-v2", tab === "curated");
-  // Curated looks are Soul 2.0 presets: with Higgsfield connected (cloud), they open on Soul 2.0 itself.
-  const status = useStatus();
-  const onSoul = engine === "cloud" && mode !== "open" && !!status.data?.providers.higgsfield?.configured;
+  const looks = useCuratedSet("soul-v2");
+  // Curated looks are Fuobe Soul's: they open on Fuobe Soul, which applies the whole look on either engine.
   const curated = useMemo(
     () => looks.filter((c) => (needle ? `${c.name} ${c.description}`.toLowerCase().includes(needle) : inCuratedTab(c, cat))),
     [looks, needle, cat],
@@ -266,7 +256,7 @@ export function MoodboardsView() {
             {curated.map((c) => (
               <Link
                 key={c.id}
-                href={`/image?${onSoul ? "model=soul-2&" : ""}moodboard=curated:${c.id}`}
+                href={`/image?model=fuobe-soul&moodboard=curated:${c.id}`}
                 aria-label={`Use ${c.name} in the Image studio${c.description ? ` — ${c.description}` : ""}`}
                 className="group/cur min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
@@ -278,7 +268,7 @@ export function MoodboardsView() {
           </div>
           {!curated.length && <p className="py-16 text-center text-[14px] text-muted-foreground">No presets match “{q}”</p>}
           <p className="mt-6 text-[12.5px] text-muted-foreground">
-            Curated looks are Soul 2.0 presets: Higgsfield Soul 2.0 takes them as its style{onSoul ? " (they open on Soul 2.0)" : ""}; other models, including the open-source ones, get each look as a prompt.
+            Curated looks are Fuobe Soul looks: Fuobe Soul applies each one whole (its LoRAs and words), free on your GPU or in the cloud. Other models get the look in words.
           </p>
         </>
       )}

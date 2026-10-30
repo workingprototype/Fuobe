@@ -12,7 +12,7 @@ process.env.OLLAMA_URL = "http://127.0.0.1:9";
 const { setSetting } = await import("@/server/settings");
 const gens = await import("@/server/generations");
 const cinema = await import("@/server/cinema");
-const { generateInProject, swatchUrl } = await import("@/server/cinema-generate");
+const { cinemaContext, generateInProject, swatchUrl } = await import("@/server/cinema-generate");
 const { askDirector, ideaOf, offlineDirector, parseDirectorAnswer } = await import("@/server/cinema-director");
 const projectsRoute = await import("@/app/api/cinema/projects/route");
 const projectRoute = await import("@/app/api/cinema/projects/[id]/route");
@@ -109,8 +109,8 @@ describe("Cinema API", () => {
     const res = await generateRoute.POST(json("POST", { input: { ...VIDEO, settings: { genre: "noir", focal: "50mm" } }, folderId: folder.id }), params({ id: p.id }));
     expect(res.status).toBe(201);
     const { items, plan } = await res.json();
-    // No Higgsfield key: Seedance 2.5 with the Director compiled into the prompt.
-    expect(plan.modelId).toBe("seedance-2-5");
+    // Fuobe Cinema (LTX-2.3 in the cloud) with the Director compiled into the prompt; no Higgsfield anywhere.
+    expect(plan.modelId).toBe("fuobe-cinema");
     expect(items).toHaveLength(1);
     const g = gens.getGeneration(items[0].id)!;
     expect(g.prompt).toMatch(/^Project brief: Rain, neon, regret\. A detective lights a match in the rain\. Noir film/);
@@ -128,7 +128,9 @@ describe("Cinema API", () => {
   it("open engine: a palette-lock step waits for each take and gets the palette swatch", async () => {
     const p = cinema.createProject({ name: "Open run" });
     const { items } = generateInProject(p.id, { ...VIDEO, engine: "open", batch: 2, settings: { palette: { kind: "preset", slug: "the-circus" } } });
-    expect(items.map((g) => g.modelId)).toEqual(["oss-wan22-14b-fast", "oss-wan22-14b-fast", "oss-palette-video", "oss-palette-video"]);
+    expect(items.map((g) => g.modelId)).toEqual(["fuobe-cinema", "fuobe-cinema", "oss-palette-video", "oss-palette-video"]);
+    // The Original runs on the engine asked for: Wan 2.2 Lightning on the user's GPU (a demo here).
+    expect(items[0].request.engine).toBe("open");
     const lock = items[2];
     expect(lock.request.inputs?.images?.[0]).toBe(swatchUrl(["#090a0b", "#900304", "#1d5768", "#58554a", "#8e5917", "#627163", "#979d7e", "#7daca6", "#7f907d", "#add3c0", "#ccebd8", "#b70204"]));
     const done = await settle(lock.id, 50_000);
@@ -137,22 +139,92 @@ describe("Cinema API", () => {
     expect(cinema.listItems(p.id)).toHaveLength(4);
   }, 70_000);
 
+  it("a 30 s take on Fuobe Cinema is one take plus an extend that waits for it (demo mode, no keys)", async () => {
+    const p = cinema.createProject({ name: "Long take" });
+    const { items, plan } = generateInProject(p.id, { ...VIDEO, duration: 30 });
+    expect(plan.modelId).toBe("fuobe-cinema");
+    expect(items.map((g) => [g.modelId, g.op])).toEqual([
+      ["fuobe-cinema", "t2v"],
+      ["fuobe-cinema", "extend"],
+    ]);
+    expect(items[0].request.params).toMatchObject({ duration: 20, extra: { camera_lora: "dolly_in" } });
+    expect(items[1].request.params).toMatchObject({ duration: 10, extra: { camera_lora: "dolly_in" } });
+    const more = await settle(items[1].id, 50_000);
+    expect(more.status).toBe("succeeded");
+    expect(more.request.inputs?.video).toBe(gens.getGeneration(items[0].id)!.outputs[0].url);
+    expect(cinema.listItems(p.id)).toHaveLength(2);
+  }, 70_000);
+
+  it("Soul Cast and Soul Location run on Fuobe Soul with a look; a location's other view on the Multiple-Angles model", async () => {
+    const p = cinema.createProject({ name: "Builders" });
+    const cast = generateInProject(p.id, { engine: "cloud", mode: "image", action: "cast", prompt: "", cast: { genre: "Western", gender: "Female", age: 35 }, batch: 1 });
+    expect(cast.items[0]).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-realistic" });
+    const loc = generateInProject(p.id, { engine: "cloud", mode: "image", action: "location", prompt: "an abandoned diner on Route 66", batch: 1 });
+    expect(loc.items[0]).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-movie" });
+    const still = await settle(loc.items[0].id);
+    expect(still.status).toBe("succeeded");
+    const view = generateInProject(p.id, { engine: "cloud", mode: "image", action: "location-view", view: "reverse", prompt: "", source: { url: still.outputs[0].url, kind: "image" } });
+    expect(view.items[0]).toMatchObject({ modelId: "qwen-multiple-angles", op: "edit" });
+    expect(view.items[0].request.params?.extra).toMatchObject({ horizontal_angle: 180 });
+    expect((await settle(view.items[0].id)).status).toBe("succeeded");
+  }, 70_000);
+
   it("refuses a run that would pass the project's cost cap", () => {
     const p = cinema.createProject({ name: "Capped", costCapUsd: 0.5 });
     // Demo mode runs are free, so the guard only bites on real (paid) routes; previewing with a fake key shows the message.
     setSetting("falKey", "test-key");
     try {
-      expect(() => generateInProject(p.id, { ...VIDEO, duration: 10 })).toThrow(/past its \$0\.50 limit/);
+      // 20 s on Fuobe Cinema at 720p 16:9 is about $0.70 (1280 × 704 × 481 frames at $0.001605 per megapixel).
+      expect(() => generateInProject(p.id, { ...VIDEO, duration: 20 })).toThrow(/past its \$0\.50 limit/);
     } finally {
       setSetting("falKey", "");
     }
   });
 
+  it("an edit carries the take's facts through the API: its model picks the editor, its length prices it", async () => {
+    const p = cinema.createProject({ name: "Edits" });
+    const src = gens.createGenerations({ feature: "cinema", modelId: "seedance-2-5", prompt: "source take", params: { duration: 5 } })[0];
+    const take = await settle(src.id);
+    const source = { url: take.outputs[0].url, kind: "video", modelId: "seedance-2-5", prompt: "A detective lights a match in the rain", seconds: 5.04, resolution: "720p", aspectRatio: "16:9" };
+    // A Seedance take is edited with Kling O3, whatever the menu says.
+    const partner = await generateRoute.POST(json("POST", { input: { ...VIDEO, action: "edit", prompt: "make it snow", source } }), params({ id: p.id }));
+    expect(partner.status).toBe(201);
+    const pj = await partner.json();
+    expect(pj.plan.modelId).toBe("kling-o3");
+    // A Fuobe Cinema take: LTX-2.3 video-to-video with the take's scene, the take held and its sound kept.
+    const own = await generateRoute.POST(json("POST", { input: { ...VIDEO, action: "edit", prompt: "make it snow", source: { ...source, modelId: "fuobe-cinema" } } }), params({ id: p.id }));
+    expect(own.status).toBe(201);
+    const oj = await own.json();
+    expect(oj.plan.modelId).toBe("fuobe-cinema");
+    const g = gens.getGeneration(oj.items[0].id)!;
+    expect(g.op).toBe("v2v");
+    expect(g.prompt).toMatch(/^A detective lights a match in the rain\. The same shot with one change: make it snow\./);
+    expect(g.request.params?.extra).toMatchObject({ video_strength: 0.5, audio_strength: 1 });
+    expect((await settle(g.id)).status).toBe("succeeded");
+    // Facts out of range are refused rather than trusted.
+    const bad = await generateRoute.POST(json("POST", { input: { ...VIDEO, action: "edit", prompt: "x", source: { ...source, seconds: -1 } } }), params({ id: p.id }));
+    expect(bad.status).toBe(400);
+    // The planner (and the project page's context) knows whether a civitai key is set: cloud moves whose LoRA downloads
+    // from civitai need one.
+    expect(cinemaContext()).toMatchObject({ cloudAllowed: true, civitai: false });
+    setSetting("civitaiKey", "test-key");
+    try {
+      expect(cinemaContext().civitai).toBe(true);
+    } finally {
+      setSetting("civitaiKey", "");
+    }
+  }, 60_000);
+
   it("extend backward chains first frame → the moment before → a clip ending on it", async () => {
     const p = cinema.createProject({ name: "Prequel" });
     const src = gens.createGenerations({ feature: "cinema", modelId: "seedance-2-5", prompt: "source take", params: { duration: 5 } })[0];
     const take = await settle(src.id);
-    const { items } = generateInProject(p.id, { ...VIDEO, action: "extend-backward", prompt: "he walks up to the door", source: { url: take.outputs[0].url, kind: "video" } });
+    // Fuobe Cinema extends the take backward in one LTX-2.3 call.
+    const one = generateInProject(p.id, { ...VIDEO, action: "extend-backward", prompt: "he walks up to the door", source: { url: take.outputs[0].url, kind: "video" } });
+    expect(one.items.map((g) => [g.modelId, g.op])).toEqual([["fuobe-cinema", "extend"]]);
+    expect(one.items[0].request.params?.extra).toMatchObject({ extend_direction: "backward" });
+    // A partner model's prequel is the three-step chain.
+    const { items } = generateInProject(p.id, { ...VIDEO, modelId: "seedance-2-5", action: "extend-backward", prompt: "he walks up to the door", source: { url: take.outputs[0].url, kind: "video" } });
     expect(items.map((g) => g.op)).toEqual(["frame", "edit", "flf2v"]);
     const film = await settle(items[2].id, 60_000);
     expect(film.status).toBe("succeeded");

@@ -1,4 +1,5 @@
 import "server-only";
+import { loraEndpointFor } from "@/lib/catalog/loras";
 import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
 import { getSetting } from "../settings";
 import { toDataUri } from "../storage";
@@ -49,7 +50,14 @@ export const replicateProvider: ProviderAdapter = {
 
   async submit({ route, input }) {
     const payload = buildPayload(route.map ?? {}, input);
-    const [slug, version] = route.endpoint.split(":");
+    // LoRAs go in the route's own fields (lora_weights[] / one per Wan 2.2 expert) or its LoRA model.
+    let endpoint: string;
+    try {
+      endpoint = loraEndpointFor(route, input.loras);
+    } catch (e) {
+      throw new ProviderError((e as Error).message);
+    }
+    const [slug, version] = endpoint.split(":");
     const res = (await (version
       ? rFetch(`${API}/predictions`, { method: "POST", body: JSON.stringify({ version, input: payload }) })
       : rFetch(`${API}/models/${slug}/predictions`, { method: "POST", body: JSON.stringify({ input: payload }) }))) as {

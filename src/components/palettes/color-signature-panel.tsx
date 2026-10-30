@@ -122,7 +122,18 @@ function FromImages({ files, setFiles, onSaved }: { files: File[]; setFiles: (f:
  * The Color signature panel: saved palettes (yours, then Cinema Studio's 50) as cards, Upload &
  * Create (colours extracted from up to 20 photos) and Pick colors manually.
  */
-export function ColorSignaturePanel({ value, onPick, engine }: { value?: PalettePick; onPick: (p?: PalettePick) => void; engine: "cloud" | "open" }) {
+export function ColorSignaturePanel({
+  value,
+  onPick,
+  engine,
+  lockByDefault = false,
+}: {
+  value?: PalettePick;
+  onPick: (p?: PalettePick) => void;
+  engine: "cloud" | "open";
+  /** The model locks the colours unless it's turned off (Fuobe Soul's HEX on the open engine). */
+  lockByDefault?: boolean;
+}) {
   const { items, isLoading } = usePalettes();
   const { create, remove } = usePaletteActions();
   const [view, setView] = useState<View>("list");
@@ -176,7 +187,7 @@ export function ColorSignaturePanel({ value, onPick, engine }: { value?: Palette
                 Lock the colours after generating
                 <span className="block text-[11.5px] text-muted-foreground">A palette-transfer step recolours each image (open source, CPU)</span>
               </span>
-              <Switch checked={!!value.lock} onCheckedChange={(lock) => onPick({ ...value, lock })} aria-label="Lock the colours after generating" />
+              <Switch checked={value.lock ?? lockByDefault} onCheckedChange={(lock) => onPick({ ...value, lock })} aria-label="Lock the colours after generating" />
             </label>
           )}
           <div className="max-h-[52svh] space-y-4 overflow-y-auto pr-0.5 sm:max-h-[360px]" onScroll={(e) => setCompact(e.currentTarget.scrollTop > 24)}>

@@ -13,8 +13,10 @@ import { BrandChip } from "@/components/brand/brand-dialog";
 import { inputCls } from "@/components/brand/fields";
 import { FORMATS, formatModels, looksLikeWebsite, MAX_PROMPT, openingAspect, TEMPLATE_INDEX, type FormatId, type MarketingCategory, type MarketingTemplate, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
+import { useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
-import { addRuns, send, useBrands, useEstimate, useStatusFlags } from "./hooks";
+import { addRuns, send, useBrands, useEstimate } from "./hooks";
 import type { MarketingRun } from "@/lib/catalog/marketing";
 import type { ModelInfo } from "./model-info";
 import { AvatarSlot, HookPicker, ProductSlot, SettingPicker, VoiceControl, type ProductChoice } from "./pickers";
@@ -97,10 +99,12 @@ function withTemplate(d: Draft, t: MarketingTemplate | null, format?: FormatId):
   };
 }
 
-function SettingsPanel({ draft, set, models, higgsfield, engine }: { draft: Draft; set: (p: Partial<Draft>) => void; models: Record<string, ModelInfo>; higgsfield: boolean; engine: "cloud" | "open" }) {
+function SettingsPanel({ draft, set, models, engine }: { draft: Draft; set: (p: Partial<Draft>) => void; models: Record<string, ModelInfo>; engine: "cloud" | "open" }) {
   const [open, setOpen] = useState(false);
   const f = FORMATS[draft.format];
-  const choices = formatModels(f, engine, { product: !!draft.product, avatar: !!draft.avatar, higgsfield });
+  // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const access = useModelAccess();
+  const choices = keepOffered(formatModels(f, engine, { product: !!draft.product, avatar: !!draft.avatar }), (c) => offered(access, c.id, engine));
   const model = choices.find((c) => c.id === draft.modelId) ?? choices[0];
   const summary = [draft.aspectRatio, f.durations && `${draft.duration}s`, draft.batch > 1 && `×${draft.batch}`].filter(Boolean).join(" · ");
   const seg = (active: boolean) => cn("h-7 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground", active && "bg-background text-foreground shadow-soft");
@@ -131,9 +135,9 @@ function SettingsPanel({ draft, set, models, higgsfield, engine }: { draft: Draf
         {f.durations && (
           <div>
             <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">Length · {draft.duration}s</p>
-            {f.pipeline === "ugc" && <p className="-mt-1 mb-1.5 text-[11px] text-subtle-foreground">The whole video: the script is sized to what&apos;s left after the hook and the product close-up</p>}
+            {f.pipeline === "ugc" && <p className="-mt-1 mb-1.5 text-[11px] text-muted-foreground">The whole video: the script is sized to what&apos;s left after the hook and the product close-up</p>}
             <input type="range" min={f.durations.min} max={f.durations.max} step={1} value={draft.duration ?? f.durations.default} onChange={(e) => set({ duration: Number(e.target.value) })} aria-label="Length in seconds" className="w-full accent-[var(--primary)]" />
-            <p className="mt-0.5 flex justify-between text-[11px] text-subtle-foreground">
+            <p className="mt-0.5 flex justify-between text-[11px] text-muted-foreground">
               <span>{f.durations.min}s</span>
               <span>{f.durations.max}s</span>
             </p>
@@ -270,7 +274,6 @@ function UrlParams({ onTemplate, onTab }: { onTemplate: (t: MarketingTemplate) =
 export function MarketingStudio({ models }: { models: Record<string, ModelInfo> }) {
   const qc = useQueryClient();
   const { engine, setEngine } = useMarketingEngine();
-  const { higgsfield } = useStatusFlags();
   const [tab, setTab] = useState<"templates" | "generations">("templates");
   const [category, setCategory] = useState<MarketingCategory | "all">("all");
   const [media, setMedia] = useState<MediaFilter>("all");
@@ -278,6 +281,9 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
   const [busy, setBusy] = useState(false);
   const [pulse, setPulse] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+  // Focus anywhere in the composer, its popovers and dialogs included.
+  const [engaged, setEngaged] = useState(false);
+  const composer = useRef<HTMLDivElement>(null);
   const prompt = useRef<HTMLTextAreaElement>(null);
   const set = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
   const f = FORMATS[draft.format];
@@ -324,8 +330,18 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
   const blocker = draft.product === null && f.product === "required" ? "Attach a product to generate" : badSite ? "Enter a valid website URL" : est.data?.blocker;
   const cost = est.data && !est.data.blocker ? (est.data.demo ? "Demo · free" : est.data.costUsd == null ? "" : est.data.costUsd === 0 ? "Free" : `≈ ${formatCost(est.data.costUsd)}`) : "";
 
+  // Until a template is picked or you start on the composer it stays slim (the attachment tiles fold
+  // away), so the template gallery behind it stays in view.
+  const slim = !template && !engaged && !draft.product && !draft.avatar && !draft.reference && !draft.prompt.trim();
+  const leaveComposer = () =>
+    requestAnimationFrame(() => {
+      const a = document.activeElement;
+      if (!a || !(composer.current?.contains(a) || a.closest("[data-radix-popper-content-wrapper], [role=dialog]"))) setEngaged(false);
+    });
+
   const generate = async () => {
     if (blocker) {
+      setEngaged(true);
       toast(blocker, { id: "marketing-blocker" });
       setPulse(/product/i.test(blocker) ? "product" : /avatar/i.test(blocker) ? "avatar" : null);
       setTimeout(() => setPulse(null), 1600);
@@ -404,8 +420,14 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
 
       {/* Docked composer */}
       <div className="sticky bottom-0 z-20 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pt-8 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
-        <div className="mx-auto w-full max-w-[860px] rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
-          <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1.5 pb-1">
+        <div
+          ref={composer}
+          data-slim={slim || undefined}
+          onFocus={() => setEngaged(true)}
+          onBlur={leaveComposer}
+          className="mx-auto w-full max-w-[860px] rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
+        >
+          <div className={cn("scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1.5 pb-1", slim && "hidden")}>
             {template && (
               <div className="relative flex h-14 shrink-0 items-center gap-2 rounded-xl bg-muted py-1 pr-7 pl-1">
                 <div className="h-12 w-9 overflow-hidden rounded-lg">
@@ -459,7 +481,7 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
               {f.text && <TextPanel draft={draft} set={set} template={template} />}
               {f.oneOf?.includes("website") && <WebsitePanel draft={draft} set={set} />}
               {f.brandKit && <BrandChip value={brandId} onChange={pickBrand} />}
-              <SettingsPanel draft={draft} set={set} models={models} higgsfield={higgsfield} engine={engine} />
+              <SettingsPanel draft={draft} set={set} models={models} engine={engine} />
             </div>
             <span className="hidden shrink-0 font-mono text-[12px] text-muted-foreground tabular-nums sm:inline">{est.isFetching && !est.data ? "…" : cost}</span>
             <Tooltip>
@@ -469,7 +491,7 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
                   onClick={() => void generate()}
                   aria-label={template ? "Recreate template" : "Generate"}
                   aria-disabled={!!blocker || busy}
-                  className={cn("grid size-10 shrink-0 place-items-center rounded-full transition-colors", blocker ? "bg-muted text-subtle-foreground" : "bg-primary text-primary-foreground hover:bg-primary/90")}
+                  className={cn("grid size-10 shrink-0 place-items-center rounded-full text-primary-foreground transition-colors", blocker ? "bg-primary/70 hover:bg-primary/80" : "bg-primary hover:bg-primary/90")}
                 >
                   {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
                 </button>

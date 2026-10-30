@@ -1,5 +1,6 @@
 import "server-only";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { tracksFor, type MotionPaths } from "@/lib/motion-paths";
@@ -8,11 +9,17 @@ import {
   alphaBBox,
   applyBindings,
   asrLanguage,
+  bypassNode,
   bypassReference,
   computeDimensions,
   computeFrames,
+  dropBranch,
+  dropLoadedSound,
+  dropVhsAudio,
+  silenceVhsAudio,
   expandCaptionWorkflow,
   explainComfyError,
+  canTakeLoras,
   injectLoras,
   languageName,
   paletteSentence,
@@ -20,6 +27,7 @@ import {
   randomSeed,
   splitCueWords,
   swatchPixels,
+  tagMetaBatch,
   whisperLanguage,
   type BindingKey,
   type CaptionCue,
@@ -28,13 +36,29 @@ import {
   type ManifestOutput,
   type ManifestWorkflow,
 } from "@/lib/comfy";
+import { fpsPlan } from "@/lib/av/fps";
+import { crossfadeProblem, fadeCurveWav } from "@/lib/av/crossfade";
+import { expandAudioJoinWorkflow, expandVideoJoinWorkflow } from "@/lib/av/joins";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
+import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
+import { loraByFile, needsToken } from "@/lib/catalog/loras";
+import { CHARACTER_SWAP, packResolution, samCoords, swapPrompt, SWAP_LORAS, windowPlan } from "@/lib/catalog/character-swap";
+import { maskMemoryProblem } from "@/lib/catalog/swap-studio";
+import { STUDIO_WORKFLOWS } from "@/lib/catalog/swap-studio-plan";
+import { maskGraph, segmentGraph, type MaskGraphOptions, type SegmentGraphOptions } from "@/lib/swap-studio-graphs";
+import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, ORIGINALS, swapTarget } from "@/lib/catalog/genjutsu";
+import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
+import { imageSize } from "@/lib/image-size";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
-import { getSetting } from "../settings";
+import { ocrText, parseOcrFrame, parseOcrLines, type OcrFrame } from "@/lib/ocr";
+import { getSetting, isCandidate, savedSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
-import { readRef } from "../storage";
+import { probeAvi } from "../avi-probe";
+import { probeWebm } from "../webm-probe";
+import { adoptFile, readRef, scratchDir } from "../storage";
+import { zipToFile } from "../zip";
 import { ProviderError, type ProviderAdapter, type RemoteOutput } from "./types";
 
 export const WORKFLOW_DIR = path.join(process.cwd(), "workflows", "comfyui");
@@ -77,7 +101,14 @@ export function workerFor(endpoint: string | undefined): ComfyWorker {
   return endpoint && loadManifest().workflows.find((w) => w.id === endpoint)?.worker === "isolated" ? "isolated" : "main";
 }
 
-function authHeaders(): Record<string, string> {
+/** A ComfyUI address as compared: no trailing slash. */
+const sameAddress = (a: string, b: string) => a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+
+function authHeaders(worker: ComfyWorker = "main"): Record<string, string> {
+  // Save & test of an address that isn't the saved one: the saved token stays with the server it
+  // was saved for. Only a token typed for this test goes to the new address.
+  const address = worker === "isolated" ? "comfyIsolatedUrl" : "comfyUrl";
+  if (isCandidate(address) && !isCandidate("comfyToken") && !sameAddress(getSetting(address), savedSetting(address))) return {};
   const t = getSetting("comfyToken");
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
@@ -88,7 +119,7 @@ async function comfyFetch(p: string, init: RequestInit = {}, worker: ComfyWorker
     throw new ProviderError(`This model runs on the isolated ComfyUI worker, which isn't set up yet: add its address in ${ISOLATED_SETTING} (or COMFYUI_ISOLATED_URL). scripts/comfy/README.md shows how to start one, usually on port 8189`);
   }
   try {
-    return await fetch(`${base}${p}`, { ...init, headers: { ...authHeaders(), ...(init.headers ?? {}) } });
+    return await fetch(`${base}${p}`, { ...init, headers: { ...authHeaders(worker), ...(init.headers ?? {}) } });
   } catch (e) {
     if (worker === "isolated") throw new ProviderError(`The isolated ComfyUI worker at ${base} doesn't answer (${(e as Error).message}). Start it (scripts/comfy/README.md) or check ${ISOLATED_SETTING}`);
     throw new ProviderError(`Can't reach ComfyUI at ${base} (${(e as Error).message}). Is it running?`);
@@ -229,7 +260,18 @@ function kindFor(filename: string, key: string, declared?: MediaKind): MediaKind
   return guessKind(filename, undefined, key === "gifs" || key === "videos" ? "video" : key);
 }
 
-const CONTENT_TYPES: Record<string, string> = { glb: "model/gltf-binary", gltf: "model/gltf+json", txt: "text/plain", srt: "application/x-subrip", vtt: "text/vtt", json: "application/json" };
+const CONTENT_TYPES: Record<string, string> = {
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
+  // Gaussian splats: ComfyUI's /view serves them as application/octet-stream.
+  ply: "model/ply",
+  spz: "model/x-spz",
+  ksplat: "model/x-ksplat",
+  txt: "text/plain",
+  srt: "application/x-subrip",
+  vtt: "text/vtt",
+  json: "application/json",
+};
 
 function textsOf(ui: Record<string, unknown> | undefined): string[] {
   return Array.isArray(ui?.text) ? (ui.text as unknown[]).filter((t): t is string => typeof t === "string") : [];
@@ -251,17 +293,27 @@ export function collectOutputs(entry: HistoryEntry, manifest: ManifestWorkflow |
     .filter((o) => o.role === "language")
     .map((o) => textsOf(outputs[o.node])[0]?.trim())
     .find(Boolean);
+  // OCR: the size the model saw (a PreviewAny "frame") goes with the lines it read.
+  const frame = declared
+    .filter((o) => o.role === "frame")
+    .map((o) => parseOcrFrame(textsOf(outputs[o.node]).join("\n")))
+    .find(Boolean);
   const files: ComfyOutput[] = [];
   const pick = (type: string) => {
     for (const nodeId of order) {
       const spec: ManifestOutput | undefined = declared.find((o) => o.node === nodeId);
-      if (spec?.role === "language") continue;
+      if (spec?.role === "language" || spec?.role === "frame") continue;
       const ui = outputs[nodeId] ?? {};
       const texts = textsOf(ui);
       const found: { key: string; f: HistoryFile }[] = [];
       for (const [key, val] of Object.entries(ui)) {
         if (!Array.isArray(val)) continue;
         for (const f of val) if (isFile(f) && f.type === type) found.push({ key, f });
+      }
+      // OCR lines (SaveText .json): the model's answer, read into lines with boxes.
+      if (spec?.role === "lines" && texts.length) {
+        if (type === "output") files.push(ocrOutput(texts.join("\n"), frame));
+        continue;
       }
       // A text output with no file (PreviewAny): keep the words.
       if (!found.length && type === "output" && spec?.kind === "text" && texts.length) {
@@ -281,6 +333,8 @@ export function collectOutputs(entry: HistoryEntry, manifest: ManifestWorkflow |
         const meta: Record<string, unknown> = {};
         if (spec?.stem) meta.stem = spec.stem;
         if (spec?.role) meta.role = spec.role;
+        // A splat says what it is (the viewer and the download name go by it): spz, ply or ksplat.
+        if (spec?.role === "splat" && ext) meta.format = ext;
         // Qwen-Image-Layered saves its layers back to front.
         if (spec?.role === "layers") Object.assign(meta, { z: i, name: i === 0 ? "Background" : `Layer ${i}` });
         if (Object.keys(meta).length) o.meta = meta;
@@ -304,6 +358,18 @@ function textOutput(o: ComfyOutput, text: string | undefined, spec: ManifestOutp
   return { ...o, kind: "text", ...(text !== undefined ? { text } : {}), ...(Object.keys(meta).length ? { meta } : {}) };
 }
 
+/**
+ * An OCR answer as Fuobe's OCR output (the shape Florence-2's cloud route gives): the lines as plain
+ * text, `meta.lines` [{text, bbox: [x, y, w, h] 0–1}] and `meta.size`, the picture the model read. An
+ * answer with no list in it keeps its words, with no lines and `meta.unreadable`.
+ */
+function ocrOutput(answer: string, frame: OcrFrame | undefined): ComfyOutput {
+  const { lines, ok } = parseOcrLines(answer, frame);
+  const text = ok ? ocrText(lines) : answer.trim();
+  const size = frame?.width && frame.height ? [frame.width, frame.height] : undefined;
+  return { url: dataUrl(Buffer.from(text), "text/plain"), kind: "text", contentType: "text/plain", text, meta: { lines, ...(size ? { size } : {}), ...(ok ? {} : { unreadable: true }) } };
+}
+
 /** Layers: download each RGBA layer once, add its bounding box (from alpha) and hand the bytes on as a data URL. */
 async function withLayerBoxes(outputs: ComfyOutput[]): Promise<ComfyOutput[]> {
   return Promise.all(
@@ -323,45 +389,167 @@ async function withLayerBoxes(outputs: ComfyOutput[]): Promise<ComfyOutput[]> {
   );
 }
 
+/**
+ * An EXR export's frames (role "frames", one file per frame) are zipped into one stored file, one frame
+ * in memory at a time, and ride along on the preview clip as meta.artifacts.exr (as LTX HDR's EXR zip
+ * does on the cloud). Other outputs pass through.
+ */
+async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promise<ComfyOutput[]> {
+  const frames = outputs.filter((o) => o.meta?.role === "frames");
+  if (!frames.length) return outputs;
+  const rest = outputs.filter((o) => o.meta?.role !== "frames");
+  const preview = rest.find((o) => o.kind === "video");
+  if (!preview) throw new ProviderError("The EXR export finished without its preview clip");
+  const dest = path.join(scratchDir(), `${generationId || nanoid(8)}-${nanoid(6)}.zip`);
+  async function* files() {
+    for (const [i, f] of frames.entries()) {
+      const res = await fetch(f.url, { headers: f.headers });
+      if (!res.ok) throw new ProviderError(`ComfyUI answered HTTP ${res.status} for EXR frame ${i + 1}`);
+      yield { name: `frame_${String(i + 1).padStart(5, "0")}.exr`, data: Buffer.from(await res.arrayBuffer()) };
+    }
+  }
+  await zipToFile(files(), dest);
+  const zip = adoptFile({ from: dest, contentType: "application/zip", name: "exr-frames.zip", source: "generation", generationId: generationId || undefined });
+  return rest.map((o) => (o === preview ? { ...o, meta: { ...o.meta, artifacts: { exr: zip.url }, frames: frames.length } } : o));
+}
+
 // ---------------------------------------------------------------------------
 // Reachability. Routing (chooseRoute) is synchronous, so the first check for a server URL is a blocking probe
 // (a worker thread does the fetch); after that the cached result is refreshed in the background every 10 s.
+// A server that refuses the connection (or a name that doesn't resolve) is down at once. One that doesn't answer
+// GET /system_stats in time may only be busy: a CPU ComfyUI working on a job can take seconds to. So a late answer
+// keeps the server reachable when it answered lately. When it didn't, and its port takes a connection, it gets one
+// longer look (none again for a while once one goes unanswered): reachable if it answers then. A port that takes the
+// connection isn't enough on its own: an ssh tunnel or a proxy whose ComfyUI is gone (or a hung ComfyUI) takes it too.
 
 declare global {
-  var __fuobeComfyReach: { ok: boolean; at: number; url: string } | undefined;
+  /** Reachability of the ComfyUI server, its RAM (bytes) when /system_stats said, when it last answered, and when a longer look last went unanswered. */
+  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number; seen?: number; silent?: number } | undefined;
+  /** The check under way: callers in the meantime share its answer. */
+  var __fuobeComfyProbe: { url: string; done: Promise<boolean> } | undefined;
 }
 
-export async function probeComfy(force = false): Promise<boolean> {
-  const cur = globalThis.__fuobeComfyReach;
-  if (!force && cur && cur.url === baseUrl() && Date.now() - cur.at < 10_000) return cur.ok;
-  let ok = false;
+/**
+ * How long a check waits for /system_stats, then for the port to take a connection, then for the longer look; how long
+ * an answer (or an unanswered longer look) counts as recent.
+ */
+export const REACH = { answerMs: 2000, connectMs: 3000, lookMs: 10_000, answeredLatelyMs: 2 * 60_000 };
+
+/** Host and port of a server address, for the connection check (undefined when it isn't a URL). */
+function hostPort(url: string): { host: string; port: number } | undefined {
   try {
-    const r = await fetch(`${baseUrl()}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(2000) });
-    ok = r.ok;
-  } catch {}
-  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url: baseUrl() };
+    const u = new URL(url);
+    return { host: u.hostname.replace(/^\[|\]$/g, ""), port: Number(u.port) || (u.protocol === "https:" ? 443 : 80) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether the server's port takes a TCP connection within `timeoutMs` (a refusal says no at once). */
+function takesConnection(url: string, timeoutMs: number): Promise<boolean> {
+  const at = hostPort(url);
+  if (!at) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const socket = net.connect(at);
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    socket.once("connect", () => done(true)).once("error", () => done(false));
+  });
+}
+
+/** What GET /system_stats got: an answer (with the RAM it says), a no (an HTTP error, a refused connection), or nothing in time. */
+async function askComfy(url: string, timeoutMs = REACH.answerMs): Promise<{ answer: "yes"; ram?: number } | { answer: "no" | "late" }> {
+  try {
+    const r = await fetch(`${url}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) return { answer: "no" };
+    const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
+    return { answer: "yes", ...(typeof total === "number" && total > 0 ? { ram: total } : {}) };
+  } catch (e) {
+    return { answer: (e as Error)?.name === "TimeoutError" ? "late" : "no" };
+  }
+}
+
+async function checkComfy(url: string): Promise<boolean> {
+  let asked = await askComfy(url);
+  const prev = globalThis.__fuobeComfyReach?.url === url ? globalThis.__fuobeComfyReach : undefined;
+  const lately = (t?: number) => !!t && Date.now() - t < REACH.answeredLatelyMs;
+  // Late is busy, not down, when it answered lately. Otherwise it gets the longer look, when its port takes a
+  // connection and no longer look went unanswered lately (a silent server isn't waited on at every check).
+  const busy = asked.answer === "late" && lately(prev?.seen);
+  let silent = prev?.silent;
+  if (asked.answer === "late" && !busy && !lately(silent) && (await takesConnection(url, REACH.connectMs))) {
+    asked = await askComfy(url, REACH.lookMs);
+    if (asked.answer !== "yes") silent = Date.now();
+  }
+  const at = Date.now();
+  // A busy server keeps the RAM and the time of its last answer; a down one, when it last went silent.
+  const ram = asked.answer === "yes" ? (asked.ram ?? prev?.ram) : prev?.ram;
+  const seen = asked.answer === "yes" ? at : prev?.seen;
+  const ok = asked.answer === "yes" || busy;
+  const reach = ok ? { ok, at, url, ...(ram ? { ram } : {}), ...(seen ? { seen } : {}) } : { ok, at, url, ...(silent ? { silent } : {}) };
+  // The address may have changed while this ran: the new one's check speaks for it.
+  if (url === baseUrl()) globalThis.__fuobeComfyReach = reach;
   return ok;
 }
 
+/** Is the ComfyUI server reachable? Cached for 10 s (`force` checks now); one check runs at a time. */
+export async function probeComfy(force = false): Promise<boolean> {
+  const url = baseUrl();
+  const cur = globalThis.__fuobeComfyReach;
+  if (!force && cur && cur.url === url && Date.now() - cur.at < 10_000) return cur.ok;
+  const running = globalThis.__fuobeComfyProbe;
+  if (running?.url === url) return running.done;
+  const done: Promise<boolean> = checkComfy(url).finally(() => {
+    if (globalThis.__fuobeComfyProbe?.done === done) globalThis.__fuobeComfyProbe = undefined;
+  });
+  globalThis.__fuobeComfyProbe = { url, done };
+  return done;
+}
+
+/** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
+export function comfyRam(): number | undefined {
+  const cur = globalThis.__fuobeComfyReach;
+  return cur?.ok && cur.url === baseUrl() ? cur.ram : undefined;
+}
+
+// flag[0]: the answer (1 yes, 2 no or refused, 3 none in time); flag[1]: 1 once the port took the connection.
 const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
 const flag = new Int32Array(workerData.sab);
+if (workerData.at) {
+  const socket = require("node:net").connect(workerData.at);
+  socket.once("connect", () => (Atomics.store(flag, 1, 1), socket.destroy())).once("error", () => {});
+}
 fetch(workerData.url, { headers: workerData.headers, signal: AbortSignal.timeout(workerData.timeout) })
-  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), () => Atomics.store(flag, 0, 2))
+  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), (e) => Atomics.store(flag, 0, e && e.name === "TimeoutError" ? 3 : 2))
   .finally(() => Atomics.notify(flag, 0));`;
 
-/** Blocking reachability check (a few ms for a refused port, at most `timeoutMs` for a host that doesn't answer). */
+/**
+ * Blocking reachability check: a few ms for a server that answers or a refused port, at most `timeoutMs` otherwise.
+ * A server that takes the connection but doesn't answer in time is taken as busy, so reachable, for now; one that
+ * doesn't even take it as unreachable. Either way the unhurried check (probeComfy) goes on in the background to say
+ * for sure.
+ */
 export function probeComfySync(timeoutMs = 1500): boolean {
   const url = baseUrl();
-  let ok = false;
+  let answer = 0;
+  let connected = false;
   try {
-    const sab = new SharedArrayBuffer(4);
+    const sab = new SharedArrayBuffer(8);
     const flag = new Int32Array(sab);
-    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/system_stats`, headers: authHeaders(), timeout: timeoutMs } });
+    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/system_stats`, at: hostPort(url), headers: authHeaders(), timeout: timeoutMs } });
     Atomics.wait(flag, 0, 0, timeoutMs + 1000);
-    ok = Atomics.load(flag, 0) === 1;
+    answer = Atomics.load(flag, 0);
+    connected = Atomics.load(flag, 1) === 1;
     void worker.terminate();
   } catch {}
-  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url };
+  const at = Date.now();
+  const ok = answer === 1 || (answer !== 2 && connected);
+  globalThis.__fuobeComfyReach = { ok, at, url, ...(answer === 1 ? { seen: at } : {}) };
+  if (answer !== 1 && answer !== 2) void probeComfy(true).catch(() => false);
   return ok;
 }
 
@@ -384,13 +572,35 @@ function rememberMedia(name: string, info: MediaInfo) {
   if (seen.size > 256) seen.delete(seen.keys().next().value!);
 }
 
-/** The header facts of a file this server uploaded to ComfyUI (undefined for images and unreadable containers). */
+/** A WebM / Matroska clip's header facts in MediaInfo's shape (src/server/webm-probe.ts). */
+function webmInfo(data: Buffer): MediaInfo | null {
+  const w = probeWebm(data);
+  if (!w) return null;
+  const frames = w.duration && w.fps ? Math.round(w.duration * w.fps) : undefined;
+  return { container: "webm", duration: w.duration, videoDuration: w.hasVideo ? w.duration : undefined, width: w.width, height: w.height, fps: w.fps, frames, hasVideo: w.hasVideo, hasAudio: w.hasAudio };
+}
+
+/** An AVI clip's header facts in MediaInfo's shape (src/server/avi-probe.ts; Character Swap Studio takes AVI). */
+function aviInfo(data: Buffer): MediaInfo | null {
+  const a = probeAvi(data);
+  if (!a) return null;
+  const frames = a.duration && a.fps ? Math.round(a.duration * a.fps) : undefined;
+  return { container: "avi", duration: a.duration, videoDuration: a.hasVideo ? a.duration : undefined, width: a.width, height: a.height, fps: a.fps, frames, hasVideo: a.hasVideo, hasAudio: a.hasAudio };
+}
+
+/** The header facts of a file this server uploaded to ComfyUI (a still has only its size; undefined for unreadable containers). */
 export function mediaInfoFor(name: unknown): MediaInfo | undefined {
   return typeof name === "string" ? globalThis.__fuobeComfyMedia?.get(name) : undefined;
 }
 
+/**
+ * Image-to-video graphs whose camera moves Wan 2.2 Fun Camera makes natively: a request with a pose (params.extra.cameraMotion)
+ * runs there (Fuobe DoP on Wan 2.2 14B, Fuobe Cinema on its Lightning graph).
+ */
+const CAMERA_POSE_GRAPH: Record<string, string> = { "wan22-i2v-14b": "wan22-fun-camera-14b", "wan22-i2v-14b-lightx2v": "wan22-fun-camera-14b" };
+
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
-const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string> }> = {
+const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {
   // Edit graphs whose extra images feed TextEncodeQwenImageEditPlus: a repeated reference is harmless.
   "qwen-image-edit-2511-multi": { reuse: true },
   "storyboard-qwen-edit-2509-next-scene": { reuse: true },
@@ -399,7 +609,36 @@ const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?:
   "palette-transfer-video": { hints: { image: "Pick a palette or add a reference image" } },
   "relight-qwen-edit-2509-reference": { hints: { image2: "Add the photo whose light to copy" } },
   "face-swap-reactor": { hints: { image2: "Add the face to put in" } },
+  "video-swap-wan-vace": { hints: { image: "Add a picture of what goes in" } },
+  "video-insert-wan-vace": { hints: { image: "Add a picture of what to add", mask: "Paint where it goes on the first frame" } },
+  // Pixal3D multi-view: the front, then any of the other sides.
+  "image-to-3d-trellis2-multiview": { hints: { image: "Add a photo of the front" }, views: { sides: ["front", "left", "back", "right"], into: "Pixal3DMultiViewConditioning" } },
 };
+
+/** Uploads that are sides of one object (image = the first side, image2 the second…), and the node they all go into. */
+interface ViewSlots {
+  sides: string[];
+  into: string;
+}
+
+const IMAGE_SLOTS = ["image", "image2", "image3", "image4"] as const;
+
+/**
+ * Which slot each photo of a multi-view 3D model goes to: params.extra.views names the side of each photo
+ * ("front", "left"…), in the order of the images; without names they are the sides in order.
+ */
+export function viewSlots(views: ViewSlots, images: string[], named: unknown): Partial<Record<(typeof IMAGE_SLOTS)[number], string>> {
+  const sides = Array.isArray(named) ? named.map((v) => String(v).toLowerCase()) : views.sides.slice(0, images.length);
+  if (sides.length !== images.length) throw new ProviderError(`${images.length} photo${images.length === 1 ? "" : "s"} but ${sides.length} side${sides.length === 1 ? "" : "s"} named`);
+  const out: Partial<Record<(typeof IMAGE_SLOTS)[number], string>> = {};
+  sides.forEach((side, i) => {
+    const at = views.sides.indexOf(side);
+    if (at < 0 || at >= IMAGE_SLOTS.length) throw new ProviderError(`A photo's side must be ${views.sides.join(", ")} (got “${side}”)`);
+    if (out[IMAGE_SLOTS[at]]) throw new ProviderError(`Two photos of the ${side}: keep one`);
+    out[IMAGE_SLOTS[at]] = images[i];
+  });
+  return out;
+}
 
 const MEDIA_HINT: Record<string, string> = {
   image: "Add an image",
@@ -454,6 +693,86 @@ function captionCues(input: GenInput, extra: Record<string, unknown>): CaptionCu
 const seconds = (n: number) => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
 const GB = 2 ** 30;
 
+const clipFacts = (clip: MediaInfo | undefined) => ({ width: clip?.width, height: clip?.height, fps: clip?.fps, frames: clip?.frames, duration: clip?.videoDuration ?? clip?.duration });
+
+/**
+ * Values and graph edits for the Upscale hub's open tools, from the request and the clip's header:
+ * VHS format / profile (export), CreateVideo's colour space (HDR10 PQ or HLG), FPS Boost's multiplier m,
+ * selection n and slow motion (src/lib/av/fps.ts), the chunked upscalers' short side and pass size.
+ * `holds` = frame-sized copies of the whole clip the graph keeps in memory (for the RAM check).
+ */
+function videoFinishValues(manifest: ManifestWorkflow, input: GenInput, clip: MediaInfo | undefined, extra: Record<string, unknown>) {
+  const b = manifest.bindings;
+  const d = manifest.defaults;
+  const facts = clipFacts(clip);
+  const values: Partial<Record<BindingKey, unknown>> = {};
+  const out = { values, wholeClip: null as ReturnType<typeof wholeClipTool>, bypassInterpolation: false, dropSound: false };
+  try {
+    // Export: VideoHelperSuite's format and ProRes profile.
+    if (manifest.capability === "export-video" && b.format) {
+      const v = exportValues(input.format);
+      values.format = v.format;
+      if (v.profile) values.profile = v.profile;
+    }
+    // SDR to HDR: HLG or PQ (HDR10's curve).
+    if (manifest.capability === "sdr-to-hdr" && b.colorSpace) values.colorSpace = hdrColorSpace(input.format);
+  } catch (e) {
+    throw new ProviderError((e as Error).message);
+  }
+  // Graphs that decode the whole clip (src/lib/av/video-finish.ts wholeClipTool says how many copies they hold).
+  if (manifest.capability === "sdr-to-hdr") out.wholeClip = wholeClipTool("sdr-to-hdr", input.format);
+  if (manifest.id === "video-export-exr") out.wholeClip = wholeClipTool("export-video", "exr");
+  // FPS Boost: interpolate by m, keep every n-th frame (the graph computes the output frame rate itself).
+  if (b.every && b.multiplier) {
+    const target = input.targetFps;
+    const slowdown = Math.max(1, Math.round(input.slowdown ?? 1));
+    let m = Number(extra.multiplier ?? d.multiplier ?? 2);
+    let n = 1;
+    // m, n and the slow-motion factor go together: a stray params.extra value can't break the ratio.
+    for (const k of ["multiplier", "every", "slowdown"]) delete extra[k];
+    if (target) {
+      // m and n come from the clip's own rate (the upload's header, else what the server read from it).
+      const sourceFps = clip?.fps && clip.fps > 0 ? clip.fps : input.sourceFps && input.sourceFps > 0 ? input.sourceFps : undefined;
+      if (!sourceFps) {
+        throw new ProviderError(
+          `FPS Boost on the open engine works out its frames from the clip's frame rate, and this file doesn't say what it is, so ${target} fps can't be hit. Re-save it as MP4 (H.264) or WebM and try again`,
+        );
+      }
+      const plan = fpsPlan(sourceFps, target, slowdown, Number(manifest.limits?.maxMultiplier ?? 16));
+      m = plan.multiplier;
+      n = plan.every;
+    } else m = Math.max(2, Math.min(Number(manifest.limits?.maxMultiplier ?? 16), Math.round(m * slowdown)));
+    // m 1 (a target the clip's rate is a whole multiple of: 60 → 30 keeps every 2nd frame): FrameInterpolate is
+    // linked out below, and the graph's frame-rate expression still reads m, so it gets the real 1. Other lower
+    // targets still interpolate (30 → 24 is m 4, n 5).
+    values.multiplier = m;
+    values.every = n;
+    values.slowdown = slowdown;
+    out.bypassInterpolation = m < 2;
+    out.dropSound = slowdown > 1;
+    out.wholeClip = wholeClipTool("interpolate", undefined, m);
+  }
+  // Chunked upscaling: the shorter edge asked for, and passes that hold about 1.5 GB of frames.
+  if (b.shortSide) {
+    const shortSide = upscaleShortSide(input.resolution, Number(d.shortSide ?? 1080));
+    values.shortSide = shortSide;
+    if (b.framesPerBatch && extra.framesPerBatch === undefined) {
+      const seedvr = /seedvr/i.test(manifest.id);
+      // ESRGAN on a big source (1440p → 2160p: about 0.85 GB a frame): down to one frame a pass, to stay near the budget.
+      values.framesPerBatch = framesPerPass(facts, { shortSide, modelScale: seedvr ? 0 : 4, fourNPlusOne: seedvr, min: seedvr ? 5 : 1, max: seedvr ? 33 : 64, fallback: Number(d.framesPerBatch ?? 16) });
+    }
+  } else if (b.framesPerBatch && manifest.capability === "export-video" && extra.framesPerBatch === undefined) {
+    values.framesPerBatch = framesPerPass(facts, { min: 8, max: 256, fallback: Number(d.framesPerBatch ?? 64) });
+  }
+  return out;
+}
+
+/** Per-job length limits a graph enforces (manifest limits.maxDurationSec), in words. */
+const OVER_LIMIT: Record<string, (s: number) => string> = {
+  "still-motion": (s) => `Ken Burns on the open engine makes up to ${s} s per clip — split a longer move into pieces`,
+  "audio-loop": (s) => `Loops on the open engine run up to ${s / 60} minutes (${s} s)`,
+};
+
 /**
  * Turn a canonical request into the exact ComfyUI prompt: picks the workflow variant, maps Fuobe's inputs
  * onto the workflow's bindings (sizes, frames, trim times, languages, palettes, layers…), uploads files the
@@ -481,6 +800,15 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   }
   // Soundtrack without a background stem: the single-track graph.
   if (ctx.op === "mux" && !audio2 && !extra.audio2 && loadManifest().workflows.some((w) => w.id === `${endpoint}-replace`)) endpoint = `${endpoint}-replace`;
+  // EXR frames have graphs of their own (export, SDR to HDR).
+  if (input.format === "exr" && (ctx.op === "export-video" || ctx.op === "sdr-to-hdr")) {
+    const exr = exrWorkflow(ctx.op);
+    if (loadManifest().workflows.some((w) => w.id === exr)) endpoint = exr;
+  }
+  // Fuobe DoP: a camera move Wan 2.2 Fun Camera makes natively (a pose, no LoRA needed) runs on its graph; a LoRA mixed
+  // in is injected on its experts as on the plain image-to-video graph.
+  const posed = CAMERA_POSE_GRAPH[endpoint];
+  if (posed && typeof extra.cameraMotion === "string" && extra.cameraMotion) endpoint = posed;
 
   const { manifest, workflow } = getWorkflow(endpoint);
   const d = manifest.defaults;
@@ -503,6 +831,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     audio: input.audio,
     seed: input.seed !== undefined && input.seed >= 0 ? input.seed : randomSeed(),
   };
+  // A multi-view 3D model: each photo goes to its side.
+  if (rules.views) Object.assign(values, { image: undefined, image2: undefined, image3: undefined, image4: undefined }, viewSlots(rules.views, images, extra.views));
+  delete extra.views;
   // Voice workflows: "audio" is the voice to speak with (TTS), speaker A (dialogue) or the speech to convert
   // (voice change, whose target voice is "audio2").
   if (ctx.op === "tts") values.audio = input.voiceAudio ?? input.audio;
@@ -512,6 +843,12 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.prompt = (input.dialogue ?? []).filter((l) => l.text.trim()).map((l) => `SPEAKER ${l.voice === "B" ? "B" : "A"}: ${l.text.trim()}`).join("\n");
   }
   if (ctx.op === "voice-change") values.audio2 = input.voiceAudio;
+  // A join of audio clips takes them in order: the graph binds the first two, expandAudioJoinWorkflow the rest.
+  const audios = input.audios ?? [];
+  if (manifest.expand === "audios" && audios.length) {
+    values.audio = audios[0];
+    values.audio2 = audios[1];
+  }
   // A voice track on the video's timeline: the clips are the spoken lines (the template binds the first).
   if (ctx.op === "timeline") values.audio = input.audios?.[0] ?? input.audio;
   // Speech workflows read the soundtrack with LoadAudio, which also takes a video upload.
@@ -560,7 +897,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     // With motion paths the frame keeps the start image's shape, so the paths need no cropping;
     // "auto" keeps the source clip's shape when its header told us.
     const srcAspect = (extra.motionPaths as MotionPaths | undefined)?.aspect;
-    const shape = srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? (clip?.width && clip.height ? `${clip.width}:${clip.height}` : undefined) : input.aspectRatio;
+    // "auto" keeps the source clip's shape when its header told us, else the start frame's (image-to-video).
+    const still = input.aspectRatio === "auto" && !clip?.width ? ctx.media?.(String(values.image ?? "")) : undefined;
+    const src = clip?.width && clip.height ? clip : still?.width && still.height ? still : undefined;
+    const shape = srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? (src ? `${src.width}:${src.height}` : undefined) : input.aspectRatio;
     const dims = computeDimensions(shape, input.resolution, { width: Number(d.width ?? 1024), height: Number(d.height ?? 1024) }, multiple);
     // Respect the workflow's size limits while keeping the aspect ratio.
     const maxW = Number(manifest.limits?.maxWidth ?? Infinity);
@@ -568,6 +908,12 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     const k = Math.min(1, maxW / dims.width, maxH / dims.height);
     values.width = Math.max(multiple, Math.floor((dims.width * k) / multiple) * multiple);
     values.height = Math.max(multiple, Math.floor((dims.height * k) / multiple) * multiple);
+  }
+  // An end card appended to an ad (video-append-endcard): the card is encoded at the ad's own size and frame rate,
+  // so the ad's packets are copied as they are. Only the ad's header knows them.
+  if (manifest.id === "video-append-endcard") {
+    if (!clip?.width || !clip.height || !clip.fps) throw new ProviderError("Couldn't read the ad's size and frame rate, so the end card can't be added");
+    Object.assign(values, { width: clip.width, height: clip.height, fps: Math.round(clip.fps * 1000) / 1000 });
   }
   if (b.frames && span) values.frames = computeFrames(span, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
   // Lip re-sync runs as long as the new voice; a voice past the frame cap is refused, not cut.
@@ -581,6 +927,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     }
     values.frames = frames;
   }
+  // Video finishing (Upscale hub): export formats, HDR curves, FPS Boost's m / n, chunked upscaling.
+  const finish = videoFinishValues(manifest, input, clip, extra);
+  Object.assign(values, finish.values);
+
   // Drawn motion paths (normalised to the start frame) → one pixel point per output frame (Wan-Move).
   const paths = extra.motionPaths as MotionPaths | undefined;
   delete extra.motionPaths;
@@ -591,6 +941,29 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (b.tags && !b.prompt) values.tags = input.prompt;
   if (b.description && !extra.description) values.description = input.prompt;
   if (b.numLayers && input.numLayers) values.numLayers = Math.max(1, Math.min(Number(manifest.limits?.maxLayers ?? 10), Math.round(input.numLayers)));
+
+  // Ken Burns (kenburns-still): the move's zoom, crop centre and easing.
+  if (b.zoomStart && input.zoomFrom !== undefined) values.zoomStart = input.zoomFrom;
+  if (b.zoomEnd && input.zoomTo !== undefined) values.zoomEnd = input.zoomTo;
+  if (b.panStartX && input.panFrom) Object.assign(values, { panStartX: input.panFrom.x, panStartY: input.panFrom.y });
+  if (b.panEndX && input.panTo) Object.assign(values, { panEndX: input.panTo.x, panEndY: input.panTo.y });
+  if (b.easeInOut && input.easing) values.easeInOut = input.easing === "linear" ? 0 : 1;
+  const maxSeconds = Number(manifest.limits?.maxDurationSec ?? 0);
+  if (maxSeconds && b.duration && Number(values.duration ?? d.duration ?? 0) > maxSeconds + 0.001) {
+    throw new ProviderError(OVER_LIMIT[manifest.capability]?.(maxSeconds) ?? `This workflow makes up to ${maxSeconds} s per job`);
+  }
+  // Loops and joins with a crossfade: core ComfyUI has no gain ramp, so the curve is a tiny WAV written here
+  // (left = fade-in, right = fade-out, exactly the crossfade long). Clips too short for it are refused up front.
+  if (b.fadeCurve) {
+    const fade = Math.max(0.02, Number(input.crossfade ?? d.crossfade ?? 1));
+    if (b.crossfade) values.crossfade = fade;
+    const loop = manifest.capability === "audio-loop";
+    const lengths = (loop ? [values.audio] : audios.length ? audios : [values.audio, values.audio2 ?? extra.audio2]).map((name) => ctx.media?.(String(name ?? ""))?.duration);
+    const problem = lengths.every((l): l is number => typeof l === "number") ? crossfadeProblem(lengths, fade, loop ? "loop" : "join") : null;
+    if (problem) throw new ProviderError(problem);
+    if (extra.fadeCurve === undefined) values.fadeCurve = await ctx.upload(Buffer.from(fadeCurveWav(fade, extra.curve === "linear" ? "linear" : "equal-power")), "audio/wav", "fade_curve.wav");
+  }
+  delete extra.curve;
 
   // Soul HEX: the hex list as words, plus a swatch the ColorTransfer lock matches.
   const palette = (input.palette ?? []).filter((p) => typeof p === "string" && p.trim());
@@ -619,6 +992,142 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values[key] = def.replaceAll("{columns}", String(columns)).replaceAll("{rows}", String(rows)).replaceAll("{count}", String(columns * rows)).replaceAll("{language}", languageName(input.targetLanguage));
   }
 
+  // Remove object: the words name what SAM 3.1 follows (maskPrompt: the objects alone, comma-separated, each its own
+  // SAM 3 prompt, so "Remove the red car from the shot" run straight from a Canvas works too) and the gap is filled
+  // with the scene without it (params.extra.prompt, else a neutral default). No graph takes clicked points.
+  // The painted eraser's last tracked mask (role "mask") is saved only for a window another one waits on.
+  const handOff = ctx.op === "remove-object" && extra[HAND_OFF] === true;
+  delete extra[HAND_OFF];
+  if (ctx.op === "remove-object") {
+    const words = input.prompt?.trim();
+    if (b.maskPrompt) {
+      if (!words && typeof extra.maskPrompt !== "string") throw new ProviderError(input.points?.length ? CLICK_OPEN_PROBLEM : "Say what to remove, e.g. “the coffee cup in her hand”");
+      if (words) values.maskPrompt = targetPhrase(words);
+    }
+    if (b.prompt) values.prompt = REMOVE_SCENE;
+  }
+  // Genjutsu's Character swap (MiniMax H3 on the h3_character_swap / H3 Relay packs): the part, the quality as the
+  // unpatched pack's string, who to swap (SAM words, largest / leftmost / rightmost / index, or clicks moved into H3's
+  // canvas), the swap LoRA's release, the window plan; the anchor first frame is images[1] (absent: its nodes go).
+  const characterSwap = manifest.capability === "video-character-swap";
+  let dropAnchor = false;
+  let dropSwapLora = false;
+  if (characterSwap) {
+    values.quality = packResolution(input.resolution);
+    // The pack's planning.validate_settings: windows 17n + 5, history 0, 1 or 17n + 1 and shorter than the window.
+    if (extra.windowFrames !== undefined || extra.historyFrames !== undefined) {
+      const plan = windowPlan(Number(extra.windowFrames ?? d.windowFrames ?? CHARACTER_SWAP.window), Number(extra.historyFrames ?? d.historyFrames ?? CHARACTER_SWAP.history));
+      extra.windowFrames = String(plan.window);
+      extra.historyFrames = String(plan.history);
+    }
+    const lora = typeof extra.lora === "string" ? extra.lora : undefined;
+    delete extra.lora;
+    if (lora === "none") dropSwapLora = true;
+    else if (lora === "v1" || lora === "v1.5") values.lora = SWAP_LORAS[lora].file;
+    if (input.points?.length) {
+      if (!clip?.width || !clip.height) throw new ProviderError("Couldn't read the clip's size to place your clicks — pick who to swap instead");
+      const [pos, neg] = samCoords(input.points, { width: clip.width, height: clip.height }, input.resolution);
+      values.positiveCoords = pos;
+      values.negativeCoords = neg;
+      // SAM3_Detect puts the clicked mask first and the "person" detections after it: SelectSubject takes that first one
+      // ("largest" would take whoever is biggest).
+      extra.selection = "index";
+      extra.subjectIndex = 0;
+    }
+    if (b.image2 && !values.image2) dropAnchor = true;
+    // No words: Openjutsu's instruction, with the anchor sentence only when the anchor goes in (the graph's own text names it).
+    if (!(typeof values.prompt === "string" && values.prompt.trim())) values.prompt = swapPrompt({ engine: "open", anchor: !!b.image2 && !dropAnchor });
+  }
+  // Character Swap Studio's segment (one H3 Relay pass): the previous take's master as history, the approved mask in
+  // place of SAM's, the anchor after the boundary, masked generation off. Branches it doesn't use go after binding.
+  // Media inputs a studio job leaves out on purpose (their branches go after binding).
+  const studioLeft: string[] = [];
+  let studioSegment: Omit<SegmentGraphOptions, "outputs"> | null = null;
+  if (manifest.id === STUDIO_WORKFLOWS.segment) {
+    const history = typeof extra.historyVideo === "string" && !!extra.historyVideo;
+    if (!history) {
+      studioLeft.push("historyVideo");
+      for (const k of ["historyVideo", "historyStart", "historyLength"]) delete extra[k];
+    } else {
+      const start = Number(extra.historyStart);
+      const length = Number(extra.historyLength);
+      if (!Number.isInteger(start) || start < 0 || !Number.isInteger(length) || length < 1) throw new ProviderError("The continuation history needs the previous take's frame count");
+    }
+    const maskFile = typeof extra.maskVideo === "string" && extra.maskVideo ? extra.maskVideo : null;
+    const span = input.endTime !== undefined ? Math.max(0, input.endTime - start) : Number(values.duration ?? 0);
+    // The master keeps the segment's last frames (the next segment's history), not the whole 16-bit segment.
+    const frames = Math.round(Number(extra.segmentFrames ?? 0));
+    const keep = Math.round(Number(extra.masterKeep ?? frames));
+    studioSegment = {
+      anchor: !dropAnchor,
+      history,
+      anchorAfterHistory: extra.anchorAfterHistory === true,
+      mask: maskFile ? { file: maskFile, start: Math.max(0, Number(extra.maskStart ?? 0)), duration: span } : null,
+      useMask: extra.useMask !== false,
+      masterTail: frames > 0 && keep > 0 && keep < frames ? { from: frames - keep, frames: keep } : null,
+    };
+    for (const k of ["maskVideo", "maskStart", "anchorAfterHistory", "useMask", "masterKeep", "segmentFrames"]) delete extra[k];
+  }
+  // Character Swap Studio's mask: who to swap on one frame of a shot (words, a selection or clicks moved into H3's
+  // canvas), followed for spanFrames, spliced into the version it corrects (prevMask).
+  let studioMask: Omit<MaskGraphOptions, "outputs"> | null = null;
+  if (manifest.id === STUDIO_WORKFLOWS.mask) {
+    values.quality = packResolution(input.resolution);
+    const words = (typeof extra.maskPrompt === "string" && extra.maskPrompt.trim()) || input.prompt?.trim() || "person";
+    values.maskPrompt = words.slice(0, 120);
+    delete extra.maskPrompt;
+    if (input.points?.length) {
+      if (!clip?.width || !clip.height) throw new ProviderError("Couldn't read the clip's size to place your clicks — pick who to swap instead");
+      const [pos, neg] = samCoords(input.points, { width: clip.width, height: clip.height }, input.resolution);
+      values.positiveCoords = pos;
+      values.negativeCoords = neg;
+      extra.selection = "index";
+      extra.subjectIndex = 0;
+    }
+    const keyFrame = Math.max(0, Math.round(Number(extra.keyFrame ?? 0)));
+    const shotFrames = Math.round(Number(extra.shotFrames ?? 0));
+    const spanFrames = Math.max(1, Math.round(Number(extra.spanFrames ?? shotFrames - keyFrame)));
+    if (!(shotFrames > 0) || keyFrame + spanFrames > shotFrames) throw new ProviderError("The mask's frames don't fit in the shot — reload and try again");
+    const prev = typeof extra.prevMask === "string" && !!extra.prevMask;
+    if (!prev) {
+      studioLeft.push("prevMask");
+      delete extra.prevMask;
+    }
+    Object.assign(extra, { keyFrame, spanFrames, tailStart: keyFrame + spanFrames, tailFrames: Math.max(1, shotFrames - keyFrame - spanFrames) });
+    delete extra.shotFrames;
+    studioMask = { head: keyFrame, tail: shotFrames - keyFrame - spanFrames, prev };
+    // The graph holds the whole shot as float frames: refuse what the server can't hold (before it runs out of memory).
+    const tooBig = maskMemoryProblem({ width: clip?.width, height: clip?.height, quality: input.resolution, shotFrames, correcting: prev }, await ctx.serverRam?.());
+    if (tooBig) throw new ProviderError(tooBig);
+  }
+  // Genjutsu's Object swap: SAM 3.1 follows what goes (params.extra.maskPrompt, or the "replace … with" part of the prompt,
+  // as Genjutsu sends it), the reference comes in, the prompt describes the result. Insert: the painted spot and the
+  // reference, the prompt says what appears there. Neither graph takes clicked points.
+  if ((ctx.op === "video-swap" || ctx.op === "video-insert") && !characterSwap) {
+    if (input.points?.length && !input.mask && typeof extra.maskPrompt !== "string") throw new ProviderError(OPEN_TARGET_PROBLEM[ctx.op === "video-insert" ? "insert" : "swap"]!);
+    const words = input.prompt?.trim() ?? "";
+    const vace = getMaker(ctx.op === "video-swap" ? ORIGINALS.swap : "oss-vace-insert", "open")!;
+    if (ctx.op === "video-swap" && b.maskPrompt) {
+      const named = typeof extra.maskPrompt === "string" ? extra.maskPrompt.trim() : "";
+      if (!named && !words) throw new ProviderError("Say what to swap, e.g. “the red car”");
+      // Named apart: the prompt is the result's own words. Only a sentence: it says both what goes and what comes in.
+      values.maskPrompt = swapTarget(named || words);
+      delete extra.maskPrompt;
+      if (!named) values.prompt = makerPrompt({ mode: "swap", maker: vace, subject: words, refs: 1 });
+    }
+    if (!words && b.prompt) values.prompt = makerPrompt({ mode: ctx.op === "video-swap" ? "swap" : "insert", maker: vace, subject: String(values.maskPrompt ?? ""), refs: 1 });
+  }
+  // Depth maps: Video Depth Anything draws gray or inferno (the other graphs grayscale only), and can put the
+  // original clip next to the map.
+  if (ctx.op === "depth-video" && input.colormap) {
+    const want = input.colormap.toLowerCase() === "grayscale" ? "gray" : input.colormap.toLowerCase();
+    if (b.colormap && (want === "gray" || want === "inferno")) values.colormap = want;
+    else if (want !== "gray") throw new ProviderError(b.colormap ? "The open engine's depth maps come in grayscale or inferno — turbo, magma and viridis are on the cloud" : "This depth model makes grayscale maps only — pick Video Depth Anything for inferno");
+  }
+  if (b.sideBySide && input.sideBySide !== undefined) values.sideBySide = input.sideBySide;
+  // Matte graphs save a cut-out and a black-and-white matte: params.matteOutput keeps one.
+  const keepRole: string | undefined = ctx.op === "bg-remove-video" ? input.matteOutput : undefined;
+
   if (b.filenamePrefix) values.filenamePrefix = `fuobe/${ctx.generationId}`;
   const cues = manifest.expand === "captions" ? captionCues(input, extra) : [];
   delete extra.cues;
@@ -626,6 +1135,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   const timeline = manifest.expand === "timeline" ? readTimeline(extra.timeline) : null;
   if (manifest.expand === "timeline" && !timeline) throw new ProviderError("The voice track needs the lines' start times (params.extra.timeline)");
   delete extra.timeline;
+  // A Video concatenator clip muted in the canvas (video-fit-clip): its sound becomes silence below.
+  const muted = manifest.id === "video-fit-clip" && extra.mute === true;
+  delete extra.mute;
   for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
   if (audio2 && ctx.op !== "dialogue" && ctx.op !== "voice-change") values.audio2 = audio2;
   // Soundtrack mix: a silent bed as long as the video, so neither track cuts the other short.
@@ -637,9 +1149,22 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // Reference images the user left out: dropped from a FLUX.2 reference chain, else the previous image
   // again where that's harmless (style boards, multi-reference edits), else a clear "add …" message.
   let graph = workflow;
-  const left: string[] = [];
+  const left: string[] = [...studioLeft];
+  // A side nobody photographed is left out (its cut-out and crop with it); the front is needed.
+  if (rules.views) {
+    for (const k of IMAGE_SLOTS.slice(1)) {
+      if (values[k] !== undefined || b[k]?.length !== 1) continue;
+      const dropped = dropBranch(graph, b[k]![0].node, rules.views.into, manifest.outputs.map((o) => o.node));
+      if (dropped) {
+        graph = dropped;
+        left.push(k);
+      }
+    }
+  }
+  // The Character swap without an anchor frame: its loader and fit are taken out after binding.
+  if (dropAnchor) left.push("image2");
   for (const [k, prev] of [["image2", "image"], ["image3", "image2"], ["image4", "image3"]] as const) {
-    if (!b[k] || values[k] !== undefined || rules.required?.includes(k)) continue;
+    if (rules.views || !b[k] || values[k] !== undefined || rules.required?.includes(k) || left.includes(k)) continue;
     if (values[prev] === undefined && !left.includes(prev)) continue;
     const bypassed = b[k]!.length === 1 ? bypassReference(graph, b[k]![0].node) : null;
     if (bypassed) {
@@ -664,9 +1189,44 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     }
   }
 
+  // Graphs that hold the whole clip in memory (FPS Boost, HDR, EXR): refuse what the server can't hold.
+  if (finish.wholeClip) {
+    const problem = wholeClipProblem(finish.wholeClip, clipFacts(clip), await ctx.serverRam?.());
+    if (problem) throw new ProviderError(problem);
+  }
+
   const bound = applyBindings(graph, b, Object.fromEntries(Object.entries(values).filter(([k]) => !left.includes(k))));
   if (bound.missing.length) throw new ProviderError(`Workflow ${manifest.id} bindings point at missing nodes: ${bound.missing.join(", ")}`);
   let wf = bound.workflow;
+  const outputIds = manifest.outputs.map((o) => o.node);
+  if (dropAnchor) wf = withoutAnchor(wf, b.image2![0].node);
+  // LoRA "none": the swap LoRA's loader is linked out (H3 runs with the Turbo LoRA alone).
+  if (dropSwapLora && b.lora?.length === 1) wf = bypassNode(wf, b.lora[0].node, "model", outputIds);
+  if (studioSegment) wf = segmentGraph(wf, { ...studioSegment, outputs: outputIds });
+  if (studioMask) wf = maskGraph(wf, { ...studioMask, outputs: outputIds });
+  // FPS Boost to a lower rate, or one the clip divides into: no interpolation, only every n-th frame.
+  if (finish.bypassInterpolation) {
+    const id = Object.keys(wf).find((k) => wf[k].class_type === "FrameInterpolate");
+    if (id) wf = bypassNode(wf, id, "images", outputIds);
+  }
+  // Slow motion: the sound would no longer match the picture.
+  if (finish.dropSound) for (const n of Object.values(wf)) if (n.class_type === "CreateVideo") delete n.inputs.audio;
+  // VHS meta-batch: a manager of its own per job (a stale one loses frames), and no sound link for a silent clip.
+  wf = tagMetaBatch(wf, ctx.generationId);
+  // A concatenator clip that is muted or has no sound: silence exactly as long as its kept frames, so every clip
+  // of the film carries a track (a packet-copy join of clips with and without one would drift). Not knowing how
+  // long the window is (no end, no header), it has no track instead.
+  if (manifest.id === "video-fit-clip" && (muted || (clip && !clip.hasAudio && clip.hasVideo))) {
+    const kept = Number(values.duration) > 0 ? Number(values.duration) : undefined;
+    const rest = clipLength !== undefined ? Math.max(0, clipLength - start) : undefined;
+    const seconds = kept !== undefined && rest !== undefined ? Math.min(kept, rest) : (kept ?? rest);
+    wf = seconds ? silenceVhsAudio(wf, Math.max(1, Math.round(seconds * fps)) / fps) : dropVhsAudio(wf);
+  }
+  if (clip && !clip.hasAudio && clip.hasVideo) {
+    wf = dropVhsAudio(wf);
+    // Core LoadAudio reading the clip's own sound (the end card's ad): no sound, no sound track.
+    wf = dropLoadedSound(wf, (b.video ?? []).filter((t) => t.input === "audio").map((t) => t.node), outputIds);
+  }
   if (manifest.expand === "captions") {
     if (!cues.length) throw new ProviderError("No timed captions to burn in. Transcribe the clip first, or write lines like “0.00-2.40: Hello there”");
     try {
@@ -682,13 +1242,51 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
       throw new ProviderError((e as Error).message);
     }
   }
-  if (input.loras?.length) wf = injectLoras(wf, input.loras);
+  // Joins of more clips than the template binds: one loader per clip, in one prompt.
+  try {
+    if (manifest.expand === "videos" && clips.length > 2) wf = expandVideoJoinWorkflow(wf, clips);
+    if (manifest.expand === "audios" && audios.length > 2) wf = expandAudioJoinWorkflow(wf, audios);
+  } catch (e) {
+    throw new ProviderError((e as Error).message);
+  }
+  if (input.loras?.length) {
+    // A LoRA a graph can't attach would be dropped without a word: say so instead.
+    if (!canTakeLoras(wf)) throw new ProviderError(`${manifest.title} can't take LoRAs (it has no model loader to attach them to)`);
+    wf = injectLoras(wf, input.loras);
+  }
+  // The output not asked for isn't saved (nor encoded: ComfyUI runs only what an output node needs).
+  if (keepRole && manifest.outputs.some((o) => o.role === keepRole)) for (const o of manifest.outputs) if (o.role && o.role !== keepRole) delete wf[o.node];
+  if (ctx.op === "remove-object" && !handOff) for (const o of manifest.outputs) if (o.role === "mask") delete wf[o.node];
   const metaBatch = Object.values(wf).some((n) => n.class_type === "VHS_BatchManager");
   return {
     manifest,
     workflow: wf,
     meta: { workflowId: manifest.id, nodeCount: Object.keys(wf).length, prefix: `fuobe/${ctx.generationId}`, ...(metaBatch ? { metaBatch: true } : {}) },
   };
+}
+
+/**
+ * The Character swap graph without its anchor frame (Openjutsu's swapWorkflow): the anchor's loader and every node that
+ * reads only it go, the swap's input takes no anchor and its use_anchor switch is off.
+ */
+export function withoutAnchor(wf: ComfyWorkflow, loaderId: string): ComfyWorkflow {
+  const out = JSON.parse(JSON.stringify(wf)) as ComfyWorkflow;
+  const gone = new Set([loaderId]);
+  // The loader's direct readers that exist only to fit it (anchor_fit): an image node fed by nothing else.
+  for (const [id, n] of Object.entries(out)) {
+    const links = Object.values(n.inputs).filter((v) => Array.isArray(v)) as [string, number][];
+    if (links.some((v) => v[0] === loaderId) && n.class_type === "ImageScale") gone.add(id);
+  }
+  for (const id of gone) delete out[id];
+  for (const n of Object.values(out)) {
+    for (const [k, v] of Object.entries(n.inputs)) {
+      if (Array.isArray(v) && gone.has(String(v[0]))) {
+        delete n.inputs[k];
+        if ("use_anchor" in n.inputs) n.inputs.use_anchor = false;
+      }
+    }
+  }
+  return out;
 }
 
 /** Friendlier words for errors that a workflow's nodes report in their own terms. */
@@ -722,7 +1320,7 @@ async function followMetaBatch(prefix: string, manifest: ManifestWorkflow | unde
   const failed = passes.find((e) => e.status?.status_str === "error");
   if (failed) return { error: explainExecutionError(executionError(failed), manifest) };
   for (const e of passes) {
-    const files = collectOutputs(e, manifest, baseUrl(worker), authHeaders());
+    const files = collectOutputs(e, manifest, baseUrl(worker), authHeaders(worker));
     if (files.length) return files;
   }
   return null;
@@ -736,6 +1334,11 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   form.append("type", "input");
   form.append("overwrite", "true");
   const res = await comfyFetch("/upload/image", { method: "POST", body: form }, worker);
+  if (res.status === 413) {
+    // ComfyUI's own limit (--max-upload-size, 100 MB unless it was started with more).
+    const mb = Math.ceil(data.length / 2 ** 20);
+    throw new ProviderError(`ComfyUI refused a ${mb} MB upload as too large (its --max-upload-size, 100 MB unless set) — start ComfyUI with a higher --max-upload-size, or send a smaller file`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw worker === "isolated" ? isolatedAnswer("an upload", res.status, reasonOf(text)) : new ProviderError(`ComfyUI upload failed: ${res.status} ${text}`);
@@ -743,11 +1346,47 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   const j = (await res.json()) as { name: string; subfolder?: string };
   const uploaded = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
   // Remember a clip's / track's header facts (length, size, fps, audio) for prepareWorkflow.
-  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name)) {
-    const info = probeMedia(data);
+  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name) || /\.(webm|mkv|avi)$/i.test(name)) {
+    const info = probeMedia(data) ?? webmInfo(data) ?? aviInfo(data);
     if (info) rememberMedia(uploaded, info);
+  } else if (/^image\//.test(contentType)) {
+    // A start frame's size: "auto" makes an image-to-video clip in the picture's own shape.
+    const size = imageSize(data);
+    if (size) rememberMedia(uploaded, { container: "image", ...size, hasVideo: false, hasAudio: false });
   }
   return uploaded;
+}
+
+type QueueEntry = unknown[];
+const postJson = (p: string, body: unknown, worker: ComfyWorker = "main") =>
+  comfyFetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, worker).catch(() => undefined);
+
+/**
+ * Take a job off ComfyUI: delete its pending prompts and interrupt the one running. A meta-batch job is
+ * every prompt carrying its filename prefix (VHS re-queues each pass under a new id with a negative queue
+ * number, so the pending pass would run first). Returns whether any prompt of the job was still there.
+ */
+async function stopPrompts(externalId: string | undefined, prefix: string | undefined, worker: ComfyWorker = "main"): Promise<boolean> {
+  const ours = (q: QueueEntry) => (!!externalId && q[1] === externalId) || (!!prefix && promptHasPrefix(q[2], prefix));
+  // Always delete the job's own id, even when the queue can't be read.
+  if (externalId) await postJson("/queue", { delete: [externalId] }, worker);
+  const queue = await comfyJson<{ queue_running?: QueueEntry[]; queue_pending?: QueueEntry[] }>("/queue", worker).catch(() => undefined);
+  if (!queue) return false;
+  const pending = (queue.queue_pending ?? []).filter(ours).map((q) => String(q[1]));
+  if (pending.length) await postJson("/queue", { delete: pending }, worker);
+  const running = (queue.queue_running ?? []).filter(ours);
+  for (const q of running) await postJson("/interrupt", { prompt_id: String(q[1]) }, worker);
+  return pending.length + running.length > 0;
+}
+
+/** Cancel tries for a meta-batch job after the first: a pass that was already saving when interrupted can still queue the next one. */
+export const CANCEL_SWEEPS = { tries: 5, everyMs: 1000 };
+
+async function sweepPasses(prefix: string, worker: ComfyWorker = "main"): Promise<void> {
+  for (let i = 0; i < CANCEL_SWEEPS.tries; i++) {
+    await new Promise((r) => setTimeout(r, CANCEL_SWEEPS.everyMs));
+    if (!(await stopPrompts(undefined, prefix, worker).catch(() => false))) return;
+  }
 }
 
 export const comfyProvider: ProviderAdapter = {
@@ -757,7 +1396,7 @@ export const comfyProvider: ProviderAdapter = {
     const cur = globalThis.__fuobeComfyReach;
     // First check for this server: wait for the answer, so a request right after start isn't sent to demo.
     if (!cur || cur.url !== baseUrl()) return probeComfySync();
-    if (Date.now() - cur.at > 10_000) void probeComfy();
+    if (Date.now() - cur.at > 10_000) void probeComfy().catch(() => false);
     return cur.ok;
   },
 
@@ -792,11 +1431,14 @@ export const comfyProvider: ProviderAdapter = {
       const where = worker === "isolated" ? "the isolated ComfyUI worker" : "your ComfyUI";
       const missingPack =
         body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on ${where} (see scripts/comfy/README.md)` : undefined;
-      const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...(input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: l.url }))] }) : (missingPack ?? body.error?.message);
+      // A LoRA it lacks: point at its model card (a civitai download URL answers 401 without the key) and the LoRA folder setting.
+      const loraModels = (input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: loraByFile(l.file)?.page ?? (l.url && !needsToken(l.url) ? l.url : undefined) }));
+      let detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...loraModels] }) : (missingPack ?? body.error?.message);
+      if (detail && loraModels.some((l) => detail!.includes(`"${l.file}"`))) detail = `${detail}\nSet the LoRA folder in Settings → LoRAs and Fuobe downloads LoRAs before a run`;
       if (!detail && !res.ok && worker === "isolated") throw isolatedAnswer("the prompt", res.status);
       throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
     }
-    return { externalId: body.prompt_id, meta: { ...meta, ...(worker === "isolated" && { worker }) }, payload: wf };
+    return { externalId: body.prompt_id, meta: { ...meta, generationId, ...(worker === "isolated" && { worker }) }, payload: wf };
   },
 
   async poll({ externalId, meta }) {
@@ -810,7 +1452,7 @@ export const comfyProvider: ProviderAdapter = {
         forget(externalId);
         return { state: "failed" as const, error: explainExecutionError(executionError(entry), manifest) };
       }
-      let outputs = collectOutputs(entry, manifest, baseUrl(worker), authHeaders());
+      let outputs = collectOutputs(entry, manifest, baseUrl(worker), authHeaders(worker));
       if (!outputs.length && meta.metaBatch && typeof meta.prefix === "string") {
         const next = await followMetaBatch(meta.prefix, manifest, worker);
         if (next === "running") return { state: "running" as const, message: "Rendering the next batch of frames" };
@@ -822,6 +1464,11 @@ export const comfyProvider: ProviderAdapter = {
       }
       forget(externalId);
       if (!outputs.length) return { state: "failed" as const, error: "Workflow finished without saving any output" };
+      try {
+        outputs = await bundleFrames(outputs, String(meta.generationId ?? String(meta.prefix ?? "").replace(/^fuobe\//, "")));
+      } catch (e) {
+        return { state: "failed" as const, error: (e as Error).message };
+      }
       return { state: "succeeded" as const, outputs: await withLayerBoxes(outputs) };
     };
     const isDone = (e: HistoryEntry | undefined): e is HistoryEntry => !!e && (!!e.status?.completed || e.status?.status_str === "success" || e.status?.status_str === "error");
@@ -859,15 +1506,15 @@ export const comfyProvider: ProviderAdapter = {
   },
 
   async cancel({ externalId, meta }) {
-    const worker: ComfyWorker = meta.worker === "isolated" ? "isolated" : "main";
+    const worker: ComfyWorker = meta?.worker === "isolated" ? "isolated" : "main";
     forget(externalId);
-    const post = (path: string, body: unknown) => comfyFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, worker);
-    await post("/queue", { delete: [externalId] }).catch(() => {});
-    const q = (await comfyJson<{ queue_running?: unknown[][] }>("/queue", worker).catch(() => ({}))) as { queue_running?: unknown[][] };
-    if (q.queue_running?.some((r) => r[1] === externalId)) await post("/interrupt", { prompt_id: externalId }).catch(() => {});
+    // A meta-batch job's later passes have prompt ids of their own (and jump the queue): find them by prefix.
+    const prefix = meta?.metaBatch && typeof meta.prefix === "string" ? meta.prefix : undefined;
+    const found = await stopPrompts(externalId, prefix, worker);
+    if (prefix && found) void sweepPasses(prefix, worker);
   },
 
-  async test() {
+  async test(opts) {
     const describe = async (worker: ComfyWorker) => {
       const res = await comfyFetch("/system_stats", {}, worker);
       if (!res.ok) throw new ProviderError(`HTTP ${res.status}`);
@@ -875,6 +1522,15 @@ export const comfyProvider: ProviderAdapter = {
       const dev = s.devices?.[0];
       return `ComfyUI ${s.system?.comfyui_version ?? ""} · ${dev?.name ?? "unknown device"}${dev?.vram_total ? ` · ${(dev.vram_total / 2 ** 30).toFixed(0)} GB` : ""}`;
     };
+    // Checking the isolated worker's address: that worker answers, or it isn't connected (the main
+    // server's state is the main address's test).
+    if (opts?.focus === "comfyIsolatedUrl") {
+      if (!baseUrl("isolated")) return { ok: false, detail: "No isolated worker address set" };
+      return describe("isolated").then(
+        (d) => ({ ok: true, detail: `isolated worker: ${d}` }),
+        (e: Error) => ({ ok: false, detail: /^HTTP \d/.test(e.message) ? `The isolated worker at ${baseUrl("isolated")} answered ${e.message}` : e.message }),
+      );
+    }
     let detail: string;
     try {
       detail = await describe("main");
@@ -892,6 +1548,16 @@ export const comfyProvider: ProviderAdapter = {
     return { ok: true, detail };
   },
 };
+
+/** The LoRA files the ComfyUI server that runs `route` has (GET /models/loras), or null when it can't say. */
+export async function comfyLoraFiles(route?: ModelRoute): Promise<string[] | null> {
+  try {
+    const res = await comfyFetch("/models/loras", {}, workerFor(route?.endpoint));
+    return res.ok ? ((await res.json()) as string[]) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Which manifest models are present on the connected ComfyUI server. */
 export async function modelInventory(): Promise<Record<string, string[]> | null> {

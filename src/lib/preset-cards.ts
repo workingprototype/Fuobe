@@ -1,14 +1,14 @@
 /**
- * Slim preset card data for the galleries, and the previews shown on each card.
+ * Slim preset card data for the galleries, and the procedural previews shown on each card.
  *
  * Gallery pages are server components: they map the full catalog `Preset` (prompt templates,
- * routes, LoRA URLs, parity notes) to `PresetCardData` with toPresetCard() (preset-card-data.ts),
- * so only what a card shows reaches the browser. A preset with rendered media (public/previews, see
- * preview-media.ts) sends only its hash; every other card gets a procedural preview: a camera move
- * over a bundled layered still for motions, a per-category animated treatment for effects and apps.
- * The procedural preview is also what a card with media falls back to when its files don't load.
- * Pure module, safe on both sides. It doesn't import the media manifest: client code imports this
- * module all over, so the manifest would ship in each of those chunks (tests/preview-media.test.ts).
+ * routes, LoRA URLs, parity notes) to `PresetCardData` here, so only what a card shows reaches
+ * the browser. A preset with a real cover (a measured render, see preset-previews.generated.ts) shows
+ * it; the others get a procedural preview: a camera move over a bundled layered still for motions, a
+ * per-category animated treatment for effects and apps. Pure module, safe on both sides.
+ *
+ * The covers manifest is read in preset-card-data.ts (previewFor, toPresetCard), not here: client
+ * components import this module, and would carry the whole manifest into every chunk they are in.
  */
 import type { Preset } from "./catalog/types";
 
@@ -174,30 +174,15 @@ export const FX = [
 ] as const;
 export type PreviewFx = (typeof FX)[number];
 
-/** A camera move over a bundled layered still (motions), or an animated treatment over one (effects, apps). */
-export interface ProceduralPreview {
-  media?: undefined;
+export interface PresetPreview {
   /** Still shown before (and under) the preview. */
   poster: string;
+  /** A real cover's clip (preset-previews.generated.ts), played instead of the procedural preview. */
+  video?: string;
   scene: PreviewScene;
   move?: CameraMove;
   fx?: PreviewFx;
 }
-
-/**
- * Rendered media: a poster and a muted loop (public/previews, see preview-media.ts). Only the hash
- * in their file names, plus a motion's move for the glyph drawn over its poster; the client works
- * the procedural preview out again if the files don't load (fallbackPreview).
- */
-export interface MediaPreview {
-  media: string;
-  move?: CameraMove;
-  poster?: undefined;
-  scene?: undefined;
-  fx?: undefined;
-}
-
-export type PresetPreview = ProceduralPreview | MediaPreview;
 
 export interface PresetCardData {
   id: string;
@@ -397,7 +382,8 @@ export function previewScene(p: Pick<Preset, "type" | "name" | "category"> & { i
   return pick(p.id, ["portrait", "landscape", "city", "portrait"] as const);
 }
 
-export function proceduralPreview(p: Pick<Preset, "id" | "type" | "name" | "category">): ProceduralPreview {
+/** The procedural preview (a preset without a real cover): a camera move for motions, a treatment for effects and apps. */
+export function proceduralPreview(p: Pick<Preset, "id" | "type" | "name" | "category">): PresetPreview {
   const scene = previewScene(p);
   return {
     poster: scenePoster(scene),
@@ -407,21 +393,18 @@ export function proceduralPreview(p: Pick<Preset, "id" | "type" | "name" | "cate
 }
 
 /**
- * The procedural preview of a card whose media doesn't load. Card data only carries the media's
- * hash, so the client works it out again from the id (which says the type), name and category.
+ * Whether a preview is a real cover (preset-previews.generated.ts) rather than a procedural one: every
+ * procedural preview carries a camera move (motions) or a treatment (effects, apps), a cover neither.
  */
-export function fallbackPreview(c: Pick<PresetCardData, "id" | "name" | "category">): ProceduralPreview {
-  const type: Preset["type"] = c.id.startsWith("motion-") ? "motion" : c.id.startsWith("effect-") ? "effect" : "app";
-  return proceduralPreview({ ...c, type });
-}
+export const isCover = (p: Pick<PresetPreview, "move" | "fx">) => !p.move && !p.fx;
 
 /**
  * Whether a card shows its still mirrored, so neighbouring treatments on the same still differ.
- * Never for camera moves (a pan left must still go left). Derived from the id on the client, so it
- * costs nothing in the gallery payload.
+ * Never for camera moves (a pan left must still go left), nor for a real cover (shown as rendered).
+ * Derived from the id on the client, so it costs nothing in the gallery payload.
  */
-export function previewFlip(c: { id: string; preview: Pick<PresetPreview, "move"> }): boolean {
-  return !c.preview.move && ((stableHash(c.id) >>> 3) & 1) === 1;
+export function previewFlip(c: { id: string; preview: Pick<PresetPreview, "move" | "fx"> }): boolean {
+  return !!c.preview.fx && ((stableHash(c.id) >>> 3) & 1) === 1;
 }
 
 /** The hue a preset's look was built from (`oklch(L C <hue>)`), for tinting its preview. */
@@ -435,6 +418,22 @@ export function clip(s: string, max: number): string {
   if (s.length <= max) return s;
   const cut = s.slice(0, max - 1);
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max * 0.6)).replace(/[\s,;:.–—-]+$/, "")}…`;
+}
+
+/** What a gallery card needs, and nothing else, with the preview it shows (toPresetCard in preset-card-data.ts picks it). */
+export function presetCard(p: Preset, preview: PresetPreview): PresetCardData {
+  return {
+    id: p.id,
+    name: p.name,
+    description: clip(p.description, 100),
+    category: p.category,
+    icon: p.look.icon,
+    hue: lookHue(p.look),
+    ...(p.badges?.includes("top") ? { top: true as const } : {}),
+    cloud: !!p.cloud,
+    open: !!p.open,
+    preview,
+  };
 }
 
 /**
@@ -485,7 +484,11 @@ export function presetRouteLines(
 ): { engine: "cloud" | "open"; label: string; model: string | null }[] {
   return (["cloud", "open"] as const).map((engine) => {
     const route = p[engine];
-    return { engine, label: engine === "cloud" ? "Cloud" : "Open source", model: route ? (nameOf(route.modelId) ?? route.modelId) : null };
+    const name = route ? (nameOf(route.modelId) ?? route.modelId) : null;
+    // A LoRA licensed for the user's GPU only (civitai "RentCivit"): the cloud route keeps the preset's words until Fuobe
+    // DoP with the LoRA is evaluated there; the licence is said, not enforced.
+    const gpuOnly = engine === "cloud" && !route?.loras?.length && !!p.open?.loras?.length && p.open.loras.every((l) => l.licence?.hostedOk === false);
+    return { engine, label: engine === "cloud" ? "Cloud" : "Open source", model: name && gpuOnly ? `${name} · words only (its LoRA is licensed for your GPU only)` : name };
   });
 }
 

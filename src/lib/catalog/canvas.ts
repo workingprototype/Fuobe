@@ -7,8 +7,12 @@
  * Everything here is pure (no server, no DOM) so the editor (live validation, ports, cost) and
  * the server (POST /api/canvases/:id/run) plan a graph exactly the same way.
  */
+import type { CanvasComment, CanvasGroup, CanvasPage, CanvasShape } from "./canvas-board";
 import { getModel, getPreset, MODELS, supportsOp } from "./index";
-import { estimateCost, inferOperation, planGeneration, type Plan } from "./plan";
+import { dualEngine, onEngine, runsOn } from "./engines";
+import { chainedWaitMessage, keyframeChain } from "./keyframes";
+import { estimateCost, inferOperation, planGeneration, routesFor, type Plan } from "./plan";
+import { replacedBy, replacementOf } from "./replaced";
 import {
   OPERATION_LABELS,
   OPERATION_OUTPUT,
@@ -25,8 +29,8 @@ import {
 // ---------------------------------------------------------------------------
 // Graph types (stored as JSON in the canvases table)
 
-/** What travels along an edge. */
-export type PortType = "text" | "image" | "video" | "audio" | "element";
+/** What travels along an edge. A voice is an audio sample to speak with (Clone Voice). */
+export type PortType = "text" | "image" | "video" | "audio" | "element" | "voice";
 
 export const PORT_TYPE_LABEL: Record<PortType, string> = {
   text: "Text",
@@ -34,6 +38,7 @@ export const PORT_TYPE_LABEL: Record<PortType, string> = {
   video: "Video",
   audio: "Audio",
   element: "Element",
+  voice: "Voice",
 };
 
 export type CanvasNodeType =
@@ -48,8 +53,25 @@ export type CanvasNodeType =
   | "upscale"
   | "bg-remove"
   | "tts"
+  | "voice-change"
+  | "clone-voice"
+  | "translate"
+  | "concat"
+  | "table"
   | "output"
   | "note";
+
+/** Video Concatenator: one clip's cut and sound. Start and end are seconds of the clip; length and size are what the editor measured. */
+export interface ClipSettings {
+  start?: number;
+  end?: number;
+  mute?: boolean;
+  /** The clip's own length, size and whether it has sound (read from its file; undefined = not known yet). */
+  length?: number;
+  width?: number;
+  height?: number;
+  audio?: boolean;
+}
 
 /** One flat shape for every node type (React Flow wants `data` to be a plain record). */
 export interface CanvasNodeData {
@@ -67,13 +89,24 @@ export interface CanvasNodeData {
   preview?: string;
   /** Generator nodes. `op` undefined = worked out from what's connected. */
   modelId?: string;
+  /** A Fuobe Original (runs on both engines, ModelDef.engines): the engine this node runs it on. */
+  engine?: Engine;
   op?: Operation;
   prompt?: string;
   params?: GenParams;
   /** Keep the current result: never re-run this node, downstream nodes use its output as is. */
   pinned?: boolean;
-  /** Model node: the kind it was added as (filters the model list). Upscale / Remove background: image or video. */
+  /** Model node: the kind it was added as (filters the model list). Upscale / Remove background: image or video. Translate: text or video. */
   mediaKind?: MediaKind;
+  /** Video Concatenator: each clip's cut and sound, by the node it comes from. */
+  clips?: Record<string, ClipSettings>;
+  /** Video Concatenator: the clips' order (node ids); clips not listed follow in board order. */
+  order?: string[];
+  /** Table: its column names, and its rows of cells (one per column). */
+  columns?: string[];
+  rows?: string[][];
+  /** Translate (video) on the open engine: the Translate & dub session it started (its result comes back from there). */
+  dubId?: string;
 }
 
 export interface CanvasNode {
@@ -98,6 +131,10 @@ export interface CanvasGraph {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   viewport?: { x: number; y: number; zoom: number };
+  /** Frames around nodes, comment pins and drawings (src/lib/catalog/canvas-board.ts): not run. */
+  groups?: CanvasGroup[];
+  comments?: CanvasComment[];
+  shapes?: CanvasShape[];
 }
 
 /** What a generator node last ran as: its signature (inputs + settings) and its generations. */
@@ -105,14 +142,24 @@ export interface NodeRun {
   sig: string;
   ids: string[];
   at: number;
+  /** A node made in several steps (Video Concatenator): the generation holding its result. Default: the first id. */
+  out?: string;
+  /** A node run once per row of a table: each row's generation, in row order (what a row of the next node takes). */
+  rows?: string[];
+  /** Each row's own signature (rowSignature): a row whose inputs didn't change and whose result is live is kept. */
+  rowSigs?: string[];
 }
+
+/** The generation a node's result (and what it passes on) is in. */
+export const runOutput = (r: NodeRun): string => r.out ?? r.ids[0];
 
 export type CanvasRuns = Record<string, NodeRun>;
 
 export interface Canvas {
   id: string;
   name: string;
-  graph: CanvasGraph;
+  /** Its pages, each a board of its own (one for a canvas saved before pages). */
+  pages: CanvasPage[];
   runs: CanvasRuns;
   templateId: string | null;
   createdAt: number;
@@ -138,6 +185,7 @@ export interface CanvasSummary {
   id: string;
   name: string;
   nodeCount: number;
+  pageCount: number;
   templateId: string | null;
   /** The newest finished image or video made on this canvas. */
   preview: { url: string; kind: MediaKind } | null;
@@ -166,6 +214,8 @@ export interface NodeSpec {
   icon: string;
   /** Generator nodes: the operations they run (empty = any operation of the chosen model). */
   ops?: Operation[];
+  /** Two ops picked by what goes in: the first runs on the first kind (the default), the second on the second. */
+  variants?: [MediaKind, MediaKind];
 }
 
 export const NODE_SPECS: Record<CanvasNodeType, NodeSpec> = {
@@ -177,14 +227,19 @@ export const NODE_SPECS: Record<CanvasNodeType, NodeSpec> = {
   model: { type: "model", label: "Model", group: "Generate", icon: "Sparkles", ops: [], description: "Any model in the catalog — image, video, audio or text" },
   join: { type: "join", label: "Join clips", group: "Utilities", icon: "Combine", ops: ["concat"], description: "Stitch clips into one video, in order (top to bottom)" },
   frame: { type: "frame", label: "Extract frame", group: "Utilities", icon: "Frame", ops: ["frame"], description: "The last frame of a video, as an image" },
-  upscale: { type: "upscale", label: "Upscale", group: "Utilities", icon: "ZoomIn", ops: ["upscale-image", "upscale-video"], description: "Sharper, larger images or videos" },
-  "bg-remove": { type: "bg-remove", label: "Remove background", group: "Utilities", icon: "Eraser", ops: ["bg-remove", "bg-remove-video"], description: "Cut out the subject of an image or video" },
+  upscale: { type: "upscale", label: "Upscale", group: "Utilities", icon: "ZoomIn", ops: ["upscale-image", "upscale-video"], variants: ["image", "video"], description: "Sharper, larger images or videos" },
+  "bg-remove": { type: "bg-remove", label: "Remove background", group: "Utilities", icon: "Eraser", ops: ["bg-remove", "bg-remove-video"], variants: ["image", "video"], description: "Cut out the subject of an image or video" },
   tts: { type: "tts", label: "Text to speech", group: "Utilities", icon: "Mic2", ops: ["tts"], description: "Speak a text, in a preset voice or a cloned one" },
+  "voice-change": { type: "voice-change", label: "Change voice", group: "Utilities", icon: "AudioWaveform", ops: ["voice-change"], description: "Say a recording again in another voice, keeping its timing" },
+  "clone-voice": { type: "clone-voice", label: "Clone voice", group: "Inputs", icon: "UserRound", description: "A voice sample (or one of your saved voices) to speak with" },
+  translate: { type: "translate", label: "Translate", group: "Utilities", icon: "Languages", ops: ["translate", "dub"], variants: ["text", "video"], description: "Translate a text, or dub a video into another language" },
+  concat: { type: "concat", label: "Video concatenator", group: "Utilities", icon: "Film", ops: ["concat"], description: "Up to 50 clips in one film: trim and mute each, pick the frame" },
+  table: { type: "table", label: "Table", group: "Inputs", icon: "Table", description: "Rows of words: what it feeds runs once per row" },
   output: { type: "output", label: "Output", group: "Output", icon: "MonitorPlay", description: "Preview what's connected, side by side" },
   note: { type: "note", label: "Sticky note", group: "Output", icon: "StickyNote", description: "A note on the board (not run)" },
 };
 
-export const GENERATOR_TYPES = new Set<CanvasNodeType>(["model", "join", "frame", "upscale", "bg-remove", "tts"]);
+export const GENERATOR_TYPES = new Set<CanvasNodeType>(["model", "join", "frame", "upscale", "bg-remove", "tts", "voice-change", "translate", "concat"]);
 export const isGenerator = (n: Pick<CanvasNode, "type">) => GENERATOR_TYPES.has(n.type);
 
 /** Entries of the Add-node palette (several entries can make the same node type). */
@@ -217,6 +272,11 @@ export const PALETTE: PaletteItem[] = [
   { ...pick("upscale"), id: "upscale", data: { mediaKind: "image" }, keywords: "enhance resolution 4k sharpen" },
   { ...pick("bg-remove"), id: "bg-remove", data: { mediaKind: "image" }, keywords: "cutout matte transparent" },
   { ...pick("tts"), id: "tts", keywords: "voice speech narration clone" },
+  { ...pick("voice-change"), id: "voice-change", keywords: "voice changer speech to speech revoice convert" },
+  { ...pick("clone-voice"), id: "clone-voice", keywords: "voice sample clone my voice speaker" },
+  { ...pick("translate"), id: "translate", data: { mediaKind: "text" }, keywords: "language translate dub localize subtitles" },
+  { ...pick("concat"), id: "concat", keywords: "concatenate join merge stitch edit trim mute film assemble" },
+  { ...pick("table"), id: "table", data: { columns: ["Subject"], rows: [[""], [""], [""]] }, keywords: "rows batch spreadsheet list variations csv grid" },
   { ...pick("output"), id: "output", keywords: "preview compare result" },
   { ...pick("note"), id: "note", keywords: "comment annotation" },
 ];
@@ -278,6 +338,8 @@ const PREFERRED: Partial<Record<Operation, Partial<Record<Engine, string>>>> = {
   avatar: { cloud: "kling-avatar-2", open: "oss-infinitetalk" },
   lipsync: { cloud: "sync-lipsync-2-pro" },
   tts: { cloud: "elevenlabs-v4", open: "oss-chatterbox" },
+  "voice-change": { cloud: "elevenlabs-voice-changer", open: "oss-chatterbox-vc" },
+  dub: { cloud: "elevenlabs-dubbing" },
   music: { cloud: "elevenlabs-music", open: "oss-ace-step" },
   sfx: { cloud: "elevenlabs-sfx" },
   concat: { cloud: "join-clips", open: "oss-join-clips" },
@@ -295,14 +357,41 @@ export function nodeOps(n: Pick<CanvasNode, "type" | "data">, model?: ModelDef):
   const spec = NODE_SPECS[n.type];
   if (!spec?.ops) return [];
   if (spec.ops.length) {
-    if (spec.ops.length === 1) return spec.ops;
-    // Upscale / Remove background: the image or the video variant.
-    const video = n.data.mediaKind === "video";
-    return [spec.ops[video ? 1 : 0]];
+    if (spec.ops.length === 1 || !spec.variants) return spec.ops.slice(0, 1);
+    // Upscale / Remove background (image or video), Translate (text or video).
+    return [spec.ops[n.data.mediaKind === spec.variants[1] ? 1 : 0]];
   }
   if (!model) return [];
   return [...new Set(model.routes.map((r) => r.op))].filter((op) => !UNSUPPORTED_OPS.has(op));
 }
+
+/**
+ * Video Concatenator (Higgsfield's video_assemble): up to 50 clips, each trimmed and muted on its own, framed
+ * to one of 8 aspect ratios at 30 fps. Clips over 512 MB are refused. The node's model names its engine: the
+ * cloud cuts with trim-video, frames with scale-video, mutes with a −70 dB level and joins with merge-videos;
+ * the open engine cuts, frames, retimes and mutes each clip in one CPU step (video-fit-clip) and joins them
+ * packet by packet (video-concat-encoded).
+ */
+export const CONCAT_LIMITS = { clips: 50, fps: 30, maxBytes: 512 * 1024 * 1024, cloudJoin: 24 } as const;
+export const CONCAT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9"] as const;
+export type ConcatRatio = (typeof CONCAT_RATIOS)[number];
+/** The film's size per ratio (720 on the short side, 1280×720 by default; even, within merge-videos' 512–2048). */
+export const CONCAT_SIZE: Record<ConcatRatio, { width: number; height: number }> = {
+  "16:9": { width: 1280, height: 720 },
+  "9:16": { width: 720, height: 1280 },
+  "1:1": { width: 960, height: 960 },
+  "4:3": { width: 960, height: 720 },
+  "3:4": { width: 720, height: 960 },
+  "3:2": { width: 1080, height: 720 },
+  "2:3": { width: 720, height: 1080 },
+  "21:9": { width: 1680, height: 720 },
+};
+export const CONCAT_MODELS: Record<Engine, string> = { cloud: "join-clips", open: "oss-join-encoded" };
+/** The steps of a concatenation, per engine. */
+export const CONCAT_TOOLS = {
+  cloud: { trim: "trim-video", fit: "scale-video", sound: "extract-soundtrack", level: "ffmpeg-loudnorm", mux: "merge-audio-video", join: "join-clips" },
+  open: { fit: "oss-fit-clip", join: "oss-join-encoded" },
+} as const;
 
 /** The default model for an op on an engine (utilities may use hidden models, e.g. Extract frame). */
 export function defaultModelFor(op: Operation, engine: Engine, opts: { hidden?: boolean } = {}): ModelDef | undefined {
@@ -316,6 +405,7 @@ const KIND_OP: Record<MediaKind, Operation> = { image: "t2i", video: "t2v", audi
 
 /** The model a new generator node starts with. */
 export function defaultModelForNode(n: Pick<CanvasNode, "type" | "data">, engine: Engine): ModelDef | undefined {
+  if (n.type === "concat") return getModel(CONCAT_MODELS[engine]);
   if (n.type === "model") {
     const kind = n.data.mediaKind ?? "image";
     return defaultModelFor(n.data.op ?? KIND_OP[kind], engine) ?? MODELS.find((m) => m.engine === engine && !m.hidden && m.kind === kind);
@@ -324,12 +414,29 @@ export function defaultModelForNode(n: Pick<CanvasNode, "type" | "data">, engine
   return op ? defaultModelFor(op, engine, { hidden: true }) : undefined;
 }
 
+/**
+ * The engine a node runs its model on: the model's own, or for a Fuobe Original (both engines) the install's only
+ * engine, else the node's pick, else the model's first (the open engine: free).
+ */
+export function nodeEngine(n: Pick<CanvasNode, "data">, m: ModelDef, mode: "both" | Engine = "both"): Engine {
+  if (!dualEngine(m)) return m.engine;
+  if (mode !== "both" && runsOn(m, mode)) return mode;
+  return n.data.engine && runsOn(m, n.data.engine) ? n.data.engine : m.engine;
+}
+
+/** A node's model as it runs: a Fuobe Original keeps its engine's routes and price (onEngine). */
+export function nodeModel(n: Pick<CanvasNode, "data">, mode: "both" | Engine = "both"): ModelDef | undefined {
+  const m = n.data.modelId ? getModel(n.data.modelId) : undefined;
+  return m && onEngine(m, nodeEngine(n, m, mode));
+}
+
 /** Models the node's picker offers. */
 export function modelChoices(n: Pick<CanvasNode, "type" | "data">): ModelDef[] {
   if (n.type === "model") {
     const kind = n.data.mediaKind;
     return MODELS.filter((m) => !m.hidden && (!kind || m.kind === kind) && !needsMarks(m) && m.routes.some((r) => !UNSUPPORTED_OPS.has(r.op)));
   }
+  if (n.type === "concat") return Object.values(CONCAT_MODELS).flatMap((id) => getModel(id) ?? []);
   const ops = nodeOps(n);
   return MODELS.filter((m) => ops.some((op) => supportsOp(m, op)) && (!m.hidden || ops.includes("frame")) && !needsMarks(m));
 }
@@ -420,17 +527,23 @@ const TEXT_LABEL_OPS = new Set<Operation>(["tts", "translate", "write", "sfx", "
 
 /** The input handles a generator node shows (the union over its ops when the op is automatic). */
 export function inputPorts(n: Pick<CanvasNode, "type" | "data">): PortDef[] {
+  // Clone voice: the sample can come from another node (a recording, a generated voice) instead of a file.
+  if (n.type === "clone-voice") return [{ id: "audio", label: "Sample", type: "audio", multiple: false }];
   if (n.type === "output") return [];
   if (!isGenerator(n)) return [];
   const model = n.data.modelId ? getModel(n.data.modelId) : undefined;
   const all = nodeOps(n, model);
   const fallback: Operation[] = n.type === "model" ? (n.data.mediaKind === "video" ? ["t2v", "i2v"] : n.data.mediaKind === "audio" ? ["tts"] : n.data.mediaKind === "text" ? ["write"] : ["t2i", "edit"]) : [];
-  const ops = n.data.op && all.includes(n.data.op) ? [n.data.op] : all.length ? all : fallback;
+  // On Auto, a keyframe film made clip by clip (the open chain) only runs when it's picked: Auto never infers it
+  // without frame times, which the canvas doesn't set, so Wan's image port stays the start frame.
+  const auto = all.filter((op) => !(op === "keyframes" && model && keyframeChain(model)));
+  const ops = n.data.op && all.includes(n.data.op) ? [n.data.op] : auto.length ? auto : fallback;
   const ids = new Set(ops.flatMap((op) => OP_PORTS[op] ?? []));
   // Start & end frames: shown on image-to-video models that can take an end frame.
   if (ops.includes("i2v") && (model?.options.endFrame || (model && supportsOp(model, "flf2v")))) ids.add("endImage");
-  // A cloned voice only where the model clones voices.
-  if (ids.has("voice") && model && !model.options.voiceClone) ids.delete("voice");
+  // A cloned voice only where the model clones voices (Text to speech and Change voice always show it, and say
+  // which models clone when a voice is connected to one that doesn't).
+  if (ids.has("voice") && model && !model.options.voiceClone && n.type !== "tts" && n.type !== "voice-change") ids.delete("voice");
   // Visual elements only on image and video models.
   if (ids.has("elements") && model && model.kind !== "image" && model.kind !== "video") ids.delete("elements");
   const maxImages = model?.options.maxImages ?? (ops.some((op) => MULTI_IMAGE_OPS.has(op)) ? 4 : 1);
@@ -444,7 +557,7 @@ export function inputPorts(n: Pick<CanvasNode, "type" | "data">): PortDef[] {
     video: { id: "video", label: "Video", type: "video", multiple: false },
     videos: { id: "videos", label: "Clips", type: "video", multiple: true },
     audio: { id: "audio", label: "Audio", type: "audio", multiple: false },
-    voice: { id: "voice", label: "Voice to clone", type: "audio", multiple: false },
+    voice: { id: "voice", label: "Voice", type: "voice", multiple: false },
   };
   return INPUT_ORDER.filter((id) => ids.has(id)).map((id) => defs[id]);
 }
@@ -455,7 +568,8 @@ const toPortType = (k: MediaKind | undefined): PortType | null => (k === "image"
 
 /** The type of a node's output handle (null = no output handle). */
 export function outputType(_graph: CanvasGraph, n: CanvasNode): PortType | null {
-  if (n.type === "prompt") return "text";
+  if (n.type === "prompt" || n.type === "table") return "text";
+  if (n.type === "clone-voice") return "voice";
   if (n.type === "element") return "element";
   if (MEDIA_INPUT_TYPE[n.type]) return MEDIA_INPUT_TYPE[n.type]!;
   if (!isGenerator(n)) return null;
@@ -466,15 +580,16 @@ export function outputType(_graph: CanvasGraph, n: CanvasNode): PortType | null 
   if (op) return toPortType(OPERATION_OUTPUT[op]);
   if (model) return toPortType(model.kind);
   if (n.type === "upscale" || n.type === "bg-remove") return n.data.mediaKind === "video" ? "video" : "image";
-  if (n.type === "join") return "video";
+  if (n.type === "join" || n.type === "concat") return "video";
   if (n.type === "frame") return "image";
   if (n.type === "tts") return "audio";
   return toPortType(n.data.mediaKind ?? "image");
 }
 
-/** Which ports accept which types. */
+/** Which ports accept which types: a voice input also takes plain audio (a sample straight from a file or a model). */
 export function acceptsType(port: PortDef | "preview", type: PortType): boolean {
-  return port === "preview" ? type !== "element" : port.type === type;
+  if (port === "preview") return type !== "element";
+  return port.type === type || (port.type === "voice" && type === "audio");
 }
 
 // ---------------------------------------------------------------------------
@@ -577,10 +692,19 @@ export function connectionError(graph: CanvasGraph, c: Connection): string | nul
   if (t.type === "output") {
     if (c.targetHandle && c.targetHandle !== PREVIEW_IN) return "Unknown input";
     if (!acceptsType("preview", type)) return "Elements go into a model's Elements input";
+    if (s.type === "table") return "A table goes into a node's Text input: that node runs once per row";
   } else {
     const port = inputPorts(t).find((p) => p.id === c.targetHandle);
     if (!port) return `${nodeLabel(t)} has no ${c.targetHandle ?? ""} input`;
-    if (!acceptsType(port, type)) return `${PORT_TYPE_LABEL[type]} can't go into ${port.label}`;
+    if (!acceptsType(port, type)) return type === "voice" ? `A voice goes into a Voice input (Text to speech, Change voice)` : `${PORT_TYPE_LABEL[type]} can't go into ${port.label}`;
+    if (t.type === "concat" && graph.edges.filter((e) => e.target === t.id && e.source !== s.id).length >= CONCAT_LIMITS.clips) return `The video concatenator takes up to ${CONCAT_LIMITS.clips} clips`;
+    // Rows from a table: one table per node, and Join clips can't take a clip per row (the concatenator can).
+    if (graph.nodes.some((n) => n.type === "table")) {
+      const withEdge: CanvasGraph = { ...graph, edges: [...graph.edges, { id: "", source: s.id, target: t.id, sourceHandle: OUT, targetHandle: c.targetHandle ?? null }] };
+      const rows = rowsFeeding(withEdge, t);
+      if (rows && "error" in rows) return rows.error;
+      if (rows && t.type === "join") return "Join clips takes one clip per input — the Video concatenator joins a clip per row";
+    }
   }
   if (ancestors(graph, [s.id]).has(t.id)) return "That would make a loop";
   return null;
@@ -635,6 +759,7 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   audio2: "audio",
   audios: "audio",
   model3d: "model3d",
+  mask: "video",
   prompt: "text",
 };
 
@@ -657,9 +782,24 @@ export function withPlaceholders(req: GenerationRequest): GenerationRequest {
 }
 
 export interface NodeRequest {
+  /** The request (the last step's, for a node made in several steps). */
   request: GenerationRequest;
-  /** Upstream generator nodes, in the order of `request.chain`. */
+  /** Upstream generator nodes, in the order of `request.chain` (for steps: each one once, in order of use). */
   deps: string[];
+  /** A node made in several steps (Video Concatenator): its jobs in order; the last one holds the result. */
+  steps?: NodeStep[];
+  /** A node run once per row of a table: how many rows (its steps are the rows, and every one is a result). */
+  rows?: number;
+}
+
+/** What fills a step's chain slot: an upstream node's result (one row of it, for a node run per row), or an earlier step of the same node. */
+export type StepSource = { node: string; row?: number } | { step: string };
+
+export interface NodeStep {
+  key: string;
+  /** Its chain slots (request.chain) are filled from `from`, in order. */
+  request: GenerationRequest;
+  from: StepSource[];
 }
 
 export interface NodeDescription extends Partial<NodeRequest> {
@@ -671,8 +811,20 @@ export interface NodeDescription extends Partial<NodeRequest> {
   error?: string;
 }
 
-function sourceOf(s: CanvasNode): Source | { error: string } {
+function sourceOf(graph: CanvasGraph, s: CanvasNode): Source | { error: string } {
   if (s.type === "prompt") return { kind: "text", text: (s.data.text ?? "").trim() };
+  // A table is read row by row (rowRequest); read whole, it is its first row.
+  if (s.type === "table") {
+    const first = tableRows(s)[0];
+    return first ? { kind: "text", text: rowText(first) } : { error: `Fill in a row of “${nodeLabel(s)}”` };
+  }
+  if (s.type === "clone-voice") {
+    // A sample wired in wins over the node's own file (a recording, a generated voice).
+    const e = graph.edges.find((x) => x.target === s.id && x.targetHandle === "audio");
+    const from = e && graph.nodes.find((n) => n.id === e.source);
+    if (from && from.type !== "clone-voice") return sourceOf(graph, from);
+    return s.data.url ? { kind: "media", url: s.data.url } : { error: `Add a voice sample to “${nodeLabel(s)}”: record, upload or pick a saved voice` };
+  }
   if (MEDIA_INPUT_TYPE[s.type]) {
     const what = s.type === "image-input" ? "an image" : s.type === "video-input" ? "a video" : "an audio clip";
     return s.data.url ? { kind: "media", url: s.data.url } : { error: `Add ${what} to “${nodeLabel(s)}”` };
@@ -742,13 +894,20 @@ function mentionedIn(text: string): Set<string> {
   return new Set([...text.matchAll(/@([\p{L}\p{N}_-]+)/gu)].map((m) => m[1].toLowerCase()));
 }
 
-function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeRequest | { error: string } {
+function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef, single = false): NodeRequest | { error: string } {
   const nodes = nodeMap(graph);
   const ports = inputPorts(n);
   const ops = nodeOps(n, model);
   const op = n.data.op && ops.includes(n.data.op) ? n.data.op : n.type !== "model" ? ops[0] : textOp(model, n.data.params);
   if (n.type !== "model" && op && !supportsOp(model, op)) return { error: `${model.name} can't do ${OPERATION_LABELS[op].toLowerCase()} — pick another model` };
-  if (op === "translate" && !n.data.params?.targetLanguage) return { error: "Pick a language to translate into" };
+  if ((op === "translate" || op === "dub") && !n.data.params?.targetLanguage) return { error: op === "dub" ? "Pick a language to dub into" : "Pick a language to translate into" };
+  if (n.type === "concat") return concatRequest(graph, n, model);
+  if (!single) {
+    const rows = rowsFeeding(graph, n);
+    if (rows && "error" in rows) return rows;
+    if (rows && n.type === "join") return { error: `Join clips takes one clip per input — use the Video concatenator to join every row of “${nodeLabel(rows.table)}”` };
+    if (rows) return rowRequest(graph, n, model, rows);
+  }
 
   const inputs: NonNullable<GenerationRequest["inputs"]> = {};
   const chain: ChainSlot[] = [];
@@ -767,7 +926,7 @@ function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeR
       const s = nodes.get(e.source)!;
       const type = outputType(graph, s);
       if (!type || !acceptsType(port, type)) return { error: `${nodeLabel(s)} can't go into ${port.label}` };
-      const src = sourceOf(s);
+      const src = sourceOf(graph, s);
       if ("error" in src) return src;
       list.push(src);
     }
@@ -812,6 +971,11 @@ function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeR
     }
   }
   if (generatedText > 1) return { error: "Connect one generated text at a time — join the others into one text model" };
+  // A voice wired into a model that only speaks preset voices: say which ones clone.
+  if (!model.options.voiceClone && graph.edges.some((e) => e.target === n.id && e.targetHandle === "voice")) {
+    const cloners = MODELS.filter((m) => !m.hidden && m.options.voiceClone && op && supportsOp(m, op) && m.engine === model.engine).map((m) => m.name);
+    return { error: `${model.name} speaks in preset voices — pick ${cloners.length ? cloners.slice(0, 2).join(" or ") : "a model that clones voices"} to use the connected voice, or disconnect it` };
+  }
 
   // Prompt: the node's own words, then connected texts, then the elements, then generated text.
   // "{text}" in the node's prompt marks where connected text goes (a generated text fills it on the server).
@@ -829,6 +993,8 @@ function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeR
   const request: GenerationRequest = {
     feature: "canvas",
     modelId: model.id,
+    // A Fuobe Original runs on the engine the node picked (the server would otherwise take the first one ready).
+    ...(dualEngine(model) && { engine: model.engine }),
     ...(op && { op }),
     ...(prompt && { prompt }),
     ...(Object.keys(inputs).length && { inputs }),
@@ -838,6 +1004,271 @@ function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeR
   return { request, deps };
 }
 
+// ---------------------------------------------------------------------------
+// Tables: the node a table feeds runs once per filled row (and so does every node after it, until a Video
+// concatenator joins the rows into one film). "{Column}" in that node's prompt takes the row's cell; otherwise the
+// row's cells, joined, are its connected text.
+
+export const TABLE_LIMITS = { rows: 50, columns: 8, cell: 2000, column: 40 } as const;
+
+/** A table's filled rows (a row with at least one cell written), each with one cell per column. */
+export function tableRows(t: Pick<CanvasNode, "data">): string[][] {
+  const width = Math.max(1, t.data.columns?.length ?? 1);
+  return (t.data.rows ?? []).filter((r) => r.some((c) => c?.trim())).map((r) => Array.from({ length: width }, (_, j) => (r[j] ?? "").trim()));
+}
+
+const rowText = (cells: string[]) => cells.filter(Boolean).join(", ");
+
+/** The table a node runs per row of (with its filled rows), why it can't, or null when no table is upstream. */
+export type RowsFeed = { table: CanvasNode; rows: string[][] } | { error: string } | null;
+
+/**
+ * The table every node of a graph runs per row of, worked out once per node however many nodes ask (the
+ * editor asks for each generator on every keystroke). See rowsFeeding.
+ */
+export function tablesFeeding(graph: CanvasGraph): (n: Pick<CanvasNode, "id" | "type" | "data">) => RowsFeed {
+  const nodes = nodeMap(graph);
+  const into = new Map<string, string[]>();
+  for (const e of graph.edges) {
+    const list = into.get(e.target);
+    if (list) list.push(e.source);
+    else into.set(e.target, [e.source]);
+  }
+  const memo = new Map<string, RowsFeed>();
+  const visiting = new Set<string>();
+  const feed = (n: Pick<CanvasNode, "id" | "type" | "data">): RowsFeed => {
+    if (n.type === "table") return { table: n as CanvasNode, rows: tableRows(n) };
+    if (!isGenerator(n) || n.type === "concat" || visiting.has(n.id)) return null;
+    const known = memo.get(n.id);
+    if (known !== undefined) return known;
+    visiting.add(n.id);
+    let found: { table: CanvasNode; rows: string[][] } | null = null;
+    let out: RowsFeed | undefined;
+    for (const sid of into.get(n.id) ?? []) {
+      const s = nodes.get(sid);
+      if (!s || (s.type !== "table" && !isGenerator(s))) continue;
+      const r = feed(s);
+      if (!r) continue;
+      if ("error" in r) {
+        out = r;
+        break;
+      }
+      if (found && found.table.id !== r.table.id) {
+        out = { error: `“${nodeLabel(found.table)}” and “${nodeLabel(r.table)}” both reach “${nodeLabel(n)}” — rows run from one table at a time` };
+        break;
+      }
+      found = r;
+    }
+    visiting.delete(n.id);
+    const result = out ?? found;
+    memo.set(n.id, result);
+    return result;
+  };
+  return feed;
+}
+
+/**
+ * The table a node runs per row of: one wired into it, or one feeding a node it builds on (a Video concatenator
+ * collects the rows instead, so nothing after it runs per row). Null when no table is upstream.
+ */
+export function rowsFeeding(graph: CanvasGraph, n: CanvasNode): RowsFeed {
+  return tablesFeeding(graph)(n);
+}
+
+/** One job per row: the table read as that row (its cells in "{Column}", or as connected text), upstream rows matched by number. */
+function rowRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef, b: { table: CanvasNode; rows: string[][] }): NodeRequest | { error: string } {
+  if (!b.rows.length) return { error: `Fill in a row of “${nodeLabel(b.table)}”` };
+  if (b.rows.length > TABLE_LIMITS.rows) return { error: `“${nodeLabel(b.table)}” has ${b.rows.length} rows — up to ${TABLE_LIMITS.rows} run at once` };
+  const nodes = nodeMap(graph);
+  const columns = (b.table.data.columns ?? []).map((c) => c.trim());
+  const own = n.data.prompt ?? "";
+  const direct = graph.edges.some((e) => e.source === b.table.id && e.target === n.id);
+  const named = direct && columns.some((c) => c && own.includes(`{${c}}`));
+  const feeds = tablesFeeding(graph);
+  const perRow = (id: string) => {
+    const r = feeds(nodes.get(id)!);
+    return !!r && !("error" in r);
+  };
+  const steps: NodeStep[] = [];
+  const deps: string[] = [];
+  for (const [i, cells] of b.rows.entries()) {
+    const prompt = named ? columns.reduce((p, c, j) => (c ? p.replaceAll(`{${c}}`, cells[j]) : p), own) : own;
+    const rowGraph: CanvasGraph = {
+      ...graph,
+      nodes: graph.nodes.map((x) => (x.id === b.table.id ? { ...x, type: "prompt" as const, data: { text: named ? "" : rowText(cells) } } : x.id === n.id ? { ...x, data: { ...x.data, prompt } } : x)),
+    };
+    const r = buildRequest(rowGraph, rowGraph.nodes.find((x) => x.id === n.id)!, model, true);
+    if ("error" in r) return { error: `Row ${i + 1}: ${r.error}` };
+    for (const d of r.deps) if (!deps.includes(d)) deps.push(d);
+    steps.push({
+      key: `row:${i}`,
+      request: { ...r.request, step: { label: `${nodeLabel(n)} · row ${i + 1}`, index: i, of: b.rows.length } },
+      from: r.deps.map((d) => (perRow(d) ? { node: d, row: i } : { node: d })),
+    });
+  }
+  return { request: steps[0].request, deps, steps, rows: steps.length };
+}
+
+// ---------------------------------------------------------------------------
+// Video Concatenator: one job per clip step, then the join
+
+/** A Video Concatenator's clips in their order: the order picked in the node, then the others top to bottom. */
+export function concatClips(graph: CanvasGraph, n: Pick<CanvasNode, "id" | "data">): { nodeId: string; settings: ClipSettings }[] {
+  const nodes = nodeMap(graph);
+  const ids = [...new Set(incoming(graph, n.id).filter((e) => e.targetHandle === "videos" && nodes.has(e.source)).map((e) => e.source))];
+  ids.sort((a, b) => byPosition(nodes.get(a)!, nodes.get(b)!));
+  const picked = (n.data.order ?? []).filter((id) => ids.includes(id));
+  return [...picked, ...ids.filter((id) => !picked.includes(id))].map((nodeId) => ({ nodeId, settings: n.data.clips?.[nodeId] ?? {} }));
+}
+
+/** The feature of a node's in-between jobs (a "-step" feature: the Library lists them under Show steps). */
+export const CANVAS_STEP_FEATURE = "canvas-step";
+
+export const concatRatio = (r: string | undefined): ConcatRatio => ((CONCAT_RATIOS as readonly string[]).includes(r ?? "") ? (r as ConcatRatio) : "16:9");
+
+/** loudnorm in linear mode at its lowest target: the clip's sound −70 dB (silent), with no measuring (see linearGain in av/dub.ts). */
+export const MUTE_LEVEL = { linear: true, integrated_loudness: -70, measured_i: 0, measured_tp: -12, measured_lra: 1, measured_thresh: -80, loudness_range: 7 } as const;
+
+/**
+ * A silent sound track `seconds` long, as a concatenator step names it: the server writes the WAV when the run
+ * starts (silenceSeconds reads the length back). A clip muted, or with no sound of its own, gets one, so every clip
+ * reaches merge-videos with sound (whether it keeps the others' sound when one clip has no audio stream is unknown).
+ */
+export const SILENCE_REF = "silence:";
+export const silenceRef = (seconds: number) => `${SILENCE_REF}${Math.round(seconds * 1000) / 1000}`;
+export function silenceSeconds(ref: string | undefined): number | null {
+  if (!ref?.startsWith(SILENCE_REF)) return null;
+  const s = Number(ref.slice(SILENCE_REF.length));
+  return Number.isFinite(s) && s > 0 && s <= 36_000 ? s : null;
+}
+
+/** One clip's cut, in seconds, checked against its length when known. */
+function clipCut(c: ClipSettings, i: number): { start: number; end?: number } | { error: string } {
+  const start = Math.max(0, c.start ?? 0);
+  const end = c.end;
+  if (end !== undefined && end <= start + 0.05) return { error: `Clip ${i + 1}: the end has to come after the start` };
+  if (c.length !== undefined && start >= c.length) return { error: `Clip ${i + 1} starts past its end (it is ${Math.round(c.length * 10) / 10} s long)` };
+  return { start: Math.round(start * 1000) / 1000, ...(end !== undefined && { end: Math.round(Math.min(end, c.length ?? end) * 1000) / 1000 }) };
+}
+
+/**
+ * The Video Concatenator's jobs. Cloud, per clip: trim-video (when cut), scale-video (into the film's frame), and
+ * for a muted clip or one with no sound of its own, silence as long as it plays muxed in (merge-audio-video with a
+ * WAV the server writes); a muted clip whose length isn't known yet gets its own soundtrack lowered −70 dB instead.
+ * Then merge-videos at 30 fps, folded in joins of 24. Open, per clip: video-fit-clip (cut, frame, 30 fps and the sound or silence in one
+ * CPU pass), then video-concat-encoded (packet copy: the clips now share one size, rate and sound layout).
+ */
+function concatRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeRequest | { error: string } {
+  const engine = model.engine;
+  const nodes = nodeMap(graph);
+  // A node run once per row of a table gives a clip per row, in row order (each with that node's cut and sound).
+  const feeds = tablesFeeding(graph);
+  const clips = concatClips(graph, n).flatMap((c): { nodeId: string; settings: ClipSettings; row?: number }[] => {
+    const rows = feeds(nodes.get(c.nodeId)!);
+    return rows && !("error" in rows) ? rows.rows.map((_, row) => ({ ...c, row })) : [c];
+  });
+  if (!clips.length) return { error: `Connect the clips to join (up to ${CONCAT_LIMITS.clips})` };
+  if (clips.length > CONCAT_LIMITS.clips) return { error: `The video concatenator takes up to ${CONCAT_LIMITS.clips} clips — remove ${clips.length - CONCAT_LIMITS.clips}` };
+  const ratio = concatRatio(n.data.params?.aspectRatio);
+  const size = CONCAT_SIZE[ratio];
+  const title = nodeLabel(n);
+  const base = { feature: "canvas" } as const;
+  const steps: NodeStep[] = [];
+  const deps: string[] = [];
+  const lasts: string[] = [];
+  /** A step reading one video: a file (inputs.video) or an upstream node / earlier step (a chain slot). */
+  const add = (key: string, from: StepSource | { url: string }, req: Omit<GenerationRequest, "feature">, more: { slot: ChainSlot; from: StepSource }[] = []) => {
+    const url = "url" in from ? from.url : undefined;
+    const slots: ChainSlot[] = [...(url ? [] : [{ slot: "video" as const }]), ...more.map((m) => m.slot)];
+    steps.push({
+      key,
+      request: { ...base, ...req, ...(url && { inputs: { ...req.inputs, video: url } }), ...(slots.length && { chain: slots }) },
+      from: [...(url ? [] : [from as StepSource]), ...more.map((m) => m.from)],
+    });
+    return { step: key } as StepSource;
+  };
+  for (const [i, c] of clips.entries()) {
+    const s = nodes.get(c.nodeId)!;
+    if (outputType(graph, s) !== "video") return { error: `${nodeLabel(s)} can't go into Clips` };
+    const src = sourceOf(graph, s);
+    if ("error" in src) return src;
+    if (src.kind !== "media" && src.kind !== "node") return { error: `${nodeLabel(s)} can't go into Clips` };
+    if (src.kind === "node" && !deps.includes(src.nodeId)) deps.push(src.nodeId);
+    // A clip per table row: the facts measured from one row's file (length, sound) don't hold for the others.
+    const facts: ClipSettings = c.row === undefined ? c.settings : { start: c.settings.start, end: c.settings.end, mute: c.settings.mute };
+    const cut = clipCut(facts, i);
+    if ("error" in cut) return cut;
+    const label = (what: string) => ({ label: `${title} · ${what} clip ${i + 1}`, index: i, of: clips.length });
+    let at: StepSource | { url: string } = src.kind === "media" ? { url: src.url } : { node: src.nodeId, ...(c.row !== undefined && { row: c.row }) };
+    const mute = !!facts.mute;
+    if (engine === "open") {
+      at = add(`fit:${i}`, at, {
+        modelId: CONCAT_TOOLS.open.fit,
+        op: "trim",
+        params: { startTime: cut.start, ...(cut.end !== undefined && { endTime: cut.end }), fps: CONCAT_LIMITS.fps, extra: { ...size, ...(mute && { mute: true }) } },
+        step: label("Fit"),
+      });
+    } else {
+      if (cut.start > 0 || cut.end !== undefined) {
+        // fal's trim-video defaults to 1 s → 3 s when an end is missing: always send both.
+        const end = cut.end ?? facts.length;
+        if (end === undefined) return { error: `Clip ${i + 1}: set where it ends too — the cloud cut needs both ends (or run the clip first, so its length is known)` };
+        at = add(`trim:${i}`, at, { modelId: CONCAT_TOOLS.cloud.trim, op: "trim", params: { startTime: cut.start, endTime: end }, step: label("Trim") });
+      }
+      at = add(`fit:${i}`, at, { modelId: CONCAT_TOOLS.cloud.fit, op: "reframe", params: { aspectRatio: ratio, extra: { ...size } }, step: label("Frame") });
+      // How long the clip plays: its cut, else its measured length from the start of the cut.
+      const plays = cut.end !== undefined ? cut.end - cut.start : facts.length !== undefined ? facts.length - cut.start : undefined;
+      if ((mute || facts.audio === false) && plays !== undefined && plays > 0) {
+        // Muted, or silent to begin with: its sound becomes silence exactly as long as the clip.
+        at = add(`quiet:${i}`, at, { modelId: CONCAT_TOOLS.cloud.mux, op: "mux", inputs: { audio: silenceRef(plays) }, step: label("Mute") });
+      } else if (mute) {
+        // Its length isn't known yet (a clip made upstream in this run): its own sound, lowered to −70 dB.
+        const sound = add(`sound:${i}`, at, { modelId: CONCAT_TOOLS.cloud.sound, op: "separate-audio", step: label("Sound of") });
+        steps.push({ key: `quiet:${i}`, request: { ...base, modelId: CONCAT_TOOLS.cloud.level, op: "level", params: { extra: { ...MUTE_LEVEL } }, chain: [{ slot: "audio" }], step: label("Mute") }, from: [sound] });
+        at = add(`mute:${i}`, at, { modelId: CONCAT_TOOLS.cloud.mux, op: "mux", step: label("Mute") }, [{ slot: { slot: "audio" }, from: { step: `quiet:${i}` } }]);
+      }
+    }
+    lasts.push((at as { step: string }).step);
+  }
+  // The join: one on the open engine (up to 100 clips), folded by 24 on the cloud.
+  let level = lasts;
+  const max = engine === "open" ? CONCAT_LIMITS.clips : CONCAT_LIMITS.cloudJoin;
+  for (let depth = 0; level.length > 1; depth++) {
+    const groups = Math.ceil(level.length / max);
+    const last = groups === 1;
+    const next: string[] = [];
+    for (let g = 0; g < groups; g++) {
+      const part = level.slice(Math.floor((g * level.length) / groups), Math.floor(((g + 1) * level.length) / groups));
+      if (part.length === 1) {
+        next.push(part[0]);
+        continue;
+      }
+      const key = last ? "join" : `join:${depth}:${g}`;
+      steps.push({
+        key,
+        request: {
+          ...base,
+          modelId: engine === "open" ? CONCAT_TOOLS.open.join : CONCAT_TOOLS.cloud.join,
+          op: "concat",
+          ...(engine === "cloud" && { params: { extra: { target_fps: CONCAT_LIMITS.fps } } }),
+          chain: part.map(() => ({ slot: "videos" as const })),
+          step: { label: last ? title : `${title} · join part ${g + 1}`, index: clips.length, of: clips.length + 1 },
+        },
+        from: part.map((k) => ({ step: k })),
+      });
+      next.push(key);
+    }
+    level = next;
+  }
+  // The cuts, frames and parts are helper steps (the Library hides them): only the film is a result.
+  for (const st of steps) if (st.key !== level[0]) st.request = { ...st.request, feature: CANVAS_STEP_FEATURE };
+  const final = steps.find((x) => x.key === level[0])!;
+  return { request: final.request, deps, steps };
+}
+
+/** A Translate node set to video with no cloud model allowed: where the open engine dubs. */
+export const OPEN_DUB_HINT = "Dubbing a video on a canvas runs on the cloud (ElevenLabs Dubbing, HeyGen). On the open engine it's made in Translate & dub, where you check the translation before it's spoken: start it from here";
+
 export interface DescribeContext {
   engineMode?: "both" | "open" | "cloud";
 }
@@ -845,10 +1276,16 @@ export interface DescribeContext {
 /** Everything the editor and the planner need about one generator node. */
 export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeContext = {}): NodeDescription {
   if (!isGenerator(n)) return { costUsd: null, error: "Not a generator" };
-  const model = n.data.modelId ? getModel(n.data.modelId) : undefined;
-  if (!model) return { costUsd: null, error: n.data.modelId ? "That model is no longer in the catalog — pick another" : "Pick a model" };
   const mode = ctx.engineMode ?? "both";
-  if (mode !== "both" && model.engine !== mode) {
+  // A Fuobe Original as it runs on the node's engine (its routes, its price).
+  const model = nodeModel(n, mode);
+  // Dubbing has no open model: an open-only install says where it dubs instead. The concatenator's tools are
+  // picked by engine, not by model.
+  if (!model) {
+    const pick = n.type === "translate" && n.data.mediaKind === "video" && mode === "open" ? OPEN_DUB_HINT : n.type === "concat" ? "Pick where the film is made: on the cloud or with open source" : "Pick a model";
+    return { costUsd: null, error: n.data.modelId ? "That model is no longer in the catalog — pick another" : pick };
+  }
+  if (mode !== "both" && !runsOn(model, mode)) {
     return {
       model,
       costUsd: null,
@@ -860,12 +1297,35 @@ export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeCon
   }
   const built = buildRequest(graph, n, model);
   if ("error" in built) return { model, costUsd: null, error: built.error };
+  if (built.steps) return describeSteps(built, model);
   try {
-    const plan = planGeneration(withPlaceholders(built.request), getModel, getPreset);
-    return { ...built, model, plan, costUsd: estimateCost(plan.model, plan.params, plan.jobs) };
+    const plan = planGeneration(withPlaceholders(built.request), (id) => (id === model.id ? model : getModel(id)), getPreset);
+    // A film built clip by clip, or the open text-to-3D still and model, is planned from its inputs when it starts:
+    // it can't wait for another node (said before Run).
+    const chained = plan.op === "keyframes" ? !!keyframeChain(plan.model) : routesFor(plan.model, plan.op).some((r) => r.chained);
+    if (built.deps.length && chained) return { ...built, model, costUsd: null, error: chainedWaitMessage(plan.model.name, plan.op) };
+    return { ...built, model, plan, costUsd: estimateCost(plan.model, plan.params, plan.jobs, plan.op) };
   } catch (e) {
     return { ...built, model, costUsd: null, error: (e as Error).message };
   }
+}
+
+/** A node made in several steps: every step planned with placeholders, the price their sum, the plan the last step's. */
+function describeSteps(built: NodeRequest, model: ModelDef): NodeDescription {
+  let cost = 0;
+  let unknown = false;
+  let plan: Plan | undefined;
+  for (const st of built.steps!) {
+    try {
+      plan = planGeneration(withPlaceholders(st.request), getModel, getPreset);
+    } catch (e) {
+      return { ...built, model, costUsd: null, error: `${st.request.step?.label ?? st.key}: ${(e as Error).message}` };
+    }
+    const c = estimateCost(plan.model, plan.params, plan.jobs, plan.op);
+    if (c === null) unknown = true;
+    else cost += c;
+  }
+  return { ...built, model, plan, costUsd: unknown ? null : Math.round(cost * 10000) / 10000 };
 }
 
 // ---------------------------------------------------------------------------
@@ -897,13 +1357,44 @@ function hash(s: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
 }
 
-/** The node's identity for "is this result still fresh": its request (minus labels) and the generations it builds on. */
-export function nodeSignature(req: GenerationRequest, depIds: string[]): string {
+const unlabeled = (req: GenerationRequest): Partial<GenerationRequest> => {
   const rest: Partial<GenerationRequest> = { ...req };
   delete rest.step;
   delete rest.frame;
   delete rest.feature;
-  return hash(stable({ ...rest, deps: depIds }));
+  return rest;
+};
+
+/**
+ * The node's identity for "is this result still fresh": its request (minus labels) and the generations it
+ * builds on. A node made in several steps: every step and what feeds it.
+ */
+export function nodeSignature(req: GenerationRequest, depIds: string[], steps?: NodeStep[]): string {
+  if (steps) return hash(stable({ steps: steps.map((st) => ({ key: st.key, request: unlabeled(st.request), from: st.from })), deps: depIds }));
+  return hash(stable({ ...unlabeled(req), deps: depIds }));
+}
+
+/**
+ * What a node builds on, for its signature: the generation of the node it takes, or for a node run per table row
+ * every row's (a row run again on its own leaves the first one as it was, and what joins the rows is stale all the same).
+ */
+export const depIdentity = (run: Pick<NodeRun, "rows"> | undefined, generationId: string): string => run?.rows?.join(",") ?? generationId;
+
+/** One row of a node run per table row: its request (minus labels) and the generations its slots take. */
+export function rowSignature(req: GenerationRequest, sources: (string | undefined)[]): string {
+  return hash(stable({ ...unlabeled(req), from: sources }));
+}
+
+const LIVE = new Set<GenerationStatus | undefined>(["queued", "running", "succeeded"]);
+
+/**
+ * The generation a row of a node run per table row keeps from its last run: the row's result when it's still live
+ * and the row's inputs are unchanged (its own signature; for a run saved before rows had one, the node's).
+ */
+export function keptRow(prev: NodeRun | undefined, row: number, rowSig: string, sig: string, status: (generationId: string) => GenerationStatus | undefined): string | undefined {
+  const old = prev?.rows?.[row];
+  if (!old || !LIVE.has(status(old))) return undefined;
+  return (prev!.rowSigs ? prev!.rowSigs[row] === rowSig : prev!.sig === sig) ? old : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -915,7 +1406,10 @@ export interface PlannedStep extends NodeRequest {
   nodeId: string;
   label: string;
   reason: RunReason;
+  /** What this run costs (a node run per row: the rows it runs again, when the planner can tell). */
   costUsd: number | null;
+  /** A node run per row: one row's price. */
+  rowCostUsd?: number | null;
 }
 
 export interface CanvasPlan {
@@ -943,8 +1437,6 @@ export interface PlanOptions extends DescribeContext {
   /** describeNode, when the caller keeps its own cache of it (the editor re-plans on every keystroke). */
   describe?: (n: CanvasNode) => NodeDescription;
 }
-
-const LIVE = new Set<GenerationStatus | undefined>(["queued", "running", "succeeded"]);
 
 export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPlan {
   const nodes = nodeMap(graph);
@@ -983,11 +1475,14 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
       continue;
     }
     const prev = runs[id];
-    const prevStatus = prev ? status(prev.ids[0]) : undefined;
+    // A node run per row is as fresh as its weakest row: a failed or trashed row makes it run again (that row only).
+    const rowStatus = prev?.rows?.map(status);
+    const weakest = rowStatus?.findIndex((x) => !LIVE.has(x)) ?? -1;
+    const prevStatus = rowStatus ? rowStatus[Math.max(0, weakest)] : prev ? status(runOutput(prev)) : undefined;
     if (n.data.pinned) {
       if (prev && LIVE.has(prevStatus)) {
-        state.set(id, { kind: "reuse", id: prev.ids[0] });
-        reused.push({ nodeId: id, reason: "pinned", generationId: prev.ids[0] });
+        state.set(id, { kind: "reuse", id: runOutput(prev) });
+        reused.push({ nodeId: id, reason: "pinned", generationId: runOutput(prev) });
       } else {
         state.set(id, { kind: "blocked" });
         errors.push({ nodeId: id, message: "Pinned, but there's no result to use yet — unpin it to run it" });
@@ -1008,21 +1503,37 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
       continue;
     }
     let reason: RunReason | null;
+    let cost = d.costUsd;
     if (upstream.some((u) => u.s!.kind === "run")) reason = prev ? "upstream" : "new";
     else {
-      const sig = nodeSignature(d.request, upstream.map((u) => (u.s as { id: string }).id));
+      const sig = nodeSignature(d.request, upstream.map((u) => depIdentity(runs[u.dep], (u.s as { id: string }).id)), d.steps);
       const fresh = !!prev && prev.sig === sig && LIVE.has(prevStatus);
       reason = opts.force && targets.has(id) ? "forced" : fresh ? null : !prev || prevStatus === undefined ? "new" : prev.sig !== sig ? "changed" : "failed";
+      // Rows that are live and unchanged are kept (the server does the same): only the others are paid for.
+      if (reason && reason !== "forced" && d.rows && d.steps && prev?.rows && cost !== null) {
+        const from = (f: StepSource) => ("node" in f ? (f.row === undefined ? (state.get(f.node) as { id: string }).id : runs[f.node]?.rows?.[f.row]) : undefined);
+        const redo = d.steps.filter((st, r) => !keptRow(prev, r, rowSignature(st.request, st.from.map(from)), sig, status)).length;
+        cost = Math.round(((cost * redo) / d.steps.length) * 10000) / 10000;
+      }
     }
     if (!reason) {
-      state.set(id, { kind: "reuse", id: prev!.ids[0] });
-      reused.push({ nodeId: id, reason: "fresh", generationId: prev!.ids[0] });
+      state.set(id, { kind: "reuse", id: runOutput(prev!) });
+      reused.push({ nodeId: id, reason: "fresh", generationId: runOutput(prev!) });
       continue;
     }
     state.set(id, { kind: "run" });
-    steps.push({ nodeId: id, label, request: d.request, deps: d.deps, reason, costUsd: d.costUsd });
-    if (d.costUsd === null) costUnknown = true;
-    else costUsd += d.costUsd;
+    steps.push({
+      nodeId: id,
+      label,
+      request: d.request,
+      deps: d.deps,
+      ...(d.steps && { steps: d.steps }),
+      ...(d.rows && { rows: d.rows, rowCostUsd: d.costUsd === null ? null : d.costUsd / d.rows }),
+      reason,
+      costUsd: cost,
+    });
+    if (cost === null) costUnknown = true;
+    else costUsd += cost;
   }
   return { order: inScope, steps, reused, errors, costUsd: Math.round(costUsd * 1000) / 1000, costUnknown };
 }
@@ -1033,7 +1544,8 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
 /** The equivalent model on the other engine for a node, if there is one. */
 export function counterpart(graph: CanvasGraph, n: CanvasNode, engine: Engine): ModelDef | undefined {
   const current = n.data.modelId ? getModel(n.data.modelId) : undefined;
-  if (current?.engine === engine) return current;
+  // A Fuobe Original runs on both: it stays, on the other engine.
+  if (current && runsOn(current, engine)) return current;
   if (n.type !== "model") return defaultModelForNode(n, engine);
   const op = n.data.op ?? effectiveOp(graph, n) ?? (current ? current.routes[0].op : KIND_OP[n.data.mediaKind ?? "image"]);
   const kind = current?.kind ?? n.data.mediaKind;
@@ -1047,15 +1559,22 @@ export function convertEngine(graph: CanvasGraph, engine: Engine): { graph: Canv
   const nodes = graph.nodes.map((n) => {
     if (!isGenerator(n)) return n;
     const current = n.data.modelId ? getModel(n.data.modelId) : undefined;
-    if (current?.engine === engine) return n;
+    if (current && runsOn(current, engine)) {
+      // A Fuobe Original keeps its model and its settings; only the engine it runs on changes.
+      if (!dualEngine(current) || nodeEngine(n, current) === engine) return n;
+      changed++;
+      return { ...n, data: { ...n.data, engine } };
+    }
     const m = counterpart(graph, n, engine);
     if (!m) {
       missing.push(n.id);
       return n;
     }
     changed++;
+    // The concatenator's settings are its own (the frame, the cuts): only the engine's tools change.
+    if (n.type === "concat") return { ...n, data: { ...n.data, modelId: m.id } };
     const keepOp = n.data.op && supportsOp(m, n.data.op) ? n.data.op : undefined;
-    return { ...n, data: { ...n.data, modelId: m.id, op: keepOp, params: sanitizeParams(m, n.data.params) } };
+    return { ...n, data: { ...n.data, modelId: m.id, op: keepOp, params: sanitizeParams(m, n.data.params), engine: dualEngine(m) ? engine : undefined } };
   });
   return { graph: { ...graph, nodes }, changed, missing };
 }
@@ -1079,7 +1598,7 @@ export function graphEngine(graph: CanvasGraph): Engine | null {
   let cloud = 0;
   let open = 0;
   for (const n of graph.nodes) {
-    const m = isGenerator(n) && n.data.modelId ? getModel(n.data.modelId) : undefined;
+    const m = isGenerator(n) ? nodeModel(n) : undefined;
     if (m?.engine === "cloud") cloud++;
     if (m?.engine === "open") open++;
   }
@@ -1122,9 +1641,43 @@ export function withCurrentElements(graph: CanvasGraph, elements: readonly Eleme
 
 const NODE_TYPES = new Set(Object.keys(NODE_SPECS));
 
-/** Drop unknown node types, dangling edges and edges into handles that don't exist (after a model or op change). */
+/**
+ * The operation a node on a retired model ran: its own, else what the retired model read connected images or elements
+ * as (Cinema Studio took them as references, Replacement.withReferences).
+ */
+function storedOp(graph: CanvasGraph, n: CanvasNode): Operation | undefined {
+  if (n.data.op) return n.data.op;
+  const by = replacedBy(n.data.modelId)?.withReferences;
+  return by && graph.edges.some((e) => e.target === n.id && (e.targetHandle === "images" || e.targetHandle === "elements")) ? by : undefined;
+}
+
+/**
+ * A node saved on a model (or a model's operation) Fuobe retired when it stopped calling Higgsfield (replaced.ts)
+ * moves to the one that does it now, keeping the settings it offers. A board picks a node's engine itself (nodeEngine
+ * follows the install's engine mode first), so an Original keeps the cloud, where the retired model ran with your key.
+ */
+function currentNode(graph: CanvasGraph, n: CanvasNode): CanvasNode {
+  const op = storedOp(graph, n);
+  const to = n.data.modelId ? replacementOf(n.data.modelId, op) : undefined;
+  const m = to && getModel(to.id);
+  if (!m) return n;
+  const runs = to.op ?? op;
+  return {
+    ...n,
+    data: { ...n.data, modelId: m.id, ...(runs && { op: runs }), params: sanitizeParams(m, n.data.params), engine: dualEngine(m) ? (n.data.engine ?? "cloud") : undefined },
+  };
+}
+
+/** A stored board with its nodes on retired models moved to the ones that replaced them (read before any save). */
+export const withCurrentModels = (graph: CanvasGraph): CanvasGraph =>
+  graph.nodes.some((n) => !!n.data.modelId && !!replacementOf(n.data.modelId, storedOp(graph, n))) ? { ...graph, nodes: graph.nodes.map((n) => currentNode(graph, n)) } : graph;
+
+/**
+ * Drop unknown node types, dangling edges and edges into handles that don't exist (after a model or op change), and
+ * move nodes on a retired model to the one that replaced it.
+ */
 export function cleanGraph(graph: CanvasGraph): CanvasGraph {
-  const nodes = graph.nodes.filter((n) => NODE_TYPES.has(n.type));
+  const nodes = graph.nodes.filter((n) => NODE_TYPES.has(n.type)).map((n) => currentNode(graph, n));
   const g: CanvasGraph = { ...graph, nodes, edges: [] };
   const ids = new Set(nodes.map((n) => n.id));
   const seen = new Set<string>();
@@ -1346,7 +1899,7 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
     build: tpl(
       [
         { id: "portrait", type: "image-input", x: 0, y: 0, data: { label: "Portrait" } },
-        { id: "sample", type: "audio-input", x: 0, y: 340, data: { label: "Voice sample (10–30 s)" } },
+        { id: "sample", type: "clone-voice", x: 0, y: 340, data: { label: "Your voice (10–30 s sample)" } },
         { id: "script", type: "prompt", x: 0, y: 540, data: { label: "Script", text: "Hi! This whole clip was made on a Fuobe canvas from one photo and a few seconds of my voice." } },
         { id: "voice", type: "tts", x: COL, y: 400, data: { label: "Cloned voice" }, models: { cloud: "chatterbox-cloud", open: "oss-chatterbox" } },
         { id: "avatar", type: "model", x: COL * 2, y: 80, data: { mediaKind: "video", label: "Talking avatar", op: "avatar", prompt: "A friendly presenter talking to the camera, natural head movement" }, models: { cloud: "kling-avatar-2", open: "oss-infinitetalk" } },
@@ -1358,6 +1911,46 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
         ["portrait", "avatar", "images"],
         ["voice", "avatar", "audio"],
         ["avatar", "out"],
+      ],
+    ),
+  },
+  {
+    id: "table-film",
+    name: "Table → shots → film",
+    description: "One row per shot: each row makes a still and animates it, then the concatenator joins every row into one film",
+    icon: "Table",
+    hue: 160,
+    build: tpl(
+      [
+        { id: "cast", type: "table", x: 0, y: 40, data: { label: "Shots", columns: ["Animal", "Place"], rows: [["red fox", "a snowy pine forest"], ["barn owl", "an old wooden barn at dusk"], ["sea otter", "a kelp forest at sunrise"]] } },
+        { id: "still", type: "model", x: COL + 140, y: 0, data: { mediaKind: "image", label: "Still", prompt: "A {Animal} in {Place}, wildlife photography, soft natural light", params: { aspectRatio: "16:9" } }, models: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" } },
+        { id: "animate", type: "model", x: COL * 2 + 140, y: 0, data: { mediaKind: "video", label: "Animate", op: "i2v", prompt: "Slow push-in, the animal turns its head", params: { aspectRatio: "16:9", duration: 5 } }, models: { cloud: "kling-2-5-turbo", open: "oss-wan22-14b-fast" } },
+        { id: "film", type: "concat", x: COL * 3 + 140, y: 0, data: { label: "Film", params: { aspectRatio: "16:9" } }, models: { cloud: CONCAT_MODELS.cloud, open: CONCAT_MODELS.open } },
+      ],
+      [
+        ["cast", "still", "prompt"],
+        ["still", "animate", "images"],
+        ["animate", "film", "videos"],
+      ],
+    ),
+  },
+  {
+    id: "clips-film",
+    name: "Clips → one film",
+    description: "Trim, mute and join clips in one frame, 30 fps, with the Video concatenator",
+    icon: "Film",
+    hue: 250,
+    build: tpl(
+      [
+        ...[0, 1, 2].map((i) => ({ id: `clip${i + 1}`, type: "video-input" as const, x: 0, y: i * 320, data: { label: `Clip ${i + 1}` } })),
+        { id: "film", type: "concat", x: COL, y: 200, data: { label: "Film", params: { aspectRatio: "16:9" } }, models: { cloud: CONCAT_MODELS.cloud, open: CONCAT_MODELS.open } },
+        { id: "out", type: "output", x: COL * 2 + 40, y: 240, data: { label: "Film" } },
+      ],
+      [
+        ["clip1", "film", "videos"],
+        ["clip2", "film", "videos"],
+        ["clip3", "film", "videos"],
+        ["film", "out"],
       ],
     ),
   },

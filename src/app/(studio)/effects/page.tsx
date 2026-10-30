@@ -11,7 +11,7 @@ export default function Page() {
     <PageShell>
       <PageHeader
         title="Effects"
-        description="Explosions, transformations and viral VFX from a single photo. Open-source versions use Wan effect LoRAs where available."
+        description="Explosions, transformations and viral VFX from a single photo. Fuobe DoP runs each with its effect LoRA where one is cleared, free on your GPU or hosted in the cloud; colour looks are graded in your browser."
       />
       <PresetGallery presets={EFFECTS.map(toPresetCard)} href="/video?preset={id}" noun="effects" />
     </PageShell>

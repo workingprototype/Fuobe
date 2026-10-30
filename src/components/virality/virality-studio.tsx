@@ -55,7 +55,7 @@ export function ViralityStudio() {
       <div className="mx-auto mt-8 grid max-w-[880px] gap-3">
         <MediaDrop kind="video" value={clip} onChange={change} title="Add your video" hint="MP4 (H.264) or WebM · the opening 3 seconds are what's checked" compact />
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="lg" className={cn("rounded-full", (!clip || clip.uploading) && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={go} disabled={current?.status === "running"}>
+          <Button size="lg" className={cn("rounded-full", (!clip || clip.uploading) && "bg-muted text-muted-foreground hover:bg-muted")} onClick={go} disabled={current?.status === "running"}>
             {current?.status === "running" ? <Loader2 className="size-4 animate-spin" /> : current?.status === "done" ? <RefreshCw className="size-4" /> : <TrendingUp className="size-4" />}
             {current?.status === "done" ? "Check again" : "Check the hook"}
           </Button>

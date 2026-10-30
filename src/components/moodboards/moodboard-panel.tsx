@@ -20,18 +20,18 @@ const SETS = [
 type CuratedSet = (typeof SETS)[number][0];
 
 /**
- * The composer's Moodboard panel: Curated (Soul 2.0's 33 looks, and Soul's 106 styles) and My
- * moodboards, search, Create moodboard. It opens on the model's own preset list (Soul's styles on Soul).
+ * The composer's Moodboard panel: Curated (Fuobe Soul's looks: Soul 2.0's 33 and Soul's 106) and My
+ * moodboards, search, Create moodboard. It opens on Soul 2.0's looks, or on the set of the look already picked.
  */
-export function MoodboardPanel({ value, onPick, presetSource }: { value?: MoodboardPick; onPick: (m?: MoodboardPick) => void; presetSource?: string }) {
+export function MoodboardPanel({ value, onPick }: { value?: MoodboardPick; onPick: (m?: MoodboardPick) => void }) {
   const { data, isLoading } = useMoodboards();
   const [tab, setTab] = useState<"curated" | "mine">(value?.kind === "personal" ? "mine" : "curated");
-  const [set, setSet] = useState<CuratedSet>(value?.kind === "curated" ? (value.source ?? "soul-v2") : presetSource === "soul-v1" ? "soul-v1" : "soul-v2");
+  const [set, setSet] = useState<CuratedSet>(value?.kind === "curated" ? (value.source ?? "soul-v2") : "soul-v2");
   const [cat, setCat] = useState("All presets");
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
   const needle = q.trim().toLowerCase();
-  const looks = useCuratedSet(set, tab === "curated");
+  const looks = useCuratedSet(set);
   const curated = useMemo(
     () => looks.filter((c) => (needle ? `${c.name} ${c.description}`.toLowerCase().includes(needle) : inCuratedTab(c, cat))),
     [looks, needle, cat],
@@ -164,8 +164,8 @@ export function MoodboardPanel({ value, onPick, presetSource }: { value?: Moodbo
         </div>
       )}
       <p className="text-[11.5px] text-muted-foreground">
-        Soul and Soul 2.0 take their own presets natively; other models get the look in words, or your board&apos;s images as style references.{" "}
-        <Link href="/moodboards" className="text-brand-text hover:underline">
+        Fuobe Soul applies a curated look whole (its LoRAs and words); other models get the look in words, or your board&apos;s images as style references.{" "}
+        <Link href="/moodboards" className="text-brand-text underline underline-offset-2">
           Manage moodboards
         </Link>
       </p>

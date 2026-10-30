@@ -6,11 +6,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { toast } from "sonner";
 import { ErrorState, NotFoundState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
-import { useSidebar } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CompareSlider } from "@/components/studio/compare-slider";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useEngine, useStatus } from "@/lib/api";
+import { useEngine, useModelAccess, useStatus } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import {
   APPLIES_TO_DOC,
   decomposeCost,
@@ -33,7 +33,7 @@ import {
   type LayerTool,
 } from "@/lib/layers";
 import { applyMeasured, idPool, type Applied } from "./apply";
-import { costLabel, Ctx, isFailed, isRunning, keysBelongElsewhere, latestJob, TOOL_FOR_JOB, type EditorCtx, type MaskEdit, type RunInput, type StageMode, type ToolId } from "./editor-context";
+import { costLabel, Ctx, isFailed, isRunning, keysBelongElsewhere, latestJob, TOOL_FOR_JOB, type EditorCtx, type MaskEdit, type PaintEdit, type RunInput, type StageMode, type ToolId } from "./editor-context";
 import { LayersPanel } from "./layers-panel";
 import { measureJob } from "./measure";
 import { MobileView } from "./mobile-view";
@@ -101,24 +101,6 @@ export function LayersEditor({ id, models }: { id: string; models: Record<string
   return <EditorSkeleton />;
 }
 
-/**
- * Below 1440 px the app's sidebar folds to icons while the editor is open, so the canvas keeps its
- * room next to a tool's form and the Layers panel (and the top bar its labels); it opens again when you leave.
- */
-function useRoomyCanvas() {
-  const sidebar = useSidebar();
-  const ref = useRef(sidebar);
-  useLayoutEffect(() => {
-    ref.current = sidebar;
-  });
-  useEffect(() => {
-    const s = ref.current;
-    if (s.isMobile || !s.open || window.innerWidth >= 1440) return;
-    s.setOpen(false);
-    return () => ref.current.setOpen(true);
-  }, []);
-}
-
 function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: () => Promise<{ data?: LayerProjectView }>; models: Record<string, LayerModelInfo> }) {
   // The document is the editor's once loaded; later fetches bring jobs and versions.
   const [initial] = useState(view);
@@ -127,7 +109,6 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   const isMobile = useIsMobile();
   const [engine, setEngine] = useEngine();
   const status = useStatus().data;
-  useRoomyCanvas();
 
   const [hist, dispatch] = useReducer(historyReducer, initial.doc, (doc) => ({ past: [], present: doc, future: [] }));
   const doc = hist.present;
@@ -160,6 +141,8 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   const [previews, setPreviews] = useState<Map<string, HTMLCanvasElement>>(() => new Map());
   const [mask, setMask] = useState<MaskEdit | null>(null);
   const [maskVersion, setMaskVersion] = useState(0);
+  const [paint, setPaint] = useState<PaintEdit | null>(null);
+  const [paintVersion, setPaintVersion] = useState(0);
   const [brushSize, setBrushSize] = useState(() => Math.round(Math.max(initial.doc.width, initial.doc.height) / 30));
   const [compare, setCompare] = useState(false);
   const toolRef = useRef(tool);
@@ -533,7 +516,8 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
       if (mod || e.altKey) return;
       if (e.key === "Escape") {
         if (mode === "brush" || mode === "eraser") setMode("select");
-        else select(null);
+        // Inpaint's paint belongs to the layer it's on: Escape doesn't drop it.
+        else if (mode !== "inpaint") select(null);
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) {
@@ -555,13 +539,19 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
         return;
       }
       const k = e.key.toLowerCase();
+      // Inpaint is open: B paints the area, E erases paint.
+      if (paint && (k === "b" || k === "e")) {
+        setPaint((p) => (p ? { ...p, erase: k === "e" } : p));
+        setMode("inpaint");
+        return;
+      }
       if (k === "v") setMode("select");
       else if (k === "h") setMode("hand");
       else if ((k === "b" || k === "e") && sel) setMode(k === "b" ? "brush" : "eraser");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, mode, commit, select, setMode, busyJob]);
+  }, [selectedId, mode, commit, select, setMode, busyJob, paint]);
 
   // ---- Compare: the original, where it sits in the document now, against the current composite.
   const [pair, setPair] = useState<{ before: string; after: string } | null>(null);
@@ -585,6 +575,8 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     };
   }, [compare, doc]);
 
+  const access = useModelAccess();
+  const offeredIds = useCallback((ids: readonly string[]) => keepOffered(ids, (x) => offered(access, x, engine)), [access, engine]);
   const isDemo = useCallback(
     (m: LayerModelInfo | undefined) => {
       if (!m || !status) return false;
@@ -619,6 +611,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     select,
     engine,
     models,
+    offeredIds,
     isDemo,
     jobs: view.jobs,
     busyJob,
@@ -634,6 +627,11 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     frame,
     setFrame,
     mask,
+    paint,
+    setPaint,
+    paintVersion,
+    brushSize,
+    setBrushSize,
     setHighlight,
     setPreview,
     tool,
@@ -643,7 +641,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   };
 
   if (isMobile) {
-    const modelId = TOOL_MODELS.decompose[engine][0];
+    const modelId = offeredIds(TOOL_MODELS.decompose[engine])[0];
     const model = models[modelId];
     return (
       <MobileView
@@ -714,6 +712,10 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
                 setFrame={setFrame}
                 mask={mask}
                 onMaskChange={() => setMaskVersion((v) => v + 1)}
+                paint={paint}
+                paintVersion={paintVersion}
+                onPaintChange={() => setPaintVersion((v) => v + 1)}
+                setPaintErase={(erase) => setPaint((p) => (p ? { ...p, erase } : p))}
                 brushSize={brushSize}
                 setBrushSize={setBrushSize}
                 highlight={highlight}

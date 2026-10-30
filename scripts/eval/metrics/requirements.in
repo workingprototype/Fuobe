@@ -1,0 +1,13 @@
+# Metrics for the evaluation harness (scripts/eval). Top-level choices with their licences;
+# requirements.txt is the full pinned set, compiled from this file:
+#   uv pip compile requirements.in --torch-backend cpu --python-version 3.12 -o requirements.txt
+# pnpm eval:setup installs it into scripts/eval/metrics/.venv (git-ignored).
+numpy==2.5.4                    # BSD-3-Clause
+pillow==13.0.0                  # MIT-CMU (HPND)
+torch==2.14.1                   # BSD-3-Clause; CPU build by default, --torch-backend auto picks CUDA
+torchvision==0.29.1             # BSD-3-Clause
+open_clip_torch==3.3.0          # MIT. CLIP score, style and drift: ViT-B-32 laion2b_s34b_b79k (MIT weights)
+                                #   aesthetic: ViT-L-14 openai (MIT weights) + LAION improved aesthetic predictor (Apache-2.0)
+huggingface_hub==2.3.0          # Apache-2.0; downloads the weights at pinned revisions
+opencv-python-headless==5.0.0.93 # Apache-2.0; optical flow for the warp error
+pytest==9.1.1                   # MIT; the metric tests

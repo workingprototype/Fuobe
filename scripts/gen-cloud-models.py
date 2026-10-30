@@ -4,8 +4,8 @@ Generate src/lib/catalog/cloud-models.generated.ts from docs/research/paid-model
 (merged with parts 2, 3 and 4: paid-model-apis-2.json, paid-model-apis-3.json, paid-model-apis-4.json).
 
 The research file holds verified fal/Replicate input schemas (field names, enums, defaults,
-prices). This script turns a curated list of models (MODELS below, mirroring Higgsfield's
-lineup) into ModelDef objects with correct FieldMaps, so no field name is typed by hand.
+prices). This script turns a curated list of models (MODELS below) into ModelDef objects with
+correct FieldMaps, so no field name is typed by hand.
 
 Run:  python3 scripts/gen-cloud-models.py
 """
@@ -32,11 +32,26 @@ for e in RESEARCH_3["endpoints"]:
     prev = EPS.get((e["provider"], e["endpoint"]))
     EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
 # Part 4 (video erase / swap, FPS / HDR / codecs, FFmpeg compose, OCR, 3D scenes, new models): same merge.
-# Its Higgsfield records (Genjutsu Light) are copied into higgsfield-api.json for gen-higgsfield-models.py.
 RESEARCH_4 = json.loads((ROOT / "docs/research/paid-model-apis-4.json").read_text())
 for e in RESEARCH_4["endpoints"]:
     prev = EPS.get((e["provider"], e["endpoint"]))
     EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
+
+# Originals (docs/research/fuobe-originals-recipes-5.json): the hosted open-weight endpoints that take LoRAs
+# (hostedLoraEndpoints: the LoRA field's shape, maximum and whether it's required, plus the full inputs where
+# scripts/fetch-hosted-schemas.py read them) and the plain endpoints of the same models (hostedBaseEndpoints).
+ORIGINALS = json.loads((ROOT / "docs/research/fuobe-originals-recipes-5.json").read_text(encoding="utf-8"))
+HOSTED_LORA = {(e["provider"], e["id"]): e for e in ORIGINALS["hostedLoraEndpoints"]}
+for e in ORIGINALS["hostedLoraEndpoints"]:
+    if e.get("inputs"):
+        EPS[(e["provider"], e["id"])] = {"provider": e["provider"], "endpoint": e["id"], "operation": e["op"], "status": e["status"], "verified": True,
+                                         "inputs": e["inputs"], "keyFields": e.get("keyFields") or {}, "output": e.get("output"), "price": e.get("price")}
+for e in ORIGINALS.get("hostedBaseEndpoints") or []:
+    EPS[(e["provider"], e["endpoint"])] = e
+# Partner models' fal routes read for build plan O7 (scripts/fetch-hosted-schemas.py --partner): Happy Horse 1.1 had
+# no fal route before.
+for e in ORIGINALS.get("partnerEndpoints") or []:
+    EPS[(e["provider"], e["endpoint"])] = e
 
 IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"]
 IMAGE_SIZE_MAP = {
@@ -45,7 +60,7 @@ IMAGE_SIZE_MAP = {
     "5:4": "landscape_4_3", "4:5": "portrait_4_3",
 }
 RATIO = re.compile(r"^\d+(\.\d+)?:\d+(\.\d+)?$")
-# Duration picks for APIs that take any whole number of seconds in a range (the Higgsfield generator's list).
+# Duration picks for APIs that take any whole number of seconds in a range.
 NICE_DURATIONS = [3, 4, 5, 6, 8, 10, 12, 15, 20, 30]
 
 # ---------------------------------------------------------------------------
@@ -56,19 +71,30 @@ M = []
 
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
-          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False):
+          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
+          frame_step=None, original=False, sizes=None):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
     formats: {canonical VideoFormat: the API's value} for its output-format field (params.format), checked against the enum.
     ranged_durations: a duration that takes any whole second in a range gets the usual picks inside it.
     fit_values: the model offers the union of its routes' aspect ratios and resolutions, so each route lists the
-    ones it takes (EnumField.accepts) and gets the closest of them (Grok Imagine on fal and Higgsfield).
-    A route's options dict may also set max_images (FieldMap.maxImages) and note."""
+    ones it takes (EnumField.accepts) and gets the closest of them (Grok Imagine's text and reference routes).
+    controls entries may carry a third item: labels for values that read badly ({0: "Precise", 1: "Creative"}).
+    fps_targets: frame rates offered for the API's target_fps (params.targetFps; ModelOptions.fpsTargets).
+    upscale_tiers: resolutions offered to an upscaler that takes a factor ("Original", "1080p", "4K"): FieldMap.upscaleFactor
+    turns the tier into target ÷ the clip's shorter edge, within the factor field's limits.
+    frame_step: video models whose length is a frame count (Wan 2.2: 4n+1, LTX: 8n+1): FieldMap.numFrames.step.
+    original: a Fuobe Original's cloud half (written to ORIGINAL_CLOUD; models.ts joins it to the ComfyUI routes).
+    sizes: {tier: {aspect: [w, h]}}: exact sizes per resolution tier (Fuobe Soul's table): FieldMap.size.table, sent
+    as width / height fields or as one {width, height} object field (fal's image_size); the tiers become the resolutions.
+    A route's options dict may also set max_images (FieldMap.maxImages), note, loraEndpoint (the same model with LoRAs:
+    FieldMap.loras comes from its research record) and pin (a Replicate model run by version: the research's version)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
-                  ranged_durations=ranged_durations, fit_values=fit_values))
+                  ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or [],
+                  frame_step=frame_step, original=original, sizes=sizes))
 
 
 # ----- Image
@@ -80,7 +106,8 @@ model("nano-banana-pro", "Nano Banana Pro", "Google", "gemini-image", "image",
 model("nano-banana-2", "Nano Banana 2", "Google", "gemini-image", "image",
       "Newest Gemini image model — sharper detail, 0.5K–4K, up to 14 references",
       [("t2i", "fal-ai/nano-banana-2"), ("edit", "fal-ai/nano-banana-2/edit")],
-      badges=["new", "4k"], pricing=("image", 0.08, "2K 1.5x, 4K 2x"), defaults={"aspectRatio": "1:1", "resolution": "1K"})
+      badges=["new", "4k"], pricing=("image", 0.08, "2K 1.5x, 4K 2x, 0.5K 0.75x", {"byResolution": {"0.5K": 0.06, "1K": 0.08, "2K": 0.12, "4K": 0.16}}),
+      defaults={"aspectRatio": "1:1", "resolution": "1K"})
 model("nano-banana-2-1", "Nano Banana 2.1", "Google", "gemini-image", "image",
       "Gemini 2.1 image with thinking — strongest instruction following",
       [("t2i", "google/nano-banana-2.1"), ("edit", "google/nano-banana-2.1/edit")],
@@ -97,6 +124,10 @@ model("seedream-5-pro", "Seedream 5.0 Pro", "ByteDance", "seedream", "image",
 model("seedream-5-lite", "Seedream 5.0 Lite", "ByteDance", "seedream", "image",
       "Fast, affordable Seedream 5",
       [("t2i", "bytedance/seedream/v5/lite/text-to-image"), ("edit", "bytedance/seedream/v5/lite/edit")],
+      badges=["fast"], defaults={"aspectRatio": "3:4"})
+model("seedream-5-flash", "Seedream 5.0 Flash", "ByteDance", "seedream", "image",
+      "The fastest, cheapest Seedream 5 — quick edits in bulk",
+      [("t2i", "bytedance/seedream/v5/flash/text-to-image"), ("edit", "bytedance/seedream/v5/flash/edit")],
       badges=["fast"], defaults={"aspectRatio": "3:4"})
 model("seedream-4-5", "Seedream 4.5", "ByteDance", "seedream", "image",
       "Photoreal 4K generation and multi-image editing",
@@ -147,7 +178,82 @@ model("wan-2-7-image", "Wan 2.7 Image", "Alibaba Wan", "wan", "image",
       [("t2i", "fal-ai/wan/v2.7/pro/text-to-image"), ("edit", "fal-ai/wan/v2.7/pro/edit")], defaults={"aspectRatio": "16:9"})
 model("z-image-turbo-cloud", "Z-Image Turbo (hosted)", "Alibaba Tongyi", "z-image", "image",
       "Sub-second photoreal images",
-      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora"})], badges=["fast"], defaults={"aspectRatio": "1:1"})
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora"}),
+       # Replicate's LoRA build of the same weights (lora_weights[] + lora_scales[]); one image per run.
+       ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True})], badges=["fast"], defaults={"aspectRatio": "1:1"})
+# Originals (O1): open-weight models hosted on fal / Replicate that take LoRA URLs (docs/research/fuobe-originals-recipes-5.md §3).
+# Apache-2.0 weights, so the same recipe runs on the user's GPU; a run with LoRAs switches to the /lora endpoint.
+model("qwen-image-2512-cloud", "Qwen-Image 2512 (hosted)", "Alibaba Qwen", "qwen-image", "image",
+      "Open-weights Qwen-Image: clean lettering and long prompts",
+      [("t2i", "fal-ai/qwen-image-2512", "fal", {"loraEndpoint": "fal-ai/qwen-image-2512/lora"})],
+      pricing=("megapixel", 0.02, "rounded up to whole megapixels"), defaults={"aspectRatio": "1:1"})
+model("qwen-image-edit-2511-cloud", "Qwen-Image-Edit 2511 (hosted)", "Alibaba Qwen", "qwen-image", "image",
+      "Open-weights instruction edits with several references",
+      [("edit", "fal-ai/qwen-image-edit-2511", "fal", {"loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"}),
+       ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]})], defaults={"aspectRatio": "1:1"},
+      # Replicate's aspect_ratio has no 21:9, 3:2, 2:3, 5:4 or 4:5: each route lists what it takes (fit_values).
+      fit_values=True)
+# Qwen-Image-Edit 2509 with its LoRAs (O4): Fuobe DoP's relight effects relight the start frame with the 2509 Relight
+# LoRA before the clip is made. A helper step, not a picker model.
+model("qwen-image-edit-2509-cloud", "Qwen-Image-Edit 2509 (hosted)", "Alibaba Qwen", "qwen-image", "image",
+      "Open-weights Qwen-Image-Edit 2509 with its LoRAs (relight, next scene, angles)",
+      [("edit", "fal-ai/qwen-image-edit-plus-lora", "fal")], hidden=True)
+model("flux-2-klein-4b-cloud", "FLUX.2 [klein] 4B (hosted)", "Black Forest Labs", "flux", "image",
+      "The Apache-2.0 FLUX.2: cheapest drafts and edits",
+      [("t2i", "fal-ai/flux-2/klein/4b", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/lora"}),
+       ("edit", "fal-ai/flux-2/klein/4b/edit", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/edit/lora"})],
+      badges=["fast"], defaults={"aspectRatio": "1:1"})
+model("wan-2-2-a14b-image-cloud", "Wan 2.2 A14B Image (hosted)", "Alibaba Wan", "wan", "image",
+      "Open-weights Wan 2.2 stills that take Wan LoRAs",
+      [("t2i", "fal-ai/wan/v2.2-a14b/text-to-image/lora", "fal")], defaults={"aspectRatio": "16:9"})
+# Soul ID on every base fal trains (O3, o/soul-id): a character or style LoRA trained on FLUX.1 [dev], FLUX.2 [dev],
+# Krea 2 or FLUX.2 [klein] 9B runs on these. The weights' licences are information shown with the model, never a gate
+# (the owner's decision of 2026-10-27): FLUX [dev] and klein 9B weights are non-commercial (fal clears its own hosted
+# outputs), Krea 2 has revenue tiers. The admin turns models on or off in Settings.
+model("flux-1-dev-lora-cloud", "FLUX.1 [dev] with LoRAs (hosted)", "Black Forest Labs", "flux", "image",
+      "FLUX.1 [dev] with your trained characters and styles · non-commercial weights, fal clears its outputs",
+      [("t2i", "fal-ai/flux-lora", "fal")], defaults={"aspectRatio": "3:4"})
+model("flux-1-krea-lora-cloud", "FLUX.1 Krea [dev] with LoRAs (hosted)", "Black Forest Labs × Krea", "flux", "image",
+      "Natural photoreal FLUX.1 Krea with FLUX.1 LoRAs · non-commercial weights, fal clears its outputs",
+      [("t2i", "fal-ai/flux-krea-lora", "fal")], defaults={"aspectRatio": "3:4"})
+model("flux-2-dev-lora-cloud", "FLUX.2 [dev] with LoRAs (hosted)", "Black Forest Labs", "flux", "image",
+      "FLUX.2 [dev] with your trained characters and styles · non-commercial weights, fal clears its outputs",
+      [("t2i", "fal-ai/flux-2/lora", "fal")], defaults={"aspectRatio": "3:4"})
+model("flux-2-klein-9b-lora-cloud", "FLUX.2 [klein] 9B with LoRAs (hosted)", "Black Forest Labs", "flux", "image",
+      "The 9B FLUX.2 [klein] with your LoRAs · non-commercial weights, fal clears its outputs",
+      [("t2i", "fal-ai/flux-2/klein/9b/lora", "fal")], badges=["fast"], defaults={"aspectRatio": "3:4"})
+model("krea-2-turbo-lora-cloud", "Krea 2 Turbo with LoRAs (hosted)", "Krea", "krea", "image",
+      "Krea 2's aesthetic with your trained characters and styles · Krea 2 Community licence (revenue tiers)",
+      [("t2i", "fal-ai/krea-2/turbo/lora", "fal")], badges=["fast"], defaults={"aspectRatio": "3:4"})
+# ----- Originals (O2): Fuobe Soul's cloud halves on hosted open weights (docs/research/fuobe-originals-recipes-5.md §4).
+# models.ts joins each to its ComfyUI routes as one model that runs on both engines (ModelDef.engines). Sizes are
+# Soul's table per tier (soul.settings.comfyui.sizes); steps, prompt expansion and format follow the recipe (§4.3).
+SOUL_TIERS = {"720p": "720p tier", "1080p": "1080p tier"}
+SOUL_SIZES = {tier: {a: [int(x) for x in wh.split("x")] for a, wh in next(v for k, v in ORIGINALS["soul"]["settings"]["comfyui"]["sizes"].items() if k.startswith(prefix)).items()}
+              for tier, prefix in SOUL_TIERS.items()}
+SOUL_FAL = {"num_inference_steps": ORIGINALS["soul"]["settings"]["fal"]["num_inference_steps"],
+            "enable_prompt_expansion": ORIGINALS["soul"]["settings"]["fal"]["enable_prompt_expansion"],
+            "output_format": ORIGINALS["soul"]["settings"]["fal"]["output_format"]}
+# Replicate's Z-Image LoRA build: the same 8 steps, a PNG (its default is jpg); guidance stays at its Turbo default 0.
+SOUL_REPLICATE = {"num_inference_steps": SOUL_FAL["num_inference_steps"], "output_format": "png"}
+model("fuobe-soul", "Fuobe Soul", "Fuobe Original", "fuobe-soul", "image",
+      "Soul's 139 looks on open weights: Z-Image Turbo with up to three LoRAs",
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
+       ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE}),
+       # Restyle a picture with the look; the result keeps the picture's shape. strength = how much changes.
+       ("edit", "fal-ai/z-image/turbo/image-to-image", "fal",
+        {"loraEndpoint": "fal-ai/z-image/turbo/image-to-image/lora", "keepSize": True, "fixed": {k: v for k, v in SOUL_FAL.items() if k != "num_inference_steps"}})],
+      original=True, sizes=SOUL_SIZES, sliders=[("strength", "Change")], defaults={"aspectRatio": "3:4", "resolution": "720p"})
+model("fuobe-soul-hd", "Fuobe Soul HD", "Fuobe Original", "fuobe-soul", "image",
+      "Soul's looks on Qwen-Image 2512: clean lettering for posters and signs",
+      [("t2i", "fal-ai/qwen-image-2512", "fal", {"loraEndpoint": "fal-ai/qwen-image-2512/lora", "fixed": {"output_format": "png"}})],
+      original=True, sizes=SOUL_SIZES, pricing=("megapixel", 0.02, "rounded up to whole megapixels", {"roundUp": True}),
+      defaults={"aspectRatio": "3:4", "resolution": "720p"})
+model("fuobe-soul-cinema", "Fuobe Soul Cinema", "Fuobe Original", "fuobe-soul", "image",
+      "One film look: wide cinematic stills with film grain",
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
+       ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE})],
+      original=True, sizes=SOUL_SIZES, defaults={"aspectRatio": "16:9", "resolution": "720p"})
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 
@@ -227,13 +333,13 @@ model("bria-extract-object", "Bria Extract Object", "Bria", "bria", "image",
 
 # ----- Video
 model("seedance-2-5", "Seedance 2.5", "ByteDance", "seedance", "video",
-      "Higgsfield's default — multi-shot cinema with native audio, up to 30s",
+      "ByteDance's cinema model — multi-shot with native audio, up to 30s",
       [("t2v", "bytedance/seedance-2.5/text-to-video"), ("i2v", "bytedance/seedance-2.5/image-to-video", "fal", "+flf2v"),
        ("ref2v", "bytedance/seedance-2.5/reference-to-video"),
        ("extend", "bytedance/seedance-2.5/reference-to-video", "fal", {"fixed": {"task": "extension"}, "videoArray": True}),
        ("finalize", "bytedance/seedance-2.5/draft/complete")],
       badges=["top", "audio", "new"], pricing=("second", 0.473, "720p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
-      # fal's schema gives no count for 2.5's reference clips; Higgsfield's and Replicate's 2.5 schemas say up to 10 (30 s in all).
+      # fal's schema gives no count for 2.5's reference clips; Replicate's 2.5 schema says up to 10 (30 s in all), as the research found.
       options={"multiShot": {"mode": "prompt", "maxShots": 6}, "maxVideos": 10, "maxAudios": 10})
 model("seedance-2-0", "Seedance 2.0", "ByteDance", "seedance", "video",
       "Smooth multi-shot motion with audio",
@@ -345,9 +451,143 @@ model("flux-3-video", "FLUX.3 Video", "Black Forest Labs", "flux", "video", "BFL
        ("flf2v", "blackforestlabs/flux-3/first-last-frame-to-video"), ("v2v", "blackforestlabs/flux-3/edit-video"),
        ("extend", "blackforestlabs/flux-3/extend-video")],
       badges=["new"], defaults={"aspectRatio": "16:9"})
+# Originals (O1): Wan 2.2 A14B and LTX-2.3 22B open weights on fal / Replicate, with camera and effect LoRAs.
+# fal's Wan 2.2 interpolates to 32 fps by default (doubled frames): interpolator_model none keeps 16 fps (research §3.1).
+WAN22_FAL = {"interpolator_model": "none"}
+WAN22_REPLICATE = {"interpolate_output": False}
+model("wan-2-2-a14b-cloud", "Wan 2.2 A14B (hosted)", "Alibaba Wan", "wan", "video", "Open-weights Wan 2.2 that takes camera and effect LoRAs",
+      [("t2v", "fal-ai/wan/v2.2-a14b/text-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/text-to-video/lora", "defaults": WAN22_FAL}),
+       ("i2v", "fal-ai/wan/v2.2-a14b/image-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora", "defaults": WAN22_FAL}),
+       # One LoRA per expert (lora_weights_transformer = high noise, _2 = low noise): a Mix runs on fal.
+       # Replicate's t2v interpolates to 30 fps by default (interpolate_output true): off, so both stay at 16 fps.
+       ("t2v", "wan-video/wan-2.2-t2v-fast", "replicate", {"defaults": WAN22_REPLICATE}),
+       ("i2v", "wan-video/wan-2.2-i2v-fast", "replicate", {"defaults": WAN22_REPLICATE})],
+      pricing=("second", 0.08, "720p on fal; 580p $0.06/s, 480p $0.04/s; with LoRAs $0.10/s",
+               {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}, "withLoras": 0.1}),
+      # Replicate takes 480p / 720p only and t2v only 16:9 / 9:16: each route lists what it takes (fit_values).
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=4, fit_values=True)
+# LTX-2.3 22B (LTX-2 Community licence: free under US$10M annual revenue). Prompt expansion is on by default and would
+# rewrite a compiled Director prompt, so it is off; sound follows the audio toggle.
+model("ltx-2-3-22b-cloud", "LTX-2.3 22B (hosted)", "Lightricks", "ltx", "video", "Open-weights LTX-2.3 with sound, camera and motion LoRAs",
+      [("t2v", "fal-ai/ltx-2.3-22b/text-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/text-to-video/lora"}),
+       ("i2v", "fal-ai/ltx-2.3-22b/image-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"}),
+       ("extend", "fal-ai/ltx-2.3-22b/extend-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/extend-video/lora"}),
+       ("v2v", "fal-ai/ltx-2.3-22b/video-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/video-to-video/lora"})],
+      badges=["audio"], api_defaults={"enable_prompt_expansion": False},
+      pricing=("second", 0.036, "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)", {"withLoras": 0.04}),
+      defaults={"aspectRatio": "16:9", "duration": 5}, frame_step=8)
+# ----- Originals (O4): Fuobe DoP's cloud halves, camera motions and effects on hosted open weights (research §3.1, §7.5).
+# DoP clips are 49 or 81 frames at 16 fps (3 or 5 s): fal's Wan 2.2 interpolates to 32 fps by default, so
+# interpolator_model none, at 20 steps. Each LoRA goes to its expert (transformer high / low / both per file); a Mix
+# sends both presets' LoRAs. Replicate's fast Wan takes one LoRA per expert (a Mix runs on fal) and makes 81–121 frames.
+DOP_FAL = {"interpolator_model": "none", "frames_per_second": 16, "num_inference_steps": 20}
+model("fuobe-dop", "Fuobe DoP", "Fuobe Original", "fuobe-dop", "video",
+      "Camera motions and effects with their LoRAs on Wan 2.2: 3 or 5 s at 16 fps",
+      [("i2v", "fal-ai/wan/v2.2-a14b/image-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora", "fixed": DOP_FAL, "flf2v": True}),
+       ("i2v", "wan-video/wan-2.2-i2v-fast", "replicate", {"fixed": WAN22_REPLICATE})],
+      original=True,
+      pricing=("second", 0.08, "720p on fal; 580p $0.06/s, 480p $0.04/s; with LoRAs $0.10/s",
+               {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}, "withLoras": 0.1}),
+      options={"durations": [3, 5]}, defaults={"aspectRatio": "auto", "duration": 5, "resolution": "720p"}, frame_step=4, fit_values=True)
+# The LTX-2.3 presets (FPV Drone, Wind to Face, the transitions with an end frame) and LTX-2.3's built-in camera LoRA
+# (camera_lora: dolly, jib, static) for the moves it covers. Prompt expansion off; sound off unless asked.
+model("fuobe-dop-ltx", "Fuobe DoP · LTX", "Fuobe Original", "fuobe-dop", "video",
+      "Camera moves, FPV and transitions on LTX-2.3 with its camera LoRAs: 3 or 5 s at 24 fps",
+      [("i2v", "fal-ai/ltx-2.3-22b/image-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora", "flf2v": True})],
+      original=True, api_defaults={"enable_prompt_expansion": False},
+      pricing=("second", 0.036, "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)", {"withLoras": 0.04}),
+      options={"durations": [3, 5]}, defaults={"aspectRatio": "auto", "duration": 5, "generateAudio": False}, frame_step=8)
+# ----- Originals (O6): Fuobe Cinema's cloud half, Cinema Studio's Director on LTX-2.3 22B (research §8 cinema-studio →
+# studios[cinema-studio].original). Prompt expansion off so the compiled Director prompt is what runs; sound follows the
+# toggle; up to 481 frames at 24 fps (20 s; Cinema adds the rest with one extend); exact sizes per tier in multiples of
+# 32. A camera move LTX-2.3's camera LoRA makes goes as camera_lora (params.extra, set by src/lib/catalog/cinema.ts).
+# An extend or an edit keeps its source clip's size. Priced on fal's per-megapixel-of-video price (Pricing.videoMegapixel:
+# the tier and shape's size × the frames, rounded up); the per-second rates are the 16:9 ones, for display.
+CINEMA = next(s for s in ORIGINALS["studios"] if s["id"] == "cinema-studio")["original"]["cloud"]
+CINEMA_TIERS = {"480p": "480p tier", "720p": "720p tier", "1080p": "1080p tier"}
+CINEMA_SIZES = {tier: {a: [int(x) for x in wh.split("x")] for a, wh in next(v for k, v in CINEMA["sizes"].items() if k.startswith(prefix)).items()}
+                for tier, prefix in CINEMA_TIERS.items()}
+
+
+def per_megapixel(endpoint):
+    """fal's '$x per megapixel of generated video' for an endpoint of the research (base or /lora)."""
+    rec = EPS.get(("fal", endpoint)) or {}
+    m = re.search(r"\$([0-9.]+) per megapixel", rec.get("price") or "")
+    if not m:
+        sys.exit(f"fuobe-cinema: no per-megapixel price for {endpoint} in the research")
+    return float(m.group(1))
+
+
+CINEMA_MP = per_megapixel("fal-ai/ltx-2.3-22b/image-to-video")
+CINEMA_MP_LORA = per_megapixel("fal-ai/ltx-2.3-22b/image-to-video/lora")
+# A second of 16:9 video at each tier: width × height × 24 frames, in megapixels, at fal's price.
+CINEMA_PER_SECOND = {t: round(s["16:9"][0] * s["16:9"][1] * CINEMA["fps"] / 1e6 * CINEMA_MP, 4) for t, s in CINEMA_SIZES.items()}
+CINEMA_PER_SECOND_LORA = {t: round(s["16:9"][0] * s["16:9"][1] * CINEMA["fps"] / 1e6 * CINEMA_MP_LORA, 4) for t, s in CINEMA_SIZES.items()}
+model("fuobe-cinema", "Fuobe Cinema", "Fuobe Original", "fuobe-cinema", "video",
+      "Cinema Studio's Director on LTX-2.3 with its camera LoRAs and sound: up to 20 s at 24 fps",
+      [("t2v", "fal-ai/ltx-2.3-22b/text-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/text-to-video/lora", "fixed": CINEMA["fixed"]}),
+       ("i2v", "fal-ai/ltx-2.3-22b/image-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora", "fixed": CINEMA["fixed"], "flf2v": True}),
+       ("extend", "fal-ai/ltx-2.3-22b/extend-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/extend-video/lora", "fixed": CINEMA["fixed"], "keepSize": True}),
+       ("v2v", "fal-ai/ltx-2.3-22b/video-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/video-to-video/lora", "fixed": CINEMA["fixed"], "keepSize": True})],
+      original=True, sizes=CINEMA_SIZES, badges=["audio"],
+      pricing=("second", CINEMA_PER_SECOND["720p"],
+               f"${CINEMA_MP} per megapixel of video (width × height × frames): about ${round(CINEMA_PER_SECOND['720p'] * 5, 2)} for 5 s at 720p; ${CINEMA_MP_LORA} with LoRAs",
+               {"byResolution": CINEMA_PER_SECOND, "withLoras": CINEMA_PER_SECOND_LORA["720p"], "withLorasByResolution": CINEMA_PER_SECOND_LORA,
+                "videoMegapixel": {"usd": CINEMA_MP, "withLoras": CINEMA_MP_LORA}}),
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=8)
+# ----- Originals (O5): Fuobe Genjutsu's cloud halves on hosted open weights (research §8 genjutsu, build plan O5;
+# docs/research/openjutsu-6.md §8 for the Character swap). Motion transfer on Wan 2.2 Animate (fal bills frames ÷ 16 as
+# "video seconds"), Object swap on Wan 2.1 VACE 14B inpainting with SAM 3.1's mask video, Restyle on Wan 2.2 Fun VACE
+# depth from a restyled first frame, Character swap on MiniMax H3 with Akatz Labs' Character Swap LoRA. Lite is the
+# cheaper, faster tier of the same Original: 480p (and fal's turbo pass on Animate).
+_ANIMATE_PRICE = {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}}
+_FRAMES16 = "fal bills frames ÷ 16 as video seconds: a 30 fps clip costs about 1.9× its length"
+model("fuobe-genjutsu-motion", "Fuobe Genjutsu · Motion", "Fuobe Original", "fuobe-genjutsu", "video",
+      "Your character performs the clip's moves with its camera and framing: Wan 2.2 Animate",
+      [("motion-transfer", "fal-ai/wan/v2.2-14b/animate/move")],
+      original=True, fit_values=True, pricing=("second", 0.08, f"720p; 580p $0.06, 480p $0.04 · {_FRAMES16}", _ANIMATE_PRICE),
+      defaults={"resolution": "720p"})
+model("fuobe-genjutsu-motion-lite", "Fuobe Genjutsu Lite · Motion", "Fuobe Original", "fuobe-genjutsu", "video",
+      "The quick tier: Wan 2.2 Animate at 480p with fal's turbo pass",
+      [("motion-transfer", "fal-ai/wan/v2.2-14b/animate/move", "fal", {"fixed": {"use_turbo": True, "resolution": "480p"}})],
+      original=True, pricing=("second", 0.04, f"480p · {_FRAMES16}"), options={"resolutions": ["480p"]}, defaults={"resolution": "480p"})
+_VACE14 = "fal-ai/wan-vace-14b/inpainting"
+_VACE14_PRICE = {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}}
+model("fuobe-genjutsu-swap", "Fuobe Genjutsu · Swap", "Fuobe Original", "fuobe-genjutsu", "video",
+      "A thing, a person or an outfit becomes your reference: SAM 3.1 follows it, Wan VACE paints it in",
+      [("video-swap", _VACE14, "fal", {"keys": {"mask": "mask_video_url"}})],
+      original=True, fit_values=True, pricing=("second", 0.08, f"720p; 580p $0.06, 480p $0.04 · {_FRAMES16}; SAM 3.1's mask $0.01 per 16 frames", _VACE14_PRICE),
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "720p"})
+model("fuobe-genjutsu-swap-lite", "Fuobe Genjutsu Lite · Swap", "Fuobe Original", "fuobe-genjutsu", "video",
+      "The quick tier: Wan VACE at 480p with fal's accelerated sampling",
+      [("video-swap", _VACE14, "fal", {"keys": {"mask": "mask_video_url"}, "fixed": {"resolution": "480p", "acceleration": "regular"}})],
+      original=True, pricing=("second", 0.04, f"480p · {_FRAMES16}"), options={"resolutions": ["480p"]},
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "480p"})
+model("fuobe-genjutsu-restyle", "Fuobe Genjutsu · Restyle", "Fuobe Original", "fuobe-genjutsu", "video",
+      "Every frame takes the look of a restyled first frame, motion kept by depth: Wan 2.2 Fun VACE",
+      [("v2v", "fal-ai/wan-22-vace-fun-a14b/depth")],
+      original=True, fit_values=True, pricing=("second", 0.1, f"720p; 580p $0.075, 480p $0.05 · {_FRAMES16}; the first frame's restyle is priced on its own",
+                                               {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True}, defaults={"resolution": "720p"})
+# Character swap (Openjutsu / Akatz Labs' H3 Character Swap): the part of the clip (5–15 s) is Video 1, the character
+# Image 1 and the anchor first frame Image 2. Prompt expansion off so H3's reference tags reach the model as written.
+model("fuobe-character-swap", "Fuobe Character swap", "Fuobe Original", "fuobe-character-swap", "video",
+      "The person in your clip becomes your character, same performance, scene and sound: MiniMax H3 with Akatz Labs' swap LoRA",
+      [("video-swap", "minimax/h3/reference-to-video/lora", "fal", {"videoArray": True, "fixed": {"prompt_expansion_mode": "disabled", "aspect_ratio": "adaptive"}})],
+      original=True, fit_values=True, badges=["audio"],
+      pricing=("second", 0.075, "768p; 480p $0.0625/s; whole seconds, 5–15 per call", {"byResolution": {"768p": 0.075, "480p": 0.0625}}),
+      options={"resolutions": ["480p", "768p"]}, defaults={"resolution": "768p"})
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
+# Fuobe DoP's Focus Change in the cloud (O4, research §7.3): LTX-2.5's own focus_shift move (camera_motion) on the fast
+# endpoint, open weights hosted with no LoRAs. 720p, the start frame's shape, silent like every DoP clip. A helper
+# the preset runs on, not a picker model.
+model("ltx-2-5-fast", "LTX 2.5 Fast", "Lightricks", "ltx", "video", "LTX-2.5's built-in camera moves (focus shift, dolly, jib) from a start frame",
+      [("i2v", "lightricks/ltx-2.5/image-to-video/fast")],
+      pricing=("second", 0.09, "720p; 1080p $0.13/s, 1440p $0.19/s, 4K $0.30/s; sound included",
+               {"byResolution": {"720p": 0.09, "1080p": 0.13, "1440p": 0.19, "2160p": 0.3}}),
+      defaults={"aspectRatio": "auto", "duration": 6, "resolution": "720p", "generateAudio": False}, hidden=True)
 model("pixverse-v6", "PixVerse V6", "PixVerse", "pixverse", "video", "Stylized social video with transitions",
       [("t2v", "fal-ai/pixverse/v6/text-to-video"), ("i2v", "fal-ai/pixverse/v6/image-to-video"), ("flf2v", "fal-ai/pixverse/v6/transition"),
        ("extend", "fal-ai/pixverse/v6/extend")],
@@ -370,6 +610,13 @@ model("happy-horse-video-edit", "Happy Horse Video Edit", "Alibaba", "happy-hors
       [("v2v", "alibaba/happy-horse/video-edit")], badges=["new", "audio"], defaults={"resolution": "720p"},
       pricing=("second", 0.28, "720p, input + output seconds; 1080p $0.56", {"byResolution": {"720p": 0.28, "1080p": 0.56}, "inputSeconds": True}),
       controls=[("audio_setting", "Audio")])
+# Happy Horse 1.1 (build plan O7): fal hosts Alibaba's three endpoints (partnerEndpoints, read
+# 2026-10-27): $0.14/s at 720p, $0.18/s at 1080p; 3-15 s; up to 9 reference images.
+model("happy-horse-1-1", "Happy Horse 1.1", "Alibaba", "happy-horse", "video", "Alibaba's expressive character-animation video model",
+      [("t2v", "alibaba/happy-horse/v1.1/text-to-video"), ("i2v", "alibaba/happy-horse/v1.1/image-to-video"),
+       ("ref2v", "alibaba/happy-horse/v1.1/reference-to-video", "fal", {"max_images": 9})],
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
+      pricing=("second", 0.14, "720p; 1080p $0.18/s", {"byResolution": {"720p": 0.14, "1080p": 0.18}}), options={"maxImages": 9})
 model("lucy-edit-pro", "Lucy Edit Pro", "Decart", "lucy", "video",
       "Text-guided video edits that keep motion and identity — outfits, props, styles",
       [("v2v", "decart/lucy-edit/pro")], defaults={"resolution": "720p"}, fixed={"sync_mode": False}, pricing=("second", 0.15, "720p"))
@@ -415,10 +662,39 @@ model("seedvr-image", "SeedVR2 Upscale", "ByteDance Seed", "seedvr", "image", "O
       [("upscale-image", "fal-ai/seedvr/upscale/image")])
 model("recraft-crisp", "Recraft Crisp Upscale", "Recraft", "recraft", "image", "Clean, crisp upscale for design work",
       [("upscale-image", "fal-ai/recraft/upscale/crisp")])
-model("topaz-video", "Topaz Video Upscale", "Topaz Labs", "topaz", "video", "Upscale and smooth any clip to 4K / 60fps",
-      [("upscale-video", "fal-ai/topaz/upscale/video")], pricing=("second", 0.02), fixed={"upscale_factor": 2})
+# Higgsfield's four video upscalers (higgsfield-delta-4.md §4.3), each with the options its API takes.
+# Topaz Video: the precision models (Proteus by default, Artemis / Iris for faces, Rhea for 4K+, Gaia for animation,
+# Theia for fine detail), Original / 1080p / 1440p / 4K (a factor of the clip's size), frame rate Original / 24 / 30 / 60
+# (the API's 16-60; Higgsfield's 120 is FPS Boost's) and the enhancement sliders. H.264 so it plays in every browser.
+model("topaz-video", "Topaz Video", "Topaz Labs", "topaz", "video", "Enhance and upscale low- to medium-quality footage, up to 4K and 60 fps",
+      [("upscale-video", "topaz/upscale/video/precision")], badges=["4k"],
+      pricing=("second", 0.02, "1080p at 30 fps; 720p $0.01/s, above 1080p $0.06/s; 60 fps doubles", {"byResolution": {"1080p": 0.02, "1440p": 0.06, "4K": 0.06}, "factors": [{"param": "targetFps", "values": {"60": 2}}]}),
+      defaults={"resolution": "1080p"}, upscale_tiers=["Original", "1080p", "1440p", "4K"], fps_targets=[24, 30, 60],
+      api_defaults={"H264_output": True}, controls=[("model", "Model")],
+      sliders=[("recover_detail", "Recover details"), ("noise", "Reduce noise"), ("compression", "Revert compression"), ("halo", "Reduce halo"), ("grain", "Grain")])
+# Topaz Starlight Precise: the generative models (Starlight Precise 2.6 by default; HQ, Mini, Sharp, Fast 2 at half the price).
+model("topaz-starlight", "Topaz Starlight", "Topaz Labs", "topaz", "video", "Recover natural detail in faces, textures and text: generative upscale to 1080p or 4K",
+      [("upscale-video", "topaz/upscale/video/generative")], badges=["new", "4k"],
+      pricing=("second", 0.26, "4K at 30 fps; up to 1080p $0.12/s; 60 fps doubles; Starlight Fast 2 is half", {"byResolution": {"1080p": 0.12, "4K": 0.26}, "factors": [{"param": "targetFps", "values": {"60": 2}}, {"param": "model", "values": {"Starlight Fast 2": 0.5}}]}),
+      defaults={"resolution": "4K"}, upscale_tiers=["1080p", "4K"], fps_targets=[24, 30, 60],
+      api_defaults={"H264_output": True}, controls=[("model", "Model")], sliders=[("softness", "Softness")])
+# ByteDance Upscale: up to 8K with scene presets ("Common" is the API's general preset).
+model("bytedance-video-upscale", "ByteDance Upscale", "ByteDance", "bytedance-upscaler", "video", "High-fidelity upscaling up to 8K with scene presets",
+      [("upscale-video", "fal-ai/bytedance-upscaler/upscale/video")], badges=["new"],
+      pricing=("second", 0.0072, "1080p at 30 fps; 2K $0.0144/s, 4K $0.0288/s (6K / 8K estimated from 4K by pixel count); 60 fps doubles; Pro is 10x", {"byResolution": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288, "6k": 0.0648, "8k": 0.1152}, "factors": [{"param": "targetFps", "values": {"60": 2}}, {"param": "enhancement_tier", "values": {"pro": 10}}]}),
+      defaults={"resolution": "1080p", "targetFps": 30}, fps_targets=[30, 60],
+      controls=[("enhancement_preset", "Preset", {"general": "Common", "ugc": "UGC (social clips)", "short_series": "Short series", "aigc": "AI-generated video", "old_film": "Old film"}),
+                ("enhancement_tier", "Model version"), ("fidelity", "Fidelity"), ("bit_depth", "Bit depth")])
+# FLUX.3 Upscale: Precise (source-faithful, Higgsfield's default) or Creative detail, guided by an optional prompt; 1.5-3x of the clip.
+model("flux-video-upscale", "FLUX.3 Upscale", "Black Forest Labs", "flux", "video", "Preserve the original or creatively enhance detail (MP4, up to 20 s)",
+      [("upscale-video", "blackforestlabs/flux-video-upscale")], badges=["new"],
+      pricing=("second", 0.15, "2K, precise; 1080p $0.084/s, 4K $0.33/s; Creative about 1.4x", {"byResolution": {"1080p": 0.084, "1440p": 0.15, "4K": 0.33}, "factors": [{"param": "creativity", "values": {"1": 1.4}}]}),
+      defaults={"resolution": "1440p"}, upscale_tiers=["1080p", "1440p", "4K"], options={"promptOptional": True},
+      api_defaults={"creativity": 0}, controls=[("creativity", "Creativity", {0: "Precise", 1: "Creative"})])
+# SeedVR2: target_resolution only applies in "target" mode (the API's default mode is a 2x factor).
 model("seedvr-video", "SeedVR2 Video Upscale", "ByteDance Seed", "seedvr", "video", "Restore and upscale video",
-      [("upscale-video", "fal-ai/seedvr/upscale/video")])
+      [("upscale-video", "fal-ai/seedvr/upscale/video")], fixed={"upscale_mode": "target"}, defaults={"resolution": "1080p"},
+      sliders=[("noise_scale", "Noise")])
 model("birefnet-cloud", "BiRefNet background removal", "ZhengPeng7", "birefnet", "image", "Clean cut-outs with hair detail",
       [("bg-remove", "fal-ai/birefnet/v2")], pricing=("image", 0.0), fixed={"operating_resolution": "2048x2048", "output_format": "png"})
 model("elevenlabs-tts", "ElevenLabs v3", "ElevenLabs", "elevenlabs", "audio", "Most expressive speech — audio tags like [whispers] and [laughs]",
@@ -453,7 +729,7 @@ model("heygen-translate-fast", "HeyGen Translate Speed", "HeyGen", "heygen", "vi
 model("elevenlabs-dubbing", "ElevenLabs Dubbing", "ElevenLabs", "elevenlabs", "video", "Dub video or audio while keeping each speaker's voice",
       [("dub", "fal-ai/elevenlabs/dubbing")], pricing=("minute", 0.6))
 # Sound effects and music (research part 3): Mirelo and Sonilo are the jobs Higgsfield's Audio runs.
-model("mirelo-sfx-2", "Mirelo SFX 2.0", "Mirelo", "mirelo", "audio", "Higgsfield's sound-effects model — layered, cinematic SFX up to 10 minutes",
+model("mirelo-sfx-2", "Mirelo SFX 2.0", "Mirelo", "mirelo", "audio", "Layered, cinematic sound effects for a clip or a prompt, up to 10 minutes",
       [("sfx", "mirelo-ai/sfx2.0/text-to-audio")], badges=["top", "new"], defaults={"duration": 5}, options={"durations": [2, 5, 10, 30, 60]},
       pricing=("second", 0.01, "intro price until 2026-12-13, then $0.015"))
 # Sonilo answers in AAC unless asked: MP3 plays and downloads everywhere.
@@ -464,9 +740,9 @@ model("stable-audio-3-sfx", "Stable Audio 3 SFX", "Stability AI", "stable-audio"
       [("sfx", "fal-ai/stable-audio-3/small/sfx/text-to-audio")], defaults={"duration": 10}, options={"durations": [5, 10, 30, 60]})
 model("cassette-sfx", "CassetteAI Sound Effects", "CassetteAI", "cassette", "audio", "One-cent sound effects up to 30 s",
       [("sfx", "cassetteai/sound-effects-generator")], badges=["fast"], defaults={"duration": 5}, options={"durations": [2, 5, 10, 30]})
-model("seed-audio", "Seed Audio 1.0", "ByteDance", "seed-audio", "audio", "Higgsfield's Seed Audio: speech, ambience, music and Foley from one prompt",
+model("seed-audio", "Seed Audio 1.0", "ByteDance", "seed-audio", "audio", "Speech, ambience, music and Foley from one prompt",
       [("sfx", "bytedance/seed-audio-1.0"), ("tts", "bytedance/seed-audio-1.0")], badges=["new"])
-model("sonilo-music", "Sonilo Music 1.1", "Sonilo", "sonilo", "audio", "Higgsfield's music model — full tracks up to 10 minutes",
+model("sonilo-music", "Sonilo Music 1.1", "Sonilo", "sonilo", "audio", "Full music tracks up to 10 minutes",
       [("music", "sonilo/v1.1/text-to-music")], badges=["top", "new"], defaults={"duration": 30}, options={"durations": [15, 30, 60, 120, 240]})
 model("lyria-3", "Lyria 3", "Google", "lyria", "audio", "Google DeepMind's music model, from a prompt or an image",
       [("music", "fal-ai/lyria3"), ("music", "google/lyria-3", "replicate")])
@@ -489,14 +765,17 @@ model("elevenlabs-sfx", "ElevenLabs Sound Effects", "ElevenLabs", "elevenlabs", 
       [("sfx", "fal-ai/elevenlabs/sound-effects/v2")], pricing=("second", 0.002), defaults={"duration": 5}, options={"durations": [2, 5, 10, 22]})
 model("elevenlabs-music", "ElevenLabs Music", "ElevenLabs", "elevenlabs", "audio", "Studio-quality songs from a prompt",
       [("music", "fal-ai/elevenlabs/music")], pricing=("minute", 0.6), defaults={"duration": 30}, options={"durations": [15, 30, 60, 120]})
-model("birefnet-video", "BiRefNet video (hosted)", "ZhengPeng7", "birefnet", "video", "Transparent WebM cut-outs of the subject",
-      [("bg-remove-video", "fal-ai/birefnet/v2/video")], pricing=("second", 0.0), fixed={"video_output_type": "VP9 (.webm)", "model": "General Use (Heavy)"})
+# Remove background (Video tools): the cut-out, or (BiRefNet: output_mask adds mask_video) its alpha mask.
+model("birefnet-video", "BiRefNet video (hosted)", "ZhengPeng7", "birefnet", "video", "Transparent WebM cut-outs of the subject, or their alpha mask",
+      [("bg-remove-video", "fal-ai/birefnet/v2/video", "fal", {"keys": {"maskOutput": "output_mask"}})], pricing=("second", 0.0),
+      fixed={"video_output_type": "VP9 (.webm)", "model": "General Use (Heavy)"})
 model("bria-video-bg", "Bria video background removal", "Bria", "bria", "video", "Production-grade video matting with audio kept",
       [("bg-remove-video", "bria/video/background-removal/v3")], pricing=("second", 0.05),
-      fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"})
+      fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"}, options={"matteOutputs": ["cutout"]})
 model("depth-anything-video-cloud", "Video Depth Anything (hosted)", "ByteDance", "depth-anything", "video", "Stable depth maps for every frame",
-      # The colour map follows params.colormap (Higgsfield's Depth Map picker); grayscale unless asked.
-      [("depth-video", "fal-ai/depth-anything-video", "fal", {"keys": {"colormap": "colormap"}})], pricing=("second", 0.04),
+      # The colour map follows params.colormap (Higgsfield's Depth Map picker); grayscale unless asked. Side by side
+      # puts the original clip next to the map.
+      [("depth-video", "fal-ai/depth-anything-video", "fal", {"keys": {"colormap": "colormap", "sideBySide": "side_by_side"}})], pricing=("second", 0.04),
       fixed={"model": "VDA-Base"}, api_defaults={"colormap": "grayscale"})
 model("lightx-relight", "LightX Relight", "LightX", "lightx", "video", "Relight a video from a description and a light direction",
       [("relight-video", "fal-ai/lightx/relight")], pricing=("second", 0.1),
@@ -511,7 +790,7 @@ model("mirelo-sfx-2-video", "Mirelo SFX 2.0 for video", "Mirelo", "mirelo", "vid
 
 # ----- Image tools: layers, text layers, cut-outs, vectors (research part 3; Higgsfield Layers)
 model("seedream-5-layers", "Seedream 5.0 Layers", "ByteDance", "seedream", "image",
-      "The model Higgsfield Layers runs on: background + up to 16 named, positioned layers",
+      "Splits a picture into a background and up to 16 named, positioned layers",
       [("layers", "bytedance/seedream/v5/pro/layerize")], badges=["top", "new"], defaults={"resolution": "auto"},
       pricing=("request", 0.17, "$0.034 per layer, ≈5 layers; double above 1536²"))
 model("seedream-5-flash-layers", "Seedream 5.0 Flash Layers", "ByteDance", "seedream", "image", "Faster, cheaper Seedream layer split",
@@ -633,12 +912,13 @@ model("wan-22-vace-inpaint", "Wan 2.2 VACE Fun Inpaint (hosted)", "Alibaba Wan",
                {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
       api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True},
       options={"requires": {"mask": True, "msg": "Paint the area to change on the first frame"}})
-# The mask maker for the erase and swap chains: what you name or click becomes a black-and-white mask video
-# (apply_mask off; whether the matte is clean black and white is unverified without a run).
+# The mask maker for the erase and swap chains, and Remove background's "keep what you name" on the cloud (Higgsfield
+# runs SAM 3 video there): what you name or click becomes a black-and-white mask video (apply_mask off; whether the
+# matte is clean black and white is unverified without a run). fal can't cut out by words, so it makes the mask only.
 model("sam-3-1-video-mask", "SAM 3.1 video mask", "Meta", "sam", "video",
-      "A mask video of what you name or click, tracked through the clip",
-      [("bg-remove-video", "fal-ai/sam-3-1/video")], fixed={"apply_mask": False}, hidden=True,
-      pricing=("second", 0.015, "$0.01 per 16 input frames (24 fps)"))
+      "The alpha mask of what you name (“the dog”), tracked through the clip",
+      [("bg-remove-video", "fal-ai/sam-3-1/video")], fixed={"apply_mask": False},
+      pricing=("second", 0.015, "$0.01 per 16 input frames (24 fps)"), options={"keepsNamed": True, "matteOutputs": ["matte"]})
 
 # ----- Swap who or what is on camera
 model("p-video-replace", "P-Video Replace", "Pruna AI", "p-video", "video",
@@ -647,14 +927,40 @@ model("p-video-replace", "P-Video Replace", "Pruna AI", "p-video", "video",
       pricing=("second", 0.03, "720p; 1080p $0.06", {"byResolution": {"720p": 0.03, "1080p": 0.06}}), defaults={"resolution": "720p"},
       # "Identity reference image(s) (1-3)".
       options={"maxImages": 3})
+# Genjutsu's hosted open alternatives (O5): Wan 2.2 Animate Replace and SCAIL-2 for people, Wan Motion with pose
+# retargeting; and MiniMax's own person swap, H3 Max Recast (a partner model: closed weights).
+model("wan-22-animate-replace", "Wan 2.2 Animate Replace (hosted)", "Alibaba Wan", "wan", "video",
+      "Swaps the person on camera for your character, lighting matched to the scene",
+      [("video-swap", "fal-ai/wan/v2.2-14b/animate/replace")], fit_values=True,
+      pricing=("second", 0.08, f"720p; 580p $0.06, 480p $0.04 · {_FRAMES16}", _ANIMATE_PRICE), defaults={"resolution": "720p"})
+_SCAIL_PROMPT = "The reference character performs the motion of the video"
+model("scail-2", "SCAIL-2 (hosted)", "SCAIL", "scail", "video",
+      "Character animation without skeletons: humans, several people or animals; or replace the person",
+      [("motion-transfer", "fal-ai/scail-2", "fal", {"fixed": {"mode": "animation"}}),
+       ("video-swap", "fal-ai/scail-2", "fal", {"fixed": {"mode": "replacement"}})],
+      controls=[("subject_type", "Subject"), ("driving_type", "Driven by")], api_defaults={"prompt": _SCAIL_PROMPT},
+      # Words are optional: the API's own prompt (above) goes when none are given.
+      options={"promptOptional": True},
+      pricing=("second", 0.2, "512p or 704p; output at 16 fps, up to 10 s a call"), defaults={"resolution": "512p"})
+model("wan-motion", "Wan Motion (hosted)", "Alibaba Wan", "wan", "video",
+      "Wan-Animate with pose retargeting: the motion fitted to your character's proportions",
+      [("motion-transfer", "fal-ai/wan-motion")],
+      pricing=("second", 0.06, "720p; billed as frames ÷ 24 (a 30 fps clip costs 1.25× its length); +$0.08 with identity enhancement"))
+model("h3-max-recast", "MiniMax H3 Max Recast", "MiniMax", "hailuo", "video",
+      "MiniMax's own person swap: 1–4 people from photos, across shots, sound kept",
+      [("video-swap", "minimax/h3-max/recast")], fit_values=True, badges=["new", "audio"], controls=[("enhance_realism", "Enhance realism")],
+      pricing=("second", 0.3, "768p; 1080p $0.45/s; references free; 5–30 s, no shot over 15 s", {"byResolution": {"768p": 0.3, "1080p": 0.45}}),
+      defaults={"resolution": "768p"})
 
 # ----- FPS boost, slow motion and SDR to HDR (Higgsfield's Upscale tools)
 model("topaz-fps-boost", "Topaz FPS Boost", "Topaz Labs", "topaz", "video",
       "Smooth frame interpolation to 16–120 fps, or up to 8× slow motion",
       [("interpolate", "topaz/interpolate/video")], badges=["new"],
-      pricing=("second", 0.03, "1080p 30→60 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output"),
+      pricing=("second", 0.03, "1080p 30→60 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output", {"factors": [{"param": "model", "values": {"Aion": 1.67}}]}),
       # H.265 unless asked: H.264 plays in every browser.
-      api_defaults={"H264_output": True}, controls=[("model", "Model")])
+      api_defaults={"H264_output": True}, controls=[("model", "Model")],
+      # Higgsfield's FPS Boost chips (60 by default) and slow motion (the API takes 1-8).
+      fps_targets=[24, 30, 60, 90, 120], defaults={"targetFps": 60}, options={"slowdowns": [1, 2, 4, 8]})
 # Doubles the frame rate (one new frame per pair) at the clip's own speed; its fps field only applies with
 # use_calculated_fps off, so a target frame rate is not sent.
 model("rife-video-cloud", "RIFE (hosted)", "Open source", "rife", "video",
@@ -696,16 +1002,21 @@ model("triposplat", "TripoSplat", "Tripo", "tripo", "model3d", "A Gaussian splat
       [("splat", "tripo3d/triposplat")], badges=["new"], fixed={"output_format": "ply"}, sliders=[("num_gaussians", "Gaussians")])
 # Its prompt defaults to "car" at the API, so Fuobe always asks for one.
 model("sam-3d-objects", "SAM 3D Objects", "Meta", "sam", "model3d", "The objects you name, rebuilt in 3D where they stand in the photo",
+      # export_textured_glb defaults to false (a grey mesh): the viewer shows the textured one.
       [("image-to-3d", "fal-ai/sam-3/3d-objects")], badges=["new"], pricing=("request", 0.02, "per unit; fal does not say what a unit is"),
-      options={"requires": {"prompt": True, "msg": "Name the objects to rebuild, e.g. “chair, lamp”"}})
+      fixed={"export_textured_glb": True}, options={"requires": {"prompt": True, "msg": "Name the objects to rebuild, e.g. “chair, lamp”"}})
 model("tripo-h3-1-text", "Tripo H3.1 Text to 3D", "Tripo", "tripo", "model3d", "A textured 3D model from a description",
       [("text-to-3d", "tripo3d/h3.1/text-to-3d")], pricing=("request", 0.2, "standard textures; untextured $0.10, HD $0.30"),
       controls=[("texture_quality", "Texture"), ("geometry_quality", "Geometry")])
 model("meshy-7-1-multi", "Meshy 7.1 Multi-view", "Meshy", "meshy", "model3d", "One object from up to 4 photos of different sides",
       [("image-to-3d", "meshy/v7.1/multi-image-to-3d")], pricing=("request", 1.2, "textured; untextured $0.80, rigging +$0.20"),
-      controls=[("topology", "Topology")])
+      controls=[("topology", "Topology")], options={"minImages": 2})
 model("meshy-rigging", "Meshy Rigging", "Meshy", "meshy", "model3d", "Rig a humanoid GLB with a skeleton, walk and run cycles, or an animation preset",
-      [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset"))
+      [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset", {"animationUsd": 0.12}))
+# Cinema Studio's "Create 3D scene" on the cloud (part 4 §8): a depth map of the whole frame, which the browser
+# turns into a point cloud with the photo's colours. So scene-3d answers with an image on this model.
+model("marigold-depth", "Marigold V2 Depth", "Marigold", "marigold", "image", "A depth map of the whole frame, for the 3D scene your browser builds",
+      [("scene-3d", "fal-ai/marigold-v2")], hidden=True, fixed={"prediction_type": "depth"})
 
 # ----- New video models
 model("flux-3-max", "FLUX 3 Max", "Black Forest Labs", "flux", "video",
@@ -725,7 +1036,6 @@ model("heygen-video", "HeyGen Video", "HeyGen", "heygen", "video",
       badges=["new", "fast"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "768p"}, ranged_durations=True,
       pricing=("second", 0.02, "480p and 768p; 1080p and 2K $0.06", {"byResolution": {"480p": 0.02, "768p": 0.02, "1080p": 0.06, "2k": 0.06}}),
       controls=[("prompt_enhancement", "Prompt boost")])
-# Higgsfield offers Grok Imagine Video 1.5 too (its Higgsfield route is added by gen-higgsfield-models.py).
 # Its routes take different values (fal's reference-to-video stops at 720p), so each lists its own (fit_values).
 model("grok-imagine-video-1-5", "Grok Imagine Video 1.5", "xAI", "grok", "video", "xAI's video model with references and audio",
       [("t2v", "xai/grok-imagine-video/v1.5/text-to-video"), ("i2v", "xai/grok-imagine-video/v1.5/image-to-video"),
@@ -775,15 +1085,14 @@ model("krea-3", "Krea 3", "Krea", "krea", "image", "Krea's new image model — g
       badges=["new"], defaults={"aspectRatio": "1:1"}, pricing=("megapixel", 0.025, "output + each reference; Replicate $0.03–0.08 per image"),
       # Both APIs take up to 8 images.
       options={"maxImages": 8})
-# Higgsfield offers Grok Imagine Image 2.0 too (its Higgsfield route is added by gen-higgsfield-models.py).
-# fal's text-to-image has no "auto" and Higgsfield no 20:9 / 19.5:9 / 9:19.5 / 9:20: each route lists what it takes (fit_values).
+# fal's text-to-image has no "auto": each route lists what it takes (fit_values).
 model("grok-imagine-image-2", "Grok Imagine Image 2.0", "xAI", "grok", "image", "xAI's image model — bold, fast, few refusals",
-      # fal's edit takes "a maximum of 5 images"; Higgsfield's route takes 10, so a run with more than 5 goes there.
+      # fal's edit takes "a maximum of 5 images".
       [("t2i", "xai/grok-imagine-image/v2.0/text-to-image"), ("edit", "xai/grok-imagine-image/v2.0/edit", "fal", {"max_images": 5})],
       defaults={"aspectRatio": "1:1", "resolution": "1k"}, fit_values=True,
-      pricing=("image", 0.06, "1K medium on fal; low $0.04; 2K $0.06–0.08; +$0.01 per input image; Higgsfield $0.04 (1K) / $0.08 (2K)",
+      pricing=("image", 0.06, "1K medium on fal; low $0.04; 2K $0.06–0.08; +$0.01 per input image",
                {"byResolution": {"1k": 0.06, "2k": 0.08}}),
-      controls=[("quality", "Quality")], options={"maxImages": 10})
+      controls=[("quality", "Quality")], options={"maxImages": 5})
 model("bria-fibo-2", "Bria FIBO 2", "Bria", "bria", "image", "Structured prompts; Bria says it is trained on licensed data only",
       [("t2i", "bria/fibo-2/generate"), ("edit", "bria/fibo-2/edit")], badges=["new"], defaults={"aspectRatio": "1:1"})
 model("ideogram-vector", "Ideogram Vector", "Ideogram", "ideogram", "image", "Editable SVGs from a prompt, or any image traced to SVG",
@@ -864,7 +1173,7 @@ def palette_format(spec):
         if {"r", "g", "b"} <= set(item):
             return "rgb-object"  # Recraft on fal: [{r, g, b}]
         if "rgb" in (item.get("fields") or item):
-            return "rgb-array"  # Recraft on Higgsfield: [{rgb: [r, g, b]}]
+            return "rgb-array"  # [{rgb: [r, g, b]}]
         if spec.get("items") == "string":
             return "hex"
     return None
@@ -898,7 +1207,9 @@ def add_slider(opts, param, label, spec):
     if not spec or "minimum" not in spec or "maximum" not in spec or any(s["param"] == param for s in opts.get("sliders", [])):
         return
     lo, hi = spec["minimum"], spec["maximum"]
-    opts.setdefault("sliders", []).append({"param": param, "label": label, "min": lo, "max": hi, "step": 0.05 if hi - lo <= 4 else 1,
+    # Narrow ranges (Topaz grain 0-0.1) get a step that still gives them about twenty stops.
+    step = 1 if hi - lo > 4 else 0.05 if hi - lo > 0.2 else round((hi - lo) / 20, 4)
+    opts.setdefault("sliders", []).append({"param": param, "label": label, "min": lo, "max": hi, "step": step,
                                            "default": spec.get("default", lo)})
 
 
@@ -908,14 +1219,17 @@ def is_sentinel(v, default):
     return s == "auto" or (s == "none" and str(default).strip().lower() == "none")
 
 
-def add_control(opts, param, label, spec, fallback=None):
-    """fallback: what Fuobe sends when the control is left on Auto (a FieldMap default), shown as the control's default."""
+def add_control(opts, param, label, spec, fallback=None, labels=None):
+    """fallback: what Fuobe sends when the control is left on Auto (a FieldMap default), shown as the control's default.
+    labels: names for values that read badly, only for values the enum has."""
     default = fallback if fallback is not None else (spec or {}).get("default")
     vals = [v for v in ((spec or {}).get("values") or []) if v != "" and not is_sentinel(v, default)]
     if not vals or any(c["param"] == param for c in opts.get("controls", [])):
         return
     keep = default is not None and not is_sentinel(default, default)
-    opts.setdefault("controls", []).append({"param": param, "label": label, "values": vals, **({"default": default} if keep else {})})
+    named = {str(k): v for k, v in (labels or {}).items() if k in vals}
+    opts.setdefault("controls", []).append({"param": param, "label": label, "values": vals, **({"default": default} if keep else {}),
+                                            **({"labels": named} if named else {})})
 
 
 def map_fields(fmap):
@@ -924,6 +1238,10 @@ def map_fields(fmap):
     for k, v in fmap.items():
         if k in ("fixed", "defaults"):
             out += list(v)
+        elif k == "loras":
+            out += lora_field_names(v)
+        elif k == "size":
+            out += [v["key"]] if v.get("key") else [v["width"], v["height"]]
         elif k in ("seedRange", "maskFormat", "ranges", "ignore", "maxImages", "omitEmptyPrompt"):
             continue
         elif isinstance(v, str):
@@ -933,6 +1251,63 @@ def map_fields(fmap):
             # Ken Burns: the zoom direction and easing are fields of their own.
             out += [v[f]["key"] for f in ("direction", "easing") if isinstance(v.get(f), dict) and isinstance(v[f].get("key"), str)]
     return [f.split(".")[0] for f in out]
+
+
+def lora_field_names(f):
+    """The payload fields a FieldMap.loras writes."""
+    if f["shape"] == "items":
+        return [f["key"]]
+    if f["shape"] == "arrays":
+        return [f["weights"], f["scales"]]
+    if f["shape"] == "single":
+        return [f["weights"], f["scale"]]
+    return [f[x][y] for x in ("high", "low") for y in ("weights", "scale")]
+
+
+def scale_range(spec):
+    lo, hi = num((spec or {}).get("minimum")), num((spec or {}).get("maximum"))
+    return {"min": lo, "max": hi} if lo is not None and hi is not None else None
+
+
+def lora_field(provider, ep):
+    """FieldMap.loras for an endpoint that takes LoRAs, from its research inputs and its hostedLoraEndpoints record."""
+    inputs = (EPS.get((provider, ep)) or {}).get("inputs") or {}
+    summary = (HOSTED_LORA.get((provider, ep)) or {}).get("lora") or {}
+    if provider == "replicate":
+        expert = ("lora_weights_transformer", "lora_scale_transformer", "lora_weights_transformer_2", "lora_scale_transformer_2")
+        if set(expert) <= set(inputs):
+            f = {"shape": "experts", "high": {"weights": expert[0], "scale": expert[1]}, "low": {"weights": expert[2], "scale": expert[3]}}
+            rng = scale_range(inputs[expert[1]])
+        elif (inputs.get("lora_weights") or {}).get("type") == "array" and "lora_scales" in inputs:
+            f = {"shape": "arrays", "weights": "lora_weights", "scales": "lora_scales"}
+            rng = None
+        elif "lora_weights" in inputs and "lora_scale" in inputs:
+            f = {"shape": "single", "weights": "lora_weights", "scale": "lora_scale"}
+            rng = scale_range(inputs["lora_scale"])
+        else:
+            return None
+        if rng:
+            f["range"] = rng
+        return f
+    key = summary.get("field") or "loras"
+    spec = inputs.get(key)
+    if not spec or spec.get("type") != "array":
+        return None
+    item = spec.get("itemSchema") or {}
+    f = {"shape": "items", "key": key}
+    mx = summary.get("maxCount") if isinstance(summary.get("maxCount"), int) else num((re.search(r"maximum (\d+)", spec.get("desc") or "") or [None, None])[1])
+    if mx:
+        f["max"] = mx
+    if spec.get("required") or summary.get("required"):
+        f["required"] = True
+    rng = scale_range(item.get("scale"))
+    if rng:
+        f["range"] = rng
+    if item.get("transformer"):
+        f["transformer"] = item["transformer"].get("default") or "both"
+    if "weight_name" in item:
+        f["weightName"] = True
+    return f
 
 
 def mask_format(ep):
@@ -1019,6 +1394,15 @@ def part4_slots(op, kf, inputs, m, opts, fmap):
         fmap["frameInterval"] = kf["frameInterval"]
     if "colormap" in kf and op == "depth-video":
         fmap["colormap"] = kf["colormap"]
+        # The picker offers the API's own maps (Higgsfield's Depth Map: Grayscale, Turbo, Inferno, Magma, Viridis).
+        opts["colormaps"] = union(opts.get("colormaps", []), [str(v) for v in enum_of(inputs, kf["colormap"])])
+    # Depth maps beside the original clip, and Remove background's alpha mask (Higgsfield's Video tools options).
+    if "sideBySide" in kf and op == "depth-video" and (inputs.get(kf["sideBySide"]) or {}).get("type") == "boolean":
+        fmap["sideBySide"] = kf["sideBySide"]
+        opts["sideBySide"] = True
+    if "maskOutput" in kf and op == "bg-remove-video" and (inputs.get(kf["maskOutput"]) or {}).get("type") == "boolean":
+        fmap["matteOutput"] = {"key": kf["maskOutput"], "values": {"cutout": False, "matte": True}}
+        opts["matteOutputs"] = ["cutout", "matte"]
     if "frames" in kf and op == "images-to-video":
         item = (inputs.get(kf["frames"]) or {}).get("itemSchema") or {}
         url, frames = next((k for k in item if "url" in k), None), next((k for k in item if "frame" in k), None)
@@ -1067,6 +1451,12 @@ def part4_ranges(op, inputs, fmap):
 
 def build_route(op, ep, provider, m, opts, ropts=None):
     ropts = ropts or {}
+    # A Replicate model run by version ("owner/name:<version>") is researched under its name.
+    if ropts.get("pin"):
+        version = (HOSTED_LORA.get((provider, ep)) or {}).get("version")
+        if not version:
+            warn(f"{m['id']}: {ep} has no researched version to pin")
+            return None
     e = EPS.get((provider, ep))
     if not e:
         warn(f"{m['id']}: endpoint {provider}:{ep} not in research")
@@ -1150,8 +1540,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # The model's own slider/control labels win over the generic voice-setting labels below.
     for path, label in m.get("sliders") or []:
         add_slider(opts, path, label, spec_at(inputs, path))
-    for path, label in m.get("controls") or []:
-        add_control(opts, path, label, spec_at(inputs, path), (m.get("api_defaults") or {}).get(path))
+    for path, label, *labels in m.get("controls") or []:
+        add_control(opts, path, label, spec_at(inputs, path), (m.get("api_defaults") or {}).get(path), labels[0] if labels else None)
     for k, v in inputs.items():
         # Voice settings belong to speech models; a transcriber's "temperature" is not a voice's variety.
         if k in SLIDER_LABELS and isinstance(v, dict) and (op in ("tts", "voice-change", "dialogue") or k == "strength"):
@@ -1213,7 +1603,64 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         fmap["styleId"] = kf["styleId"]
     if "numLayers" in kf:
         fmap["numLayers"] = kf["numLayers"]
+    # Video models whose length is a frame count (Wan 2.2 num_frames at 16 fps, LTX-2.3 at 24): the duration picked
+    # becomes frames (FieldMap.numFrames, 4n+1 / 8n+1 by model), and the durations offered are the ones that fit.
+    nf = kf.get("numFrames") or (kf.get("duration") if kf.get("duration") in ("num_frames", "frames") else None)
+    if nf and op in ("t2v", "i2v", "flf2v", "extend", "v2v") and (inputs.get(nf) or {}).get("type") == "integer":
+        kf.pop("duration", None)
+        kf.pop("numFrames", None)
+        spec = inputs.get(nf) or {}
+        fps_key = kf.get("fps") or next((k for k in ("fps", "frames_per_second") if k in inputs), None)
+        fps = num((inputs.get(fps_key) or {}).get("default")) or 16
+        lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
+        # Extend's num_frames is the length to add (the picked duration), never the input clip's own length.
+        fmap["numFrames"] = {"key": nf, "fps": fps, **({"min": lo} if lo is not None else {}), **({"max": hi} if hi is not None else {}),
+                             **({"step": m["frame_step"]} if m.get("frame_step") else {}), **({"fromDuration": True} if op == "extend" else {})}
+        opts["durations"] = union(opts.get("durations", []), [d for d in NICE_DURATIONS if (lo is None or d * fps >= lo) and (hi is None or d * fps <= hi + (m.get("frame_step") or 0))])
+    # Width and height fields (Replicate's Z-Image LoRA model): computed from the aspect ratio (FieldMap.size).
+    if "width" in kf and "height" in kf and "aspectRatio" not in kf:
+        w, h = inputs.get(kf["width"]) or {}, inputs.get(kf["height"]) or {}
+        mx = [x for x in (num(w.get("maximum")), num(h.get("maximum"))) if x is not None]
+        fmap["size"] = {"width": kf["width"], "height": kf["height"], "multiple": 16, **({"max": min(mx)} if mx else {}),
+                        **({"base": num(w.get("default"))} if num(w.get("default")) else {})}
+        opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
+    # Exact sizes per tier (Fuobe Soul's table): one {width, height} object field (fal's image_size, whose union takes
+    # an object) or the width / height fields above; the tiers are the model's resolutions.
+    if m.get("sizes") and not ropts.get("keepSize"):
+        spec = inputs.get(kf.get("aspectRatio") or "image_size") or {}
+        takes_object = spec.get("type") == "union" and any((v == "object{width,height}") or (isinstance(v, dict) and v.get("type") == "object") for v in spec.get("variants") or [])
+        if "size" in fmap:
+            fmap["size"]["table"] = m["sizes"]
+        elif takes_object:
+            fmap["size"] = {"key": kf.get("aspectRatio") or "image_size", "multiple": 16, "table": m["sizes"]}
+            kf.pop("aspectRatio", None)
+        else:
+            warn(f"{m['id']}: {ep} takes neither width / height nor an image_size object for its size table")
+        opts["aspectRatios"] = union(opts.get("aspectRatios", []), list(next(iter(m["sizes"].values())).keys()))
+        opts["resolutions"] = union(opts.get("resolutions", []), list(m["sizes"].keys()))
+    elif ropts.get("keepSize"):
+        # The result keeps the input picture's shape (image_size "auto", the API's default).
+        kf.pop("aspectRatio", None)
     part4_slots(op, kf, inputs, m, opts, fmap)
+    # Frame rates an upscaler (or FPS Boost) can reach: params.targetFps -> its target_fps field.
+    if m.get("fps_targets") and op in ("interpolate", "upscale-video"):
+        key = fmap.get("targetFps") or ("target_fps" if "target_fps" in inputs else None)
+        spec = inputs.get(key) or {}
+        lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
+        bad = [v for v in m["fps_targets"] if (lo is not None and v < lo) or (hi is not None and v > hi)]
+        if key and not bad:
+            fmap["targetFps"] = key
+            opts["fpsTargets"] = union(opts.get("fpsTargets", []), m["fps_targets"])
+        else:
+            warn(f"{m['id']}: frame rates {bad or m['fps_targets']} don't fit {ep}'s target_fps")
+    # Upscalers that take a factor: the resolution tier becomes target / the clip's shorter edge.
+    if m.get("upscale_tiers") and op == "upscale-video":
+        spec = inputs.get("upscale_factor") or {}
+        if spec.get("type") in ("number", "integer"):
+            fmap["upscaleFactor"] = {"key": "upscale_factor", **{k: num(spec[f]) for k, f in (("min", "minimum"), ("max", "maximum")) if num(spec.get(f)) is not None}}
+            opts["resolutions"] = union(opts.get("resolutions", []), m["upscale_tiers"])
+        else:
+            warn(f"{m['id']}: {ep} has no numeric upscale_factor for its tiers")
     # fal compose: the timeline's tracks are built from the clips and their start times (FieldMap.timeline).
     if "tracks" in kf and op == "timeline":
         fmap["timeline"] = kf["tracks"]
@@ -1255,8 +1702,11 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             # "enum or free string" unions (FLUX Ultra's aspect_ratio): offer the enum.
             enum = [v for var in spec.get("variants") or [] for v in (var.get("values") or [])]
         if key == "image_size" or any("landscape" in str(v) or "square" in str(v) for v in enum):
-            fmap["aspectRatio"] = {"key": key, "values": IMAGE_SIZE_MAP}
-            opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
+            # A model that asks for "auto" (Fuobe DoP · LTX: the start frame's shape) keeps it when the API takes it;
+            # otherwise the default fallback below would make every clip square (1:1, the first size listed).
+            auto = "auto" in enum and m["defaults"].get("aspectRatio") == "auto"
+            fmap["aspectRatio"] = {"key": key, "values": {**({"auto": "auto"} if auto else {}), **IMAGE_SIZE_MAP}}
+            opts["aspectRatios"] = union(opts.get("aspectRatios", []), (["auto"] if auto else []) + IMG_AR)
         else:
             fmap["aspectRatio"] = key
             ratios = [v for v in enum if RATIO.match(str(v)) or v == "auto"]
@@ -1324,6 +1774,14 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             warn(f"{m['id']}: default fields {missing} not in {ep} inputs")
         if not fmap["defaults"]:
             del fmap["defaults"]
+    # LoRAs (O1): the field the route's LoRA endpoint (or the endpoint itself) takes them in, from the research.
+    # Read before the required-inputs check below: an endpoint whose LoRAs are required (MiniMax H3's /lora) fills them here.
+    lora_ep = ropts.get("loraEndpoint")
+    lf = lora_field(provider, lora_ep or ep)
+    if lf:
+        fmap["loras"] = lf
+    elif lora_ep:
+        warn(f"{m['id']}: LoRA endpoint {lora_ep} has no researched LoRA field")
     # Inputs the API requires that no canonical field fills: send the API's own documented default
     # (MiniMax H3 Max's prompt_expansion_mode), or warn when there is none to send.
     sent = set(map_fields(fmap)) | ({"prompt"} if "prompt" not in fmap else set())
@@ -1348,13 +1806,22 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # Inpaint routes say what the mask's paint means (edit routes get theirs when the inpaint route is derived).
     if op == "inpaint" and "mask" in fmap and mask_format(ep):
         fmap["maskFormat"] = mask_format(ep)
-    route = {"op": op, "provider": provider, "endpoint": ep, "map": fmap}
+    route = {"op": op, "provider": provider, "endpoint": f"{ep}:{version}" if ropts.get("pin") else ep, "map": fmap}
     if ropts.get("note"):
         route["note"] = ropts["note"]
-    if ropts.get("loraEndpoint"):
-        if (provider, ropts["loraEndpoint"]) not in EPS:
-            warn(f"{m['id']}: LoRA endpoint {ropts['loraEndpoint']} not in research")
-        route["loraEndpoint"] = ropts["loraEndpoint"]
+    if lora_ep:
+        le = EPS.get((provider, lora_ep))
+        if not le:
+            warn(f"{m['id']}: LoRA endpoint {lora_ep} not in research")
+        else:
+            # The same payload goes to both endpoints: every field the route sends must be one the LoRA endpoint takes.
+            missing = [f for f in map_fields(fmap) if f not in (le.get("inputs") or {})]
+            if missing:
+                warn(f"{m['id']}: {lora_ep} has no {missing} (sent by {ep})")
+        rec = HOSTED_LORA.get((provider, lora_ep)) or {}
+        if rec.get("commercialWeights") is False:
+            warn(f"{m['id']}: {lora_ep} runs non-commercial weights ({rec.get('baseLicence')}): never an Original's default")
+        route["loraEndpoint"] = lora_ep
     return route, e
 
 
@@ -1370,6 +1837,7 @@ def parse_price(e):
 
 
 out = []
+originals = []
 for m in M:
     opts = {}
     routes = []
@@ -1392,7 +1860,8 @@ for m in M:
             if mk:
                 fmt = mask_format(ep)
                 routes.append({**route, "op": "inpaint", "map": {**route["map"], "mask": mk, **({"maskFormat": fmt} if fmt else {})}})
-        if len(r) > 3 and r[3] == "+flf2v" and not ropts:
+        # "+flf2v" (or the route option flf2v: True, beside others): the same endpoint as a start/end-frame route.
+        if (len(r) > 3 and r[3] == "+flf2v" and not ropts) or ropts.get("flf2v"):
             if "endImage" in route["map"]:
                 routes.append({**route, "op": "flf2v"})
             else:
@@ -1421,12 +1890,26 @@ for m in M:
         pricing = {"unit": u, "usd": usd, **({"note": note[0]} if note else {}), **extra}
     elif first_e:
         pricing = parse_price(first_e)
+    # What a run costs on the route's LoRA endpoint, when its price is in the same unit (fal's /lora variants cost more).
+    lora_eps = [r["loraEndpoint"] for r in routes if r.get("loraEndpoint")]
+    if pricing and lora_eps and "withLoras" not in pricing:
+        lp = parse_price(EPS.get((routes[0]["provider"], lora_eps[0])) or {})
+        if lp and lp["unit"] == pricing["unit"]:
+            pricing["withLoras"] = lp["usd"]
     d = {
         "id": m["id"], "name": m["name"], "vendor": m["vendor"], "family": m["family"], "engine": "cloud",
         "kind": m["kind"], "tagline": m["tagline"], "routes": routes, "options": opts,
     }
     if m["badges"]:
         d["badges"] = m["badges"]
+    # The open weights' licence, from the hosted LoRA endpoint the model runs on or with (hostedLoraEndpoints): data the
+    # admin reads in Settings, never a gate (the owner's decision of 2026-10-27).
+    lic = next((HOSTED_LORA[(r["provider"], ep)] for r in routes for ep in (r["endpoint"], r.get("loraEndpoint"))
+                if ep and HOSTED_LORA.get((r["provider"], ep), {}).get("baseLicence")), None)
+    if lic:
+        d["licence"] = {"licence": lic["baseLicence"], "commercial": lic.get("commercialWeights"),
+                        **({"note": lic["licenceNote"]} if lic.get("licenceNote") else {}),
+                        **({"checked": lic["checked"]} if lic.get("checked") else {})}
     defaults = {k: v for k, v in m["defaults"].items()}
     # Drop defaults the model can't take.
     if "aspectRatio" in defaults and defaults["aspectRatio"] not in opts.get("aspectRatios", [defaults["aspectRatio"]]):
@@ -1443,12 +1926,14 @@ for m in M:
         d["pricing"] = pricing
     if m["hidden"]:
         d["hidden"] = True
-    out.append(d)
+    (originals if m["original"] else out).append(d)
 
 ts = (
     "// Generated by scripts/gen-cloud-models.py from docs/research/paid-model-apis(-2,-3,-4).json — do not edit by hand.\n"
     'import type { ModelDef } from "./types";\n\n'
-    f"export const CLOUD_MODELS: ModelDef[] = {json.dumps(out, indent=2)};\n"
+    f"export const CLOUD_MODELS: ModelDef[] = {json.dumps(out, indent=2)};\n\n"
+    "/** The Fuobe Originals' cloud halves (hosted open weights): models.ts joins each to its ComfyUI routes. */\n"
+    f"export const ORIGINAL_CLOUD: ModelDef[] = {json.dumps(originals, indent=2)};\n"
 )
 (ROOT / "src/lib/catalog/cloud-models.generated.ts").write_text(ts)
-print(f"wrote {len(out)} cloud models")
+print(f"wrote {len(out)} cloud models and {len(originals)} Originals' cloud halves")

@@ -4,6 +4,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import type { AssistThread, AssistThreadSummary, AssistThreadView } from "./assist";
+import type { TestProvider } from "./connections";
 import type { ElementKind, StudioElement } from "./catalog/elements";
 import type { Engine, Generation, GenerationRequest, MediaKind, ReviewStatus } from "./catalog/types";
 import {
@@ -25,6 +26,8 @@ import {
   type StreamEvent,
 } from "./generation-stream";
 import { cursorAfter, filterToSearch, type AssetUse, type FeedFilter, type Folder } from "./library";
+import type { ShareCreated, ShareInfo, ShareListItem, SharePatch, ShareRequest } from "./share";
+import type { AccessSummary } from "./model-access";
 
 export interface Asset {
   id: string;
@@ -505,16 +508,18 @@ export function useLibraryFacets(opts: { steps?: boolean } = {}) {
 export function useCreateGeneration() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (req: GenerationRequest) =>
-      (
-        await json<{ items: Generation[] }>(
-          await fetch("/api/generations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(req),
-          }),
-        )
-      ).items,
+    mutationFn: async (req: GenerationRequest) => {
+      const { items, notes } = await json<{ items: Generation[]; notes?: string[] }>(
+        await fetch("/api/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(req),
+        }),
+      );
+      // What the run leaves out or changes (a LoRA that runs only on your GPU, a length the API rounds) is said, not dropped silently.
+      if (notes?.length) toast.warning(notes.length > 1 ? "This run changes a few things" : "This run changes one thing", { description: notes.join(". ") });
+      return items;
+    },
     onSuccess: (items) => {
       // Show new cards instantly in the feeds they belong to (newest first, like the server), then let polling take over.
       for (const g of items) applyEvent(qc, { type: "generation", generation: { ...g, deletedAt: null } });
@@ -676,6 +681,39 @@ export function useFolderActions() {
 }
 
 // ---------------------------------------------------------------------------
+// Share links (Library → Shared, the Share dialog, the Publish wizard)
+
+/** Every link, and whether sign-in is on (a link to a studio without a password opens more than the page). */
+export function useShares(opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ["shares"],
+    queryFn: async () => json<{ items: ShareListItem[]; signIn: boolean }>(await fetch("/api/shares")),
+    staleTime: 10_000,
+    enabled: opts.enabled ?? true,
+  });
+}
+
+export function useShareActions() {
+  const qc = useQueryClient();
+  return useMemo(() => {
+    const send = async <T,>(url: string, method: string, body?: unknown) => {
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const out = res.status === 204 ? (undefined as T) : await json<T>(res);
+      void qc.invalidateQueries({ queryKey: ["shares"] });
+      return out;
+    };
+    return {
+      /** A new link; the answer carries its token once. */
+      create: (body: ShareRequest) => send<ShareCreated>("/api/shares", "POST", body),
+      /** Change it; with newLink, a new token (in the answer) replaces the old one. */
+      update: (id: string, patch: SharePatch) => send<{ share: ShareInfo; token?: string; path?: string }>(`/api/shares/${id}`, "PATCH", patch),
+      /** Revoke: the link stops working at once. */
+      revoke: (id: string) => send<void>(`/api/shares/${id}`, "DELETE"),
+    };
+  }, [qc]);
+}
+
+// ---------------------------------------------------------------------------
 // Uploads & assets
 
 export async function uploadFile(file: File): Promise<Asset> {
@@ -768,7 +806,8 @@ export function useDeleteElement() {
 export type EngineMode = "both" | "open" | "cloud";
 
 export interface StatusInfo {
-  providers: Record<string, { label: string; configured: boolean }>;
+  /** `ramBytes`: the connected ComfyUI's RAM (comfyui only, when it says). */
+  providers: Record<string, { label: string; configured: boolean; ramBytes?: number }>;
   demoMode: string;
   engineMode: EngineMode;
   cloudProvider: string;
@@ -784,6 +823,31 @@ export interface StatusInfo {
     problem: string | null;
     detected: { kind: string; label: string; url: string; up: boolean; auth: string; models: number; model: string | null; problem: string | null }[];
   };
+  /** The first-run guide was put away, or something the engine mode generates with was connected once. */
+  onboarded?: boolean;
+  /** Settings → Models & licences: what is switched off (absent while everything is on). */
+  access?: AccessSummary;
+}
+
+/** A connection test's answer (POST /api/providers/test). */
+export interface ConnectionTest {
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * Test a provider, with unsaved values (by setting name) in place of the saved ones when given.
+ * `field` is the setting being checked (the Anthropic key, Ollama's address…), so the test checks that one.
+ */
+export async function testConnection(provider: TestProvider, values?: Record<string, string>, field?: string): Promise<ConnectionTest> {
+  const res = await fetch("/api/providers/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, values, field }) });
+  const body = (await res.json().catch(() => null)) as ConnectionTest | null;
+  return body && typeof body.ok === "boolean" ? body : { ok: false, detail: `The test didn't answer (${res.status})` };
+}
+
+/** Save settings by name (PUT /api/settings); throws the server's message when a value isn't allowed. */
+export async function saveSettings(patch: Record<string, string>): Promise<void> {
+  await json(await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }));
 }
 
 export function useStatus() {
@@ -792,6 +856,27 @@ export function useStatus() {
     queryFn: async () => json<StatusInfo>(await fetch("/api/status")),
     staleTime: 15_000,
     refetchInterval: 30_000,
+  });
+}
+
+/** What an uploaded clip's header says: length, size, frame rate and sound (empty for formats the server can't read). */
+export interface ClipFacts {
+  duration?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  hasAudio?: boolean;
+}
+
+/** The attached clip's facts (Upscale hub: prices by its length, "24 → 60 fps"). Only for uploads and results on this server. */
+export function useClipFacts(url: string | undefined) {
+  return useQuery({
+    queryKey: ["clip-facts", url],
+    enabled: !!url && url.startsWith("/api/files/"),
+    queryFn: async () =>
+      json<ClipFacts>(await fetch("/api/media/probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) })),
+    staleTime: Infinity,
+    retry: false,
   });
 }
 
@@ -862,6 +947,16 @@ export function useEngineMode(): EngineMode {
   // Suspense subtrees can hydrate after the status query resolved; render the server's view until hydrated.
   if (!hydrated) return "both";
   return serverMode ?? cached;
+}
+
+/**
+ * What Settings → Models & licences switched off, for pickers to leave out (src/lib/model-access.ts offered()).
+ * Undefined until hydrated and while everything is on; the server refuses an off model either way.
+ */
+export function useModelAccess(): AccessSummary | undefined {
+  const hydrated = useHydrated();
+  const access = useStatus().data?.access;
+  return hydrated ? access : undefined;
 }
 
 export function useEngine(): [Engine, (e: Engine) => void, EngineMode] {

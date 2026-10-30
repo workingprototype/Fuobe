@@ -11,6 +11,7 @@ import {
   Crop,
   Download,
   FastForward,
+  FileArchive,
   FileDown,
   FolderDown,
   Heart,
@@ -19,12 +20,15 @@ import {
   Mic2,
   MoreHorizontal,
   Pin,
+  Repeat,
   RotateCcw,
+  Share2,
   SlidersHorizontal,
   Sparkles,
   Trash2,
   UserRoundPlus,
   Wand2,
+  WandSparkles,
   ZoomIn,
   type LucideIcon,
 } from "lucide-react";
@@ -53,12 +57,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ReviewMenuItems } from "@/components/library/review";
+import { useShare } from "@/components/share/share-provider";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCreateGeneration, useGenerationActions, useSaveElement } from "@/lib/api";
 import { ELEMENT_KINDS, type ElementKind } from "@/lib/catalog/elements";
-import type { Generation, OutputFile } from "@/lib/catalog/types";
-import { downloadName } from "@/lib/library";
+import { OPERATION_LABELS, type Generation, type OutputFile } from "@/lib/catalog/types";
+import { downloadName, userTitle } from "@/lib/library";
 import { toSrt, toVtt } from "@/lib/cues";
 import { cuesOf, outputActions, textOf, type ActionContext, type OutputAction, type OutputActionId } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
@@ -76,7 +81,9 @@ export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
   reframe: Crop,
   lipsync: Mic2,
   "add-sound": AudioLines,
+  genjutsu: WandSparkles,
   "voice-change": AudioLines,
+  "loop-audio": Repeat,
   "copy-text": Copy,
   "view-3d": Box,
   download: Download,
@@ -84,11 +91,13 @@ export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
   "download-srt": FileDown,
   "download-vtt": FileDown,
   "download-all": FolderDown,
+  "download-exr": FileArchive,
   favorite: Heart,
   finalize: Sparkles,
   compare: Columns2,
   reuse: RotateCcw,
   "copy-prompt": Copy,
+  share: Share2,
   pin: Pin,
   review: CircleDot,
   delete: Trash2,
@@ -192,6 +201,7 @@ export function useActionRunner(opts: RunnerOptions = {}) {
   const create = useCreateGeneration();
   const confirmForever = useConfirmForever();
   const deleteUpload = useContext(UploadDeleteContext);
+  const share = useShare();
   return (a: OutputAction, g: Generation, index: number) => {
     const o = g.outputs[index];
     switch (a.id) {
@@ -201,6 +211,10 @@ export function useActionRunner(opts: RunnerOptions = {}) {
         return void copyWithToast(textOf(o));
       case "copy-prompt":
         return void copyWithToast(g.prompt ?? "", "Prompt copied");
+      case "share":
+        if (!share) return void toast.error("Share from the Library or a studio page");
+        // The prompt-made title only while prompts are shared (the dialog switches between them).
+        return share.share({ kind: "result", id: g.id, title: `${OPERATION_LABELS[g.op] ?? "Result"}${g.modelName ? ` · ${g.modelName}` : ""}`, promptTitle: userTitle(g).slice(0, 120) });
       case "download-txt":
         return saveBlob(textOf(o), downloadName(g, o, index, "txt"), "text/plain");
       case "download-srt":

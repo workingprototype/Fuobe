@@ -1,0 +1,338 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "genjutsu",
+  "title": "Fuobe Genjutsu · motion transfer, character swap, object swap, restyle",
+  "description": "Runs the Genjutsu studio route (POST /api/genjutsu, priced by /api/genjutsu/estimate) on your reference clips and images in local/genjutsu/: dance.mp4 (a 4–10 s clip of one person moving), person.mp4 (5–15 s, one continuous shot, the person visible in its first frame), character.png (who should move like that or take their place, a consenting person or a drawn character), street.mp4 (a clip with an object to swap), object.png (what replaces it), style.png (a look image you own). The Originals (O5) run on both engines: open weights on ComfyUI (Wan Animate 2, MiniMax H3 Character swap, Wan 2.1 VACE with SAM 3.1, Wan 2.2 Fun VACE) and the same open models hosted on fal (Wan 2.2 Animate, MiniMax H3 with Akatz Labs' swap LoRA, Wan VACE). The -lite cases run an Original's cheaper, faster tier on the same inputs (motion and object swap have one); the partner variant runs each mode's partner model on fal for reference (Kling 3.0 Motion Control, MiniMax H3 Max Recast, Kling O3 edit, Kling O3 4K edit). A job is skipped when the studio would pick another model than the one named.",
+  "original": [
+    "fuobe-genjutsu-motion",
+    "fuobe-character-swap",
+    "fuobe-genjutsu-swap",
+    "fuobe-genjutsu-restyle"
+  ],
+  "kind": "video",
+  "targets": {
+    "open": {
+      "models": ["fuobe-genjutsu-motion"]
+    },
+    "cloud": {
+      "models": ["fuobe-genjutsu-motion"]
+    },
+    "demo": {
+      "models": ["fuobe-genjutsu-motion"]
+    }
+  },
+  "defaults": {
+    "seeds": [1001],
+    "metrics": ["temporal", "clip"],
+    "timeoutSeconds": 2700,
+    "candidate": "original"
+  },
+  "variants": {
+    "original": {
+      "description": "The Original as the studio runs it (the -lite cases: its Lite tier)"
+    },
+    "partner": {
+      "description": "Each mode's partner model on fal, for reference (cases name it)",
+      "engines": ["cloud"]
+    }
+  },
+  "cases": [
+    {
+      "id": "genjutsu/move",
+      "title": "Motion transfer: your character dances the clip",
+      "inputs": {
+        "video": "local/genjutsu/dance.mp4",
+        "images": ["local/genjutsu/character.png"]
+      },
+      "demoInputs": {
+        "video": "samples/demo-portrait.mp4",
+        "images": ["fixtures/character/drawn-face-1.png"]
+      },
+      "variantModels": {
+        "partner": {
+          "cloud": ["kling-motion-control"]
+        }
+      },
+      "prompts": [
+        {
+          "id": "dance",
+          "text": "the character performs the dance from the clip, same timing"
+        }
+      ],
+      "references": "local/genjutsu/character.png",
+      "metrics": ["temporal", "identity", "clip"],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": {
+          "engine": "{{engine}}",
+          "mode": "motion",
+          "modelId": "{{modelId}}",
+          "prompt": "{{prompt}}",
+          "references": ["{{inputs.images.0}}"],
+          "source": "{{source:inputs.video}}",
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "genjutsu/move-lite",
+      "title": "Motion transfer on the Lite tier: Wan Animate at 480p in fewer steps",
+      "inputs": {
+        "video": "local/genjutsu/dance.mp4",
+        "images": ["local/genjutsu/character.png"]
+      },
+      "demoInputs": {
+        "video": "samples/demo-portrait.mp4",
+        "images": ["fixtures/character/drawn-face-1.png"]
+      },
+      "prompts": [
+        {
+          "id": "dance",
+          "text": "the character performs the dance from the clip, same timing"
+        }
+      ],
+      "references": "local/genjutsu/character.png",
+      "metrics": ["temporal", "identity", "clip"],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": {
+          "engine": "{{engine}}",
+          "mode": "motion",
+          "modelId": "{{modelId}}",
+          "prompt": "{{prompt}}",
+          "references": ["{{inputs.images.0}}"],
+          "source": "{{source:inputs.video}}",
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      },
+      "models": {
+        "open": ["fuobe-genjutsu-motion-lite"],
+        "cloud": ["fuobe-genjutsu-motion-lite"],
+        "demo": ["fuobe-genjutsu-motion-lite"]
+      }
+    },
+    {
+      "id": "genjutsu/character",
+      "title": "Character swap: your character takes the person's place, with the first frame made first",
+      "models": {
+        "open": ["fuobe-character-swap", "oss-h3-character-swap-relay"],
+        "cloud": ["fuobe-character-swap"],
+        "demo": ["fuobe-character-swap"]
+      },
+      "variantModels": {
+        "partner": {
+          "cloud": ["h3-max-recast", "p-video-replace", "kling-o3"]
+        }
+      },
+      "inputs": {
+        "video": "local/genjutsu/person.mp4",
+        "images": ["local/genjutsu/character.png"]
+      },
+      "demoInputs": {
+        "video": "fixtures/walk-6s.mp4",
+        "images": ["fixtures/character/drawn-face-2.png"]
+      },
+      "prompts": [
+        {
+          "id": "direction",
+          "text": "keep the walk and the timing; the character wears the same clothes as in the picture"
+        }
+      ],
+      "references": "local/genjutsu/character.png",
+      "metrics": ["temporal", "identity", "clip"],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": {
+          "engine": "{{engine}}",
+          "mode": "character",
+          "modelId": "{{modelId}}",
+          "prompt": "{{prompt}}",
+          "references": ["{{inputs.images.0}}"],
+          "source": "{{source:inputs.video}}",
+          "range": {
+            "start": 0,
+            "end": 5
+          },
+          "character": {
+            "who": "largest"
+          },
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "genjutsu/character-plain",
+      "title": "Character swap at 480p without the first frame (what a failed anchor falls back to)",
+      "models": {
+        "open": ["fuobe-character-swap"],
+        "cloud": ["fuobe-character-swap"],
+        "demo": ["fuobe-character-swap"]
+      },
+      "inputs": {
+        "video": "local/genjutsu/person.mp4",
+        "images": ["local/genjutsu/character.png"]
+      },
+      "demoInputs": {
+        "video": "fixtures/walk-6s.mp4",
+        "images": ["fixtures/character/drawn-face-2.png"]
+      },
+      "prompts": [
+        {
+          "id": "plain",
+          "text": "the person walks across the scene"
+        }
+      ],
+      "references": "local/genjutsu/character.png",
+      "metrics": ["temporal", "identity", "clip"],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": {
+          "engine": "{{engine}}",
+          "mode": "character",
+          "modelId": "{{modelId}}",
+          "references": ["{{inputs.images.0}}"],
+          "source": "{{source:inputs.video}}",
+          "range": {
+            "start": 0,
+            "end": 5
+          },
+          "quality": "480p",
+          "character": {
+            "who": "largest",
+            "anchor": false
+          },
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "genjutsu/swap",
+      "title": "Object swap: replace the object in the clip",
+      "models": {
+        "open": ["fuobe-genjutsu-swap"],
+        "cloud": ["fuobe-genjutsu-swap"],
+        "demo": ["fuobe-genjutsu-swap"]
+      },
+      "variantModels": {
+        "partner": {
+          "cloud": ["kling-o3"]
+        }
+      },
+      "inputs": {
+        "video": "local/genjutsu/street.mp4",
+        "images": ["local/genjutsu/object.png"]
+      },
+      "demoInputs": {
+        "video": "samples/demo-landscape.mp4",
+        "images": ["fixtures/palette.png"]
+      },
+      "prompts": [
+        {
+          "id": "swap",
+          "text": "the car on the left"
+        }
+      ],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": {
+          "engine": "{{engine}}",
+          "mode": "swap",
+          "modelId": "{{modelId}}",
+          "target": "type",
+          "subject": "{{prompt}}",
+          "references": ["{{inputs.images.0}}"],
+          "source": "{{source:inputs.video}}",
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "genjutsu/swap-lite",
+      "title": "Object swap on the Lite tier: VACE at 480p",
+      "models": {
+        "open": ["fuobe-genjutsu-swap-lite"],
+        "cloud": ["fuobe-genjutsu-swap-lite"],
+        "demo": ["fuobe-genjutsu-swap-lite"]
+      },
+      "inputs": {
+        "video": "local/genjutsu/street.mp4",
+        "images": ["local/genjutsu/object.png"]
+      },
+      "demoInputs": {
+        "video": "samples/demo-landscape.mp4",
+        "images": ["fixtures/palette.png"]
+      },
+      "prompts": [
+        {
+          "id": "swap",
+          "text": "the car on the left"
+        }
+      ],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": {
+          "engine": "{{engine}}",
+          "mode": "swap",
+          "modelId": "{{modelId}}",
+          "target": "type",
+          "subject": "{{prompt}}",
+          "references": ["{{inputs.images.0}}"],
+          "source": "{{source:inputs.video}}",
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    },
+    {
+      "id": "genjutsu/restyle",
+      "title": "Restyle: the clip in your look",
+      "models": {
+        "open": ["fuobe-genjutsu-restyle"],
+        "cloud": ["fuobe-genjutsu-restyle"],
+        "demo": ["fuobe-genjutsu-restyle"]
+      },
+      "variantModels": {
+        "partner": {
+          "cloud": ["kling-o3-4k-edit"]
+        }
+      },
+      "inputs": {
+        "video": "local/genjutsu/dance.mp4",
+        "images": ["local/genjutsu/style.png"]
+      },
+      "demoInputs": {
+        "video": "samples/demo-portrait.mp4",
+        "images": ["fixtures/references/warm-1.png"]
+      },
+      "prompts": [
+        {
+          "id": "look",
+          "text": "the same scene as a warm hand-painted animation"
+        }
+      ],
+      "references": "local/genjutsu/style.png",
+      "metrics": ["temporal", "style", "clip"],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": {
+          "engine": "{{engine}}",
+          "mode": "restyle",
+          "modelId": "{{modelId}}",
+          "look": {
+            "kind": "custom",
+            "images": ["{{inputs.images.0}}"],
+            "words": "{{prompt}}"
+          },
+          "source": "{{source:inputs.video}}",
+          "seed": "{{seed}}",
+          "requestId": "{{requestId}}"
+        }
+      }
+    }
+  ]
+}

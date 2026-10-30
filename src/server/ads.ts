@@ -20,7 +20,6 @@ import { getBrand, getProduct, listProducts, parseJsonObject } from "./brand";
 import { db } from "./db";
 import { llmText } from "./enhance";
 import { createGenerations, getGeneration, previewGeneration, recordLocalGeneration } from "./generations";
-import { provider } from "./providers";
 import { llmBackends } from "./providers/llm";
 import { engineMode } from "./settings";
 
@@ -29,34 +28,23 @@ import { engineMode } from "./settings";
  * Each ad = a selling angle with headline, body copy and CTA (LLM, or rules offline) + one visual
  * from an image model (product photo as reference, no text in it). The finished creative is
  * composited in the browser (canvas) in 1:1, 4:5 and 9:16 with the brand's logo, colours and fonts.
- * With a Higgsfield key, Higgsfield's own Ads Studio can render whole ads in one call instead.
+ * Ads drawn whole in one call (words included) before build plan O7 stay as they were ("baked"); a retry makes
+ * them the Fuobe way.
  */
 
 export const BatchBody = z.object({
   brandId: z.string().min(1).max(40),
   engine: z.enum(["cloud", "open"]),
-  route: z.enum(["fuobe", "higgsfield"]).optional(),
   items: z
     .array(z.object({ productId: z.string().min(1).max(40), count: z.number().int().min(1).max(MAX_ADS_PER_PRODUCT) }))
     .min(1)
     .max(MAX_PRODUCTS_PER_RUN),
   /** What the user asked for in the chat ("holiday setting for our winter sale"). */
   direction: z.string().max(1000).optional(),
-  /** Higgsfield renders one format per ad. */
-  ratio: z.enum(AD_RATIOS).optional(),
 });
 export type BatchInput = z.infer<typeof BatchBody>;
 
 export class AdsError extends Error {}
-
-const higgsfieldReady = () => provider("higgsfield").isConfigured();
-
-/** The route a batch takes: Higgsfield's one-shot Ads Studio when asked for (or by default with a key), else Fuobe's. */
-export function batchRoute(input: Pick<BatchInput, "engine" | "route">): "fuobe" | "higgsfield" {
-  if (input.engine === "open") return "fuobe";
-  if (input.route) return input.route === "higgsfield" && higgsfieldReady() ? "higgsfield" : "fuobe";
-  return higgsfieldReady() ? "higgsfield" : "fuobe";
-}
 
 // ---------------------------------------------------------------------------
 // Copy
@@ -191,33 +179,6 @@ export function visualRequest(c: Pick<AdConcept, "visual" | "headline">, product
   };
 }
 
-export function higgsfieldRequest(product: Product | null, brand: BrandKit, ratio: string, direction?: string, n = 0): GenerationRequest {
-  const angle = AD_ANGLES[n % AD_ANGLES.length];
-  return {
-    feature: "ads",
-    modelId: "ads-studio",
-    op: product?.images.length ? "edit" : "t2i",
-    prompt: [
-      `A static social ad for ${product?.name ?? brand.name} by ${brand.name}`,
-      `Angle: ${angle.name} — ${angle.copy}`,
-      product?.description && `Product: ${product.description.slice(0, 600)}`,
-      product?.sellingPoints.length && `Selling points: ${product.sellingPoints.join("; ")}`,
-      (product?.audience || brand.audience) && `Audience: ${product?.audience || brand.audience}`,
-      brand.tone.length && `Tone: ${brand.tone.join(", ")}`,
-      brandLine(brand),
-      direction && `Direction: ${direction}`,
-      "Include a short headline and a call to action",
-    ]
-      .filter(Boolean)
-      .join(". ")
-      .slice(0, 7900),
-    inputs: product?.images.length ? { images: product.images.slice(0, 10) } : undefined,
-    params: { aspectRatio: ratio, numOutputs: 1 },
-    title: `${product?.name ?? brand.name} ad`,
-    batchTitle: `${brand.name} · ads`,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Batches
 
@@ -244,8 +205,10 @@ interface CreativeRow {
 interface CreativeMeta {
   engine: Engine;
   modelId: string;
-  route: "fuobe" | "higgsfield";
+  /** "baked": drawn whole, words included, in one format by a one-shot ad model before build plan O7 (history). */
+  route: "fuobe" | "baked";
   direction?: string;
+  /** A baked ad's one format. */
   ratio?: string;
   /** Composited PNGs saved to the Library, by ratio. */
   saved?: Record<string, string>;
@@ -257,7 +220,6 @@ declare global {
 const running = () => (globalThis.__fuobeAdRuns ??= new Set<string>());
 
 export interface BatchEstimate {
-  route: "fuobe" | "higgsfield";
   modelId: string;
   modelName: string;
   total: number;
@@ -274,22 +236,17 @@ export interface BatchEstimate {
 export function estimateBatch(input: BatchInput, draft?: { brand: BrandKit; product: Product | null }): BatchEstimate {
   const brand = draft?.brand ?? getBrand(input.brandId);
   if (!brand) throw new AdsError("That brand no longer exists");
-  const route = batchRoute(input);
   const total = input.items.reduce((n, i) => n + i.count, 0);
   const product = draft ? draft.product : getProduct(input.items[0].productId);
-  const req = route === "higgsfield" ? higgsfieldRequest(product, brand, input.ratio ?? "4:5") : visualRequest({ visual: "the product", headline: "Ad" }, product, brand, input.engine);
-  const p = previewGeneration(req);
+  const p = previewGeneration(visualRequest({ visual: "the product", headline: "Ad" }, product, brand, input.engine));
   let copy = 0;
-  if (route === "fuobe") {
-    try {
-      copy = previewGeneration({ feature: "ads", modelId: input.engine === "open" ? "oss-text-llm" : "text-llm", op: "write", prompt: "copy" }).costUsd ?? 0;
-    } catch {
-      copy = 0;
-    }
+  try {
+    copy = previewGeneration({ feature: "ads", modelId: input.engine === "open" ? "oss-text-llm" : "text-llm", op: "write", prompt: "copy" }).costUsd ?? 0;
+  } catch {
+    copy = 0;
   }
   const perAd = p.costUsd;
   return {
-    route,
     modelId: p.model.id,
     modelName: p.model.name,
     total,
@@ -297,7 +254,7 @@ export function estimateBatch(input: BatchInput, draft?: { brand: BrandKit; prod
     costUsd: perAd === null ? null : Math.round((perAd * total + copy * input.items.length) * 1000) / 1000,
     demo: p.demo,
     // Who writes the words: an LLM this install can reach (as llmText picks one), else the rules.
-    copyBy: route === "fuobe" && llmBackends({ endpoint: "claude" }).length ? "llm" : "rules",
+    copyBy: llmBackends({ endpoint: "claude" }).length ? "llm" : "rules",
   };
 }
 
@@ -320,11 +277,11 @@ export function createBatch(input: BatchInput, fixed: FixedCopy = {}): { batchId
     return { product: p, count: i.count };
   });
   const est = estimateBatch(input); // validates the model, engine mode and price now
-  const route = est.route;
+  const route = "fuobe";
   const batchId = nanoid(10);
   const now = Date.now();
   db().prepare("INSERT INTO ad_batches (id, brand_id, engine, route, model_id, direction, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(batchId, brand.id, input.engine, route, est.modelId, input.direction ?? null, now);
-  const meta: CreativeMeta = { engine: input.engine, modelId: est.modelId, route, direction: input.direction, ratio: input.ratio };
+  const meta: CreativeMeta = { engine: input.engine, modelId: est.modelId, route, direction: input.direction };
   const insert = db().prepare(
     "INSERT INTO ad_creatives (id, batch_id, brand_id, product_id, position, status, generation_id, meta_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
   );
@@ -334,29 +291,19 @@ export function createBatch(input: BatchInput, fixed: FixedCopy = {}): { batchId
     for (const { product, count } of products) {
       for (let k = 0; k < count; k++) {
         const id = nanoid(10);
-        insert.run(id, batchId, brand.id, product.id, pos++, route === "fuobe" ? "writing" : "queued", JSON.stringify(meta), now + pos, now + pos);
+        insert.run(id, batchId, brand.id, product.id, pos++, "writing", JSON.stringify(meta), now + pos, now + pos);
         ids.push({ id, product, index: k });
       }
     }
   })();
   running().add(batchId);
-  const run = fillBatch(batchId, brand, ids, input, route, fixed).finally(() => running().delete(batchId));
+  const run = fillBatch(batchId, brand, ids, input, fixed).finally(() => running().delete(batchId));
   return { batchId, creatives: listCreatives({ brandId: brand.id, batchId }), run };
 }
 
-async function fillBatch(batchId: string, brand: BrandKit, ids: { id: string; product: Product; index: number }[], input: BatchInput, route: "fuobe" | "higgsfield", fixed: FixedCopy = {}): Promise<void> {
+async function fillBatch(batchId: string, brand: BrandKit, ids: { id: string; product: Product; index: number }[], input: BatchInput, fixed: FixedCopy = {}): Promise<void> {
   const setGen = (id: string, g: Generation) => db().prepare("UPDATE ad_creatives SET generation_id = ?, status = 'queued', updated_at = ? WHERE id = ?").run(g.id, Date.now(), id);
   const fail = (id: string, error: string) => db().prepare("UPDATE ad_creatives SET status = 'failed', error = ?, updated_at = ? WHERE id = ?").run(error, Date.now(), id);
-  if (route === "higgsfield") {
-    for (const c of ids) {
-      try {
-        setGen(c.id, createGenerations(higgsfieldRequest(c.product, brand, input.ratio ?? "4:5", input.direction, c.index), { batchId })[0]);
-      } catch (e) {
-        fail(c.id, (e as Error).message);
-      }
-    }
-    return;
-  }
   // Copy per product (one LLM call each), then one visual per ad.
   const byProduct = new Map<string, typeof ids>();
   for (const c of ids) byProduct.set(c.product.id, [...(byProduct.get(c.product.id) ?? []), c]);
@@ -423,8 +370,8 @@ function toCreative(r: CreativeRow): AdCreative {
     error: s.error,
     generationId: r.generation_id,
     image: s.image,
-    baked: meta.route === "higgsfield",
-    ...(meta.route === "higgsfield" && { ratio: (AD_RATIOS as readonly string[]).includes(meta.ratio ?? "") ? (meta.ratio as AdCreative["ratio"]) : "4:5" }),
+    baked: meta.route === "baked",
+    ...(meta.route === "baked" && { ratio: (AD_RATIOS as readonly string[]).includes(meta.ratio ?? "") ? (meta.ratio as AdCreative["ratio"]) : "4:5" }),
     layout: r.layout,
     engine: meta.engine,
     modelId: meta.modelId,
@@ -503,15 +450,14 @@ export async function retryCreative(id: string): Promise<AdCreative> {
   const meta = parseMeta(r.meta_json);
   const mode = engineMode();
   if (mode !== "both" && mode !== meta.engine) throw new AdsError(`This ad was made on the ${meta.engine === "open" ? "open-source" : "cloud"} engine, which Settings has turned off`);
-  let g: Generation;
-  if (meta.route === "higgsfield") {
-    g = createGenerations(higgsfieldRequest(product, brand, meta.ratio ?? "4:5", meta.direction, r.position), { batchId: r.batch_id })[0];
-  } else {
-    let concept: AdConcept = { angle: r.angle ?? "", headline: r.headline ?? "", body: r.body ?? "", cta: r.cta ?? "", visual: r.visual ?? "" };
-    if (!concept.headline || !concept.visual) concept = (await writeConcepts(brand, product ?? fakeProduct(brand), 1, meta.direction, r.position))[0];
-    g = createGenerations(visualRequest(concept, product, brand, meta.engine), { batchId: r.batch_id })[0];
-    db().prepare("UPDATE ad_creatives SET angle = ?, headline = ?, body = ?, cta = ?, visual = ? WHERE id = ?").run(concept.angle, concept.headline, concept.body, concept.cta, concept.visual, id);
-  }
+  // A baked ad (one drawn whole before build plan O7) is made again the Fuobe way: copy, a visual, your fonts.
+  let concept: AdConcept = { angle: r.angle ?? "", headline: r.headline ?? "", body: r.body ?? "", cta: r.cta ?? "", visual: r.visual ?? "" };
+  if (!concept.headline || !concept.visual) concept = (await writeConcepts(brand, product ?? fakeProduct(brand), 1, meta.direction, r.position))[0];
+  const g = createGenerations(visualRequest(concept, product, brand, meta.engine), { batchId: r.batch_id })[0];
+  const fresh: CreativeMeta = { ...meta, route: "fuobe", ratio: undefined };
+  db()
+    .prepare("UPDATE ad_creatives SET angle = ?, headline = ?, body = ?, cta = ?, visual = ?, meta_json = ? WHERE id = ?")
+    .run(concept.angle, concept.headline, concept.body, concept.cta, concept.visual, JSON.stringify(fresh), id);
   db().prepare("UPDATE ad_creatives SET generation_id = ?, status = 'queued', error = NULL, updated_at = ? WHERE id = ?").run(g.id, Date.now(), id);
   return getCreative(id)!;
 }
@@ -688,12 +634,12 @@ export async function chat(brandId: string, text: string): Promise<ChatMessage[]
 }
 
 /** The user said yes to a proposal: run it and remember the batch on the message. */
-export function confirmProposal(brandId: string, messageId: string, engine: Engine, route?: "fuobe" | "higgsfield", ratio?: BatchInput["ratio"]): { batchId: string; run: Promise<void>; chat: ChatMessage[] } {
+export function confirmProposal(brandId: string, messageId: string, engine: Engine): { batchId: string; run: Promise<void>; chat: ChatMessage[] } {
   const history = getChat(brandId);
   const msg = history.find((m) => m.id === messageId);
   if (!msg?.proposal) throw new AdsError("That suggestion is no longer available");
   if (msg.batchId) throw new AdsError("Those ads are already on their way");
-  const r = createBatch({ brandId, engine, route, items: msg.proposal.items, direction: msg.proposal.direction, ratio });
+  const r = createBatch({ brandId, engine, items: msg.proposal.items, direction: msg.proposal.direction });
   const next = history.map((m) => (m.id === messageId ? { ...m, batchId: r.batchId } : m));
   saveChat(brandId, next);
   return { batchId: r.batchId, run: r.run, chat: next };

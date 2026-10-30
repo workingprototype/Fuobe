@@ -7,6 +7,9 @@ const Hex = z.string().regex(/^#?[0-9a-fA-F]{6}$/);
 const RequestSchema = z.object({
   feature: z.string().min(1).max(80),
   presetId: z.string().max(120).optional(),
+  // A Fuobe Soul look's strength, and the engine an Original runs on (the lock itself is the open engine's).
+  presetStrength: z.number().min(0).max(1).optional(),
+  engine: z.enum(["open", "cloud"]).optional(),
   modelId: z.string().min(1).max(120),
   op: z.string().max(40).optional(),
   prompt: z.string().max(10_000).optional(),

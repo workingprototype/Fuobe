@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Engine } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
+import { useModKey } from "@/lib/keys";
 import { docJson, exportScale, scaledSize, type LayerDoc, type LayerJob, type LayerVersion } from "@/lib/layers";
 import { cn } from "@/lib/utils";
 import { copyWithToast } from "@/lib/clipboard";
@@ -125,7 +126,7 @@ function SaveBadge({ state, onRetry }: { state: SaveState; onRetry: () => void }
       </span>
     </>
   );
-  const cls = cn("inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1 text-[12px] whitespace-nowrap", bad ? "text-warning" : "text-subtle-foreground");
+  const cls = cn("inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1 text-[12px] whitespace-nowrap", bad ? "text-warning" : "text-muted-foreground");
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -167,7 +168,7 @@ export function TopBar(p: {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
   const copyJson = () => void copyWithToast(docJson(p.doc, window.location.origin), "JSON copied");
-  const mod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+  const mod = useModKey();
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-1.5 border-b bg-background px-2 sm:px-3">

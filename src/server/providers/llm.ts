@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { getModel } from "@/lib/catalog";
 import { cueText, parseCues, toSrt, type Cue } from "@/lib/cues";
 import type { GenInput, ModelRoute, Operation } from "@/lib/catalog/types";
-import { aiHelper, chatLocal, emptyReply, localLabel, localProblem, localReady, localWhat, probeLocal, type JsonSpec, type Ready } from "../llm";
+import { aiHelper, chatLocal, checkLocal, emptyReply, LOCAL_LABELS, localLabel, localProblem, localReady, localServers, localWhat, pinnedKind, probeLocal, type JsonSpec, type LocalKind, type Ready } from "../llm";
 import { engineMode, getSetting } from "../settings";
 import { toDataUri } from "../storage";
 import { comfyProvider } from "./comfyui";
@@ -362,6 +362,47 @@ async function runJob(op: string, input: GenInput, backends: Backend[], job: Llm
   return [textOutput(done.join("\n\n"), null, { language: lang })];
 }
 
+/** Is the Anthropic key accepted? Listing one model costs nothing. */
+async function testClaude(): Promise<{ ok: boolean; detail: string }> {
+  try {
+    await new Anthropic({ apiKey: getSetting("anthropicKey") }).models.list({ limit: 1 }, { timeout: 15_000, maxRetries: 0 });
+    return { ok: true, detail: "Claude key accepted" };
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) return { ok: false, detail: "Anthropic rejected the key (401)" };
+    if (e instanceof Anthropic.PermissionDeniedError) return { ok: false, detail: "That Anthropic key can't use the API (403)" };
+    if (e instanceof Anthropic.APIError && e.status) return { ok: false, detail: `Anthropic answered ${e.status}: ${e.message}` };
+    return { ok: false, detail: `Can't reach Anthropic (${(e as Error).message})` };
+  }
+}
+
+/** The local server each of its settings belongs to: Save & test checks that server. */
+const LOCAL_FOCUS: Partial<Record<string, LocalKind>> = {
+  ollamaUrl: "ollama",
+  ollamaModel: "ollama",
+  lmstudioUrl: "lmstudio",
+  lmstudioModel: "lmstudio",
+  lmstudioToken: "lmstudio",
+  unslothUrl: "unsloth",
+  unslothModel: "unsloth",
+  unslothKey: "unsloth",
+  llmUrl: "custom",
+  llmModel: "custom",
+  llmKey: "custom",
+};
+
+/** "Ollama, LM Studio or Unsloth Studio", or the server Settings pins. */
+const localNames = () => {
+  const pinned = pinnedKind();
+  return pinned ? LOCAL_LABELS[pinned] : "Ollama, LM Studio or Unsloth Studio";
+};
+
+/** Where the local servers were looked for, for "nothing answers at …". */
+const localUrls = () =>
+  localServers()
+    .map((s) => s.url)
+    .filter(Boolean)
+    .join(", ");
+
 export const llmProvider: ProviderAdapter = {
   id: "llm",
   /** "Claude or LM Studio": the local server in use (or pinned), "a local model" when none answers. */
@@ -406,9 +447,38 @@ export const llmProvider: ProviderAdapter = {
     jobs().delete(externalId);
   },
 
-  async test() {
+  /**
+   * Checks each LLM text steps would use: Claude's key (a free model list call) and that the local
+   * server answers with its model. Checking the Anthropic key itself (focus) always asks Anthropic,
+   * also when text steps run on a local model (Open source only, or the AI helper set to Local):
+   * Assist can still use the key. Checking a local server's URL, model or key asks that server.
+   */
+  async test(opts) {
+    if (opts?.focus === "anthropicKey") {
+      if (!getSetting("anthropicKey")) return { ok: false, detail: "No Anthropic key set" };
+      const claude = await testClaude();
+      // A good key that text steps don't use: say where they run, so green doesn't read as "Claude rewrites prompts".
+      const choice = aiHelper();
+      let elsewhere: string | null = null;
+      if (choice === "none") elsewhere = "text steps are off (AI helper: Offline rewriter)";
+      else if (choice === "local" || (choice === "auto" && engineMode() === "open")) {
+        await probeLocal();
+        elsewhere = choice === "local" ? `text steps use ${localLabel()} (AI helper)` : `Open source only mode keeps text steps on ${localLabel()}`;
+      }
+      return claude.ok && elsewhere ? { ok: true, detail: `${claude.detail} · ${elsewhere}` } : claude;
+    }
+    const kind = opts?.focus ? LOCAL_FOCUS[opts.focus] : undefined;
+    if (kind) return checkLocal(kind);
+    if (aiHelper() === "none") return { ok: false, detail: "Text steps are off (AI helper: Offline rewriter)" };
     await probeLocal(true);
     const b = llmBackends({ endpoint: "auto" });
-    return b.length ? { ok: true, detail: `Text steps run on ${b.map((x) => backendLabel(x)).join(", then ")}` } : { ok: false, detail: llmMissing({ endpoint: "auto" }) };
+    if (!b.length) {
+      const why = localProblem() ?? `nothing answers at ${localUrls()}`;
+      return { ok: false, detail: engineMode() === "open" && getSetting("anthropicKey") ? `Open source only mode skips Claude, and no local model can run: ${why}` : `Add an Anthropic key, or start ${localNames()} (${why})` };
+    }
+    const checks = await Promise.all(b.map((x) => (x === "claude" ? testClaude() : x === "local" ? checkLocal() : Promise.resolve({ ok: true, detail: backendLabel(x) }))));
+    const detail = checks.map((c) => c.detail).join(" · ");
+    // Fine when the first one works (the rest are fallbacks); otherwise say what failed.
+    return { ok: checks[0].ok, detail: b.length > 1 && checks[0].ok ? `Text steps run on ${b.map((x) => backendLabel(x)).join(", then ")} · ${detail}` : detail };
   },
 };

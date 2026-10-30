@@ -1,7 +1,8 @@
 import { connection } from "next/server";
 import { z } from "zod";
+import { CF_LENGTH_VALUES } from "@/lib/catalog/content-factory";
 import { FACELESS_LENGTHS, MAX_SCRIPT, MAX_TOPIC } from "@/lib/catalog/faceless";
-import { body, createEpisode, FacelessError, handle, listEpisodes, SettingsSchema } from "@/server/faceless";
+import { body, createEpisode, FacelessError, getChannel, handle, listEpisodes, SettingsSchema } from "@/server/faceless";
 
 const Create = z.object({
   channelId: z.string().max(40),
@@ -25,7 +26,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   return handle(async () => {
     const input = await body(request, Create, "Pick a topic and the video settings");
-    if (!FACELESS_LENGTHS.includes(input.settings.length)) throw new FacelessError("Choose one of the offered video lengths");
+    // A Content Factory channel (its settings carry a style brief) also makes 30-second episodes.
+    const lengths = getChannel(input.channelId)?.settings.brief ? CF_LENGTH_VALUES : FACELESS_LENGTHS;
+    if (!lengths.includes(input.settings.length)) throw new FacelessError("Choose one of the offered video lengths");
     return Response.json(createEpisode({ kind: "faceless", channelId: input.channelId, topic: input.topic, script: input.script, settings: input.settings, saveLook: input.saveLook }), { status: 201 });
   });
 }

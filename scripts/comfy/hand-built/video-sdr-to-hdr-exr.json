@@ -1,0 +1,92 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input.mp4"
+    },
+    "_meta": {
+      "title": "SDR video (video)"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Frames, sound, fps"
+    }
+  },
+  "3": {
+    "class_type": "ImageSDRToHDR",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ],
+      "algorithm": "lottes",
+      "algorithm.target_luminance": 650
+    },
+    "_meta": {
+      "title": "Expand to Rec.2020 HLG (strength: target peak nits)"
+    }
+  },
+  "4": {
+    "class_type": "SaveImageAdvanced",
+    "inputs": {
+      "images": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/video-sdr-to-hdr-exr",
+      "format": "exr",
+      "format.bit_depth": "16-bit float",
+      "format.input_color_space": "HDR"
+    },
+    "_meta": {
+      "title": "OpenEXR frames: scene-linear Rec.2020, half float (the inverse HLG curve)"
+    }
+  },
+  "5": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "3",
+        0
+      ],
+      "fps": [
+        "2",
+        2
+      ],
+      "audio": [
+        "2",
+        1
+      ],
+      "bit_depth": 10,
+      "color_space": "HDR",
+      "codec": "h264"
+    },
+    "_meta": {
+      "title": "10-bit HLG preview"
+    }
+  },
+  "6": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "5",
+        0
+      ],
+      "filename_prefix": "fuobe/video-sdr-to-hdr-exr",
+      "format": "mp4",
+      "format.codec": "h264",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save the HLG preview"
+    }
+  }
+}

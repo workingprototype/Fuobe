@@ -1,0 +1,150 @@
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+
+/** pnpm eval:covers --from-masters: rendered masters (one folder per preset id) become covers, merged into the manifest. */
+type Entry = { poster: string; video?: string; run: string; engine: string; model: string; variant: string };
+type Cover = Entry & { key: string; kind: "image" | "video"; from: string; kept?: true };
+const covers = (await import("../scripts/eval/lib/covers.mjs")) as unknown as {
+  coversFromMasters: (dir: string, opts: Record<string, unknown>) => { covers: Cover[]; skipped: { id: string; why: string }[] };
+  readManifest: (file: string) => Record<string, Entry>;
+  writeManifest: (entries: Record<string, Entry>, file: string) => void;
+  seamless: (frames: Buffer[], fade: number) => Buffer[];
+  loopsAlready: (frames: Buffer[], luma: number) => boolean;
+};
+const { coversFromMasters, loopsAlready, readManifest, seamless, writeManifest } = covers;
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-covers-masters-"));
+afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+const hasFfmpeg = spawnSync("ffmpeg", ["-version"]).status === 0;
+const SAMPLES = path.join(process.cwd(), "public", "samples");
+
+function master(root: string, id: string, files: Record<string, string>) {
+  fs.mkdirSync(path.join(root, id), { recursive: true });
+  for (const [name, from] of Object.entries(files)) fs.copyFileSync(from, path.join(root, id, name));
+}
+
+/** A small PNG still, made from a sample clip's first frame. */
+function still(): string {
+  const png = path.join(dir, "still.png");
+  if (!fs.existsSync(png)) spawnSync("ffmpeg", ["-v", "error", "-y", "-i", path.join(SAMPLES, "demo-landscape.mp4"), "-frames:v", "1", png]);
+  return png;
+}
+
+const PROVENANCE = { run: "comfyui-previews-test", engine: "comfyui", model: "ideogram4", videoModel: "minimax-h3", variant: "lean-json" };
+
+describe("covers from masters", () => {
+  it("needs a run name and a masters folder", () => {
+    expect(() => coversFromMasters(dir, {})).toThrow(/--run/);
+    expect(() => coversFromMasters(path.join(dir, "nope"), { run: "r" })).toThrow(/No masters folder/);
+  });
+
+  it("dry run: a clip where there is one, else the start still; folders without either are skipped; nothing is written", () => {
+    const masters = path.join(dir, "dry");
+    master(masters, "effect-set-on-fire", { "clip.mp4": path.join(SAMPLES, "demo-portrait.mp4"), "start.png": path.join(SAMPLES, "previews", "portrait.svg") });
+    master(masters, "app-headshot-generator", { "start.png": path.join(SAMPLES, "previews", "portrait.svg") });
+    master(masters, "motion-still-rendering", {});
+    const manifest = path.join(dir, "dry-manifest.ts");
+    const r = coversFromMasters(masters, { ...PROVENANCE, dryRun: true, publicDir: path.join(dir, "dry-public"), manifest });
+    expect(r.covers.map((c) => [c.key, !!c.video, c.model])).toEqual([
+      ["app-headshot-generator", false, "ideogram4"],
+      ["effect-set-on-fire", true, "minimax-h3"],
+    ]);
+    expect(r.covers[1]).toMatchObject({ poster: "/previews/presets/effect-set-on-fire.jpg", video: "/previews/presets/effect-set-on-fire.mp4", run: "comfyui-previews-test", engine: "comfyui", variant: "lean-json" });
+    expect(r.skipped).toEqual([{ id: "motion-still-rendering", why: "no clip.mp4 or start.png yet" }]);
+    expect(fs.existsSync(manifest)).toBe(false);
+    expect(fs.existsSync(path.join(dir, "dry-public"))).toBe(false);
+  });
+
+  it.runIf(hasFfmpeg)("encodes small covers and merges them into the manifest, keeping other runs' entries; runs again cheaply", () => {
+    const masters = path.join(dir, "masters");
+    const pub = path.join(dir, "public");
+    const out = path.join(pub, "previews", "presets");
+    const manifest = path.join(dir, "manifest.ts");
+    // An earlier eval run's cover, and an earlier masters cover that this run replaces.
+    const measured = { poster: "/previews/dop/effect-thunder-god.jpg", video: "/previews/dop/effect-thunder-god.mp4", run: "r1", engine: "open", model: "oss-wan22-14b", variant: "research" };
+    writeManifest({ "effect-thunder-god": measured, "app-headshot-generator": { poster: "/previews/presets/old.jpg", run: "old", engine: "comfyui", model: "x", variant: "y" } }, manifest);
+    master(masters, "effect-set-on-fire", { "clip.mp4": path.join(SAMPLES, "demo-portrait.mp4") });
+    master(masters, "app-headshot-generator", { "start.png": still() });
+    // A folder's meta.json can name the model that made it.
+    fs.writeFileSync(path.join(masters, "app-headshot-generator", "meta.json"), JSON.stringify({ model: "krea2-realism" }));
+
+    const r = coversFromMasters(masters, { ...PROVENANCE, publicDir: pub, manifest });
+    expect(r.covers).toHaveLength(2);
+    const m = readManifest(manifest);
+    expect(Object.keys(m)).toEqual(["app-headshot-generator", "effect-set-on-fire", "effect-thunder-god"]);
+    expect(m["effect-thunder-god"]).toEqual(measured);
+    expect(m["app-headshot-generator"]).toEqual({ poster: "/previews/presets/app-headshot-generator.jpg", run: "comfyui-previews-test", engine: "comfyui", model: "krea2-realism", variant: "lean-json" });
+    expect(m["effect-set-on-fire"]).toEqual({ poster: "/previews/presets/effect-set-on-fire.jpg", video: "/previews/presets/effect-set-on-fire.mp4", run: "comfyui-previews-test", engine: "comfyui", model: "minimax-h3", variant: "lean-json" });
+    // Still: at most 768 px; clip: at most 512 px and 4 s, no audio.
+    const probe = (f: string) => JSON.parse(spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "json", path.join(out, f)], { encoding: "utf8" }).stdout);
+    const s = probe("app-headshot-generator.jpg").streams[0];
+    expect(Math.max(s.width, s.height)).toBeLessThanOrEqual(768);
+    // 4:2:0, not the 4:4:4 a PNG source would give: about a third smaller.
+    const pix = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=pix_fmt", "-of", "csv=p=0", path.join(out, "app-headshot-generator.jpg")], { encoding: "utf8" }).stdout.trim();
+    expect(pix).toBe("yuvj420p");
+    const v = probe("effect-set-on-fire.mp4");
+    expect(v.streams.map((x: { codec_type: string }) => x.codec_type)).toEqual(["video"]);
+    expect(Math.max(v.streams[0].width, v.streams[0].height)).toBeLessThanOrEqual(512);
+    expect(Number(v.format.duration)).toBeLessThanOrEqual(4.1);
+
+    // Again: nothing changed, so nothing is encoded; the manifest is the same.
+    const before = fs.readFileSync(manifest, "utf8");
+    const again = coversFromMasters(masters, { ...PROVENANCE, publicDir: pub, manifest });
+    expect(again.covers.every((c) => c.kept)).toBe(true);
+    expect(fs.readFileSync(manifest, "utf8")).toBe(before);
+
+    // A preset whose clip goes away becomes a still cover and loses its old clip; --only touches just that id.
+    fs.rmSync(path.join(masters, "effect-set-on-fire", "clip.mp4"));
+    fs.copyFileSync(still(), path.join(masters, "effect-set-on-fire", "start.png"));
+    const only = coversFromMasters(masters, { ...PROVENANCE, publicDir: pub, manifest, only: ["effect-set-on-fire"] });
+    expect(only.covers.map((c) => c.key)).toEqual(["effect-set-on-fire"]);
+    expect(readManifest(manifest)["effect-set-on-fire"]).toEqual({ poster: "/previews/presets/effect-set-on-fire.jpg", run: "comfyui-previews-test", engine: "comfyui", model: "ideogram4", variant: "lean-json" });
+    expect(fs.existsSync(path.join(out, "effect-set-on-fire.mp4"))).toBe(false);
+    expect(readManifest(manifest)["effect-thunder-god"]).toEqual(measured);
+
+    // A master for a preset whose cover a measured run made: kept, and listed, unless --replace.
+    const dop = path.join(pub, "previews", "dop");
+    fs.mkdirSync(dop, { recursive: true });
+    for (const ext of ["jpg", "mp4"]) fs.writeFileSync(path.join(dop, `effect-thunder-god.${ext}`), "x");
+    master(masters, "effect-thunder-god", { "start.png": still() });
+    const held = coversFromMasters(masters, { ...PROVENANCE, publicDir: pub, manifest, only: ["effect-thunder-god"] });
+    expect(held.covers).toEqual([]);
+    expect(held.skipped).toEqual([{ id: "effect-thunder-god", why: "its cover is r1's (/previews/dop/effect-thunder-god.jpg): --replace takes it over" }]);
+    expect(readManifest(manifest)["effect-thunder-god"]).toEqual(measured);
+    const replaced = coversFromMasters(masters, { ...PROVENANCE, publicDir: pub, manifest, only: ["effect-thunder-god"], replace: true });
+    expect(replaced.covers.map((c) => c.key)).toEqual(["effect-thunder-god"]);
+    expect(readManifest(manifest)["effect-thunder-god"]).toMatchObject({ poster: "/previews/presets/effect-thunder-god.jpg", run: "comfyui-previews-test" });
+    expect(fs.readdirSync(dop)).toEqual([]);
+  });
+
+  it("reads a missing manifest as empty, and stops at one it can't read rather than write over it", () => {
+    expect(readManifest(path.join(dir, "no-such-manifest.ts"))).toEqual({});
+    const broken = path.join(dir, "broken-manifest.ts");
+    fs.writeFileSync(broken, 'export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {\n  "app-x": { "poster": ');
+    expect(() => readManifest(broken)).toThrow(/isn't a covers manifest/);
+    const masters = path.join(dir, "masters-broken");
+    master(masters, "app-headshot-generator", { "start.png": path.join(SAMPLES, "previews", "portrait.svg") });
+    expect(() => coversFromMasters(masters, { ...PROVENANCE, dryRun: true, manifest: broken })).toThrow(/isn't a covers manifest/);
+  });
+
+  it("makes a clip loop without a jump: its last frames fade into its first, which it then starts after (unless it loops already)", () => {
+    const frames = Array.from({ length: 20 }, (_, i) => Buffer.from([i * 10, i * 10]));
+    const out = seamless(frames, 4);
+    expect(out).toHaveLength(16);
+    // It starts at the 5th frame; the last four are blended from the old end towards the first four.
+    expect(out[0]).toEqual(frames[4]);
+    expect(out.slice(12).map((b) => b[0])).toEqual([128, 106, 84, 62]);
+    // So looping (last frame back to the first) is a step like those of the fade, not the plain clip's jump from 190 to 0.
+    const steps = out.map((b, i) => Math.abs(b[0] - out[(i + 1) % out.length][0]));
+    expect(Math.max(...steps)).toBe(22);
+    expect(seamless(frames, 0)).toBe(frames);
+    // A clip that ends where it starts (an orbit holding the same picture) loops already: it is cut, not crossfaded.
+    const orbit = [100, 100, 100, 110, 120, 130, 140, 130, 120, 110, 100, 100, 100].map((v) => Buffer.alloc(8, v));
+    expect(loopsAlready(orbit, 8)).toBe(true);
+    expect(loopsAlready(frames, 2)).toBe(false);
+  });
+});

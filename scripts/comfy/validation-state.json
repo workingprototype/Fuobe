@@ -3,7 +3,7 @@
     "sha256": "f18c08cd22f37ccadb81cf557c4624e894c71dd718685e7b3030c92c9893be6a",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:21.245Z"
+    "at": "2026-10-24T05:04:51.883Z"
   },
   "audio-loop-crossfade": {
     "sha256": "97a181dd41506ca676dd88cb238da5e7871ce7101b74186991e4be33a0a2654c",
@@ -173,6 +173,12 @@
     "error": null,
     "at": "2026-10-23T16:54:45.150Z"
   },
+  "image-to-3d-trellis2-multiview": {
+    "sha256": "06ac47b57c4007ed0bb6f96ecde799de1e24285baf590f14357ffde87081b118",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T00:46:07.467Z"
+  },
   "image-to-splat-triposplat": {
     "sha256": "cb65f4660b4d5fef3c0544146ed51b7d3acf059f3190a102dccf8166908f5413",
     "validated": true,
@@ -208,6 +214,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-23T00:12:15.716Z"
+  },
+  "interpolate-rife-fps": {
+    "sha256": "ae2495e1eacc960f6d6b95beae519e4ba1c8017a3143c835cdd77613a365721e",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:21.986Z"
   },
   "interpolate-rife-vfi": {
     "sha256": "bec30ae2655d256ad465f02fb5249b7a6ec08c57cd3d6ca2f5425428f1f6f95c",
@@ -256,6 +268,24 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:26.268Z"
+  },
+  "ltx23-flf2v-lora": {
+    "sha256": "7cdc4e07f2560d71f104a40aff59b99577e8d86691d3daaca4e2ce12f227d91c",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T08:23:53.847Z"
+  },
+  "ltx23-i2v-lora": {
+    "sha256": "34dcdf439d9f5fccfc48d5376bae9ec8abf1abd69a21ec426442ab52e71c4070",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T08:23:50.752Z"
+  },
+  "ltx23-t2v-lora": {
+    "sha256": "1ea883fdcbd76611ab7da834e1d9cf19ef4e3eb940d44f4c0203ef485ee371d4",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T08:23:53.900Z"
   },
   "ltx25-i2v": {
     "sha256": "7a9a34d0b7571d6a44cfd7b7cdb98a2896023700b7a0beba452f15f45d91130a",
@@ -503,11 +533,23 @@
     "error": null,
     "at": "2026-10-16T20:57:26.837Z"
   },
+  "upscale-video-esrgan-chunked": {
+    "sha256": "23ca663fd29770482d2c018f97f02966f4540e279e87c2ddf44647f345628cc3",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:22.275Z"
+  },
   "upscale-video-seedvr2": {
     "sha256": "42f7ef1d6ab68d53f96a704037fc443fd207b790562da473c747f9f6e14c34fc",
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:26.825Z"
+  },
+  "upscale-video-seedvr2-chunked": {
+    "sha256": "c24dd08377b79410406355b72b5b11945f0c1e419ab1bd49228ee31e6b4ac3af",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:25.649Z"
   },
   "v2a-hunyuan-foley": {
     "sha256": "2b6f39b10c3d7bfdef30257682a207b7b89af5f246c38c5aa782de7b3b496359",
@@ -531,13 +573,31 @@
     "sha256": "08da8d310a04add6eb729fb67f3a82b63b0a806368ce49fc498dfe6aeb58c83e",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.314Z"
+    "at": "2026-10-23T16:47:53.381Z"
   },
   "video-bg-remove-sam3": {
-    "sha256": "111df3bc07d19b0b7c05b31150a260799a991fdd82f5b0407fa476338489452a",
+    "sha256": "0d8eb4714dee686b9c5b63a74ff2edd7feccf8eae825e3c6843e00efe1bac1b9",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.559Z"
+    "at": "2026-10-23T16:47:53.446Z"
+  },
+  "video-character-swap-h3": {
+    "sha256": "37496982555a84ada4ccb22a155639d6ed8817b0cf0a868aa1497bd05c1c9de2",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'Prepare · 24 fps / pixel budget' not found. The custom node may not be installed. (Node ID '#31')",
+    "at": "2026-10-27T04:10:39.868Z"
+  },
+  "video-character-swap-h3-relay": {
+    "sha256": "7ff9fd0074152ee5bd15e187b04faec8d876164ea77b0df07224f2c41e677ee6",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'H3RelayAppendWindow' not found. The custom node may not be installed. (Node ID '#append')",
+    "at": "2026-10-27T04:10:39.895Z"
+  },
+  "video-character-swap-h3-segment": {
+    "sha256": "876118b7908f3f831f4232a4cdad10235d15b736af835c84b60234a384226f4e",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'H3RelayAppendWindow' not found. The custom node may not be installed. (Node ID '#append')",
+    "at": "2026-10-27T11:01:36.134Z"
   },
   "video-concat-2": {
     "sha256": "3d08966f5a3c2da662dc112df537ad4245bcd5dbb90e0451a0beb5c54d8db581",
@@ -556,6 +616,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T23:33:20.703Z"
+  },
+  "video-concat-encoded": {
+    "sha256": "0d99102a6a9bbbc2150ee23ae8d2ac3bbcd5f30903bb374082da2b7a04c51988",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-24T05:04:50.642Z"
   },
   "video-concat-sound1-2": {
     "sha256": "70ed1a9d7d25e3022e0289e8c1c4db3a6471e616201e3c1575150ce68cfef108",
@@ -594,28 +660,28 @@
     "at": "2026-10-21T16:25:18.439Z"
   },
   "video-depth-da3": {
-    "sha256": "4c2dd5a6ee8b99eb9eeaf3ea5c9e7b3439964dc87171afef8dbbe2db53676f81",
+    "sha256": "732796f61d7404fe06f9e1132262778692c7e51ebca7316841ed14b91493e4f7",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.879Z"
+    "at": "2026-10-23T16:47:54.176Z"
   },
   "video-depth-vda-small": {
-    "sha256": "aa686ba74bb94dad4ef71f54eed453589d6330e3b25ae79ed5721637fe8902bb",
+    "sha256": "dc83a7795e72cde121a462cc9b3cc684e9619711521d3935fee015209f932dfe",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:22.128Z"
+    "at": "2026-10-23T16:47:54.852Z"
   },
   "video-erase-void": {
     "sha256": "667f8b59d931311b5081e2407ef53aee0b39a36007cf838ba18b64d5d2681bdc",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:20.436Z"
+    "at": "2026-10-23T04:45:42.666Z"
   },
   "video-export-exr": {
-    "sha256": "59de86f898829c9ed60d059d038e3a5b3f5df8fdd675a76579eacaae1526c6a8",
+    "sha256": "76efcb75b5995707dc326254ae73cdc806f12714c7543f70511f74f62fd8ca49",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:21.270Z"
+    "at": "2026-10-23T22:48:20.813Z"
   },
   "video-export-pro": {
     "sha256": "94b6ad366376bad9348ddd79e137b012bed54184e7d269cb66952cee5c1d6ca4",
@@ -623,29 +689,47 @@
     "error": null,
     "at": "2026-10-23T00:12:21.253Z"
   },
+  "video-export-pro-chunked": {
+    "sha256": "dce6e5904a85f48e12c30aa0750934f017bb09237026bd4698c29da2126ab562",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:26.054Z"
+  },
   "video-extend-wan22-fun-vace": {
     "sha256": "c6e30d4d5acf5d3d97c59fe02194e4b80fc21278ea0e946547060b80efd70ae0",
     "validated": true,
     "error": null,
     "at": "2026-10-16T23:33:13.889Z"
   },
+  "video-fit-clip": {
+    "sha256": "f00ba60d6f7aac8a250bbf757483869be5bfef80727ce8c08d59b606f9bf5b27",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T09:24:35.576Z"
+  },
   "video-inpaint-wan-vace": {
     "sha256": "71aaa43c8ac4bb0a764a9a835d96d1c47b33244f741611c7036ebea8ffcef3a7",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:19.803Z"
+    "at": "2026-10-23T04:45:37.134Z"
   },
   "video-inpaint-wan-vace-painted": {
-    "sha256": "2563d3d6a4ecac8d21d7831324eb4c0e93797afce58eaed71015bca3aa7549ab",
+    "sha256": "97d00c52d4c177c408528604cf20116bebf7128fba216021fefe5560f9a8d3fb",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:20.124Z"
+    "at": "2026-10-23T16:47:59.267Z"
   },
   "video-insert-wan-vace": {
     "sha256": "5f57a143e6b2357badf59ebaa3d6d5c834c03330dee79f8af96d9b2307b5be24",
     "validated": true,
     "error": null,
     "at": "2026-10-23T00:12:21.209Z"
+  },
+  "video-mask-h3-relay": {
+    "sha256": "d5a3fc7046010b54ea070f45acc325602ed5ab5dbe403040e4d6591949084c84",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'H3RelayPrepareSource' not found. The custom node may not be installed. (Node ID '#prepare')",
+    "at": "2026-10-27T11:01:36.148Z"
   },
   "video-mux-audio": {
     "sha256": "68af795bae0c0e89749819173916044e4024a6ce3035f830b48c80e0b6899181",
@@ -658,6 +742,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-18T07:29:29.488Z"
+  },
+  "video-person-remove-h3-relay": {
+    "sha256": "5ba6ab867836433b4af7b00e507c1bc031483afebb8680e10a9d41903c6de2f0",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'H3RelayAppendWindow' not found. The custom node may not be installed. (Node ID '#append')",
+    "at": "2026-10-27T09:34:44.790Z"
   },
   "video-reframe-wan22-fun-vace": {
     "sha256": "3d97f02a5da7badd11df1f1334de2924b4fc930c8976597b25c231d342b629de",
@@ -681,7 +771,13 @@
     "sha256": "f51f27af77dd2f61d51553241b15f6b5af14e6c06ff3342b24e810dff3e87f93",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:21.261Z"
+    "at": "2026-10-23T22:48:17.397Z"
+  },
+  "video-sdr-to-hdr-exr": {
+    "sha256": "76b2183fbe97e482526797aa054dae20fc6ca4ee793c245e6957476dc9fa9572",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:27.080Z"
   },
   "video-segment-resample": {
     "sha256": "957899bf0bd99a4bf9e2407a6149392eccc2ee6d8338088809992025e4d4b45d",
@@ -784,6 +880,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:21.746Z"
+  },
+  "z-image-turbo-i2i": {
+    "sha256": "bc702da5141ab4941d1fa0af9eb6cdc94c789f69c2f53c82a4335e1f1df763ea",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T00:27:46.842Z"
   },
   "z-image-turbo-t2i": {
     "sha256": "dda8f9b795709c31220a732c2db134e130cda20d0672c0cca64905b1f8397a70",

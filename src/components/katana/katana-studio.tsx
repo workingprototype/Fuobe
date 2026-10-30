@@ -18,9 +18,10 @@ import { frameDiff, openVideo, releaseVideo, sampleFrames } from "@/components/a
 import { MediaDrop } from "@/components/av/media-drop";
 import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
-import { useEngine } from "@/lib/api";
+import { useEngine, useModelAccess } from "@/lib/api";
 import { formatCueTime } from "@/lib/av/cue-edit";
 import { detectCutIndices, KATANA_LIMITS, katanaProgress, katanaStage, motionModel, MOTION_MODELS, nearestAspect, planSegments, refineCut, refineTimes, type KatanaJobView, type Segment } from "@/lib/av/katana";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { useKatanaActions, useKatanaJobs, useKatanaPreview, type KatanaBody } from "./hooks";
 
@@ -71,7 +72,10 @@ export function KatanaStudio() {
   const [scanning, setScanning] = useState<number | null>(null);
   const [modelId, setModelId] = useState<string | undefined>(undefined);
   const [keepAudio, setKeepAudio] = useState(true);
-  const m = motionModel(engine, modelId);
+  // Motion models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const access = useModelAccess();
+  const motionModels = keepOffered(MOTION_MODELS[engine], (x) => offered(access, x.id, engine));
+  const m = motionModel(engine, modelId && motionModels.some((x) => x.id === modelId) ? modelId : motionModels[0].id);
   const len = Math.min(m.max, Math.max(m.min, length ?? m.max));
 
   const segments = useMemo<Segment[] | null>(() => {
@@ -239,7 +243,7 @@ export function KatanaStudio() {
               className="min-h-20 resize-none text-[14px]"
               aria-label="Instructions"
             />
-            <p className="mt-1 text-right font-mono text-[11px] text-subtle-foreground">
+            <p className="mt-1 text-right font-mono text-[11px] text-muted-foreground">
               {instructions.length}/{KATANA_LIMITS.maxInstructions}
             </p>
           </Panel>
@@ -253,7 +257,7 @@ export function KatanaStudio() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {MOTION_MODELS[engine].map((x) => (
+                  {motionModels.map((x) => (
                     <SelectItem key={x.id} value={x.id}>
                       {x.label} · {x.min}–{x.max} s
                     </SelectItem>
@@ -279,7 +283,7 @@ export function KatanaStudio() {
                 (blocker ?? "Pricing…")
               )}
             </p>
-            <Button size="lg" className={cn("rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={go} disabled={start.isPending || scanning !== null}>
+            <Button size="lg" className={cn("rounded-full", blocker && "bg-muted text-muted-foreground hover:bg-muted")} onClick={go} disabled={start.isPending || scanning !== null}>
               {start.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Recreate
             </Button>
           </div>
@@ -311,7 +315,7 @@ function SegmentBar({ segments, duration }: { segments: Segment[]; duration: num
           </div>
         ))}
       </div>
-      <div className="mt-1 flex justify-between font-mono text-[11px] text-subtle-foreground">
+      <div className="mt-1 flex justify-between font-mono text-[11px] text-muted-foreground">
         <span>0:00</span>
         <span>{formatCueTime(duration)}</span>
       </div>

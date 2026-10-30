@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /**
- * The review fixes of the marketing suite: open joins keep the voice, plans with a Higgsfield key,
+ * The review fixes of the marketing suite: open joins keep the voice, plans on fal and Replicate alone,
  * offline scripts that keep the call to action and the instructions, chat directions without "@"
  * leftovers, a research bar that never goes back, and the sound-keeping join workflows bound for real.
  */
@@ -68,7 +68,6 @@ beforeAll(() => {
   setSetting("enhanceProvider", "none");
 });
 afterAll(() => {
-  setSetting("higgsfieldKey", "");
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -92,7 +91,7 @@ describe("open joins keep the voice", () => {
   it("UGC with a hook: the presenter's own sound starts after the silent hook (sound of clip 2)", () => {
     const plan = mk.planMarketing(
       { engine: "open", format: "ugc-talking", templateId: "ugc-honest-review", hookId: "camera-bump", voiceSample: upload("v.png") },
-      { product: product(), higgsfield: false, script: SCRIPT },
+      { product: product(), script: SCRIPT },
     );
     const film = filmOf(plan);
     expect(plan.finals).toEqual(["film"]);
@@ -107,7 +106,7 @@ describe("open joins keep the voice", () => {
   });
 
   it("UGC without a hook and Click to Ad's presenter: the first clip's sound from the start", () => {
-    const ugc = mk.planMarketing({ engine: "open", format: "ugc-talking", hookId: null, voiceSample: upload("v.png") }, { product: product(), higgsfield: false, script: SCRIPT });
+    const ugc = mk.planMarketing({ engine: "open", format: "ugc-talking", hookId: null, voiceSample: upload("v.png") }, { product: product(), script: SCRIPT });
     expect(filmOf(ugc).request.modelId).toBe(cat.OPEN_SOUND_JOIN.first);
     expect(filmOf(ugc).after).toEqual(["captions", "broll"]);
     const c2a = mk.planClickToAd({ engine: "open", productId: "p1", styleId: "simple-ugc", voiceSample: upload("v.png"), quality: "720p" }, { product: product(), script: SCRIPT });
@@ -128,24 +127,24 @@ describe("open joins keep the voice", () => {
 
   it("Ad Multiplier hook / CTA: the reference's own sound when it has one, the plain join otherwise", () => {
     const base = { engine: "open" as const, video: upload("ref.png"), duration: 12, mode: "sections" as const, quality: "1080p" as const, firstFrame: upload("f.png"), lastFrame: upload("l.png") };
-    const both = mk.planMultiplier({ ...base, hook: "Wait", cta: "Shop" }, { higgsfield: false, referenceSound: true, referenceAspect: "9:16" });
+    const both = mk.planMultiplier({ ...base, hook: "Wait", cta: "Shop" }, { referenceSound: true, referenceAspect: "9:16" });
     const film = filmOf(both);
     expect(film.request).toMatchObject({ modelId: cat.OPEN_SOUND_JOIN.second, inputs: { videos: [base.video] }, params: { aspectRatio: "9:16", resolution: "720p" } });
     expect(both.steps.find((s) => s.key === "hook")!.request.params).toMatchObject({ aspectRatio: "9:16" });
-    const ctaOnly = mk.planMultiplier({ ...base, hook: null, cta: "Shop" }, { higgsfield: false, referenceSound: true });
+    const ctaOnly = mk.planMultiplier({ ...base, hook: null, cta: "Shop" }, { referenceSound: true });
     expect(filmOf(ctaOnly).request.modelId).toBe(cat.OPEN_SOUND_JOIN.first);
-    const silent = mk.planMultiplier({ ...base, hook: "Wait", cta: null }, { higgsfield: false, referenceSound: false });
+    const silent = mk.planMultiplier({ ...base, hook: "Wait", cta: null }, { referenceSound: false });
     expect(filmOf(silent).request.modelId).toBe("oss-join-clips");
     expect(silent.notes).toEqual([]);
-    const unknown = mk.planMultiplier({ ...base, hook: "Wait", cta: null }, { higgsfield: false });
+    const unknown = mk.planMultiplier({ ...base, hook: "Wait", cta: null }, {});
     expect(filmOf(unknown).request.modelId).toBe("oss-join-clips");
     expect(unknown.notes.join(" ")).toMatch(/soundtrack couldn't be read/);
   });
 
   it("Ad Multiplier prompt mode: no 'Original sound' step for a silent reference", () => {
     const base = { engine: "open" as const, video: upload("ref.png"), duration: 12, mode: "prompt" as const, quality: "720p" as const, images: [upload("star.png")], prompt: "Recreate with @image_1" };
-    expect(mk.planMultiplier(base, { higgsfield: false, referenceSound: true }).steps.map((s) => s.key)).toEqual(["edit", "sound"]);
-    const silent = mk.planMultiplier(base, { higgsfield: false, referenceSound: false });
+    expect(mk.planMultiplier(base, { referenceSound: true }).steps.map((s) => s.key)).toEqual(["edit", "sound"]);
+    const silent = mk.planMultiplier(base, { referenceSound: false });
     expect(silent.steps.map((s) => s.key)).toEqual(["edit"]);
     expect(silent.steps[0].request).toMatchObject({ feature: "ad-multiplier", title: silent.title });
   });
@@ -187,29 +186,15 @@ describe("the sound-keeping join workflows", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("plans with a Higgsfield key", () => {
-  it("Ads Studio goes one-shot through Higgsfield's ads-studio; the Multiplier defaults to Seedance 2.5 edit", () => {
-    setSetting("higgsfieldKey", "key:secret");
-    try {
-      expect(ads.batchRoute({ engine: "cloud" })).toBe("higgsfield");
-      expect(ads.batchRoute({ engine: "cloud", route: "fuobe" })).toBe("fuobe");
-      expect(ads.batchRoute({ engine: "open", route: "higgsfield" })).toBe("fuobe");
-      const kit = brand.kitForSite("https://hf.example/p/1", { name: "HF Brand", colors: ["#123456"], fonts: {} });
-      const req = ads.higgsfieldRequest(product(), kit, "9:16", "winter sale", 3);
-      expect(req).toMatchObject({ modelId: "ads-studio", op: "edit", params: { aspectRatio: "9:16", numOutputs: 1 } });
-      expect(req.prompt).toMatch(/Direction: winter sale/);
-      const model = mk.multiplierModel({ engine: "cloud" }, true);
-      expect(model.id).toBe("seedance-2-5");
-      const plan = mk.planMultiplier({ engine: "cloud", video: upload("ref.png"), duration: 10, mode: "prompt", quality: "720p" }, { higgsfield: true });
-      expect(plan.steps[0].request).toMatchObject({ modelId: "seedance-2-5", op: "v2v" });
-      expect(model.routes.some((r) => r.op === "v2v" && r.provider === "higgsfield")).toBe(true);
-      expect(plan.notes.join(" ")).not.toMatch(/connect a Higgsfield key/);
-      brand.deleteBrand(kit.id);
-    } finally {
-      setSetting("higgsfieldKey", "");
-    }
-    expect(ads.batchRoute({ engine: "cloud" })).toBe("fuobe");
-    expect(mk.multiplierModel({ engine: "cloud" }, false).id).toBe("kling-o3");
+describe("plans on fal and Replicate alone", () => {
+  it("the Multiplier recreates on Kling O3 edit by default, or Happy Horse's edit with your images", () => {
+    expect(mk.multiplierModel({ engine: "cloud" }).id).toBe("kling-o3");
+    expect(mk.multiplierModel({ engine: "cloud", modelId: "happy-horse-video-edit" }).id).toBe("happy-horse-video-edit");
+    // An old pick (Seedance 2.5's edit, which no longer has a route) falls back to the default.
+    expect(mk.multiplierModel({ engine: "cloud", modelId: "seedance-2-5" }).id).toBe("kling-o3");
+    const plan = mk.planMultiplier({ engine: "cloud", video: upload("ref.png"), duration: 10, mode: "prompt", quality: "720p", modelId: "happy-horse-video-edit", images: [upload("a.png")], prompt: "Swap the bottle for @image_1" }, {});
+    expect(plan.steps[0].request).toMatchObject({ modelId: "happy-horse-video-edit", op: "v2v", inputs: { images: [expect.any(String)] } });
+    expect(getModel("happy-horse-video-edit")!.routes.every((r) => r.provider === "fal")).toBe(true);
   });
 
   it("says the rules write the copy when no LLM is reachable", () => {
@@ -345,20 +330,20 @@ describe("composer details", () => {
   });
   it("SaaS motion uses the brand kit's website when no link or product is given", () => {
     const b = { ...cat.emptyKit("Northbound"), id: "b1", website: "https://northbound.example/" } as import("@/lib/catalog/marketing").BrandKit;
-    const plan = mk.planMarketing({ engine: "cloud", format: "motion-saas" }, { brand: b, higgsfield: false });
+    const plan = mk.planMarketing({ engine: "cloud", format: "motion-saas" }, { brand: b });
     expect(plan.steps[0].request.prompt).toMatch(/For the product at https:\/\/northbound\.example\//);
-    expect(() => mk.planMarketing({ engine: "cloud", format: "motion-saas" }, { higgsfield: false })).toThrow(/website/);
+    expect(() => mk.planMarketing({ engine: "cloud", format: "motion-saas" }, {})).toThrow(/website/);
   });
   it("open posters and ads ask for room where the words go", () => {
-    const ad = mk.planMarketing({ engine: "open", format: "ads", templateId: "ad-hero-headline", productImages: [upload()] }, { higgsfield: false });
+    const ad = mk.planMarketing({ engine: "open", format: "ads", templateId: "ad-hero-headline", productImages: [upload()] }, {});
     expect(cat.overlayLayout("ads")).toBe("overlay");
     expect(ad.steps[0].request.prompt).toMatch(/lower third/);
-    const poster = mk.planMarketing({ engine: "open", format: "poster", prompt: "A summer concert" }, { higgsfield: false });
+    const poster = mk.planMarketing({ engine: "open", format: "poster", prompt: "A summer concert" }, {});
     expect(cat.overlayLayout("poster")).toBe("frame");
     expect(poster.steps[0].request.prompt).not.toMatch(/third/);
   });
   it("keeps the browser's own composite on the run once (a second automatic one returns it)", () => {
-    const plan = mk.planMarketing({ engine: "open", format: "poster", prompt: "A summer concert", headline: "Live at dusk" }, { higgsfield: false });
+    const plan = mk.planMarketing({ engine: "open", format: "poster", prompt: "A summer concert", headline: "Live at dusk" }, {});
     const run = mk.launch(plan);
     expect(run.meta.overlay).toEqual({ headline: "Live at dusk" });
     const first = mk.saveRunComposite(run.id, { url: upload("c1.png"), ratio: "3:4", text: "Live at dusk", auto: true });

@@ -18,7 +18,7 @@ export function FieldRow({ label, hint, children, className, htmlFor }: { label:
         {label}
       </label>
       {children}
-      {hint && <p className="text-[11px] text-subtle-foreground">{hint}</p>}
+      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   );
 }

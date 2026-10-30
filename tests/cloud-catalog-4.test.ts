@@ -9,12 +9,6 @@ import { OPERATION_LABELS, OPERATION_OUTPUT, type GenerationRequest, type ModelR
 type Endpoint = { provider: string; endpoint: string; status?: string; verified?: boolean; inputs?: Record<string, { values?: unknown[] }> };
 const research4 = (JSON.parse(fs.readFileSync("docs/research/paid-model-apis-4.json", "utf8")) as { endpoints: Endpoint[] }).endpoints;
 const byId = new Map(research4.map((e) => [`${e.provider}:${e.endpoint}`, e]));
-type HiggsfieldEndpoint = { path: string; method: string; inputs?: Record<string, { enum?: unknown[] }> };
-const higgsfield = new Map(
-  (JSON.parse(fs.readFileSync("docs/research/higgsfield-api.json", "utf8")) as { endpoints: HiggsfieldEndpoint[] }).endpoints
-    .filter((e) => e.method === "POST")
-    .map((e) => [e.path.replace(/^\//, ""), e]),
-);
 
 /** The models round 4 added (research part 4), with the operation each is for. */
 const ROUND4: Record<string, Operation> = {
@@ -58,13 +52,10 @@ const ROUND4: Record<string, Operation> = {
   "bria-expand": "outpaint",
   "heygen-voice-turbo": "tts",
   "gemini-3-8-flash-tts": "tts",
-  // Higgsfield (gen-higgsfield-models.py)
-  "genjutsu-lite-object-swap": "video-swap",
-  "genjutsu-lite-motion-transfer": "motion-transfer",
 };
 
-/** Chain helpers that never show in a picker. */
-const HIDDEN = ["bria-video-erase-points", "bria-video-erase-mask", "sam-3-1-video-mask", "ken-burns", "overlay-image", "extract-frames", "images-to-video", "join-audio"];
+/** Chain helpers that never show in a picker (SAM 3.1's mask is also Remove background's "keep what you name" on the cloud). */
+const HIDDEN = ["bria-video-erase-points", "bria-video-erase-mask", "ken-burns", "overlay-image", "extract-frames", "images-to-video", "join-audio"];
 
 const NEW_OPS: Operation[] = [
   "remove-object", "video-swap", "video-insert", "keyframes", "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop", "audio-join",
@@ -139,7 +130,7 @@ describe("round-4 cloud models", () => {
     expect(ids("video", ["t2v", "i2v", "flf2v", "ref2v"])).not.toEqual(expect.arrayContaining(["wan-22-vace-inpaint"]));
     expect(ids("video", ["avatar", "lipsync"])).toContain("p-video-2-pro-avatar");
     expect(ids("video", ["reframe"])).toContain("minimax-h3-max-reframe");
-    expect(ids("video", ["motion-transfer"])).toContain("genjutsu-lite-motion-transfer");
+    expect(ids("video", ["motion-transfer"])).toContain("fuobe-genjutsu-motion-lite");
     // Image studio (t2i), Edit (edit), Inpaint, Vectorize, Audio (tts).
     expect(ids("image", ["t2i"])).toEqual(expect.arrayContaining(["krea-3", "grok-imagine-image-2", "bria-fibo-2", "ideogram-vector"]));
     expect(ids("image", ["edit"])).toEqual(expect.arrayContaining(["krea-3", "grok-imagine-image-2", "bria-fibo-2"]));
@@ -148,7 +139,7 @@ describe("round-4 cloud models", () => {
     expect(ids("audio", ["tts"])).toEqual(expect.arrayContaining(["heygen-voice-turbo", "gemini-3-8-flash-tts"]));
     // The round-4 tools by operation (their studios come with the feature packages).
     expect(ids("video", ["remove-object"])).toEqual(expect.arrayContaining(["kling-o3", "kling-o3-4k-edit", "bria-video-erase", "void-video-inpainting", "ltx-2-3-clean-plate", "wan-22-vace-inpaint"]));
-    expect(ids("video", ["video-swap"])).toEqual(expect.arrayContaining(["kling-o3", "wan-22-vace-inpaint", "p-video-replace", "genjutsu-lite-object-swap", "genjutsu-object-swap"]));
+    expect(ids("video", ["video-swap"])).toEqual(expect.arrayContaining(["kling-o3", "wan-22-vace-inpaint", "p-video-replace", "fuobe-genjutsu-swap-lite", "fuobe-genjutsu-swap"]));
     expect(ids("video", ["video-insert"])).toEqual(expect.arrayContaining(["kling-o3", "wan-22-vace-inpaint"]));
     expect(ids("video", ["interpolate"])).toEqual(["topaz-fps-boost", "rife-video-cloud"]);
     expect(ids("video", ["sdr-to-hdr"])).toEqual(["topaz-sdr-to-hdr", "ltx-2-3-hdr"]);
@@ -159,33 +150,19 @@ describe("round-4 cloud models", () => {
     expect(ids("video", ["keyframes"])).toEqual(["flux-3-max"]);
   });
 
-  it("keeps the Higgsfield routes of the Grok models now generated from fal, and adds Genjutsu Lite", () => {
+  it("runs the Grok models on fal alone, and Genjutsu Lite as the Original's Lite tier", () => {
     for (const [id, ops] of [
       ["grok-imagine-video-1-5", ["t2v", "i2v", "ref2v"]],
       ["grok-imagine-image-2", ["t2i", "edit"]],
     ] as const) {
       const m = getModel(id)!;
-      for (const op of ops) {
-        expect(m.routes.some((r) => r.op === op && r.provider === "fal"), `${id} fal ${op}`).toBe(true);
-        expect(m.routes.some((r) => r.op === op && r.provider === "higgsfield"), `${id} higgsfield ${op}`).toBe(true);
-      }
+      for (const op of ops) expect(m.routes.some((r) => r.op === op && r.provider === "fal"), `${id} fal ${op}`).toBe(true);
+      expect(m.routes.every((r) => r.provider === "fal")).toBe(true);
     }
     expect(MODELS.filter((m) => m.id === "grok-imagine-video-1-5")).toHaveLength(1);
-    const lite = getModel("genjutsu-lite-object-swap")!;
-    expect(lite.routes).toEqual([
-      {
-        op: "video-swap",
-        provider: "higgsfield",
-        endpoint: "higgsfield/genjutsu-light/object-swap/v1.0",
-        map: { omitEmptyPrompt: true, images: "image_urls", video: "video_url", resolution: "resolution" },
-      },
-    ]);
-    // Duration is read-only on Genjutsu Light (taken from the source): never sent, never offered.
-    expect(lite.options.durations).toBeUndefined();
-    expect(lite.options.maxImages).toBe(8);
-    expect(lite.pricing).toMatchObject({ unit: "second", usd: 0.1 });
-    expect(getModel("genjutsu-lite-motion-transfer")!.routes[0]).toMatchObject({ op: "motion-transfer", endpoint: "higgsfield/genjutsu-light/motion-transfer/v1.0" });
-    expect(route("kling-o3", "remove-object", "higgsfield").endpoint).toBe("kling-video/o3/video-edit");
+    expect(getModel("genjutsu-lite-object-swap")).toBeUndefined();
+    expect(getModel("fuobe-genjutsu-swap-lite")!.engines).toEqual(["open", "cloud"]);
+    expect(route("kling-o3", "remove-object", "fal").endpoint).toMatch(/kling-video\/o3/);
   });
 
   it("prices FLUX 3 Max at its launch rate until 2026-11-07, then at the list price", () => {
@@ -250,6 +227,7 @@ describe("round-4 payloads", () => {
       prompt: "chair, lamp",
       image_url: "room.png",
       point_prompts: [{ x: 10, y: 20, label: 1 }],
+      export_textured_glb: true,
     });
   });
 
@@ -387,8 +365,8 @@ describe("round-4 planning", () => {
     expect(op("wan-22-vace-inpaint", { video, images: ["/r.png"] })).toBe("video-swap");
     expect(op("wan-22-vace-inpaint", { video, mask: "/m.png" })).toBe("remove-object");
     expect(op("bria-video-erase", { video })).toBe("remove-object");
-    expect(op("genjutsu-lite-object-swap", { video, images: ["/r.png"] })).toBe("video-swap");
-    expect(op("genjutsu-lite-motion-transfer", { video, images: ["/r.png"] })).toBe("motion-transfer");
+    expect(op("fuobe-genjutsu-swap-lite", { video, images: ["/r.png"] })).toBe("video-swap");
+    expect(op("fuobe-genjutsu-motion-lite", { video, images: ["/r.png"] })).toBe("motion-transfer");
     // A general video editor keeps plain edits unless the studio asks for the tool.
     expect(op("kling-o3", { video })).toBe("v2v");
     expect(op("flux-3-max", { images: ["/a.png", "/b.png", "/c.png"] })).toBe("keyframes");
@@ -460,11 +438,7 @@ describe("round-4 planning", () => {
 
   it("lets a swap run without words where the API does, and asks for words where it doesn't", () => {
     expect(promptOptional(getModel("p-video-replace")!, "video-swap")).toBe(true);
-    expect(promptOptional(getModel("genjutsu-lite-object-swap")!, "video-swap")).toBe(true);
-    expect(promptOptional(getModel("genjutsu-object-swap")!, "video-swap")).toBe(true);
     expect(getModel("p-video-replace")!.options.promptless).toBeFalsy();
-    expect(plan({ modelId: "genjutsu-lite-object-swap", inputs: { video, images: ["/r.png"] } }).op).toBe("video-swap");
-    expect(buildPayload(map("genjutsu-lite-object-swap", "video-swap", "higgsfield"), { prompt: "", video: "v.mp4", images: ["r.png"] })).toEqual({ image_urls: ["r.png"], video_url: "v.mp4" });
     expect(fails({ modelId: "kling-o3", op: "video-swap", inputs: { video, images: ["/r.png"] } })).toBe("Write a prompt first");
     expect(fails({ modelId: "sam-3d-objects", inputs: { images: ["/room.png"] } })).toBe("Name the objects to rebuild, e.g. “chair, lamp”");
     expect(plan({ modelId: "pixelcut-looping-video", inputs: { images: ["/bottle.png"] } }).op).toBe("i2v");
@@ -494,13 +468,12 @@ describe("round-4 review fixes", () => {
     expect(fitValue(["480p"], "very_low", "tier")).toBeUndefined();
   });
 
-  it("sends Grok Imagine on fal and Higgsfield only values each route's API lists", () => {
+  it("sends Grok Imagine on fal only values each route's API lists", () => {
     const bad: string[] = [];
     for (const id of ["grok-imagine-video-1-5", "grok-imagine-image-2"]) {
       const m = getModel(id)!;
       for (const r of m.routes) {
-        const enumOf = (field: string): unknown[] | undefined =>
-          r.provider === "higgsfield" ? higgsfield.get(r.endpoint)?.inputs?.[field]?.enum : byId.get(`${r.provider}:${r.endpoint}`)?.inputs?.[field]?.values;
+        const enumOf = (field: string): unknown[] | undefined => byId.get(`${r.provider}:${r.endpoint}`)?.inputs?.[field]?.values;
         const images = r.op === "ref2v" || r.op === "edit" ? ["a.png", "b.png"] : r.op === "i2v" ? ["a.png"] : [];
         for (const aspectRatio of m.options.aspectRatios ?? []) {
           const sent = buildPayload(r.map!, { prompt: "p", images, aspectRatio }).aspect_ratio;
@@ -516,19 +489,12 @@ describe("round-4 review fixes", () => {
     // fal's reference-to-video stops at 720p; text-to-video makes 1080p.
     expect(buildPayload(map("grok-imagine-video-1-5", "ref2v"), { prompt: "p", images: ["a.png", "b.png"], resolution: "1080p" })).toMatchObject({ reference_image_urls: ["a.png", "b.png"], resolution: "720p" });
     expect(buildPayload(map("grok-imagine-video-1-5", "t2v"), { prompt: "p", resolution: "1080p" }).resolution).toBe("1080p");
-    // Higgsfield: a start frame or references, never both; references up to 720p.
-    expect(buildPayload(map("grok-imagine-video-1-5", "i2v", "higgsfield"), { prompt: "p", images: ["a.png"], resolution: "1080p" })).toEqual({ prompt: "p", image_url: "a.png", resolution: "1080p" });
-    expect(buildPayload(map("grok-imagine-video-1-5", "ref2v", "higgsfield"), { prompt: "p", images: ["a.png", "b.png"], resolution: "1080p" })).toEqual({ prompt: "p", image_urls: ["a.png", "b.png"], resolution: "720p" });
-    // fal's text-to-image has no "auto" (its edit does); Higgsfield takes the nearest of its shapes.
+    // fal's text-to-image has no "auto" (its edit does).
     expect(buildPayload(map("grok-imagine-image-2", "t2i"), { prompt: "p", aspectRatio: "auto" })).toEqual({ prompt: "p" });
     expect(buildPayload(map("grok-imagine-image-2", "edit"), { prompt: "p", images: ["a.png"], aspectRatio: "auto" }).aspect_ratio).toBe("auto");
-    for (const [want, sent] of [["20:9", "2:1"], ["19.5:9", "2:1"], ["9:19.5", "1:2"], ["9:20", "1:2"], ["16:9", "16:9"], ["auto", "auto"]]) {
-      expect(buildPayload(map("grok-imagine-image-2", "t2i", "higgsfield"), { prompt: "p", aspectRatio: want }).aspect_ratio, want).toBe(sent);
-    }
-    // Up to 10 references (Higgsfield); fal's edit route says it takes 5, so a run with more goes to Higgsfield.
-    expect(getModel("grok-imagine-image-2")!.options.maxImages).toBe(10);
+    // fal's edit route takes 5 references, and the model offers no more.
+    expect(getModel("grok-imagine-image-2")!.options.maxImages).toBe(5);
     expect(map("grok-imagine-image-2", "edit").maxImages).toBe(5);
-    expect(map("grok-imagine-image-2", "edit", "higgsfield").maxImages).toBeUndefined();
   });
 
   it("asks frame-count routes for as many frames as the clip has", () => {

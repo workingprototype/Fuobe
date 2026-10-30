@@ -1,6 +1,6 @@
 import "server-only";
 import { nanoid } from "nanoid";
-import { handleFor, type ElementKind, type ElementLora, type StudioElement } from "@/lib/catalog/elements";
+import { handleFor, MAX_ELEMENT_PHOTOS, type ElementKind, type ElementLora, type StudioElement } from "@/lib/catalog/elements";
 import { db } from "./db";
 
 interface Row {
@@ -60,7 +60,7 @@ export function createElement(input: { name: string; kind: ElementKind; descript
     handle: uniqueHandle(name),
     kind: input.kind,
     description: input.description?.trim() || null,
-    reference_asset_ids_json: JSON.stringify(input.references.slice(0, 20)),
+    reference_asset_ids_json: JSON.stringify(input.references.slice(0, MAX_ELEMENT_PHOTOS)),
     loras_json: null,
     status: "ready" as const,
     created_at: now,
@@ -91,7 +91,7 @@ export function updateElement(
       name,
       handle: name === cur.name ? cur.handle : uniqueHandle(name, id),
       description: patch.description === undefined ? cur.description : patch.description?.trim() || null,
-      refs: JSON.stringify((patch.references ?? cur.references).slice(0, 20)),
+      refs: JSON.stringify((patch.references ?? cur.references).slice(0, MAX_ELEMENT_PHOTOS)),
       loras: JSON.stringify(patch.loras ?? cur.loras),
       status: patch.status ?? cur.status,
       now: Date.now(),

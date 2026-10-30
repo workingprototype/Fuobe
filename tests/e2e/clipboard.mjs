@@ -68,7 +68,7 @@ try {
     await openRoute(page, `${app}/image`);
 
     step("feed: a result's ⋯ menu → Copy prompt");
-    const header = page.locator("header", { has: page.locator("h3", { hasText: prompt }) });
+    const header = page.locator("header", { has: page.locator("h2", { hasText: prompt }) });
     await copies(
       page,
       async () => {

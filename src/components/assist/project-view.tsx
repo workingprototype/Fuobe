@@ -54,6 +54,7 @@ import { useChatActions, useChats, useProject, useProjectActions, useProjectAsse
 import { MemoryView } from "./memory-view";
 import { useModeChoice } from "./mode-picker";
 import { ProjectDialog } from "./project-dialog";
+import { ScheduledView } from "./scheduled-view";
 import { ProjectDot, RailButton } from "./shell";
 
 const SOURCE_ICON: Record<SourceKind, typeof FileText> = { link: Link2, file: FileText, image: ImageIcon, video: Video, audio: AudioLines, element: AtSign, text: NotebookPen };
@@ -136,11 +137,12 @@ function Project({ p }: { p: AssistProject }) {
               }}
               footer={<NewChatControls choice={choice} setChoice={setChoice} can={can} engine={engine} setEngine={setEngine} askFirst={askFirst} setAskFirst={setAskFirst} />}
             />
-            {!chats.data?.threads.length && <SkillStarters skills={available} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />}
+            {!chats.data?.threads.length && <SkillStarters skills={available} loading={skills.data === undefined && !skills.isError} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />}
           </div>
         </div>
         <Tabs value={tab} onValueChange={setTab} className="mt-10 gap-4">
-          <TabsList>
+          {/* Five tabs are wider than a phone: the row scrolls by itself, not the page. */}
+          <TabsList className="max-w-full justify-start overflow-x-auto scrollbar-none">
             <TabsTrigger value="chats" className="px-3">
               Chats <span className="font-mono text-[11px] text-muted-foreground">{chats.data?.threads.length || ""}</span>
             </TabsTrigger>
@@ -152,6 +154,9 @@ function Project({ p }: { p: AssistProject }) {
             </TabsTrigger>
             <TabsTrigger value="memory" className="px-3">
               Memory
+            </TabsTrigger>
+            <TabsTrigger value="scheduled" className="px-3">
+              Scheduled
             </TabsTrigger>
           </TabsList>
           <TabsContent value="chats">
@@ -181,6 +186,9 @@ function Project({ p }: { p: AssistProject }) {
           </TabsContent>
           <TabsContent value="memory" className="-mx-3 sm:-mx-6">
             <MemoryView projectId={p.id} />
+          </TabsContent>
+          <TabsContent value="scheduled" className="-mx-3 sm:-mx-6">
+            <ScheduledView projectId={p.id} />
           </TabsContent>
         </Tabs>
       </div>
@@ -367,7 +375,7 @@ function Sources({ p }: { p: AssistProject }) {
             ) : (
               <p className="px-3 py-4 text-center text-[13px] text-muted-foreground">
                 No elements yet —{" "}
-                <Link href="/elements" className="text-brand-text hover:underline">
+                <Link href="/elements" className="text-brand-text underline underline-offset-2">
                   save a character or product
                 </Link>
                 .

@@ -12,7 +12,7 @@ Full write-up (what is in the library, validation results, models, quirks for ap
 
 | file | purpose |
 |---|---|
-| `install-comfyui.sh` | reproducible CPU install of ComfyUI + the 15 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3; ToSVG (VTracer) in round 4). Non-commercial node code is opt-in: `NC_PACKS=1` adds ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) |
+| `install-comfyui.sh` | reproducible CPU install of ComfyUI + 17 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3; ToSVG (VTracer) in round 4). Licences are information: the non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) is installed too, and `NC_PACKS=0` leaves it out (Settings → Models & licences has a switch per node pack). Round 4 part 4 adds Akatz Labs' GPL-3.0 `h3_character_swap` for Genjutsu's Character swap (`H3_PACK=0` leaves it out; it needs `ffmpeg` and `ffprobe`), and H3 Relay 2.0 with `H3_RELAY=1` (the Relay swap, H3 Person Removal and, since round 4 part 5, the Character Swap Studio's two graphs) |
 | `install-isolated-worker.sh` | a second ComfyUI with its own code copy, base directory, `HOME` and virtualenv for LatentSync 1.6 and ThinkSound (below) |
 | `start-comfyui.sh` / `stop-comfyui.sh` | run ComfyUI in the background on 127.0.0.1:8188 (log: `$COMFYUI_DIR/logs/comfyui.log`) |
 | `export-templates.mjs` | Playwright: opens the ComfyUI frontend, `app.loadGraphData(ui)` → `app.graphToPrompt().output`, writes `build/raw/<key>.api.json` + `.meta.json` (embedded model URLs, missing node types) |
@@ -93,7 +93,7 @@ node validate-workflows.mjs <ids>
   stream is copied packet by packet (bit-identical, no decode), only the AAC soundtrack is encoded. The two-track
   graph mixes voice and background over `EmptyAudio` of the video's length (`AudioMerge` cuts its second track to
   the first one's length). A 900-frame clip muxes in ~5 s at +0.02 GB RSS.
-- **`captions-whisper-burnin`** decodes the whole clip (VHS) and needs ComfyUI-Whisper (`NC_PACKS=1`); the provider
+- **`captions-whisper-burnin`** decodes the whole clip (VHS) and needs ComfyUI-Whisper (non-commercial code, installed unless `NC_PACKS=0`); the provider
   refuses clips that would need more than half the server's RAM and points to the chunked route.
 - **New entry fields**: `worker: "isolated"` (below), `expand`, and on outputs `stem` (`voice` | `background`) and
   `role` (`cues`, `transcript`, `language`, `sheet`, `tiles`, `layers`, `first-frame`, `turntable`).
@@ -204,6 +204,161 @@ node validate-workflows.mjs <ids> wan21-vace-14b-ref2v --shared
   with the source frames), a 1 s window (29 frames), a silent clip (no sound track, no error), a 25 fps clip through
   VOID (197 frames, 7.880 s of picture and of sound, 672×376) and a window at 50 s of a 60 s clip (0.6 s instead of
   2.6 s with the whole-clip decode). MoGe's guard ran on 1536×3000, 3000×1536 and 1024×768 stills.
+
+### Round-4 video finishing (r4/video-finish, 2026-10-23)
+
+Five hand-built entries for the Upscale hub's FPS Boost, SDR to HDR and Export modes and for R4-38 (open video
+upscaling decoded the whole film: about 38 GB of float frames for 30 s at 480p). No new node pack: core nodes plus
+VHS's `VHS_LoadVideo` meta-batch, `VHS_BatchManager`, `VHS_SelectEveryNthImage` and `VHS_VideoCombine`.
+`video-sdr-to-hdr` also binds `colorSpace` (HLG, or `HDR PQ` for HDR10), and `video-export-exr` saves a preview clip.
+
+```bash
+npm run build -- interpolate-rife-fps upscale-video-esrgan-chunked upscale-video-seedvr2-chunked video-export-pro-chunked video-sdr-to-hdr-exr video-sdr-to-hdr video-export-exr
+node validate-workflows.mjs <the same ids> --shared
+```
+
+| id | capability | what | ran for real here |
+|---|---|---|---|
+| `interpolate-rife-fps` | interpolate | FrameInterpolate by m, keep every n-th: source fps × m / n = target × slowdown; output fps computed in the graph | yes: 24 → 60, 25 → 30 at 2× slow, 30 → 24 |
+| `upscale-video-esrgan-chunked` | upscale-video | Real-ESRGAN in passes of `framesPerBatch` frames, scaled to `shortSide`, one H.264 encode across passes | yes: 30 s 144p → 1080p, 47 passes, +0.87 GB RSS |
+| `upscale-video-seedvr2-chunked` | upscale-video | SeedVR2 3B in passes of 4n+1 frames (no context across passes: a seam is possible) | no (GPU); /prompt only |
+| `video-export-pro-chunked` | export-video | ProRes 422 HQ / 4444, H.265 10-bit, FFV1, H.264 in passes, with the sound | yes: ProRes, H.265, FFV1 |
+| `video-sdr-to-hdr-exr` | sdr-to-hdr | scene-linear Rec.2020 half-float EXR per frame + an HLG preview | yes: 60 frames + preview |
+
+- **What the provider does** (`src/server/providers/comfyui.ts`, `src/lib/av/fps.ts`, `src/lib/av/video-finish.ts`): m and n
+  from the clip's header frame rate (the cheapest exact pair, the nearest one for 29.97-style rates); FrameInterpolate
+  linked out when m is 1; slow motion drops the sound link; params.format → VHS format / ProRes profile, CreateVideo's
+  colour space, or the EXR graphs; EXR frames zipped one at a time onto the preview clip (`meta.artifacts.exr`);
+  `framesPerBatch` sized from the clip so a pass holds about 1.5 GB of frames; each job tags its `VHS_BatchManager`
+  (ComfyUI otherwise reuses a cached manager after a failed meta-batch run and silently loses frames: 32 of 48 seen
+  here); a silent clip loses the `VHS_LoadVideo` audio link (VHS fails on it); graphs that still decode the whole clip
+  (FPS Boost, HDR, EXR) refuse a clip that needs more than half the server's RAM, and the composer checks the same rule
+  before Generate (`/api/status` reports the ComfyUI's RAM). They hold 2 frame-sized float copies of the clip (decoding
+  stacks the frames; the tone map makes one more; encoders and the EXR writer take a frame at a time), FPS Boost 2 + m
+  (`VHS_SelectEveryNthImage` is a view): measured here, SDR to HDR on 10 s of 640×360 at 30 fps peaked 1.57 GB above idle,
+  2.04 copies. FPS Boost needs the clip's frame rate (header) and refuses without it rather than guess m and n.
+- **Cancel**: VHS re-queues each pass under a new prompt id with a negative queue number (it runs before anything else),
+  so cancelling a meta-batch job deletes every pending prompt carrying the job's filename prefix, interrupts the one
+  running, and looks again for a few seconds (a pass that was already saving can still queue the next). Checked here on a
+  38-pass ProRes 4444 export: cancelled during pass 4, nothing ran after it. VHS keeps that pass's ffmpeg encode open in
+  the cached batch manager (a partial `.mov` without its moov atom stays in `output/`) until ComfyUI drops the cache; the
+  same happens to any meta-batch run that fails or is interrupted.
+- **Real runs**: through Fuobe's API on the dev server (the comfyui provider end to end: upload, bindings, meta-batch
+  follow, EXR zip) and directly with a small runner, on the shared CPU server with own prompt ids only, every output
+  ffprobe-checked. The model graphs ran with random-weight stand-ins (`vftest_rife_random.safetensors`,
+  `vftest_esrgan_x4_random.safetensors`, removed afterwards), so they prove frame counts, sizes, rates, sound and memory,
+  not picture quality. Chunked vs whole-clip ESRGAN: 30 s at 256×144 to 1920×1080 held 0.87 GB above idle in 47 passes;
+  the whole-clip graph held 3.0 GB for 10 s of the same clip at only 1024×576.
+- **Caveat**: VHS's ProRes `hq` profile leaves the pixel format to `prores_ks`, which picks `yuv444p10le` for RGB frames, so
+  "ProRes 422 HQ" is the HQ tag (`apch`) carrying 4:4:4 samples (FFmpeg reads it). A strict 4:2:2 file needs a VHS format
+  with `-pix_fmt yuv422p10le`, a change to the node pack (not made). Core ComfyUI has no H.265 encoder, so the open HDR
+  is H.264 High 10 (HLG or PQ); HDR10 in H.265 comes from Topaz on the cloud.
+- **FILM**: oss-rife's Model control can pick `film_net_fp16.safetensors`; the spec lists it under `optionalModels`, so
+  the manifest carries it with `optional: true` (named with its download when it's missing, not counted as missing on
+  the Workflows page). Its URL is the repo's current name, `Comfy-Org/Frame-Interpolation` (the old lowercase one redirects).
+
+### Round-4 Image to 3D extras (r4/3d-plus, 2026-10-25)
+
+One hand-built entry for Image to 3D's "From several images" on the open engine, from the official template
+`3d_pixal3d_multi_views` (2026-09-09; core nodes only):
+
+```bash
+node export-templates.mjs 3d_pixal3d_multi_views          # build/raw/, then the hand-built graph was made from it
+npm run build -- image-to-3d-trellis2-multiview image-to-3d-trellis2
+node validate-workflows.mjs image-to-3d-trellis2-multiview image-to-3d-trellis2 --shared
+```
+
+| id | capability | what | ran for real here |
+|---|---|---|---|
+| `image-to-3d-trellis2-multiview` | image-to-3d | One upload per side (image = front, image2 = left, image3 = back, image4 = right) → BiRefNet cut-out and crop per side → `Pixal3DMultiViewConditioning` (a fixed orbit rig; its field of view measured on the front crop by MoGe 2) → TRELLIS.2 stages on `pixal3d_multiview_int8_convrot` (5.58 GB, MIT) → PBR GLB + a 36-view turntable (RotateMesh + RenderMesh, 12 fps), which the server replaces with its CPU turntable when it can | no (GPU); /prompt only (every side, and front + back / front + right pruned); the MoGe FOV subgraph ran on CPU |
+
+- **What the provider does**: `SLOT_RULES` gives the workflow its sides; each photo goes to the side
+  `params.extra.views` names (in order when unnamed), and a side with no photo is cut out of the graph
+  (`dropBranch` in `src/lib/comfy.ts`: its loader, cut-out and crop go, and the rig loses that input). The front is needed.
+- **Field of view**: the official multi-view template keeps the rig's 20° (right for rendered turnaround sheets). Photos are
+  wider as framed, so the graph measures it as the single-view Pixal3D template does: `MoGeInference` on the front crop →
+  `MoGeGeometryToFOV` (horizontal, degrees) → the rig's `fov` (+0.66 GB, `moge_2_vitl_normal_fp16`). `fovX` fixes MoGe's lens
+  instead (0 = estimate; 20 for a generated sheet). On the CPU server two runs of the subgraph (resolution level 9, one estimating,
+  one given 20°) took 137 s in all, model load included: 40.0° estimated on a test image, 20° passed through.
+- **Sides**: the rig's left is the object's own left (camera at +90° azimuth): facing the front, walk to your right to photograph it.
+- **Single view**: `image-to-3d-pixal3d` (Pixal3D with MoGe 2's camera, the default "From an image" route) and
+  `image-to-3d-trellis2` (the fallback) remesh with `sign_mode` solid (fill 20) and decimate to 250,000 faces, and have no
+  turntable in the graph: the Fuobe server finishes every open image-to-3D GLB (a meshopt + WebP web GLB as `meta.web`, the
+  pivot at the bottom) and renders a 96-frame turntable on the CPU (`src/server/model3d-finish.ts`, `scripts/model3d/`).
+  The multi-view graph still has the template's udf remesh, a 700,000-face decimate and its GPU turntable; moving it to the
+  single-view settings needs a new /prompt validation.
+- **Licences**: the TRELLIS.2 and Pixal3D graphs (single and multi-view) encode with DINOv3 ViT-L (`dino_v3_L_naf`), so their
+  licence names the DINOv3 License and its "Built with DINOv3" notice, like TripoSplat's.
+- **Not open**: rigging. UniRig (MIT) has no ComfyUI pack verified against v0.41, so Rig & animate is Meshy on fal only.
+  SAM 3D Objects has no open route either (the core SAM 3D nodes are body only).
+
+### Genjutsu Character swap (o/genjutsu-original, 2026-10-27)
+
+Two hand-built entries for Genjutsu's Character swap on MiniMax H3, and one for Remove object's person removal on the same
+model (docs/research/openjutsu-6.md):
+
+```bash
+npm run build -- video-character-swap-h3 video-character-swap-h3-relay video-person-remove-h3-relay
+node validate-workflows.mjs video-character-swap-h3 video-character-swap-h3-relay video-person-remove-h3-relay --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `video-character-swap-h3` | video-character-swap | Openjutsu's `swap.api.json` (Akatz Labs' H3 Character Swap graph at `0670e4f` with a `Video Slice` in front): the part (start + length, 5–15 s, longer continues window by window), quality as the unpatched pack's string (`"480"` / `"768"`), H3 reference tags in the prompt, who to swap (SAM 3.1 words, largest / leftmost / rightmost / index, or clicks as JSON points on H3's canvas), the anchor first frame as `image2` (absent: its loader and fit are deleted and the shot's `use_anchor` is off), the swap LoRA release (V1.5, V1, or none: the Turbo LoRA alone) | no: `missing_node_type` (the `h3_character_swap` nodes are not on this server; its 22 core nodes are in `object_info.subset.json`) |
+| `video-character-swap-h3-relay` | video-character-swap | H3 Relay 2.0's character-swap example (akatz-ai/h3-relay at `e2a7665b`) with a `Video Slice`: the same part, quality, words, seed and who; no anchor | no: `missing_node_type` (`H3RelayAppendWindow`) |
+| `video-person-remove-h3-relay` | remove-object | H3 Relay 2.0's Person Removal example with Akatz Labs' Person Remover V1 LoRA (`akatz-ai/MiniMax-H3-Person-Remover-LoRA` at `fe136b3`): SAM 3.1 marks the person you name in green, H3 rebuilds the background in 22-frame windows from a clean first frame (`image`, fitted to the video's size by an added `ImageScale`). Remove object's "H3 Person Removal" eraser fits the part to 24 fps on the 32-pixel grid, makes the clean frame with Qwen-Image-Edit and puts the sound back | no: `missing_node_type` (`H3RelayAppendWindow`) |
+
+- **Node packs**: `h3_character_swap` (GPL-3.0) is copied out of `akatz-labs/h3-character-swap-tool` at
+  `0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b` by `install-comfyui.sh` (`H3_PACK=0` skips it; it needs FFmpeg and FFprobe on
+  PATH). H3 Relay (GPL-3.0) registers HTTP routes and patches H3's layout in memory when it loads, so it is opt-in:
+  `H3_RELAY=1` clones it at `e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220`. Neither pack is installed on the CPU server
+  these graphs were built on, so both entries are recorded with `validated: false` and the missing node named.
+- **Weights** (46.33 GB, pinned to Hugging Face revisions in `library.spec.mjs`): H3 Ref2VA int8, its video and audio VAEs and
+  the NVFP4 Qwen3-VL text encoder (Comfy-Org/MiniMax-H3), lightx2v's FL2V Turbo 8-step LoRA, SAM 3.1, and Akatz Labs'
+  Character Swap LoRA V1.5 (V1 optional). The provider downloads the two LoRAs before a run (`graphLoras`).
+- **Licences, as information**: MiniMax H3 Community License (territory excludes the US, the EU, the UK and South Korea;
+  over US$20M yearly revenue needs MiniMax's written authorization; show "MiniMax H3"), Meta's SAM License, Apache-2.0
+  (Turbo LoRA), GPL-3.0 (both packs). The admin decides what runs (Settings → Models & licences).
+- **Clicks**: the provider moves them into the frame the pack prepares (its `canvas_dimensions`: a 0.5 / 1.0 MP budget
+  on the 32-pixel grid, the clip scaled to cover and the middle cropped) and sets SelectSubject to `index` 0, since
+  `SAM3_Detect` returns the clicked mask first and the "person" detections after it. Person numbers (`index`) are SAM's
+  detections in order of confidence, not left to right. A window and history the pack's `validate_settings` would
+  refuse (history ≥ window) is brought below the window.
+- **GPU**: tested by their authors on a 96 GB RTX PRO 6000 and on a 24 GB RTX 4090 with 128 GB RAM and offloading.
+- **Comfy Developer Platform** (what Openjutsu deploys to): a deployment is not a plain ComfyUI server — it is driven by
+  the v2 API (`@comfyorg/sdk`: upload, job, poll), not `/prompt` and `/history` — so Fuobe does not add a provider for it.
+  Point `COMFYUI_URL` at a ComfyUI that has the packs installed instead.
+
+### Character Swap Studio (o/h3-studio, 2026-10-27)
+
+Two hand-built entries for the Character Swap Studio (`/character-swap`) on your GPU, on H3 Relay 2.0's nodes; the
+segment graph is built from `video-character-swap-h3-relay`. They follow Akatz Labs' app (docs/research/openjutsu-6.md
+§4.2):
+
+```bash
+npm run build -- video-character-swap-h3-segment video-mask-h3-relay
+node validate-workflows.mjs video-character-swap-h3-segment video-mask-h3-relay --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `video-character-swap-h3-segment` | video-character-swap | One segment: a single H3 Relay 2.0 pass (its "segment" schedule, at most 362 frames) over the clip's 24 fps copy. The approved mask (a whole-shot mask from `video-mask-h3-relay`) replaces SAM's own chain, the anchor goes in as Picture 2 (Picture 3 after a history boundary), and the previous take's lossless master (16-bit FFV1, output role `master`) gives the history frames (`historyVideo`, `historyStart`, `historyLength`). Outputs: the segment (H.264) and its master for the next segment. The provider rewrites the graph per job (`src/lib/swap-studio-graphs.ts`). Limits 30 s / 703 frames; 24 GB | no: `missing_node_type` (`H3RelayAppendWindow`) |
+| `video-mask-h3-relay` | person-mask | Who to swap in one shot, as a black-and-white mask video at H3's canvas size and 24 fps: SAM 3.1 detects on frame `keyFrame` from words or clicks, H3 Relay picks largest / leftmost / rightmost / #n, and SAM 3.1 tracks it for `spanFrames` (the rest of the shot for Track shot, 1 for Update frame). The new part is spliced into the version it corrects (`prevMask`, `tailStart`, `tailFrames`). Limits 150 s / 3,592 frames; 6 GB | no: `missing_node_type` (`H3RelayPrepareSource`) |
+
+- **Node packs**: no new one. Both use H3 Relay (GPL-3.0, opt-in with `H3_RELAY=1`, pinned at
+  `e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220`); the segment graph also uses ComfyUI-VideoHelperSuite and needs FFmpeg.
+  `build-library.mjs` gains eight binding keys for them: `historyVideo`, `historyStart`, `historyLength`, `keyFrame`,
+  `spanFrames`, `tailStart`, `tailFrames` and `prevMask`.
+- **Weights**: no new files. The segment graph uses the same pinned MiniMax H3 files, Turbo LoRA, SAM 3.1 and swap LoRA
+  as `video-character-swap-h3-relay`, and the provider downloads the LoRAs before a segment runs; the mask graph needs
+  only SAM 3.1 (1.75 GB).
+- **Uploads**: a continuation uploads the previous take's master, about 3 MB a frame at 1 MP. ComfyUI takes uploads up to
+  100 MB unless started with a higher `--max-upload-size`, so more than about 30 frames of history needs a higher one.
+  An upload ComfyUI refuses as too large now fails with a message that says this, for every feature.
+- **Memory**: the provider refuses a mask shot too long for the server's RAM before it runs. That limit is an estimate,
+  not a measurement, and may be too strict (on a 64 GB server, 1 MP corrections stop at shots of about 18 s).
+- **Not run**: neither graph has loaded in a ComfyUI with H3 Relay, and nothing has run on a GPU.
+  `tests/comfy-swap-studio.test.ts` checks the provider's rewrites on the library files.
 
 ## Adding a workflow
 

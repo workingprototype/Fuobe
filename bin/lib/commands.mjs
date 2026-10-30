@@ -64,6 +64,8 @@ export const GEN_OPTIONS = {
   count: { type: "number", short: "n", value: "n", describe: "How many takes (1–8)" },
   seed: { type: "number", value: "n" },
   negative: { type: "string", value: "text", describe: "Negative prompt" },
+  look: { type: "string", value: "id", describe: "A Fuobe Soul look (fuobe-soul, fuobe-soul-hd): v1-general, v1-y2k, v2-y2k-studio…" },
+  "look-strength": { type: "number", value: "0-1", describe: "How strongly the look's LoRAs apply (default 1)" },
   sound: { type: "boolean", describe: "Native sound on (--no-sound for off), on video models that offer it" },
   enhance: { type: "boolean", describe: "Let Fuobe rewrite the prompt first" },
   voice: { type: "string", value: "id", describe: "Voice id for text to speech" },
@@ -404,7 +406,8 @@ async function models(ctx) {
   // How a run goes today (Settings → Demo mode decides with the providers); an older server only says `connected`.
   const runs = (m) => m.runs ?? (m.connected ? "real" : "demo");
   const mark = { real: "", demo: " (demo)", refused: " (not set up)" };
-  const rows = items.map((m) => [m.id, m.name, m.engine === "open" ? "open" : "cloud", `${m.price}${mark[runs(m)] ?? ""}`, m.ops.join(", ")]);
+  // A Fuobe Original runs on both engines (open+cloud); --engine lists it as that engine's model.
+  const rows = items.map((m) => [m.id, m.name, (m.engines ?? [m.engine]).map((e) => (e === "open" ? "open" : "cloud")).join("+"), `${m.price}${mark[runs(m)] ?? ""}`, m.ops.join(", ")]);
   ctx.print(table(["ID", "NAME", "ENGINE", "PRICE", "DOES"], rows, ctx.io.columns));
   const count = (r) => items.filter((m) => runs(m) === r).length;
   const notes = [`${items.length} model${items.length === 1 ? "" : "s"}${items.length < res.items.length ? ` of ${res.items.length}` : ""}.`];
@@ -748,8 +751,23 @@ async function mcp(ctx) {
  * @property {Record<string, OptionSpec>} [options]
  * @property {string[]} [examples]
  * @property {true} [ownConfig] reads the saved config itself (login, logout), so a broken one doesn't stop it
+ * @property {true} [passthrough] takes its arguments as they are (eval hands them to the harness's own parser)
  * @property {(ctx: any) => Promise<number | void>} run
  */
+
+// ---------------------------------------------------------------------------
+// eval
+
+/** The evaluation harness (scripts/eval), which lives in the Fuobe checkout next to this CLI. */
+async function evalHarness(ctx) {
+  const entry = new URL("../../scripts/eval/eval.mjs", import.meta.url);
+  if (!fs.existsSync(entry)) throw new ApiError("fuobe eval runs from a Fuobe checkout: scripts/eval isn't next to this CLI (clone the repo and run it there).");
+  const { main: harness } = await import(entry.href);
+  // The harness finds its server the way this CLI does (--url / --token, FUOBE_URL / FUOBE_TOKEN, then the
+  // saved config, from the same home), so the saved token still rides only to the server it was saved for.
+  // Handing it over as FUOBE_TOKEN would send it to whatever server a later --url names.
+  return harness(ctx.positionals, { stdout: ctx.io.stdout, stderr: ctx.io.stderr, env: ctx.io.env, home: ctx.io.home, fetch: ctx.io.fetch });
+}
 
 /** @type {Record<string, Command>} */
 export const COMMANDS = {
@@ -879,6 +897,13 @@ export const COMMANDS = {
     usage: "fuobe mcp",
     examples: ["fuobe mcp", "fuobe mcp --json"],
     run: mcp,
+  },
+  eval: {
+    summary: "Measure Fuobe Originals: run a suite, score, review blind, compare runs",
+    usage: "fuobe eval <run|report|review|compare|promote|covers|history|validate|setup|trash> [options]   (from a Fuobe checkout)",
+    examples: ["fuobe eval run --suite selftest --engine demo", "fuobe eval run --suite soul --engine open --looks v1-general --variants recipe,prompt-only", "fuobe eval compare latest~1 latest --fail-on clip --threshold 1"],
+    passthrough: true,
+    run: evalHarness,
   },
 };
 

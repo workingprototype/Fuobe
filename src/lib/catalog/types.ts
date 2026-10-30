@@ -219,14 +219,24 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
 /**
  * Video codecs and containers an export or HDR job can write (params.format): H.264 MP4, 10-bit H.265
  * MP4, ProRes 422 HQ or 4444 in a .mov, lossless FFV1 in a .mkv, or a 16-bit EXR frame sequence.
+ * The open engine's HDR is also written as 10-bit H.264 in BT.2020 with the HLG or PQ (HDR10) curve
+ * (core ComfyUI has no H.265 encoder).
  */
-export type VideoFormat = "h264" | "h265_10bit" | "prores_422_hq" | "prores_4444" | "ffv1" | "exr";
+export type VideoFormat = "h264" | "h265_10bit" | "prores_422_hq" | "prores_4444" | "ffv1" | "exr" | "hlg_10bit" | "pq_10bit";
+
+/** What Remove background makes: the subject on a transparent background, or its black-and-white alpha mask. */
+export type MatteOutput = "cutout" | "matte";
+
+/** Depth map colour maps, in Higgsfield's order (grayscale first: every depth model draws it). */
+export const COLORMAPS = ["grayscale", "turbo", "inferno", "magma", "viridis"] as const;
 
 /** A point on a picture in its own pixels (the first frame of a video). Negative points mark what to keep. */
 export interface PixelPoint {
   x: number;
   y: number;
   label?: "positive" | "negative";
+  /** A video's frame the point is on (0, the first, when unset): SAM 3.1 video's `frame_index` on fal. */
+  frame?: number;
 }
 
 /** A position on a picture as fractions of its width and height (0–1 from the top left). */
@@ -236,7 +246,7 @@ export interface FocusPoint {
 }
 
 /** "llm" runs text steps (translate, write) on the configured LLM (Claude or a local model) inside the server. */
-export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local" | "llm";
+export type ProviderId = "fal" | "replicate" | "openai" | "google" | "comfyui" | "mock" | "local" | "llm";
 
 /** Duration encodings differ between APIs ("5" vs 5 vs "5s"). */
 export interface DurationField {
@@ -253,7 +263,7 @@ export interface EnumField {
   values?: Record<string, string | number | boolean>;
   /**
    * The canonical values this route takes, when they differ from the model's own list (a model on two
-   * APIs, e.g. Grok Imagine on fal and Higgsfield). Any other value is sent as the closest one it takes
+   * APIs that take different lists). Any other value is sent as the closest one it takes
    * (aspect ratios by shape, resolutions by size) and left out when none is close ("auto" on an API
    * without it), so the API's default applies.
    */
@@ -311,7 +321,7 @@ export interface FieldMap {
   fps?: string;
   /**
    * Colour palette: hex strings converted to the API's shape ("rgb-object" = Recraft on fal [{r,g,b}],
-   * "rgb-array" = Recraft on Higgsfield [{rgb:[r,g,b]}], "ideogram" = {members:[{rgb:{r,g,b}, color_weight}]}).
+   * "rgb-array" = [{rgb:[r,g,b]}], "ideogram" = {members:[{rgb:{r,g,b}, color_weight}]}).
    * `background` names the API's background-colour field: a hex string sent as params.extra[background]
    * is converted to the same shape.
    */
@@ -347,6 +357,11 @@ export interface FieldMap {
    * and one for `audio2` (a background bed), each placed at 0 and as long as `duration` (seconds).
    */
   tracks?: string;
+  /**
+   * How this route (or its `loraEndpoint`) takes LoRAs: generated from the research's hostedLoraEndpoints,
+   * filled by src/lib/catalog/loras.ts (loraFields) from GenInput.loras.
+   */
+  loras?: LoraField;
   // Round 4 (research part 4).
   /**
    * Points clicked on the first frame (params.points, pixels) in the API's shape: "bria" = strings like
@@ -380,6 +395,13 @@ export interface FieldMap {
   frameInterval?: string;
   /** Depth map colours (params.colormap: grayscale, turbo, inferno, magma, viridis). */
   colormap?: string | EnumField;
+  /** Boolean field: the original clip next to the depth map (params.sideBySide). */
+  sideBySide?: string;
+  /**
+   * Remove background's output (params.matteOutput) as the API's own value: BiRefNet's `output_mask` true adds
+   * the mask video, and the job keeps the asked-for file (outputs tagged meta.role "cutout" / "matte").
+   */
+  matteOutput?: { key: string; values: Partial<Record<MatteOutput, unknown>> };
   /** Images held as video frames: [{[url]: image, [frames]: 1}] in order (images to video at params.fps). */
   frames?: { key: string; url: string; frames: string };
   /**
@@ -395,8 +417,26 @@ export interface FieldMap {
    * A frame count for routes that render only as many frames as asked (LTX 2.3 clean plate and HDR, VOID):
    * the clip's length (params.sourceDuration, else params.duration) × the frame rate (params.fps, else
    * `fps`), kept within min–max. Nothing is sent when the length is unknown (the API's default applies).
+   * Also video models whose length is a frame count (Wan 2.2, LTX-2.3 22B), where `step` keeps the count at
+   * step·n + 1 (Wan 4n+1, LTX 8n+1). `fromDuration`: the frames to add (extend), so params.duration counts,
+   * never the input clip's length, at the clip's own frame rate when it is known (fal's LTX-2.3 extend matches it).
    */
-  numFrames?: { key: string; fps: number; min?: number; max?: number };
+  numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number; fromDuration?: boolean };
+  /**
+   * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
+   * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
+   */
+  size?: {
+    width?: string;
+    height?: string;
+    /** One object field that takes {width, height} (fal's image_size) instead of two fields. */
+    key?: string;
+    multiple: number;
+    max?: number;
+    base?: number;
+    /** Exact sizes per resolution tier and aspect ratio (Fuobe Soul's table); the computed size where it has none. */
+    table?: Record<string, Record<string, [number, number]>>;
+  };
   /**
    * Limits the API checks on numeric fields Fuobe fills (round 4: target fps, slow motion, frame interval,
    * overlay position and scale, Ken Burns length…): a value is rounded when the field takes whole numbers
@@ -409,6 +449,12 @@ export interface FieldMap {
   omitEmptyPrompt?: boolean;
   /** params.extra keys this route has no field for (a model-wide control only its other routes read): left out. */
   ignore?: string[];
+  /**
+   * An upscaler that takes a factor, not a size (Topaz, FLUX Upscale): params.resolution ("1080p", "4K",
+   * "Original" = 1) becomes target ÷ the clip's shorter edge (GenInput.sourceSize), kept within min–max.
+   * Nothing is sent when the clip's size is unknown (the API's default factor applies).
+   */
+  upscaleFactor?: { key: string; min?: number; max?: number };
 }
 
 export interface ModelRoute {
@@ -417,10 +463,23 @@ export interface ModelRoute {
   /** fal endpoint id, replicate "owner/name", or ComfyUI workflow id from the manifest. */
   endpoint: string;
   map?: FieldMap;
+  /**
+   * The parts of `map` the composer previews a result with ("1920×1080 → 2880×1620", an EXR frame count),
+   * kept by slimModel when it drops the field maps for the browser. The server reads `map`.
+   */
+  preview?: Pick<FieldMap, "upscaleFactor" | "numFrames">;
   /** Optional note shown in the UI (e.g. "uses Lightx2v 4-step LoRA"). */
   note?: string;
-  /** Same model with LoRA support (fal's `/lora` variants): used when a trained identity is mentioned. */
+  /**
+   * Same model with LoRA support (fal's `/lora` variants): the run switches to it when it carries LoRAs
+   * (a trained identity, a preset's look or motion). `map.loras` says how they go in its payload.
+   */
   loraEndpoint?: string;
+  /**
+   * The route runs as several jobs of its workflow, built on the server (ComfyUI keyframes: one
+   * start/end-frame clip of `endpoint` per pair of frames, then joined; src/server/chains.ts).
+   */
+  chained?: true;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";
@@ -442,8 +501,11 @@ export interface ModelOptions {
   multiShot?: { mode: "native" | "prompt" | "concat"; maxShots: number };
   /** Draft mode (cheap preview, then a full render of the take you like). */
   draft?: boolean;
-  /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
-  presets?: { source: string; param: string; label: string; required?: boolean };
+  /**
+   * Takes a Fuobe Soul look (src/lib/catalog/soul.ts) as GenerationRequest.presetId, with presetStrength scaling
+   * its LoRAs; `label` names the picker.
+   */
+  looks?: { label: string };
   /** Premade voices the model offers (shown in the voice picker). */
   voices?: { id: string; name: string; hint?: string }[];
   /** Takes a reference recording to clone a voice from. */
@@ -454,8 +516,8 @@ export interface ModelOptions {
   languages?: string[];
   /** Numeric settings sent as-is (stability, similarity, speed, exaggeration…). */
   sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
-  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
-  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
+  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…); `labels` names values that read badly (FLUX Upscale's creativity 0 / 1). */
+  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number; labels?: Record<string, string> }[];
   /** Images it needs before it can run (try-on: the person and the garment). */
   minImages?: number;
   /** What each image is, in order ("person photo", "garment"): blockers and slot labels. */
@@ -477,6 +539,21 @@ export interface ModelOptions {
   requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; msg: string };
   /** Output formats it can write (params.format: SDR to HDR, export). */
   formats?: VideoFormat[];
+  /** Depth maps: the colour maps it draws (params.colormap; see COLORMAPS). Unset = grayscale only. */
+  colormaps?: string[];
+  /** Depth maps: it can put the original clip next to the depth map (params.sideBySide). */
+  sideBySide?: boolean;
+  /** Remove background: what it can make (params.matteOutput), its default first. Unset = the cut-out. */
+  matteOutputs?: MatteOutput[];
+  /** Remove background keeps only what you name (SAM): words, or points clicked on the first frame, are needed. */
+  keepsNamed?: boolean;
+  /**
+   * Frame rates it can reach (params.targetFps): FPS Boost's 24–120, an upscaler's 24 / 30 / 60. Without a
+   * default target (`defaults.targetFps`) the clip's own frame rate is the first choice ("Original").
+   */
+  fpsTargets?: number[];
+  /** Slow-motion factors it takes (params.slowdown; 1 = the clip's speed). */
+  slowdowns?: number[];
 }
 
 export interface Pricing {
@@ -492,6 +569,37 @@ export interface Pricing {
    * prices after it. The catalog applies whichever holds when it loads (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s).
    */
   promo?: { until: string; usd: number; byResolution?: Record<string, number> };
+  /**
+   * Price multipliers by a setting's value (Topaz 60 fps 2x, ByteDance Pro 10x, FLUX.3 Creative about 1.4x):
+   * `param` is "targetFps" or a params.extra key (its control's default when unset); `values` maps a value to its factor.
+   */
+  factors?: { param: string; values: Record<string, number> }[];
+  /** The price per unit when the run carries LoRAs and goes to the route's LoRA endpoint (fal's /lora variants cost more). */
+  withLoras?: number;
+  /** withLoras at each resolution, when it differs (Fuobe Cinema's LTX-2.3 bills per megapixel of video). */
+  withLorasByResolution?: Record<string, number>;
+  /**
+   * Billed per megapixel of video made, width × height × frames rounded up (fal's LTX-2.3): a per-second model whose
+   * routes carry a size table and a frame count is priced on the clip's real size for its tier and shape and its frame
+   * count, rather than on `usd` / `byResolution` (one shape's per-second rate). `withLoras`: the LoRA endpoint's rate.
+   */
+  videoMegapixel?: { usd: number; withLoras?: number };
+  /** Per-megapixel prices billed on whole megapixels (fal's Qwen-Image 2512). */
+  roundUp?: true;
+  /** What an animation preset adds to a run (params.animation: Meshy rigging +$0.12). */
+  animationUsd?: number;
+}
+
+/** A model's weights licence, as read in the research: information, never a gate (the owner's decision of 2026-10-27). */
+export interface ModelLicence {
+  /** As written ("FLUX.1 [dev] Non-Commercial License"). */
+  licence: string;
+  /** The weights allow selling outputs: true, false (non-commercial) or null (a revenue tier decides). */
+  commercial: boolean | null;
+  /** What else the research noted (fal's own terms for its hosted outputs). */
+  note?: string;
+  /** When it was read (YYYY-MM-DD). */
+  checked?: string;
 }
 
 export interface ModelDef {
@@ -505,10 +613,29 @@ export interface ModelDef {
   badges?: Badge[];
   routes: ModelRoute[];
   options: ModelOptions;
-  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice">>;
+  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice" | "targetFps" | "format">>;
   pricing?: Pricing;
-  /** Trained identities this model accepts by id (Higgsfield Soul ID). */
-  identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
+  /**
+   * The licence of the open weights a hosted model runs (generated from the research), as information: nothing is
+   * hidden or refused for it; the admin turns models on or off in Settings.
+   */
+  licence?: ModelLicence;
+  /**
+   * A Fuobe Original that runs on both engines: its routes cover ComfyUI and the hosted open weights on fal /
+   * Replicate. `engine` is the one it shows first; a request picks one with GenerationRequest.engine, and
+   * onEngine() (src/lib/catalog/engines.ts) gives the model as it runs there (that engine's routes only).
+   */
+  engines?: Engine[];
+  /**
+   * An Original's defaults on one engine, over `defaults` (Fuobe DoP: 480p on the user's GPU, where 720p takes three
+   * times as long; 720p in the cloud, where the LoRA endpoint costs the same at either size).
+   */
+  engineDefaults?: Partial<Record<Engine, ModelDef["defaults"]>>;
+  /**
+   * An Original's options on one engine, over `options` (Fuobe DoP · LTX: no sound toggle on the user's GPU, whose
+   * LTX-2.3 graphs make silent clips).
+   */
+  engineOptions?: Partial<Record<Engine, Partial<ModelOptions>>>;
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
   /**
@@ -580,6 +707,10 @@ export interface GenParams {
   slowdown?: number;
   /** Depth map colours: grayscale, turbo, inferno, magma or viridis. */
   colormap?: string;
+  /** Depth maps: the original clip next to the result. */
+  sideBySide?: boolean;
+  /** Remove background: the cut-out (transparent video) or its alpha mask (black and white). */
+  matteOutput?: MatteOutput;
   /** Overlay: where its centre goes (0–1 of the background) and its size (1 = its own size). */
   position?: FocusPoint;
   scale?: number;
@@ -589,15 +720,74 @@ export interface GenParams {
   extra?: Record<string, unknown>;
 }
 
+/**
+ * What a LoRA's licence allows, as read on `snapshotDate` (docs/research/fuobe-originals-recipes-5.json).
+ * A LoRA with no licence is the user's own (a trained identity or style).
+ */
+export interface LoraLicence {
+  /** Outputs may be sold (civitai: the "Image" permission). */
+  commercial: boolean;
+  /** The weights may run on a third-party service such as fal or Replicate (civitai: "Rent"). false = the user's GPU only. */
+  hostedOk: boolean;
+  /** When the licence or the civitai permissions were read (YYYY-MM-DD). */
+  snapshotDate: string;
+  /** The licence as written ("Apache-2.0", "civitai permissions: Image, Rent, Sell"). */
+  name?: string;
+  /** civitai's permission list on that date (Image, RentCivit, Rent, Sell, SellMerge). */
+  permissions?: string[];
+}
+
 export interface LoraRef {
-  /** File name as placed in ComfyUI models/loras. */
+  /** File name as placed in ComfyUI models/loras (unique there: civitai files are renamed, several are called V1.safetensors). */
   file: string;
+  /** Where the file downloads from (a pinned civitai version or a Hugging Face file). */
   url?: string;
   strength?: number;
   trigger?: string;
-  /** Wan 2.2 MoE: which expert gets the LoRA. */
+  /** Wan 2.2 MoE: which expert gets the LoRA (fal's `transformer`). Wan 2.1 LoRAs go on both. */
   target?: "high" | "low" | "both";
+  /** fal's `weight_name`: the file inside the repo or archive `url` names. */
+  weightName?: string;
+  /** A copy the cloud engine can fetch without the user's token (a mirror on fal or Replicate storage). */
+  hostedUrl?: string;
+  /**
+   * The version the file is pinned to: a civitai model version id (never "latest": newer versions are often for
+   * another base), or the Hugging Face commit its URL resolves at.
+   */
+  version?: string;
+  licence?: LoraLicence;
+  /**
+   * The user's own trained LoRA (Fuobe Soul ID): Fuobe keeps the file, so a run copies it into ComfyUI's folder or
+   * sends it to the cloud provider itself (src/server/loras.ts), whichever engine trained it.
+   */
+  own?: true;
+  /**
+   * Set by the server on a run's LoRAs while Settings → Models & licences keeps LoRAs licensed for your GPU only
+   * off the cloud: a cloud route then leaves such a LoRA out (localOnly). Without it they are sent like any other.
+   */
+  keepOnGpu?: true;
 }
+
+/** Scale limits of a LoRA field. */
+export interface LoraRange {
+  min: number;
+  max: number;
+}
+
+/**
+ * How a cloud API takes LoRAs (FieldMap.loras, generated from the research's hostedLoraEndpoints):
+ * - "items": fal's `loras: [{path, scale, transformer?, weight_name?}]`, up to `max` (unset: none stated);
+ *   `transformer` = the API's default expert when items take one (Wan 2.2, LTX-2.3 quality); `weightName`
+ *   = items take a weight_name; `required` = the API refuses an empty list (LTX-2.3 22B);
+ * - "arrays": Replicate's `lora_weights: [url]` + `lora_scales: [number]` (prunaai/z-image-turbo-lora);
+ * - "experts": one LoRA per Wan 2.2 expert, each a URL field and a scale field (Replicate wan-2.2 fast);
+ * - "single": one URL field and one scale field (Replicate qwen-image-edit-2511).
+ */
+export type LoraField =
+  | { shape: "items"; key: string; max?: number; required?: boolean; range?: LoraRange; transformer?: "high" | "low" | "both"; weightName?: boolean }
+  | { shape: "arrays"; weights: string; scales: string; max?: number; range?: LoraRange }
+  | { shape: "experts"; high: { weights: string; scale: string }; low: { weights: string; scale: string }; range?: LoraRange }
+  | { shape: "single"; weights: string; scale: string; range?: LoraRange };
 
 /** What the UI posts to /api/generations. Asset references are local asset ids or URLs. */
 export interface GenerationRequest {
@@ -635,12 +825,32 @@ export interface GenerationRequest {
   presetStrength?: number;
   /** Higgsfield's Mix: a second motion or effect on top of the first, with its own strength. */
   mix?: { presetId: string; strength: number };
-  /** Server-side only: LoRAs added by @element mentions (trained identities). */
+  /** LoRAs added by @element mentions (trained identities, server-side), or a recipe's LoRAs sent by the evaluation harness. */
   loras?: LoraRef[];
+  /**
+   * The engine a model that runs on both (a Fuobe Original, ModelDef.engines) runs on: the composer's switch.
+   * Unset: the install's engine mode, else the first one connected (your GPU before the cloud).
+   */
+  engine?: Engine;
   /** Chained jobs: where the previous job's image goes among `inputs.images` (one dependency). */
   chainFrom?: "first" | "last";
   /** Chained jobs with several dependencies: where each one's first output goes, in dependsOn order. */
   chain?: ChainSlot[];
+  /** Server-set when the runner filled the chain slots from the earlier steps' outputs (a retry takes them out again: unfilledRequest). */
+  chainFilled?: boolean;
+  /**
+   * Server-set when the runner left out optional chain slots whose steps failed (ChainSlot.optional): their indexes, and
+   * the prompt the request had before the fallback replaced it (a retry puts it back).
+   */
+  chainSkipped?: { slots: number[]; prompt?: string };
+  /** Server-set: what changed while the job ran (an optional input left out), said on the result and carried down the chain. */
+  notice?: string;
+  /**
+   * A step only worth making for the steps after it (a per-frame render's frame edits and clips): while it still
+   * waits for its inputs (nothing spent yet), the runner cancels it once every step that would use it has failed
+   * or been canceled, so one failed frame doesn't leave the other lanes running up the bill.
+   */
+  dropWhenUnused?: boolean;
   /** Storyboard frame this request makes (shown under the frame). */
   frame?: { scene: string; index: number; of: number };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
@@ -665,8 +875,10 @@ export interface ChainSlot {
    * "audio2" is the second audio track (the background stem mixed under the new voice, mux).
    * "audios" is a list of audio clips (the spoken lines a timeline places at their start times).
    * "model3d" is a 3D model (a mesh to rig).
+   * "mask" is what to change (remove-object): a mask video (SAM 3.1's track of the object), or a still mask of a
+   * window's first frame (the open engine's painted eraser hands the tracked object on from window to window).
    */
-  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "model3d" | "prompt";
+  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "model3d" | "mask" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
   /**
@@ -675,7 +887,30 @@ export interface ChainSlot {
    * accompaniment/instrumental/residual/no_vocals). Without it, the first output of the slot's kind.
    */
   stem?: string;
+  /**
+   * Fan-out from a step that makes a list (extract-frames: one image per frame): take the dependency's
+   * output number `index` of the slot's kind (0-based, by `meta.index` when the outputs carry it). Past
+   * the end it takes the last one, so a provider that returns a frame or two fewer than planned holds the
+   * last frame instead of failing the whole render (`of` bounds how many). One step per index fans a list out; a step with one slot
+   * per index gathers it back in order.
+   */
+  index?: number;
+  /**
+   * With `index`: how many outputs the list was planned to have. A list more than CHAIN_LIST_SLACK short of it
+   * fails the step before it runs (a frame or two lost at the clip's end is held; half a clip of frozen, paid
+   * frames is not).
+   */
+  of?: number;
+  /**
+   * An input the step can do without (Genjutsu's anchor first frame): when the step it comes from fails or is canceled,
+   * this step runs without it instead of failing. `prompt` then replaces the request's prompt (the words that named the
+   * missing input go), and `notice` is said on the result and on the steps after it.
+   */
+  optional?: { prompt?: string; notice: string };
 }
+
+/** How many outputs a planned list (ChainSlot.of) may be short of before the steps reading it fail. */
+export const CHAIN_LIST_SLACK = 2;
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */
 export interface GenInput extends GenParams {
@@ -694,6 +929,12 @@ export interface GenInput extends GenParams {
   audios?: string[];
   model3d?: string;
   loras?: LoraRef[];
+  /**
+   * Server-filled from the input clip's header (generations.ts submit): its displayed size (upscale factors,
+   * the upscale tier) and frame rate (open FPS Boost's m / n when the provider's own upload cache has none).
+   */
+  sourceSize?: { width: number; height: number };
+  sourceFps?: number;
 }
 
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
@@ -754,6 +995,11 @@ export interface Generation {
   pinnedAt?: number | null;
   /** Review status (null: none). */
   review?: ReviewStatus | null;
+  /**
+   * What the run leaves out or changes, said when it is created (LoRAs a cloud run can't carry, a clip length
+   * the API rounds). Only on the answer that creates it; not stored.
+   */
+  notes?: string[];
 }
 
 /** Input slot a preset asks the user for. */
@@ -788,6 +1034,12 @@ export interface PresetRoute {
   loras?: LoraRef[];
   /** Overrides the preset prompt template for this engine. */
   promptTemplate?: string;
+  /**
+   * A partner model running the preset's words because its Original has nothing of its own here yet (a Fuobe DoP move
+   * with no hostable LoRA, camera LoRA, hosted move or step in the cloud keeps Kling 2.5 Turbo until the evaluation
+   * harness promotes Fuobe DoP's words). Picking the preset doesn't move the composer to it; an engine switch does.
+   */
+  partner?: boolean;
 }
 
 export type PresetType = "app" | "motion" | "effect";
@@ -811,6 +1063,25 @@ export interface Preset {
   open: PresetRoute | null;
   /** Research confidence / parity notes shown in docs and the UI. */
   parity?: string;
+  /** Fuobe DoP's colour-grade effects: a src/lib/grade.ts preset the browser applies to the finished clip. */
+  grade?: string;
+  /** Fuobe DoP's relight effects: a step that makes the start frame first, on each engine (src/lib/catalog/dop.ts). */
+  prestep?: PresetPrestep;
+}
+
+/** A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, then animates it). */
+export interface PresetPrestep {
+  open: PrestepRoute;
+  cloud: PrestepRoute;
+}
+
+export interface PrestepRoute {
+  modelId: string;
+  op: Operation;
+  prompt: string;
+  loras?: LoraRef[];
+  /** What the step costs (a 1-megapixel picture), added to the clip's price before the run; 0 on the user's GPU. */
+  usd?: number;
 }
 
 /** Route endpoint for models without an extend API: last frame → image-to-video → join (src/server/chains.ts). */

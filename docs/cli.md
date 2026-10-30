@@ -227,6 +227,22 @@ Desktop, Cursor, Codex…) take the server entry it prints on stderr (`fuobe mcp
 The agent then has `search_models`, `estimate_cost`, `generate`, `check_generations`, the studio
 tools and Fuobe's skills as prompts.
 
+### `fuobe eval` — measure the Fuobe Originals
+
+From a Fuobe checkout, `fuobe eval <command>` is the evaluation harness (`pnpm eval:<command>`). It
+finds the server and token as the other commands do, so the saved token goes only to the server it was
+saved for, even when `--url` names another:
+
+```bash
+fuobe eval run --suite selftest --engine demo        # a free self-test of the harness
+fuobe eval run --suite soul --engine open --looks v1-general --variants recipe,prompt-only
+fuobe eval compare latest~1 latest --fail-on clip --threshold 1   # exit 1 on a regression
+fuobe eval trash latest                              # the run's generations to that Fuobe's Trash
+```
+
+See [`scripts/eval/README.md`](../scripts/eval/README.md) for the suites, metrics, blind review and
+the promote rule.
+
 ## Skills for other agents
 
 Fuobe's skills are [Agent Skills](https://agentskills.io/specification), so the open `skills` CLI
@@ -279,7 +295,9 @@ server too (`fuobe mcp`).
 
 For script writers who'd rather call the API directly: `GET /api/models` (`kind`, `engine`, `op`,
 `q`, `hidden=1`; it answers with the studios' `defaults` per engine, `demoMode`, and per model
-`connected` and `runs`), `POST /api/generations` (with `?preview=1` to price), `GET /api/generations[/<id>]`,
+`connected` and `runs`), `POST /api/generations` (with `?preview=1` to price; a model id Fuobe has
+retired runs on the model that replaced it, and the answer gives that `modelId` with `notes` saying so),
+`GET /api/generations[/<id>]`,
 `POST /api/generations/<id>/cancel`, `POST /api/uploads` (multipart `file`), `GET /api/files/…`,
 `GET /api/status`, `GET|PATCH /api/assist/skills[/<name>]`, `POST /api/assist/skills/upload`
 (`?replace=1`) and `POST /api/mcp` (JSON-RPC). Every call carries `Authorization: Bearer <token>`

@@ -213,7 +213,7 @@ export function fitText(text: string, width: number, maxLines: number, family: s
   }
 }
 
-const textBox = (t: { size: number; lines: string[] }, x: number, y: number, family: string, weight: number, color: string, align: "left" | "center", width: number, lh = 1.12): TextBox => ({
+export const textBox = (t: { size: number; lines: string[] }, x: number, y: number, family: string, weight: number, color: string, align: "left" | "center", width: number, lh = 1.12): TextBox => ({
   lines: t.lines,
   x,
   y,

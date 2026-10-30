@@ -101,7 +101,7 @@ function ModelRow({
           {showEngine && (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] bg-muted px-1 text-[10px] leading-4 font-medium text-muted-foreground">
               {m.engine === "open" ? <Cpu className="size-2.5!" /> : <Cloud className="size-2.5!" />}
-              {m.engine === "open" ? "Open" : "Cloud"}
+              {m.engine === "open" ? "Open source" : "Cloud"}
             </span>
           )}
         </span>
@@ -109,13 +109,13 @@ function ModelRow({
           {m.vendor} · {m.tagline}
         </span>
         {m.worker === "isolated" && (
-          <span className="mt-0.5 flex items-center gap-1 text-[11px] leading-snug text-subtle-foreground">
+          <span className="mt-0.5 flex items-center gap-1 text-[11px] leading-snug text-muted-foreground">
             <Server className="size-3! shrink-0" aria-hidden />
             {ISOLATED_NOTE}
           </span>
         )}
       </span>
-      <span className="shrink-0 text-right text-[11px] text-subtle-foreground tabular-nums">{priceHint(m)}</span>
+      <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{priceHint(m)}</span>
       {/* Pointer only: inside an option it would be a nested control. Keyboard: Alt+S on the highlighted row (starKey). */}
       <button
         type="button"
@@ -218,7 +218,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
             <span aria-hidden>·</span>
             <span className="min-w-0">
               Demo — no key connected, outputs are placeholders.{" "}
-              <Link href="/settings" className="text-brand-text hover:underline">
+              <Link href="/settings" className="text-brand-text underline underline-offset-2">
                 Connect
               </Link>
             </span>

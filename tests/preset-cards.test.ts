@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
-import { previewFor, toPresetCard } from "@/lib/preset-card-data";
+import { APPS, EFFECTS, getPreset, MOTIONS } from "@/lib/catalog";
+
+// One measured cover (pnpm eval:covers writes this file) and one still cover (pnpm eval:covers --from-masters), for preset ids the catalog doesn't have.
+vi.mock("@/lib/preset-previews.generated", () => ({
+  PRESET_PREVIEWS: {
+    "effect-measured-cover": { poster: "/previews/dop/effect-measured-cover.jpg", video: "/previews/dop/effect-measured-cover.mp4", run: "r", engine: "open", model: "oss-wan22-14b", variant: "research" },
+    "app-still-cover": { poster: "/previews/presets/app-still-cover.jpg", run: "comfyui-previews-2026-10", engine: "comfyui", model: "ideogram4", variant: "lean-json" },
+  },
+}));
 import {
   appFx,
   CAMERA_MOVES,
   effectFx,
-  fallbackPreview,
   FX,
+  isCover,
   LAYER_BLEED,
   layerTransform,
   lookHue,
@@ -15,19 +22,14 @@ import {
   PREVIEW_LAYERS,
   presetHowTo,
   presetRouteLines,
-  proceduralPreview,
+  previewFlip,
   searchText,
   type CameraMove,
   type MoveSpec,
   type PreviewLayer,
 } from "@/lib/preset-cards";
+import { previewFor, toPresetCard } from "@/lib/preset-card-data";
 import type { Preset } from "@/lib/catalog/types";
-
-// Rendered media here: every effect, and one camera motion. Apps and the other motions have none.
-vi.mock("@/lib/catalog/preview-media.generated.json", async () => {
-  const { EFFECTS } = await import("@/lib/catalog");
-  return { default: { effects: Object.fromEntries(EFFECTS.map((e) => [e.id, "0123abcd"])), motions: { "motion-crash-zoom-in": "89abcdef" } } };
-});
 
 const byName = (list: Preset[], name: string) => {
   const p = list.find((x) => x.name === name);
@@ -232,12 +234,8 @@ describe("slim card DTOs", () => {
       const slim = JSON.stringify(list.map(toPresetCard)).length;
       expect(slim / full).toBeLessThan(0.45);
     }
-    // The 255-card effects gallery ships well under 80 KB of card data: with media (here every effect
-    // has some) only its 8-character hash goes out, and the procedural previews fit as well.
-    const cards = EFFECTS.map(toPresetCard);
-    const procedural = cards.map((c, i) => ({ ...c, preview: proceduralPreview(EFFECTS[i]) }));
-    expect(JSON.stringify(procedural).length).toBeLessThan(80_000);
-    expect(JSON.stringify(cards).length).toBeLessThan(JSON.stringify(procedural).length - 10_000);
+    // The 255-card effects gallery ships well under 80 KB of card data.
+    expect(JSON.stringify(EFFECTS.map(toPresetCard)).length).toBeLessThan(80_000);
   });
 
   it("reads the hue back from the preset look", () => {
@@ -258,24 +256,6 @@ describe("slim card DTOs", () => {
   });
 });
 
-describe("rendered preview media", () => {
-  it("sends only the media's hash, and a motion's move for its glyph", () => {
-    expect(toPresetCard(byName(EFFECTS, "Set On Fire")).preview).toStrictEqual({ media: "0123abcd" });
-    expect(toPresetCard(byName(MOTIONS, "Crash Zoom In")).preview).toStrictEqual({ media: "89abcdef", move: "crash-in" });
-  });
-
-  it("keeps the procedural preview for presets without media", () => {
-    const faceSwap = toPresetCard(byName(APPS, "Face Swap"));
-    expect(faceSwap.preview).toEqual({ poster: "/samples/previews/portrait.svg", scene: "portrait", fx: "swap" });
-    expect(faceSwap.preview).not.toHaveProperty("media");
-    expect(previewFor(byName(MOTIONS, "Crash Zoom Out"))).toEqual(proceduralPreview(byName(MOTIONS, "Crash Zoom Out")));
-  });
-
-  it("lets the client work out each card's procedural preview again, for when its media doesn't load", () => {
-    for (const p of [...APPS, ...MOTIONS, ...EFFECTS]) expect(fallbackPreview(toPresetCard(p)), p.id).toEqual(proceduralPreview(p));
-  });
-});
-
 describe("preset route lines (details popover)", () => {
   it("names each engine's model, or says there is none", () => {
     const names: Record<string, string> = { "nano-banana-pro": "Nano Banana Pro" };
@@ -286,6 +266,15 @@ describe("preset route lines (details popover)", () => {
     ]);
     // Unknown names fall back to the model id.
     expect(presetRouteLines({ cloud: null, open: { modelId: "oss-x", op: "edit" } })[1].model).toBe("oss-x");
+  });
+
+  it("says when a motion's cloud route runs words because its LoRA is licensed for the GPU only", () => {
+    const wiggle = getPreset("motion-wiggle")!;
+    const [cloud, open] = presetRouteLines(wiggle, (id) => ({ "fuobe-dop": "Fuobe DoP", "kling-2-5-turbo": "Kling 2.5 Turbo" })[id]);
+    // The cloud route carries no LoRA it can't host: the move's words, on its partner model until Fuobe DoP's are measured.
+    expect(cloud.model).toBe("Kling 2.5 Turbo · words only (its LoRA is licensed for your GPU only)");
+    expect(open.model).toBe("Fuobe DoP");
+    expect(presetRouteLines(getPreset("motion-overhead")!, () => "Fuobe DoP")[0].model).toBe("Fuobe DoP");
   });
 });
 
@@ -309,5 +298,30 @@ describe("preset how-to line", () => {
   it("handles presets without inputs", () => {
     expect(presetHowTo({ type: "app", userPrompt: "required", inputs: [] })).toBe("Describe what you want, then Generate.");
     expect(presetHowTo({ type: "app", userPrompt: "none", inputs: [] })).toBe("Press Generate — no inputs needed.");
+  });
+});
+
+describe("real covers", () => {
+  it("a preset with a measured cover shows that clip and its poster instead of the procedural preview", () => {
+    const measured = previewFor({ id: "effect-measured-cover", type: "effect", name: "Measured", category: "Elements" });
+    expect(measured).toMatchObject({ poster: "/previews/dop/effect-measured-cover.jpg", video: "/previews/dop/effect-measured-cover.mp4" });
+    expect(measured.fx).toBeUndefined();
+    // The others keep their procedural preview.
+    expect(previewFor({ id: "effect-other", type: "effect", name: "Other", category: "Elements" }).video).toBeUndefined();
+  });
+
+  it("a still cover is the card's image: no clip, no move or treatment, never mirrored", () => {
+    const still = previewFor({ id: "app-still-cover", type: "app", name: "Still", category: "Identity" });
+    expect(still).toStrictEqual({ poster: "/previews/presets/app-still-cover.jpg", scene: "portrait" });
+    expect(isCover(still)).toBe(true);
+    // Whatever its id hashes to, a cover is shown as rendered.
+    for (const id of ["app-still-cover", "a", "b", "c", "d", "e", "f"]) expect(previewFlip({ id, preview: still })).toBe(false);
+  });
+
+  it("no procedural preview counts as a cover, and only treatments mirror", () => {
+    const all = [...APPS, ...MOTIONS, ...EFFECTS].map(toPresetCard);
+    for (const c of all) expect(isCover(c.preview), c.id).toBe(false);
+    expect(all.filter((c) => c.preview.move).some((c) => previewFlip(c))).toBe(false);
+    expect(all.filter((c) => c.preview.fx).some((c) => previewFlip(c))).toBe(true);
   });
 });

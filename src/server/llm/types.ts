@@ -75,6 +75,8 @@ export interface ChatMessage {
   toolCallId?: string;
   /** Tool results: the tool's name (Ollama). */
   toolName?: string;
+  /** User turns: pictures for a model that can see (base64, JPEG, PNG, GIF or WebP); a text-only model answers from the words. */
+  images?: { data: string; contentType: string }[];
 }
 
 /** A JSON Schema the answer must follow (root object or array), or "object" for any JSON object. */

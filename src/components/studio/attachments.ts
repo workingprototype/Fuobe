@@ -3,7 +3,8 @@
 import { nanoid } from "nanoid";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { acceptedKinds, fitAttachments, noRoomMessage, onImageChange, placeAttachment, replaceAttachment } from "@/lib/composer";
+import { MAX_KEYFRAMES } from "@/lib/catalog/keyframes";
+import { acceptedKinds, addFrame, fitAttachments, noRoomMessage, onImageChange, placeAttachment, removeFrame, replaceAttachment } from "@/lib/composer";
 import type { InputSlot, MediaKind } from "@/lib/catalog/types";
 import { fileToSlot, kindOfFile, type SlotValue } from "./media-slot";
 import { useStudio, type Draft, type SlotKey } from "./studio-context";
@@ -16,10 +17,10 @@ import { useStudio, type Draft, type SlotKey } from "./studio-context";
 const inflight = new Map<string, { ac: AbortController; seen: boolean }>();
 
 /** Abort uploads whose attachment is gone from the draft. Mount once, where the draft is read. */
-export function useUploadReaper(draft: Pick<Draft, "slots" | "refs">) {
+export function useUploadReaper(draft: Pick<Draft, "slots" | "refs" | "frames">) {
   useEffect(() => {
     if (!inflight.size) return;
-    const ids = new Set([...Object.values(draft.slots), ...draft.refs].map((v) => v?.id).filter(Boolean));
+    const ids = new Set([...Object.values(draft.slots), ...draft.refs, ...(draft.frames ?? []).map((f) => f.value)].map((v) => v?.id).filter(Boolean));
     for (const [id, e] of inflight) {
       if (ids.has(id)) e.seen = true;
       else if (e.seen) {
@@ -27,8 +28,11 @@ export function useUploadReaper(draft: Pick<Draft, "slots" | "refs">) {
         inflight.delete(id);
       }
     }
-  }, [draft.slots, draft.refs]);
+  }, [draft.slots, draft.refs, draft.frames]);
 }
+
+/** Frames mode is full. */
+const FRAMES_FULL = `Frames mode takes up to ${MAX_KEYFRAMES} frames — remove one to add another`;
 
 /** Paste / drop / "+" take at most this many files in one go. */
 const MAX_AT_ONCE = 8;
@@ -81,10 +85,11 @@ export function useAttach(slots: InputSlot[], refMax: number) {
 
   const noRoom = useCallback(() => toast(noRoomMessage(refMax, config.multiRef?.kind)), [refMax, config.multiRef]);
 
-  /** Put it wherever it fits best: the first empty slot of its kind, else the references. */
+  /** Put it wherever it fits best: the first empty slot of its kind, else the references (in Frames mode: the next frame). */
   const place = useCallback(
     (v: SlotValue) =>
       setDraft((d) => {
+        if (d.frames) return d.frames.length < MAX_KEYFRAMES && v.kind === "image" ? { frames: addFrame(d.frames, v) } : {};
         const r = placeAttachment(d, slots, config.multiRef, refMax, v);
         if (!r) return {};
         // Pasting over a full image slot drops the drawing made on the old image.
@@ -96,7 +101,11 @@ export function useAttach(slots: InputSlot[], refMax: number) {
   /** A library pick (an attachment that needs no upload). */
   const attach = useCallback(
     (v: SlotValue) => {
-      if (!placeAttachment(latest.current, slots, config.multiRef, refMax, v)) return noRoom();
+      const frames = latest.current.frames;
+      if (frames) {
+        if (v.kind !== "image") return void toast("Frames are images — add a still");
+        if (frames.length >= MAX_KEYFRAMES) return void toast(FRAMES_FULL);
+      } else if (!placeAttachment(latest.current, slots, config.multiRef, refMax, v)) return noRoom();
       place(v);
     },
     [place, noRoom, slots, config.multiRef, refMax],
@@ -104,8 +113,16 @@ export function useAttach(slots: InputSlot[], refMax: number) {
 
   const attachFiles = useCallback(
     (files: File[]) => {
-      const usable = files.filter((f) => kinds.has(kindOfFile(f)));
-      if (usable.length < files.length) toast(files.length - usable.length > 1 ? "This studio doesn't take those files" : "This studio doesn't take that kind of file");
+      const frames = latest.current.frames;
+      // Frames mode: each still becomes the next frame, up to ten.
+      const usable = files.filter((f) => (frames ? kindOfFile(f) === "image" : kinds.has(kindOfFile(f))));
+      if (usable.length < files.length) toast(frames ? "Frames are images — the other files were left out" : files.length - usable.length > 1 ? "This studio doesn't take those files" : "This studio doesn't take that kind of file");
+      if (frames) {
+        const room = MAX_KEYFRAMES - frames.length;
+        if (usable.length > room) toast(FRAMES_FULL);
+        for (const f of usable.slice(0, Math.max(0, room))) start(f, place, "image");
+        return;
+      }
       if (usable.length > MAX_AT_ONCE) toast(`Added the first ${MAX_AT_ONCE} — that's the most at once`);
       const batch = usable.slice(0, MAX_AT_ONCE);
       // Room first: a file with nowhere to go never uploads.
@@ -131,7 +148,22 @@ export function useAttach(slots: InputSlot[], refMax: number) {
     [start, setDraft, config.multiRef, refMax, noRoom],
   );
 
-  return useMemo(() => ({ kinds, attach, attachFiles, setSlotValue, uploadToSlot, removeRef, addRefFile }), [kinds, attach, attachFiles, setSlotValue, uploadToSlot, removeRef, addRefFile]);
+  /** A frame's tile: a new still in its place (its time stays), or null to take the frame out. */
+  const setFrameValue = useCallback(
+    (i: number, v: SlotValue | null) =>
+      setDraft((d) => {
+        if (!d.frames?.[i]) return {};
+        return { frames: v ? d.frames.map((f, j) => (j === i ? { ...f, value: v } : f)) : removeFrame(d.frames, i) };
+      }),
+    [setDraft],
+  );
+
+  const uploadToFrame = useCallback((i: number, file: File) => start(file, (v) => setFrameValue(i, v), "image"), [start, setFrameValue]);
+
+  return useMemo(
+    () => ({ kinds, attach, attachFiles, setSlotValue, uploadToSlot, removeRef, addRefFile, setFrameValue, uploadToFrame }),
+    [kinds, attach, attachFiles, setSlotValue, uploadToSlot, removeRef, addRefFile, setFrameValue, uploadToFrame],
+  );
 }
 
 /**

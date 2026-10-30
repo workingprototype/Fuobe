@@ -50,6 +50,8 @@ export interface ManifestModel {
   folder: string;
   url?: string;
   sizeGb?: number;
+  /** An alternative a model control can pick (FILM for RIFE): not needed for the workflow's defaults. */
+  optional?: boolean;
 }
 
 export interface ManifestOutput {
@@ -60,7 +62,10 @@ export interface ManifestOutput {
   /**
    * What a text, image or 3D output is: timed caption cues, a plain transcript, the detected language, layers, a grid's sheet or tiles…
    * Round 4: OCR "lines" (JSON, boxes 0–1000) and the "frame" the model saw, an EXR sequence's "frames", a whole-"scene" GLB and its
-   * "depth" map, a Gaussian "splat", a reference video's style "brief".
+   * "depth" map, a Gaussian "splat", a reference video's style "brief"; a painted eraser's last tracked "mask" (handed to the next
+   * window), and a matte graph's "cutout" (transparent video) and "matte" (black and white) videos. A "preview" is the clip shown
+   * for an EXR export (the frames ride along zipped). A "master" is a lossless copy a later job continues from (Character Swap
+   * Studio's segment, 16-bit FFV1).
    */
   role?:
     | "cues"
@@ -77,7 +82,12 @@ export interface ManifestOutput {
     | "scene"
     | "depth"
     | "splat"
-    | "brief";
+    | "brief"
+    | "mask"
+    | "cutout"
+    | "matte"
+    | "preview"
+    | "master";
 }
 
 export interface ManifestWorkflow {
@@ -100,9 +110,10 @@ export interface ManifestWorkflow {
   worker?: "isolated";
   /**
    * The provider rewrites the graph before submitting ("captions": one segment per caption cue;
-   * "timeline": one loader per audio clip, each placed at its start time).
+   * "timeline": one loader per audio clip, each placed at its start time; "videos" / "audios": one loader
+   * per clip of a join, src/lib/av/joins.ts).
    */
-  expand?: "captions" | "timeline";
+  expand?: "captions" | "timeline" | "videos" | "audios";
   validated: boolean;
   notes?: string;
 }
@@ -143,6 +154,11 @@ export function applyBindings(
 }
 
 const MODEL_LOADERS = new Set(["UNETLoader", "CheckpointLoaderSimple", "UnetLoaderGGUF", "ImageOnlyCheckpointLoader"]);
+
+/** Whether a graph has a diffusion model loader LoRAs can be attached after (wrapper graphs load models their own way). */
+export function canTakeLoras(wf: ComfyWorkflow): boolean {
+  return Object.values(wf).some((n) => MODEL_LOADERS.has(n.class_type));
+}
 
 /**
  * Insert LoraLoaderModelOnly nodes after every diffusion model loader (or only the
@@ -518,6 +534,134 @@ export function bypassReference(wf: ComfyWorkflow, loaderId: string): ComfyWorkf
   };
   for (const n of Object.values(out)) for (const [k, v] of Object.entries(n.inputs)) if (isLinkValue(v) && refs.has(v[0])) n.inputs[k] = source(v);
   for (const id of [...refs, ...path]) delete out[id];
+  return out;
+}
+
+/**
+ * Take a node out of the graph: whatever read its first output reads `input`'s link instead (FPS Boost
+ * without interpolation: Select Every Nth takes the frames straight). Nodes nothing reads any more (its
+ * model loader, its constants) go too, except output nodes (`keep`). Unchanged when `input` isn't a link.
+ */
+export function bypassNode(wf: ComfyWorkflow, nodeId: string, input: string, keep: string[] = []): ComfyWorkflow {
+  const src = wf[nodeId]?.inputs[input];
+  if (!isLinkValue(src)) return wf;
+  const out = cloneWorkflow(wf);
+  for (const n of Object.values(out)) for (const [k, v] of Object.entries(n.inputs)) if (isLinkValue(v) && v[0] === nodeId) n.inputs[k] = [...src];
+  delete out[nodeId];
+  return dropUnused(out, keep);
+}
+
+/** Remove nodes whose outputs nothing reads, over and over, keeping the output nodes `keep`. */
+export function dropUnused(wf: ComfyWorkflow, keep: string[]): ComfyWorkflow {
+  const out = cloneWorkflow(wf);
+  for (;;) {
+    const read = new Set(Object.values(out).flatMap((n) => Object.values(n.inputs).filter(isLinkValue).map((v) => v[0])));
+    const gone = Object.keys(out).filter((id) => !read.has(id) && !keep.includes(id));
+    if (!gone.length) return out;
+    for (const id of gone) delete out[id];
+  }
+}
+
+/**
+ * VHS meta-batch graphs: tag each job's VHS_BatchManager with an input of its own. ComfyUI caches a node
+ * whose inputs didn't change, so without it a job right after a failed or canceled meta-batch reuses the
+ * stale manager and silently loses frames (checked on the CPU server: 32 of 48 frames). VHS keeps inputs
+ * it doesn't declare (it adds its own "requeue" the same way).
+ */
+export function tagMetaBatch(wf: ComfyWorkflow, job: string): ComfyWorkflow {
+  if (!Object.values(wf).some((n) => n.class_type === "VHS_BatchManager")) return wf;
+  const out = cloneWorkflow(wf);
+  for (const n of Object.values(out)) if (n.class_type === "VHS_BatchManager") n.inputs.job = job;
+  return out;
+}
+
+/**
+ * A clip with no sound: VHS_LoadVideo fails ("failed to extract audio") once its audio output is read, so
+ * the links from that output (VHS_VideoCombine.audio) are dropped. Only for clips whose header says so.
+ */
+export function dropVhsAudio(wf: ComfyWorkflow): ComfyWorkflow {
+  const loaders = new Set(Object.entries(wf).filter(([, n]) => n.class_type === "VHS_LoadVideo").map(([id]) => id));
+  if (!loaders.size) return wf;
+  const out = cloneWorkflow(wf);
+  for (const n of Object.values(out)) {
+    const a = n.inputs.audio;
+    if (isLinkValue(a) && loaders.has(a[0]) && a[1] === 2) delete n.inputs.audio;
+  }
+  return out;
+}
+/**
+ * The sound a VHS loader hands on replaced by `seconds` of stereo silence (the Video concatenator's muted
+ * clips and clips without sound): every input fed by a loader's audio output takes an EmptyAudio instead,
+ * so the clip still has a sound track as long as its picture and a join keeps the clips in step. The
+ * loader's own sound is then never read (a file without one would stop VHS).
+ */
+export function silenceVhsAudio(wf: ComfyWorkflow, seconds: number): ComfyWorkflow {
+  const loaders = new Set(Object.entries(wf).filter(([, n]) => n.class_type === "VHS_LoadVideo").map(([id]) => id));
+  if (!loaders.size) return wf;
+  const out = cloneWorkflow(wf);
+  let id = "silence";
+  for (let k = 2; out[id]; k++) id = `silence${k}`;
+  out[id] = { class_type: "EmptyAudio", inputs: { duration: Math.round(seconds * 1000) / 1000, sample_rate: 44100, channels: 2 }, _meta: { title: "Silence as long as the clip" } };
+  for (const n of Object.values(out)) {
+    const a = n.inputs.audio;
+    if (isLinkValue(a) && loaders.has(a[0]) && a[1] === 2) n.inputs.audio = [id, 0];
+  }
+  return out;
+}
+/**
+ * A silent clip read by core LoadAudio (video-append-endcard reads the ad's sound from the same upload): LoadAudio
+ * stops with "No audio stream found in the file". The loaders go, with the sound nodes fed only by them (the card's
+ * silence and the AudioConcat), and the inputs of the picture nodes that took that sound (ConcatenateVideo's
+ * complete_audio), so the result has no sound track. `loaders` are the LoadAudio node ids; `keep` the output nodes.
+ */
+export function dropLoadedSound(wf: ComfyWorkflow, loaders: string[], keep: string[]): ComfyWorkflow {
+  const gone = new Set(loaders.filter((id) => wf[id]?.class_type === "LoadAudio"));
+  if (!gone.size) return wf;
+  const out = cloneWorkflow(wf);
+  const isSound = (cls: string) => /audio/i.test(cls) && !/video/i.test(cls);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [id, n] of Object.entries(out)) {
+      if (gone.has(id) || !isSound(n.class_type)) continue;
+      if (Object.values(n.inputs).some((v) => isLinkValue(v) && gone.has(v[0]))) {
+        gone.add(id);
+        grew = true;
+      }
+    }
+  }
+  for (const n of Object.values(out)) for (const [k, v] of Object.entries(n.inputs)) if (isLinkValue(v) && gone.has(v[0])) delete n.inputs[k];
+  for (const id of gone) delete out[id];
+  return dropUnused(out, keep);
+}
+
+/**
+ * An optional upload with no file (a side of a multi-view 3D model nobody photographed): the loader goes, with
+ * every node downstream of it, up to the inputs of `into` nodes (Pixal3DMultiViewConditioning's "left"), which
+ * are dropped. Null when its branch doesn't end in such an input, or reaches an output node in `keep` (then the
+ * upload can't simply be left out).
+ */
+export function dropBranch(wf: ComfyWorkflow, loaderId: string, into: string, keep: string[] = []): ComfyWorkflow | null {
+  if (!wf[loaderId]) return null;
+  const gone = new Set([loaderId]);
+  const cut: { id: string; input: string }[] = [];
+  for (const queue = [loaderId]; queue.length; ) {
+    const id = queue.shift()!;
+    for (const [cid, n] of Object.entries(wf)) {
+      for (const [input, v] of Object.entries(n.inputs)) {
+        if (!isLinkValue(v) || v[0] !== id) continue;
+        if (n.class_type === into) cut.push({ id: cid, input });
+        else if (keep.includes(cid)) return null;
+        else if (!gone.has(cid)) {
+          gone.add(cid);
+          queue.push(cid);
+        }
+      }
+    }
+  }
+  if (!cut.length) return null;
+  const out = cloneWorkflow(wf);
+  for (const c of cut) delete out[c.id].inputs[c.input];
+  for (const id of gone) delete out[id];
   return out;
 }
 

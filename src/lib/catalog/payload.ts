@@ -1,5 +1,7 @@
 import { readTimeline, timelineTracks } from "@/lib/av/timeline";
-import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MediaKind, type Operation, type PixelPoint } from "./types";
+import { upscaleFactorFor } from "@/lib/av/upscale";
+import { loraFields } from "./loras";
+import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MatteOutput, type MediaKind, type Operation, type PixelPoint } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
   if (typeof field === "string") return [field, value];
@@ -60,11 +62,56 @@ function inRange(n: number, r: Range): number {
 }
 
 /** How many frames a frame-count route renders for the clip (FieldMap.numFrames), or undefined when its length is unknown. */
-export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pick<GenInput, "sourceDuration" | "duration" | "fps">): number | undefined {
-  const seconds = input.sourceDuration ?? input.duration;
+export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pick<GenInput, "sourceDuration" | "duration" | "fps" | "sourceFps">): number | undefined {
+  // Extend adds the length picked; other routes render the clip's own length when there is one.
+  const seconds = f.fromDuration ? input.duration : (input.sourceDuration ?? input.duration);
   if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined;
-  const fps = input.fps !== undefined && input.fps > 0 ? input.fps : f.fps;
+  const fps = input.fps !== undefined && input.fps > 0 ? input.fps : f.fromDuration && input.sourceFps && input.sourceFps > 0 ? input.sourceFps : f.fps;
+  // Wan wants 4n+1 frames and LTX 8n+1: the nearest count of that form that fits.
+  if (f.step) {
+    const step = f.step;
+    const fit = (n: number) => Math.round((n - 1) / step) * step + 1;
+    let n = fit(seconds * fps);
+    while (f.max !== undefined && n > f.max) n -= step;
+    while (f.min !== undefined && n < f.min) n += step;
+    return n;
+  }
   return inRange(seconds * fps, { min: f.min, max: f.max, integer: true });
+}
+
+/**
+ * The clip length (seconds) a frame-count route makes when asked for `seconds`, or undefined when it makes
+ * that length (within a quarter second) or isn't a frame-count route. Replicate's Wan 2.2 fast renders 81–121
+ * frames, so 3 s comes back as 5 s and 10 s as 7.5 s.
+ */
+export function framedLength(f: FieldMap["numFrames"] | undefined, seconds: number | undefined, fps?: number): number | undefined {
+  if (!f || seconds === undefined || !(seconds > 0)) return undefined;
+  const rate = fps !== undefined && fps > 0 ? fps : f.fps;
+  const n = numFramesValue(f, { duration: seconds, fps: rate });
+  if (n === undefined) return undefined;
+  const made = n / rate;
+  return Math.abs(made - seconds) > 0.25 ? made : undefined;
+}
+
+/**
+ * Width and height for an aspect ratio (FieldMap.size): the table's size for the tier and shape when it has one
+ * (Fuobe Soul: its first tier when the tier is unknown), else the shape on a `base`×`base` pixel budget; neither
+ * side above `max` (Replicate's Z-Image takes 1440).
+ */
+export function sizeValue(f: NonNullable<FieldMap["size"]>, aspectRatio: string | undefined, resolution?: string): { width: number; height: number } {
+  const base = f.base ?? 1024;
+  const ratio = (aspectRatio && ratioOf(aspectRatio)) || 1;
+  const round = (v: number) => Math.max(f.multiple, Math.round(v / f.multiple) * f.multiple);
+  const tier = f.table && (f.table[resolution ?? ""] ?? Object.values(f.table)[0]);
+  const exact = tier && aspectRatio ? tier[aspectRatio] : undefined;
+  let width = exact ? exact[0] : round(base * Math.sqrt(ratio));
+  let height = exact ? exact[1] : round(base / Math.sqrt(ratio));
+  if (f.max !== undefined && Math.max(width, height) > f.max) {
+    const k = f.max / Math.max(width, height);
+    width = Math.min(f.max, round(width * k));
+    height = Math.min(f.max, round(height * k));
+  }
+  return { width, height };
 }
 
 /** Path segments that would reach Object.prototype (or a constructor) instead of the payload. */
@@ -163,7 +210,8 @@ export function pointsValue(format: NonNullable<FieldMap["points"]>["format"], p
     const x = Math.round(p.x);
     const y = Math.round(p.y);
     const positive = p.label !== "negative";
-    return format === "bria" ? `{'x':${x}, 'y':${y}, 'type':'${positive ? "positive" : "negative"}'}` : { x, y, label: positive ? 1 : 0 };
+    if (format === "bria") return `{'x':${x}, 'y':${y}, 'type':'${positive ? "positive" : "negative"}'}`;
+    return { x, y, label: positive ? 1 : 0, ...(Number.isInteger(p.frame) && p.frame! > 0 ? { frame_index: p.frame } : {}) };
   });
 }
 
@@ -302,6 +350,14 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.styleId && input.styleId) out[map.styleId] = input.styleId;
   if (map.numLayers && input.numLayers !== undefined) out[map.numLayers] = input.numLayers;
   if (map.palette && input.palette?.length) out[map.palette.key] = paletteValue(map.palette.format, input.palette);
+  if (map.size) {
+    const { width, height } = sizeValue(map.size, input.aspectRatio, input.resolution);
+    if (map.size.key) out[map.size.key] = { width, height };
+    if (map.size.width) out[map.size.width] = width;
+    if (map.size.height) out[map.size.height] = height;
+  }
+  // LoRAs (a look, a motion, a trained identity) in the API's shape; the provider calls the route's LoRA endpoint then.
+  if (map.loras && input.loras?.length) Object.assign(out, loraFields(map.loras, input.loras));
 
   // Round 4: clicked points, keyframes, formats, Ken Burns, overlays, retiming, frames and 3D (research part 4).
   if (map.points && input.points?.length) out[map.points.key] = pointsValue(map.points.format, input.points);
@@ -325,9 +381,15 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     const [k, v] = enumValue(map.colormap, input.colormap);
     out[k] = v;
   }
+  if (map.sideBySide && input.sideBySide !== undefined) out[map.sideBySide] = input.sideBySide;
+  if (map.matteOutput && input.matteOutput) {
+    const v = map.matteOutput.values[input.matteOutput];
+    if (v !== undefined) out[map.matteOutput.key] = v;
+  }
   if (map.frames && images.length) out[map.frames.key] = images.map((url) => ({ [map.frames!.url]: url, [map.frames!.frames]: 1 }));
   if (map.loop && input.audio) {
-    const want = input.duration && input.sourceDuration ? Math.ceil(input.duration / input.sourceDuration) : map.loop.max;
+    // A length that is a whole number of plays counts as that many (30.003 / 10.001 is a hair over 3 in floats).
+    const want = input.duration && input.sourceDuration ? Math.ceil(input.duration / input.sourceDuration - 1e-6) : map.loop.max;
     out[map.loop.key] = Array.from({ length: Math.max(2, Math.min(map.loop.max, want)) }, () => input.audio);
   }
   if (map.model3d && input.model3d) out[map.model3d] = input.model3d;
@@ -343,6 +405,11 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.numFrames) {
     const n = numFramesValue(map.numFrames, input);
     if (n !== undefined) out[map.numFrames.key] = n;
+  }
+  // Upscalers that take a factor: the tier asked for over the clip's shorter edge (unknown size: the API's default).
+  if (map.upscaleFactor && input.resolution) {
+    const f = upscaleFactorFor(input.resolution, input.sourceSize, map.upscaleFactor.min, map.upscaleFactor.max);
+    if (f !== undefined) out[map.upscaleFactor.key] = f;
   }
   // The API's limits on what Fuobe filled in (params.extra below is sent as given).
   for (const [k, r] of Object.entries(map.ranges ?? {})) if (typeof out[k] === "number") out[k] = inRange(out[k] as number, r);
@@ -660,6 +727,17 @@ function model3dOutputs(response: unknown): ExtractedOutput[] {
 }
 
 /**
+ * A 3D scene: the whole-scene mesh when the model builds one, else (Marigold's `image`) the depth map that
+ * Cinema Studio turns into a point cloud in the browser, as an image with meta.role "depth".
+ */
+function sceneOutputs(response: unknown): ExtractedOutput[] {
+  const media = extractMedia(response);
+  const depth = media.find((m) => m.kind === "image");
+  if (!depth || media.some((m) => m.kind === "model3d" || /\.(obj|fbx|ply|usdz)(\?|$)/i.test(m.url))) return model3dOutputs(response);
+  return [{ ...depth, meta: { role: "depth" } }];
+}
+
+/**
  * Gaussian splats (TripoSplat's model_mesh, a .ply unless it says .spz) with meta.format; the cut-out the
  * model actually saw is the preview.
  */
@@ -756,6 +834,28 @@ function stemOutputs(response: unknown): ExtractedOutput[] {
 }
 
 /**
+ * Remove background: BiRefNet answers with the cut-out (`video`) and, when asked, its mask (`mask_video`); both are
+ * tagged (meta.role "cutout" / "matte") so the job keeps the one asked for ({@link keepMatte}).
+ */
+function matteOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  const cut = isObj(r) ? fileOf(r.video) : undefined;
+  const mask = isObj(r) ? fileOf(r.mask_video) : undefined;
+  if (!cut || !mask) return extractMedia(response);
+  return [
+    { url: cut.url, kind: "video", contentType: cut.contentType, meta: { role: "cutout" } },
+    { url: mask.url, kind: "video", contentType: mask.contentType, meta: { role: "matte" } },
+  ];
+}
+
+/** The results of a Remove background job: only the asked-for file when the answer tagged both (else all of them). */
+export function keepMatte<T extends { meta?: Record<string, unknown> }>(outputs: T[], want: MatteOutput | undefined): T[] {
+  if (!want) return outputs;
+  const kept = outputs.filter((o) => o.meta?.role === want);
+  return kept.length ? kept : outputs;
+}
+
+/**
  * Every result of a provider response, with structure the operation defines: layers (name, z, bbox),
  * text blocks, transcripts (text + cues), 3D models and audio stems. A text operation's response with
  * no media but text comes back as one text output; for media operations a text-only answer (a refusal)
@@ -775,8 +875,10 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       break;
     case "image-to-3d":
     case "text-to-3d":
-    case "scene-3d":
       out = model3dOutputs(response);
+      break;
+    case "scene-3d":
+      out = sceneOutputs(response);
       break;
     case "splat":
       out = splatOutputs(response);
@@ -795,6 +897,9 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       break;
     case "separate-audio":
       out = stemOutputs(response);
+      break;
+    case "bg-remove-video":
+      out = matteOutputs(response);
       break;
     default:
       out = extractMedia(response);

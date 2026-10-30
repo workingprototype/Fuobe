@@ -1,13 +1,14 @@
 import "server-only";
 import { nanoid } from "nanoid";
-import { getTrainingTarget } from "@/lib/catalog/training";
+import { getTrainingTarget, identityFor, targetsFor, type TrainingTarget } from "@/lib/catalog/training";
+import { MAX_ELEMENT_PHOTOS } from "@/lib/catalog/elements";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { COVER_PROMPT, CURATED_SETS, MOODBOARD_LIMITS, moodboardStatus, moodboardError, type CuratedMoodboard, type Moodboard } from "@/components/moodboards/logic";
 import { db } from "./db";
 import { createElement, getElement } from "./elements";
 import { createGenerations, getGeneration } from "./generations";
 import { engineMode } from "./settings";
-import { startTraining, trainingBlocker } from "./training";
+import { demoTraining, describeTargets, startTraining, trainingBlocker } from "./training";
 
 /**
  * Moodboards (Soul 2.0's "presets evolved"): a named set of 5–80 reference images in one style.
@@ -16,8 +17,9 @@ import { startTraining, trainingBlocker } from "./training";
  * Styles turns the 10 most representative images into a reusable style (its id comes back in
  * meta.styleId) while drawing the cover; on the open engine Qwen-Image-Edit Style Reference draws
  * the cover from the board's collages. The status follows that job: In queue → In progress →
- * Preparing cover → Complete (or Failed, with Retry). A board can also train a Z-Image Turbo style
- * LoRA through the existing AI-Toolkit path (a style element), which then wins on the open engine.
+ * Preparing cover → Complete (or Failed, with Retry). A board can also be trained as a Z-Image Turbo style LoRA
+ * (Fuobe Soul ID's style trainings, build plan O3: AI-Toolkit on the user's GPU or fal's Z-Image trainer in style
+ * mode): a style element whose LoRA is then the board's Fuobe look, on Fuobe Soul on either engine.
  */
 
 interface Row {
@@ -42,7 +44,9 @@ export const PREP_MODEL: Record<Engine, string> = { cloud: "recraft-4-style", op
 function toMoodboard(r: Row): Moodboard {
   const images = JSON.parse(r.images_json) as string[];
   const el = r.element_id ? getElement(r.element_id) : null;
-  const lora = el?.loras.find((l) => l.modelId === "oss-z-image-turbo" && l.engine === "open");
+  // The style LoRA that runs on Fuobe Soul on some engine (a demo training's stand-in says so instead).
+  const lora = el && (identityFor(el.loras, { id: STYLE_MODEL, engine: "open" }) ?? identityFor(el.loras, { id: STYLE_MODEL, engine: "cloud" }));
+  const demo = !lora && el?.loras.some((l) => l.demo);
   return {
     id: r.id,
     name: r.name,
@@ -55,7 +59,9 @@ function toMoodboard(r: Row): Moodboard {
     styleId: r.style_id,
     error: r.error,
     generationId: r.generation_id,
-    lora: el ? { elementId: el.id, handle: el.handle, status: lora ? "ready" : el.status === "training" ? "training" : el.status === "failed" ? "failed" : "none" } : null,
+    lora: el
+      ? { elementId: el.id, handle: el.handle, status: el.status === "training" ? "training" : lora ? "ready" : demo ? "demo" : el.status === "failed" ? "failed" : "none" }
+      : null,
     createdAt: r.created_at,
   };
 }
@@ -183,27 +189,43 @@ export function deleteMoodboard(id: string): boolean {
   return db().prepare("DELETE FROM moodboards WHERE id = ?").run(id).changes > 0;
 }
 
-/** A board's persistent open-source style: a Z-Image Turbo LoRA trained on AI-Toolkit. */
-const STYLE_TARGET = "aitk-z-image";
+/** The model a trained board's look runs on. */
+const STYLE_MODEL = "fuobe-soul";
+
+/** A trained board is a Fuobe look: it trains on Fuobe Soul's base (Z-Image Turbo), on the GPU or in the cloud. */
+const lookTargets = () => targetsFor("style").filter((t) => t.modelIds.includes(STYLE_MODEL));
+
+/** The style trainings a board can run on (AI-Toolkit on the user's GPU, fal in the cloud), with what stops each. */
+export function moodboardTrainingTargets() {
+  return describeTargets(lookTargets());
+}
+
+/** The style training a board runs when none is named: the engine mode's, else the board's own engine. */
+function defaultStyleTarget(m: Moodboard): TrainingTarget {
+  const mode = engineMode();
+  const engine = mode === "both" ? m.engine : mode;
+  return lookTargets().find((t) => t.engine === engine) ?? lookTargets()[0];
+}
 
 /**
- * Train a persistent open-source style: a style element with the board's 20 most representative
- * images, trained as a Z-Image Turbo LoRA on AI-Toolkit (the same path as character LoRAs).
+ * Train a board as a Fuobe look: a style element with the board's most representative images (up to 80), trained as
+ * a Z-Image Turbo style LoRA on the target asked (AI-Toolkit on the user's GPU, or fal's Z-Image trainer in style
+ * mode). The LoRA then runs on Fuobe Soul on both engines as the board's look.
  */
-export function trainMoodboard(id: string): Moodboard {
+export function trainMoodboard(id: string, targetId?: string): Moodboard {
   const m = getMoodboard(id);
   if (!m) throw new Error("Moodboard not found");
-  if (engineMode() === "cloud") throw new Error("This install is set to paid cloud APIs only (Settings → Engine mode) — a style LoRA trains on your own GPU");
   if (m.status !== "complete") throw new Error("This moodboard is still training. Try again once it is ready.");
-  // Say what's missing (an AI-Toolkit URL) before making the style element, so a refusal leaves nothing behind.
-  const target = getTrainingTarget(STYLE_TARGET);
-  const blocker = target && trainingBlocker(target);
-  if (blocker) throw new Error(blocker);
+  const target = targetId ? getTrainingTarget(targetId) : defaultStyleTarget(m);
+  if (!target || !lookTargets().includes(target)) throw new Error("Pick a style training for Fuobe Soul");
+  // Say what's missing (a key, an AI-Toolkit URL, the engine mode) before making the style element, so a refusal leaves nothing behind.
+  const blocker = trainingBlocker(target);
+  if (blocker && !demoTraining(target)) throw new Error(blocker);
   let el = m.lora ? getElement(m.lora.elementId) : null;
   if (!el) {
-    el = createElement({ name: m.name.slice(0, 60), kind: "style", description: `the visual style of the “${m.name}” moodboard`, references: m.images.slice(0, 20) });
+    el = createElement({ name: m.name.slice(0, 60), kind: "style", description: `the visual style of the “${m.name}” moodboard`, references: m.images.slice(0, MAX_ELEMENT_PHOTOS) });
     update(id, { element_id: el.id });
   }
-  startTraining(el.id, STYLE_TARGET);
+  startTraining(el.id, target.id);
   return getMoodboard(id)!;
 }

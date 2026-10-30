@@ -4,37 +4,58 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
+import { migrateRequest, replacedBy } from "@/lib/catalog/replaced";
+import { directorFieldWords } from "@/lib/catalog/cinema";
 import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
-import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
+import { upscaleTier } from "@/lib/av/upscale";
+import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
+import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
+import { framedLength, keepMatte } from "@/lib/catalog/payload";
+import { fitLoras, lorasFit } from "@/lib/catalog/loras";
+import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
+import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
+import { isDop } from "@/lib/catalog/dop";
+import { finishSteps } from "@/lib/soul-post";
 import {
+  CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
   type ChainSlot,
+  type Engine,
   type Generation,
   type GenerationRequest,
   type MediaKind,
   type GenInput,
+  type LoraRef,
+  type ModelDef,
   type ModelRoute,
+  type Operation,
   type OutputFile,
+  type Preset,
   type ProviderId,
 } from "@/lib/catalog/types";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
-import { createExtendChain, createShotFilm } from "./chains";
-import { enhancePrompt } from "./enhance";
+import { createExtendChain, createKeyframeFilm, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
+import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
-import { provider } from "./providers";
-import { probeComfy } from "./providers/comfyui";
+import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
+import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { graphLoras } from "@/lib/catalog/character-swap";
+import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
+import { offeredLoras, offeredRoutes, requireOffered } from "./model-access";
 import { llmBackends, llmLabel, llmMissing, llmUsesClaude, probeLocal } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
+import { mediaFacts } from "./media-facts";
 import { modelToFinish, startModelFinish, startTurntable, stopModelFinish, type OutputStore } from "./model3d-finish";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
-import { contentTypeFor, deleteAsset, readRef, saveFile } from "./storage";
+import { fetchRemoteToFile } from "./remote-fetch";
+import { adoptFile, contentTypeFor, deleteAsset, readRef, saveFile, scratchDir } from "./storage";
 
 interface Row {
   id: string;
@@ -109,8 +130,10 @@ export function toGeneration(r: Row): Generation {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
-    modelName: model?.name ?? r.model_id,
-    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? null) : null,
+    // A run on a model Fuobe retired keeps the name it ran under (replaced.ts `was`); Reuse moves it to the replacement.
+    modelName: model?.name ?? replacedBy(r.model_id)?.was ?? r.model_id,
+    // A Fuobe Soul look is named like a preset ("Look · Y2K" in the viewer).
+    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? (soulKind(r.model_id) ? (soulLook(r.preset_id)?.name ?? null) : null)) : null,
     aspectRatio: ar && ar !== "auto" ? ar : null,
     deletedAt: lib.deleted_at ?? null,
     folderId: lib.folder_id ?? null,
@@ -272,6 +295,12 @@ export const ASSET_REFS: AssetRef[] = [
   // Translate & dub sessions and Katana jobs: the source video, the subject picture and each step's files.
   { table: "dub_sessions", cols: ["data_json"], what: "dub", name: "json_extract(data_json, '$.title')" },
   { table: "katana_jobs", cols: ["data_json"], what: "Katana job", name: "json_extract(data_json, '$.title')" },
+  // Content Factory: a series' reference clip and its thumbnail.
+  { table: "content_series", cols: ["data_json"], what: "Content Factory series", name: "COALESCE(json_extract(data_json, '$.name'), json_extract(data_json, '$.reference.title'))" },
+  // Assist's scheduled tasks: the files the prompt runs with.
+  { table: "assist_schedules", cols: ["attachments_json"], what: "scheduled task", name: "title" },
+  // Character Swap Studio: the character picture, each clip and its 24 fps copy, masks, anchors, takes and their masters.
+  { table: "swap_projects", cols: ["data_json"], what: "Character Swap project", name: "name" },
 ];
 
 /**
@@ -294,6 +323,15 @@ export const ASSET_FREE: Record<string, string> = {
   "assist_thread_state.skills_json": "skill names",
   "skills.meta_json": "SKILL.md front matter",
   "skills.files_json": "a skill's own text files, stored inline",
+  "lora_mirrors.source_url": "where a LoRA file downloads from (civitai, Hugging Face), without the key",
+  "lora_mirrors.hosted_url": "the provider's copy of a LoRA file (fal or Replicate storage), never ours",
+  "shares.tags_json": "words",
+  "shares.items_json": "generation ids: a share link shows what still exists and keeps no file alive",
+  "lora_mirrors.licence_json": "the licence and civitai permissions a LoRA copy was made under",
+  "assist_schedules.rule_json": "when a scheduled task runs",
+  "assist_schedules.mode_json": "the Assist mode a scheduled run starts in",
+  "assist_connectors.url": "a remote MCP server Claude connects to, never one of ours",
+  "assist_connectors.tools_json": "the tool names a connector is limited to",
 };
 
 /** The query that finds the rows of one ASSET_REFS table naming a file (@id), except the purged generation's own (@g). */
@@ -354,16 +392,23 @@ export function deleteGeneration(id: string): void {
 /**
  * Pick the provider for a run: a configured real provider, else the demo provider (unless demo is off).
  * `images` is how many images the run sends: a route whose list takes fewer (FieldMap.maxImages: Grok
- * Imagine Image takes 5 on fal, 10 on Higgsfield) gives way to one that takes them all, or says so.
+ * Imagine Image takes 5 on fal) gives way to one that takes them all, or says so.
+ * `loras` and `seconds` (the clip length asked for) prefer a route that carries every LoRA and makes that
+ * length (Replicate's Wan 2.2 fast renders only 81–121 frames, fal's 17–161).
  */
-export function chooseRoute(candidates: ModelRoute[], images = 0): { route: ModelRoute; demo: boolean } {
+export function chooseRoute(candidates: ModelRoute[], images = 0, loras: LoraRef[] = [], seconds?: number): { route: ModelRoute; demo: boolean } {
   // Honour the preferred cloud aggregator (Settings → API configuration) when a model is on several.
   const preferred = getSetting("cloudProvider");
   const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
   if (demo === "on") return { route: routes[0], demo: true };
   const takes = (r: ModelRoute) => !r.map?.maxImages || images <= r.map.maxImages;
-  const real = routes.find((r) => routeReady(r) && takes(r));
+  // A route that carries every LoRA wins (Replicate's Wan 2.2 takes one per expert, fal's takes a Mix), then one
+  // that makes the length asked; otherwise the first ready one runs and the plan's notes say what it changes.
+  const ok = (r: ModelRoute) => routeReady(r) && takes(r);
+  const long = (r: ModelRoute) => framedLength(r.map?.numFrames, seconds) === undefined;
+  const real =
+    routes.find((r) => ok(r) && lorasFit(r, loras) && long(r)) ?? routes.find((r) => ok(r) && lorasFit(r, loras)) ?? routes.find((r) => ok(r) && long(r)) ?? routes.find(ok);
   if (real) return { route: real, demo: false };
   const short = routes.find(routeReady);
   if (short) {
@@ -383,7 +428,8 @@ const routeReady = (r: ModelRoute) => (r.provider === "llm" ? llmBackends(r).len
 
 /** What a run produces: colour matching works on images and videos, and fal renders a timeline as a video, so those follow the model. */
 export function outputKind(op: Generation["op"], model: { kind: MediaKind }): MediaKind {
-  return op === "color-match" || op === "timeline" ? model.kind : OPERATION_OUTPUT[op];
+  // A 3D scene is a mesh on the open engine and a depth map (an image) on the cloud.
+  return op === "color-match" || op === "timeline" || op === "scene-3d" ? model.kind : OPERATION_OUTPUT[op];
 }
 
 // Live updates: every write to the table becomes an event (src/server/live.ts). A trashed row
@@ -400,15 +446,61 @@ setResolver((ids) =>
 // ---------------------------------------------------------------------------
 // Create
 
+/**
+ * A request as it runs now: one that names a model (or an operation) Fuobe retired when it stopped calling Higgsfield moves
+ * to what replaced it (src/lib/catalog/replaced.ts), with Cinema Studio's Director fields in words. Every way in goes
+ * through it (the API, a retry, a waiting step, a saved project's run); `note` says what changed.
+ */
+export function currentRequest(req: GenerationRequest): { request: GenerationRequest; note?: string } {
+  return migrateRequest(req, { directorWords: directorFieldWords });
+}
+
+/**
+ * The engine a model runs a request on: a Fuobe Original runs on the engine asked for (the composer's switch), else
+ * the engine mode, else the first one connected; any other model on its own.
+ */
+export function engineFor(m: ModelDef, asked: Engine | undefined): Engine {
+  return dualEngine(m) ? pickEngine(m, asked, engineMode(), (e) => onEngine(m, e).routes.some(routeReady)) : m.engine;
+}
+
+/**
+ * Fuobe DoP's relight effects (Silhouette, Window…) on their own model: the step that relights the start frame on the
+ * engine the clip runs on. None for any other request (the effect on a partner model runs on its words).
+ */
+export function relightStep(req: GenerationRequest, model: ModelDef): { engine: Engine; step: NonNullable<Preset["prestep"]>["open"] } | undefined {
+  const preset = req.presetId ? getPreset(req.presetId) : undefined;
+  if (!preset?.prestep || !req.inputs?.images?.length) return undefined;
+  const engine = engineFor(model, req.engine);
+  if (presetRoute(preset, engine)?.modelId !== model.id) return undefined;
+  return { engine, step: preset.prestep[engine] };
+}
+
+/**
+ * The model a request may run, as Settings → Models & licences offers it (only its routes that are on). Engine mode
+ * refuses an Original's engine it rules out first; then a model that is off is refused naming the switch, and so is
+ * an Original's engine that is off when it is the one asked for, or the one the install's engine mode runs it on.
+ * Every run and every chain (createGenerations, before any step is queued) goes through it.
+ */
+export function offeredFor(m: ModelDef, asked: Engine | undefined): ModelDef {
+  const mode = engineMode();
+  if (dualEngine(m)) pickEngine(m, asked, mode, () => true);
+  return requireOffered(m, asked ?? (mode === "both" ? undefined : mode));
+}
+
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
   // A style signature's sentences (palette, look) join the prompt here; the stored request keeps the user's words.
   const worded = withSignatureWords(original);
-  const model = getModel(worded.modelId);
-  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
-  let plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
+  // Settings → Models & licences: a model (or the engine of an Original asked for) that is switched off is refused,
+  // naming the switch; an Original otherwise runs on an engine that is still on, with the routes that are on.
+  const found = getModel(worded.modelId);
+  const allowed = found && offeredFor(found, worded.engine);
+  const model = allowed && dualEngine(allowed) ? onEngine(allowed, engineFor(allowed, worded.engine)) : allowed;
+  const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
+  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
+  let plan = planGeneration(req, lookup, getPreset);
   if (mode !== "both" && plan.model.engine !== mode) {
     throw new Error(
       mode === "open"
@@ -419,22 +511,82 @@ function prepare(original: GenerationRequest) {
   // Checks planGeneration can't make without knowing the model's kind or the text ops' needs.
   if (plan.op === "color-match" && plan.model.kind === "video" && !req.inputs?.video) throw new Error("Add the video and a reference image");
   if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
-  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0);
-  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images) runs one job per output.
-  if (!demo && route.map && !route.map.numOutputs && plan.perJobOutputs > 1) {
+  // The length asked of a clip that is made (not one that follows its input video's length).
+  const seconds = MADE_LENGTH_OPS.has(plan.op) ? plan.params.duration : undefined;
+  // LoRAs switched off (by file or licence class) are left out, their trigger words with them; with "keep GPU-only
+  // LoRAs on your GPU" on, the rest are marked so a cloud route leaves those out (fitLoras).
+  const access = offeredLoras(plan.loras);
+  if (access.dropped.length) plan = { ...plan, loras: access.loras, prompt: withoutTriggers(plan.prompt, plan.loras.filter((l) => !access.loras.some((k) => k.file === l.file)), access.loras) };
+  else if (access.loras.some((l, i) => l !== plan.loras[i])) plan = { ...plan, loras: access.loras };
+  // A preset can route to another model than the one asked for: its routes that are on (or the switch that's off).
+  const { route, demo } = chooseRoute(offeredRoutes(plan.model, routesFor(plan.model, plan.op)), req.inputs?.images?.length ?? 0, plan.loras, seconds);
+  // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
+  // takes at most so many (the plan's notes say which were left out). Open runs carry them all. Without a
+  // civitai key a Soul look's civitai LoRA the run can't get is left out (and said), rather than failing at the
+  // download: the look's words still carry it. Any other run (a motion, whose LoRA is the point) still stops there.
+  const asked = plan.loras;
+  const reachable =
+    demo || !plan.soul ? { loras: asked, notes: [] } : withoutUnreachableCivitai(asked, route.provider === "comfyui" ? "comfyui" : route.provider === "replicate" ? "replicate" : "fal");
+  const fitted = fitLoras(reachable.loras, route);
+  // A Soul look's triggers lead the prompt: a LoRA left out takes its trigger with it.
+  const prompt = plan.soul ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras) : plan.prompt;
+  plan = { ...plan, prompt, loras: fitted.loras };
+  const notes = [...(plan.notes ?? []), ...access.notes, ...reachable.notes, ...fitted.notes];
+  // A frame-count API that can't make the length asked (Replicate's Wan 2.2 fast: 81–121 frames) says what it makes.
+  const made = demo ? undefined : framedLength(route.map?.numFrames, seconds, plan.params.fps);
+  if (made !== undefined && route.map?.numFrames) {
+    const f = route.map.numFrames;
+    const fps = plan.params.fps && plan.params.fps > 0 ? plan.params.fps : f.fps;
+    const half = (x: number) => Math.round(x * 2) / 2;
+    const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
+    notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
+  }
+  // A route that can't batch (Replicate's Nano Banana Pro beside fal's num_images; a ComfyUI graph, which makes
+  // one picture a run: Fuobe Soul on the open engine) runs one job per output.
+  if (!demo && !route.map?.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
   }
   const providerId: ProviderId = demo ? "mock" : route.provider;
   // A text step that runs on a local model is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
-  return { req, plan, route, demo, providerId, cost: free ? 0 : estimateCost(plan.model, plan.params, 1) };
+  const withLoras = fitted.loras.length > 0 && !!route.loraEndpoint;
+  const unreachable = asked.filter((l) => !reachable.loras.includes(l));
+  // Priced for the clip the route makes: Replicate's Wan 2.2 fast makes 5 s when 3 s was asked.
+  const priced = made !== undefined && plan.params.duration !== undefined ? { ...plan.params, duration: Math.round(made * 2) / 2 } : plan.params;
+  return { req, plan, route, demo, providerId, notes, asked, unreachable, switchedOff: access.dropped, cost: free ? 0 : estimateCost(plan.model, priced, 1, plan.op, withLoras) };
 }
+
+/** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */
+const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "extend", "keyframes"]);
 
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
-export function previewGeneration(req: GenerationRequest) {
-  const { plan, demo, providerId, cost } = prepare(req);
-  return { model: plan.model, op: plan.op, jobs: plan.jobs, outputs: plan.jobs * plan.perJobOutputs, demo, providerId, costUsd: cost === null ? null : cost * plan.jobs };
+export function previewGeneration(asked: GenerationRequest) {
+  const moved = currentRequest(asked);
+  const prepared = prepare(moved.request);
+  const { plan, route, demo, providerId, cost, asked: askedLoras, unreachable, switchedOff } = prepared;
+  const notes = moved.note ? [moved.note, ...prepared.notes] : prepared.notes;
+  const fitted = routeLoras(route, askedLoras.filter((l) => !unreachable.includes(l)));
+  const loras = {
+    ...fitted,
+    dropped: [...switchedOff, ...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped],
+  };
+  return {
+    model: plan.model,
+    op: plan.op,
+    jobs: plan.jobs,
+    outputs: plan.jobs * plan.perJobOutputs,
+    demo,
+    providerId,
+    costUsd: cost === null ? null : cost * plan.jobs,
+    // The engine it runs on (a Fuobe Original picks one per request).
+    engine: plan.model.engine,
+    // What the route runs (the evaluation harness records it): the provider endpoint, the final prompt and the LoRAs it loads.
+    route: { provider: route.provider, endpoint: loras.applied.length && route.provider !== "comfyui" && route.loraEndpoint ? route.loraEndpoint : route.endpoint },
+    prompt: plan.prompt,
+    loras,
+    ...(notes.length && { notes }),
+  };
 }
 
 /** Preview a step that will wait for `deps` earlier steps: validated with placeholders in its chain slots, as createGenerations does. */
@@ -442,6 +594,8 @@ export function previewChained(req: GenerationRequest, deps: number) {
   if (!deps) return previewGeneration(req);
   // A waiting step always runs as one job (createGenerations doesn't batch dependents).
   const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
+  // Refused before anything starts, as createGenerations refuses it.
+  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name, p.op));
   const jobs = Math.max(1, p.jobs);
   return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
@@ -458,20 +612,41 @@ export interface CreateOptions {
 
 const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
 
-export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
-  // Open models make multi-shot films shot by shot, then join the clips.
-  const shotModel = getModel(original.modelId);
+export function createGenerations(asked: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+  // A retired model or operation (a retry, an old script, a saved project) runs on what replaced it, and says so.
+  const moved = currentRequest(asked);
+  const original = moved.request;
+  // Open models make multi-shot films shot by shot, then join the clips. A Fuobe Original is taken on the engine it runs
+  // on (Fuobe DoP's Frames mode is a GPU chain).
+  // A model (or an Original's engine asked for) switched off in Settings → Models & licences is refused here, before a
+  // chain queues any step; an Original otherwise runs on an engine still on.
+  const catalogModel = getModel(original.modelId);
+  const found = catalogModel && offeredFor(catalogModel, original.engine);
+  const shotModel = found && dualEngine(found) ? onEngine(found, engineFor(found, original.engine)) : found;
   if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
     return createShotFilm(original, shotModel);
   }
   if (!opts.dependsOn && original.op === "extend" && shotModel && routesFor(shotModel, "extend").some((r) => r.endpoint === LAST_FRAME_CHAIN)) {
     return createExtendChain(original, shotModel);
   }
+  // Frames mode on an open model: one start/end-frame clip per pair of frames, then joined.
+  const filmRoute = shotModel && keyframeChain(shotModel);
+  if (!opts.dependsOn && filmRoute && inferOperation(shotModel, original) === "keyframes") return createKeyframeFilm(original, shotModel, filmRoute);
+  // Text to 3D on the open engine: a still first, then the 3D model of it. The operation is read as the planner
+  // reads it (Assist, MCP and API clients usually leave op out).
+  const stillTo3d = !opts.dependsOn && shotModel && inferOperation(shotModel, original) === "text-to-3d" ? routesFor(shotModel, "text-to-3d").find((r) => r.chained) : undefined;
+  if (shotModel && stillTo3d) return createStillTo3d(original, shotModel, stillTo3d);
+  // Fuobe DoP's relight effects: the start frame is relit first, then animated.
+  const relight = !opts.dependsOn && shotModel ? relightStep(original, shotModel) : undefined;
+  if (relight) return createRelitClip(original, relight);
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
   const { req, plan, route, demo, providerId, cost } = p;
+  const notes = moved.note ? [moved.note, ...p.notes] : p.notes;
+  // A chained route is built from its inputs when it's created; it can't wait for another step's output.
+  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name, plan.op));
   const jobs = waits ? 1 : plan.jobs;
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();
@@ -493,7 +668,8 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
       message: waits ? (original.frame ? "Waits for the previous frame" : "Waits for the earlier steps") : demo ? "Demo mode — no provider connected" : "Submitting",
       // A step whose prompt comes from an earlier step shows its own words (not the placeholder) until then.
       prompt: waits && req.chain?.some((s) => s.slot === "prompt") ? original.prompt?.replaceAll("{text}", "…").trim() || null : plan.prompt,
-      request_json: JSON.stringify(original),
+      // An Original remembers the engine it ran on, so a retry or a chained step runs there too.
+      request_json: JSON.stringify(dualEngine(plan.model) ? { ...original, engine: plan.model.engine } : original),
       provider_input_json: null,
       external_id: null,
       external_meta_json: null,
@@ -513,7 +689,9 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
           .join(", ")})`,
       )
       .run(row);
-    created.push(toGeneration(row));
+    // What the run leaves out or changes (LoRAs a cloud run can't carry, a length the API rounds) goes back
+    // with it, so the composer and API clients can say so; it isn't stored.
+    created.push(notes.length ? { ...toGeneration(row), notes } : toGeneration(row));
     if (!waits) void submit(id, route, providerId, plan, req, i);
   }
   ensureRunner();
@@ -536,6 +714,7 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   audio2: "audio",
   audios: "audio",
   model3d: "model3d",
+  mask: "video",
   prompt: "text",
 };
 
@@ -554,13 +733,33 @@ const SOUNDTRACK_SLOTS = new Set<ChainSlot["slot"]>(["audio", "audio2"]);
 
 /** The dependency output a slot takes: the first of the slot's kind, or the one with the slot's `stem`. */
 export function pickOutput(outputs: OutputFile[], s: ChainSlot): OutputFile | undefined {
+  // A mask: the output made as one (meta.role "mask": a painted window's last tracked frame), else a mask video, else a still.
+  if (s.slot === "mask") return outputs.find((o) => o.meta?.role === "mask") ?? outputs.find((o) => o.kind === "video") ?? outputs.find((o) => o.kind === "image");
   const ofKind = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]);
+  if (s.index !== undefined) {
+    if (!ofKind.length) return undefined;
+    const at = (o: OutputFile, i: number) => (typeof o.meta?.index === "number" ? o.meta.index : i);
+    const ordered = ofKind.map((o, i) => ({ o, i: at(o, i) })).sort((a, b) => a.i - b.i);
+    return (ordered.find((x) => x.i === s.index) ?? ordered[Math.min(s.index, ordered.length - 1)]).o;
+  }
   if (!s.stem) return ofKind[0] ?? (SOUNDTRACK_SLOTS.has(s.slot) ? outputs.find((o) => o.kind === "video") : undefined);
   const want = STEM_ALIASES[s.stem.toLowerCase()] ?? [s.stem.toLowerCase()];
   return ofKind.find((o) => typeof o.meta?.stem === "string" && want.includes(o.meta.stem.toLowerCase()));
 }
 
-const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : SLOT_KIND[s.slot]);
+const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : s.slot === "mask" ? "mask" : SLOT_KIND[s.slot]);
+
+/**
+ * A planned list (ChainSlot `index` + `of`) that came back too short to read: a frame or two missing at
+ * the end is held (pickOutput takes the last one), more fails the step before it is paid for.
+ */
+export function listShortfall(outputs: OutputFile[], s: ChainSlot): string | null {
+  if (s.index === undefined || s.of === undefined) return null;
+  const made = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]).length;
+  if (made >= s.of - CHAIN_LIST_SLACK) return null;
+  const noun = slotNoun(s);
+  return `made ${made} ${noun}${made === 1 ? "" : "s"} where ${s.of} were planned`;
+}
 
 function placeholderFor(s: ChainSlot): string {
   const kind = SLOT_KIND[s.slot];
@@ -609,6 +808,32 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
   return { ...req, prompt, inputs };
 }
 
+/**
+ * A stored step as it was before the runner filled its chain slots (`chainFilled`): the chained list
+ * items come out from the front ("first") and the back ("last"), single slots are emptied, and the
+ * step's own items stay. A retry rebuilds the step from new dependencies this way. Text that filled a
+ * "prompt" slot can't be told from the prompt, so it stays.
+ */
+export function unfilledRequest(req: GenerationRequest, deps: number): GenerationRequest {
+  const { chainFilled, chainSkipped, ...rest } = req;
+  // A fallback's notice belongs to the run that fell back, not to a retry.
+  delete rest.notice;
+  if (!chainFilled) return chainSkipped ? { ...rest, ...(chainSkipped.prompt !== undefined ? { prompt: chainSkipped.prompt } : {}) } : rest;
+  // Optional slots left out filled nothing; the fallback's prompt goes back to the one planned.
+  if (chainSkipped?.prompt !== undefined) rest.prompt = chainSkipped.prompt;
+  const slots = filledSlots({ ...rest, chainSkipped }, deps);
+  const inputs = { ...rest.inputs };
+  for (const k of ["images", "videos", "audios"] as const) {
+    const count = (pos: "first" | "last") => slots.filter((s) => s.slot === k && (s.position ?? "last") === pos).length;
+    const list = inputs[k] ?? [];
+    const own = list.slice(count("first"), list.length - count("last"));
+    if (own.length) inputs[k] = own;
+    else delete inputs[k];
+  }
+  for (const s of slots) if (s.slot !== "images" && s.slot !== "videos" && s.slot !== "audios" && s.slot !== "prompt") delete inputs[s.slot];
+  return { ...rest, inputs: Object.keys(inputs).length ? inputs : undefined };
+}
+
 /** Generations this process is handing to a provider right now (shared across hot reloads and bundles). */
 declare global {
   var __fuobeSubmitting: Set<string> | undefined;
@@ -633,43 +858,167 @@ function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route:
   return {};
 }
 
-/** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
-async function advanceDependents(): Promise<void> {
-  const rows = db()
-    .prepare("SELECT * FROM generations WHERE status = 'queued' AND external_id IS NULL AND depends_on IS NOT NULL ORDER BY created_at ASC LIMIT 50")
-    .all() as Row[];
-  for (const r of rows) {
-    if (submitting().has(r.id)) continue;
-    const request = JSON.parse(r.request_json) as GenerationRequest;
-    const ids = depIds(r.depends_on);
-    const slots = slotsFor(request, ids.length);
-    const deps = ids.map((id) => db().prepare("SELECT status, provider, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json"> | undefined);
-    const earlier = request.frame ? "The previous frame" : "An earlier step";
-    if (deps.some((d) => !d || d.status === "failed" || d.status === "canceled")) {
-      update(r.id, { status: "failed", error: `${earlier} didn't finish`, message: null, completed_at: Date.now() });
+/** A waiting row's dependency ids as a json_each source (depends_on is one id, or a JSON list). */
+const DEP_IDS = "json_each(CASE WHEN substr(g.depends_on, 1, 1) = '[' AND json_valid(g.depends_on) THEN g.depends_on ELSE json_array(g.depends_on) END) d";
+
+/**
+ * Waiting steps that can move: none of their dependencies is still queued or running (so they launch), or one
+ * failed, was canceled or is gone (so they fail now, not after the others finish). A per-frame render keeps
+ * hundreds of steps waiting for its lanes, and a plain "oldest 50 waiting" would hold every chain started after
+ * it until its backlog drained. The steps this process is handing to a provider right now are still "queued":
+ * the limit makes room for them.
+ */
+const READY_DEPENDENTS = `SELECT g.* FROM generations g
+  WHERE g.status = 'queued' AND g.external_id IS NULL AND g.depends_on IS NOT NULL
+    AND (
+      NOT EXISTS (SELECT 1 FROM ${DEP_IDS} JOIN generations dep ON dep.id = d.value WHERE dep.status IN ('queued', 'running'))
+      OR EXISTS (SELECT 1 FROM ${DEP_IDS} LEFT JOIN generations dep ON dep.id = d.value WHERE dep.id IS NULL OR dep.status IN ('failed', 'canceled'))
+    )
+  ORDER BY g.created_at ASC LIMIT ?`;
+
+/** The error a waiting step gets when an input failed (framesProgress tells these from a step's own failure). */
+export const waitedOnFailure = (frame?: boolean) => `${frame ? "The previous frame" : "An earlier step"} didn't finish`;
+/** What a step dropped by dropUnused says (canceled, not by anyone: the steps it was for failed). */
+export const DROPPED_UNUSED = "Stopped before it ran: the steps it was for failed";
+
+/** Ids in a depends_on column that name `id` (one id, or a JSON list). */
+const DEPENDENTS_OF = "(depends_on = @id OR (substr(depends_on, 1, 1) = '[' AND instr(depends_on, @quoted) > 0))";
+
+/**
+ * A waiting step marked dropWhenUnused whose every dependent has failed or been canceled can no longer be
+ * used: cancel it (nothing was spent on it) and look again at the steps it waited for. `ids` are the inputs
+ * of a step that just failed. A step being handed to its provider right now is left alone.
+ */
+function dropUnused(ids: string[]): void {
+  const todo = [...ids];
+  // Settled: dropped, or not a waiting dropWhenUnused step. One still used is looked at again when a step using it is dropped.
+  const settled = new Set<string>();
+  const live = db().prepare(`SELECT 1 FROM generations WHERE status IN ('queued', 'running') AND ${DEPENDENTS_OF} LIMIT 1`);
+  while (todo.length) {
+    const id = todo.pop()!;
+    if (settled.has(id) || submitting().has(id)) continue;
+    const r = db().prepare("SELECT status, external_id, depends_on, request_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "external_id" | "depends_on" | "request_json"> | undefined;
+    if (!r || r.status !== "queued" || r.external_id || !r.depends_on || !(JSON.parse(r.request_json) as GenerationRequest).dropWhenUnused) {
+      settled.add(id);
       continue;
     }
+    if (live.get({ id, quoted: JSON.stringify(id) })) continue;
+    settled.add(id);
+    const now = Date.now();
+    db()
+      .prepare("UPDATE generations SET status = 'canceled', error = ?, message = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND external_id IS NULL")
+      .run(DROPPED_UNUSED, now, now, id);
+    todo.push(...depIds(r.depends_on));
+  }
+}
+
+/**
+ * A step with optional inputs whose steps failed (ChainSlot.optional): its chain without those slots, the fallback's
+ * prompt and notice, and what was left out (so a retry can put the request back as it was: unfilledRequest).
+ */
+export function withoutSkipped(req: GenerationRequest, slots: ChainSlot[], skipped: number[]): GenerationRequest {
+  const left = skipped.map((i) => slots[i]);
+  const prompt = left.map((s) => s.optional?.prompt).find((p) => p !== undefined);
+  const notice = [req.notice, ...left.map((s) => s.optional?.notice)].filter(Boolean).join(" · ");
+  return {
+    ...req,
+    chainSkipped: { slots: skipped, ...(prompt !== undefined && req.prompt !== undefined ? { prompt: req.prompt } : {}) },
+    ...(prompt !== undefined ? { prompt } : {}),
+    ...(notice ? { notice } : {}),
+  };
+}
+
+/** The chain slots a step fills: its own, less the optional ones left out (chainSkipped). */
+const filledSlots = (req: GenerationRequest, n: number): ChainSlot[] => slotsFor(req, n).filter((_, i) => !req.chainSkipped?.slots.includes(i));
+
+/** When a step after real ComfyUI steps first found ComfyUI not answering, by step id (shared across hot reloads). */
+declare global {
+  var __fuobeComfyWaits: Map<string, number> | undefined;
+}
+const comfyWaits = (): Map<string, number> => (globalThis.__fuobeComfyWaits ??= new Map<string, number>());
+/** How long such a step waits for ComfyUI to answer again before chainMode fails it. */
+export const COMFY_WAIT = { ms: 60_000 };
+
+/** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
+async function advanceDependents(): Promise<void> {
+  const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
+  // A forced look at ComfyUI, at most one a sweep, for the steps that found it not answering.
+  let lookedAgain: Promise<boolean> | undefined;
+  for (const r of rows) {
+    if (submitting().has(r.id)) continue;
+    // A step queued before its model was retired runs on what replaced it (and its row says so).
+    const moved = currentRequest(JSON.parse(r.request_json) as GenerationRequest);
+    const stored = moved.request;
+    const allIds = depIds(r.depends_on);
+    const allSlots = slotsFor(stored, allIds.length);
+    const allDeps = allIds.map(
+      (id) => db().prepare("SELECT status, provider, outputs_json, request_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json" | "request_json"> | undefined,
+    );
+    const earlier = stored.frame ? "The previous frame" : "An earlier step";
+    const fail = (error: string) => {
+      update(r.id, { status: "failed", error, message: null, completed_at: Date.now() });
+      // Steps waiting only to feed this one (the other lanes of a per-frame render) are dropped before they are paid for.
+      dropUnused(allIds);
+    };
+    const broken = (d: (typeof allDeps)[number]) => !d || d.status === "failed" || d.status === "canceled";
+    // An optional input whose step failed is left out (Genjutsu's anchor frame): the step runs without it.
+    const skipped = allSlots.flatMap((s, i) => (s.optional && broken(allDeps[i]) ? [i] : []));
+    if (allDeps.some((d, i) => broken(d) && !skipped.includes(i))) {
+      fail(waitedOnFailure(!!stored.frame));
+      continue;
+    }
+    const keep = (_: unknown, i: number) => !skipped.includes(i);
+    const deps = allDeps.filter(keep);
+    const slots = allSlots.filter(keep);
     if (deps.some((d) => d!.status !== "succeeded")) continue;
+    const request = skipped.length ? withoutSkipped(stored, allSlots, skipped) : stored;
+    // What changed upstream (an earlier fallback) is said on this step too, down to the finished result.
+    const notices = [request.notice, ...deps.map((d) => (JSON.parse(d!.request_json) as GenerationRequest).notice)].filter((x): x is string => !!x);
+    if (notices.length) request.notice = [...new Set(notices)].join(" · ");
+    const outputs = deps.map((d) => JSON.parse(d!.outputs_json) as OutputFile[]);
+    const short = slots.map((s, i) => listShortfall(outputs[i], s)).find(Boolean);
+    if (short) {
+      fail(`${earlier} ${short}`);
+      continue;
+    }
     submitting().add(r.id);
     let handedOff = false;
     try {
       // The planned op (r.op), not request.op: a translate whose op was inferred still gets the cue list.
-      const values = await Promise.all(deps.map((d, i) => chainValue(pickOutput(JSON.parse(d!.outputs_json) as OutputFile[], slots[i]), slots[i], r.op)));
+      const values = await Promise.all(outputs.map((o, i) => chainValue(pickOutput(o, slots[i]), slots[i], r.op)));
       const missing = values.findIndex((u) => !u);
       if (missing >= 0) {
-        update(r.id, { status: "failed", error: `${earlier} has no ${slotNoun(slots[missing])} to use`, message: null, completed_at: Date.now() });
+        fail(`${earlier} has no ${slotNoun(slots[missing])} to use`);
         continue;
       }
-      // Routing reads cached reachability: make sure it's fresh for local engines.
+      // Routing reads cached reachability: make sure it's fresh for local engines. An Original counts with the routes of
+      // the engine it runs on, ComfyUI taken as answering: one on the cloud doesn't use it, so doesn't wait for it.
       const model = getModel(request.modelId);
-      if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
+      const runs = model && dualEngine(model) ? onEngine(model, pickEngine(model, request.engine, engineMode(), () => true)) : model;
+      if (runs?.routes.some((x) => x.provider === "comfyui") && !(await probeComfy()) && deps.some((d) => d!.provider === "comfyui")) {
+        // The earlier steps ran for real on ComfyUI: one missed check (a server busy finishing them, or restarting)
+        // mustn't make this one a demo, which chainMode fails. Look again at once (one forced look a sweep), then wait
+        // for the next sweeps (COMFY_WAIT from the first miss) before chainMode has its say.
+        const first = comfyWaits().get(r.id);
+        const back = first === undefined && (await (lookedAgain ??= probeComfy(true)));
+        if (!back && first === undefined) {
+          comfyWaits().set(r.id, Date.now());
+          update(r.id, { message: "Waits for ComfyUI to answer" });
+          continue;
+        }
+        if (!back && Date.now() - first! < COMFY_WAIT.ms) continue;
+      }
+      comfyWaits().delete(r.id);
       if (model?.routes.some((x) => x.provider === "llm")) await probeLocal();
-      const original = withChainInputs(request, values as string[]);
+      // Filled with the slots that have an input; stored with its whole chain (and what was skipped) for a retry.
+      const filled = withChainInputs({ ...request, chain: slots }, values as string[]);
+      const original: GenerationRequest = { ...filled, chain: request.chain, chainFilled: true };
       const prepared = prepare(original);
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
       if (mode.error) throw new Error(mode.error);
       const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
       update(r.id, {
+        ...(moved.note && { model_id: p.plan.model.id, engine: p.plan.model.engine }),
         provider: p.providerId,
         op: p.plan.op,
         kind: outputKind(p.plan.op, p.plan.model),
@@ -682,7 +1031,7 @@ async function advanceDependents(): Promise<void> {
       handedOff = true;
       void submit(r.id, p.route, p.providerId, p.plan, p.req, 0);
     } catch (e) {
-      update(r.id, { status: "failed", error: (e as Error).message, message: null, completed_at: Date.now() });
+      fail((e as Error).message);
     } finally {
       if (!handedOff) submitting().delete(r.id);
     }
@@ -714,6 +1063,19 @@ async function submit(
       const f = await readRef(ref);
       return adapter.prepareFile(f.data, f.contentType, f.name, route);
     };
+    // The input clip's header (size, frame rate, length): upscalers that take a factor and frame-count routes read it.
+    let source: Pick<GenInput, "sourceSize" | "sourceFps" | "sourceDuration"> = {};
+    const prepVideo = async (ref?: string) => {
+      if (!ref) return undefined;
+      const f = await readRef(ref);
+      const facts = mediaFacts(f.data);
+      source = {
+        ...(facts.width && facts.height ? { sourceSize: { width: facts.width, height: facts.height } } : {}),
+        ...(facts.fps ? { sourceFps: facts.fps } : {}),
+        ...(facts.duration ? { sourceDuration: facts.duration } : {}),
+      };
+      return adapter.prepareFile(f.data, f.contentType, f.name, route);
+    };
     const prepMask = async (ref?: string) => {
       if (!ref) return undefined;
       const f = await readRef(ref);
@@ -724,7 +1086,13 @@ async function submit(
     let prompt = plan.prompt;
     if (req.params?.enhancePrompt && prompt) {
       update(id, { message: "Enhancing prompt" });
-      prompt = await enhancePrompt(prompt, plan.model.kind, plan.op).catch(() => prompt);
+      const words = plan.soul?.words;
+      const at = words ? prompt.indexOf(words) : -1;
+      if (words && at >= 0) {
+        // Soul: only the user's words are expanded (60–120 words of subject, wardrobe, place, light); the look stays as it is.
+        const longer = await enhanceSoulWords(words).catch(() => words);
+        prompt = prompt.slice(0, at) + longer + prompt.slice(at + words.length);
+      } else prompt = await enhancePrompt(prompt, plan.model.kind, plan.op).catch(() => prompt);
       update(id, { prompt });
     }
     const input: GenInput = {
@@ -734,7 +1102,7 @@ async function submit(
       images: (await Promise.all((req.inputs?.images ?? []).map(prep))).filter(Boolean) as string[],
       endImage: await prep(req.inputs?.endImage),
       mask: await prepMask(req.inputs?.mask),
-      video: await prep(req.inputs?.video),
+      video: await prepVideo(req.inputs?.video),
       audio: await prep(req.inputs?.audio),
       audio2: await prep(req.inputs?.audio2),
       voiceAudio: await prep(req.inputs?.voiceAudio),
@@ -746,6 +1114,26 @@ async function submit(
       // Vary seeds across a batch so N jobs don't return N identical results.
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,
     };
+    // What the caller said about the clip's length wins; the header fills the rest.
+    Object.assign(input, { ...source, ...(plan.params.sourceDuration !== undefined && { sourceDuration: plan.params.sourceDuration }) });
+    // An upscale that wouldn't enlarge the clip (a 1080p clip at a default 1080p; a 4K clip would even shrink):
+    // a tier the model only defaulted to moves up to the next one it offers, one the caller picked is refused.
+    if (plan.op === "upscale-video" && input.sourceSize) {
+      const tier = upscaleTier(input.resolution, plan.model.options.resolutions, input.sourceSize, req.params?.resolution !== undefined);
+      if ("error" in tier) throw new Error(tier.error);
+      if (tier.resolution !== input.resolution) {
+        input.resolution = tier.resolution;
+        if (providerId !== "mock" && plan.model.engine !== "open") update(id, { cost_usd: estimateCost(plan.model, { ...plan.params, resolution: tier.resolution }, 1, plan.op) });
+      }
+    }
+    // LoRA files: ComfyUI gets the ones it lacks downloaded into its loras folder; a cloud run gets a civitai
+    // file mirrored once to the provider's storage (the civitai key never leaves this server).
+    if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
+      input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
+    } else if (providerId === "comfyui" && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
+      // A graph that loads its own LoRAs (Genjutsu's Character swap: the Turbo and swap LoRAs) gets them downloaded too.
+      await ensureLorasOnComfy([...(input.loras ?? []), ...graphLoras(route.endpoint, input.extra)], await comfyLoraFiles(route), (message) => update(id, { message }));
+    }
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
     const now = Date.now();
     const status = statusOf(id);
@@ -910,7 +1298,9 @@ function pollContext(r: Row, model: NonNullable<ReturnType<typeof getModel>>): P
 async function pollOne(r: Row): Promise<void> {
   const model = getModel(r.model_id);
   if (!model) {
-    update(r.id, { status: "failed", error: `Model ${r.model_id} no longer exists`, completed_at: Date.now() });
+    // A job on a model Fuobe retired with its provider (replaced.ts) can't be collected: Reuse runs it on the replacement.
+    const retired = !!replacedBy(r.model_id) || !Object.hasOwn(PROVIDERS, r.provider);
+    update(r.id, { status: "failed", error: retired ? RETIRED_PROVIDER_ERROR : `Model ${r.model_id} no longer exists`, completed_at: Date.now(), message: null });
     return;
   }
   // The clock runs from when the provider got the job (and from when it started it), not from creation:
@@ -962,7 +1352,9 @@ async function pollOne(r: Row): Promise<void> {
   // Mark first so a slow download isn't polled twice.
   update(r.id, { status: "running", progress: 0.99, message: "Saving results" });
   const outputs: OutputFile[] = [];
-  for (const o of res.outputs as RichOutput[]) {
+  // Remove background: of a cut-out and its mask (BiRefNet's answer), the one asked for (params.matteOutput).
+  const matte = r.op === "bg-remove-video" ? (JSON.parse(r.request_json) as GenerationRequest).params?.matteOutput : undefined;
+  for (const o of keepMatte(res.outputs as RichOutput[], matte)) {
     try {
       outputs.push(await persistOutput(o, r.id));
     } catch (e) {
@@ -970,6 +1362,13 @@ async function pollOne(r: Row): Promise<void> {
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
+  // Fuobe Soul: what follows in the browser (the look's grade, an overlay, Soul Cinema's 21:9 crop), on each image;
+  // API clients read it as meta.
+  const post = soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
+  if (post) for (const [i, o] of outputs.entries()) if (o.kind === "image") outputs[i] = { ...o, meta: { ...o.meta, ...post } };
+  // Fuobe DoP's colour-grade effects: the grade the browser applies to the clip (the result's "Apply the grade" step).
+  const grade = isDop(r.model_id) && r.preset_id ? getPreset(r.preset_id)?.grade : undefined;
+  if (grade) for (const [i, o] of outputs.entries()) if (o.kind === "video") outputs[i] = { ...o, meta: { ...o.meta, grade } };
   // An image-to-3D GLB from ComfyUI gets the server's finish first (the web GLB, seconds): the outputs are
   // stored now and the row stays running until it's done, so a restart resumes it from them. The turntable
   // is rendered after the job has succeeded (src/server/model3d-finish.ts).
@@ -1043,7 +1442,65 @@ function inlineText(text: string | undefined, meta: Record<string, unknown> | un
   return { text: text.slice(0, MAX_INLINE_TEXT), meta: { ...meta, truncated: true } };
 }
 
+/**
+ * Extra files a result carries as links are kept too, so the Library never depends on a provider's expiring URL:
+ * meta.artifacts (LTX HDR's EXR zip, Higgsfield's fbx / zip), meta.formats (a 3D model's other formats, a rig's FBX
+ * and its walk and run cycles, SAM 3D's splat) and meta.preview (a 3D model's render, the cut-out a splat was
+ * made from). Links are streamed to disk (an EXR zip runs to gigabytes); one that can't be fetched stays as it
+ * was (the result's actions still offer it). A link to the main file itself (`main`) is left for persistOutput.
+ */
+export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string, main?: string): Promise<Record<string, unknown> | undefined> {
+  if (!meta) return meta;
+  let out = meta;
+  for (const key of LINK_MAPS) {
+    const links = meta[key];
+    if (!links || typeof links !== "object" || Array.isArray(links)) continue;
+    const kept: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(links as Record<string, unknown>)) kept[k] = v === main ? v : await keepLink(v, key === "artifacts" ? k : `${key}-${k}`, generationId);
+    out = { ...out, [key]: kept };
+  }
+  for (const key of LINKS) if (typeof meta[key] === "string" && meta[key] !== main) out = { ...out, [key]: await keepLink(meta[key], key, generationId) };
+  return out;
+}
+
+/** Maps of extra files by name, and single extra files, that a result links to (see persistArtifacts). */
+const LINK_MAPS = ["artifacts", "formats"] as const;
+const LINKS = ["preview"] as const;
+
+/** A provider's link stored as a file of the generation (its local URL), or the link as it was when it can't be fetched. */
+async function keepLink(v: unknown, label: string, generationId: string): Promise<unknown> {
+  if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) return v;
+  try {
+    if (v.startsWith("data:")) {
+      const f = await readRef(v);
+      return saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
+    }
+    const dest = path.join(scratchDir(), `${generationId}-${label}-${nanoid(6)}`);
+    const res = await fetchRemoteToFile(v, dest);
+    const name = new URL(res.url).pathname.split("/").pop() || undefined;
+    const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
+    return adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
+  } catch (e) {
+    console.warn(`[fuobe] could not keep the ${label} file of ${generationId}: ${(e as Error).message}`);
+    return v;
+  }
+}
+
+/** The extra links that pointed at the main file point at its stored copy. */
+function relinkMain(meta: Record<string, unknown> | undefined, from: string, to: string): Record<string, unknown> | undefined {
+  if (!meta || !from) return meta;
+  let out = meta;
+  for (const key of LINK_MAPS) {
+    const links = meta[key];
+    if (!links || typeof links !== "object" || Array.isArray(links) || !Object.values(links).includes(from)) continue;
+    out = { ...out, [key]: Object.fromEntries(Object.entries(links as Record<string, unknown>).map(([k, v]) => [k, v === from ? to : v])) };
+  }
+  for (const key of LINKS) if (meta[key] === from) out = { ...out, [key]: to };
+  return out;
+}
+
 async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
+  const linked = await persistArtifacts(o.meta, generationId, o.url);
   let data: Buffer;
   let contentType = o.contentType;
   if (!o.url && o.text !== undefined) {
@@ -1065,6 +1522,7 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     contentType ??= header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url);
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
+  const meta = relinkMain(linked, o.url, asset.url);
   // A text file's words travel with the generation, so feeds and the next chained step can use them.
   const text = o.text ?? (asset.kind === "text" ? data.toString("utf8") : undefined);
   return {
@@ -1072,7 +1530,7 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     kind: asset.kind,
     contentType: asset.contentType,
     assetId: asset.id,
-    ...inlineText(text, o.meta),
+    ...inlineText(text, meta),
     ...(o.draftId ? { draftId: o.draftId } : {}),
   };
 }
@@ -1096,6 +1554,49 @@ export async function cancelGeneration(id: string): Promise<void> {
   }
   stopModelFinish(id);
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
+  // Steps waiting only to feed this one are dropped too (nothing was spent on them).
+  dropUnused(depIds(r.depends_on));
+}
+
+// ---------------------------------------------------------------------------
+// Fuobe Soul's post steps (the look's grade and overlay), made in the browser when the result arrives.
+
+/** The aspect ratio a stored request asked for (Soul Cinema's 21:9 is made at 16:9 and cropped). */
+function requestAspect(json: string): string | undefined {
+  try {
+    return (JSON.parse(json) as GenerationRequest).params?.aspectRatio;
+  } catch {
+    return undefined;
+  }
+}
+
+export class FinishError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Keep the finished picture of a Soul result in place of the raw one: the raw one stays as meta.original (its
+ * file is still the generation's), meta.finished marks it done. The first finished copy wins: another tab's
+ * answer is 409, and an output with nothing left to do is refused.
+ */
+export function finishOutput(id: string, index: number, png: Buffer): Generation {
+  const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
+  if (!r) throw new FinishError("Not found", 404);
+  if (r.status !== "succeeded") throw new FinishError("The result isn't ready yet", 409);
+  const outputs = JSON.parse(r.outputs_json) as OutputFile[];
+  const o = outputs[index];
+  if (!o || !Number.isInteger(index)) throw new FinishError("No such output", 404);
+  if (o.meta?.finished) throw new FinishError("Already finished", 409);
+  if (!finishSteps(o)) throw new FinishError("This output has no grade or overlay to apply", 400);
+  const asset = saveFile({ data: png, contentType: "image/png", name: `${id}-${index}-finished.png`, source: "generation", generationId: id });
+  outputs[index] = { ...o, url: asset.url, assetId: asset.id, contentType: "image/png", meta: { ...o.meta, finished: true, original: o.url } };
+  update(id, { outputs_json: JSON.stringify(outputs) });
+  return getGeneration(id, { includeDeleted: true })!;
 }
 
 // ---------------------------------------------------------------------------

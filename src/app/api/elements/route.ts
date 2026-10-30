@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { z } from "zod";
+import { MAX_ELEMENT_PHOTOS } from "@/lib/catalog/elements";
 import { createElement, listElements } from "@/server/elements";
 
 const Kind = z.enum(["character", "location", "prop", "style", "voice"]);
@@ -8,7 +9,7 @@ const Body = z.object({
   name: z.string().trim().min(1).max(60),
   kind: Kind.default("character"),
   description: z.string().max(500).optional(),
-  references: z.array(z.string().startsWith("/api/files/")).max(20),
+  references: z.array(z.string().startsWith("/api/files/")).max(MAX_ELEMENT_PHOTOS),
 });
 
 export async function GET(request: Request) {

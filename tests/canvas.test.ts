@@ -352,7 +352,7 @@ describe("canvas templates", () => {
     expect(graphEngine(g)).toBe(engine);
     const plan = planCanvas(g, { engineMode: engine });
     // Only the empty upload nodes need the user.
-    for (const e of plan.errors) expect(e.message).toMatch(/^(Add (an image|an audio clip) to|Waiting on)/);
+    for (const e of plan.errors) expect(e.message).toMatch(/^(Add (an image|an audio clip|a video|a voice sample) to|Waiting on)/);
     if (!plan.errors.length) expect(plan.steps.length).toBe(g.nodes.filter(isGenerator).length);
     if (engine === "open") expect(plan.costUsd).toBe(0);
   });
@@ -433,7 +433,6 @@ describe("round-4 models on the canvas", () => {
     expect(ports("kling-o3", "video-swap")).toEqual(["prompt", "elements", "images", "video"]);
     expect(ports("bria-video-erase")).toEqual(["prompt", "video"]);
     expect(ports("p-video-replace")).toEqual(["prompt", "elements", "images", "video"]);
-    expect(ports("genjutsu-lite-object-swap")).toEqual(["prompt", "elements", "images", "video"]);
     expect(ports("florence-2-ocr")).toEqual(["images"]);
     expect(ports("topaz-sdr-to-hdr")).toEqual(["video"]);
     expect(ports("triposplat")).toEqual(["images"]);
@@ -442,6 +441,34 @@ describe("round-4 models on the canvas", () => {
     const keyframes = inputPorts(modelNode("flux-3-max", "keyframes"));
     expect(keyframes.map((p) => p.id)).toEqual(["prompt", "images"]);
     expect(keyframes.find((p) => p.id === "images")!.multiple).toBe(true);
+  });
+
+  it("keeps Wan 2.2 14B's image port a start frame on Auto; its keyframe film is picked, and fed uploaded images", () => {
+    for (const id of ["oss-wan22-14b-fast", "oss-wan22-14b"]) {
+      const auto = inputPorts(modelNode(id)).find((p) => p.id === "images")!;
+      expect(auto).toMatchObject({ label: "Start frame", multiple: false });
+      expect(inputPorts(modelNode(id, "keyframes")).find((p) => p.id === "images")).toMatchObject({ label: "Images", multiple: true });
+    }
+    // Uploaded stills: a film is planned.
+    const files: CanvasGraph = {
+      nodes: [
+        node("a", "image-input", 0, 0, { url: "/api/files/a.png" }),
+        node("b", "image-input", 0, 200, { url: "/api/files/b.png" }),
+        node("m", "model", 300, 0, { modelId: "oss-wan22-14b", mediaKind: "video", op: "keyframes", prompt: "dawn over the bay", params: { duration: 5 } }),
+      ],
+      edges: [edge("a", "m", "images"), edge("b", "m", "images")],
+    };
+    const film = describeNode(files, files.nodes[2]);
+    expect(film.error).toBeUndefined();
+    expect(film.plan?.op).toBe("keyframes");
+    // Generated stills: said on the node before Run (the film's clips are planned from its inputs when it starts).
+    const generated: CanvasGraph = {
+      nodes: [node("img", "model", 0, 0, { modelId: "nano-banana-pro", prompt: "a bay at dawn" }), { ...files.nodes[2] }, files.nodes[0]],
+      edges: [edge("a", "m", "images"), edge("img", "m", "images")],
+    };
+    const d = describeNode(generated, generated.nodes[1]);
+    expect(d.error).toBe("Wan 2.2 14B builds this film from several clips of the images you add when it starts — give it uploaded images and a typed prompt, not another step's output");
+    expect(planCanvas(generated).errors.map((e) => e.nodeId)).toEqual(["m"]);
   });
 
   it("runs an eraser fed from the board", () => {

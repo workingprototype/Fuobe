@@ -5,14 +5,18 @@ import { Check, Clapperboard, Loader2, MousePointerClick, PenLine, RefreshCw, Sp
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { themeFrom } from "@/components/ads/layout";
 import { LogoField } from "@/components/brand/brand-kit-form";
 import { areaCls, ColorList, inputCls } from "@/components/brand/fields";
 import { ImageList } from "@/components/brand/image-list";
 import { AddFromLink, priceText, ProductThumb, UploadProductButton } from "@/components/brand/products";
 import type { SlotValue } from "@/components/studio/media-slot";
-import { AD_STYLES, KIT_LABELS, type BrandKit, type MarketingRun, type Product, type RunEstimate } from "@/lib/catalog/marketing";
+import { uploadFile } from "@/lib/api";
+import { AD_STYLES, END_CARD, KIT_LABELS, type BrandKit, type MarketingRun, type Product, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { endCardPng, renderEndCard, siteLabel, type EndCardInput } from "./end-card";
 import { addRuns, send, useBrand, useEstimate, useProductActions, useProducts, useReadingProduct, useUpdateBrand } from "./hooks";
 import type { ModelInfo } from "./model-info";
 import { AvatarSlot, VoiceControl } from "./pickers";
@@ -47,7 +51,7 @@ function KitProgress() {
       <p className="text-[12px] font-semibold tracking-wide text-muted-foreground uppercase">Building your product kit</p>
       <ol className="mt-2 grid gap-1 sm:grid-cols-2">
         {KIT_LABELS.map((l, k) => (
-          <li key={l} className={cn("flex items-center gap-2 text-[13px]", k > i && "text-subtle-foreground")}>
+          <li key={l} className={cn("flex items-center gap-2 text-[13px]", k > i && "text-muted-foreground")}>
             {k < i ? <Check className="size-3.5 text-success" /> : k === i ? <Loader2 className="size-3.5 animate-spin text-brand-text" /> : <span className="size-3.5" />}
             {l}
           </li>
@@ -58,6 +62,22 @@ function KitProgress() {
 }
 
 const styleScene = (presenter: boolean, dark?: boolean) => (presenter ? "selfie" : dark ? "noir" : "orbit");
+
+/** The end card as the ad will end on it, drawn small (the same drawing as the full-size PNG). */
+function EndCardPreview({ input, className }: { input: EndCardInput; className?: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const key = JSON.stringify(input);
+  useEffect(() => {
+    // The logo and fonts load at their own pace: only the latest look is drawn.
+    let live = true;
+    if (ref.current) void renderEndCard(ref.current, JSON.parse(key) as EndCardInput, 0.3, () => live);
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  const words = [input.content.brand, input.content.product, input.content.cta].filter(Boolean).join(", ");
+  return <canvas ref={ref} role="img" aria-label={`End card preview: ${words}`} className={cn("aspect-[9/16] rounded-lg border bg-muted", className)} />;
+}
 
 /**
  * The product kit's logo and colours, kept in the product's brand kit (made from the page when the link
@@ -87,7 +107,7 @@ function KitBrand({ brand }: { brand: BrandKit }) {
     <div className="space-y-2.5 rounded-xl border p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[12px] font-medium text-muted-foreground">Logo and colours</p>
-        <span className="text-[11px] text-subtle-foreground">{update.isPending ? "Saving…" : `In the ${brand.name} brand kit`}</span>
+        <span className="text-[11px] text-muted-foreground">{update.isPending ? "Saving…" : `In the ${brand.name} brand kit`}</span>
       </div>
       <LogoField value={brand.logo} onChange={(v) => save({ logo: v ?? "" })} />
       <ColorList
@@ -137,6 +157,29 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
   const withPresenter = presenter ?? style.presenter;
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
+  // The logo end card: on by default when the kit has a logo (null = follow that), with its call to action.
+  const [endCardOn, setEndCardOn] = useState<boolean | null>(null);
+  const [cta, setCta] = useState<string>(END_CARD.cta);
+  const logo = brand?.logo || brandBits?.logo || null;
+  const withEndCard = endCardOn ?? !!logo;
+  const card = useMemo<EndCardInput>(
+    () => ({
+      theme: themeFrom(brand ?? (brandBits ? { colors: brandBits.colors } : null)),
+      content: { brand: brand?.name ?? "", product: name.trim() || product?.name || "", cta: cta.trim() || undefined, website: siteLabel(brand?.website ?? product?.url) },
+      logo,
+    }),
+    [brand, brandBits, name, product, cta, logo],
+  );
+  // The drawn card is uploaded once per look (a second Generate with the same card reuses it).
+  const uploadedCard = useRef<{ key: string; url: string } | null>(null);
+  const cardUrl = async () => {
+    const key = JSON.stringify(card);
+    if (uploadedCard.current?.key === key) return uploadedCard.current.url;
+    const blob = await endCardPng(card);
+    const { url } = await uploadFile(new File([blob], "end-card.png", { type: "image/png" }));
+    uploadedCard.current = { key, url };
+    return url;
+  };
 
   const choose = (p: Product, bits?: { logo?: string; colors: string[] }) => {
     setProductId(p.id);
@@ -166,9 +209,11 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
             voice,
             voiceSample: sample?.ref,
             avatar: withPresenter ? avatar?.ref : undefined,
+            // Priced with a stand-in; the card itself is drawn and uploaded when you generate.
+            endCard: withEndCard ? { image: "/api/files/placeholder.png" } : undefined,
           }
         : null,
-    [engine, productId, styleId, picked, withPresenter, script, mode, instructions, quality, voice, sample, avatar],
+    [engine, productId, styleId, picked, withPresenter, script, mode, instructions, quality, voice, sample, avatar, withEndCard],
   );
   const est = useEstimate<RunEstimate>("/api/marketing/click-to-ad/estimate", body);
   const blocker = !product ? "Select a product or enter a product URL" : !product.images.length ? `${product.name} has no images` : !desc.trim() ? "Add a description" : est.data?.blocker;
@@ -191,7 +236,8 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
     if (blocker) return void toast(blocker, { id: "c2a-blocker" });
     setBusy(true);
     try {
-      const r = await send<{ run: MarketingRun; script: string }>("/api/marketing/click-to-ad", "POST", body);
+      const endCard = withEndCard ? { image: await cardUrl() } : undefined;
+      const r = await send<{ run: MarketingRun; script: string }>("/api/marketing/click-to-ad", "POST", { ...body, endCard });
       addRuns(qc, "click-to-ad", [r.run]);
       setScript(r.script);
       toast.success("Creating your video", { duration: 1600 });
@@ -329,6 +375,22 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
                   {withPresenter && <AvatarSlot value={avatar} onChange={setAvatar} />}
                   <VoiceControl engine={engine} models={models} voice={voice} sample={sample} onVoice={setVoice} onSample={setSample} />
                 </div>
+                <div className="flex items-start gap-3 rounded-xl border p-3">
+                  <EndCardPreview input={card} className={cn("w-[72px] shrink-0 transition-opacity", !withEndCard && "opacity-40")} />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="c2a-end-card" className="text-[13px] font-medium">
+                        End card
+                      </label>
+                      <Switch id="c2a-end-card" checked={withEndCard} onCheckedChange={setEndCardOn} />
+                    </div>
+                    <p className="text-[12px] text-muted-foreground">
+                      {withEndCard ? `The ad ends on your ${logo ? "logo" : "brand name"} for ${END_CARD.seconds} s, in your brand colours.` : "The ad ends on its last shot."}
+                      {!logo && " Add a logo in the product kit to show it."}
+                    </p>
+                    {withEndCard && <input value={cta} onChange={(e) => setCta(e.target.value.slice(0, 30))} className={inputCls} aria-label="Call to action on the end card" placeholder="Call to action, e.g. Shop now" />}
+                  </div>
+                </div>
                 <div>
                   <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">Video quality</p>
                   <div role="radiogroup" aria-label="Video quality" className="inline-flex rounded-full bg-muted p-0.5">
@@ -364,9 +426,12 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
               </div>
             </div>
             <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t pt-4">
-              <p className="mr-auto text-[12px] text-muted-foreground">9:16 · up to 12 s · voiceover and captions{est.data?.steps.length ? ` · ${est.data.steps.length} steps` : ""}</p>
+              <p className="mr-auto text-[12px] text-muted-foreground">
+                9:16 · up to 12 s · voiceover and captions{withEndCard ? ` · ${END_CARD.seconds} s end card` : ""}
+                {est.data?.steps.length ? ` · ${est.data.steps.length} steps` : ""}
+              </p>
               {cost && <span className="font-mono text-[13px] text-muted-foreground">{cost}</span>}
-              <Button size="lg" onClick={() => void generate()} aria-disabled={!!blocker || busy} className={cn(blocker && "bg-muted text-subtle-foreground hover:bg-muted")} title={blocker}>
+              <Button size="lg" onClick={() => void generate()} aria-disabled={!!blocker || busy} className={cn(blocker && "bg-muted text-muted-foreground hover:bg-muted")} title={blocker}>
                 {busy ? <Loader2 className="animate-spin" /> : <Wand2 />} Generate video
               </Button>
             </div>
@@ -386,7 +451,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
             }
           />
         </div>
-        <p className="flex items-center justify-center gap-1.5 pt-4 text-[12px] text-subtle-foreground">
+        <p className="flex items-center justify-center gap-1.5 pt-4 text-[12px] text-muted-foreground">
           <Sparkles className="size-3" /> Cloud: Seedance 2.5 shots or an OmniHuman presenter, ElevenLabs voice, Auto Subtitle · Open source: Wan 2.2, InfiniteTalk, Chatterbox (your voice sample), caption burn-in
         </p>
       </div>

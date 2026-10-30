@@ -496,6 +496,25 @@ describe("reading a server's answers", () => {
 // Against stand-in servers, through Fuobe's own code paths
 
 describe("LM Studio", () => {
+  it("checks a typed address and model before Settings saves them (Save & test), and sends pictures as data URLs", async () => {
+    const lms = await started(lmStudio({ loaded: 16384 }));
+    const { POST } = await import("@/app/api/providers/test/route");
+    const check = async (body: unknown) => (await (await POST(new Request("http://localhost/api/providers/test", { method: "POST", body: JSON.stringify(body) }))).json()) as { ok: boolean; detail: string };
+    expect(await check({ provider: "llm", values: { lmstudioUrl: lms.url } })).toEqual({ ok: true, detail: "LM Studio · qwen/qwen3-8b ready" });
+    expect(await check({ provider: "llm", values: { lmstudioUrl: lms.url, lmstudioModel: "nope/model" }, field: "lmstudioModel" })).toMatchObject({ ok: false, detail: expect.stringMatching(/^LM Studio has no model called nope\/model/) });
+    // Nothing was saved.
+    expect(local.localServer("lmstudio").url).not.toBe(lms.url);
+    // A picture for a model that can see (Content Factory's frames, Describe my character).
+    setSetting("llmProvider", "lmstudio");
+    setSetting("lmstudioUrl", lms.url);
+    await local.probeLocal(true);
+    await llmText("Describe.", "What is in the picture?", [{ data: Buffer.from("png-bytes"), contentType: "image/png" }]);
+    expect(lms.chats().at(-1)!.messages![1].content).toEqual([
+      { type: "image_url", image_url: { url: `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}` } },
+      { type: "text", text: "What is in the picture?" },
+    ]);
+  });
+
   it("runs Enhance on the model it loads with 16k context, once, and drops the thinking", async () => {
     const lms = await started(lmStudio());
     setSetting("llmProvider", "lmstudio");
@@ -581,6 +600,30 @@ describe("LM Studio", () => {
     expect(await local.probeLocal(true)).toBe(true);
     expect(await llmText("Reply.", "hello")).toBe("(??·lms) hello");
     expect(lms.seen.at(-1)!.auth).toBe("Bearer lms-secret-1234");
+  });
+
+  it("keeps each saved token or key with the server it was saved for when Save & test tries a new address", async () => {
+    const saved = await started(lmStudio({ loaded: 16384 }));
+    const other = await started(lmStudio({ loaded: 16384 }));
+    const { POST } = await import("@/app/api/providers/test/route");
+    const check = (body: unknown) => POST(new Request("http://localhost/api/providers/test", { method: "POST", body: JSON.stringify(body) }));
+    setSetting("lmstudioUrl", saved.url);
+    setSetting("lmstudioToken", "saved-lmstudio-secret");
+    setSetting("unslothKey", "saved-unsloth-secret");
+    setSetting("llmKey", "saved-cloud-key");
+    // A new address gets no saved secret, whichever server it is for.
+    await check({ provider: "llm", values: { lmstudioUrl: other.url } });
+    await check({ provider: "llm", values: { unslothUrl: other.url } });
+    await check({ provider: "llm", values: { llmUrl: other.url } });
+    expect(other.seen.length).toBeGreaterThan(0);
+    expect(other.seen.filter((r) => r.auth)).toEqual([]);
+    // A key typed with the new address goes to it.
+    await check({ provider: "llm", values: { lmstudioUrl: other.url, lmstudioToken: "typed-token" } });
+    expect(other.seen.at(-1)!.auth).toBe("Bearer typed-token");
+    // The saved server, typed again (with /v1 pasted) or not, still gets its own.
+    await check({ provider: "llm", values: { lmstudioUrl: `${saved.url}/v1` } });
+    expect(saved.seen.at(-1)!.auth).toBe("Bearer saved-lmstudio-secret");
+    expect(local.localServer("lmstudio").key).toBe("saved-lmstudio-secret");
   });
 
   it("explains a context overflow and a model that spent its reply thinking; a dead server, how to start it", async () => {
@@ -744,5 +787,36 @@ describe("Automatic", () => {
     setSetting("lmstudioUrl", "http://127.0.0.1:9");
     await local.probeLocal(true);
     expect((await local.activeLocal())!.server.kind).toBe("ollama");
+  });
+});
+
+describe("the open text model's licence", () => {
+  it("is the licence of the model the local server in use runs, LM Studio and Unsloth ids included", async () => {
+    const { changeAccess, offeredModel, routeLicence } = await import("@/server/model-access");
+    const { getModel } = await import("@/lib/catalog");
+    const m = getModel("oss-text-llm")!;
+    const route = m.routes[0];
+    // Nothing answers: Ollama's model setting, as before.
+    expect(routeLicence(route, m)).toMatchObject({ name: "Apache-2.0", class: "commercial", note: expect.stringContaining("on Ollama (qwen3:8b)") });
+    // LM Studio pinned with a Gemma model: Gemma's terms, also with the publisher in front of the name.
+    setSetting("llmProvider", "lmstudio");
+    setSetting("lmstudioModel", "google/gemma-3-12b");
+    expect(routeLicence(route, m)).toMatchObject({ name: "Gemma Terms of Use", class: "conditions", note: expect.stringContaining("on LM Studio (google/gemma-3-12b)") });
+    // So switching off "Commercial use with conditions" reaches it, and a model with another licence brings it back.
+    changeAccess([{ kind: "class", id: "conditions", on: false }]);
+    try {
+      expect(offeredModel(m)).toBeUndefined();
+      setSetting("lmstudioModel", "qwen/qwen3-8b");
+      expect(offeredModel(m)).toBe(m);
+    } finally {
+      changeAccess([{ kind: "class", id: "conditions", on: true }]);
+    }
+    // The model a ready server reports wins over the setting (Unsloth: the loaded one).
+    const uns = await started(unslothStudio());
+    setSetting("llmProvider", "unsloth");
+    setSetting("unslothUrl", uns.url);
+    setSetting("unslothKey", "sk-unsloth-test");
+    await local.probeLocal(true);
+    expect(routeLicence(route, m)).toMatchObject({ name: "Apache-2.0", note: expect.stringContaining("on Unsloth Studio (unsloth/Qwen3-8B-GGUF)") });
   });
 });

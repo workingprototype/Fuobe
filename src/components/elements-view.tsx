@@ -28,19 +28,20 @@ import { fileToSlot, MediaSlot, type SlotValue } from "@/components/studio/media
 import { ELEMENT_ICONS } from "@/components/studio/prompt-input";
 import { VoiceRecorder } from "@/components/studio/voice-recorder";
 import { useDeleteElement, useElements, useSaveElement } from "@/lib/api";
-import { ELEMENT_KINDS, elementKindInfo, handleFor, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
+import { ELEMENT_KINDS, elementKindInfo, handleFor, MAX_ELEMENT_PHOTOS, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
+import { isLegacySoulId, SOUL_ID_PHOTOS } from "@/lib/catalog/training";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 const TIPS: Record<ElementKind, string> = {
-  character: "3–20 clear photos of one person: different angles, at least one full-body, no sunglasses, filters or group shots.",
+  character: `3+ clear photos of one person (${SOUL_ID_PHOTOS.recommended}+ to train a Soul ID, up to ${SOUL_ID_PHOTOS.max}): different angles, at least one full-body, no sunglasses, filters or group shots.`,
   location: "1–6 photos of the place from a few viewpoints.",
   prop: "1–4 clean photos of the object, ideally on a plain background.",
-  style: "2–10 images that share the look you want: palette, lighting, grain, mood.",
+  style: "2–10 images that share the look you want: palette, lighting, grain, mood (20+ to train it as a look).",
   voice: "One clean 10–60 second recording of the voice — just speech, no music. Record it here or upload a WAV or MP3.",
 };
 
-const MAX_PHOTOS = 20;
+const MAX_PHOTOS = MAX_ELEMENT_PHOTOS;
 
 function PhotoGrid({ photos, setPhotos }: { photos: SlotValue[]; setPhotos: React.Dispatch<React.SetStateAction<SlotValue[]>> }) {
   const addFiles = (files: FileList | File[]) => {
@@ -110,7 +111,7 @@ interface ElementDialogProps {
 export function ElementDialog(props: ElementDialogProps) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="sm:max-w-[560px]">{props.open && <ElementForm {...props} />}</DialogContent>
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-[560px]">{props.open && <ElementForm {...props} />}</DialogContent>
     </Dialog>
   );
 }
@@ -182,7 +183,7 @@ function ElementForm({ onOpenChange, element, defaultKind = "character", onSaved
         />
         <p className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground">
           <AtSign className="size-3" />
-          {name.trim() ? handleFor(name) : "handle"} <span className="text-subtle-foreground">— how you mention it in prompts</span>
+          {name.trim() ? handleFor(name) : "handle"} <span className="text-muted-foreground">— how you mention it in prompts</span>
         </p>
       </div>
       <Textarea
@@ -193,7 +194,10 @@ function ElementForm({ onOpenChange, element, defaultKind = "character", onSaved
         className="resize-none text-sm"
       />
       <div className="space-y-2">
-        <p className="text-[12px] text-muted-foreground">{TIPS[kind]}</p>
+        <p className="text-[12px] text-muted-foreground">
+          {TIPS[kind]}
+          {kind !== "voice" && photos.length > 0 && <span className="tabular-nums"> · {photos.length}/{MAX_PHOTOS}</span>}
+        </p>
         {kind === "voice" ? (
           <VoiceSample value={photos[0]} onChange={(v) => setPhotos(v ? [{ ...v, id: nanoid(6) }] : [])} />
         ) : (
@@ -244,6 +248,26 @@ function HandleCopy({ handle }: { handle: string }) {
   );
 }
 
+/** Training, Soul ID (a LoRA that runs), Retrain (only an older Soul ID kept by reference) or Demo (only a demo training's stand-in). */
+function TrainedBadge({ el }: { el: StudioElement }) {
+  const real = el.loras.some((l) => !l.demo && !isLegacySoulId(l));
+  const legacy = !real && el.loras.some(isLegacySoulId);
+  const label = el.status === "training" ? "Training" : real ? "Soul ID" : legacy ? "Retrain" : el.loras.length ? "Demo" : null;
+  if (!label) return null;
+  return (
+    <span
+      className={cn(
+        "pointer-events-none absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-background/90 px-2 py-0.5 text-[11px] font-medium shadow-soft backdrop-blur",
+        real || el.status === "training" ? "text-success" : "text-warning",
+      )}
+      title={legacy ? "An older Soul ID that no longer runs: retrain it for Fuobe Soul on the same photos" : undefined}
+    >
+      {el.status === "training" ? <Loader2 className="size-3 animate-spin" /> : <GraduationCap className="size-3" />}
+      {label}
+    </span>
+  );
+}
+
 function ElementCard({ el }: { el: StudioElement }) {
   const del = useDeleteElement();
   const Icon = ELEMENT_ICONS[el.kind];
@@ -261,7 +285,7 @@ function ElementCard({ el }: { el: StudioElement }) {
               el.references.slice(0, 4).map((r, i, arr) => (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  key={r}
+                  key={`${i}:${r}`}
                   src={r}
                   alt=""
                   className={cn(
@@ -280,12 +304,7 @@ function ElementCard({ el }: { el: StudioElement }) {
           </div>
         </Link>
       )}
-      {(el.loras.length > 0 || el.status === "training") && (
-        <span className="pointer-events-none absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-background/90 px-2 py-0.5 text-[11px] font-medium text-success shadow-soft backdrop-blur">
-          {el.status === "training" ? <Loader2 className="size-3 animate-spin" /> : <GraduationCap className="size-3" />}
-          {el.status === "training" ? "Training" : "Trained"}
-        </span>
-      )}
+      <TrainedBadge el={el} />
       <div className="flex items-start justify-between gap-2 p-3">
         <div className="min-w-0">
           <p className="truncate font-medium">{el.name}</p>

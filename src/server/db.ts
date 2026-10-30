@@ -445,6 +445,125 @@ const MIGRATIONS: string[] = [
   ALTER TABLE generations ADD COLUMN pinned_at INTEGER;
   ALTER TABLE generations ADD COLUMN review TEXT;
   CREATE INDEX IF NOT EXISTS generations_pinned ON generations(pinned_at) WHERE pinned_at IS NOT NULL;`,
+  // originals (o/lora-plumbing): every LoRA copy Fuobe made — a download into ComfyUI's loras folder or a mirror on
+  // fal / Replicate storage — with its pinned source, hash, size and the licence / civitai permissions it was made under.
+  `CREATE TABLE IF NOT EXISTS lora_mirrors (
+    file TEXT NOT NULL,
+    target TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    version TEXT,
+    hosted_url TEXT,
+    sha256 TEXT,
+    size_bytes INTEGER,
+    licence_json TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (file, target)
+  );`,
+  // round 4 (r4/content-factory): Content Factory series — the reference clip, its style brief, the planned
+  // episodes and the settings; the episodes themselves are Faceless episodes in the series' channel.
+  `CREATE TABLE IF NOT EXISTS content_series (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT,
+    data_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS content_series_updated ON content_series(updated_at DESC);`,
+  // round 4 (r4/share-links): read-only share links and published pages. `id` is the token's first 12 characters
+  // (the lookup key); only the SHA-256 of the whole token is kept. A share names generations, folders or projects,
+  // never files: its page shows what still exists.
+  `CREATE TABLE IF NOT EXISTS shares (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    layout TEXT NOT NULL DEFAULT 'grid',
+    items_json TEXT NOT NULL DEFAULT '[]',
+    cover_id TEXT,
+    cover_index INTEGER NOT NULL DEFAULT 0,
+    show_prompts INTEGER NOT NULL DEFAULT 0,
+    expires_at INTEGER,
+    views INTEGER NOT NULL DEFAULT 0,
+    last_viewed_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS shares_target ON shares(kind, target_id);`,
+  // round 4 (r4/assist-connectors): Assist's scheduled tasks (a prompt, its rule and time zone, ask-first or
+  // auto-run within a cost cap, whether its runs may use connectors, and how the last run went), custom MCP
+  // connectors (name, URL, token — a secret, masked before it reaches the browser — and the tools they're
+  // limited to), and on each chat the task that started it, what that run has spent on its own, and whether
+  // it uses connectors.
+  `CREATE TABLE IF NOT EXISTS assist_schedules (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    attachments_json TEXT NOT NULL DEFAULT '[]',
+    project_id TEXT,
+    rule_json TEXT NOT NULL,
+    tz TEXT NOT NULL,
+    approval TEXT NOT NULL DEFAULT 'ask',
+    cap_usd REAL,
+    connectors INTEGER NOT NULL DEFAULT 0,
+    engine TEXT NOT NULL DEFAULT 'cloud',
+    mode_json TEXT,
+    paused INTEGER NOT NULL DEFAULT 0,
+    next_run_at INTEGER,
+    last_run_at INTEGER,
+    last_thread_id TEXT,
+    last_status TEXT,
+    last_text TEXT,
+    runs INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS assist_schedules_due ON assist_schedules(paused, next_run_at);
+  CREATE INDEX IF NOT EXISTS assist_schedules_project ON assist_schedules(project_id);
+  CREATE TABLE IF NOT EXISTS assist_connectors (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    url TEXT NOT NULL,
+    token TEXT,
+    tools_json TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  ALTER TABLE assist_thread_state ADD COLUMN schedule_id TEXT;
+  ALTER TABLE assist_thread_state ADD COLUMN cap_usd REAL;
+  ALTER TABLE assist_thread_state ADD COLUMN spent_usd REAL NOT NULL DEFAULT 0;
+  ALTER TABLE assist_thread_state ADD COLUMN connectors INTEGER NOT NULL DEFAULT 1;
+  CREATE INDEX IF NOT EXISTS assist_thread_state_schedule ON assist_thread_state(schedule_id);`,
+  // originals (o/h3-studio): Character Swap Studio projects — the character (picture and description), the clips with
+  // their 24 fps copies, cuts and shots, transcripts and voices, masks and anchors, segments with their takes, review
+  // decisions and assemblies, as one document (data_json; revision counts saves, so an open page knows it changed).
+  // Every job is an ordinary generation the document names by id. `waiting`: takes queued behind the segments they
+  // continue from, which the studio's sweep launches once those are made.
+  `CREATE TABLE IF NOT EXISTS swap_projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    waiting INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS swap_projects_updated ON swap_projects(updated_at DESC);
+  CREATE INDEX IF NOT EXISTS swap_projects_waiting ON swap_projects(waiting) WHERE waiting > 0;`,
+  // originals (o/no-higgsfield): Fuobe no longer calls Higgsfield's API (build plan O7). Its saved key is deleted (a
+  // secret nothing reads any more), a "Higgsfield first" cloud provider becomes Automatic, and the ads its Ads Studio
+  // drew whole are marked baked, which is all the Ads Studio needs to show them as they are. Jobs and trainings still
+  // waiting on it fail on their next poll with a way forward (src/server/providers/index.ts, src/server/training.ts).
+  `DELETE FROM settings WHERE key = 'higgsfield.key';
+  UPDATE settings SET value = 'auto' WHERE key = 'cloud.provider' AND value = 'higgsfield';
+  UPDATE ad_batches SET route = 'baked' WHERE route = 'higgsfield';
+  UPDATE ad_creatives SET meta_json = json_set(meta_json, '$.route', 'baked')
+    WHERE json_valid(meta_json) AND json_extract(meta_json, '$.route') = 'higgsfield';`,
 ];
 
 declare global {
