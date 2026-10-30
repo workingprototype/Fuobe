@@ -5,31 +5,46 @@ Written on 2026-10-30, when PR #15 wrapped up the work so far, and revised the s
 ## Start here
 
 1. **Check that PR #15 is merged:** `git fetch origin && git log --oneline origin/main | grep -m1 'pull request #15'`.
-   - While it is still open, use `origin/claude/fuobe-r5-batch-7` wherever this file says `origin/main`. That branch already holds main and this handoff.
-   - First check that acc-1 and acc-2 are gone from it: `git grep -q better-auth origin/claude/fuobe-r5-batch-7 -- package.json` must find nothing.
-2. **Set up the session** ("Setting up a new session" below). This includes rebuilding the base from main and moving the two branches with work in progress onto it.
-3. **Ask the owner** the questions under "Waiting on the owner". Record the answers in [`handoff/owner-decisions.json`](handoff/owner-decisions.json), then commit them to `claude/fuobe-parity-4` and push.
-4. **Build.**
+   - While it is still open, use `origin/claude/fuobe-r5-batch-7` wherever this file says `origin/main`, but only once that branch is PR #15's final head: acc-1 and acc-2 removed, and this handoff on it. When this file was written, it still had both and an older handoff (head `c9cd489`). Check it; each line prints its answer:
+
+     ```bash
+     B=origin/claude/fuobe-r5-batch-7; git rev-parse -q --verify $B >/dev/null || echo "STOP: there is no $B"
+     git grep -q better-auth $B -- package.json && echo "STOP: acc-1 is still on $B" || echo "ok: no acc-1"
+     git cat-file -e $B:src/server/access/route.ts 2>/dev/null && echo "STOP: acc-2 is still on $B" || echo "ok: no acc-2"
+     git grep -q accounts_10_30 $B -- docs/handoff/owner-decisions.json && echo "ok: this handoff" || echo "STOP: $B has an older handoff"
+     git merge-base --is-ancestor origin/main $B && echo "ok: it holds main" || echo "behind main: setup step 4 brings main in"
+     ```
+
+   - On any STOP, don't build: PR #15's branch hasn't been rebuilt yet. Tell the owner and wait for it.
+2. **See what main gained since this file was written:** `git log --first-parent --format='%h %ad %s' --date=short a5f841f..origin/main` and `git diff --stat a5f841f origin/main -- docs/public-signup.md`. When this was written, that was four commits, listed under "after this handoff" in "Where things stand". Where main says more than a brief, main wins. Note what changes a brief in its `wip` entry in `queue.json`.
+3. **Set up the session** ("Setting up a new session" below). This includes rebuilding the base from main, moving the two branches with work in progress onto it, and bringing main's newer work into the base.
+4. **Ask the owner** the questions under "Waiting on the owner". Record the answers in [`handoff/owner-decisions.json`](handoff/owner-decisions.json), then commit them to `claude/fuobe-parity-4` and push.
+5. **Build.**
    - If the owner asks for a workflow, follow "Running the build".
-   - Otherwise build one package at a time through the same four stages, using the prompts the generated workflow script holds. Generate the script with `make-workflow.mjs` and read the prompts for that package.
-5. **Before the session ends**, follow "Before a session ends". Branches, reports and journals that aren't pushed are lost with the container.
+   - Otherwise follow "Building without the Workflow tool": the same four stages, one package at a time, with the same prompts.
+6. **Before the session ends**, follow "Before a session ends". Branches, reports and journals that aren't pushed are lost with the container.
 
 ## Where things stand
 
 - **`main`** (after PR #15) holds:
   - all of round 4, the Fuobe Originals O1 to O11 and O13, and from PR #14 Skills W1 and W2, Fixes 5 and the research notes for DBS, new models, Work2Skill and accounts
-  - from PR #15: DBS soundtrack separation (D1), MOSS-Image (N7-1), the fly path (N7-5), the turnaround video (N7-6), the research for Idol (research 9) and this handoff. PR #15 does **not** carry acc-1 and acc-2: the owner dropped them (below).
-  - the owner's own work from 10-30 (20 commits; read their messages with `git log dc51169..a5f841f`):
+  - from PR #15: DBS soundtrack separation (D1), MOSS-Image (N7-1), the fly path (N7-5), the turnaround video (N7-6), the research for Idol (research 9) and this handoff. PR #15's own tools follow public sign-up (`tests/public-signup-tools.test.ts`), and the pre-flight index covers MOSS-Image, the fly path and Split soundtrack. PR #15 does **not** carry acc-1 and acc-2: the owner dropped them (below), and its branch reverts them.
+  - the owner's own work from 10-30 up to this handoff (20 commits; read their messages with `git log dc51169..a5f841f`):
     - **public sign-up** (`docs/public-signup.md`), described under "Accounts" below.
     - **local LLMs:** `src/server/llm` and `/api/llm` cover Ollama, LM Studio, Unsloth Studio and any OpenAI-compatible server (Settings → AI helper).
     - **Pixal3D** is now the Image to 3D route for a photo, with the server's GLB finish and a CPU turntable (`scripts/comfy/hand-built/image-to-3d-pixal3d.json`). TRELLIS.2 is the fallback, and its graph was trimmed.
     - **premium preset covers:** 480 covers rendered on ComfyUI, in `public/previews/presets` (`pnpm eval:covers --from-masters`).
     - **the README is a product page.** The details moved to `docs/FEATURES.md`, `docs/SELF-HOSTING.md` and `docs/DEVELOPMENT.md`. Also new: the MIT licence, the tab icon and the demo video.
     - **the GPU pre-flight board at `/connect`.** It shows what the connected ComfyUI has, and every studio as Ready, One step away, Needs setup or Needs a bigger GPU. The same chips show on gallery cards, studio headers and the model picker. Its index is `workflows/comfyui/requirements.json`, which the library build writes.
+  - **after this handoff** (late on 10-30, `b7f78e7` to `b5ca728`; "Start here" step 2 lists what came later):
+    - accounts upload pictures, clips and sound (`POST /api/uploads`) and run the studios' input modes, camera motions, effects and input apps on their own ComfyUI. What an account's run may read is `src/server/tenant.ts`, and its inputs are checked in `src/server/account-inputs.ts`. One new migration (`assets.account_id`).
+    - Image to 3D and every 3D model are closed to accounts for now. The 3D finish (`scripts/model3d/finish-glb.mjs`) refuses a GLB with external file references.
+    - the sign-in proxy holds request bodies only up to 66 MB (`next.config.ts`). `/api/uploads` skips it and makes the same checks itself (`src/server/direct-gate.ts`).
+    - before/after reveal clips on 42 apps' preset covers.
 - **Accounts** are the owner's public sign-up on main. It is off by default, and `FUOBE_PUBLIC_SIGNUP=1` turns it on. With it on:
   - guests browse read-only
   - anyone can sign up with an email; accounts live in `auth.json` with a scrypt hash
-  - accounts see a guest view of the owner's library, can't touch settings, keys or tokens, and run only on their own ComfyUI (Settings → Your GPU, checked on `/connect`)
+  - accounts see a guest view of the owner's library and can't touch settings, keys or tokens. They upload their own files and run only on their own ComfyUI (Settings → Your GPU, checked on `/connect`).
 
   The PR #15 packages acc-1 (the Better Auth identity base) and acc-2 (the actor context on every route, with its integration fix 4e8359f) are dropped. The 55 remaining packages of the old accounts lane (acc-3 to acc-57) are dropped from the queue. The next accounts work starts with a new plan written with the owner, around public sign-up. [`research/accounts-8.md`](research/accounts-8.md) is background research only.
 - **`claude/fuobe-parity-4`** is the integration branch. Packages are merged into it one at a time, and a PR is cut from it as a snapshot branch when the owner asks for one. It still points at `f7c6d8e`, which carries acc-1 and acc-2, so rebuild it from main before building (see "Setting up a new session").
@@ -52,10 +67,14 @@ The owner's own words on engines, SAM Audio, accounts and the PR #14 calls are i
   - the DBS packages split soundtracks on the open engine only
   - today's cloud dub (Demucs) stays as it is
   - hosted speech cleaners (VEED, DeepFilterNet, ElevenLabs isolation) are used only under their own names
-- **Accounts are the owner's public sign-up** (the owner, 10-30: "main wins"; key `accounts_10_30`). Every route, page and run a package adds follows it the way main's own routes do. Every brief ends with a PUBLIC SIGN-UP rule:
-  - read `src/lib/guest-access.ts`, `src/proxy.ts` and `tests/public-signup.test.ts`
-  - add new routes to those rules and tests
-  - add new studios to the `/connect` board
+- **Accounts are the owner's public sign-up** (the owner, 10-30: "main wins"; key `accounts_10_30`). Every route, page and run a package adds follows it the way main's own routes do, and `docs/public-signup.md` at the base wins where it says more than a brief. Every brief ends with a PUBLIC SIGN-UP rule:
+  - read `src/lib/guest-access.ts`, `src/proxy.ts`, `src/server/tenant.ts` and `tests/public-signup.test.ts`
+  - price checks (estimate routes, `?preview=1` on run routes) go in `ESTIMATES` or `PREVIEWS` and run through `priceAs` (`src/server/visitor.ts`), so a visitor is priced for its own GPU, never a demo
+  - changes to the library or projects go in `LIBRARY_CHANGES` (403 `code: "library"` for an account). Settings, keys and tokens stay the owner's. The owner's lists come back empty for a visitor, and a visitor is never told whether one of the owner's records exists.
+  - only the owner's runs reach the install's keys or GPU. An account's studio generations run on its own ComfyUI through `POST /api/generations`; other runs answer `connect-gpu`, then `own-gpu-tool`. An account's run reads only its own files (`src/server/tenant.ts`, `src/server/account-inputs.ts`).
+  - a request body over 66 MB doesn't get through the sign-in proxy: a route that takes a large file takes an uploaded file's reference
+  - add new routes to those rules and to `tests/public-signup.test.ts`
+  - new ComfyUI workflows and node packs go into the pre-flight's requirement index (`packs.json`, `model-pins.json`, then `node scripts/comfy/build-requirements.mjs`), and new studios and tools get a row on the `/connect` board (`STUDIO_ROWS` in `src/server/gpu/tools.ts`)
 
   The owner's earlier accounts answers of 10-29 (three modes, teams, plans, an admin panel, paid keys both ways, enterprise features) stay under the key `accounts`. They are background for the re-plan, to be confirmed with the owner.
 - **The owner's calls from PR #14** are package `owner-calls-1`, first in lane O:
@@ -67,7 +86,7 @@ The owner's own words on engines, SAM Audio, accounts and the PR #14 calls are i
 
 - **Re-plan accounts around public sign-up.** The seven open questions of accounts-8.md §15 are moot. Ask the owner what accounts should become beyond public sign-up, for example:
   - teams, and sharing inside a team
-  - accounts with their own uploads, projects and library
+  - accounts' own projects and library (since 5e6a421 they have their own uploads and runs)
   - plans, credits and payments, and an admin panel beyond Settings → Accounts
   - which of the 10-29 answers still stand: the three modes (Personal, In-house studio, Platform) and enterprise features (SSO, SCIM, audit)
 
@@ -78,6 +97,7 @@ The owner's own words on engines, SAM Audio, accounts and the PR #14 calls are i
 
   Put them in the inputs folder (below). Both briefs describe what was learned from them, so the packages can start without them.
 - **`o/acc-3` on origin** is dropped work. Ask the owner whether to delete it (`git push origin --delete o/acc-3`).
+- **May the integrator remove merged worktrees?** If yes, pass `--remove-worktrees` (see "Running the build", Disk). Without it, every package keeps its worktree until the session ends.
 
 ## What's left: the queue
 
@@ -107,11 +127,13 @@ Lanes run side by side. Inside a lane, packages run in this order, and each pack
 - `o12-training-kit`
 - More skills: `w2s-w5`, `w2s-w6`, `w2s-w7`
 
-Each package's full brief is in `queue.json` under `packages.<key>.brief`, with its research sections, the owner's rules and its test plan. Every brief ends with the PUBLIC SIGN-UP rule. Briefs in areas main changed on 10-30 carry a "MAIN CHANGED THIS AREA" line to read main's code first: Image to 3D, local LLMs, and the pre-flight board for new studios. `n7-3-regenerate-2k` and `archive-restore` both add a step to Upscale → Video at the same time, and each brief says how to keep them apart.
+These lists are as of 10-30. The current state is what `make-workflow.mjs` prints: the packages it leaves out as merged, and the first package of each lane.
+
+Each package's full brief is in `queue.json` under `packages.<key>.brief`, with its research sections, the owner's rules and its test plan. Every brief ends with the PUBLIC SIGN-UP rule. Briefs in areas main changed on 10-30 carry a "MAIN CHANGED THIS AREA" line to read main's code first: Image to 3D (including the 3D finish's self-contained GLB and 3D closed to accounts), local LLMs, and the pre-flight board for new studios. `n7-3-regenerate-2k` and `archive-restore` both add a step to Upscale → Video at the same time, and each brief says how to keep them apart.
 
 ## Work in progress
 
-Both branches with work are pushed to `origin`, cut from the old `claude/fuobe-parity-4` head `f7c6d8e`. That head carries the dropped acc-1 and acc-2, so the main session moves each branch onto the rebuilt base before any stage runs (see "Setting up a new session"). Each package's full notes are in `queue.json` under `wip`: what is built, the next steps and the risks. `make-workflow.mjs` passes them to the package's agents.
+Both branches with work are pushed to `origin`, cut from the old `claude/fuobe-parity-4` head `f7c6d8e`. That head carries the dropped acc-1 and acc-2. If the base is reset, the main session moves each branch onto it before any stage runs. If the base fast-forwards to a main that reverts them, the package's agent merges the base in (see "Setting up a new session"). Each package's full notes are in `queue.json` under `wip`: what is built, the next steps and the risks. `make-workflow.mjs` passes them to the package's agents.
 
 | Branch | State | What the next run does |
 |---|---|---|
@@ -125,22 +147,28 @@ When both packages merge, they conflict in one place: the lucide import list in 
 
 The container starts fresh, so set up the following before building.
 
-**1. The repository and the base.** The base must match main. Main never got acc-1 and acc-2 (the owner dropped them), but `claude/fuobe-parity-4` still carries them:
+**1. The repository and the base.** First see where the base points: `cd /home/user/Fuobe && git fetch origin && git rev-parse --short origin/claude/fuobe-parity-4`.
 
-```bash
-cd /home/user/Fuobe                      # the repository
-git fetch origin
-MAIN=origin/main                         # while PR #15 is still open: MAIN=origin/claude/fuobe-r5-batch-7
-git checkout claude/fuobe-parity-4
-git log --oneline --no-merges $MAIN..origin/claude/fuobe-parity-4   # what the base has that main lacks
-```
+- **Still `f7c6d8e`:** this is the first session after PR #15, and the base must be rebuilt from main. Main never got acc-1 and acc-2 (the owner dropped them), but `claude/fuobe-parity-4` still carries them:
 
-Act on what the last command prints:
-- **Nothing:** `git merge --ff-only $MAIN && git push origin claude/fuobe-parity-4`.
-- **Only the dropped accounts work:** the "Accounts 1…" and "Accounts 2…" commits, plus 4e8359f "Turnaround routes go through handler()". Run `git reset --hard $MAIN && git push --force-with-lease origin claude/fuobe-parity-4`. This applies the owner's 10-30 decision; the old head was `f7c6d8e`.
-- **Anything else:** stop. Compare with `git diff --stat $MAIN origin/claude/fuobe-parity-4` and ask the owner.
+  ```bash
+  MAIN=origin/main                         # while PR #15 is still open ("Start here" step 1): MAIN=origin/claude/fuobe-r5-batch-7
+  git checkout claude/fuobe-parity-4
+  git log --oneline --no-merges $MAIN..origin/claude/fuobe-parity-4   # what the base has that main lacks
+  ```
 
-**2. The two branches with work in progress.** If you reset the base, move each branch's own commits onto it. Expect conflicts with main's 10-30 work in `src/server/generations.ts` and `src/server/settings.ts` (the 3D finish, local LLMs and public sign-up changed them):
+  Act on what the last command prints:
+  - **Nothing:** `git merge --ff-only $MAIN && git push origin claude/fuobe-parity-4`. This is the expected case: PR #15's branch removes acc-1 and acc-2 by reverting them on top of `f7c6d8e`, so once it is merged with a merge commit (as PRs #10 to #14 were), main contains `f7c6d8e`.
+  - **Only the dropped accounts work:** the "Accounts 1…" and "Accounts 2…" commits, plus 4e8359f "Turnaround routes go through handler()". Run `git reset --hard $MAIN && git push --force-with-lease origin claude/fuobe-parity-4`. This applies the owner's 10-30 decision; the old head was `f7c6d8e`.
+  - **Anything else:** stop. Compare with `git diff --stat $MAIN origin/claude/fuobe-parity-4` and ask the owner.
+- **Anything else:** an earlier session already rebuilt the base, and it holds the packages merged since. Compared with main (the `git log` above), it lists their commits; that is expected, not a reason to stop. Run `git checkout claude/fuobe-parity-4 && git merge --ff-only origin/claude/fuobe-parity-4`, and step 4 brings main's newer work in.
+
+**2. The two branches with work in progress.** If you reset the base in step 1, move each branch's own commits onto it. Whether they are rebased here or the package's agent merges the base in, expect conflicts (test merges on 10-30):
+- `o/n7-2-layout-mode`: `src/components/studio/composer.tsx`, `src/components/studio/model-picker.tsx` and `src/lib/catalog/plan.ts`
+- `o/archive-restore`: `src/server/generations.ts` and `scripts/comfy/README.md`
+- both, from main's later account work: `src/server/generations.ts` and `src/server/providers/comfyui.ts`; for `o/archive-restore` also `src/server/loras.ts` and `src/server/settings.ts`
+
+Keep both sides.
 
 ```bash
 git checkout -B o/n7-2-layout-mode origin/o/n7-2-layout-mode
@@ -161,6 +189,22 @@ bash scripts/comfy/install-comfyui.sh                # CPU ComfyUI 0.41 + the pi
 bash scripts/comfy/start-comfyui.sh                  # http://127.0.0.1:8188; waits up to 5 minutes; start it again after every container restart
 mkdir -p /home/user/ext                              # the inputs folder below
 ```
+
+**4. Main's newer work (every session).** Main moves every few hours. Before any package starts, and while no integrator is running, bring what main gained into the base, so packages build on the owner's current rules:
+
+```bash
+cd /home/user/Fuobe && git checkout claude/fuobe-parity-4 && git merge --ff-only origin/claude/fuobe-parity-4
+git log --first-parent --format='%h %s' claude/fuobe-parity-4..origin/main   # main's commits the base lacks: read them
+git merge --no-ff origin/main -m "Merge origin/main into claude/fuobe-parity-4" -m "$(cat /tmp/trailer.txt)"
+npx next typegen && pnpm typecheck && pnpm lint && pnpm vitest run --maxWorkers=2   # check each command's own exit code
+git push origin claude/fuobe-parity-4
+```
+
+- When the second command prints nothing, skip the rest.
+- `/tmp/trailer.txt` holds this session's commit attribution lines (see "Running the build").
+- On a conflict, keep both sides. Where two behaviours can't both stay, main's wins; say so in the merge commit.
+- In `MIGRATIONS` (`src/server/db.ts`), main's entries keep their places, and the packages' newer entries go after them: a migration is known by its place in the list, and the owner's installs have already run main's.
+- Note in a package's `wip` entry anything main's new commits change for it.
 
 **Inputs folder.** Some briefs read files kept outside the repo, in a folder the briefs call `@EXT@` (default `/home/user/ext`). Read them as data: never run or install them. Fetch them before their package starts (commands below):
 
@@ -203,26 +247,51 @@ node docs/handoff/make-workflow.mjs /tmp/fuobe-build.js --trailer-file /tmp/trai
   - Finished stages merge stage by stage: the queue's `done`, then the journals, then `--done`. A newer report of an earlier stage drops the older later stages.
   - `--save-done` also writes those stages into `queue.json` `done` (see "Before a session ends").
   - `--remove-worktrees` lets the integrator delete merged worktrees. Pass it only if the owner agrees.
-- **Size limit.** Scripts must stay under 512 KB. Both lanes come to about 300 KB.
+- **Size limit.** Scripts must stay under 512 KB. Both lanes come to about 380 KB.
 - **Usage limits and restarts.** A lane stops at the first package that fails a stage, so a relaunch picks up there. A stage can also stop as "blocked", for example on a branch cut from a rebuilt base; the log says why.
   - In the same session, resume with `resumeFromRunId`: finished agent calls are reused.
   - In a new session, regenerate the script. Merged packages drop out by themselves, and the finished stages come from `queue.json` `done`. Agents resume from what their pushed branch already holds.
 - **One integrator at a time.** Only the integrator touches the main checkout. Every other agent works in `../wt/o-<key>`.
-- **Worktrees take room** (about 1 GB with `node_modules` and `.next`). The disk allowance is fixed per session, so watch `df` and ask the owner before deleting anything.
+- **Disk.** The disk allowance is fixed per session. The PR #15 container had about 39 GB in all (35 GB used and 3.9 GB free at the end):
+  - ComfyUI: 5.7 GB
+  - `~/.cache`: uv 5.8 GB and the evaluation cache 2.6 GB
+  - scratch and verify data: 5 to 7 GB
+  - worktrees: 6.3 GB
+
+  A worktree's `node_modules` are hardlinks into the pnpm store, so a worktree costs its sources (about 150 MB) plus its `.next` (up to 0.8 GB). Agents delete `.next` after browser checks. After a PR, remove verify.sh's `../wt/verify-*` worktree and its out folder. Check `df -h /` before each run, and ask the owner before deleting anything else.
+
+## Building without the Workflow tool
+
+Without the owner's go-ahead for a workflow, run the same stages yourself, one package at a time, in lane order:
+
+1. **Write the script:** `node docs/handoff/make-workflow.mjs /tmp/fuobe-build.js --trailer-file /tmp/trailer.txt --done /tmp/done.json`. Leave out `--done` until that file exists.
+2. **Print the package's next stage:** `node docs/handoff/next-prompt.mjs /tmp/fuobe-build.js <key>`. [`handoff/next-prompt.mjs`](handoff/next-prompt.mjs) prints the stage (impl, review, fix or merge), the fields of its report and the prompt. It runs nothing else.
+3. **Run the stage.** Give the prompt to a subagent and ask for the report as JSON with those fields, or follow it yourself. The merge stage runs in the main checkout, one at a time.
+4. **Record the report** in `/tmp/done.json` as `{ "<key>": { "<stage>": report } }`, keeping the earlier stages (the merge stage as `"merge"`). Then write the script again and print the next stage. A merged package drops out by itself.
+5. **Push after each stage:** `git -C /home/user/Fuobe push -u origin o/<key>`. Before the session ends, save the stages ("Before a session ends", with `--done /tmp/done.json` in place of the journals).
 
 ## Before a session ends
 
 Workflow journals, reports, worktrees and the inputs folder don't survive a new container. Only what is pushed does.
 
+Run these in the main checkout on `claude/fuobe-parity-4`, while no integrator is running.
+
 1. **Push every `o/<key>` branch** that has commits not in `claude/fuobe-parity-4`: `git push -u origin o/<key>`. WIP commits are fine; say so in the commit message.
-2. **Save the finished stages** of packages that aren't merged:
+2. **Save the reports of the packages merged this session**, for the next PR's description. Do this before step 3, which drops merged packages from `queue.json` `done`:
+
+   ```bash
+   node docs/handoff/save-reports.mjs docs/handoff/reports $(ls -tr ~/.claude/projects/*/*/subagents/workflows/*/journal.jsonl)
+   ```
+
+   [`handoff/save-reports.mjs`](handoff/save-reports.mjs) writes `docs/handoff/reports/<key>.json` as `{ key, impl, review, fix, merge }`, from `queue.json` `done` and the journals, oldest first. Without a workflow, pass `--done /tmp/done.json` in place of the journals.
+3. **Save the finished stages** of packages that aren't merged:
 
    ```bash
    node docs/handoff/make-workflow.mjs /tmp/x.js --trailer-file /tmp/trailer.txt --journal <journal.jsonl> --save-done
    ```
 
-   This writes them into `queue.json` `done`. Then update `wip` in `queue.json` and the "Work in progress" table here.
-3. **Commit that to `claude/fuobe-parity-4`** in the main checkout, while no integrator is running, and push.
+   This writes them into `queue.json` `done` (`--done /tmp/done.json` without a workflow). Then update `wip` in `queue.json` and the "Work in progress" table here.
+4. **Commit `queue.json` and `docs/handoff/reports`** to `claude/fuobe-parity-4`, and push.
 
 ## Cutting a PR
 
@@ -241,14 +310,15 @@ Only cut a PR when the owner asks for one. The steps that worked for PRs #12 to 
    ```js
    Workflow({ scriptPath: "docs/handoff/pr-describe.js", args: {
      repo: "/home/user/Fuobe", head: "claude/fuobe-r5-batch-<n>", base: "<main's commit the PR builds on>", pr: <n>,
-     round: "Round 5, part 3", reports: "/tmp/pr-<n>/reports", out: "/tmp/pr-<n>",
+     round: "Round 5, part 3", reports: "/home/user/Fuobe/docs/handoff/reports", out: "/tmp/pr-<n>",
      history: "<how the branch was made>", areas: [{ key, title, pkgs: [["<package>", "<merge commit>"]] }],
      notInPr: "<the queue's next packages>", handoff: "<what changed in the handoff>" } })
    ```
 
-   - `reports` holds `<package>.json` per merged package: each entry the build workflow returned, `{ key, impl, review, fix, merge }`.
+   - `reports` holds `<package>.json` per merged package, `{ key, impl, review, fix, merge }`: `docs/handoff/reports`, which each session fills before it ends. Save this session's merges there first ("Before a session ends", step 2).
    - It saves the title and body in `out`. Fill the body's `<!-- CHECKS -->` line from verify.sh's summary.
-4. **Docs pass** with [`handoff/pr-docs.js`](handoff/pr-docs.js): writers per doc group, then accuracy and staleness checkers and a reviser. Its args are `worktree`, `docsBase`, `pr`, `round`, `summary`, `notYet` and `facts` (the folder with `body.md` and `reports/`).
+   - Then remove the folder on the snapshot branch (`git rm -r -q docs/handoff/reports` and commit), so main doesn't carry it. When main comes back into the base after the PR merges, the reports it covered leave the base too, and newer ones stay.
+4. **Docs pass** with [`handoff/pr-docs.js`](handoff/pr-docs.js): writers per doc group, then accuracy and staleness checkers and a reviser. Its args are `worktree`, `docsBase`, `pr`, `round`, `summary`, `notYet` and `facts`: the folder with `body.md` and `reports/`, so copy the reports next to the description first (`cp -r /home/user/Fuobe/docs/handoff/reports /tmp/pr-<n>/` and pass `facts: "/tmp/pr-<n>"`).
    - Since the owner's 10-30 work, the docs live in [`README.md`](../README.md) (the product page, with "Upgrading from an earlier version"), `docs/FEATURES.md`, `docs/SELF-HOSTING.md`, `docs/DEVELOPMENT.md`, [`docs/STATUS.md`](STATUS.md) and [`docs/ARCHITECTURE.md`](ARCHITECTURE.md), plus `docs/public-signup.md`, [`docs/research/README.md`](research/README.md) and [`scripts/comfy/README.md`](../scripts/comfy/README.md) (library counts).
    - Review the diff it leaves, then commit it to the snapshot branch.
 5. **Open the PR** against `main`, with the checks summary and what none of the checks cover (no GPU, no paid keys).
@@ -264,7 +334,7 @@ Only cut a PR when the owner asks for one. The steps that worked for PRs #12 to 
   - on a server installed before today's script: `captions-whisper-burnin`, `image-vectorize-vtracer`, `video-character-swap-h3` (h3_character_swap) and `separate-soundtrack-dbs` (ComfyUI-DBS)
 
   Never install packs or restart ComfyUI from a package agent. Say what's needed instead.
-- **After PR #15:** main's pre-flight board predates PR #15's studios. Check that Split soundtrack (`/audio/split`) has its row in `STUDIO_ROWS` (`src/server/gpu/tools.ts`), and that PR #15's graphs are in `workflows/comfyui/requirements.json` (`node scripts/comfy/build-requirements.mjs`).
+- **After PR #15:** main's pre-flight board predated PR #15's studios, and PR #15's integration added them. Check that they reached main: `git grep -c '/audio/split' origin/main -- src/server/gpu/tools.ts` (Split soundtrack's row in `STUDIO_ROWS`) and `git grep -c separate-soundtrack-dbs origin/main -- workflows/comfyui/requirements.json` must each print a count. If not, add them (`node scripts/comfy/build-requirements.mjs` rewrites the index).
 - **Public sign-up** is off by default, and verify.sh's servers run without it. `tests/public-signup.test.ts` is where every new route's guest and account answers are pinned.
 - **What none of the checks cover:** no GPU and no paid key have been used. Every Original is checked in demo mode, on the CPU ComfyUI (graphs accepted, no weights run) and by unit tests, but not for image quality or real bills.
 - **The owner's workflow JSONs and downloaded repos:** never commit them, never run them.
