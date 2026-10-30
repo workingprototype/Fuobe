@@ -14,6 +14,7 @@ const { setSetting } = await import("@/server/settings");
 const gens = await import("@/server/generations");
 const cinema = await import("@/server/cinema");
 const route = await import("@/app/api/turnaround/route");
+const estimate = await import("@/app/api/turnaround/estimate/route");
 const cinemaRoute = await import("@/app/api/cinema/projects/[id]/generate/route");
 const { saveFile } = await import("@/server/storage");
 const { encodePng } = await import("@/server/png");
@@ -100,6 +101,16 @@ describe("/api/turnaround", () => {
     expect(items[0]).toMatchObject({ modelId: "minimax-h3-max-camera", op: "camera-path", feature: `element:${el.id}` });
     await settle(filmId);
   }, 60_000);
+
+  it("prices a job named by its model at /api/turnaround/estimate, as the evaluation harness does", async () => {
+    const pics = { front: upload("ef.png"), right: upload("er.png"), back: upload("eb.png"), left: upload("el.png") };
+    const ask = async (b: unknown) =>
+      (await estimate.POST(new Request("http://x/api/turnaround/estimate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }))).json();
+    expect(await ask({ engine: "cloud", views: pics, modelId: "flux-3-max", requestId: "r1" })).toMatchObject({ route: "keyframes", modelId: "flux-3-max", modelName: "FLUX 3 Max", demo: true });
+    expect(await ask({ engine: "cloud", views: pics, modelId: "minimax-h3-max-camera" })).toMatchObject({ route: "camera", modelId: "minimax-h3-max-camera" });
+    // A model the engine has no route for leaves the default.
+    expect(await ask({ engine: "open", views: pics, modelId: "flux-3-max" })).toMatchObject({ route: "frames", modelId: "oss-wan22-14b" });
+  });
 
   it("refuses pictures not uploaded here, and a run with no front view", async () => {
     expect((await post({ engine: "open", views: { front: "https://elsewhere.test/a.png" } })).status).toBe(400);
