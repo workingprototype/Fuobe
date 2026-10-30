@@ -68,7 +68,21 @@ export const PresetCard = memo(function PresetCard({
       </div>
       <div className="min-w-0 px-0.5">
         <p className="truncate text-[13px] font-medium">{preset.name}</p>
-        {!compact && <p className="line-clamp-2 text-[12px] leading-snug text-muted-foreground">{preset.description}</p>}
+        {!compact && (
+          // Two lines hold the card's place in the grid; on hover or focus the full text shows in a panel that
+          // continues the card's hover background below it, over the next row, so nothing reflows.
+          <div className="relative">
+            <p className="line-clamp-2 text-[12px] leading-snug text-muted-foreground group-hover/card:invisible group-focus-visible/card:invisible">
+              {preset.description}
+            </p>
+            <p
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 top-0 z-10 -mx-2 hidden rounded-b-xl bg-accent px-2 pb-2 text-[12px] leading-snug text-muted-foreground shadow-md group-hover/card:block group-focus-visible/card:block"
+            >
+              {preset.description}
+            </p>
+          </div>
+        )}
       </div>
     </IntentLink>
   );
