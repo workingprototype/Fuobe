@@ -65,7 +65,15 @@ try {
       const settle = () =>
         page.waitForFunction(() => !document.querySelector('[role="listbox"][data-state="closed"], [role="dialog"][data-state="closed"]'), null, { timeout: 5000 }).catch(() => {});
       const engine = async (name) => {
-        await page.getByRole("radiogroup", { name: "Engine" }).getByRole("radio", { name: new RegExp(name, "i") }).first().click();
+        const radio = page.getByRole("radiogroup", { name: "Engine" }).getByRole("radio", { name: new RegExp(name, "i") }).first();
+        if (width < 500) {
+          // On a phone a toast spans the top of the screen, over the Engine switch, for a few seconds ("Rendering your
+          // video", the notifications offer). Sonner holds a toast while a pointer rests on it, and a click would leave
+          // the mouse there, so the toast would never go. Like a finger, the tap leaves no pointer behind (the mouse
+          // waits at the bottom) and waits for the toast to go.
+          await page.mouse.move(width / 2, height - 1);
+          await radio.tap();
+        } else await radio.click();
         await page.waitForTimeout(400);
       };
       const restyle = () => page.getByRole("radiogroup", { name: "Restyle" });
@@ -90,7 +98,14 @@ try {
 
       // ---- Mixed Media ------------------------------------------------------------------------------------------
       await page.goto(`${app}/mixed-media?preset=mixed-sketch&video=${encodeURIComponent(mmClip)}`, { waitUntil: "load" });
-      await page.locator("#mm-editor").getByText("Generate video").waitFor({ timeout: 30_000 });
+      // While the page streams in, React can hold a second copy of it in a <div hidden> (at phone width the client draws
+      // the page itself before that copy is swapped in, then drops it): wait for the shown editor, then for one editor.
+      await page.locator("#mm-editor").getByRole("button", { name: "Generate video" }).waitFor({ timeout: 30_000 });
+      const oneEditor = await page.waitForFunction(() => document.querySelectorAll("#mm-editor").length === 1, null, { timeout: 10_000 }).then(
+        () => true,
+        () => false,
+      );
+      check(`${tag} · mixed: one editor once the page has loaded (no duplicate ids)`, oneEditor, `${await page.locator("#mm-editor").count()} found`);
       await page.waitForTimeout(800);
       const editor = page.locator("#mm-editor");
       check(`${tag} · mixed: Per frame, Smooth and Fast on the cloud`, JSON.stringify(await modes()) === JSON.stringify(["Per frame", "Smooth", "Fast"]), JSON.stringify(await modes()));
@@ -132,15 +147,16 @@ try {
       const res = await sent.catch(() => null);
       const req = res ? JSON.parse(res.request().postData() ?? "{}") : {};
       check(`${tag} · mixed: the render asks for the Original, per frame`, res?.ok() && req.modelId === "fuobe-mixed-media" && req.mode === "frames", res ? `${res.status()} ${req.modelId} ${req.mode}` : "no request");
-      const done = await editor
+      // The render's own video ("Your video"), not the trimmer's preview of the clip, which is there from the start.
+      const latest = editor.locator('[aria-live="polite"]').filter({ has: page.getByText("Your video", { exact: true }) });
+      const done = await latest
         .locator("video")
-        .first()
         .waitFor({ timeout: 120_000 })
         .then(
           () => true,
           () => false,
         );
-      check(`${tag} · mixed: the demo render finishes with a video`, done);
+      check(`${tag} · mixed: the demo render finishes with a video`, done, done ? "" : (await latest.innerText({ timeout: 1000 }).catch(() => "no render shown")).replace(/\s+/g, " "));
       await shot("mixed-cloud");
       check(`${tag} · mixed: nothing scrolls sideways (cloud)`, (await sideways()) <= 0, `${await sideways()} px`);
       // Your GPU: Per frame and Smooth, no Fast, the Original first, free.
@@ -212,7 +228,7 @@ try {
     const page = await context.newPage();
     await page.goto(`${app}/mixed-media?preset=mixed-sketch&video=${encodeURIComponent(mmClip)}`, { waitUntil: "load" });
     const editor = page.locator("#mm-editor");
-    await editor.getByText("Generate video").waitFor({ timeout: 30_000 });
+    await editor.getByRole("button", { name: "Generate video" }).waitFor({ timeout: 30_000 });
     const perFrame = await editor
       .getByText(/frames × \$[\d.]+ a frame \(Fuobe Mixed Media\)/)
       .waitFor({ timeout: 20_000 })
