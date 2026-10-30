@@ -13,8 +13,9 @@ export const meta = {
 //   base      main's commit this PR builds on (the last PR's merge on main, or git merge-base origin/main <head>)
 //   pr        the PR's number (or the next one), used in wording only
 //   round     how the title starts, e.g. 'Round 5, part 3'
-//   reports   a folder holding <package>.json per merged package: { impl, review, fix, merge }, the build workflow's
-//             reports (from its journal, or docs/handoff/queue.json `done`)
+//   reports   a folder holding <package>.json per merged package: { key, impl, review, fix, merge }, the build
+//             workflow's reports: docs/handoff/reports, which save-reports.mjs fills before each session ends (or the
+//             journal of a run in this container: node docs/handoff/save-reports.mjs <dir> <journal.jsonl>…)
 //   out       a folder where the reviser writes title.txt, body.md and notes.md (the result you post)
 //   history   a few sentences on how the branch was made: what was merged in which order (the first-parent merges and
 //             their commits), main merged in, commits added on top

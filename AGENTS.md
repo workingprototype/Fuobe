@@ -16,9 +16,9 @@ Fuobe is built package by package from a queue. Before starting work, read [`doc
 - the owner's binding rules and open questions
 - the queued packages with their full briefs (`docs/handoff/queue.json`)
 - the branches with work in progress
-- how to set up a new session (including rebuilding the integration branch from main)
-- how to run the build workflow
-- what to push before a session ends
+- how to set up a new session (including rebuilding the integration branch from main, and bringing main's newer work into it every session)
+- how to run the build workflow, or the same stages one package at a time without it (`docs/handoff/next-prompt.mjs`)
+- what to push and save before a session ends (`docs/handoff/save-reports.mjs`)
 - how to cut a PR (`docs/handoff/pr-describe.js` and `docs/handoff/pr-docs.js`)
 
-Accounts are the owner's public sign-up on main (`docs/public-signup.md`): every route, page and run follows its rules. The old accounts plan (acc-1 to acc-57) is dropped, and new accounts work starts from a plan written with the owner.
+Accounts are the owner's public sign-up on main (`docs/public-signup.md`, which keeps growing there): every route, page and run follows its rules. The old accounts plan (acc-1 to acc-57) is dropped, and new accounts work starts from a plan written with the owner.

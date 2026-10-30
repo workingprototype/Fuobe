@@ -41,7 +41,9 @@ step install pnpm install --frozen-lockfile --prefer-offline || exit 1
 step typegen npx next typegen
 step typecheck pnpm typecheck
 step lint pnpm lint
-step vitest pnpm vitest run --maxWorkers=2
+# Accounts are refused (503) while the data disk has less free space than they keep (20 GB or a tenth of the disk):
+# a container disk with a few GB free would fail tests/gpu-api.test.ts. Set FUOBE_ACCOUNT_DISK_FREE_GB to check the real floor.
+step vitest env FUOBE_ACCOUNT_DISK_FREE_GB="${FUOBE_ACCOUNT_DISK_FREE_GB:-1}" pnpm vitest run --maxWorkers=2
 step eval-validate pnpm eval:validate
 step build env NEXT_TELEMETRY_DISABLED=1 pnpm build
 
