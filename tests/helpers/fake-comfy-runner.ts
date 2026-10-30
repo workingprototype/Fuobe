@@ -7,7 +7,10 @@
  *
  * Options for tests: `loras` (GET /models/loras), `delayMs` (until the history says done), `drip` (the history
  * answers one byte every 2 s, never finishing), `huge` (/view streams without end), `promptId` (the job id /prompt
- * answers), `missing` (a file /prompt answers "not in list" for), `output` ("video" or "image").
+ * answers), `missing` (a file /prompt answers "not in list" for), `output` ("video" or "image"), `layers` (the
+ * history lists that many Qwen-Image-Layered layers, node 60), `frames` (an EXR export: a preview clip, node 5, and
+ * that many frames, node 3), `historyError` (/history answers HTTP 500 and then sends nothing), `uploadStatus` (the HTTP
+ * status /upload/image answers, e.g. 500 to fail every upload).
  * This file runs under plain Node too: only erasable TypeScript.
  */
 import http from "node:http";
@@ -22,6 +25,10 @@ export interface FakeComfyOptions {
   promptId?: string;
   missing?: string;
   output?: "video" | "image";
+  layers?: number;
+  frames?: number;
+  historyError?: boolean;
+  uploadStatus?: number;
 }
 
 export interface FakeLogEntry {
@@ -91,6 +98,7 @@ export function startFakeComfy(opts: FakeComfyOptions = {}, port = 0): Promise<F
       if (p === "/object_info") return json(200, {});
       if (p === "/upload/image" && req.method === "POST") {
         entry.upload = uploadedBytes(body, req.headers["content-type"] ?? "");
+        if (opts.uploadStatus && opts.uploadStatus !== 200) return json(opts.uploadStatus, { error: "upload refused" });
         return json(200, { name: `fake_${log.length}.bin`, subfolder: "", type: "input" });
       }
       if (p === "/prompt" && req.method === "POST") {
@@ -109,6 +117,11 @@ export function startFakeComfy(opts: FakeComfyOptions = {}, port = 0): Promise<F
       }
       if (p.startsWith("/history/")) {
         const id = decodeURIComponent(p.slice("/history/".length));
+        if (opts.historyError) {
+          res.writeHead(500, { "content-type": "text/plain" });
+          res.write("x");
+          return;
+        }
         if (opts.drip) {
           res.writeHead(200, { "content-type": "application/json" });
           const t = setInterval(() => res.write(" "), 2000);
@@ -117,6 +130,10 @@ export function startFakeComfy(opts: FakeComfyOptions = {}, port = 0): Promise<F
         }
         const started = jobs.get(id);
         if (started === undefined || Date.now() - started < (opts.delayMs ?? 0)) return json(200, {});
+        const done = { status: { completed: true, status_str: "success" } };
+        const list = (n: number, ext: string) => Array.from({ length: n }, (_, i) => ({ filename: `fake_${String(i + 1).padStart(5, "0")}_.${ext}`, subfolder: "", type: "output" }));
+        if (opts.layers) return json(200, { [id]: { ...done, outputs: { "60": { images: list(opts.layers, "png") } } } });
+        if (opts.frames) return json(200, { [id]: { ...done, outputs: { "5": { gifs: list(1, "mp4") }, "3": { images: list(opts.frames, "exr") } } } });
         const file = opts.output === "image" ? { filename: "fake_00001_.png", subfolder: "", type: "output" } : { filename: "fake_00001.mp4", subfolder: "", type: "output" };
         const key = opts.output === "image" ? "images" : "gifs";
         return json(200, { [id]: { status: { completed: true, status_str: "success" }, outputs: { "900": { [key]: [file] } } } });
@@ -141,7 +158,12 @@ export function startFakeComfy(opts: FakeComfyOptions = {}, port = 0): Promise<F
           pump();
           return;
         }
-        const png = (url.searchParams.get("filename") ?? "").endsWith(".png");
+        const name = url.searchParams.get("filename") ?? "";
+        if (name.endsWith(".exr")) {
+          res.writeHead(200, { "content-type": "image/x-exr" });
+          return res.end(Buffer.from("762f3101", "hex"));
+        }
+        const png = name.endsWith(".png");
         res.writeHead(200, { "content-type": png ? "image/png" : "video/mp4" });
         return res.end(png ? TINY_PNG : TINY_MP4);
       }

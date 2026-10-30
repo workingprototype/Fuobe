@@ -177,6 +177,8 @@ describe("an account runs the catalogue on its own ComfyUI", () => {
     expect(done?.status).toBe("failed");
     expect(done?.error).toMatch(/^Your ComfyUI doesn't have a LoRA file this needs/);
     expect(done?.error).toContain("motionpushin-v5-wan-i2v-14b-720p-400.safetensors");
+    // What was missing stays on the failed step, so its tile can offer the pre-flight's "Fix it".
+    expect(done?.fix).toMatchObject({ code: "comfy_missing_model", items: [{ folder: "loras", file: "motionpushin-v5-wan-i2v-14b-720p-400.safetensors" }] });
     expect(fake.log.some((e) => e.path === "/upload/image")).toBe(false);
     // With the file there, the same run goes ahead.
     fake.opts.loras = ["motionpushin-v5-wan-i2v-14b-720p-400.safetensors"];

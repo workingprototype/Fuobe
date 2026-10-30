@@ -163,4 +163,11 @@ describe("proxy matcher (C13)", () => {
     expect(matches("/apple-icon.png")).toBe(false);
     expect(matches("/_next/static/chunks/a.js")).toBe(false);
   });
+  it("skips only a real dot: a path with 'svg', 'ico' or 'png' after another character still runs the proxy", () => {
+    expect(matches("/api/svg")).toBe(true);
+    expect(matches("/x/svg")).toBe(true);
+    expect(matches("/aXsvg")).toBe(true);
+    expect(matches("/faviconXico")).toBe(true);
+    expect(matches("/apple-iconXpng")).toBe(true);
+  });
 });

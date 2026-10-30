@@ -55,7 +55,7 @@ function glb(image?: string): Buffer {
   return Buffer.concat([header, jh, j, bh, bin]);
 }
 
-const run = (input: string, output: string) => spawnSync(process.execPath, [SCRIPT, "--in", input, "--out", output], { encoding: "utf8", timeout: 60_000, cwd: dir });
+const run = (input: string, output: string, ...extra: string[]) => spawnSync(process.execPath, [SCRIPT, "--in", input, "--out", output, ...extra], { encoding: "utf8", timeout: 60_000, cwd: dir });
 
 describe("the 3D finish reads only the model it was given", () => {
   it("refuses a GLB whose image points at another file, and never reads it", () => {
@@ -89,6 +89,20 @@ describe("the 3D finish reads only the model it was given", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(fs.existsSync(out)).toBe(true);
   });
+
+  it("refuses an account's model with a texture over 4096 x 4096 before decoding it", async () => {
+    const sharp = (await import("sharp")).default;
+    const big = await sharp({ create: { width: 5000, height: 5000, channels: 3, background: "#808080" } }).png({ compressionLevel: 9 }).toBuffer();
+    const work = fs.mkdtempSync(path.join(dir, "job-"));
+    const raw = path.join(work, "raw.glb");
+    fs.writeFileSync(raw, glb(`data:image/png;base64,${big.toString("base64")}`));
+    const r = run(raw, path.join(work, "web.glb"), "--limits", "account");
+    expect(r.status, r.stderr).toBe(3);
+    expect(r.stderr).toMatch(/texture over 4096 x 4096/);
+    // The owner's model with the same texture is finished as before.
+    const own = run(raw, path.join(work, "own.glb"));
+    expect(own.status, own.stderr).toBe(0);
+  }, 60_000);
 
   it("runs the scripts with a short environment, never the server's secrets", () => {
     const env = scriptEnv();

@@ -6,6 +6,7 @@ import { DATA_DIR, db } from "./db";
 import type { MediaKind } from "@/lib/catalog/types";
 import { fetchRemote } from "./remote-fetch";
 import { tenant, tenantAccount } from "./tenant";
+import { accountInputLimit } from "./account-files";
 import { assetAccount, fileAccount, generationAccount } from "./account-library";
 
 export const FILES_DIR = path.join(DATA_DIR, "files");
@@ -152,15 +153,15 @@ function ownerOf(opts: NewAsset): string | null {
 
 /**
  * Store a file under files/<outputs|uploads>/<day>/<id>.<ext>: `put` writes it there, then its row is added. The
- * extension comes from the type. A type Fuobe doesn't know is stored as .bin, except the owner's provider files with a
- * plain extension of their own (a rig's .fbx): an upload's or an account's file name never picks it.
+ * extension comes from the type. A type Fuobe doesn't know keeps the plain extension of the owner's file name (a rig's
+ * .fbx, an Assist source's .pdf or .md), never a page or script one (.html, .svg, .js), and an account's file name never
+ * picks it: those are stored as .bin.
  */
 function addAsset(opts: NewAsset, put: (abs: string) => void): Asset {
   const id = nanoid(12);
   const account = ownerOf(opts);
   const named = opts.name?.includes(".") ? opts.name.split(".").pop()?.toLowerCase() : undefined;
-  const fromName =
-    opts.source !== "upload" && !account && named && /^[a-z0-9]{1,8}$/.test(named) && !/^(html?|xht|xhtml|xml|svgz?|js|mjs)$/.test(named) ? named : undefined;
+  const fromName = !account && named && /^[a-z0-9]{1,8}$/.test(named) && !/^(html?|xht|xhtml|xml|svgz?|js|mjs)$/.test(named) ? named : undefined;
   const ext = EXT_BY_TYPE[opts.contentType.split(";")[0].trim()] ?? fromName ?? "bin";
   const day = new Date().toISOString().slice(0, 10);
   const relPath = path.join(/*turbopackIgnore: true*/ opts.source === "generation" ? "outputs" : "uploads", day, `${id}.${ext}`);
@@ -253,7 +254,7 @@ export function absolutePath(relPath: string): string {
  */
 export function localHead(ref: string, maxBytes = 512 * 1024): Buffer | null {
   try {
-    const rel = ref.startsWith("/api/files/") ? decodeURIComponent(ref.slice("/api/files/".length).split("?")[0]) : /^[\w-]{6,40}$/.test(ref) ? getAsset(ref)?.relPath : undefined;
+    const rel = ref.startsWith("/api/files/") ? filesRel(ref) : /^[\w-]{6,40}$/.test(ref) ? getAsset(ref)?.relPath : undefined;
     if (!rel) return null;
     // A visitor's price check or an account's run: only its own files, and no word on whether another one exists.
     if (tenant() && !ownsRef(ref, rel)) return null;
@@ -275,8 +276,16 @@ export function localHead(ref: string, maxBytes = 512 * 1024): Buffer | null {
  * to bytes + content type.
  */
 export async function readRef(ref: string): Promise<{ data: Buffer; contentType: string; name: string }> {
-  // An account's run (or a visitor's price check): only its own files (guardRef).
+  // An account's run (or a visitor's price check): only its own files (guardRef), and none bigger than an upload may be.
   if (tenant()) guardRef(ref);
+  const read = async (abs: string, contentType: string) => {
+    if (tenant()) {
+      const limit = accountInputLimit(contentType);
+      if ((await fs.promises.stat(abs)).size > limit.bytes) throw new RefError(limit.message, 413);
+    }
+    // Read without holding up the server.
+    return fs.promises.readFile(abs);
+  };
   if (ref.startsWith("data:")) {
     const m = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(ref);
     if (!m) throw new Error("Malformed data URI");
@@ -285,9 +294,12 @@ export async function readRef(ref: string): Promise<{ data: Buffer; contentType:
     return { data, contentType, name: `input.${EXT_BY_TYPE[contentType] ?? "bin"}` };
   }
   if (ref.startsWith("/api/files/")) {
-    const rel = decodeURIComponent(ref.slice("/api/files/".length));
+    // The same path guardRef checked: the query left out, decoded once, never a step out of its folder.
+    const rel = filesRel(ref);
+    if (rel === null) throw new Error("Invalid path");
     const abs = absolutePath(rel);
-    return { data: fs.readFileSync(abs), contentType: contentTypeFor(abs), name: path.basename(abs) };
+    const contentType = contentTypeFor(abs);
+    return { data: await read(abs, contentType), contentType, name: path.basename(abs) };
   }
   if (/^https?:\/\//.test(ref)) {
     // Public links only: never this machine or its private network (see remote-fetch.ts).
@@ -299,7 +311,7 @@ export async function readRef(ref: string): Promise<{ data: Buffer; contentType:
   const asset = getAsset(ref);
   if (!asset) throw new Error(`Unknown asset ${ref}`);
   return {
-    data: fs.readFileSync(absolutePath(asset.relPath)),
+    data: await read(absolutePath(asset.relPath), asset.contentType),
     contentType: asset.contentType,
     name: asset.name ?? path.basename(asset.relPath),
   };
@@ -308,11 +320,11 @@ export async function readRef(ref: string): Promise<{ data: Buffer; contentType:
 // ---------------------------------------------------------------------------
 // Public sign-up: an account's run reads only its own files
 
-/** A file a run may not read: `status` is the HTTP answer a route gives (403, or 404 for one that is gone). */
+/** A file a run may not read: `status` is the HTTP answer a route gives (403; 404 for one that is gone; 413 too big). */
 export class RefError extends Error {
   constructor(
     message: string,
-    readonly status: 403 | 404,
+    readonly status: 403 | 404 | 413,
   ) {
     super(message);
   }
@@ -322,14 +334,20 @@ export const LINK_INPUT_MESSAGE = "Upload the file first. Runs on your GPU can't
 export const NOT_YOURS_MESSAGE = "That file isn't yours. Upload your own.";
 export const GONE_MESSAGE = "That file has expired. Upload it again.";
 
-/** A stored file's path under the files folder, from an /api/files/… reference (null: not one, or not decodable). */
-function filesRel(ref: string): string | null {
+/**
+ * A stored file's path under the files folder, from an /api/files/… reference: the query and fragment left out, then
+ * decoded once. Null when it isn't one, doesn't decode, or a part of it is empty, "." or "..", or holds a backslash, a
+ * colon or a NUL. Every check and every read goes by it, so the path a check looks up is always the path that is read.
+ */
+export function filesRel(ref: string): string | null {
   if (!ref.startsWith("/api/files/")) return null;
+  let rel: string;
   try {
-    return decodeURIComponent(ref.slice("/api/files/".length).split("?")[0]);
+    rel = decodeURIComponent(ref.slice("/api/files/".length).split(/[?#]/)[0]);
   } catch {
     return null;
   }
+  return rel.split("/").every((p) => p && p !== "." && p !== ".." && !/[\\:\0]/.test(p)) ? rel : null;
 }
 
 /** Whether the tenant owns this file (an account: its own; a guest: none). */

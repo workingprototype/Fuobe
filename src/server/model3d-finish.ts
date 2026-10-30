@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { OutputFile } from "@/lib/catalog/types";
 import { absolutePath, deleteAsset, getAsset, saveFile } from "./storage";
+import { inTurn } from "./account-send";
 
 /**
  * The finish every image-to-3D GLB from ComfyUI gets on this server, in two steps:
@@ -162,7 +163,6 @@ const removeDir = (dir: string) => fs.promises.rm(dir, { recursive: true, force:
 declare global {
   var __fuobeModelFinish: Map<string, AbortController> | undefined;
   var __fuobeTurntableQueue: Promise<unknown> | undefined;
-  var __fuobeAccountFinishQueue: Promise<unknown> | undefined;
 }
 
 const running = () => (globalThis.__fuobeModelFinish ??= new Map());
@@ -175,12 +175,9 @@ function oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 // One finish for accounts (public sign-up) at a time across the server: a model from someone else's ComfyUI waits its
-// turn, so many accounts can't keep every CPU core busy at once.
-function oneAccountAtATime<T>(fn: () => Promise<T>): Promise<T> {
-  const next = (globalThis.__fuobeAccountFinishQueue ?? Promise.resolve()).then(fn, fn);
-  globalThis.__fuobeAccountFinishQueue = next.catch(() => {});
-  return next;
-}
+// turn, so many accounts can't keep every CPU core busy at once. The accounts take turns (account-send.ts), so one
+// with many models waiting never holds up another's.
+const oneAccountAtATime = <T,>(account: string, fn: () => Promise<T>): Promise<T> => inTurn("finish", 1, account, fn);
 
 /** An account's raw GLB over this is kept as it is, with no finish. */
 export const ACCOUNT_FINISH_MAX_BYTES = 300 * 2 ** 20;
@@ -216,7 +213,13 @@ export async function finishModel(
     const webFile = path.join(tmp, "web.glb");
     let stats: FinishStats | null = null;
     try {
-      const run = await runScript("finish-glb.mjs", ["--in", raw, "--out", webFile], { timeoutMs: FINISH_TIMEOUT_MS, signal, cwd: tmp });
+      // An account's model: below the server's own work, one thread for its pictures, their sizes checked first.
+      const run = await runScript("finish-glb.mjs", ["--in", raw, "--out", webFile, ...(o.account ? ["--limits", "account"] : [])], {
+        timeoutMs: FINISH_TIMEOUT_MS,
+        signal,
+        cwd: tmp,
+        lowPriority: !!o.account,
+      });
       stats = run.code === 0 && fs.existsSync(webFile) ? lastJsonLine<FinishStats>(run.stdout) : null;
       if (!stats) finish.error = `web GLB: ${tail(run.stderr) || `exit ${run.code}`}`;
     } catch (e) {
@@ -254,7 +257,7 @@ export function startModelFinish(
   running().set(generationId, ctl);
   const run = () => (ctl.signal.aborted ? Promise.reject(new Error("Stopped")) : finishModel(generationId, outputs, { ...o, signal: ctl.signal }));
   // An account's finish waits for the one before it (oneAccountAtATime).
-  void (o.account ? oneAccountAtATime(run) : run())
+  void (o.account ? oneAccountAtATime(o.account, run) : run())
     .catch((e) => {
       if (ctl.signal.aborted) return null;
       console.warn(`[fuobe] 3D finish for ${generationId} failed: ${(e as Error).message}`);

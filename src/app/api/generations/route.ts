@@ -1,14 +1,12 @@
 import { connection } from "next/server";
 import { CONNECT_GPU_HEADER, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
-import { graphLoras } from "@/lib/catalog/character-swap";
 import { missingFilesMessage } from "@/lib/missing-files";
 import { accountGpu, requestAccount, requestViewer } from "@/server/auth";
 import { OPERATION_LABELS } from "@/lib/catalog/types";
 import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "@/server/account-files";
 import { accountInputProblem } from "@/server/account-inputs";
-import { checkAccountLoras } from "@/server/account-loras";
 import { db } from "@/server/db";
-import { accountRun, asVisitor, createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
+import { accountLoraFix, accountRun, asVisitor, createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
 import { hit, unhit } from "@/server/rate";
 import { GenerationRequestSchema } from "@/server/request-schema";
@@ -123,12 +121,9 @@ export async function POST(request: Request) {
       }
     }
     if (account) {
-      // The LoRAs this run adds must be on the account's ComfyUI: say which to download before anything is queued.
-      const fix = await onOwn(async () => {
-        const p = previewGeneration(req);
-        if (p.route.provider !== "comfyui") return null;
-        return checkAccountLoras([...p.loras.applied, ...graphLoras(p.route.endpoint, req.params?.extra)], p.route.endpoint);
-      });
+      // The LoRAs this run adds (and its start frame's step, for an effect that makes one) must be on the account's
+      // ComfyUI: say which to download before anything is queued.
+      const fix = await onOwn(() => accountLoraFix(req));
       if (fix) {
         unhit(`run:${account.id}`);
         return refuse(409, missingFilesMessage(fix), { code: "comfy_missing_model", fix });

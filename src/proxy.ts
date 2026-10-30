@@ -209,5 +209,5 @@ export const config = {
   // the demo samples, the preset covers, vendored scripts (the 3D viewer's meshopt decoder) and the
   // SVGs at the root. Generated SVGs under /api/files stay behind sign-in. /api/uploads makes the same
   // checks itself (src/server/direct-gate.ts): the proxy would hold the whole file in memory first.
-  matcher: ["/((?!_next/static|_next/image|favicon\.ico$|apple-icon\.png$|samples/|previews/|vendor/|api/uploads$|[^/]+\.svg$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico$|apple-icon\\.png$|samples/|previews/|vendor/|api/uploads$|[^/]+\\.svg$).*)"],
 };

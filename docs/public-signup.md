@@ -111,16 +111,18 @@ cloudflared tunnel --url http://localhost:8188   # or: ngrok http 8188
   with the open-source engine: the Image, Video and Audio studios (their input modes too: edit,
   inpaint, extend, lipsync, reframe, upscale, image to video…), every camera motion and effect,
   and the apps that take a picture, a clip or a sound. Their chained steps (multi-shot films,
-  Frames mode, Extend, text to 3D, relit effects) run there too, as the account's own. Polls,
+  Frames mode, Extend, relit effects) run there too, as the account's own. Polls,
   uploads, outputs and cancels go there, and nothing falls back to the studio's own providers. If
   the account's ComfyUI can't be reached, the run fails and says so. A cloud model, an AI helper or
   the studio's local LLM is refused; "Enhance prompt" uses Fuobe's offline wording. Other tools
   (Canvas, Cinema, Shorts, Assist, Marketing…) answer 403 with `code: "own-gpu-tool"`, because they
-  plan with the studio's own AI helpers or keep projects of their own.
+  plan with the studio's own AI helpers or keep projects of their own. Image to 3D and text to 3D
+  answer the same for now: a 3D model is finished on the server.
 - **Files a run takes.** A run on your GPU takes only files you uploaded here, or your own results.
   A link or a `data:` URI answers 400 with `code: "input-not-allowed"`, someone else's file 403
   (`input-not-yours`), and a file that has expired 404 (`input-gone`, "That file has expired.
-  Upload it again."). The server never fetches a link for an account.
+  Upload it again."). A file bigger than an upload of its kind may be (one of your own results,
+  too) answers 413 (`input-too-big`). The server never fetches a link for an account.
 - **LoRAs and model files.** The server never downloads anything onto your machine. A LoRA a run
   adds (a camera motion's, an effect's, a look's) must already be in your ComfyUI's `models/loras`
   folder. When one is missing, the run answers 409 with `code: "comfy_missing_model"` and a `fix`
@@ -130,8 +132,13 @@ cloudflared tunnel --url http://localhost:8188   # or: ngrok http 8188
   checkpoint or encoder your ComfyUI lacks is named by ComfyUI's own answer.
 - **Limits.** Up to 4 runs at once and 60 an hour; a run makes up to 4 results. A run waits up to
   30 minutes in your ComfyUI's queue and may run for 45. Your ComfyUI's answers have a deadline and
-  a size cap (a result up to 1 GB in 15 minutes; 16 results a job at most). Image to 3D gets the
-  web model, without the server's turntable: the 3D page records one in your browser.
+  a size cap (a result up to 1 GB in 15 minutes, and no more than your files have room for; 16
+  results a job at most). Each account sends one file to its ComfyUI at a time, and the accounts
+  take turns. The clip check (`POST /api/media/probe`) allows 60 a minute and 2 at once.
+- **Disk space.** Accounts can't upload or run when the server's data disk is short of space
+  (503): it keeps 20 GB free, or a tenth of a smaller disk, and at least 2 GB.
+  `FUOBE_ACCOUNT_DISK_FREE_GB` sets another amount, and the server log says when accounts are
+  refused for space.
 - **What a visitor sees.** For a guest or an account, `GET /api/status` describes its own GPU
   (`viewer`), with the open engine and no Demo mode. It says nothing about the studio's own
   ComfyUI, providers, keys or local AI servers. The sidebar shows **Your GPU · Connect** (a guest

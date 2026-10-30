@@ -32,7 +32,7 @@ export const ACCOUNT_LIMITS = {
   /** Retention: uploads (even when a run still names them), and runs with their files. */
   uploadDays: 14,
   runDays: 30,
-  /** The disk space the server keeps free: below it, no account uploads or runs. */
+  /** The disk space the server keeps free, at most (a tenth of a smaller disk; diskFloorBytes): below it, no account uploads or runs. */
   diskFreeBytes: 20 * GB,
   /** Runs: at once (queued or running), per hour, and outputs per run. */
   activeRuns: 4,
@@ -40,8 +40,9 @@ export const ACCOUNT_LIMITS = {
   outputsPerRun: 4,
   /** What one run request may weigh (inputs are uploaded first, so a request is only words and file paths). */
   runBodyBytes: 1 * MB,
-  /** Outputs kept from one job on the account's ComfyUI. */
+  /** Outputs kept from one job on the account's ComfyUI, and EXR frames zipped from one export. */
   outputsPerJob: 16,
+  framesPerJob: 1800,
   /** How long a job may wait in the account's ComfyUI's queue. */
   queueMs: 30 * 60_000,
   /** GPU address checks and saves, per minute. */
@@ -55,6 +56,7 @@ export const ACCOUNT_MESSAGES = {
   imageTooManyPixels: "That picture is over 40 megapixels. Save it smaller, then try again.",
   audioTooBig: "That sound file is over 50 MB. Trim it, then try again.",
   videoTooBig: "That clip is over 95 MB. Trim it or lower its quality, then try again.",
+  fileTooBig: "That file is over 95 MB. Make it smaller, then try again.",
   wrongType: "Fuobe takes PNG, JPEG or WebP pictures, MP4, MOV, WebM, MKV or AVI clips, and MP3, WAV, OGG, FLAC or M4A sound.",
   uploadsFull: "Your uploads have reached 1 GB. Uploads are removed after 14 days.",
   filesFull: "Your files have reached 3 GB. Delete some runs to make room.",
@@ -65,6 +67,7 @@ export const ACCOUNT_MESSAGES = {
   outputsCapped: "Runs on your GPU make up to 4 at a time.",
   bodyTooBig: "That request is too large.",
   gpuChecks: "Too many checks. Wait a minute.",
+  probeRate: "Too many clip checks at once. Wait a moment, then try again.",
   reloadToUpload: "Reload the page, then upload again.",
   lengthNeeded: "Send the file with its size (Content-Length).",
 } as const;
@@ -81,24 +84,61 @@ export function accountUsage(id: string): { total: number; uploads: number; uplo
 }
 
 declare global {
-  /** Tests only: the free disk space to report. */
+  /** Tests only: the free disk space and the disk's size to report. */
   var __fuobeTestDiskFree: number | undefined;
+  var __fuobeTestDiskSize: number | undefined;
+  /** When the owner was last told that accounts are refused for space. */
+  var __fuobeDiskLowWarned: number | undefined;
 }
 
-/** Free space on the disk that holds the data folder (Infinity when it can't be read: the check never blocks by mistake). */
-export function diskFreeBytes(): number {
-  if (process.env.VITEST === "true" && typeof globalThis.__fuobeTestDiskFree === "number") return globalThis.__fuobeTestDiskFree;
+/** The data disk's free space and size (Infinity when they can't be read: the check never blocks by mistake). */
+function diskSpace(): { free: number; size: number } {
+  if (process.env.VITEST === "true" && typeof globalThis.__fuobeTestDiskFree === "number") return { free: globalThis.__fuobeTestDiskFree, size: globalThis.__fuobeTestDiskSize ?? Infinity };
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const s = fs.statfsSync(DATA_DIR);
-    return Number(s.bavail) * Number(s.bsize);
+    return { free: Number(s.bavail) * Number(s.bsize), size: Number(s.blocks) * Number(s.bsize) };
   } catch {
-    return Infinity;
+    return { free: Infinity, size: Infinity };
   }
 }
 
-/** Whether the server has room for an account's upload or run. */
-export const diskHasRoom = () => diskFreeBytes() >= ACCOUNT_LIMITS.diskFreeBytes;
+/** Free space on the disk that holds the data folder. */
+export const diskFreeBytes = (): number => diskSpace().free;
+
+/**
+ * The free space accounts never use: FUOBE_ACCOUNT_DISK_FREE_GB when it is set, else 20 GB or a tenth of the disk,
+ * whichever is less, and at least 2 GB (a small server keeps a share of its own disk, not a fixed 20 GB).
+ */
+export function diskFloorBytes(size = diskSpace().size): number {
+  const set = process.env.FUOBE_ACCOUNT_DISK_FREE_GB?.trim();
+  if (set && Number.isFinite(Number(set)) && Number(set) >= 0) return Number(set) * GB;
+  return Math.max(2 * GB, Math.min(ACCOUNT_LIMITS.diskFreeBytes, size / 10));
+}
+
+/** Whether the server has room for an account's upload or run. When it hasn't, the server log says so once an hour. */
+export function diskHasRoom(): boolean {
+  const { free, size } = diskSpace();
+  const floor = diskFloorBytes(size);
+  if (free >= floor) return true;
+  if (Date.now() - (globalThis.__fuobeDiskLowWarned ?? 0) > 60 * 60_000) {
+    globalThis.__fuobeDiskLowWarned = Date.now();
+    console.warn(`[fuobe] Accounts can't upload or run now: the data disk has ${(free / GB).toFixed(1)} GB free, and ${(floor / GB).toFixed(1)} GB is kept free (FUOBE_ACCOUNT_DISK_FREE_GB sets it).`);
+  }
+  return false;
+}
+
+/**
+ * The most a run on an account's GPU sends of one stored file (its own results too): what an upload of its kind may
+ * be (a picture 25 MB, sound 50 MB, a clip 95 MB; anything else as a clip). Each file sent is held in memory a few times.
+ */
+export function accountInputLimit(contentType: string): { bytes: number; message: string } {
+  const t = contentType.split(";")[0].trim().toLowerCase();
+  if (t.startsWith("image/")) return { bytes: ACCOUNT_LIMITS.imageBytes, message: ACCOUNT_MESSAGES.imageTooBig };
+  if (t.startsWith("audio/")) return { bytes: ACCOUNT_LIMITS.audioBytes, message: ACCOUNT_MESSAGES.audioTooBig };
+  if (t.startsWith("video/")) return { bytes: ACCOUNT_LIMITS.videoBytes, message: ACCOUNT_MESSAGES.videoTooBig };
+  return { bytes: ACCOUNT_LIMITS.videoBytes, message: ACCOUNT_MESSAGES.fileTooBig };
+}
 
 // ---------------------------------------------------------------------------
 // When an account is deleted

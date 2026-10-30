@@ -337,6 +337,11 @@ export interface PublicFetchOptions extends Pick<RemoteFetchOptions, "resolve" |
 
 export const PUBLIC_FETCH_MAX_BYTES = 8 * 2 ** 20;
 
+/** Let go of an answer whose body won't be read (an error status): its connection closes now (fetchPublic). */
+export function discardBody(res: Response): void {
+  if (res.body && !res.bodyUsed) res.body.cancel().catch(() => {});
+}
+
 const mbOf = (n: number) => (n >= 2 ** 30 ? `${Math.round(n / 2 ** 30)} GB` : `${Math.max(1, Math.round(n / 2 ** 20))} MB`);
 
 export async function fetchPublic(url: string, init: RequestInit = {}, o: PublicFetchOptions = {}): Promise<Response> {
@@ -416,7 +421,12 @@ export async function fetchPublic(url: string, init: RequestInit = {}, o: Public
       const stream = counted;
       res.on("error", (e) => stream.destroy(e));
       res.on("aborted", () => stream.destroy(new RemoteFetchError(`${target.host} stopped answering`)));
-      stream.on("close", () => clearTimeout(deadline));
+      // Read to its end, failed, or let go by the caller (discardBody): the connection closes at once, never held
+      // open until the deadline.
+      stream.on("close", () => {
+        clearTimeout(deadline);
+        if (!res.complete) res.destroy();
+      });
       res.pipe(stream);
       settle(undefined, new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>, { status, statusText: res.statusMessage, headers: out }));
     });

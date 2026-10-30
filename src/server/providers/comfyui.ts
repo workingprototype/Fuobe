@@ -61,8 +61,11 @@ import { probeAvi } from "../avi-probe";
 import { probeWebm } from "../webm-probe";
 import { adoptFile, readRef, scratchDir } from "../storage";
 import { CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
-import { fetchPublic } from "../remote-fetch";
+import { discardBody, fetchPublic, RemoteFetchError } from "../remote-fetch";
 import { zipToFile } from "../zip";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "../account-files";
+import { accountSend } from "../account-send";
+import { tenantAccount } from "../tenant";
 import { ask, checkReach, reachSync, sharedCheck, type Reach } from "./reach";
 import { ProviderError, type ProviderAdapter, type RemoteOutput } from "./types";
 
@@ -127,10 +130,16 @@ export const outsideOwnGpu = <T,>(fn: () => T): T => ownGpuStore.exit(fn);
 /** The most an account's ComfyUI may send back for one output file, and how long it may take. */
 export const OWN_OUTPUT_LIMITS = { maxBytes: 2 ** 30, deadlineMs: 15 * 60_000 };
 
-/** fetch() for a provider's file: through fetchPublic on an account's own ComfyUI (1 GB and 15 minutes at most). */
-export function outputFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  return ownGpu() ? fetchPublic(url, init, { timeoutMs: 120_000, ...OWN_OUTPUT_LIMITS }) : fetch(url, init);
+/** fetch() for a provider's file: through fetchPublic on an account's own ComfyUI (1 GB and 15 minutes at most, or less). */
+export function outputFetch(url: string, init: RequestInit = {}, o: { maxBytes?: number } = {}): Promise<Response> {
+  if (!ownGpu()) return fetch(url, init);
+  const maxBytes = Math.max(1, Math.min(OWN_OUTPUT_LIMITS.maxBytes, o.maxBytes ?? Infinity));
+  return fetchPublic(url, init, { timeoutMs: 120_000, ...OWN_OUTPUT_LIMITS, maxBytes });
 }
+
+/** An account's ComfyUI: a layer read for its box (one at a time), and one EXR frame, at most. */
+export const OWN_LAYER_MAX_BYTES = 32 * 2 ** 20;
+export const OWN_FRAME_MAX_BYTES = 100 * 2 ** 20;
 
 /**
  * What an account's ComfyUI may answer, by path: a file (/view) up to 1 GB in 15 minutes; an upload's answer 1 MB, in
@@ -223,7 +232,10 @@ const reasonOf = (text: string) => (/^\s*</.test(text) ? "" : text.trim().slice(
 async function comfyJson<T>(p: string, worker: ComfyWorker = "main"): Promise<T> {
   const res = await comfyFetch(p, {}, worker);
   const path = p.split("?")[0];
-  if (!res.ok) throw worker === "isolated" ? isolatedAnswer(path, res.status) : new ProviderError(`ComfyUI ${path} answered HTTP ${res.status}`, res.status);
+  if (!res.ok) {
+    discardBody(res);
+    throw worker === "isolated" ? isolatedAnswer(path, res.status) : new ProviderError(`ComfyUI ${path} answered HTTP ${res.status}`, res.status);
+  }
   try {
     return (await res.json()) as T;
   } catch {
@@ -449,23 +461,35 @@ function ocrOutput(answer: string, frame: OcrFrame | undefined): ComfyOutput {
   return { url: dataUrl(Buffer.from(text), "text/plain"), kind: "text", contentType: "text/plain", text, meta: { lines, ...(size ? { size } : {}), ...(ok ? {} : { unreadable: true }) } };
 }
 
-/** Layers: download each RGBA layer once, add its bounding box (from alpha) and hand the bytes on as a data URL. */
+/**
+ * Layers: download each RGBA layer once, add its bounding box (from alpha) and hand the bytes on as a data URL. On an
+ * account's ComfyUI: only as many layers as the run keeps (16), one at a time, 32 MB each at most, and the layer stays a
+ * link (saved later straight to disk), so a long list of layers can't fill the server's memory.
+ */
 async function withLayerBoxes(outputs: ComfyOutput[]): Promise<ComfyOutput[]> {
-  return Promise.all(
-    outputs.map(async (o) => {
-      if (o.kind !== "image" || typeof o.meta?.z !== "number" || o.url.startsWith("data:")) return o;
-      try {
-        const res = await outputFetch(o.url, { headers: o.headers });
-        if (!res.ok) return o;
-        const data = Buffer.from(await res.arrayBuffer());
-        const png = decodePng(data);
-        const bbox = alphaBBox(png.data, png.width, png.height);
-        return { ...o, url: dataUrl(data, "image/png"), contentType: "image/png", headers: undefined, meta: { ...o.meta, bbox: bbox ?? [0, 0, 0, 0], width: png.width, height: png.height } };
-      } catch {
-        return o; // keep the layer without a box rather than failing the job
+  const own = !!ownGpu();
+  const isLayer = (o: ComfyOutput) => o.kind === "image" && typeof o.meta?.z === "number" && !o.url.startsWith("data:");
+  const box = async (o: ComfyOutput): Promise<ComfyOutput> => {
+    try {
+      const res = await outputFetch(o.url, { headers: o.headers }, own ? { maxBytes: OWN_LAYER_MAX_BYTES } : {});
+      if (!res.ok) {
+        discardBody(res);
+        return o;
       }
-    }),
-  );
+      const data = Buffer.from(await res.arrayBuffer());
+      const png = decodePng(data);
+      const bbox = alphaBBox(png.data, png.width, png.height);
+      const meta = { ...o.meta, bbox: bbox ?? [0, 0, 0, 0], width: png.width, height: png.height };
+      return own ? { ...o, contentType: "image/png", meta } : { ...o, url: dataUrl(data, "image/png"), contentType: "image/png", headers: undefined, meta };
+    } catch {
+      return o; // keep the layer without a box rather than failing the job
+    }
+  };
+  if (!own) return Promise.all(outputs.map((o) => (isLayer(o) ? box(o) : o)));
+  const out: ComfyOutput[] = [];
+  let layers = 0;
+  for (const o of outputs) out.push(isLayer(o) && layers++ < ACCOUNT_LIMITS.outputsPerJob ? await box(o) : o);
+  return out;
 }
 
 /**
@@ -479,15 +503,43 @@ async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promi
   const rest = outputs.filter((o) => o.meta?.role !== "frames");
   const preview = rest.find((o) => o.kind === "video");
   if (!preview) throw new ProviderError("The EXR export finished without its preview clip");
+  // An account's ComfyUI: a frame count that fits a clip, room on the server, 100 MB a frame, and no more in all than
+  // the account's files have room for (3 GB).
+  const account = ownGpu() ? tenantAccount() : undefined;
+  let budget = Infinity;
+  if (account) {
+    if (frames.length > ACCOUNT_LIMITS.framesPerJob) throw new ProviderError(`Your ComfyUI made ${frames.length} EXR frames. A run on your GPU keeps up to ${ACCOUNT_LIMITS.framesPerJob}: export a shorter clip.`);
+    if (!diskHasRoom()) throw new ProviderError(ACCOUNT_MESSAGES.diskLow);
+    budget = ACCOUNT_LIMITS.totalBytes - accountUsage(account).total;
+    if (budget <= 0) throw new ProviderError(ACCOUNT_MESSAGES.filesFull);
+  }
   const dest = path.join(scratchDir(), `${generationId || nanoid(8)}-${nanoid(6)}.zip`);
+  let total = 0;
+  // Past what the account's files have room for: say that, not the size of one answer.
+  const full = (e: unknown) => (account && budget - total < OWN_FRAME_MAX_BYTES && e instanceof RemoteFetchError && /^The answer was over/.test(e.message) ? new ProviderError(ACCOUNT_MESSAGES.filesFull) : e);
   async function* files() {
     for (const [i, f] of frames.entries()) {
-      const res = await outputFetch(f.url, { headers: f.headers });
-      if (!res.ok) throw new ProviderError(`ComfyUI answered HTTP ${res.status} for EXR frame ${i + 1}`);
-      yield { name: `frame_${String(i + 1).padStart(5, "0")}.exr`, data: Buffer.from(await res.arrayBuffer()) };
+      let data: Buffer;
+      try {
+        const res = await outputFetch(f.url, { headers: f.headers }, account ? { maxBytes: Math.min(OWN_FRAME_MAX_BYTES, budget - total) } : {});
+        if (!res.ok) {
+          discardBody(res);
+          throw new ProviderError(`ComfyUI answered HTTP ${res.status} for EXR frame ${i + 1}`);
+        }
+        data = Buffer.from(await res.arrayBuffer());
+      } catch (e) {
+        throw full(e);
+      }
+      total += data.length;
+      yield { name: `frame_${String(i + 1).padStart(5, "0")}.exr`, data };
     }
   }
-  await zipToFile(files(), dest);
+  try {
+    await zipToFile(files(), dest);
+  } catch (e) {
+    fs.rmSync(dest, { force: true });
+    throw e;
+  }
   const zip = adoptFile({ from: dest, contentType: "application/zip", name: "exr-frames.zip", source: "generation", generationId: generationId || undefined });
   return rest.map((o) => (o === preview ? { ...o, meta: { ...o.meta, artifacts: { exr: zip.url }, frames: frames.length } } : o));
 }
@@ -798,8 +850,13 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // Media refs in params.extra (e.g. a background stem for "audio2") are uploaded like regular inputs.
   for (const [k, v] of Object.entries(extra)) {
     if (!isMediaRef(v)) continue;
-    const f = await readRef(v);
-    extra[k] = await ctx.upload(f.data, f.contentType, f.name);
+    // An account's file is read and sent when it may send (account-send.ts), as the run's other inputs are.
+    const send = async () => {
+      const f = await readRef(v);
+      return ctx.upload(f.data, f.contentType, f.name);
+    };
+    const account = ownGpu() ? tenantAccount() : undefined;
+    extra[k] = await (account ? accountSend(account, send) : send());
   }
   // The variant this request runs (one graph per clip count, the single-track soundtrack, EXR frames, a Fun Camera pose,
   // the product shot): src/lib/comfy-variants.ts, which the GPU pre-flight's gate reads too. A LoRA mixed into a pose is
@@ -1356,6 +1413,7 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   form.append("overwrite", "true");
   const res = await comfyFetch("/upload/image", { method: "POST", body: form }, worker);
   if (res.status === 413) {
+    discardBody(res);
     // ComfyUI's own limit (--max-upload-size, 100 MB unless it was started with more).
     const mb = Math.ceil(data.length / 2 ** 20);
     throw new ProviderError(`ComfyUI refused a ${mb} MB upload as too large (its --max-upload-size, 100 MB unless set) — start ComfyUI with a higher --max-upload-size, or send a smaller file`);
@@ -1557,7 +1615,10 @@ export const comfyProvider: ProviderAdapter = {
   async test(opts) {
     const describe = async (worker: ComfyWorker) => {
       const res = await comfyFetch("/system_stats", {}, worker);
-      if (!res.ok) throw new ProviderError(`HTTP ${res.status}`);
+      if (!res.ok) {
+        discardBody(res);
+        throw new ProviderError(`HTTP ${res.status}`);
+      }
       const s = (await res.json()) as { system?: { comfyui_version?: string }; devices?: { name?: string; vram_total?: number }[] };
       const dev = s.devices?.[0];
       return `ComfyUI ${s.system?.comfyui_version ?? ""} · ${dev?.name ?? "unknown device"}${dev?.vram_total ? ` · ${(dev.vram_total / 2 ** 30).toFixed(0)} GB` : ""}`;
@@ -1593,6 +1654,7 @@ export const comfyProvider: ProviderAdapter = {
 export async function comfyLoraFiles(route?: ModelRoute): Promise<string[] | null> {
   try {
     const res = await comfyFetch("/models/loras", {}, workerFor(route?.endpoint));
+    if (!res.ok) discardBody(res);
     return res.ok ? ((await res.json()) as string[]) : null;
   } catch {
     return null;

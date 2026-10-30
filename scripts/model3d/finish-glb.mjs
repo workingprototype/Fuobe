@@ -2,7 +2,10 @@
 // Finish an image-to-3D GLB from ComfyUI (Pixal3D, TRELLIS.2, Hunyuan3D) for the web. The Fuobe server runs
 // this in a child process after the job (src/server/model3d-finish.ts); it also works by hand:
 //
-//   node scripts/model3d/finish-glb.mjs --in raw.glb --out web.glb [--material auto|matte|metal|mixed] [--texture-size 2048]
+//   node scripts/model3d/finish-glb.mjs --in raw.glb --out web.glb [--material auto|matte|metal|mixed] [--texture-size 2048] [--limits account]
+//
+// --limits account (a model made on an account's own ComfyUI): one CPU thread for the pictures, at most 32 textures,
+// none over 4096 x 4096 and 64 megapixels in all, checked from the pictures' headers before any is decoded (exit 3).
 //
 // 1. Material: "auto" reads the baked metallic channel (B of the metallicRoughness texture). Mostly metal
 //    (>= 25 % of texels at metallic >= 0.5) -> "metal"; almost none (< 2 % and mean < 0.05) -> "matte";
@@ -34,8 +37,16 @@ const { values: a } = parseArgs({
     out: { type: "string" },
     material: { type: "string", default: "auto" },
     "texture-size": { type: "string", default: "2048" },
+    limits: { type: "string" },
   },
 });
+const ACCOUNT = a.limits === "account";
+/** --limits account: per picture, all pictures, and how many. */
+const LIMITS = { texels: 4096 * 4096, total: 64_000_000, textures: 32 };
+if (ACCOUNT) sharp.concurrency(1);
+/** sharp, kept to the account limits when they apply (every picture this script and textureCompress decode). */
+const pic = (input, options = {}) => sharp(input, ACCOUNT ? { ...options, limitInputPixels: LIMITS.texels } : options);
+Object.assign(pic, sharp);
 if (!a.in || !a.out) {
   console.error("usage: finish-glb.mjs --in raw.glb --out web.glb [--material auto|matte|metal|mixed] [--texture-size 2048]");
   process.exit(2);
@@ -87,6 +98,27 @@ const doc = await io.readBinary(new Uint8Array(input.buffer, input.byteOffset, i
 doc.setLogger(new Logger(Logger.Verbosity.ERROR));
 const root = doc.getRoot();
 
+// ---- 0. a model from an account's ComfyUI: its pictures' sizes from their headers, before anything is decoded
+if (ACCOUNT) {
+  const textures = root.listTextures();
+  if (textures.length > LIMITS.textures) refuse(`too many textures (${textures.length}; at most ${LIMITS.textures})`);
+  let total = 0;
+  for (const tex of textures) {
+    const image = tex.getImage();
+    if (!image) continue;
+    let size;
+    try {
+      size = await sharp(Buffer.from(image), { limitInputPixels: false }).metadata();
+    } catch {
+      refuse("a texture that can't be read");
+    }
+    const texels = (size.width ?? 0) * (size.height ?? 0);
+    if (!texels || texels > LIMITS.texels) refuse(`a texture over 4096 x 4096 (${size.width} x ${size.height})`);
+    total += texels;
+    if (total > LIMITS.total) refuse("textures over 64 megapixels in all");
+  }
+}
+
 // ---- 1. material class from the metallic channel
 const mrTextures = [...new Set(root.listMaterials().map((m) => m.getMetallicRoughnessTexture()).filter(Boolean))];
 const decoded = new Map();
@@ -95,7 +127,7 @@ let metalSum = 0;
 let texels = 0;
 for (const tex of mrTextures) {
   // 8-bit sRGB (a grey or 16-bit PNG too), stepped by the decoded pixels' own channel count (alpha or not).
-  const { data: raw, info } = await sharp(Buffer.from(tex.getImage())).toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
+  const { data: raw, info } = await pic(Buffer.from(tex.getImage())).toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
   const { width, height, channels } = info;
   decoded.set(tex, { raw, width, height, channels });
   for (let i = 0; i < raw.length; i += channels) {
@@ -140,7 +172,7 @@ if (rule.roughFloor > 0 || rule.noMetal) {
       if (rule.floorMetalTexels || !metal) raw[i + 1] = Math.max(raw[i + 1], floor);
       if (rule.noMetal) raw[i + 2] = 0;
     }
-    const png = await sharp(raw, { raw: { width, height, channels } }).png({ compressionLevel: 6 }).toBuffer();
+    const png = await pic(raw, { raw: { width, height, channels } }).png({ compressionLevel: 6 }).toBuffer();
     tex.setImage(new Uint8Array(png)).setMimeType("image/png");
   }
 }
@@ -157,7 +189,7 @@ await doc.transform(
   weld(),
   prune({ keepAttributes: true, keepIndices: false, keepLeaves: false, keepSolidTextures: true }),
   sparse(),
-  textureCompress({ encoder: sharp, targetFormat: "webp", resize: [size, size] }),
+  textureCompress({ encoder: pic, targetFormat: "webp", resize: [size, size] }),
   meshopt({ encoder: MeshoptEncoder, level: "high" }),
 );
 

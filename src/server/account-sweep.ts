@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { RETENTION_MS, runAccountDeletedHooks } from "./account-files";
 import { clearAccountLoras } from "./account-loras";
-import { listAccounts } from "./auth";
+import { readAccountIds } from "./auth";
 import { db } from "./db";
 import { deleteForever } from "./library";
 import { deleteAsset, scratchDir } from "./storage";
@@ -17,6 +17,8 @@ import { deleteAsset, scratchDir } from "./storage";
 const DAY = 24 * 60 * 60_000;
 /** An upload's temp file left behind (the server stopped mid-upload). */
 const STALE_UPLOAD_MS = 60 * 60_000;
+/** Any other scratch file left behind: a result's download, a frames zip. */
+const STALE_SCRATCH_MS = 6 * 60 * 60_000;
 
 /** Every account that owns a run or a file here. */
 function owners(): string[] {
@@ -64,18 +66,31 @@ export async function sweepAccountFiles(now = Date.now()): Promise<{ uploads: nu
     )
     .all(now - RETENTION_MS.run) as { id: string }[];
   for (const o of orphans) deleteAsset(o.id);
-  // Accounts that are gone.
-  const live = new Set(listAccounts().map((a) => a.id));
-  const gone = owners().filter((id) => !live.has(id));
+  // Accounts that are gone (deleting one purges it at once: this only catches what that missed). Only when the auth
+  // file was read whole, and not when it lists no account at all while accounts own files: a file that failed to read,
+  // or one put back from before the sign-ups, must never wipe everyone's work.
+  let gone: string[] = [];
+  const owning = owners();
+  // No account owns anything here (a new install has no auth file yet): nothing to check.
+  if (owning.length) {
+    try {
+      const live = readAccountIds();
+      if (live.size) gone = owning.filter((id) => !live.has(id));
+      else console.warn(`[fuobe] account sweep: the auth file lists no accounts, but ${owning.length} own files here; nothing removed`);
+    } catch (e) {
+      console.warn(`[fuobe] account sweep: skipped removing deleted accounts' files (${(e as Error).message})`);
+    }
+  }
   for (const id of gone) await purgeAccount(id);
-  // Upload temp files the server left behind.
+  // Temp files the server left behind (it stopped mid-upload, mid-download or mid-zip): an upload's after an hour,
+  // anything else in the scratch folder after six hours untouched (a download or zip in progress writes to it all along).
   try {
     const dir = scratchDir();
     for (const f of fs.readdirSync(dir)) {
-      if (!f.startsWith("up-")) continue;
       const file = path.join(dir, f);
       try {
-        if (now - fs.statSync(file).mtimeMs > STALE_UPLOAD_MS) fs.rmSync(file, { force: true });
+        const st = fs.statSync(file);
+        if (st.isFile() && now - st.mtimeMs > (f.startsWith("up-") ? STALE_UPLOAD_MS : STALE_SCRATCH_MS)) fs.rmSync(file, { force: true });
       } catch {}
     }
   } catch {}

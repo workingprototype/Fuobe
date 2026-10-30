@@ -51,14 +51,14 @@ import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
-import { comfyLoraFiles, onOwnGpu, outputFetch, outsideOwnGpu, ownGpu, probeComfy } from "./providers/comfyui";
+import { comfyLoraFiles, onOwnGpu, outputFetch, outsideOwnGpu, OWN_OUTPUT_LIMITS, ownGpu, probeComfy } from "./providers/comfyui";
 import { accountGpu } from "./auth";
 import { CONNECT_GPU_MESSAGE, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { outsideTenant, runAsTenant, tenant, tenantAccount } from "./tenant";
 import { generationAccount } from "./account-library";
-import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage } from "./account-files";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "./account-files";
 import { checkAccountLoras } from "./account-loras";
-import { missingFilesMessage } from "@/lib/missing-files";
+import { missingFilesMessage, type MissingFiles } from "@/lib/missing-files";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { graphLoras } from "@/lib/catalog/character-swap";
@@ -71,7 +71,8 @@ import { mediaFacts } from "./media-facts";
 import { modelToFinish, startModelFinish, startTurntable, stopModelFinish, type OutputStore } from "./model3d-finish";
 import { convertMask, decodePng, encodePng } from "./png";
 import { engineMode, getSetting, withCandidates, withoutCandidates } from "./settings";
-import { blockedForAccounts, fetchRemoteToFile } from "./remote-fetch";
+import { blockedForAccounts, discardBody, fetchRemoteToFile, RemoteFetchError } from "./remote-fetch";
+import { accountSend } from "./account-send";
 import { absolutePath, adoptFile, contentTypeFor, deleteAsset, localHead, readRef, saveFile, scratchDir } from "./storage";
 
 interface Row {
@@ -1220,6 +1221,46 @@ export function accountRun(accountId: string, providerId: string): { run: <T>(fn
 }
 
 /**
+ * The LoRA files an account's run needs that its own ComfyUI doesn't have (call it inside accountRun): the run's own,
+ * and those of the step that makes its start frame first (a Fuobe DoP relight or Mixed Media effect, which
+ * createRelitClip queues as a step of its own). Null when nothing is missing, or the list couldn't be read.
+ */
+export async function accountLoraFix(req: GenerationRequest): Promise<MissingFiles | null> {
+  const p = previewGeneration(req);
+  const asks: { loras: LoraRef[]; endpoint: string }[] = [];
+  if (p.route.provider === "comfyui") asks.push({ loras: [...p.loras.applied, ...graphLoras(p.route.endpoint, req.params?.extra)], endpoint: p.route.endpoint });
+  const pre = relightStep(req, p.model);
+  if (pre) {
+    try {
+      const { step } = pre;
+      const s = previewGeneration({
+        feature: req.feature,
+        account: req.account,
+        engine: pre.engine,
+        modelId: step.modelId,
+        op: step.op,
+        prompt: step.prompt,
+        inputs: { images: (req.inputs?.images ?? []).slice(0, 1) },
+        ...(step.loras?.length && { loras: step.loras }),
+        ...(step.params && { params: step.params }),
+      });
+      if (s.route.provider === "comfyui") asks.push({ loras: [...s.loras.applied, ...graphLoras(s.route.endpoint, step.params?.extra)], endpoint: s.route.endpoint });
+    } catch {
+      // The step says what's wrong when it is created.
+    }
+  }
+  const items: MissingFiles["items"] = [];
+  let workflowId: string | undefined;
+  for (const a of asks) {
+    const f = await checkAccountLoras(a.loras, a.endpoint);
+    if (!f) continue;
+    workflowId ??= f.workflowId;
+    for (const i of f.items) if (!items.some((x) => x.file === i.file)) items.push(i);
+  }
+  return items.length ? { code: "comfy_missing_model", ...(workflowId && { workflowId }), items } : null;
+}
+
+/**
  * Plan (and price) as a visitor's run would go: as that visitor (an account, or a guest), on its own ComfyUI (none
  * yet: an empty address that reaches nothing), the open engine, no demo outputs. For previews; a run goes through
  * accountRun.
@@ -1228,28 +1269,6 @@ export function asVisitor<T>(gpu: { url: string; token?: string } | null, fn: ()
   return runAsTenant(accountId ? { kind: "account", id: accountId } : { kind: "guest" }, () =>
     onOwnGpu(gpu ?? { url: "" }, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn)),
   );
-}
-
-/** How many files an account's runs send to ComfyUIs at once, across the server (each holds the file about 3 times in memory). */
-const ACCOUNT_SENDS = 2;
-
-declare global {
-  var __fuobeAccountSends: { busy: number; waiting: (() => void)[] } | undefined;
-}
-
-/** Send an account's file when a slot is free (ACCOUNT_SENDS at once). */
-async function accountSend<T>(fn: () => Promise<T>): Promise<T> {
-  const s = (globalThis.__fuobeAccountSends ??= { busy: 0, waiting: [] });
-  // A finished send hands its slot straight to the next one waiting.
-  if (s.busy >= ACCOUNT_SENDS) await new Promise<void>((resolve) => s.waiting.push(resolve));
-  else s.busy++;
-  try {
-    return await fn();
-  } finally {
-    const next = s.waiting.shift();
-    if (next) next();
-    else s.busy--;
-  }
 }
 
 const accountOf = (r: Pick<Row, "request_json">): string | undefined => {
@@ -1280,14 +1299,29 @@ async function submitNow(
 ): Promise<void> {
   const adapter = provider(providerId);
   submitting().add(id);
+  /** Why the run failed, once it has: its files still waiting to be sent are not sent. */
+  let failed: { error: unknown } | undefined;
   try {
     // An account's run on its own ComfyUI: every LoRA it adds must be there first (nothing is sent before this check).
     if (req.account && providerId === "comfyui") {
       const fix = await checkAccountLoras([...plan.loras, ...graphLoras(route.endpoint, plan.params.extra)], route.endpoint, route);
       if (fix) throw Object.assign(new Error(missingFilesMessage(fix)), { fix });
     }
-    // An account's files go to its ComfyUI a few at a time across the server (accountSend).
-    const gate = <T,>(fn: () => Promise<T>): Promise<T> => (req.account ? accountSend(fn) : fn());
+    // An account's files go to its ComfyUI one at a time, a few across the server (account-send.ts). A file whose turn
+    // comes after another input failed, or after a cancel, isn't read or sent.
+    const gate = <T,>(fn: () => Promise<T>): Promise<T> => {
+      if (!req.account) return fn();
+      return accountSend(req.account, async () => {
+        if (failed) throw failed.error;
+        if (statusOf(id) === "canceled") throw new Error("Stopped");
+        try {
+          return await fn();
+        } catch (e) {
+          failed ??= { error: e };
+          throw e;
+        }
+      });
+    };
     const prep = async (ref?: string) => {
       if (!ref) return undefined;
       return gate(async () => {
@@ -1414,6 +1448,7 @@ async function submitNow(
       recordSubmission(id, now);
     })();
   } catch (e) {
+    failed ??= { error: e };
     // A cancel during the hand-over stays a cancel. What the GPU was missing (a model, a node class) is kept, so the
     // tile offers "Fix it", and the account's GPU check counts as stale.
     const fix = (e as { fix?: GenerationFix }).fix;
@@ -1908,18 +1943,33 @@ function roomFor(account: string, bytes: number, file?: string): void {
 }
 
 /**
- * An account's result from its own ComfyUI: streamed to disk (1 GB at most, outputFetch), checked against its storage,
- * stored as a type from the allowlist. A download that fails leaves no file behind.
+ * An account's result from its own ComfyUI: streamed to disk (1 GB at most, outputFetch, and never more than its files
+ * have room for), checked against its storage, stored as a type from the allowlist. Nothing is fetched while the
+ * server is short of space. A download that fails leaves no file behind.
  */
 async function persistAccountOutput(o: RichOutput, generationId: string, account: string, linked: Record<string, unknown> | undefined): Promise<OutputFile> {
-  const res = await outputFetch(o.url, { headers: o.headers });
-  if (!res.ok || !res.body) throw new Error(`download ${res.status}`);
+  const left = ACCOUNT_LIMITS.totalBytes - accountUsage(account).total;
+  if (left <= 0) throw new AccountFilesFull(ACCOUNT_MESSAGES.filesFull);
+  if (!diskHasRoom()) throw new Error(ACCOUNT_MESSAGES.diskLow);
+  const quotaCapped = left < OWN_OUTPUT_LIMITS.maxBytes;
+  // A result over what the account has room for says so, not the size of one answer.
+  const full = (e: unknown) => (quotaCapped && e instanceof RemoteFetchError && /^The answer was over/.test(e.message) ? new AccountFilesFull(ACCOUNT_MESSAGES.filesFull) : e);
+  let res: Response;
+  try {
+    res = await outputFetch(o.url, { headers: o.headers }, { maxBytes: left });
+  } catch (e) {
+    throw full(e);
+  }
+  if (!res.ok || !res.body) {
+    discardBody(res);
+    throw new Error(`download ${res.status}`);
+  }
   const dest = path.join(scratchDir(), `${generationId}-out-${nanoid(8)}`);
   try {
     await pipeline(Readable.fromWeb(res.body as import("node:stream/web").ReadableStream<Uint8Array>), fs.createWriteStream(dest));
   } catch (e) {
     fs.rmSync(dest, { force: true });
-    throw e;
+    throw full(e);
   }
   roomFor(account, fs.statSync(dest).size, dest);
   const header = res.headers.get("content-type")?.split(";")[0];
