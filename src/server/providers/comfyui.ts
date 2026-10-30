@@ -63,7 +63,7 @@ import { adoptFile, readRef, scratchDir } from "../storage";
 import { CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
 import { discardBody, fetchPublic, RemoteFetchError } from "../remote-fetch";
 import { zipToFile } from "../zip";
-import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "../account-files";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "../account-files";
 import { accountSend } from "../account-send";
 import { tenantAccount } from "../tenant";
 import { ask, checkReach, reachSync, sharedCheck, type Reach } from "./reach";
@@ -510,13 +510,13 @@ async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promi
   if (account) {
     if (frames.length > ACCOUNT_LIMITS.framesPerJob) throw new ProviderError(`Your ComfyUI made ${frames.length} EXR frames. A run on your GPU keeps up to ${ACCOUNT_LIMITS.framesPerJob}: export a shorter clip.`);
     if (!diskHasRoom()) throw new ProviderError(ACCOUNT_MESSAGES.diskLow);
-    budget = ACCOUNT_LIMITS.totalBytes - accountUsage(account).total;
-    if (budget <= 0) throw new ProviderError(ACCOUNT_MESSAGES.filesFull);
+    budget = accountTotalBytes(account) - accountUsage(account).total;
+    if (budget <= 0) throw new ProviderError(filesFullMessage(account));
   }
   const dest = path.join(scratchDir(), `${generationId || nanoid(8)}-${nanoid(6)}.zip`);
   let total = 0;
   // Past what the account's files have room for: say that, not the size of one answer.
-  const full = (e: unknown) => (account && budget - total < OWN_FRAME_MAX_BYTES && e instanceof RemoteFetchError && /^The answer was over/.test(e.message) ? new ProviderError(ACCOUNT_MESSAGES.filesFull) : e);
+  const full = (e: unknown) => (account && budget - total < OWN_FRAME_MAX_BYTES && e instanceof RemoteFetchError && /^The answer was over/.test(e.message) ? new ProviderError(filesFullMessage(account)) : e);
   async function* files() {
     for (const [i, f] of frames.entries()) {
       let data: Buffer;

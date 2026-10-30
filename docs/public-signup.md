@@ -166,9 +166,13 @@ multipart form works up to 26 MB). Without a connected GPU it answers 403 with
 
 - The type is read from the file's first bytes. A file that isn't one of these answers 415.
 - `Content-Length` is required (411), and a file over its size answers 413 before it is read.
-- An account keeps up to 1 GB of uploads and 3 GB of files in all (uploads and results). Past that,
-  uploads and runs answer 413: delete some runs to make room.
-- Up to 60 uploads an hour, 300 a day and 2 at once (429 with `Retry-After`).
+- An account keeps up to 1 GB of uploads and 3 GB of files in all (uploads and results); in its
+  first 7 days, 1 GB in all. Past that, uploads and runs answer 413: delete some runs to make room.
+- All accounts together keep at most a quarter of the data disk (`FUOBE_ACCOUNTS_DISK_GB` sets
+  it), and the disk always keeps its free floor (`FUOBE_ACCOUNT_DISK_FREE_GB`). Past either,
+  account uploads and runs answer 503 "short of space"; the owner's work is not affected.
+- Up to 60 uploads an hour, 300 a day and 2 at once (429 with `Retry-After`), and 8 at once from
+  every account together. One address makes at most 5 accounts a day.
 - **How long files stay.** Uploads are removed after 14 days, even when a run still uses them.
   Runs and their results are removed after 30 days. Everything goes at once when the account is
   deleted.

@@ -56,7 +56,7 @@ import { accountGpu } from "./auth";
 import { CONNECT_GPU_MESSAGE, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { outsideTenant, runAsTenant, tenant, tenantAccount } from "./tenant";
 import { generationAccount } from "./account-library";
-import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "./account-files";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "./account-files";
 import { checkAccountLoras } from "./account-loras";
 import { missingFilesMessage, type MissingFiles } from "@/lib/missing-files";
 import { Readable } from "node:stream";
@@ -1904,7 +1904,7 @@ function relinkMain(meta: Record<string, unknown> | undefined, from: string, to:
 /** The most one file of an account's run may weigh (a result, or a file it links to). */
 const ACCOUNT_LIMITS_FILE_BYTES = 2 ** 30;
 
-/** An account's files are full (ACCOUNT_LIMITS.totalBytes): the job fails with this message. */
+/** An account's files are full (accountTotalBytes): the job fails with this message. */
 class AccountFilesFull extends Error {}
 
 /** Types an account's result is stored as; any other is stored as application/octet-stream (.bin), never served as a page. */
@@ -1935,11 +1935,11 @@ const accountType = (t: string) => {
   return ACCOUNT_OUTPUT_TYPES.has(bare) ? bare : "application/octet-stream";
 };
 
-/** Before an account's file is kept: refuse it (and remove `file`, when given) when its files would pass 3 GB. */
+/** Before an account's file is kept: refuse it (and remove `file`, when given) when its files would pass its total (3 GB; 1 GB while new). */
 function roomFor(account: string, bytes: number, file?: string): void {
-  if (accountUsage(account).total + bytes <= ACCOUNT_LIMITS.totalBytes) return;
+  if (accountUsage(account).total + bytes <= accountTotalBytes(account)) return;
   if (file) fs.rmSync(file, { force: true });
-  throw new AccountFilesFull(ACCOUNT_MESSAGES.filesFull);
+  throw new AccountFilesFull(filesFullMessage(account));
 }
 
 /**
@@ -1948,12 +1948,12 @@ function roomFor(account: string, bytes: number, file?: string): void {
  * server is short of space. A download that fails leaves no file behind.
  */
 async function persistAccountOutput(o: RichOutput, generationId: string, account: string, linked: Record<string, unknown> | undefined): Promise<OutputFile> {
-  const left = ACCOUNT_LIMITS.totalBytes - accountUsage(account).total;
-  if (left <= 0) throw new AccountFilesFull(ACCOUNT_MESSAGES.filesFull);
+  const left = accountTotalBytes(account) - accountUsage(account).total;
+  if (left <= 0) throw new AccountFilesFull(filesFullMessage(account));
   if (!diskHasRoom()) throw new Error(ACCOUNT_MESSAGES.diskLow);
   const quotaCapped = left < OWN_OUTPUT_LIMITS.maxBytes;
   // A result over what the account has room for says so, not the size of one answer.
-  const full = (e: unknown) => (quotaCapped && e instanceof RemoteFetchError && /^The answer was over/.test(e.message) ? new AccountFilesFull(ACCOUNT_MESSAGES.filesFull) : e);
+  const full = (e: unknown) => (quotaCapped && e instanceof RemoteFetchError && /^The answer was over/.test(e.message) ? new AccountFilesFull(filesFullMessage(account)) : e);
   let res: Response;
   try {
     res = await outputFetch(o.url, { headers: o.headers }, { maxBytes: left });

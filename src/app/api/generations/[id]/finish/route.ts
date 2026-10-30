@@ -1,4 +1,4 @@
-import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "@/server/account-files";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "@/server/account-files";
 import { requestAccount } from "@/server/auth";
 import { gateAsProxy } from "@/server/direct-gate";
 import { FinishError, finishOutput } from "@/server/generations";
@@ -33,7 +33,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/generations
   if (account) {
     const refuse = (status: number, error: string, headers: Record<string, string> = {}) => Response.json({ error }, { status, headers: { "Cache-Control": "no-store", ...headers } });
     if (!diskHasRoom()) return refuse(503, ACCOUNT_MESSAGES.diskLow);
-    if (accountUsage(account.id).total + data.length > ACCOUNT_LIMITS.totalBytes) return refuse(413, ACCOUNT_MESSAGES.filesFull);
+    if (accountUsage(account.id).total + data.length > accountTotalBytes(account.id)) return refuse(413, filesFullMessage(account.id));
     const rate = hit(`finish:${account.id}`, ACCOUNT_LIMITS.finishesPerHour, 60 * 60_000);
     if (!rate.ok) return refuse(429, ACCOUNT_MESSAGES.finishRate, { "Retry-After": String(rate.retryAfterS) });
   }

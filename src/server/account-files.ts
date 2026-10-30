@@ -1,5 +1,6 @@
 import "server-only";
 import fs from "node:fs";
+import { accountById } from "./auth";
 import { DATA_DIR, db } from "./db";
 
 /**
@@ -25,10 +26,15 @@ export const ACCOUNT_LIMITS = {
   /** Live uploads per account, and all its files (uploads and results). */
   uploadsBytes: 1 * GB,
   totalBytes: 3 * GB,
+  /** All its files in its first days: accounts made in bulk can't fill the disk fast. */
+  newAccountBytes: 1 * GB,
+  newAccountDays: 7,
   /** Uploads: per hour, per day, and at once. */
   uploadsPerHour: 60,
   uploadsPerDay: 300,
   uploadsAtOnce: 2,
+  /** Uploads at once from every account together (a multipart one is held in memory). */
+  uploadsAtOnceAll: 8,
   /** Retention: uploads (even when a run still names them), and runs with their files. */
   uploadDays: 14,
   runDays: 30,
@@ -75,6 +81,19 @@ export const ACCOUNT_MESSAGES = {
   lengthNeeded: "Send the file with its size (Content-Length).",
 } as const;
 
+/** What an account may keep in all: 3 GB, or 1 GB in its first 7 days. */
+export function accountTotalBytes(id: string): number {
+  const created = accountById(id)?.createdAt ?? 0;
+  return Date.now() - created < ACCOUNT_LIMITS.newAccountDays * DAY ? ACCOUNT_LIMITS.newAccountBytes : ACCOUNT_LIMITS.totalBytes;
+}
+
+/** What an account is told when its files are full. */
+export function filesFullMessage(id: string): string {
+  return accountTotalBytes(id) < ACCOUNT_LIMITS.totalBytes
+    ? "Your files have reached 1 GB. A new account keeps up to 1 GB in its first 7 days, then 3 GB. Delete some runs to make room."
+    : ACCOUNT_MESSAGES.filesFull;
+}
+
 /** What an account stores: all its files, its uploads, and how many uploads. */
 export function accountUsage(id: string): { total: number; uploads: number; uploadCount: number } {
   const r = db()
@@ -119,14 +138,39 @@ export function diskFloorBytes(size = diskSpace().size): number {
   return Math.max(2 * GB, Math.min(ACCOUNT_LIMITS.diskFreeBytes, size / 10));
 }
 
-/** Whether the server has room for an account's upload or run. When it hasn't, the server log says so once an hour. */
+/**
+ * What all accounts together may keep: FUOBE_ACCOUNTS_DISK_GB when it is set, else a quarter of the data disk. The rest
+ * stays the owner's (and the other sites' on a shared server), however many accounts sign up.
+ */
+export function accountsMaxBytes(size = diskSpace().size): number {
+  const set = process.env.FUOBE_ACCOUNTS_DISK_GB?.trim();
+  if (set && Number.isFinite(Number(set)) && Number(set) >= 0) return Number(set) * GB;
+  return size / 4;
+}
+
+/** What every account's files weigh together. */
+function accountsBytes(): number {
+  const r = db().prepare("SELECT COALESCE(SUM(size), 0) AS n FROM assets WHERE account_id IS NOT NULL").get() as { n: number };
+  return Number(r.n);
+}
+
+/**
+ * Whether the server has room for an account's upload or run: the disk keeps its free floor, and all accounts together
+ * stay under their share (accountsMaxBytes). When it hasn't, the server log says so once an hour.
+ */
 export function diskHasRoom(): boolean {
   const { free, size } = diskSpace();
   const floor = diskFloorBytes(size);
-  if (free >= floor) return true;
+  const max = accountsMaxBytes(size);
+  const used = accountsBytes();
+  if (free >= floor && used < max) return true;
   if (Date.now() - (globalThis.__fuobeDiskLowWarned ?? 0) > 60 * 60_000) {
     globalThis.__fuobeDiskLowWarned = Date.now();
-    console.warn(`[fuobe] Accounts can't upload or run now: the data disk has ${(free / GB).toFixed(1)} GB free, and ${(floor / GB).toFixed(1)} GB is kept free (FUOBE_ACCOUNT_DISK_FREE_GB sets it).`);
+    console.warn(
+      free < floor
+        ? `[fuobe] Accounts can't upload or run now: the data disk has ${(free / GB).toFixed(1)} GB free, and ${(floor / GB).toFixed(1)} GB is kept free (FUOBE_ACCOUNT_DISK_FREE_GB sets it).`
+        : `[fuobe] Accounts can't upload or run now: their files take ${(used / GB).toFixed(1)} GB, their share of the disk (FUOBE_ACCOUNTS_DISK_GB sets it).`,
+    );
   }
   return false;
 }

@@ -52,6 +52,13 @@ beforeAll(async () => {
   b = auth.createAccount("review-b@example.com", "long enough").id;
   auth.setAccountGpu(a, { url: fake.url });
   cookie = `${auth.SESSION_COOKIE}=${auth.createSession(a).value}`;
+  // Accounts past their first week, so their files may reach 3 GB (a new account keeps 1 GB).
+  const authFile = path.join(dir, "auth.json");
+  const data = JSON.parse(fs.readFileSync(authFile, "utf8")) as { accounts: { createdAt: number }[] };
+  for (const x of data.accounts) x.createdAt -= 8 * 24 * 60 * 60_000;
+  fs.writeFileSync(authFile, JSON.stringify(data));
+  // A new modified time, so the auth module reads the file again (it caches by that time).
+  fs.utimesSync(authFile, new Date(), new Date(Date.now() + 5000));
 });
 afterAll(async () => {
   globalThis.fetch = realFetch;

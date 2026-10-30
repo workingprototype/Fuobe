@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { CONNECT_GPU_HEADER, CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
 import { imageSize } from "@/lib/image-size";
 import { sniffMedia, type SniffKind } from "@/lib/sniff";
-import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "@/server/account-files";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "@/server/account-files";
 import { accountGpu, type Account } from "@/server/auth";
 import { gateDirect } from "@/server/direct-gate";
 import { enter, hit } from "@/server/rate";
@@ -149,9 +149,16 @@ async function accountUpload(request: Request, account: Account): Promise<Respon
   if (!hour.ok || !day.ok) return json(429, { error: ACCOUNT_MESSAGES.uploadRate }, { "Retry-After": String(Math.max(hour.retryAfterS, day.retryAfterS)) });
   const release = enter(`up:${account.id}`, ACCOUNT_LIMITS.uploadsAtOnce);
   if (!release) return json(429, { error: ACCOUNT_MESSAGES.uploadRate }, { "Retry-After": "10" });
+  // And a few at once from every account together.
+  const releaseAll = enter("up:accounts", ACCOUNT_LIMITS.uploadsAtOnceAll);
+  if (!releaseAll) {
+    release();
+    return json(429, { error: ACCOUNT_MESSAGES.uploadRate }, { "Retry-After": "10" });
+  }
   try {
     return await accountUploadBody(request, account);
   } finally {
+    releaseAll();
     release();
   }
 }
@@ -170,7 +177,7 @@ async function accountUploadBody(request: Request, account: Account): Promise<Re
   if (length > ACCOUNT_LIMITS.videoBytes) return json(413, { error: ACCOUNT_MESSAGES.videoTooBig });
   const usage = accountUsage(account.id);
   if (usage.uploads + length > ACCOUNT_LIMITS.uploadsBytes) return json(413, { error: ACCOUNT_MESSAGES.uploadsFull });
-  if (usage.total + length > ACCOUNT_LIMITS.totalBytes) return json(413, { error: ACCOUNT_MESSAGES.filesFull });
+  if (usage.total + length > accountTotalBytes(account.id)) return json(413, { error: filesFullMessage(account.id) });
 
   const dest = tempFile();
   let bytes: number;

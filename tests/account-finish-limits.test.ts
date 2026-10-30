@@ -80,11 +80,11 @@ describe("M-5: an account's finished pictures count like its other files", () =>
 
   it("refuses when the account's files are full", async () => {
     const big = saveFile({ data: Buffer.from("x"), contentType: "image/png", source: "upload", accountId: a });
-    db().prepare("UPDATE assets SET size = ? WHERE id = ?").run(ACCOUNT_LIMITS.totalBytes, big.id);
+    db().prepare("UPDATE assets SET size = ? WHERE id = ?").run(ACCOUNT_LIMITS.newAccountBytes, big.id);
     try {
       const r = await post(soulRun(a), cookie);
       expect(r.status).toBe(413);
-      expect((await r.json()).error).toBe(ACCOUNT_MESSAGES.filesFull);
+      expect((await r.json()).error).toMatch(/Your files have reached 1 GB/);
     } finally {
       db().prepare("DELETE FROM assets WHERE id = ?").run(big.id);
     }

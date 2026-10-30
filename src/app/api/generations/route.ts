@@ -3,7 +3,7 @@ import { CONNECT_GPU_HEADER, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/l
 import { missingFilesMessage } from "@/lib/missing-files";
 import { accountGpu, requestViewer } from "@/server/auth";
 import { OPERATION_LABELS } from "@/lib/catalog/types";
-import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "@/server/account-files";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "@/server/account-files";
 import { accountInputProblem } from "@/server/account-inputs";
 import { db } from "@/server/db";
 import { accountLoraFix, accountRun, asVisitor, createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
   if (account && !preview) {
     // Room on the server, room in the account's files, and a fair share of runs.
     if (!diskHasRoom()) return refuse(503, ACCOUNT_MESSAGES.diskLow);
-    if (accountUsage(account.id).total >= ACCOUNT_LIMITS.totalBytes) return refuse(413, ACCOUNT_MESSAGES.filesFull);
+    if (accountUsage(account.id).total >= accountTotalBytes(account.id)) return refuse(413, filesFullMessage(account.id));
     if (activeRuns(account.id) >= ACCOUNT_LIMITS.activeRuns) return refuse(429, ACCOUNT_MESSAGES.activeRuns, {}, { "Retry-After": "30" });
     const rate = hit(`run:${account.id}`, ACCOUNT_LIMITS.runsPerHour, 60 * 60_000);
     if (!rate.ok) return refuse(429, ACCOUNT_MESSAGES.runRate, {}, { "Retry-After": String(rate.retryAfterS) });
