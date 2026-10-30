@@ -948,6 +948,12 @@ export interface ChainSlot {
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
   /**
+   * For list slots: the place it takes in the finished list (0-based) among the request's own items, instead of before or
+   * after them. Slots with `at` go in after the others, in order of `at`, so each lands where it says: a keyframe film's
+   * frames that earlier steps make (Turnaround video: the sides the Angles app draws go between the photo's own views).
+   */
+  at?: number;
+  /**
    * Audio slots: take the dependency's output whose `meta.stem` is this (separate-audio makes
    * "voice" and "background", DBS also "music" and "effects"; "voice" also matches vocals/speech/target,
    * "background" also accompaniment/instrumental/residual/no_vocals, "effects" also sfx). Without it, the first

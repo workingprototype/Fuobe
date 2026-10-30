@@ -1212,12 +1212,20 @@ export function withPlaceholders(step: CinemaStep): GenerationRequest {
   const req = step.request;
   if (!req.chain?.length) return req;
   const inputs = { ...req.inputs };
+  // Images with a place (ChainSlot.at: a film's frames that earlier steps make) go in after the others, as the runner puts them.
+  const placed = req.chain.filter((c) => c.slot === "images" && c.at !== undefined && c.at >= 0).sort((a, b) => a.at! - b.at!);
   for (const c of req.chain) {
+    if (placed.includes(c)) continue;
     if (c.slot === "images") inputs.images = c.position === "first" ? [PLACEHOLDER.image, ...(inputs.images ?? [])] : [...(inputs.images ?? []), PLACEHOLDER.image];
     else if (c.slot === "videos") inputs.videos = [...(inputs.videos ?? []), PLACEHOLDER.video];
     else if (c.slot === "endImage") inputs.endImage = PLACEHOLDER.image;
     else if (c.slot === "video") inputs.video = PLACEHOLDER.video;
     else if (c.slot === "audio" || c.slot === "voiceAudio") inputs[c.slot] = PLACEHOLDER.audio;
+  }
+  for (const c of placed) {
+    const list = [...(inputs.images ?? [])];
+    list.splice(Math.min(c.at!, list.length), 0, PLACEHOLDER.image);
+    inputs.images = list;
   }
   return { ...req, inputs };
 }
