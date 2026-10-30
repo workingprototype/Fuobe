@@ -129,7 +129,8 @@ for (const [size, scheme] of [
   const text = await dialog.innerText();
   check(`${tag}: the five slots (Front, Right side, Back, Left side, Sheet)`, ["Front", "Right side", "Back", "Left side", "Sheet"].every((s) => text.includes(s)), text.slice(0, 200));
   check(`${tag}: the person's own left and right are explained`, /their right side is on your left/.test(text));
-  check(`${tag}: the price or GPU line shows before running`, true, await price.innerText());
+  const priceText = await price.innerText();
+  check(`${tag}: the price or GPU line shows before running`, (engine === "open" ? /Free · on your GPU|Demo · free/ : /Demo · free|≈ \$\d/).test(priceText), priceText);
   check(`${tag}: the consent line is asked for (photos someone brought)`, /I consent to this biometric data processing/.test(text));
   const make = dialog.getByRole("button", { name: /Make turnaround/ });
   check(`${tag}: Make turnaround waits for the consent line`, await make.isDisabled());
@@ -143,10 +144,21 @@ for (const [size, scheme] of [
   );
   if (phone) check(`${tag}: a finger drag scrolls the dialog`, await fingerScroll(page, dialog));
   await shoot(page, `sheet-dialog-${size}-${scheme}`);
-  // Switch the sides off: the film goes front → back → front; switch them back on.
-  await dialog.getByRole("switch", { name: "Draw the missing sides" }).click();
-  await until(async () => /Front view|left out|Drawn first/.test(await dialog.innerText()) || true, "the plan");
-  await dialog.getByRole("switch", { name: "Draw the missing sides" }).click();
+  // Flip "Draw the missing sides": the right side's slot goes from drawn first to not used (or back), then returns.
+  const fillSwitch = dialog.getByRole("switch", { name: "Draw the missing sides" });
+  const rightSlot = dialog.getByRole("button", { name: /^Right side: / });
+  const slotState = async () => (await rightSlot.getAttribute("aria-label")).replace(/^Right side: | — change$/g, "");
+  const was = { on: await fillSwitch.getAttribute("aria-checked"), slot: await slotState() };
+  await fillSwitch.click();
+  const flipped = await until(
+    async () => ((await fillSwitch.getAttribute("aria-checked")) !== was.on && (await slotState()) !== was.slot ? await slotState() : null),
+    "the plan to change with Draw the missing sides",
+    20_000,
+  ).catch(() => null);
+  check(`${tag}: Draw the missing sides changes the plan (right side: ${was.slot} → ${flipped ?? "unchanged"})`, !!flipped && /drawn first|not used/.test(`${was.slot} ${flipped}`));
+  await fillSwitch.click();
+  const back = await until(async () => ((await slotState()) === was.slot ? true : null), "the plan to return", 20_000).catch(() => false);
+  check(`${tag}: switching it back restores the plan`, back);
   if (engine === "cloud") {
     const routes = dialog.getByRole("radiogroup", { name: "Route" });
     await routes.waitFor();
@@ -163,8 +175,10 @@ for (const [size, scheme] of [
     await make.click();
     await dialog.getByRole("status").first().waitFor();
     check(`${tag}: progress shows while it renders`, /steps done/.test(await dialog.innerText()));
-    await dialog.locator("video").waitFor({ timeout: 120_000 });
-    check(`${tag}: the film plays in the dialog when it's done`, true);
+    const film = dialog.locator("video");
+    await film.waitFor({ timeout: 120_000 });
+    const filmSrc = await film.getAttribute("src");
+    check(`${tag}: the film is in the dialog when it's done`, !!filmSrc && filmSrc.startsWith("/api/files/"), filmSrc ?? "no src");
     await shoot(page, "sheet-done");
     const lib = (await call("/api/generations?features=turnaround&limit=10")).items ?? [];
     check(`${tag}: the film is in the feed (Turnaround · in the Library's list)`, lib.some((g) => g.op === "concat" && g.status === "succeeded"), JSON.stringify(lib.map((g) => [g.op, g.status])));
@@ -190,6 +204,8 @@ for (const [size, scheme] of [
     await flyDialog.getByRole("radio", { name: "Tilted ring" }).click();
     check(`${tag}: a move is picked`, (await flyDialog.getByRole("radio", { name: "Tilted ring" }).getAttribute("aria-checked")) === "true");
   }
+  const flyText = await flyDialog.innerText();
+  check(`${tag}: a character always asks the consent line (no "A real person" switch to turn it off)`, /I consent to this biometric data processing/.test(flyText) && !(await flyDialog.getByRole("switch", { name: "These pictures show a real person" }).count()));
   check(`${tag}: no sideways scroll with Fly around open`, (await sideways(page)) <= 1);
   if (phone) check(`${tag}: a finger drag scrolls Fly around`, await fingerScroll(page, flyDialog));
   await shoot(page, `fly-${size}-${scheme}`);
@@ -204,6 +220,10 @@ for (const [size, scheme] of [
       return items.find((g) => g.op === "camera-path") ?? null;
     }, "the fly-around in the character's feed");
     check(`${tag}: Fly around lands in the character's feed`, !!feed, feed?.modelId);
+    // The cloud run's film comes back to the dialog too (the demo provider stands in for fal).
+    const flyFilm = flyDialog.locator("video");
+    await flyFilm.waitFor({ timeout: 120_000 });
+    check(`${tag}: the cloud film shows in the dialog`, ((await flyFilm.getAttribute("src")) ?? "").startsWith("/api/files/"));
   }
   await page.keyboard.press("Escape");
 

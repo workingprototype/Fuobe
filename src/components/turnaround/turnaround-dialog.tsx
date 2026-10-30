@@ -5,6 +5,7 @@ import { AlertTriangle, Check, ImageOff, Loader2, Rotate3d, Sparkles } from "luc
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useSubmitGuard } from "@/components/shorts/hooks";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { Button } from "@/components/ui/button";
@@ -170,8 +171,10 @@ function TurnaroundForm({ pictures, name, realPerson: realDefault = false, eleme
   const setDuration = (d: number) => setPicked((x) => ({ ...(x.engine === engine ? x : { engine }), duration: d }));
   const [path, setPath] = useState<string | undefined>(undefined);
   const [aspectRatio, setAspect] = useState<"9:16" | "16:9">("9:16");
-  const [realPerson, setReal] = useState(realDefault);
+  // A character is a person whatever the switch says: the server asks for its consent line (or has it on file).
+  const [realPerson, setReal] = useState(realDefault || !!elementId);
   const [consent, setConsent] = useState(false);
+  const guard = useSubmitGuard();
 
   const body: TurnaroundBody = {
     engine,
@@ -194,11 +197,15 @@ function TurnaroundForm({ pictures, name, realPerson: realDefault = false, eleme
   });
   const p = preview.data;
   const make = useMutation({
-    mutationFn: async (b: TurnaroundBody) => (onRun ? onRun(b) : (await post<{ items: Generation[] }>("/api/turnaround", { ...b, requestId: crypto.randomUUID() })).items),
-    // The film: the joined clips, else the one video the run makes (the pictures drawn first are stills).
-    onSuccess: (items) => onStarted({ ids: items.map((g) => g.id), filmId: (items.find((g) => g.op === "concat") ?? items.find((g) => g.kind === "video") ?? items[0])?.id }),
+    // The request id stays the same for the same body until it succeeds, so a repeat (a lost answer, a second click)
+    // gets the first run. useSubmitGuard's id, not crypto.randomUUID: that is missing on a plain-http LAN address.
+    mutationFn: async ({ b, requestId }: { b: TurnaroundBody; requestId: string }): Promise<{ items: Generation[]; filmId?: string }> =>
+      onRun ? { items: await onRun(b) } : post<{ items: Generation[]; filmId: string }>("/api/turnaround", { ...b, requestId }),
+    // The film: the one the server names, else the joined clips, else the one video the run makes (drawn pictures are stills).
+    onSuccess: ({ items, filmId }) => onStarted({ ids: items.map((g) => g.id), filmId: filmId ?? (items.find((g) => g.op === "concat") ?? items.find((g) => g.kind === "video") ?? items[0])?.id }),
     onError: (e) => toast.error((e as Error).message),
   });
+  const makeIt = () => void guard(JSON.stringify(body), (requestId) => make.mutateAsync({ b: body, requestId })).catch(() => {});
 
   const usedRoute = p?.route ?? route;
   const camera = usedRoute === "camera";
@@ -318,11 +325,20 @@ function TurnaroundForm({ pictures, name, realPerson: realDefault = false, eleme
 
       {!fictional && (
         <section aria-label="Consent" className="space-y-2 rounded-xl border p-3">
-          <label className="flex items-center justify-between gap-3">
-            <span className="text-[13px] font-medium">A real person</span>
-            <Switch checked={realPerson} onCheckedChange={setReal} aria-label="These pictures show a real person" />
-          </label>
-          {realPerson ? (
+          {elementId ? (
+            // A character always is a person, as for a Soul ID: no switch to turn it off.
+            <p className="text-[13px] font-medium">Consent</p>
+          ) : (
+            <label className="flex items-center justify-between gap-3">
+              <span className="text-[13px] font-medium">A real person</span>
+              <Switch checked={realPerson} onCheckedChange={setReal} aria-label="These pictures show a real person" />
+            </label>
+          )}
+          {p?.consent === "on-file" ? (
+            <p className="flex items-start gap-1.5 text-[12px] leading-snug text-muted-foreground">
+              <Check className="mt-0.5 size-3.5 shrink-0" aria-hidden /> Confirmed when {name ?? "this character"} was trained for Soul ID: {SOUL_ID_COPY.consent}
+            </p>
+          ) : realPerson ? (
             <label className="flex items-start gap-2 text-[12px] leading-snug text-muted-foreground">
               <Checkbox checked={consent} onCheckedChange={(v) => setConsent(v === true)} className="mt-0.5" aria-label="I confirm the consent line" />
               <span>{SOUL_ID_COPY.consent}</span>
@@ -360,7 +376,7 @@ function TurnaroundForm({ pictures, name, realPerson: realDefault = false, eleme
         <span className="font-mono text-[12px] whitespace-nowrap text-muted-foreground" aria-live="polite">
           {preview.isFetching && !p ? "Pricing…" : price}
         </span>
-        <Button onClick={() => make.mutate(body)} disabled={!p || !!p.blocker || preview.isError || make.isPending || preview.isFetching}>
+        <Button onClick={makeIt} disabled={!p || !!p.blocker || preview.isError || make.isPending || preview.isFetching}>
           {make.isPending ? <Loader2 className="animate-spin" /> : <Rotate3d />} {flyAround ? "Fly around" : "Make turnaround"}
         </Button>
       </div>

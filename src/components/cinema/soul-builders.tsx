@@ -360,7 +360,8 @@ function CastTurnaround({ projectId, folderId, engine, name, results, picked }: 
       <p className="min-w-0 flex-1 text-[12px] text-muted-foreground">{picked ? "Film the picked variant all the way round, as a new take." : "Film the first variant all the way round, as a new take."}</p>
       <TurnaroundButton
         key={g.id}
-        pictures={sheetPictures(g)}
+        // The picked variant is the sheet the dialog starts on (a cloud batch is one generation with every variant).
+        pictures={sheetPictures(g, picked)}
         name={name}
         engine={engine}
         fictional
