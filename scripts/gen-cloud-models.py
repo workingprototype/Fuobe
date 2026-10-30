@@ -472,9 +472,10 @@ model("minimax-h3-max", "MiniMax H3 Max", "MiniMax", "hailuo", "video", "Top-tie
       # Build plan N7-6 (Turnaround video): fal bills every H3 Max route per second by resolution (the records' price
       # text); the flat rate read from the image-to-video record was its 480P launch price. Reference-to-video has no
       # launch price, so the list rates are used for all of them (image and text to video cost less until 2026-10-31).
-      # Four square references are included; each further one adds about $0.02 (not counted here).
-      pricing=("second", 0.08, "768P; 480P $0.05, 1080P $0.16 — image and text to video at the launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31; reference to video: 4 square references included, about $0.02 for each one after",
-               {"byResolution": {"480P": 0.05, "768P": 0.08, "1080P": 0.16}}))
+      # Four square references are included; each further one adds about $0.02 (not counted here). 2K is extend's alone
+      # ($0.32/s, its record). No Pricing.promo: it would apply to every route, and reference to video has no launch price.
+      pricing=("second", 0.08, "768P; 480P $0.05, 1080P $0.16, 2K $0.32 (extend) — image and text to video at the launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31; reference to video: 4 square references included, about $0.02 for each one after",
+               {"byResolution": {"480P": 0.05, "768P": 0.08, "1080P": 0.16, "2K": 0.32}}))
 # Build plan N7-5 (Fly path in Cinema's 3D scene): H3 Max following a keyframed camera path from one still. A hidden
 # helper (Cinema's "Film this path" picks it), priced per second by resolution: fal's launch rates until 2026-10-31, then
 # the list rates (Pricing.promo). Prompt expansion stays off so the user's motion words reach the model as written.

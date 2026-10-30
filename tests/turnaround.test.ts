@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { presetKeys } from "@/lib/camera-path";
+import { DEFAULT_MOTION, presetKeys } from "@/lib/camera-path";
 import { getModel } from "@/lib/catalog";
+import { estimateCost } from "@/lib/catalog/plan";
 import { buildPayload } from "@/lib/catalog/payload";
 import { ANGLES_2511_LORA } from "@/lib/catalog/open-tools";
 import {
@@ -11,6 +12,7 @@ import {
   TURN_SIDES,
   WORLDCAST,
   anglesHorizontal,
+  cameraWords,
   elementPictures,
   pathAzimuth,
   planTurnaround,
@@ -95,6 +97,25 @@ describe("the pictures a sheet or a character offers", () => {
       { url: "/api/files/me.jpg", label: "Photo 1", side: "front" },
       { url: "/api/files/me2.jpg", label: "Photo 2" },
     ]);
+  });
+
+  it("offers every variant of a cloud batch as a sheet, the picked one first (by its url or the one it was finished from)", () => {
+    // Fuobe Soul makes a Soul Cast batch as one generation with a sheet per variant (the open engine makes one job each).
+    const batch = gen([
+      { url: "/v1.png", kind: "image" },
+      { url: "/v2.png", kind: "image", meta: { original: "/v2-raw.png" } },
+      { url: "/v3.png", kind: "image" },
+    ]);
+    const pics = sheetPictures(batch, "/v2.png");
+    expect(pics).toEqual([
+      { url: "/v2.png", label: "Sheet 2", sheet: true },
+      { url: "/v1.png", label: "Sheet 1", sheet: true },
+      { url: "/v3.png", label: "Sheet 3", sheet: true },
+    ]);
+    expect(startingViews(pics).sheet).toBe("/v2.png");
+    expect(startingViews(sheetPictures(batch, "/v2-raw.png")).sheet).toBe("/v2.png");
+    // Nothing picked: the first variant.
+    expect(startingViews(sheetPictures(batch)).sheet).toBe("/v1.png");
   });
 
   it("takes a character's wide picture as its sheet and the first other one as its front", () => {
@@ -184,6 +205,17 @@ describe("the open engine: Frames mode's chain", () => {
   });
 });
 
+describe("the camera route's words", () => {
+  it("uses the orbit words only for a level full ring, and N7-5's neutral words for any other move", () => {
+    const words = (path?: string, prompt?: string) => planTurnaround({ engine: "cloud", views: views("front"), ...(path && { path }), ...(prompt && { prompt }) }).steps[0].request.prompt;
+    expect(words()).toBe(ORBIT_PROMPT);
+    expect(words("orbit_360_cw")).toBe(ORBIT_PROMPT);
+    for (const path of ["zoom_in", "zoom_out", "orbit_90_cw", "orbit_90_ccw", "orbit_180_push", "orbit_tilt_20"]) expect(words(path), path).toBe(DEFAULT_MOTION);
+    expect(cameraWords("zoom_in", "slow")).toBe(`${DEFAULT_MOTION}. slow`);
+    expect(cameraWords("orbit_360")).toBe(ORBIT_PROMPT);
+  });
+});
+
 describe("the cloud", () => {
   it("takes the camera path from a single front view, an exact clockwise orbit by default: $0.40 for 5 s at 768P", () => {
     const plan = planTurnaround({ engine: "cloud", views: views("front") });
@@ -203,11 +235,22 @@ describe("the cloud", () => {
     const r = plan.steps[0].request;
     expect(r).toMatchObject({ modelId: "minimax-h3-max", op: "ref2v", inputs: { images: [V.front, V.right, V.back, V.left] }, params: { duration: 5, resolution: "768P", aspectRatio: "9:16" } });
     expect(r.prompt).toMatch(/^Image 1 is the person's front view, Image 2 is their right side, Image 3 is their back, Image 4 is their left side\. The camera orbits 360 degrees/);
+    // It starts and ends on the front: the front is also the last frame.
+    expect(r.inputs?.endImage).toBe(V.front);
     // With a sheet: no sides drawn (the sheet shows them), and it is the last reference.
     const sheet = planTurnaround({ engine: "cloud", views: views("front", "back"), sheet: SHEET });
     expect(sheet.fills).toEqual([]);
     expect(sheet.steps[0].request.inputs?.images).toEqual([V.front, V.back, SHEET]);
     expect(sheet.steps[0].request.prompt).toMatch(/Image 3 is a turnaround sheet of the same person/);
+  });
+
+  it("ends on a front drawn from the sheet when no picture shows the front", () => {
+    const plan = planTurnaround({ engine: "cloud", sheet: SHEET });
+    expect(plan.route).toBe("references");
+    const main = plan.steps.at(-1)!;
+    expect(main.request.chain).toEqual([{ slot: "images", at: 0 }, { slot: "endImage" }]);
+    expect(main.after).toEqual(["front", "front"]);
+    expect(main.request.inputs).toEqual({ images: [SHEET] });
   });
 
   it("draws missing sides with Qwen Multiple Angles ($0.035 each) and places them among the references", () => {
@@ -251,6 +294,12 @@ describe("the cloud", () => {
     }
   });
 
+  it("prices H3 Max per second by resolution, 2K (extend's alone) at $0.32", () => {
+    const h3 = getModel("minimax-h3-max")!;
+    const at = (resolution: string, op: "ref2v" | "extend") => estimateCost(h3, { duration: 5, resolution }, 1, op);
+    expect([at("480P", "ref2v"), at("768P", "ref2v"), at("1080P", "ref2v"), at("2K", "extend")]).toEqual([0.25, 0.4, 0.8, 1.6]);
+  });
+
   it("picks another route when a model is switched off in Settings → Models & licences", () => {
     const plan = planTurnaround({ engine: "cloud", views: views("front", "right", "back", "left") }, { has: (id) => id !== "minimax-h3-max" });
     expect(plan.routes).toEqual(["keyframes", "camera"]);
@@ -263,10 +312,11 @@ describe("the reference-to-video payload", () => {
     const plan = planTurnaround({ engine: "cloud", views: views("front", "right", "back", "left"), sheet: SHEET });
     const r = plan.steps[0].request;
     const route = getModel("minimax-h3-max")!.routes.find((x) => x.op === "ref2v")!;
-    const body = buildPayload(route.map!, { prompt: r.prompt, images: r.inputs?.images, ...(r.params as GenInput) });
+    const body = buildPayload(route.map!, { prompt: r.prompt, images: r.inputs?.images, endImage: r.inputs?.endImage, ...(r.params as GenInput) });
     expect(body).toMatchObject({
       reference_image_urls: [V.front, V.right, V.back, V.left, SHEET],
       image_url: V.front,
+      end_image_url: V.front,
       duration: 5,
       resolution: "768P",
       aspect_ratio: "9:16",

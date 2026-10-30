@@ -6308,11 +6308,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "second",
       "usd": 0.08,
-      "note": "768P; 480P $0.05, 1080P $0.16 \u2014 image and text to video at the launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31; reference to video: 4 square references included, about $0.02 for each one after",
+      "note": "768P; 480P $0.05, 1080P $0.16, 2K $0.32 (extend) \u2014 image and text to video at the launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31; reference to video: 4 square references included, about $0.02 for each one after",
       "byResolution": {
         "480P": 0.05,
         "768P": 0.08,
-        "1080P": 0.16
+        "1080P": 0.16,
+        "2K": 0.32
       }
     }
   },

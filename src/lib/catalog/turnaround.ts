@@ -13,7 +13,7 @@
  * N7-9 later puts WorldCast behind the same buttons on the open engine; its side names and angles are written down here.
  * Pure: the browser prices it live, the server runs the same steps (src/server/turnaround.ts, Cinema's "turnaround").
  */
-import { PATH_PRESETS, presetKeys, type CameraKey } from "@/lib/camera-path";
+import { DEFAULT_MOTION, PATH_PRESETS, presetKeys, type CameraKey } from "@/lib/camera-path";
 import { poseWords } from "@/lib/scene3d";
 import { getModel, getPreset } from "./index";
 import { onEngine } from "./engines";
@@ -155,8 +155,17 @@ export const TURN_PATHS = [
 ];
 export const DEFAULT_PATH = TURN_PATHS[0].id;
 
-/** The words every turnaround films to (the open engine's and FLUX 3 Max's frames, the camera path). */
+/** The words a turnaround films to (the open engine's and FLUX 3 Max's frames, the camera path's level rings). */
 export const ORBIT_PROMPT = "The camera orbits 360 degrees around the person at a constant height; the person stands naturally";
+
+/**
+ * The camera route's words for a path: the orbit's own words only for a level full ring (Orbit 360°, either way round);
+ * any other move (an arc, a tilted ring, a dolly) gets N7-5's neutral words, so the prompt never fights the path the
+ * model follows exactly (prompt expansion is off on this route, so nothing reconciles the two).
+ */
+export function cameraWords(path: string, extra?: string): string {
+  return withWords(/^orbit_360(_c?cw)?$/.test(path) ? ORBIT_PROMPT : DEFAULT_MOTION, extra);
+}
 
 const FILL_KEEP = "Keep the same person: identity, face, hair, body, outfit, lighting and plain background";
 const SHEET_FRONT_PROMPT =
@@ -201,21 +210,25 @@ export interface TurnPicture {
 const TILES: { label: string; side?: TurnSide }[] = [{ label: "Front", side: "front" }, { label: "Three-quarter" }, { label: "Profile" }, { label: "Back", side: "back" }];
 
 /**
- * The pictures a finished Character Sheet or Soul Cast result offers: the views its graph cut (front and back known; the
- * three-quarter and profile turn either way, so the user places them), the sheet itself, and the photos it was made from
- * (the first is the front when nothing else is).
+ * The pictures a finished Character Sheet or Soul Cast result offers: its whole sheets, the views its graph cut (front
+ * and back known; the three-quarter and profile turn either way, so the user places them), and the photos it was made
+ * from (the first is the front when nothing else is). Every picture that isn't a cut view is a whole sheet: the graph's
+ * own, or each variant of a cloud batch, which one generation returns as its outputs. `picked` (a variant the user chose,
+ * by its url or the url it was finished from) comes first, so the dialog starts on it.
  */
-export function sheetPictures(g: Pick<Generation, "outputs" | "request">): TurnPicture[] {
-  const out: TurnPicture[] = [];
+export function sheetPictures(g: Pick<Generation, "outputs" | "request">, picked?: string): TurnPicture[] {
   const images = g.outputs.filter((o) => o.kind === "image");
   const tiles = images.filter((o) => o.meta?.role === "tiles");
-  images.forEach((o, i) => {
-    if (o.meta?.role === "tiles") {
-      const n = tiles.indexOf(o);
-      const tile = TILES[typeof o.meta?.index === "number" ? (o.meta.index as number) : n];
-      out.push({ url: o.url, label: tile?.label ?? `View ${n + 1}`, ...(tile?.side && { side: tile.side }) });
-    } else if (o.meta?.role === "sheet" || i === 0) out.push({ url: o.url, label: "Sheet", sheet: true });
-    else out.push({ url: o.url, label: `Picture ${i + 1}` });
+  const sheets = images.filter((o) => o.meta?.role !== "tiles");
+  const isPicked = (o: (typeof images)[number]) => !!picked && (o.url === picked || o.meta?.original === picked);
+  const out: TurnPicture[] = [...sheets.filter(isPicked), ...sheets.filter((o) => !isPicked(o))].map((o) => ({
+    url: o.url,
+    label: sheets.length > 1 ? `Sheet ${sheets.indexOf(o) + 1}` : "Sheet",
+    sheet: true,
+  }));
+  tiles.forEach((o, n) => {
+    const tile = TILES[typeof o.meta?.index === "number" ? (o.meta.index as number) : n];
+    out.push({ url: o.url, label: tile?.label ?? `View ${n + 1}`, ...(tile?.side && { side: tile.side }) });
   });
   const photos = (g.request.inputs?.images ?? []).filter((u) => u.startsWith("/api/files/"));
   const hasFront = out.some((p) => p.side === "front");
@@ -514,6 +527,13 @@ export function planTurnaround(input: TurnaroundInput, ctx: TurnaroundContext = 
     if (sheet) list.push({ key: "sheet", src: { url: sheet } });
     frames = list.map((f) => ({ side: f.key, from: f.key === "sheet" ? "picture" : fromOf(f.src, f.key), ...("url" in f.src && { url: f.src.url }) }));
     const { images, chain, after } = gather(list.map((f) => f.src));
+    // The front is the first frame (Image 1 goes as image_url) and the last (end_image_url), so the turn comes back to it.
+    const front = sourceOf("front");
+    const inputs: GenerationRequest["inputs"] = { ...(images.length && { images }), ...(front && "url" in front && { endImage: front.url }) };
+    if (front && "key" in front) {
+      chain.push({ slot: "endImage" });
+      after.push(front.key);
+    }
     const max = model.options.maxImages ?? 9;
     if (list.length > max) blocker ??= `${model.name} takes up to ${max} references`;
     main = {
@@ -527,13 +547,15 @@ export function planTurnaround(input: TurnaroundInput, ctx: TurnaroundContext = 
           input.prompt,
         ),
         title,
-        ...(images.length && { inputs: { images } }),
+        ...(Object.keys(inputs).length && { inputs }),
         ...(chain.length && { chain }),
         params: { numOutputs: 1, duration, resolution: info.resolution, aspectRatio, ...seed },
       },
       ...(after.length && { after }),
     };
-    notes.push(`${model.name} takes ${list.length === 1 ? "the front view" : `the ${list.length} pictures`} as references and turns the camera from the words: identity holds, the path is loose`);
+    notes.push(
+      `${model.name} takes ${list.length === 1 ? "the front view" : `the ${list.length} pictures`} as references, starts and ends on the front, and turns the camera from the words: identity holds, the path is loose`,
+    );
   } else {
     const path = input.path && presetKeys(input.path) ? input.path : DEFAULT_PATH;
     const keys: CameraKey[] = presetKeys(path)!;
@@ -545,7 +567,7 @@ export function planTurnaround(input: TurnaroundInput, ctx: TurnaroundContext = 
         feature,
         modelId: model.id,
         op: "camera-path",
-        prompt: withWords(ORBIT_PROMPT, input.prompt),
+        prompt: cameraWords(path, input.prompt),
         title,
         ...(src && "url" in src && { inputs: { images: [src.url] } }),
         ...(src && "key" in src && { chain: [{ slot: "images" as const }] }),
@@ -610,4 +632,9 @@ export interface TurnaroundPreview {
   demo: boolean;
   /** The open engine: the most VRAM a step needs (GB). */
   gpuGb?: number;
+  /**
+   * A real person (the client says so, or a character, which always is): Soul ID's consent line is asked for, or it is
+   * on file from the character's Soul ID training.
+   */
+  consent?: "asked" | "on-file";
 }
