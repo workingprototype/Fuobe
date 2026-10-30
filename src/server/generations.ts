@@ -494,12 +494,14 @@ export function outputKind(op: Generation["op"], model: { kind: MediaKind }): Me
 
 // Live updates: every write to the table becomes an event (src/server/live.ts). A trashed row
 // (soft delete, when the table has one) leaves the feeds like a deleted one.
+// The live feed is the owner's (accounts don't get it): an account's runs are never sent on it.
 setResolver((ids) =>
-  ids.map((id): LiveEvent => {
+  ids.flatMap((id): LiveEvent[] => {
     const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as (Row & { deleted_at?: number | null; trashed_at?: number | null }) | undefined;
+    if (r && accountOf(r)) return [];
     const g = r && (toGeneration(r) as Generation & { deletedAt?: number | null; trashedAt?: number | null });
-    if (!r || !g || r.deleted_at || r.trashed_at || g.deletedAt || g.trashedAt) return { type: "deleted", id, json: JSON.stringify({ id }) };
-    return { type: "generation", id, json: JSON.stringify(g) };
+    if (!r || !g || r.deleted_at || r.trashed_at || g.deletedAt || g.trashedAt) return [{ type: "deleted", id, json: JSON.stringify({ id }) }];
+    return [{ type: "generation", id, json: JSON.stringify(g) }];
   }),
 );
 

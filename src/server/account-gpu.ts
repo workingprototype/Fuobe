@@ -65,10 +65,10 @@ export interface GpuInfo {
 }
 
 /** Ask the account's ComfyUI for /system_stats, the check the studio makes of its own. */
-export async function testGpu(gpu: AccountGpu, o: { resolve?: (host: string) => Promise<string[]>; timeoutMs?: number } = {}): Promise<GpuInfo> {
+export async function testGpu(gpu: AccountGpu, o: { resolve?: (host: string) => Promise<string[]>; timeoutMs?: number; maxBytes?: number } = {}): Promise<GpuInfo> {
   let res: Response;
   try {
-    res = await fetchPublic(`${gpu.url}/system_stats`, { headers: gpu.token ? { Authorization: `Bearer ${gpu.token}` } : {} }, { timeoutMs: o.timeoutMs ?? 10_000, deadlineMs: (o.timeoutMs ?? 10_000) + 5_000, maxBytes: 1 * 2 ** 20, resolve: o.resolve });
+    res = await fetchPublic(`${gpu.url}/system_stats`, { headers: gpu.token ? { Authorization: `Bearer ${gpu.token}` } : {} }, { timeoutMs: o.timeoutMs ?? 10_000, deadlineMs: (o.timeoutMs ?? 10_000) + 5_000, maxBytes: o.maxBytes ?? 1 * 2 ** 20, resolve: o.resolve });
   } catch (e) {
     throw new GpuError(`Couldn't reach your ComfyUI at ${gpu.url}: ${(e as Error).message}`);
   }
@@ -83,22 +83,38 @@ export async function testGpu(gpu: AccountGpu, o: { resolve?: (host: string) => 
 declare global {
   /** Each account's GPU as last asked (Your GPU: online or not, and what it is), for the status strip. */
   var __fuobeAccountGpus: Map<string, { url: string; at: number; online: boolean; info: GpuInfo }> | undefined;
+  /** The checks on their way, one per account: status requests that arrive meanwhile wait for it. */
+  var __fuobeAccountGpuChecks: Map<string, Promise<{ online: boolean } & GpuInfo>> | undefined;
 }
 
-/** Is the account's ComfyUI answering, and what is it? Asked at most every 30 s per account. */
+/** What a status check reads of /system_stats at most: a ComfyUI's answer is a few KB. */
+const STATUS_MAX_BYTES = 64 * 1024;
+
+/**
+ * Is the account's ComfyUI answering, and what is it? Asked at most every 30 s per account, and one check at a time:
+ * status requests that arrive while one is on its way share its answer.
+ */
 export async function gpuState(id: string, gpu: AccountGpu): Promise<{ online: boolean } & GpuInfo> {
   const cache = (globalThis.__fuobeAccountGpus ??= new Map());
   const hit = cache.get(id);
   if (hit && hit.url === gpu.url && Date.now() - hit.at < 30_000) return { online: hit.online, ...hit.info };
-  let online = false;
-  let info: GpuInfo = hit?.url === gpu.url ? hit.info : {};
-  try {
-    info = await testGpu(gpu, { timeoutMs: 5000 });
-    online = true;
-  } catch {}
-  cache.set(id, { url: gpu.url, at: Date.now(), online, info });
-  if (cache.size > 5000) cache.delete(cache.keys().next().value!);
-  return { online, ...info };
+  const checks = (globalThis.__fuobeAccountGpuChecks ??= new Map());
+  const key = `${id} ${gpu.url}`;
+  const going = checks.get(key);
+  if (going) return going;
+  const check = (async () => {
+    let online = false;
+    let info: GpuInfo = hit?.url === gpu.url ? hit.info : {};
+    try {
+      info = await testGpu(gpu, { timeoutMs: 5000, maxBytes: STATUS_MAX_BYTES });
+      online = true;
+    } catch {}
+    cache.set(id, { url: gpu.url, at: Date.now(), online, info });
+    if (cache.size > 5000) cache.delete(cache.keys().next().value!);
+    return { online, ...info };
+  })().finally(() => checks.delete(key));
+  checks.set(key, check);
+  return check;
 }
 
 /** What a visitor's status strip shows (GET /api/status): its own GPU, never the install's providers, servers or Demo mode. */

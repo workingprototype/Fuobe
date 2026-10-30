@@ -69,23 +69,38 @@ interface AuthFile {
   accounts?: Account[];
   /** Settings → Security: guests may browse and anyone may sign up (FUOBE_PUBLIC_SIGNUP overrides it). */
   publicSignup?: boolean;
+  /** In memory only: the file is there but can't be read or parsed. Sign-in stays on, nobody is signed in, nothing is written. */
+  unreadable?: true;
 }
 
 let cache: { mtime: number; data: AuthFile } | null = null;
+let warnedUnreadable = 0;
 
+/**
+ * The auth file. No file yet: no Settings password, no accounts (a new install). A file that is there but can't be read
+ * or parsed fails closed: sign-in stays on with nobody signed in, never an open studio, and nothing writes over it.
+ */
 function read(): AuthFile {
   try {
     const mtime = fs.statSync(FILE).mtimeMs;
     if (cache?.mtime === mtime) return cache.data;
-    const data = JSON.parse(fs.readFileSync(FILE, "utf8")) as AuthFile;
+    const data = JSON.parse(fs.readFileSync(FILE, "utf8")) as AuthFile | null;
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("not an object");
+    data.tokens ??= [];
     cache = { mtime, data };
     return data;
-  } catch {
-    return { secret: "", tokens: [] };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { secret: "", tokens: [] };
+    if (Date.now() - warnedUnreadable > 60 * 60_000) {
+      warnedUnreadable = Date.now();
+      console.warn(`[fuobe] ${FILE} can't be read (${(e as Error).message}): sign-in stays on and nobody can sign in until it is fixed or restored.`);
+    }
+    return { secret: "", tokens: [], unreadable: true };
   }
 }
 
 function write(data: AuthFile): void {
+  if (data.unreadable) throw new Error("The sign-in file (auth.json) can't be read. Fix or restore it: Fuobe won't write over it.");
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = `${FILE}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
@@ -101,12 +116,17 @@ const envPassword = () => process.env.FUOBE_PASSWORD || "";
 
 export function authStatus(): { enabled: boolean; fromEnv: boolean; tokens: Omit<ApiToken, "hash">[] } {
   const d = read();
-  return { enabled: !!(envPassword() || d.password), fromEnv: !!envPassword(), tokens: d.tokens.map(publicToken) };
+  return { enabled: !!(envPassword() || d.password || d.unreadable), fromEnv: !!envPassword(), tokens: d.tokens.map(publicToken) };
 }
 
 const publicToken = (t: ApiToken): Omit<ApiToken, "hash"> => ({ id: t.id, name: t.name, prefix: t.prefix, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt });
 
-export const authEnabled = () => !!(envPassword() || read().password);
+/** Sign-in is on: a password is set (FUOBE_PASSWORD or Settings), or the auth file can't be read (fail closed). */
+export const authEnabled = () => {
+  if (envPassword()) return true;
+  const d = read();
+  return !!(d.password || d.unreadable);
+};
 
 // ---------------------------------------------------------------------------
 // Passwords
@@ -348,8 +368,11 @@ export function accountsCsv(items = listAccounts()): string {
 
 export const accountById = (id: string): Account | undefined => read().accounts?.find((a) => a.id === id);
 
-/** The account's own ComfyUI, or null when it hasn't connected one. */
-export const accountGpu = (id: string): AccountGpu | null => accountById(id)?.gpu ?? null;
+/** The account's own ComfyUI, or null when it hasn't connected one or the owner switched the account off. */
+export const accountGpu = (id: string): AccountGpu | null => {
+  const a = accountById(id);
+  return a && !a.disabled ? (a.gpu ?? null) : null;
+};
 
 function withoutGpu(a: Account): Account {
   const copy = { ...a };

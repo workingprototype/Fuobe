@@ -390,9 +390,12 @@ export interface LibraryFacets {
   reviews: Partial<Record<ReviewStatus, number>>;
 }
 
-/** Counts for the Library's tabs and filters; helper steps are left out unless `steps` (as the lists do). */
+/**
+ * Counts for the owner's Library tabs and filters; helper steps are left out unless `steps` (as the lists do). Accounts'
+ * runs are theirs, never counted here (public sign-up).
+ */
 export function libraryFacets(opts: { steps?: boolean } = {}): LibraryFacets {
-  const all = "FROM generations g LEFT JOIN generation_trash t ON t.generation_id = g.id WHERE t.generation_id IS NULL";
+  const all = "FROM generations g LEFT JOIN generation_trash t ON t.generation_id = g.id WHERE t.generation_id IS NULL AND json_extract(g.request_json, '$.account') IS NULL";
   const live = opts.steps ? all : `${all} AND NOT ${HELPER_SQL}`;
   const models = db().prepare(`SELECT g.model_id AS id, COUNT(*) AS n ${live} GROUP BY g.model_id ORDER BY n DESC`).all() as { id: string; n: number }[];
   const kinds = db().prepare(`SELECT g.kind AS kind, COUNT(*) AS n ${live} GROUP BY g.kind`).all() as { kind: MediaKind; n: number }[];

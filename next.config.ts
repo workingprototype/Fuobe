@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
+  poweredByHeader: false,
   partialPrefetching: true,
   experimental: {
     // The sign-in proxy holds every request body it sees in memory, up to this size, even one it refuses: a small limit
@@ -14,6 +15,13 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      // Pages: a fixed policy that holds without nonces (pages are prerendered): no plugins, no <base> elsewhere, no
+      // framing by other sites, forms post only here. Stored files (/api/files, a share's /s/<token>/f/) keep their own,
+      // stricter policy (src/server/file-response.ts).
+      {
+        source: "/:path((?!api/|s/[^/]+/f/).*)",
+        headers: [{ key: "Content-Security-Policy", value: "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'" }],
+      },
       // Vendored scripts (public/vendor: the 3D viewer's meshopt decoder) keep their name across upgrades:
       // a day, then revalidated in the background.
       { source: "/vendor/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }] },
