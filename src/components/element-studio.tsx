@@ -9,9 +9,12 @@ import { StudioSkeleton } from "@/components/skeletons";
 import { StudioPage } from "@/components/studio/studio-page";
 import type { StudioConfig } from "@/components/studio/studio-context";
 import { TrainDialog } from "@/components/train-dialog";
+import { TurnaroundButton, useCharacterPictures } from "@/components/turnaround/turnaround-dialog";
 import { Button } from "@/components/ui/button";
 import { useElement } from "@/lib/api";
 import { loraFamily, TRAINING_FAMILIES } from "@/lib/catalog/training";
+
+const NO_REFS: string[] = [];
 
 /**
  * A studio for one element: the prompt starts with its @handle, references are resolved by the
@@ -22,6 +25,8 @@ export function ElementStudio({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
   const [training, setTraining] = useState(false);
   const el = q.data;
+  // A character's pictures (a wide one is its sheet) for "Fly around this character".
+  const pictures = useCharacterPictures(el?.kind === "character" ? el.references.slice(0, 12) : NO_REFS);
   const config = useMemo<StudioConfig | null>(() => {
     if (!el) return null;
     // A trained Soul ID runs on its family's lead model (Fuobe Soul, Soul HD, FLUX…): start there, on each engine it has.
@@ -95,6 +100,9 @@ export function ElementStudio({ id }: { id: string }) {
                 {el.status === "training" ? <Loader2 className="animate-spin" /> : <GraduationCap />}
                 <span className="hidden sm:inline">{trainLabel}</span>
               </Button>
+            )}
+            {el.kind === "character" && el.references.length > 0 && (
+              <TurnaroundButton flyAround label="Fly around" variant="ghost" compact pictures={pictures} name={el.name} elementId={el.id} realPerson />
             )}
             <Button variant="ghost" size="sm" onClick={() => setEditing(true)} aria-label={`Edit ${el.name}`}>
               <Pencil /> <span className="hidden sm:inline">Edit</span>

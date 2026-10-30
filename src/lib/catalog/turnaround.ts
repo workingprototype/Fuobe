@@ -585,3 +585,24 @@ export function planTurnaround(input: TurnaroundInput, ctx: TurnaroundContext = 
     costUsd: cost === null ? null : Math.round(cost * 1000) / 1000,
   };
 }
+
+/** What /api/turnaround?preview=1 answers: the plan as this install would run it (src/server/turnaround.ts). */
+export interface TurnaroundPreview {
+  route: TurnRoute;
+  routes: TurnRoute[];
+  model: { id: string; name: string };
+  duration: number;
+  durations: number[];
+  frames: TurnFrame[];
+  fills: TurnSide[];
+  frontFromSheet: boolean;
+  fill: boolean;
+  steps: number;
+  notes: string[];
+  blocker?: string;
+  costUsd: number | null;
+  /** Some step runs on the demo provider (no key, or ComfyUI not reachable, with demo mode on). */
+  demo: boolean;
+  /** The open engine: the most VRAM a step needs (GB). */
+  gpuGb?: number;
+}

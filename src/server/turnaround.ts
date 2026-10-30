@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getModel } from "@/lib/catalog";
 import { routesFor } from "@/lib/catalog/plan";
-import { planTurnaround, type TurnaroundContext, type TurnaroundInput, type TurnaroundPlan, type TurnStep } from "@/lib/catalog/turnaround";
+import { planTurnaround, type TurnaroundContext, type TurnaroundInput, type TurnaroundPlan, type TurnaroundPreview, type TurnStep } from "@/lib/catalog/turnaround";
 import type { Generation } from "@/lib/catalog/types";
 import { cancelGeneration, createGenerations, previewChained, previewGeneration } from "./generations";
 import { isOffered } from "./model-access";
@@ -92,25 +92,6 @@ function gpuGb(plan: TurnaroundPlan): number | undefined {
   return most;
 }
 
-export interface TurnaroundPreview {
-  route: TurnaroundPlan["route"];
-  routes: TurnaroundPlan["routes"];
-  model: { id: string; name: string };
-  duration: number;
-  durations: number[];
-  frames: TurnaroundPlan["frames"];
-  fills: TurnaroundPlan["fills"];
-  frontFromSheet: boolean;
-  fill: boolean;
-  steps: number;
-  notes: string[];
-  blocker?: string;
-  costUsd: number | null;
-  /** Some step runs on the demo provider (no key, or ComfyUI not reachable, with demo mode on). */
-  demo: boolean;
-  /** The open engine: the most VRAM a step needs (GB). */
-  gpuGb?: number;
-}
 
 /** The run as the server would make it, priced, without running it. */
 export function previewTurnaround(input: TurnaroundRequest): TurnaroundPreview {
