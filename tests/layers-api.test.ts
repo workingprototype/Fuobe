@@ -228,7 +228,7 @@ describe("layers API", () => {
     expect(view.doc).toMatchObject({ width: 1920, height: 1080, decomposed: false, source });
     expect(view.jobs).toEqual([]);
 
-    res = await list.GET();
+    res = await list.GET(new Request("http://localhost/"));
     const items = ((await res.json()) as { items: LayerProject[] }).items;
     expect(items.map((p) => p.id)).toEqual([id]);
 
@@ -246,7 +246,7 @@ describe("layers API", () => {
     expect(started.generationIds).toHaveLength(1);
 
     // The card says it's processing; a second decomposition is refused while it runs.
-    res = await list.GET();
+    res = await list.GET(new Request("http://localhost/"));
     expect(((await res.json()) as { items: LayerProject[] }).items[0].status).toBe("processing");
     res = await jobs.POST(req("POST", { tool: "decompose", engine: "cloud", image: source, frame: [0, 0, 1920, 1080] }), ctx({ id }));
     expect(res.status).toBe(409);
@@ -458,7 +458,7 @@ describe("layers API", () => {
     // Until the editor lays the layers out, the card says they're ready to see (not “Processing…” for good).
     expect(v.project).toMatchObject({ status: "unopened", layers: 1 });
     expect(v.project.pendingLayers).toBe(v.jobs[0].result?.outputs.filter((o) => o.kind === "image").length);
-    const card = ((await (await list.GET()).json()) as { items: LayerProject[] }).items.find((p) => p.id === v.project.id);
+    const card = ((await (await list.GET(new Request("http://localhost/"))).json()) as { items: LayerProject[] }).items.find((p) => p.id === v.project.id);
     expect(card?.status).toBe("unopened");
     const bad = await list.POST(req("POST", { source, width: 512, height: 512, generationId: "nope" }));
     expect(bad.status).toBe(400);

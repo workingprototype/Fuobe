@@ -238,7 +238,7 @@ describe("moodboards", () => {
       expect(res.status).toBe(409);
       expect((await res.json()).error).toMatch(/cloud APIs only/);
       expect(moodboards.getMoodboard(m.id)!.lora).toBeNull();
-      const targets = (await (await trainRoute.GET()).json()).targets as { id: string; price: string; blocker: string | null; demo: boolean }[];
+      const targets = (await (await trainRoute.GET(new Request("http://localhost/"))).json()).targets as { id: string; price: string; blocker: string | null; demo: boolean }[];
       expect(targets.map((t) => [t.id, t.price])).toEqual([
         ["aitk-z-image", "Free"],
         ["fal-z-image-style", "≈ $3.39 (1,500 steps)"],

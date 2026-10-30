@@ -1,6 +1,8 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { createPalette, listPalettes, signatureCaps } from "@/server/palettes";
+import { rethrowAccess } from "@/server/access/errors";
+import { handler } from "@/server/access/route";
 
 const Body = z.object({
   name: z.string().trim().min(1).max(60),
@@ -11,17 +13,18 @@ const Body = z.object({
 });
 
 /** Your colour signatures and the 50 built-in palettes, plus which models take a palette natively. */
-export async function GET() {
+export const GET = handler({ access: "signed-in" }, async () => {
   await connection();
   return Response.json({ items: listPalettes(), caps: signatureCaps() });
-}
+});
 
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Give the palette a name and 1–12 colours" }, { status: 400 });
   try {
     return Response.json(createPalette(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 400 });
   }
-}
+});

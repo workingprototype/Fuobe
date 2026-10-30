@@ -3,6 +3,8 @@ import { testCivitaiKey } from "@/server/loras";
 import { testAiToolkit } from "@/server/training";
 import { PROVIDERS } from "@/server/providers";
 import { validateSetting, withCandidates, type SettingName } from "@/server/settings";
+import { rethrowAccess } from "@/server/access/errors";
+import { handler } from "@/server/access/route";
 
 /**
  * Test a provider's connection. With `value` (the provider's main setting) or `values` (by setting
@@ -11,7 +13,7 @@ import { validateSetting, withCandidates, type SettingName } from "@/server/sett
  * unsaved one), so a provider that reaches several servers tests that one: the Anthropic key is
  * checked with Anthropic even when text steps run on Ollama. Nothing is stored here.
  */
-export async function POST(request: Request) {
+export const POST = handler({ access: "perm:install.settings" }, async (request: Request) => {
   const body = (await request.json().catch(() => ({}))) as { provider?: unknown; value?: unknown; values?: unknown; field?: unknown };
   const provider = body.provider;
   // The civitai key isn't a model provider's (it downloads LoRAs), nor is AI-Toolkit (it trains them).
@@ -22,6 +24,7 @@ export async function POST(request: Request) {
   try {
     for (const [name, v] of Object.entries(values)) validateSetting(name as SettingName, v);
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ ok: false, detail: (e as Error).message }, { status: 400 });
   }
   const settings: readonly string[] = PROVIDER_SETTINGS[provider];
@@ -34,6 +37,7 @@ export async function POST(request: Request) {
     const hint = !res.ok && Object.entries(values).map(([n, v]) => settingProblem(n, v ?? "")).find(Boolean);
     return Response.json(hint && !res.detail.includes(hint) ? { ...res, detail: `${res.detail} — ${hint}` } : res);
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ ok: false, detail: `Couldn't run the test: ${(e as Error).message}` });
   }
-}
+});

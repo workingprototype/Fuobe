@@ -2,6 +2,7 @@ import "server-only";
 import { hostAllowed } from "../auth";
 import { db } from "../db";
 import { installMode, signInOn } from "../mode";
+import { LOCAL_OWNER } from "../access/actor";
 import { ensurePendingPerson, getAuth, sessionCookieName } from "./auth";
 import { tokenFromHeader } from "./tokens";
 
@@ -15,8 +16,8 @@ import { tokenFromHeader } from "./tokens";
  * 3. Just me (Personal, sign-in off, a local address) → the owner, via `local`.
  * 4. Otherwise nobody.
  *
- * The proxy uses it optimistically; route handlers that need a person ask again (acc-2 puts an actor on every
- * route).
+ * The proxy uses it optimistically; every route handler asks again through handler() (src/server/access/route.ts),
+ * which also holds the restricted session kinds' registry and the actor-substitution seam.
  */
 
 export type ActorVia = "session" | "token" | "local" | "system" | "runner" | "scim";
@@ -38,15 +39,14 @@ export interface Principal {
   actor: Actor | null;
   /** Why there is no actor: INVALID_TOKEN (401), or a refusal code (ACCOUNT_PENDING…). */
   code?: string;
+  /** The person a refusal code is about (their token or session was valid, they may not act now): for the audit log. */
+  refused?: { userId: string; via: "token" | "session" };
   /** The session is due for its daily refresh, which only a POST performs (deferSessionRefresh). */
   needsRefresh?: boolean;
 }
 
-/**
- * Restricted session kinds and the routes each may reach (packages add theirs: two-step enrolment, view-as…). A
- * restricted actor outside its routes is treated as signed out.
- */
-export const RESTRICTED_KINDS = new Map<string, (pathname: string) => boolean>();
+/** The header Better Auth and the audit log read the client's address from; only the proxy writes it. */
+export const CLIENT_IP_HEADER = "x-fuobe-client-ip";
 
 interface PersonRow {
   id: string;
@@ -76,8 +76,6 @@ export function hasSessionCookie(request: Request): boolean {
   return (request.headers.get("cookie") ?? "").split(";").some((c) => c.trim().startsWith(`${name}=`));
 }
 
-const LOCAL: Actor = { userId: "u_owner", role: "owner", via: "local", scopes: ["full"] };
-
 async function resolve(request: Request): Promise<Principal> {
   const local = justMe(request);
   const bearer = tokenFromHeader(request.headers.get("authorization"));
@@ -87,7 +85,7 @@ async function resolve(request: Request): Promise<Principal> {
     const p = person(bearer.userId);
     if (!p) return { actor: null, code: "INVALID_TOKEN" };
     const code = blocked(p);
-    if (code) return { actor: null, code };
+    if (code) return { actor: null, code, refused: { userId: p.id, via: "token" } };
     return { actor: { userId: p.id, role: p.role, via: "token", tokenId: bearer.tokenId, scopes: bearer.scopes, workspacePin: bearer.workspacePin } };
   }
   if (hasSessionCookie(request)) {
@@ -97,14 +95,14 @@ async function resolve(request: Request): Promise<Principal> {
     if (found) {
       const p = ensurePendingPerson(found.user.id);
       const code = blocked(p);
-      if (code) return { actor: null, code };
+      if (code) return { actor: null, code, refused: { userId: p.id, via: "session" } };
       return {
         actor: { userId: p.id, role: p.role, via: "session", sessionId: found.session.id, scopes: ["full"] },
         needsRefresh: !!(found as { needsRefresh?: boolean }).needsRefresh,
       };
     }
   }
-  if (local) return { actor: LOCAL };
+  if (local) return { actor: LOCAL_OWNER };
   return { actor: null };
 }
 
@@ -117,15 +115,6 @@ export function resolvePrincipal(request: Request): Promise<Principal> {
     memo.set(request, p);
   }
   return p;
-}
-
-/** Act as someone else for this request (view-as, §9.5 E5b). The real actor is kept as the impersonator. */
-export function substituteActor(actor: Actor, request: Request): void {
-  const real = memo.get(request);
-  memo.set(
-    request,
-    (real ?? Promise.resolve({ actor: null } as Principal)).then((r) => ({ actor: { ...actor, impersonatorId: r.actor?.userId ?? actor.impersonatorId } })),
-  );
 }
 
 /**

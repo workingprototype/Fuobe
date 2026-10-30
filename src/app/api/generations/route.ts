@@ -3,6 +3,8 @@ import { OPERATION_LABELS } from "@/lib/catalog/types";
 import { createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
 import { GenerationRequestSchema } from "@/server/request-schema";
+import { rethrowAccess } from "@/server/access/errors";
+import { handler } from "@/server/access/route";
 
 /**
  * List generations, newest first. Filters: kind / kinds, features (`x*` = prefix), models, statuses,
@@ -10,14 +12,14 @@ import { GenerationRequestSchema } from "@/server/request-schema";
  * paging with before=<createdAt>:<id> of the last row (<deletedAt>:<id> in the Trash; a bare
  * timestamp still works) and limit (≤ 200).
  */
-export async function GET(request: Request) {
+export const GET = handler({ access: "signed-in" }, async (request: Request) => {
   await connection();
   ensureTrashPurge();
   return Response.json({ items: listGenerations(listOptionsFrom(new URL(request.url).searchParams)) });
-}
+});
 
 /** Start a generation; `?preview=1` only says what it would run as (model, operation, jobs, outputs, cost). */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = GenerationRequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
@@ -35,6 +37,7 @@ export async function POST(request: Request) {
     const notes = [...new Set(items.flatMap((g) => g.notes ?? []))];
     return Response.json({ items, ...(notes.length && { notes }) }, { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
-}
+});

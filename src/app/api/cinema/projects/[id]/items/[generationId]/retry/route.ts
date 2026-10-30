@@ -1,10 +1,11 @@
 import { retryItem } from "@/server/cinema";
 import { handle } from "@/server/cinema-schemas";
+import { handler } from "@/server/access/route";
 
 /** Run a failed take again (same request, same folder). */
-export async function POST(_req: Request, ctx: RouteContext<"/api/cinema/projects/[id]/items/[generationId]/retry">) {
+export const POST = handler({ access: "signed-in" }, async (_req: Request, ctx: RouteContext<"/api/cinema/projects/[id]/items/[generationId]/retry">) => {
   return handle(async () => {
     const { id, generationId } = await ctx.params;
     return Response.json({ items: retryItem(id, generationId) }, { status: 201 });
   });
-}
+});

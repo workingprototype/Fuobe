@@ -64,7 +64,7 @@ type Row = Record<string, unknown> & { id: string; status: string; variant: stri
 
 const ctx = (params: Record<string, unknown>) => ({ params: Promise.resolve(params) }) as never;
 const ROUTES: [string, RegExp, (req: Request, m: RegExpExecArray) => Promise<Response>][] = [
-  ["GET", /^\/api\/status$/, () => status.GET()],
+  ["GET", /^\/api\/status$/, () => status.GET(new Request("http://localhost/"))],
   ["GET", /^\/api\/models$/, (r) => models.GET(r)],
   ["POST", /^\/api\/generations$/, (r) => generations.POST(r)],
   ["GET", /^\/api\/generations\/([^/]+)$/, (r, m) => generation.GET(r, ctx({ id: m[1] }))],

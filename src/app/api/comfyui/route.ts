@@ -1,8 +1,9 @@
 import { connection } from "next/server";
 import { loadManifest, modelInventory, probeComfy } from "@/server/providers/comfyui";
+import { handler } from "@/server/access/route";
 
 /** Workflow library + which required models are present on the connected server. */
-export async function GET() {
+export const GET = handler({ access: "signed-in" }, async () => {
   await connection();
   const manifest = loadManifest();
   const reachable = await probeComfy(true);
@@ -17,4 +18,4 @@ export async function GET() {
       models: w.models.map((m) => ({ ...m, present: inventory ? present.has(m.file) : null })),
     })),
   });
-}
+});

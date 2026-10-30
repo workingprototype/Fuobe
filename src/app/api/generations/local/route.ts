@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { recordLocalGeneration } from "@/server/generations";
+import { rethrowAccess } from "@/server/access/errors";
+import { handler } from "@/server/access/route";
 
 const Body = z.object({
   feature: z.string().min(1).max(80),
@@ -12,12 +14,13 @@ const Body = z.object({
 });
 
 /** Record a result rendered in the browser (e.g. a colour grade) so it shows up in the library. */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid result" }, { status: 400 });
   try {
     return Response.json(recordLocalGeneration(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
-}
+});

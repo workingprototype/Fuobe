@@ -28,6 +28,7 @@ import {
 } from "@/lib/catalog/training";
 import { TRAINING_REPLACED_BY } from "@/lib/catalog/replaced";
 import { DEFAULT_AI_TOOLKIT_URL } from "@/lib/connections";
+import { AccountOffError, rowOwner, runAsOwner } from "./access/permissions";
 import { DATA_DIR, db } from "./db";
 import { getElement, updateElement } from "./elements";
 import { keepTrainedLora, lorasPath, ownCopy, recordTrainedMirror } from "./loras";
@@ -448,15 +449,25 @@ export async function pollTrainings(): Promise<void> {
   const sql = `SELECT * FROM trainings WHERE status IN ('queued','running') AND target IN (${retired.map(() => "?").join(", ")})`;
   for (const r of db().prepare(sql).all(...retired) as Row[]) fail(r.id, r.element_id, retiredTraining(r.target)!);
   // Copies of hosted LoRAs a restart cut off: start them again.
-  for (const r of db().prepare(`SELECT * FROM trainings WHERE status = 'succeeded' AND meta_json LIKE '%"keep":"pending"%'`).all() as Row[]) keepInBackground(r);
+  // Each training is polled, and its LoRA kept, as the person who started it.
+  for (const r of db().prepare(`SELECT * FROM trainings WHERE status = 'succeeded' AND meta_json LIKE '%"keep":"pending"%'`).all() as Row[]) {
+    try {
+      runAsOwner(rowOwner(r), () => keepInBackground(r));
+    } catch (e) {
+      if (!(e instanceof AccountOffError)) throw e;
+      setKeep(r.id, "failed", e.message);
+    }
+  }
   const rows = db().prepare("SELECT * FROM trainings WHERE status = 'running' AND external_id IS NOT NULL").all() as Row[];
   await Promise.all(
-    rows.map((r) =>
-      pollOne(r).catch((e) => {
-        if (permanent(e)) return fail(r.id, r.element_id, (e as Error).message);
+    rows.map(async (r) => {
+      try {
+        await runAsOwner(rowOwner(r), () => pollOne(r));
+      } catch (e) {
+        if (e instanceof AccountOffError || permanent(e)) return fail(r.id, r.element_id, (e as Error).message);
         update(r.id, { message: `Checking status failed: ${(e as Error).message}` });
-      }),
-    ),
+      }
+    }),
   );
 }
 

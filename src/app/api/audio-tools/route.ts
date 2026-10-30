@@ -1,4 +1,6 @@
 import { AudioToolBody, AudioToolError, previewAudioTool, runAudioTool } from "@/server/audio-tools";
+import { rethrowAccess } from "@/server/access/errors";
+import { handler } from "@/server/access/route";
 
 /** What a field that doesn't check out means, in words the page shows. */
 const MESSAGES: Record<string, string> = {
@@ -10,7 +12,7 @@ const MESSAGES: Record<string, string> = {
 };
 
 /** Audio → Loop / extend, Join and Split soundtrack (and a split's mix put back on its video): start a run; `?preview=1` only plans and prices it. */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const raw: unknown = await request.json().catch(() => null);
   const parsed = AudioToolBody.safeParse(raw);
   if (!parsed.success) {
@@ -23,8 +25,9 @@ export async function POST(request: Request) {
     if (new URL(request.url).searchParams.get("preview") === "1") return Response.json(await previewAudioTool(parsed.data));
     return Response.json(await runAudioTool(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     if (e instanceof AudioToolError) return Response.json({ error: e.message }, { status: 422 });
     console.error("[audio-tools]", e);
     return Response.json({ error: (e as Error).message || "Something went wrong" }, { status: 500 });
   }
-}
+});

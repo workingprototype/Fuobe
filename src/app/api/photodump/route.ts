@@ -1,6 +1,8 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { createPhotodump, listUserPacks, previewPhotodump } from "@/server/photodump";
+import { rethrowAccess } from "@/server/access/errors";
+import { handler } from "@/server/access/route";
 
 const Body = z
   .object({
@@ -14,22 +16,23 @@ const Body = z
   .refine((b) => !!b.elementId || !!b.selfie, { message: "Pick a character or add a selfie" });
 
 /** Your own packs (the built-in ones ship with the page). */
-export async function GET() {
+export const GET = handler({ access: "signed-in" }, async () => {
   await connection();
   return Response.json({ packs: listUserPacks() });
-}
+});
 
 /**
  * Generate a photodump: one photo per pack shot, as one batch. `?preview=1` prices it instead
  * (model, photo count, cost, demo, notes, or the error that would stop it).
  */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues[0]?.message ?? "Pick a pack" }, { status: 400 });
   if (new URL(request.url).searchParams.get("preview")) return Response.json(previewPhotodump(parsed.data));
   try {
     return Response.json(createPhotodump(parsed.data), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
-}
+});

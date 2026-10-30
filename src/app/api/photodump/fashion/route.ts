@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { createFashion, previewFashion, type FashionRun } from "@/server/photodump";
+import { rethrowAccess } from "@/server/access/errors";
+import { handler } from "@/server/access/route";
 
 const File = z.string().startsWith("/api/files/");
 const Engine = z.enum(["cloud", "open"]);
@@ -14,7 +16,7 @@ const Body = z.discriminatedUnion("step", [
  * Fashion Factory steps: 4 base shots of the character in the template's set, the outfit (try-on),
  * and the photoset (one photo per template shot). `?preview=1` prices a step instead.
  */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Template required" }, { status: 400 });
   const input = parsed.data as FashionRun;
@@ -22,6 +24,7 @@ export async function POST(request: Request) {
   try {
     return Response.json(createFashion(input), { status: 201 });
   } catch (e) {
+    rethrowAccess(e);
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }
-}
+});

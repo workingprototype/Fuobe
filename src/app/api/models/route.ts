@@ -9,6 +9,7 @@ import { provider } from "@/server/providers";
 import { llmBackends } from "@/server/providers/llm";
 import { offeredDefault, offeredModels } from "@/server/model-access";
 import { engineMode, getSetting } from "@/server/settings";
+import { handler } from "@/server/access/route";
 
 /** A provider for one of its routes is set up. */
 const connected = (m: ModelDef) => m.routes.some((r) => (r.provider === "llm" ? llmBackends(r).length > 0 : provider(r.provider).isConfigured()));
@@ -50,7 +51,7 @@ const DEFAULTS: Record<string, { cloud?: string; open?: string }> = {
  * goes today (`runs`, which follows Settings → Demo mode). Models switched off in Settings → Models & licences
  * are left out, and a default that is off gives way to the next model that is on.
  */
-export async function GET(request: Request) {
+export const GET = handler({ access: "signed-in" }, async (request: Request) => {
   await connection();
   const p = new URL(request.url).searchParams;
   const kind = p.get("kind") || undefined;
@@ -75,4 +76,4 @@ export async function GET(request: Request) {
   );
   const demoMode = getSetting("demoMode");
   return Response.json({ engineMode: mode, demoMode, defaults, items: list.map((m) => ({ ...toModelInfo(m), connected: connected(m), runs: runsAs(m, demoMode) })) });
-}
+});

@@ -1,14 +1,15 @@
 import { z } from "zod";
 import { probeSource } from "@/server/shorts";
 import { body, handle } from "@/server/shorts-schemas";
+import { handler } from "@/server/access/route";
 
 /**
  * An uploaded clip's length, size, frame rate and whether it has sound, from its header (MP4 / MOV, WebM).
  * The composer prices clip-length tools with it and says what comes out (Upscale hub: "24 → 60 fps").
  */
-export async function POST(request: Request) {
+export const POST = handler({ access: "signed-in" }, async (request: Request) => {
   return handle(async () => {
     const { url } = await body(request, z.object({ url: z.string().startsWith("/api/files/").max(500) }), "Upload the clip first");
     return Response.json(await probeSource(url));
   });
-}
+});

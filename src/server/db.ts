@@ -714,6 +714,11 @@ const MIGRATIONS: string[] = [
   create index "auth_session_userId_idx" on "auth_session" ("userId");
   create index "auth_account_userId_idx" on "auth_account" ("userId");
   create index "auth_verification_identifier_idx" on "auth_verification" ("identifier");`,
+  // originals (o/acc-2): the audit log refuses DELETE as it already refuses UPDATE (docs/research/accounts-8.md §7.14),
+  // so a row can only be added. Only the retention purge (acc-34) removes rows: it lifts this trigger inside its own
+  // transaction and writes an entry of its own.
+  `CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
+    BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;`,
 ];
 
 /** The index of the migration whose SQL contains `fragment` (-1 when none does): tests and the bootstrap name migrations by what they do. */
