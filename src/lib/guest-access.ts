@@ -196,8 +196,11 @@ export const CONNECT_GPU_MESSAGE = "Connect your GPU to run this. Free accounts 
 
 /** Install-wide settings, keys and tokens: changes are the owner's (403 for an account). */
 const OWNER_WRITES = new Set(["/api/settings", "/api/settings/models", "/api/loras", "/api/llm", "/api/providers/test", "/api/auth/public"]);
-/** Owner only, reads included: the password, the API tokens, the assistant's connectors, the MCP endpoint and the accounts admin. */
-const OWNER_ALL = [/^\/api\/auth\/(password|tokens)$/, /^\/api\/assist\/connectors(\/|$)/, /^\/api\/mcp$/, /^\/api\/admin(\/|$)/];
+/**
+ * Owner only, reads included: the password, the API tokens, signing everyone out, the assistant's connectors, the MCP
+ * endpoint and the accounts admin.
+ */
+const OWNER_ALL = [/^\/api\/auth\/(password|tokens|sessions)$/, /^\/api\/assist\/connectors(\/|$)/, /^\/api\/mcp$/, /^\/api\/admin(\/|$)/];
 
 export function ownerOnly(method: string, pathname: string): boolean {
   if (OWNER_ALL.some((r) => r.test(pathname))) return true;

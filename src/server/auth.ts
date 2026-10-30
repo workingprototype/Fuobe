@@ -24,6 +24,7 @@ const FILE = path.join(DATA_DIR, "auth.json");
 
 export const SESSION_COOKIE = "fuobe_session";
 const SESSION_DAYS = 30;
+const SESSION_MS = SESSION_DAYS * 86_400_000;
 
 export interface ApiToken {
   id: string;
@@ -59,7 +60,10 @@ export interface Account {
 interface AuthFile {
   /** scrypt hash of the UI-set password ("salt:hash", hex). */
   password?: string;
-  /** Signs session cookies; replaced when the password changes, which signs everyone out. */
+  /**
+   * Signs session cookies. Kept apart from the password (FUOBE_PASSWORD or the Settings one): replaced when the Settings
+   * password changes and by Settings → Security → Sign everyone out, which both sign every browser out.
+   */
   secret: string;
   tokens: ApiToken[];
   accounts?: Account[];
@@ -151,13 +155,23 @@ export function createSession(accountId?: string): { value: string; maxAge: numb
     d = withSecret(d);
     write(d);
   }
-  const exp = Date.now() + SESSION_DAYS * 86_400_000;
+  const exp = Date.now() + SESSION_MS;
   const payload = accountId ? `${exp}.${accountId}` : String(exp);
   return { value: `${payload}.${sign(d.secret, payload)}`, maxAge: SESSION_DAYS * 86_400 };
 }
 
 /** Who a session cookie belongs to: the owner, an account that still exists, or nobody. */
 export type Viewer = { kind: "owner" } | { kind: "account"; account: Account };
+
+/**
+ * A cookie's expiry: the digits createSession wrote, not past and no further ahead than a session lasts. Whoever got hold
+ * of the secret could sign any expiry; a far one is refused, so such a cookie ends with the session lifetime too.
+ */
+function liveExpiry(exp: string, now = Date.now()): boolean {
+  if (!/^\d{1,16}$/.test(exp)) return false;
+  const t = Number(exp);
+  return t >= now && t <= now + SESSION_MS;
+}
 
 export function sessionViewer(value: string | undefined): Viewer | null {
   if (!value) return null;
@@ -166,11 +180,21 @@ export function sessionViewer(value: string | undefined): Viewer | null {
   const exp = parts[0];
   const mac = parts[parts.length - 1];
   const d = read();
-  if (!d.secret || !exp || !mac || !(Number(exp) >= Date.now())) return null;
+  if (!d.secret || !mac || !liveExpiry(exp)) return null;
   if (!same(Buffer.from(mac), Buffer.from(sign(d.secret, parts.slice(0, -1).join("."))))) return null;
   if (parts.length === 2) return { kind: "owner" };
   const account = d.accounts?.find((a) => a.id === parts[1]);
   return account && !account.disabled ? { kind: "account", account } : null;
+}
+
+/**
+ * Settings → Security → Sign everyone out: a new secret, so every session cookie (the owner's and every account's,
+ * this browser's too) stops working at once. Works while FUOBE_PASSWORD is set, which the Settings password change
+ * can't. With `tokens`, every API token is revoked as well. The password stays as it is.
+ */
+export function signOutEveryone(opts: { tokens?: boolean } = {}): void {
+  const d = read();
+  write({ ...d, secret: crypto.randomBytes(32).toString("hex"), ...(opts.tokens && { tokens: [] }) });
 }
 
 /** The owner's session (the install password's): what Settings → Security and the tokens need. */
