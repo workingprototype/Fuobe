@@ -194,7 +194,9 @@ fuobe skills add ./my-skills --replace              # overwrite your own skills 
 else `skills/`, `.agents/skills/`, `.claude/skills/` and the folders right under it (up to three
 levels), else any `SKILL.md` a few levels down; skills marked `metadata.internal: true` are left out
 unless named with `--skill`. Each skill is uploaded as a zip with its text files (binaries and
-dot-files are left out, and listed). Git sources need `git`.
+dot-files are left out, and listed). Git sources need `git`. A skill's `recipe.json` (a skill that runs
+by itself; see `skills/README.md`) goes up with it but starts unchecked: check it in **Assist → Skills**
+before you run it. The CLI has no command to run a skill yet.
 
 ### `fuobe tools`, `fuobe tool` — the MCP tools
 
