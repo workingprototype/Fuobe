@@ -153,7 +153,11 @@ for (const [size, scheme] of [
     check(`${tag}: the cloud offers References, Keyframes and Camera path`, /References[\s\S]*Keyframes[\s\S]*Camera path/.test(await routes.innerText()));
   }
   await dialog.getByRole("checkbox", { name: "I confirm the consent line" }).click();
-  await until(async () => !(await make.isDisabled()), "Make turnaround to be ready");
+  await until(async () => !(await make.isDisabled()), "Make turnaround to be ready", 20_000).catch(async (e) => {
+    console.log((await dialog.innerText()).slice(-600));
+    await shoot(page, `stuck-${size}-${scheme}`);
+    throw e;
+  });
   check(`${tag}: with the consent line ticked, Make turnaround is ready`, true);
   if (size === "1440" && scheme === "light") {
     await make.click();

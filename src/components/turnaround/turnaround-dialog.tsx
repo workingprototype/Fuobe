@@ -130,7 +130,14 @@ export function TurnaroundButton({
         {status && <span className={cn("font-mono text-[11px] text-muted-foreground", compact && "hidden sm:inline")}>· {status}</span>}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[92svh] gap-3 overflow-y-auto sm:max-w-[640px]">
+        <DialogContent
+          className="max-h-[92svh] gap-3 overflow-y-auto sm:max-w-[640px]"
+          // Focus the dialog itself, not its first control: no tooltip or focus ring pops up on the engine switch or a slot.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement | null)?.focus();
+          }}
+        >
           {open && (run ? <RunView heading={headingOf(props)} state={state} elementId={props.elementId} onAgain={() => setRun(null)} /> : <TurnaroundForm {...props} onStarted={setRun} />)}
         </DialogContent>
       </Dialog>
@@ -207,7 +214,7 @@ function TurnaroundForm({ pictures, name, realPerson: realDefault = false, eleme
     <>
       <DialogHeader>
         <DialogTitle className="font-heading text-[24px] font-normal">{heading}</DialogTitle>
-        <DialogDescription>The camera goes all the way round {name ? name : "the character"}, starting and ending on the front: the front, their right side, their back, their left side.</DialogDescription>
+        <DialogDescription>The camera goes all the way round the character, starting and ending on the front: the front, their right side, their back, their left side.</DialogDescription>
       </DialogHeader>
 
       {!fixedEngine && (
