@@ -6,7 +6,7 @@
 
 [![Watch the product demo](docs/media/demo-poster.jpg)](docs/media/fuobe-demo.mp4)
 
-▶ **[Watch the product demo](docs/media/fuobe-demo.mp4)** (51 s): the studio itself, running locally on ComfyUI
+▶ **[Watch the product demo](docs/media/fuobe-demo.mp4)** (20 s, 60 fps): the studio itself, running locally on ComfyUI
 
 Fuobe is a complete creative studio you can run yourself: 108 camera motions, 255 effects and 124 apps, Cinema, Shorts, Marketing and Ads studios, Layers, Canvas, Storyboard, Image to 3D, voice and music tools, and an Assist agent that plans and runs whole jobs. Every tool runs either on open-weight models on your own GPU through **ComfyUI**, or on frontier models with your own fal.ai / Replicate key. Flip one switch. Licences are information, not gates: **Settings → Models & licences** shows the licence of every model, LoRA and node pack.
 
