@@ -159,6 +159,8 @@ describe("proxy matcher (C13)", () => {
     expect(matches("/previews/presets/effect-set-on-fire.jpg")).toBe(false);
     expect(matches("/previews/presets/motion-fpv-drone.mp4")).toBe(false);
     expect(matches("/favicon.ico")).toBe(false);
+    expect(matches("/icon.svg")).toBe(false);
+    expect(matches("/apple-icon.png")).toBe(false);
     expect(matches("/_next/static/chunks/a.js")).toBe(false);
   });
 });
