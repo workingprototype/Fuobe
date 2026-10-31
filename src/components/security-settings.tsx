@@ -208,8 +208,9 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
 
 /**
  * A new session secret: every sign-in on every device ends (this browser's too, and every account's), and the owner
- * signs in again with the same password. It works when the password is set on the server (FUOBE_PASSWORD), where a
- * password change can't sign anyone out. Optionally revokes every API token as well.
+ * signs in again with the same password. It works when the password is set on the server (FUOBE_PASSWORD), which
+ * Settings can't change. Optionally revokes every API token as well: offered even when the list looked empty when the
+ * page loaded, since a token made since then would otherwise stay.
  */
 function SignOutEveryone({ tokens }: { tokens: number }) {
   const router = useRouter();
@@ -245,14 +246,12 @@ function SignOutEveryone({ tokens }: { tokens: number }) {
             <AlertDialogTitle>Sign everyone out?</AlertDialogTitle>
             <AlertDialogDescription>Everyone has to sign in again, you too. You go to the sign-in page next.</AlertDialogDescription>
           </AlertDialogHeader>
-          {tokens > 0 && (
-            <div className="flex items-start gap-2">
-              <Checkbox id={`${id}-tokens`} className="mt-0.5" checked={revoke} onCheckedChange={(v) => setRevoke(!!v)} />
-              <Label htmlFor={`${id}-tokens`} className="text-[13px] leading-snug font-normal">
-                Also revoke every API token ({tokens}). Scripts and agents that use one stop working until you give them a new one.
-              </Label>
-            </div>
-          )}
+          <div className="flex items-start gap-2">
+            <Checkbox id={`${id}-tokens`} className="mt-0.5" checked={revoke} onCheckedChange={(v) => setRevoke(!!v)} />
+            <Label htmlFor={`${id}-tokens`} className="text-[13px] leading-snug font-normal">
+              Also revoke every API token{tokens > 0 ? ` (${tokens})` : ""}. Scripts and agents that use one stop working until you give them a new one.
+            </Label>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={() => void run()}>

@@ -61,8 +61,8 @@ interface AuthFile {
   /** scrypt hash of the UI-set password ("salt:hash", hex). */
   password?: string;
   /**
-   * Signs session cookies. Kept apart from the password (FUOBE_PASSWORD or the Settings one): replaced when the Settings
-   * password changes and by Settings → Security → Sign everyone out, which both sign every browser out.
+   * Signs session cookies (an owner's with the password's fingerprint too: keyFor). Replaced when the Settings password
+   * changes and by Settings → Security → Sign everyone out, which both sign every browser out.
    */
   secret: string;
   tokens: ApiToken[];
@@ -99,6 +99,10 @@ function read(): AuthFile {
   }
 }
 
+declare global {
+  var __fuobeAuthWrites: number | undefined;
+}
+
 function write(data: AuthFile): void {
   if (data.unreadable) throw new Error("The sign-in file (auth.json) can't be read. Fix or restore it: Fuobe won't write over it.");
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -106,7 +110,14 @@ function write(data: AuthFile): void {
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, FILE);
   cache = null;
+  globalThis.__fuobeAuthWrites = (globalThis.__fuobeAuthWrites ?? 0) + 1;
 }
+
+/**
+ * Changes when this server writes the sign-in file (a sign-out of everyone, a new password, a token revoked…): a request
+ * that stays open, like the live feed, checks who is asking again when it changes.
+ */
+export const authVersion = () => globalThis.__fuobeAuthWrites ?? 0;
 
 function withSecret(data: AuthFile): AuthFile {
   return data.secret ? data : { ...data, secret: crypto.randomBytes(32).toString("hex") };
@@ -182,8 +193,18 @@ export function setPassword(pw: string | null): void {
 const sign = (secret: string, payload: string) => crypto.createHmac("sha256", secret).update(payload).digest("base64url");
 
 /**
+ * The key a session is signed with. An owner's also holds the password's fingerprint, so a new password (FUOBE_PASSWORD
+ * after a restart, or the Settings one) ends every owner sign-in at once, and the secret alone (auth.json) can't make an
+ * owner cookie. An account's is the secret alone, so the owner's new password doesn't sign every account out.
+ */
+function keyFor(d: AuthFile, owner: boolean): string {
+  if (!owner) return d.secret;
+  return `${d.secret}.${crypto.createHash("sha256").update(envPassword() || d.password || "").digest("hex")}`;
+}
+
+/**
  * A session cookie: "<expiry>.<mac>" for the owner, "<expiry>.<account id>.<mac>" for an account.
- * The two sign different text, so neither can be turned into the other.
+ * The two sign different text with different keys, so neither can be turned into the other.
  */
 export function createSession(accountId?: string): { value: string; maxAge: number } {
   let d = read();
@@ -193,7 +214,7 @@ export function createSession(accountId?: string): { value: string; maxAge: numb
   }
   const exp = Date.now() + SESSION_MS;
   const payload = accountId ? `${exp}.${accountId}` : String(exp);
-  return { value: `${payload}.${sign(d.secret, payload)}`, maxAge: SESSION_DAYS * 86_400 };
+  return { value: `${payload}.${sign(keyFor(d, !accountId), payload)}`, maxAge: SESSION_DAYS * 86_400 };
 }
 
 /** Who a session cookie belongs to: the owner, an account that still exists, or nobody. */
@@ -217,7 +238,7 @@ export function sessionViewer(value: string | undefined): Viewer | null {
   const mac = parts[parts.length - 1];
   const d = read();
   if (!d.secret || !mac || !liveExpiry(exp)) return null;
-  if (!same(Buffer.from(mac), Buffer.from(sign(d.secret, parts.slice(0, -1).join("."))))) return null;
+  if (!same(Buffer.from(mac), Buffer.from(sign(keyFor(d, parts.length === 2), parts.slice(0, -1).join("."))))) return null;
   if (parts.length === 2) return { kind: "owner" };
   const account = d.accounts?.find((a) => a.id === parts[1]);
   return account && !account.disabled ? { kind: "account", account } : null;

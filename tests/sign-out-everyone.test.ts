@@ -22,8 +22,13 @@ afterAll(() => {
 
 const DAY = 86_400_000;
 const secret = () => (JSON.parse(fs.readFileSync(path.join(dir, "auth.json"), "utf8")) as { secret: string }).secret;
-/** A cookie signed with the real secret, as someone who read auth.json could make one. */
-const forge = (payload: string) => `${payload}.${crypto.createHmac("sha256", secret()).update(payload).digest("base64url")}`;
+const hmac = (key: string, payload: string) => crypto.createHmac("sha256", key).update(payload).digest("base64url");
+const passwordTag = () => crypto.createHash("sha256").update(process.env.FUOBE_PASSWORD ?? "").digest("hex");
+/**
+ * A cookie signed as the server signs it, as someone who read auth.json and also knew the password could make one: an
+ * owner's ("<expiry>") with the secret and the password, an account's ("<expiry>.<id>") with the secret alone.
+ */
+const forge = (payload: string) => `${payload}.${hmac(payload.includes(".") ? secret() : `${secret()}.${passwordTag()}`, payload)}`;
 
 function req(method: string, init: { cookie?: string; headers?: Record<string, string> } = {}) {
   const headers: Record<string, string> = { ...init.headers };
@@ -57,6 +62,99 @@ describe("H-1: a cookie's expiry is capped at the session lifetime", () => {
     // Both read as a time a day from now by Number(), but no real cookie looks like this.
     expect(auth.validSession(forge(`0x${(Date.now() + DAY).toString(16)}`))).toBe(false);
     expect(auth.validSession(forge(`${String(Date.now() + DAY).slice(0, -3)}e3`))).toBe(false);
+  });
+});
+
+describe("H-1: owner sign-ins are tied to the password", () => {
+  it("a new FUOBE_PASSWORD ends every owner sign-in at the restart, and no account's", () => {
+    const owner = auth.createSession().value;
+    const a = auth.createAccount("tied@example.com", "long enough");
+    const account = auth.createSession(a.id).value;
+    process.env.FUOBE_PASSWORD = "a brand new password";
+    try {
+      expect(auth.validSession(owner)).toBe(false);
+      expect(auth.sessionViewer(account)?.kind).toBe("account");
+      expect(auth.validSession(auth.createSession().value)).toBe(true);
+    } finally {
+      process.env.FUOBE_PASSWORD = "from the environment";
+    }
+  });
+
+  it("the secret alone (someone who read auth.json, not the password) can't make an owner cookie", () => {
+    const exp = String(Date.now() + DAY);
+    expect(auth.validSession(`${exp}.${hmac(secret(), exp)}`)).toBe(false);
+    expect(auth.validSession(forge(exp))).toBe(true);
+  });
+});
+
+describe("H-1: Sign everyone out also ends an open live feed", () => {
+  const stream = () => import("@/app/api/generations/stream/route");
+  /** A read left waiting when the time ran out: the next call takes it over, so no chunk is lost. */
+  const waiting = new WeakMap<object, Promise<ReadableStreamReadResult<Uint8Array>>>();
+  /** What a stream sends within `ms`, and whether it ended. */
+  async function readFor(reader: ReadableStreamDefaultReader<Uint8Array>, ms: number): Promise<{ text: string; done: boolean }> {
+    const dec = new TextDecoder();
+    let text = "";
+    const until = Date.now() + ms;
+    for (;;) {
+      const left = until - Date.now();
+      if (left <= 0) return { text, done: false };
+      const read = waiting.get(reader) ?? reader.read();
+      waiting.set(reader, read);
+      const r = await Promise.race([read, new Promise<null>((resolve) => setTimeout(() => resolve(null), left))]);
+      if (r === null) return { text, done: false };
+      waiting.delete(reader);
+      if (r.done) return { text, done: true };
+      text += dec.decode(r.value);
+    }
+  }
+  let n = 0;
+  /** A new run in the owner's library (a row change is what the feed sends). */
+  async function aRun(): Promise<string> {
+    const { db } = await import("@/server/db");
+    const id = `live-${++n}-${Date.now()}`;
+    db()
+      .prepare(
+        "INSERT INTO generations (id, feature, model_id, engine, provider, op, kind, status, prompt, request_json, created_at, updated_at) VALUES (?, 'image', 'mock-image', 'cloud', 'mock', 'text-to-image', 'image', 'queued', ?, '{}', ?, ?)",
+      )
+      .run(id, `prompt ${id}`, Date.now(), Date.now());
+    return id;
+  }
+
+  it("a stream opened before Sign everyone out sends nothing after it, and closes", async () => {
+    const owner = auth.createSession().value;
+    const ac = new AbortController();
+    const res = await (await stream()).GET(new NextRequest("http://localhost:3000/api/generations/stream", { headers: { cookie: `${auth.SESSION_COOKIE}=${owner}` }, signal: ac.signal }));
+    const reader = res.body!.getReader();
+    try {
+      expect((await readFor(reader, 200)).text).toMatch(/^retry: 2000/);
+      const before = await aRun();
+      expect((await readFor(reader, 300)).text).toContain(`"id":"${before}"`);
+      auth.signOutEveryone();
+      const after = await aRun();
+      const rest = await readFor(reader, 500);
+      expect(rest.text).not.toContain(after);
+      expect(rest.done).toBe(true);
+    } finally {
+      ac.abort();
+    }
+  });
+
+  it("the same for a stream opened with an API token that is then revoked", async () => {
+    const { token, info } = auth.createToken("feed");
+    const ac = new AbortController();
+    const res = await (await stream()).GET(new NextRequest("http://localhost:3000/api/generations/stream", { headers: { authorization: `Bearer ${token}` }, signal: ac.signal }));
+    const reader = res.body!.getReader();
+    try {
+      await readFor(reader, 100);
+      auth.revokeToken(info.id);
+      const after = await aRun();
+      const rest = await readFor(reader, 500);
+      expect(rest.text).not.toContain(after);
+      expect(rest.done).toBe(true);
+    } finally {
+      ac.abort();
+    }
   });
 });
 

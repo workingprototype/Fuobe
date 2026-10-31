@@ -70,7 +70,7 @@ claude mcp add --transport http fuobe http://localhost:3000/api/mcp --header "Au
 
 Share links are the one exception: `/s/<token>` and its files open for anyone who has the link, after the host and cross-site checks. Without a password, anyone who can open a share link can open the whole studio too.
 
-A sign-in lasts 30 days. If you think someone else has signed in as you, open **Settings → Security** and press **Sign everyone out**. It ends every sign-in on every device, yours included, and can revoke every API token too. Your password stays the same. A Settings password change also signs everyone out, but a new `FUOBE_PASSWORD` does not: use **Sign everyone out** after you change it.
+A sign-in lasts 30 days. If you think someone else has signed in as you, open **Settings → Security** and press **Sign everyone out**. It ends every sign-in on every device, yours included (an open live feed too), and can revoke every API token too. Your password stays the same. A new password also ends every owner sign-in: a Settings password change at once (it signs accounts out too), and a new `FUOBE_PASSWORD` when the server restarts (accounts stay signed in). API tokens are not tied to the password: revoke them in **Settings → Security**, or tick **Also revoke every API token** when you sign everyone out.
 
 Public sign-up, guest browsing and connecting your own GPU to a shared install are described in [public-signup.md](public-signup.md).
 
