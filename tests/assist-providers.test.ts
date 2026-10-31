@@ -22,7 +22,7 @@ process.env.COMFYUI_URL = "http://127.0.0.1:9";
 process.env.OLLAMA_URL = "http://127.0.0.1:9";
 for (const k of Object.keys(process.env)) if (/_API_KEY$|^HF_TOKEN$|^FUOBE_LLM_|^LM_API_TOKEN$|^LMSTUDIO_|^UNSLOTH_|^FUOBE_ENHANCE_PROVIDER$/.test(k)) delete process.env[k];
 
-const { setSetting, SETTINGS } = await import("@/server/settings");
+const { setSetting } = await import("@/server/settings");
 const agent = await import("@/server/assist/agent");
 const { modeLabel } = await import("@/lib/assist");
 const { LLM_PROVIDERS, getLlmProvider } = await import("@/lib/catalog/llm-providers");
@@ -40,7 +40,7 @@ async function fake(mode: Mode, provider: string = mode): Promise<FakeLlm> {
 }
 /** Every provider key off, and the local server pinned to an address nothing answers. */
 function disconnect() {
-  for (const p of LLM_PROVIDERS) if (p.keySetting) setSetting(p.keySetting as keyof typeof SETTINGS, "");
+  for (const p of LLM_PROVIDERS) if (p.keySetting) setSetting(p.keySetting as Parameters<typeof setSetting>[0], "");
   setSetting("llmProvider", "custom");
   setSetting("llmUrl", "http://127.0.0.1:9/v1");
   setSetting("llmKey", "");

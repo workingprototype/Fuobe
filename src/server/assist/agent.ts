@@ -761,7 +761,8 @@ export const claude: ModelCall = async ({ system, messages, tools, settings, con
 export function forAnthropic(messages: Stored[]): MessageParam[] {
   return messages.map((m) => {
     if (!("replay" in m)) return m;
-    const { replay: _replay, ...rest } = m;
+    const rest = { ...m };
+    delete rest.replay;
     return rest;
   });
 }
@@ -879,7 +880,7 @@ export const offline: ModelCall = async ({ messages, ctx, skills }) => {
 };
 
 /** Under every offline plan: the rule-based planner is a fallback, not the assistant. */
-export const OFFLINE_NOTE = "Offline planner — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for better plans.";
+export const OFFLINE_NOTE = "Offline planner — connect a model in Settings → AI helper (Anthropic, OpenAI, Google, OpenRouter… or a local model) for better plans.";
 
 /** What to offer next, by what was just started. */
 const FOLLOW_UP: Record<MediaKind, string> = {

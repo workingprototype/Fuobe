@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AccountsChip } from "@/components/accounts-admin";
 import { ConnectField, useSettings, type PublicSetting } from "@/components/connect-field";
 import { GetStarted } from "@/components/get-started";
+import { LlmProviderSettings } from "@/components/llm-provider-settings";
 import { LoraSettings } from "@/components/lora-settings";
 import { useStatus, type StatusInfo } from "@/lib/api";
 import { AI_TOOLKIT_REPO, connectionSummary, DEFAULT_AI_TOOLKIT_URL, ENGINE_MODE_LABEL, FAL_KEYS_URL, showFirstRun } from "@/lib/connections";
@@ -649,8 +650,8 @@ export function SettingsForm({ prices }: { prices?: string }) {
 
       <Section
         id="text-ai"
-        title="AI helper · Claude or a local model"
-        description="The LLM that writes for Fuobe: the Enhance toggle, storyboards, translations and scripts, ad copy, brand research, and the Assist agent. Use Claude, a local model (Ollama, LM Studio, Unsloth Studio or another OpenAI-compatible server: fully open source), or the built-in offline rewriter. In Open source only mode, Automatic skips Claude. Save & test checks a key or address before saving it."
+        title="AI helper · models and providers"
+        description="The LLMs that write for Fuobe. Use (below) picks the one for the Enhance toggle, storyboards, translations and scripts, ad copy and brand research: Claude, a local model (Ollama, LM Studio, Unsloth Studio or another OpenAI-compatible server: fully open source), or the built-in offline rewriter. The Assist agent can also plan with the providers you add a key for (OpenAI, Gemini, DeepSeek, Kimi, GLM, OpenRouter and more). In Open source only mode, Automatic skips Claude. Save & test checks a key or address before saving it."
       >
         <ChoiceField
           id="setting-enhancer"
@@ -666,6 +667,9 @@ export function SettingsForm({ prices }: { prices?: string }) {
           ]}
         />
         <ConnectField name="anthropicKey" setting={get("anthropicKey")} provider="llm" label="Anthropic API key" placeholder="sk-ant-…" hint="Test checks the key with a free model list call." />
+        <div id="llm-providers" className="scroll-mt-28 md:scroll-mt-20">
+          <LlmProviderSettings get={get} set={set} />
+        </div>
         <LocalLlmSettings get={get} set={set} />
       </Section>
 
