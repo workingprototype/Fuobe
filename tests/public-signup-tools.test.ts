@@ -59,7 +59,7 @@ function call(url: string, body: unknown, cookie?: string) {
 const png = (name: string) => saveFile({ data: encodePng({ width: 18, height: 32, data: Buffer.alloc(18 * 32 * 4, 128) }), contentType: "image/png", name, source: "upload" }).url;
 
 /** A two-second 16-bit stereo WAV, saved as the owner's upload. */
-function wav(name = "film.wav"): string {
+function wav(name = "film.wav", accountId?: string): string {
   const rate = 8000;
   const n = rate * 2;
   const buf = Buffer.alloc(44 + n * 4);
@@ -75,7 +75,7 @@ function wav(name = "film.wav"): string {
   buf.writeUInt16LE(16, 34);
   buf.write("data", 36);
   buf.writeUInt32LE(n * 4, 40);
-  return saveFile({ data: buf, contentType: "audio/wav", name, source: "upload" }).url;
+  return saveFile({ data: buf, contentType: "audio/wav", name, source: "upload", ...(accountId && { accountId }) }).url;
 }
 
 let n = 0;
@@ -204,17 +204,23 @@ describe("the routes: a visitor's price is its own GPU's, and the owner's charac
     expect((await turnaroundEstimate.POST(call("/api/turnaround/estimate", { engine: "open", views, elementId: "no-such-id" }, owner))).status).toBe(404);
   });
 
-  it("prices a visitor's Split soundtrack on its own GPU, never a demo", async () => {
+  it("prices a visitor's Split soundtrack on its own GPU, never a demo, and only of its own file", async () => {
     process.env.FUOBE_PUBLIC_SIGNUP = "1";
-    const media = wav();
-    const body = { tool: "split", engine: "open", media, kind: "audio", name: "Film" };
-    const guest = await audioTools.POST(call("/api/audio-tools?preview=1", body));
-    expect(guest.status).toBe(200);
-    expect(await guest.json()).toMatchObject({ steps: 1, costUsd: 0, demo: false });
-    const account = await audioTools.POST(call("/api/audio-tools?preview=1", body, auth.createSession(newAccount().id).value));
-    expect(await account.json()).toMatchObject({ steps: 1, demo: false });
-    const owner = await audioTools.POST(call("/api/audio-tools?preview=1", body, auth.createSession().value));
-    expect(await owner.json()).toMatchObject({ steps: 1, demo: true });
+    const who = newAccount();
+    const cookie = auth.createSession(who.id).value;
+    const owners = wav();
+    const body = (media: string) => ({ tool: "split", engine: "open", media, kind: "audio", name: "Film" });
+    // A price check reads only the asker's own files (storage.ts storedMedia): the owner's file answers a guest, who owns
+    // none, and an account as a file that is gone, saying nothing of what it holds.
+    for (const c of [undefined, cookie]) {
+      const r = await audioTools.POST(call("/api/audio-tools?preview=1", body(owners), c));
+      expect(r.status).toBe(422);
+      expect((await r.json()).error).toBe("That audio file is gone — add it again");
+    }
+    const account = await audioTools.POST(call("/api/audio-tools?preview=1", body(wav("mine.wav", who.id)), cookie));
+    expect(await account.json()).toMatchObject({ steps: 1, costUsd: 0, demo: false, channels: 2 });
+    const owner = await audioTools.POST(call("/api/audio-tools?preview=1", body(owners), auth.createSession().value));
+    expect(await owner.json()).toMatchObject({ steps: 1, demo: true, channels: 2 });
   });
 });
 

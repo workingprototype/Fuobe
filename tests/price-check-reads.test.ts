@@ -84,6 +84,25 @@ describe("H-3: price checks read only the header of the asker's own files", () =
     expect((await previewAudioTool({ tool: "loop", engine: "open", audio: owners, duration: 60 })).summary).toMatch(/Loops it/);
   });
 
+  it("Split soundtrack and its remux: never another's file, and it answers like a file that is gone", async () => {
+    const owners = saveFile({ data: wav(30), contentType: "audio/wav", source: "upload" }).url;
+    const others = saveFile({ data: wav(30), contentType: "audio/wav", source: "upload", accountId: b }).url;
+    const mine = saveFile({ data: wav(30), contentType: "audio/wav", source: "upload", accountId: a }).url;
+    const video = saveFile({ data: MP4, contentType: "video/mp4", source: "upload", accountId: a }).url;
+    for (const url of [owners, others]) {
+      await expect(asA(() => previewAudioTool({ tool: "split", engine: "open", media: url, kind: "audio" }))).rejects.toThrow(/gone/);
+      await expect(asGuest(() => previewAudioTool({ tool: "split", engine: "open", media: url, kind: "audio" }))).rejects.toThrow(/gone/);
+      await expect(asA(() => previewAudioTool({ tool: "remux", engine: "open", video, audio: url }))).rejects.toThrow("That mix is gone");
+      await expect(asA(() => previewAudioTool({ tool: "remux", engine: "open", video: url, audio: mine }))).rejects.toThrow("That video is gone");
+    }
+    // Its own file: the header's length and channels, never the whole file. The owner still prices with any file.
+    const spies = wholeReads();
+    expect(await asA(() => previewAudioTool({ tool: "split", engine: "open", media: mine, kind: "audio" }))).toMatchObject({ length: 30, channels: 1, demo: false });
+    expect(called(spies, mine)).toBe(false);
+    expect((await asA(() => previewAudioTool({ tool: "remux", engine: "open", video, audio: mine }))).steps).toBe(1);
+    expect((await previewAudioTool({ tool: "split", engine: "open", media: others, kind: "audio" })).channels).toBe(1);
+  });
+
   it("audio Join: ten copies of its own file read its header, not the whole file", async () => {
     const mine = saveFile({ data: wav(20), contentType: "audio/wav", source: "upload", accountId: a }).url;
     const spies = wholeReads();

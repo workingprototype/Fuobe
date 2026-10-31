@@ -59,11 +59,10 @@ process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
 
 const { setSetting } = await import("@/server/settings");
-const { getAsset, saveFile, scratchDir } = await import("@/server/storage");
+const { getAsset, saveFile, scratchDir, storedMedia } = await import("@/server/storage");
 const gens = await import("@/server/generations");
 const route = await import("@/app/api/audio-tools/route");
 const exportRoute = await import("@/app/api/audio-tools/export/route");
-const { fileInfo } = await import("@/server/media-facts");
 
 beforeAll(() => setSetting("demoMode", "auto"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -489,8 +488,9 @@ describe("POST /api/audio-tools split and remux (demo mode)", () => {
     expect(run.result.request.params.extra).toEqual({ channels: "mono", sourceChannels: 6 });
   });
 
-  it("reads a header without reading the file: a 2.2 GB file is a few small reads", async () => {
-    const file = path.join(dir, "huge.wav");
+  it("reads a header without reading the file: a 2.2 GB file is a few small reads", () => {
+    fs.mkdirSync(path.join(dir, "files", "uploads"), { recursive: true });
+    const file = path.join(dir, "files", "uploads", "huge.wav");
     const head = Buffer.alloc(44);
     const data = 2.2e9 - 44;
     head.write("RIFF", 0);
@@ -508,7 +508,7 @@ describe("POST /api/audio-tools split and remux (demo mode)", () => {
     fs.writeFileSync(file, head);
     fs.truncateSync(file, 2.2e9);
     try {
-      expect(await fileInfo(file)).toEqual({ container: "wav", duration: data / 192000, hasVideo: false, hasAudio: true, channels: 2 });
+      expect(storedMedia("/api/files/uploads/huge.wav", { allContainers: true })).toEqual({ info: { container: "wav", duration: data / 192000, hasVideo: false, hasAudio: true, channels: 2 } });
     } finally {
       fs.rmSync(file, { force: true });
     }

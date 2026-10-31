@@ -93,10 +93,11 @@ function present(url: string, gone: string): void {
 
 /**
  * A clip's length, channel count and whether it has sound, from its header (read as {@link lengthOf} reads it, through
- * storedMedia: only the asker's own files), or null when no reader knows the file.
+ * storedMedia: only the asker's own files, header only, cached; a WebM or AVI header too: screen and browser recordings
+ * are WebM), or null when no reader knows the file.
  */
 function factsOf(url: string): ClipFacts | null {
-  const found = storedMedia(url);
+  const found = storedMedia(url, { allContainers: true });
   if (!found) throw new AudioToolError("That audio file is gone — add it again");
   const info = found.info;
   if (!info) return null;
