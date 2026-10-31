@@ -6,8 +6,10 @@
 // free (the preview API: no picker attaches a LoRA to MOSS yet). Each page at 1440 and 390 px, light and dark, without
 // sideways scroll. The prices follow the server, as /api/status says it runs: without a fal key the cloud runs are free
 // demos, and without a reachable ComfyUI so are the open engine's (both "Demo · free", as every model in demo mode).
-// Usage: node tests/e2e/moss-image.mjs [appUrl] [--shots <dir>]   against the demo server (verify.sh), or with
-// FAL_KEY=anything and a reachable ComfyUI for the hosted price ($0.05, unknown with a LoRA) and Free on your GPU.
+// Usage: node tests/e2e/moss-image.mjs [appUrl] [--shots <dir>] [--fal] [--live]   verify.sh runs it on each of its three
+// servers: demo mode, FAL_KEY=anything with --fal for the hosted price ($0.05, unknown with a LoRA), and the live ComfyUI
+// with --live for Free on your GPU. --fal and --live each fail the run when the server lacks a fal key or can't reach
+// ComfyUI, so those prices are never skipped unseen.
 // Nothing is sent: Generate is never pressed. Exits 1 on a failed check.
 import fs from "node:fs";
 import path from "node:path";
@@ -31,6 +33,8 @@ const comfy = !!status.providers?.comfyui?.configured;
 const demo = status.demoMode !== "off";
 if (!fal) console.log('note: no fal key on this server: the cloud composer shows "Demo · free" (start it with FAL_KEY=anything for the hosted price)');
 if (!comfy) console.log('note: ComfyUI is unreachable from this server: the open engine shows "Demo · free" too (Free once it is reachable)');
+if (argv.includes("--fal")) check("server: a fal key is set (--fal), so the hosted price is checked", fal);
+if (argv.includes("--live")) check("server: ComfyUI is reachable (--live), so Free on your GPU is checked", comfy);
 
 const browser = await launch();
 const contextFor = async (engine, width = 1440, colorScheme = "light") => {

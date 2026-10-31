@@ -58,12 +58,13 @@ done
 step e2e-eval-review timeout 600 node tests/e2e/eval-review.mjs
 stop_port 3399
 
-# Hosted prices with a fake fal key (estimates only; nothing is sent to fal).
+# Hosted prices with a fake fal key (estimates only; nothing is sent to fal), MOSS-Image's $0.05 among them.
 rm -rf "$S/data-fal"; mkdir -p "$S/data-fal"
 stop_port 3401
 FAL_KEY=anything COMFYUI_URL=http://127.0.0.1:1 FUOBE_DATA_DIR=$S/data-fal NEXT_TELEMETRY_DISABLED=1 pnpm start -p 3401 > "$L/server-fal.log" 2>&1 &
 wait_up http://localhost:3401/ && echo "fal-price server up" >> "$SUM"
 step e2e-open-tools-fal-prices timeout 1200 node tests/e2e/open-tools.mjs http://localhost:3401
+step e2e-moss-image-fal-prices timeout 1200 node tests/e2e/moss-image.mjs http://localhost:3401 --fal
 stop_port 3401
 
 # The live CPU ComfyUI: weight-free workflows through the app's own API.
@@ -74,6 +75,8 @@ wait_up http://localhost:3400/ && echo "live server up" >> "$SUM"
 step e2e-comfyui-selftest timeout 2400 node tests/e2e/comfyui-selftest.mjs http://localhost:3400
 step e2e-comfyui-canvas-concat timeout 2400 node tests/e2e/comfyui-canvas-concat.mjs http://localhost:3400
 step e2e-comfyui-faceless-plus timeout 2400 node tests/e2e/comfyui-faceless-plus.mjs http://localhost:3400
+# MOSS-Image on the open engine with ComfyUI reachable: Free, not a demo (nothing is run).
+step e2e-moss-image-live timeout 1200 node tests/e2e/moss-image.mjs http://localhost:3400 --live
 stop_port 3400
 
 # Every workflow in the library posted to the live ComfyUI (never run); packs this server lacks show as failures.
