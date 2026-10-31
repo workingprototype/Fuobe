@@ -26,6 +26,7 @@ import {
   type StreamEvent,
 } from "./generation-stream";
 import { cursorAfter, filterToSearch, type AssetUse, type FeedFilter, type Folder } from "./library";
+import { markRefusalShown, responseError } from "./refusals";
 import { postFile } from "./upload";
 import type { ShareCreated, ShareInfo, ShareListItem, SharePatch, ShareRequest } from "./share";
 import type { AccessSummary } from "./model-access";
@@ -43,7 +44,7 @@ export interface Asset {
 
 async function json<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw responseError(res, body.error ?? `Request failed (${res.status})`);
   return body;
 }
 
@@ -1099,24 +1100,43 @@ export const CONNECT_GPU_EVENT = "fuobe:connect-gpu";
 /** The guided fix (src/components/gpu/guided-fix.tsx): { ref, plan? }. */
 export const GPU_SETUP_EVENT = "fuobe:gpu-setup";
 
+/** A card GuestPrompt shows for a refusal: "Create a free account" (coming back to `here` after) or "Connect your GPU". */
+export type RefusalCard = { kind: "guest"; here: string } | { kind: "gpu" };
+
+/**
+ * The card a refusal opens on this page. None on the sign-in page: the visitor is signing in already,
+ * and a wrong password there is the form's own error.
+ */
+export function refusalCard(kind: RefusalCard["kind"], at: { pathname: string; search: string }): RefusalCard | null {
+  if (at.pathname === "/login") return null;
+  return kind === "guest" ? { kind, here: at.pathname + at.search } : { kind };
+}
+
 /**
  * A guest tried to change something (the proxy answers a guest's change with a 401 marked
  * x-fuobe-guest): open "Create a free account" (GuestPrompt). An account tried to run something
  * (a 403 marked x-fuobe-connect-gpu): open "Connect your GPU". Watches every fetch, so the studio's
- * own helpers (json() here, and the components' own) all get it. Installed once.
+ * own helpers (json() here, and the components' own) all get it. The response is marked
+ * (src/lib/refusals.ts): the error json() and postFile() throw for it shows no toast on top of the
+ * card. Never on the sign-in page (refusalCard). Installed once.
  */
 export function watchGuestRefusals(): void {
   const w = window as typeof window & { __fuobeGuestFetch?: boolean };
   if (w.__fuobeGuestFetch) return;
   w.__fuobeGuestFetch = true;
   const original = window.fetch.bind(window);
+  const open = (res: Response, kind: RefusalCard["kind"]) => {
+    if (!refusalCard(kind, window.location)) return;
+    markRefusalShown(res);
+    window.dispatchEvent(new Event(kind === "guest" ? GUEST_PROMPT_EVENT : CONNECT_GPU_EVENT));
+  };
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const res = await original(input, init);
     if (res.status === 401 && res.headers.get("x-fuobe-guest") === "1") {
       const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
-      if (method !== "GET" && method !== "HEAD") window.dispatchEvent(new Event(GUEST_PROMPT_EVENT));
+      if (method !== "GET" && method !== "HEAD") open(res, "guest");
     }
-    if (res.status === 403 && res.headers.get("x-fuobe-connect-gpu") === "1") window.dispatchEvent(new Event(CONNECT_GPU_EVENT));
+    if (res.status === 403 && res.headers.get("x-fuobe-connect-gpu") === "1") open(res, "gpu");
     // A run the GPU pre-flight stopped (something missing on the viewer's ComfyUI): the guided fix opens with its plan.
     if (res.status === 409 && res.headers.get("x-fuobe-gpu-setup") === "1") {
       res

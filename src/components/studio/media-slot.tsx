@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAssets, type Asset } from "@/lib/api";
+import { toastError } from "@/lib/refusals";
 import { postFile } from "@/lib/upload";
 import type { MediaKind } from "@/lib/catalog/types";
 import { slotCaption } from "@/lib/composer";
@@ -87,7 +88,8 @@ export async function fileToSlot(file: File, onChange: (v: SlotValue | null) => 
   } catch (e) {
     if (opts.signal?.aborted || (e as Error).name === "AbortError") return;
     onChange(null);
-    toast.error((e as Error).message || "Upload failed. Please try again.");
+    // Refused with its own card ("Create a free account", "Connect your GPU"): nothing on top of it.
+    toastError(e, "Upload failed. Please try again.");
   } finally {
     revoke();
   }

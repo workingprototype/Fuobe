@@ -65,6 +65,7 @@ import {
   startStep,
 } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
+import { toastError } from "@/lib/refusals";
 import { cn } from "@/lib/utils";
 import { badgeFor, badgeText, openGpuSetup, setGpuRetry, useGpuBadges } from "@/hooks/use-gpu";
 import { AttachMenu } from "./attach-menu";
@@ -517,8 +518,8 @@ export function Composer({ docked }: { docked: boolean }) {
       () => submitRef.current(true),
     );
     create.mutate(skipGpu ? ({ ...sent.request, gpuCheck: "skip" } as typeof sent.request) : sent.request, {
-      // Stopped by the GPU pre-flight: the guided fix is open already, so no error toast on top.
-      onError: (e) => void ((e as { gpuSetup?: boolean }).gpuSetup || toast.error((e as Error).message)),
+      // Stopped by the GPU pre-flight, or refused with its own card: the guided fix or the card is open already, so no error toast on top.
+      onError: (e) => void ((e as { gpuSetup?: boolean }).gpuSetup || toastError(e)),
     });
   };
 
@@ -529,7 +530,7 @@ export function Composer({ docked }: { docked: boolean }) {
       const p = await enhance(draft.prompt, config.kind, op ?? (config.kind === "video" ? "t2v" : "t2i"));
       setDraft({ prompt: p });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setEnhancing(false);
     }

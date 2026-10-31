@@ -13,6 +13,7 @@ import { uploadFile } from "@/lib/api";
 import { applyPreset, CONTROLS, describeGrade, FRAGMENT, isNeutral, NEUTRAL, PRESETS, uniforms, VERTEX, type Grade } from "@/lib/grade";
 import { cn } from "@/lib/utils";
 import { loseContext as loseGlContext, releaseVideo } from "@/lib/media-release";
+import { toastError } from "@/lib/refusals";
 
 type Source = HTMLImageElement | HTMLVideoElement;
 
@@ -296,7 +297,8 @@ function Grader() {
       if (!blob) throw new Error("Couldn't export the image");
       await record(new File([blob], "graded.png", { type: "image/png" }), "image");
     } catch (e) {
-      toast.error((e as Error).message);
+      // A guest's save opens "Create a free account" (an account's, "Connect your GPU"): nothing on top of it.
+      toastError(e);
     } finally {
       setSaving(null);
     }
@@ -348,7 +350,7 @@ function Grader() {
       if (!alive.current) return;
       await record(new File(chunks, "graded.webm", { type: "video/webm" }), "video");
     } catch (e) {
-      if (alive.current) toast.error((e as Error).message);
+      if (alive.current) toastError(e);
     } finally {
       release(clip);
       if (alive.current) setSaving(null);
