@@ -99,7 +99,7 @@ describe("progressive list paging", () => {
 function fakeEnv({ hover = false, reduced = false, width = 1280, height = 800, saveData = false } = {}) {
   let ioCallback: IntersectionObserverCallback | null = null;
   const observed = new Set<Element>();
-  const listeners = { scroll: new Set<() => void>(), visibilitychange: new Set<() => void>() };
+  const listeners = { scroll: new Set<() => void>(), visibilitychange: new Set<() => void>(), motion: new Set<() => void>() };
   let hidden = false;
   let now = 0;
   const timers = new Set<{ at: number; cb: () => void }>();
@@ -139,6 +139,8 @@ function fakeEnv({ hover = false, reduced = false, width = 1280, height = 800, s
     hidden: () => hidden,
     saveData: () => saveData,
   };
+  /** The connection turns to Save-Data or 2G (no event: the next pick reads it). */
+  const setSaveData = (on: boolean) => void (saveData = on);
   /** A card whose box starts `top` px down and `left` px across the screen. */
   const card = (top: number, left = 0, width = 240, height = 180) => ({ getBoundingClientRect: () => ({ top, left, width, height }) }) as unknown as Element;
   const intersect = (entries: [Element, number][]) =>
@@ -149,7 +151,12 @@ function fakeEnv({ hover = false, reduced = false, width = 1280, height = 800, s
     hidden = h;
     listeners.visibilitychange.forEach((f) => f());
   };
-  return { env, card, intersect, scrolled, setHidden, advance, observed, listeners, timers };
+  /** The user turns reduced motion on (or off) while the page is open. */
+  const setReduced = (r: boolean) => {
+    reduced = r;
+    listeners.motion.forEach((f) => f());
+  };
+  return { env, card, intersect, scrolled, setHidden, setReduced, setSaveData, advance, observed, listeners, timers };
 }
 
 /** Cards in a grid, `rows` × `cols` of `w` × `h` with 20 px between them, watched by `store` and all in full view: "r1c2" is row 1, column 2. */
@@ -291,16 +298,42 @@ describe("preview playback store", () => {
   });
 
   it("with reduced motion nothing plays by itself, but hover and keyboard focus still do", () => {
-    const { env, card, advance, observed, listeners } = fakeEnv({ reduced: true });
-    const store = createPlaybackStore(env);
-    store.watch(card(300), "a")();
-    expect(store.watchedCount()).toBe(0);
-    expect(observed.size).toBe(0);
-    expect(listeners.scroll.size).toBe(0);
-    store.play("a");
-    advance(HOVER_INTENT);
-    expect(store.playing()).toEqual(["a"]);
+    const fake = fakeEnv({ reduced: true });
+    const store = createPlaybackStore(fake.env);
+    watchGrid(store, fake, 1, 2);
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual([]);
+    store.play("r0c0");
+    fake.advance(HOVER_INTENT);
+    expect(store.playing()).toEqual(["r0c0"]);
     expect(store.reducedMotion()).toBe(true);
+  });
+
+  it("follows reduced motion turned on or off while the page is open", () => {
+    const fake = fakeEnv({ hover: true });
+    const store = createPlaybackStore(fake.env);
+    const off = store.subscribe(() => {});
+    expect(fake.listeners.motion.size).toBe(1);
+    watchGrid(store, fake, 1, 3);
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual(["r0c0", "r0c1", "r0c2"]);
+    // Turned on: what plays by itself stops at once, and a scroll doesn't start it again.
+    fake.setReduced(true);
+    expect(store.playing()).toEqual([]);
+    fake.scrolled();
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual([]);
+    // A hover still plays one.
+    store.play("r0c1");
+    fake.advance(HOVER_INTENT);
+    expect(store.playing()).toEqual(["r0c1"]);
+    store.stop("r0c1");
+    // Turned off: the cards in view play again once the page is still.
+    fake.setReduced(false);
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual(["r0c0", "r0c1", "r0c2"]);
+    off();
+    expect(fake.listeners.motion.size).toBe(0);
   });
 
   it("with Save-Data or on a 2G connection nothing plays by itself (hover still does)", () => {
@@ -313,6 +346,18 @@ describe("preview playback store", () => {
     store.play("a");
     advance(HOVER_INTENT);
     expect(store.playing()).toEqual(["a"]);
+  });
+
+  it("stops what plays by itself at the next pick once the connection turns to Save-Data or 2G", () => {
+    const fake = fakeEnv();
+    const store = createPlaybackStore(fake.env);
+    watchGrid(store, fake, 1, 2);
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual(["r0c0", "r0c1"]);
+    fake.setSaveData(true);
+    fake.scrolled();
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual([]);
   });
 
   it("reads Save-Data and the connection type from the browser", () => {
@@ -346,6 +391,7 @@ describe("preview playback store", () => {
     const store = createPlaybackStore(env);
     const off = store.subscribe(() => {});
     expect(listeners.visibilitychange.size).toBe(1);
+    expect(listeners.motion.size).toBe(1);
     const els = [card(0), card(200), card(400), card(600)];
     const unwatch = els.map((el, i) => store.watch(el, `c${i}`));
     expect(listeners.scroll.size).toBe(1);
@@ -366,6 +412,7 @@ describe("preview playback store", () => {
     expect(timers.size).toBe(0);
     off();
     expect(listeners.visibilitychange.size).toBe(0);
+    expect(listeners.motion.size).toBe(0);
   });
 
   it("does nothing without IntersectionObserver", () => {

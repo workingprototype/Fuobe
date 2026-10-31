@@ -4,7 +4,8 @@
  * screen, at most MAX_PLAYING at once, so a gallery with dozens of clips stays smooth and doesn't
  * download them all. Procedural previews (no clip) play by themselves only where nothing can hover
  * (phones); a still never moves. Nothing plays by itself when the user prefers reduced motion, asks
- * for less data (Save-Data, a 2G connection) or the tab is hidden.
+ * for less data (Save-Data, a 2G connection) or the tab is hidden; reduced motion turned on while the
+ * page is open stops what plays by itself at once.
  *
  * The hovered or focused card plays too, on top of those, once the pointer has rested on it for a
  * moment (a pointer crossing the grid doesn't start every card it passes); asked for, it plays even
@@ -12,6 +13,10 @@
  *
  * Pure apart from the environment it's given, so the rules are testable without a browser.
  */
+
+export type PlaybackEvent = "scroll" | "visibilitychange" | "motion";
+
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
 /** What the store needs from the browser. */
 export interface PlaybackEnv {
@@ -22,9 +27,9 @@ export interface PlaybackEnv {
   delay(cb: () => void, ms: number): () => void;
   viewportWidth(): number;
   viewportHeight(): number;
-  /** Scrolling anywhere on the page, or the tab being hidden or shown. */
-  on(type: "scroll" | "visibilitychange", cb: () => void): void;
-  off(type: "scroll" | "visibilitychange", cb: () => void): void;
+  /** Scrolling anywhere on the page, the tab being hidden or shown, or the reduced-motion setting changing. */
+  on(type: PlaybackEvent, cb: () => void): void;
+  off(type: PlaybackEvent, cb: () => void): void;
   /** The tab is in the background. */
   hidden(): boolean;
   /** The user asked for less data (Save-Data), or the connection is 2G. */
@@ -108,7 +113,7 @@ export function createPlaybackStore(env: PlaybackEnv) {
     auto = new Set(ids);
     notify();
   };
-  const reducedMotion = () => env.matches("(prefers-reduced-motion: reduce)");
+  const reducedMotion = () => env.matches(REDUCED_MOTION);
   const cancelPending = () => {
     pending?.cancel();
     pending = null;
@@ -120,6 +125,7 @@ export function createPlaybackStore(env: PlaybackEnv) {
 
   const pick = () => {
     settle = null;
+    if (reducedMotion() || env.saveData()) return setAuto([]);
     const cx = env.viewportWidth() / 2;
     const cy = env.viewportHeight() / 2;
     const cards: Candidate[] = [];
@@ -143,7 +149,14 @@ export function createPlaybackStore(env: PlaybackEnv) {
     notify();
   };
 
-  const isPlaying = (id: string) => !env.hidden() && (hovered === id || auto.has(id));
+  // Reduced motion turned on stops what plays by itself at once (isPlaying) and the next pick chooses
+  // nothing; turned off, the cards in view are picked again.
+  const onMotion = () => {
+    if (watched.size) schedule();
+    notify();
+  };
+
+  const isPlaying = (id: string) => !env.hidden() && (hovered === id || (auto.has(id) && !reducedMotion()));
   /** Hover / focus: play this one once it has had the pointer for HOVER_INTENT. */
   const play = (id: string) => {
     cancelPending();
@@ -161,11 +174,16 @@ export function createPlaybackStore(env: PlaybackEnv) {
 
   return {
     subscribe(l: () => void) {
-      if (!listeners.size) env.on("visibilitychange", onVisibility);
+      if (!listeners.size) {
+        env.on("visibilitychange", onVisibility);
+        env.on("motion", onMotion);
+      }
       listeners.add(l);
       return () => {
         listeners.delete(l);
-        if (!listeners.size) env.off("visibilitychange", onVisibility);
+        if (listeners.size) return;
+        env.off("visibilitychange", onVisibility);
+        env.off("motion", onMotion);
       };
     },
     isPlaying,
@@ -181,9 +199,9 @@ export function createPlaybackStore(env: PlaybackEnv) {
     /** Let visibility decide whether `el` plays by itself (see autoplays). Returns the cleanup. */
     watch(el: Element, id: string): () => void {
       const IO = env.IntersectionObserver;
-      // Each card that comes into view would start a download, and motion the user didn't ask for: none
-      // with Save-Data, on 2G or with reduced motion.
-      if (!IO || env.saveData() || reducedMotion()) return () => {};
+      // Each card that comes into view would start a download: none with Save-Data or on 2G. With
+      // reduced motion it's watched but not picked (pick), so turning the setting off plays it.
+      if (!IO || env.saveData()) return () => {};
       observer ??= new IO(
         (entries) => {
           for (const e of entries) {
@@ -224,6 +242,10 @@ export type PlaybackStore = ReturnType<typeof createPlaybackStore>;
 
 type Connection = { saveData?: boolean; effectiveType?: string };
 
+/** The reduced-motion query, kept: a change listener comes off only the list it was added to. */
+let motionQuery: MediaQueryList | undefined;
+const reducedMotionQuery = () => (typeof window.matchMedia === "function" ? (motionQuery ??= window.matchMedia(REDUCED_MOTION)) : undefined);
+
 /** The real browser; every member is safe to call during server rendering. */
 export const browserPlaybackEnv: PlaybackEnv = {
   matches: (q) => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(q).matches,
@@ -237,8 +259,16 @@ export const browserPlaybackEnv: PlaybackEnv = {
   viewportWidth: () => window.innerWidth,
   viewportHeight: () => window.innerHeight,
   // Scrolls are caught from every scroller (capture), a horizontal row's included.
-  on: (type, cb) => (type === "scroll" ? window.addEventListener("scroll", cb, { passive: true, capture: true }) : document.addEventListener(type, cb)),
-  off: (type, cb) => (type === "scroll" ? window.removeEventListener("scroll", cb, { capture: true }) : document.removeEventListener(type, cb)),
+  on: (type, cb) => {
+    if (type === "scroll") window.addEventListener("scroll", cb, { passive: true, capture: true });
+    else if (type === "motion") reducedMotionQuery()?.addEventListener("change", cb);
+    else document.addEventListener(type, cb);
+  },
+  off: (type, cb) => {
+    if (type === "scroll") window.removeEventListener("scroll", cb, { capture: true });
+    else if (type === "motion") reducedMotionQuery()?.removeEventListener("change", cb);
+    else document.removeEventListener(type, cb);
+  },
   hidden: () => typeof document !== "undefined" && document.hidden,
   saveData: () => {
     const c = typeof navigator === "undefined" ? undefined : (navigator as Navigator & { connection?: Connection }).connection;
