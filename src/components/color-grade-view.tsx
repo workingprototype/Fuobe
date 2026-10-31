@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { downloadBlob } from "@/components/ads/render";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Slider } from "@/components/ui/slider";
 import { MediaSlot, type SlotValue } from "@/components/studio/media-slot";
-import { uploadFile } from "@/lib/api";
+import { uploadFile, useViewer } from "@/lib/api";
 import { applyPreset, CONTROLS, describeGrade, FRAGMENT, isNeutral, NEUTRAL, PRESETS, uniforms, VERTEX, type Grade } from "@/lib/grade";
 import { cn } from "@/lib/utils";
 import { loseContext as loseGlContext, releaseVideo } from "@/lib/media-release";
@@ -140,8 +141,11 @@ function Grader() {
   const [grade, setGrade] = useState<Grade>(() => (handed ? applyPreset(handed) : NEUTRAL));
   const [preset, setPreset] = useState<string | undefined>(handed?.id);
   const [holding, setHolding] = useState(false);
-  const [saving, setSaving] = useState<null | "image" | number>(null);
+  /** The graded file being rendered, where it goes and (for a clip) how far along it is. */
+  const [saving, setSaving] = useState<null | { to: "download" | "library"; progress?: number }>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  // Saving goes to the studio's library, which only its owner can change: everyone else downloads.
+  const owner = useViewer().data?.owner;
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<GradeRenderer | null>(null);
@@ -283,36 +287,32 @@ function Grader() {
     toast.success("Saved to your library");
   };
 
-  const exportImage = async () => {
-    if (!source || source instanceof HTMLVideoElement) return;
-    setSaving("image");
+  /** The graded picture as a PNG, at full size (or the largest this browser's WebGL draws). */
+  const renderImage = async (img: HTMLImageElement): Promise<File> => {
+    const c = document.createElement("canvas");
+    const r = new GradeRenderer(c);
     try {
-      const c = document.createElement("canvas");
-      const r = new GradeRenderer(c);
-      const [w, h] = dims(source);
+      const [w, h] = dims(img);
       const s = Math.min(1, r.maxSize / Math.max(w, h));
-      r.render(source, grade, Math.round(w * s), Math.round(h * s));
+      r.render(img, grade, Math.round(w * s), Math.round(h * s));
       const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/png"));
-      loseContext(r);
       if (!blob) throw new Error("Couldn't export the image");
-      await record(new File([blob], "graded.png", { type: "image/png" }), "image");
-    } catch (e) {
-      // A guest's save opens "Create a free account" (an account's, "Connect your GPU"): nothing on top of it.
-      toastError(e);
+      return new File([blob], "graded.png", { type: "image/png" });
     } finally {
-      setSaving(null);
+      loseContext(r);
     }
   };
 
-  /** Re-plays the clip once through the grader and records the canvas (WebM, with the original audio when the browser allows). */
-  const exportVideo = async () => {
-    if (!(source instanceof HTMLVideoElement)) return;
-    setSaving(0);
+  /**
+   * Re-plays the clip once through the grader and records the canvas (WebM, with the original audio when the browser
+   * allows). Null when the page closed before the end.
+   */
+  const renderVideo = async (playing: HTMLVideoElement, onProgress: (p: number) => void): Promise<File | null> => {
     let clip: HTMLVideoElement | null = null;
     try {
       const c = document.createElement("canvas");
       const r = new GradeRenderer(c);
-      const [w, h] = dims(source);
+      const [w, h] = dims(playing);
       const s = Math.min(1, 1920 / Math.max(w, h));
       const W = Math.round((w * s) / 2) * 2;
       const H = Math.round((h * s) / 2) * 2;
@@ -338,7 +338,7 @@ function Grader() {
         const tick = () => {
           if (!alive.current) return res();
           r.render(v, grade, W, H);
-          setSaving(Math.min(0.99, v.currentTime / (v.duration || 1)));
+          onProgress(Math.min(0.99, v.currentTime / (v.duration || 1)));
           if (v.ended) res();
           else requestAnimationFrame(tick);
         };
@@ -347,15 +347,29 @@ function Grader() {
       rec.stop();
       await done;
       loseContext(r);
-      if (!alive.current) return;
-      await record(new File(chunks, "graded.webm", { type: "video/webm" }), "video");
+      if (!alive.current) return null;
+      return new File(chunks, "graded.webm", { type: "video/webm" });
+    } finally {
+      release(clip);
+    }
+  };
+
+  /** Renders the graded picture or clip in the browser, then downloads it or (the owner) saves it to the library. */
+  const exportTo = async (to: "download" | "library") => {
+    if (!source) return;
+    setSaving({ to, progress: source instanceof HTMLVideoElement ? 0 : undefined });
+    try {
+      const file = source instanceof HTMLVideoElement ? await renderVideo(source, (progress) => setSaving({ to, progress })) : await renderImage(source);
+      if (!file || !alive.current) return;
+      if (to === "download") downloadBlob(file, file.name);
+      else await record(file, file.type.startsWith("video/") ? "video" : "image");
     } catch (e) {
       if (alive.current) toastError(e);
     } finally {
-      release(clip);
       if (alive.current) setSaving(null);
     }
   };
+  const rendering = (to: "download" | "library") => saving?.to === to && saving.progress !== undefined && `Rendering ${Math.round(saving.progress * 100)}%`;
 
   const groups = useMemo(() => [...new Set(CONTROLS.map((c) => c.group))], []);
   const neutral = isNeutral(grade);
@@ -373,7 +387,7 @@ function Grader() {
   };
 
   return (
-    <div className="flex h-svh flex-col">
+    <div className="flex flex-col lg:h-svh">
       <header className="flex h-14 shrink-0 items-center gap-2 px-3 sm:px-6">
         <SidebarTrigger className="md:hidden" />
         <h1 className="font-heading text-[22px] leading-none">Color grading</h1>
@@ -383,7 +397,14 @@ function Grader() {
         </div>
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3 sm:px-6 lg:flex-row">
-        <div ref={box} className="relative grid min-h-[40vh] flex-1 place-items-center overflow-hidden rounded-xl bg-media">
+        <div
+          ref={box}
+          className={cn(
+            "relative grid min-h-[40vh] place-items-center overflow-hidden rounded-xl bg-media lg:flex-1",
+            // On a phone the picture stays at the top while the looks and sliders scroll under it.
+            input && "max-lg:sticky max-lg:top-0 max-lg:z-10 max-lg:h-[40svh] max-lg:min-h-0",
+          )}
+        >
           {!input ? (
             <div className="flex flex-col items-center gap-4 text-center text-white/80">
               <ImagePlus className="size-8" />
@@ -450,7 +471,7 @@ function Grader() {
                         <span className="block size-full animate-pulse bg-muted" />
                       )}
                     </span>
-                    <span className="truncate px-0.5 text-[11px] font-medium">{p.name}</span>
+                    <span className="line-clamp-2 px-0.5 text-[11px] leading-tight font-medium">{p.name}</span>
                   </button>
                 ))}
               </div>
@@ -491,29 +512,30 @@ function Grader() {
             ))}
           </div>
           <div className="space-y-2 border-t p-3">
-            {typeof saving === "number" && (
+            {saving?.progress !== undefined && (
               <div className="h-1 overflow-hidden rounded-full bg-muted">
-                <div className="h-full bg-primary transition-[width]" style={{ width: `${saving * 100}%` }} />
+                <div className="h-full bg-primary transition-[width]" style={{ width: `${saving.progress * 100}%` }} />
               </div>
             )}
             <div className="flex gap-2">
               <Button variant="ghost" size="sm" disabled={neutral} onClick={() => (setGrade(NEUTRAL), setPreset(undefined))}>
                 <RotateCcw /> Reset
               </Button>
-              <Button className="flex-1" size="sm" disabled={!source || neutral || saving !== null} onClick={input?.kind === "video" ? exportVideo : exportImage}>
-                {saving !== null ? <Loader2 className="animate-spin" /> : <Save />}
-                {typeof saving === "number" ? `Rendering ${Math.round(saving * 100)}%` : "Save to library"}
+              <Button className={cn(!owner && "flex-1")} variant={owner ? "outline" : "default"} size="sm" disabled={!source || saving !== null} onClick={() => exportTo("download")}>
+                {saving?.to === "download" ? <Loader2 className="animate-spin" /> : <Download />}
+                {rendering("download") || "Download"}
               </Button>
+              {owner && (
+                <Button className="flex-1" size="sm" disabled={!source || neutral || saving !== null} onClick={() => exportTo("library")}>
+                  {saving?.to === "library" ? <Loader2 className="animate-spin" /> : <Save />}
+                  {rendering("library") || "Save to library"}
+                </Button>
+              )}
             </div>
             {saved && (
-              <div className="flex gap-2 text-[12px]">
-                <Link href="/library" className="text-brand-text underline underline-offset-2">
-                  Open library
-                </Link>
-                <a href={`${saved}?download=graded.${input?.kind === "video" ? "webm" : "png"}`} className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
-                  <Download className="size-3" /> Download
-                </a>
-              </div>
+              <Link href="/library" className="block text-[12px] text-brand-text underline underline-offset-2">
+                Open library
+              </Link>
             )}
           </div>
         </aside>

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EFFECTS, MOTIONS } from "@/lib/catalog";
 import { copyText, copyWithToast } from "@/lib/clipboard";
@@ -552,6 +553,25 @@ describe("releasing color grading's media", () => {
     expect(lose).toHaveBeenCalledOnce();
     expect(() => loseContext(null)).not.toThrow();
     expect(() => loseContext({ getExtension: (() => null) as WebGLRenderingContext["getExtension"] })).not.toThrow();
+  });
+});
+
+describe("color grading for everyone", () => {
+  const view = fs.readFileSync(path.resolve(__dirname, "../src/components/color-grade-view.tsx"), "utf8");
+
+  it("previews its looks on a full-size photo that stays light enough for a phone", async () => {
+    const file = path.resolve(__dirname, "../public/samples/grade-sample.jpg");
+    const meta = await sharp(file).metadata();
+    expect(meta.format).toBe("jpeg");
+    expect(meta.width).toBeGreaterThanOrEqual(1280);
+    expect(fs.statSync(file).size).toBeLessThan(300 * 1024);
+  });
+
+  it("downloads the graded result straight from the browser, and only the owner saves it to the library", () => {
+    // Download needs no upload (guests and accounts can't change the owner's library); Save stays the owner's.
+    expect(view).toMatch(/onClick=\{\(\) => exportTo\("download"\)\}/);
+    expect(view).toMatch(/if \(to === "download"\) downloadBlob\(file, file\.name\);/);
+    expect(view).toMatch(/\{owner && \(\s*<Button[^>]*onClick=\{\(\) => exportTo\("library"\)\}/);
   });
 });
 
