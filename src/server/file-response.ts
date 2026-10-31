@@ -31,6 +31,26 @@ export function fileResponse(request: Request, relPath: string, opts: { cache?: 
     pipeline(stream, patched, () => {}); // a read error ends the response (pipeline destroys both)
     return patched;
   };
+  // Opened when the body is first read: a body never read (Next answers HEAD with GET and drops the body) holds no
+  // file open, and a file deleted in between (its run deleted) fails the read. A stream opened at once has no error
+  // listener until it is read, so that ENOENT was an uncaught exception.
+  const body = (range?: { start: number; end: number }): ReadableStream<Uint8Array> => {
+    let chunks: AsyncIterator<Uint8Array> | undefined;
+    return new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          chunks ??= read(range)[Symbol.asyncIterator]();
+          const { value, done } = await chunks.next();
+          if (done) controller.close();
+          else controller.enqueue(value);
+        },
+        async cancel() {
+          await chunks?.return?.();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+  };
   const headers: Record<string, string> = {
     // Transcripts, subtitles and scripts are UTF-8 text.
     "Content-Type": /^text\/|^application\/(json|x-subrip)$/.test(type) ? `${type}; charset=utf-8` : type,
@@ -48,12 +68,12 @@ export function fileResponse(request: Request, relPath: string, opts: { cache?: 
     const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
     const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
     if (start >= size || start > end) return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
-    return new Response(read({ start, end }) as unknown as ReadableStream, {
+    return new Response(body({ start, end }), {
       status: 206,
       headers: { ...headers, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(end - start + 1) },
     });
   }
-  return new Response(read() as unknown as ReadableStream, {
+  return new Response(body(), {
     headers: { ...headers, "Content-Length": String(size) },
   });
 }
