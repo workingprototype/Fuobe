@@ -94,6 +94,21 @@
   "sizeBytes": 2521292758,
   "sha256": "e7c3091949c27e2d55ae6d5df917b99dadfebbf308e5a50d0ade0d16c90297ae"
  },
+ "https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_int8_convrot.safetensors": {
+  "revision": "2aa6c75ce6d5fabded0ca4d0f76abbfaf8edc87d",
+  "sizeBytes": 9583465712,
+  "sha256": "a9164002943463b4c7b2abd88c82a488c088acc35762651e4d8604d6ce4a163d"
+ },
+ "https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_unconditional_int8_convrot.safetensors": {
+  "revision": "2aa6c75ce6d5fabded0ca4d0f76abbfaf8edc87d",
+  "sizeBytes": 9583465712,
+  "sha256": "cd03ed94f244c9cb705e7d30ca0f40b5f5b004bb20674117adff88d16416c23d"
+ },
+ "https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors": {
+  "revision": "2aa6c75ce6d5fabded0ca4d0f76abbfaf8edc87d",
+  "sizeBytes": 10588637512,
+  "sha256": "4ba424cf62e51392e4d1a39933e803706f4e823c1065f36aaf149c6453f66bcd"
+ },
  "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors": {
   "revision": "1171f4dc7e325bf3734586942e737872506c73e1",
   "sizeBytes": 13492686496,

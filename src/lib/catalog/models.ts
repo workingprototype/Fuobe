@@ -73,6 +73,35 @@ type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badge
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
 
 const open: ModelDef[] = [
+  // ---- Ideogram 4 (B-I)
+  // The prompt is a JSON caption the server writes from the words (promptFormat; src/lib/ideogram-caption.ts).
+  o({
+    id: "oss-ideogram-4",
+    name: "Ideogram 4",
+    vendor: "Ideogram",
+    family: "ideogram",
+    kind: "image",
+    tagline: "Typography, posters and photographic stills from structured captions · 24 GB GPU · non-commercial weights",
+    badges: ["new", "top"],
+    routes: [comfy("t2i", "ideogram4-t2i", "lean JSON caption; Quality preset")],
+    options: {
+      aspectRatios: IMG_AR,
+      resolutions: ["1K", "1.5K", "2K"],
+      seed: true,
+      controls: [
+        {
+          param: "preset",
+          label: "Quality",
+          values: ["Quality", "Default", "Turbo"],
+          default: "Quality",
+          labels: { Quality: "Quality (48 steps)", Default: "Balanced (20 steps)", Turbo: "Turbo (12 steps)" },
+        },
+      ],
+      promptFormat: "ideogram4",
+    },
+    defaults: { aspectRatio: "1:1", resolution: "1.5K" },
+  }),
+
   // ---- Qwen-Image 2.1 (B-Q)
   o({
     id: "oss-qwen-image-21",

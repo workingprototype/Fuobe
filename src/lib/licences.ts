@@ -256,6 +256,7 @@ const SPDX = (id: string) => `https://spdx.org/licenses/${id}.html`;
 const KNOWN: { re: RegExp; name: string; class: LicenceClass; url?: string }[] = [
   { re: /FLUX\.1 \[dev\] Non-Commercial License|FLUX\.1 \[dev\] base is NON-COMMERCIAL/, name: "FLUX.1 [dev] Non-Commercial License", class: "non-commercial", url: "https://huggingface.co/black-forest-labs/FLUX.1-dev" },
   { re: /FLUX \[dev\] Non-Commercial License/, name: "FLUX [dev] Non-Commercial License", class: "non-commercial", url: "https://huggingface.co/black-forest-labs/FLUX.2-dev" },
+  { re: /Ideogram Non-Commercial Model Agreement/, name: "Ideogram Non-Commercial Model Agreement", class: "non-commercial", url: "https://huggingface.co/ideogram-ai/ideogram-4-fp8/blob/main/LICENSE.md" },
   { re: /inswapper/, name: "InsightFace inswapper (research only)", class: "research", url: "https://github.com/deepinsight/insightface" },
   { re: /CC-BY-NC-SA-4\.0/, name: "CC BY-NC-SA 4.0", class: "non-commercial", url: SPDX("CC-BY-NC-SA-4.0") },
   { re: /CC[- ]BY[- ]NC(?:[- ]4\.0)?\b/, name: "CC BY-NC 4.0", class: "non-commercial", url: SPDX("CC-BY-NC-4.0") },

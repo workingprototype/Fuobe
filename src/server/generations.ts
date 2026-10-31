@@ -24,6 +24,8 @@ import { MIXED_ORIGINAL, originalFrameSize } from "@/lib/catalog/mixed-media";
 import { imageSize } from "@/lib/image-size";
 import { finishSteps, mosaicPixels, unionMasks } from "@/lib/soul-post";
 import { ANGLES_ORIGINAL, MOSAIC_SCALE } from "@/lib/catalog/open-tools";
+import { computeDimensions } from "@/lib/comfy";
+import { captionFromWords, parseCaption } from "@/lib/ideogram-caption";
 import {
   CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
@@ -48,7 +50,7 @@ import { listElements } from "./elements";
 import { markStale } from "./gpu/snapshots";
 import { pollTrainings } from "./training";
 import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
-import { enhancePrompt, enhanceSoulWords } from "./enhance";
+import { enhancePrompt, enhanceSoulWords, ideogramCaption } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
 import { comfyLoraFiles, onOwnGpu, outputFetch, outsideOwnGpu, OWN_OUTPUT_LIMITS, ownGpu, probeComfy } from "./providers/comfyui";
@@ -1396,7 +1398,8 @@ async function submitNow(
       });
     };
     let prompt = plan.prompt;
-    if (req.params?.enhancePrompt && prompt) {
+    const captioned = plan.model.options.promptFormat === "ideogram4";
+    if (req.params?.enhancePrompt && prompt && !captioned) {
       update(id, { message: "Enhancing prompt" });
       const words = plan.soul?.words;
       const at = words ? prompt.indexOf(words) : -1;
@@ -1405,6 +1408,14 @@ async function submitNow(
         const longer = await enhanceSoulWords(words).catch(() => words);
         prompt = prompt.slice(0, at) + longer + prompt.slice(at + words.length);
       } else prompt = await enhancePrompt(prompt, plan.model.kind, plan.op).catch(() => prompt);
+      update(id, { prompt });
+    }
+    // Ideogram 4 reads a JSON caption (src/lib/ideogram-caption.ts): one given as the prompt (a reused run) is kept, plain
+    // words get one written. It becomes the run's prompt, as Enhance's rewrite does, so Reuse makes the same picture.
+    if (captioned && prompt) {
+      update(id, { message: "Writing the caption" });
+      const words = prompt;
+      prompt = parseCaption(words) ?? (await ideogramCaption(words, computeDimensions(plan.params.aspectRatio, plan.params.resolution, {})).catch(() => captionFromWords(words)));
       update(id, { prompt });
     }
     const input: GenInput = {

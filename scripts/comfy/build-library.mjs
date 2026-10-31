@@ -135,6 +135,8 @@ export const BINDING_KEYS = new Set([
   'separationModel', 'channels',
   // MOSS-Image (docs/research/new-models-7.md §4.6): the KSampler's sampler and the UNET file its Quality / Fast settings pick
   'sampler', 'unet',
+  // The owner's SOTA image families (2026-10-31): Ideogram 4's sampling preset
+  'preset',
 ]);
 
 // Sizes in GB: two decimals, and three where two would read 0 (a 4 MB DBS model), so no other entry's size changes.
@@ -160,7 +162,11 @@ async function hfTreeSize(url) {
 async function hfSize(url, cache) {
   if (cache[url] !== undefined && !cache[url]?.error) return cache[url];
   try {
-    const res = await fetch(url, { method: 'HEAD', redirect: 'manual' });
+    let res = await fetch(url, { method: 'HEAD', redirect: 'manual' });
+    // A renamed repository answers with a redirect to its new name on huggingface.co (Comfy-Org/flux2-dev → Flux-2-Dev):
+    // follow that one. The download's own redirect, to the CDN, carries the size and isn't followed.
+    const moved = res.headers.get('location');
+    if ([301, 302, 307, 308].includes(res.status) && moved?.startsWith('/')) res = await fetch(new URL(moved, url), { method: 'HEAD', redirect: 'manual' });
     const linked = res.headers.get('x-linked-size');
     const len = linked || (res.status === 200 ? res.headers.get('content-length') : null);
     if (res.status === 401 || res.status === 403) {

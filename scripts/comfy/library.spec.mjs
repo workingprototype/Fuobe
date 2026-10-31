@@ -117,6 +117,8 @@
 // Entry field requiredModels: files a loader reads by a name with no extension (DBSLoader's model folder), listed in the
 // manifest like any model (KNOWN_MODELS keys are the path under the folder, e.g. 'DBS-BSRNN-DnR/model.safetensors'), so the
 // Workflows page's presence check and its install commands cover them.
+// Keys added with the owner's SOTA image families (2026-10-31), model controls (params.extra):
+//   preset                                (Ideogram 4's sampling preset by name: Quality | Default | Turbo, the graph's own table)
 
 import fs from 'node:fs';
 
@@ -306,6 +308,12 @@ export const KNOWN_MODELS = {
   'qwen3vl_8b_int8_convrot.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors', variants: ['qwen3vl_8b_bf16.safetensors'] },
   'qwen_image_2.1_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors' },
   'qwen-image-2.1-outpaint-v2.safetensors': { folder: 'loras', url: 'https://huggingface.co/ausboss/Qwen-Image-2.1-Outpaint-LoRA/resolve/main/qwen-image-2.1-outpaint-v2.safetensors' },
+
+  // owner's SOTA families (2026-10-31): Ideogram 4 (Comfy-Org/Ideogram-4; its flux2-vae is the flux2-dev row above). `variants`:
+  // the same weights in another precision in the same repository, which a ComfyUI may list instead of the pinned file.
+  'ideogram4_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_int8_convrot.safetensors', variants: ['ideogram4_fp8_scaled.safetensors'] },
+  'ideogram4_unconditional_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_unconditional_int8_convrot.safetensors', variants: ['ideogram4_unconditional_fp8_scaled.safetensors'] },
+  'qwen3vl_8b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors' },
 };
 
 const WAN_NEG_EN =
@@ -2283,6 +2291,29 @@ export const SPEC = [
       'Pads are the input photo\'s pixels (multiples of 8); defaults 384/288/384/288 = a 1.5x zoom-out of a 1536x1152 photo. Grow at most about the photo\'s own size per side per run. ' +
       'prompt = the optional "what goes there" hint (the lead-in "Also include in the prompt:" is added); it must not name the subject, which then appears again in the margin. ' +
       'Removed: AusBoss Seed/Text/Compare/RunTimer/ShowText/WorkflowNote and its SaveImage (SaveImage). Proof [P]: the preview expand stills.',
+  },
+  // ---- Owner's SOTA image families: Ideogram 4 -------------------------------------------
+  {
+    id: 'ideogram4-t2i',
+    title: 'Ideogram 4 text to image (int8, dual-model guidance, the Quality / Default / Turbo preset table)',
+    capability: 't2i',
+    handBuilt: 'hand-built/ideogram4-t2i.json',
+    bindings: {
+      prompt: [b('98:24', 'text')], width: [b('98:27', 'value')], height: [b('98:28', 'value')], seed: [b('98:18', 'noise_seed')],
+      preset: [b('98:156', 'choice')],
+    },
+    outputs: [{ node: '158', kind: 'image' }],
+    defaults: { preset: 'Quality' },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 24,
+    license: 'Ideogram Non-Commercial Model Agreement: NON-COMMERCIAL (research and personal use; commercial use needs a paid Ideogram licence)',
+    notes:
+      'The owner\'s image_ideogram4_t2i_int8.json, exported through the ComfyUI frontend (subgraph 98 flattened, its LLM caption-template subgraph and preview pruned) and rendered as the preview pipeline\'s A1 [proven]. ' +
+      'Kept as saved: the conditional UNET with CFGOverride (cfg 3 for the last 30% of steps) into DualModelGuider cfg 7, whose negative pass is the unconditional UNET on the zeroed prompt; ' +
+      'qwen3vl_8b_fp8_scaled loaded as type ideogram4; flux2-vae; EmptyFlux2LatentImage; euler; SamplerCustomAdvanced; width and height rounded up to 16 (at least 256) by its math nodes. ' +
+      'The preset table feeds Ideogram4Scheduler (Quality 48 steps / mu 0 / std 1.5, Default 20 / 0 / 1.75, Turbo 12 / 0.5 / 1.75); the graph runs Quality, the recipe of the approved preview stills with people (those without ran Default, as the saved workflow does). ' +
+      'No negative prompt: the guidance is asymmetric with a text-free unconditional pass. The prompt is an Ideogram 4 JSON caption (the app writes one from plain words: src/lib/ideogram-caption.ts); ' +
+      'plain sentences often come back as the grey "blocked by safety filter" card. The Realism Engine LoRA graph is not used (the approved stills are the stock graph).',
   },
 
   // ---- Fuobe DoP (Originals O4): LTX-2.3 camera moves, FPV and transitions with LoRAs ------------
