@@ -839,7 +839,7 @@ export interface StatusInfo {
    * Public sign-up: a guest or an account is looking. Then everything else here is its own view
    * (its own GPU as ComfyUI, the open engine, no Demo mode), never the install's (src/server/account-gpu.ts).
    */
-  viewer?: { kind: "guest" | "account"; gpu: { connected: boolean; online?: boolean; device?: string; vramBytes?: number } };
+  viewer?: { kind: "guest" | "account"; gpu: { connected: boolean; mode?: "computer" | "link"; online?: boolean; device?: string; vramBytes?: number } };
 }
 
 /** A connection test's answer (POST /api/providers/test). */
@@ -1071,6 +1071,8 @@ export interface ViewerInfo {
   /** Guests may browse and anyone may sign up. */
   publicSignup: boolean;
   account?: { email: string };
+  /** Runs go to the ComfyUI on the person's own computer, which a Fuobe tab of theirs runs (components/gpu/computer-runner.tsx). */
+  computer?: boolean;
 }
 
 export function useViewer() {
@@ -1144,6 +1146,8 @@ export function signInHref(mode: "signup" | "login", next?: string): string {
 
 export const GUEST_PROMPT_EVENT = "fuobe:guest-prompt";
 export const CONNECT_GPU_EVENT = "fuobe:connect-gpu";
+/** A run started from this tab (components/gpu/computer-runtime.ts listens). */
+export const COMPUTER_KICK_EVENT = "fuobe:computer-kick";
 /** The guided fix (src/components/gpu/guided-fix.tsx): { ref, plan? }. */
 export const GPU_SETUP_EVENT = "fuobe:gpu-setup";
 
@@ -1184,6 +1188,10 @@ export function watchGuestRefusals(): void {
       if (method !== "GET" && method !== "HEAD") open(res, "guest");
     }
     if (res.status === 403 && res.headers.get("x-fuobe-connect-gpu") === "1") open(res, "gpu");
+    // A run started here, on the ComfyUI on this computer: the tab that runs it asks for it at once.
+    if (res.status === 201 && (init?.method ?? "").toUpperCase() === "POST" && new URL(input instanceof Request ? input.url : String(input), window.location.href).pathname === "/api/generations") {
+      window.dispatchEvent(new Event(COMPUTER_KICK_EVENT));
+    }
     // A run the GPU pre-flight stopped (something missing on the viewer's ComfyUI): the guided fix opens with its plan.
     if (res.status === 409 && res.headers.get("x-fuobe-gpu-setup") === "1") {
       res

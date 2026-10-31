@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseComfyBinary, parseComfyText, type ComfyEvent } from "@/lib/comfy-ws";
-import { FAKE_PNG, startLocalComfy, type LocalComfy } from "./helpers/fake-local-comfy";
+import { gatherInventory } from "@/lib/gpu/gather";
+import { workflowReadiness } from "@/lib/gpu/readiness";
+import { parseIndex } from "@/lib/gpu/requirements";
+import { fetchTransport } from "@/lib/gpu/transport";
+import { FAKE_PNG, startLocalComfy, type IndexLike, type LocalComfy } from "./helpers/fake-local-comfy";
 
 const SITE = "http://127.0.0.1:3370";
 let fake: LocalComfy | undefined;
@@ -90,5 +96,18 @@ describe("the fake local ComfyUI", () => {
     fake.restart();
     expect((await fetch(`${fake.url}/api/jobs/${id}`)).status).toBe(404);
     expect(await (await fetch(`${fake.url}/history/${id}`)).json()).toEqual({});
+  });
+
+  it("can have everything the studio's workflows need, so the GPU check finds a tool ready", async () => {
+    const idx = parseIndex(JSON.parse(fs.readFileSync(path.join(process.cwd(), "workflows/comfyui/requirements.json"), "utf8")));
+    const read = (base: string) => fetchTransport("browser", base, (url, init) => browser(url, init), { decodes: true });
+    fake = await startLocalComfy({ cors: SITE });
+    const bare = await gatherInventory(read(fake.url), idx, { where: "computer" });
+    expect(workflowReadiness("z-image-turbo-t2i", bare, idx, { account: true }).state).not.toBe("ready");
+    await fake.close();
+    fake = await startLocalComfy({ cors: SITE, has: idx as unknown as IndexLike });
+    const inv = await gatherInventory(read(fake.url), idx, { where: "computer" });
+    expect(inv.nodes.missing).toEqual([]);
+    expect(workflowReadiness("z-image-turbo-t2i", inv, idx, { account: true }).state).toBe("ready");
   });
 });

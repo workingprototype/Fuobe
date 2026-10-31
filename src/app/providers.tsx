@@ -9,6 +9,8 @@ import { AUTH_CHANNEL } from "@/lib/api";
 
 /** The GPU pre-flight's guided fix: loaded after the page, listening for "fuobe:gpu-setup". */
 const GuidedFixHost = dynamic(() => import("@/components/gpu/guided-fix").then((m) => m.GuidedFixHost), { ssr: false });
+/** "Use the ComfyUI on this computer": runs the person's jobs from this browser while it's open. */
+const ComputerRunnerHost = dynamic(() => import("@/components/gpu/computer-runner").then((m) => m.ComputerRunnerHost), { ssr: false });
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -41,6 +43,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           <Toaster position="top-center" gap={8} offset={29} />
           <GuestPrompt />
           <GuidedFixHost />
+          <ComputerRunnerHost />
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>

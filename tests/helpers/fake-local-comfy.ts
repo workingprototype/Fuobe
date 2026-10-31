@@ -12,6 +12,7 @@
  * Runs under plain Node too: only erasable TypeScript.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
@@ -32,13 +33,44 @@ export interface LocalComfyOptions {
   failNext?: "oom" | "missing_node" | "missing_model" | "gone" | "never";
   /** Lose this many prompts in a row (taken, then gone: a restart while it waited). */
   loseNext?: number;
-  /** What a job saves (default: one picture). "fake-png" is a web page named .png. */
+  /** What a job saves (default: what its save node makes: a clip, a sound, else a picture). "fake-png" is a web page named .png. */
   outputs?: ("image" | "video" | "audio" | "exr" | "text" | "fake-png")[];
   /** VHS meta-batch: the job finishes without outputs and queues this many more passes (the last one saves the clip). */
   metaBatch?: number;
   /** Embedded Python (portable / Easy-Install). */
   portable?: boolean;
   loras?: string[];
+  /**
+   * Everything a requirement index names is installed (the studio's workflows/comfyui/requirements.json): its node
+   * classes, with the loaders listing its files, and its model files. Without it, this ComfyUI has nothing.
+   */
+  has?: IndexLike;
+}
+
+/** The parts of a requirement index (src/lib/gpu/types.ts) the stand-in reads. */
+export interface IndexLike {
+  folders: string[];
+  files: Record<string, { folder: string; file: string; sizeBytes?: number; presence?: string; loaders?: [string, string][] }>;
+  workflows: Record<string, { core: string[]; packs: Record<string, string[]> }>;
+}
+
+const made = new WeakMap<IndexLike, ReturnType<typeof install>>();
+/** /object_info and the model folders of a ComfyUI that has everything in `idx`. */
+const installed = (idx: IndexLike) => made.get(idx) ?? made.set(idx, install(idx)).get(idx)!;
+function install(idx: IndexLike) {
+  const info: Record<string, { input: { required: Record<string, unknown[]> } }> = {};
+  const node = (cls: string) => (info[cls] ??= { input: { required: {} } });
+  for (const w of Object.values(idx.workflows)) {
+    for (const c of w.core) node(c);
+    for (const cs of Object.values(w.packs)) for (const c of cs) node(c);
+  }
+  const folders = new Map<string, { name: string; size: number }[]>(idx.folders.map((f) => [f, []]));
+  for (const f of Object.values(idx.files)) {
+    if (!folders.has(f.folder)) folders.set(f.folder, []);
+    folders.get(f.folder)!.push({ name: f.file, size: f.sizeBytes ?? 1 });
+    if (f.presence === "loader") for (const [cls, input] of f.loaders ?? []) ((node(cls).input.required[input] ??= [[]])[0] as string[]).push(f.file);
+  }
+  return { info, folders };
 }
 
 export interface LocalComfyLog {
@@ -90,9 +122,8 @@ export const FAKE_PNG = Buffer.from(
 export const FAKE_MP4 = Buffer.concat([Buffer.from("000000186674797069736f6d0000020069736f6d69736f32", "hex"), Buffer.alloc(64, 1)]);
 const FAKE_WAV = Buffer.concat([Buffer.from("RIFF"), Buffer.from([36, 0, 0, 0]), Buffer.from("WAVEfmt "), Buffer.alloc(64, 0)]);
 const FAKE_EXR = Buffer.concat([Buffer.from("762f3101", "hex"), Buffer.alloc(60, 2)]);
-const PREVIEW_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
 
-/** The parts of a multipart body: field name → {filename?, data}. */
+/** The parts of a multipart body: field name â†’ {filename?, data}. */
 function multipart(body: Buffer, contentType: string): Map<string, { filename?: string; data: Buffer }> {
   const out = new Map<string, { filename?: string; data: Buffer }>();
   const boundary = /boundary=(?:"([^"]+)"|([^;]+))/.exec(contentType);
@@ -142,6 +173,13 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
   const event = (clientId: string | undefined, type: string, data: Record<string, unknown>) => send(clientId, Buffer.from(JSON.stringify({ type, data })));
   const status = () => event(undefined, "status", { status: { exec_info: { queue_remaining: queue.length + (running ? 1 : 0) } } });
 
+  /** What a graph's save node makes. */
+  const madeBy = (g: Graph): NonNullable<LocalComfyOptions["outputs"]> => {
+    const classes = Object.values(g).map((n) => n.class_type);
+    if (classes.some((c) => /VHS_VideoCombine|SaveVideo|SaveWEBM|CreateVideo|SaveAnimated/.test(c))) return ["video"];
+    if (classes.some((c) => /SaveAudio/.test(c))) return ["audio"];
+    return ["image"];
+  };
   const outputNode = (g: Graph) => Object.keys(g).find((k) => /^(Save|VHS_VideoCombine|PreviewImage|CreateVideo)/.test(g[k].class_type)) ?? "9";
   const prefixOf = (g: Graph) => String(Object.values(g).find((n) => typeof n.inputs?.filename_prefix === "string")?.inputs.filename_prefix ?? "ComfyUI");
 
@@ -152,7 +190,7 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
     const base = prefix.split("/").pop();
     const ui: Record<string, unknown[]> = {};
     const add = (key: string, ext: string, i: number) => (ui[key] ??= []).push({ filename: `${base}_${String(i + 1).padStart(5, "0")}_.${ext}`, subfolder: sub, type: "output" });
-    (opts.outputs ?? ["image"]).forEach((k, i) => {
+    (opts.outputs ?? madeBy(job.graph)).forEach((k, i) => {
       if (k === "image" || k === "fake-png") add("images", "png", i);
       else if (k === "video") add("gifs", "mp4", i);
       else if (k === "audio") add("audio", "wav", i);
@@ -184,10 +222,10 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
         step++;
         event(job.clientId, "progress", { value: step, max: steps, prompt_id: job.id, node });
         if (job.preview) {
-          const meta = Buffer.from(JSON.stringify({ prompt_id: job.id, node_id: node, image_type: "image/jpeg" }));
+          const meta = Buffer.from(JSON.stringify({ prompt_id: job.id, node_id: node, image_type: "image/png" }));
           const len = Buffer.alloc(4);
           len.writeUInt32BE(meta.length);
-          send(job.clientId, Buffer.concat([Buffer.from([0, 0, 0, 4]), len, meta, PREVIEW_JPEG]), true);
+          send(job.clientId, Buffer.concat([Buffer.from([0, 0, 0, 4]), len, meta, FAKE_PNG]), true);
         }
         timer = setTimeout(next, opts.stepMs);
         return;
@@ -273,6 +311,8 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
         res.end(Buffer.isBuffer(value) ? value : JSON.stringify(value));
       };
       if (req.method === "OPTIONS") return reply(200, "");
+      // The stand-in's own count, for a test driving it from another process (never a ComfyUI route).
+      if (url.pathname === "/__fake/stats") return reply(200, { posts, uploads: inputs.size });
       const p = url.pathname;
       if (p === "/system_stats" || p === "/api/system_stats") {
         const argv = ["main.py", ...(opts.cors === "off" ? [] : ["--enable-cors-header", opts.cors]), "--base-directory", "C:\\Users\\someone\\private"];
@@ -283,10 +323,18 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
       }
       // No list given: an older ComfyUI without the route (the run goes ahead, and ComfyUI has the last word).
       if (p === "/models/loras") return opts.loras ? reply(200, opts.loras) : reply(404, { error: "not found" });
-      if (p === "/models") return reply(200, ["checkpoints", "loras", "vae"]);
-      if (p.startsWith("/models/")) return reply(200, []);
-      if (p === "/object_info") return reply(200, {});
-      if (p.startsWith("/object_info/")) return reply(200, {});
+      const has = opts.has ? installed(opts.has) : null;
+      if (p === "/models") return reply(200, has ? [...has.folders.keys()] : ["checkpoints", "loras", "vae"]);
+      if (p.startsWith("/models/")) return reply(200, (has?.folders.get(decodeURIComponent(p.slice(8))) ?? []).map((f) => f.name));
+      if (p.startsWith("/experiment/models/") && has) {
+        const files = has.folders.get(decodeURIComponent(p.slice(19)));
+        return files ? reply(200, files.map((f) => ({ name: f.name, pathIndex: 0, size: f.size }))) : reply(404, { error: "not found" });
+      }
+      if (p === "/object_info") return reply(200, has?.info ?? {});
+      if (p.startsWith("/object_info/")) {
+        const cls = decodeURIComponent(p.slice(13));
+        return reply(200, has?.info[cls] ? { [cls]: has.info[cls] } : {});
+      }
       if (p === "/embeddings") return reply(200, []);
       if (p === "/upload/image" && req.method === "POST") {
         const parts = multipart(body, String(req.headers["content-type"] ?? ""));
@@ -432,7 +480,7 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
         if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
       }
     }
-    throw new Error(`No free port in ${TEST_PORTS.join("–")}`);
+    throw new Error(`No free port in ${TEST_PORTS.join("â€“")}`);
   };
 
   const closeSockets = () => {
@@ -482,11 +530,14 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
 }
 
 // Run on its own: node tests/helpers/fake-local-comfy.ts --port 3371 --cors http://127.0.0.1:3370
+// [--has workflows/comfyui/requirements.json]: everything that index names is installed.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const arg = (name: string) => {
     const i = process.argv.indexOf(`--${name}`);
     return i > 0 ? process.argv[i + 1] : undefined;
   };
-  const fake = await startLocalComfy({ cors: arg("cors") ?? "off", steps: Number(arg("steps") ?? 8), stepMs: Number(arg("step-ms") ?? 250), portable: arg("portable") === "1" }, Number(arg("port") ?? 3371));
+  const index = arg("has");
+  const has = index ? (JSON.parse(readFileSync(index, "utf8")) as IndexLike) : undefined;
+  const fake = await startLocalComfy({ cors: arg("cors") ?? "off", steps: Number(arg("steps") ?? 8), stepMs: Number(arg("step-ms") ?? 250), portable: arg("portable") === "1", has }, Number(arg("port") ?? 3371));
   console.log(`fake ComfyUI on ${fake.url} (cross-site setting: ${fake.opts.cors})`);
 }

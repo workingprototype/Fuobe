@@ -62,7 +62,6 @@ export interface RunnerView {
   facts?: ComputerFacts;
 }
 
-class Gone extends Error {}
 class Stopped extends Error {}
 
 const PROGRESS_EVERY_MS = 500;
@@ -335,7 +334,15 @@ export class ComputerRunner {
       }
       const { task } = (await res.json()) as { task: ClaimedTask };
       this.leases.set(task.id, task.lease);
-      await this.run(task);
+      try {
+        await this.run(task);
+      } catch (e) {
+        // Something broke mid-job (the studio or the connection): forget it here, so the next claim picks it up again
+        // from where it got to (the job stays this computer's on the server).
+        this.view.jobs = this.view.jobs.filter((j) => j.taskId !== task.id);
+        this.emit();
+        throw e;
+      }
       return true;
     } finally {
       this.busy = false;

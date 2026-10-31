@@ -2,6 +2,8 @@
 
 import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, Wrench, X } from "lucide-react";
 import { openGpuSetup } from "@/hooks/use-gpu";
+import { useLocalJob } from "@/components/gpu/computer-runner";
+import { jobWords } from "@/lib/relay";
 import Link from "next/link";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -43,7 +45,9 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   // The clock runs between the job's reports (a fal queue or Higgsfield may report rarely).
   const now = useNow(1000);
   const pct = g.progress != null ? Math.round(g.progress * 100) : null;
-  const label = g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…");
+  // Running on the ComfyUI on this computer: its live preview (sharper with each step), where it runs, and its step now.
+  const local = useLocalJob(g.id);
+  const label = (local && jobWords(local.job, g.kind, g.message ?? undefined)) ?? (g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…"));
   // When progress moved (not every poll: each one rewrites updatedAt) gives the pace, so the time left.
   // Keyed by id: a chain's tile moves on to its next step's generation.
   const report = g.status === "running" ? g.progress : null;
@@ -56,9 +60,21 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
     // otherwise make the tile wider than its column and spill over the next card.
     <div className="relative h-full max-w-full overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }}>
       <div className="skeleton-sweep absolute inset-0 animate-skeleton" />
-      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3">
+      {local?.preview && (
+        // eslint-disable-next-line @next/next/no-img-element -- a live frame from the person's own ComfyUI (a blob: address)
+        <img
+          src={local.preview}
+          alt=""
+          // Shown once a frame decodes (a frame that doesn't keeps the shimmer).
+          onLoad={(e) => (e.currentTarget.style.opacity = "0.9")}
+          onError={(e) => (e.currentTarget.style.opacity = "0")}
+          className="absolute inset-0 size-full object-cover opacity-0 transition-opacity duration-300"
+        />
+      )}
+      <div className={cn("absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3", local?.preview && "bg-gradient-to-t from-background/85 to-transparent pt-8")}>
         <div className="min-w-0">
           <p className="shimmer-text animate-shimmer-text truncate text-[13px] font-medium">{label}</p>
+          {local && <p className="truncate text-[11px] text-muted-foreground">{local.here ? "On your computer · keep this tab open" : "Running in another Fuobe tab"}</p>}
           <p className="flex flex-wrap gap-x-1.5 font-mono text-[11px] text-muted-foreground tabular-nums">
             {pct != null && <span>{pct}%</span>}
             <span className={cn(pct != null && "before:mr-1.5 before:content-['·']")}>{elapsed(g.createdAt, Math.max(now, g.createdAt))}</span>

@@ -2,7 +2,9 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
+import { rememberedComfy } from "@/components/gpu/computer-runtime";
 import { GPU_SETUP_EVENT } from "@/lib/api";
+import { checkThisComputer, sendCheck } from "@/lib/gpu/browser-check";
 import { BADGE_STATE } from "@/lib/gpu/readiness";
 import type { Badge, BadgeMap, CheckLine, FixPlan, GpuProblem, ReadinessReport, Readiness } from "@/lib/gpu/types";
 import { responseError } from "@/lib/refusals";
@@ -15,7 +17,8 @@ import { responseError } from "@/lib/refusals";
 
 export interface ReadinessView {
   connected: boolean;
-  target?: "install" | "account";
+  /** Whose ComfyUI: the studio's own, a link, or the one on the person's computer (checked from this browser). */
+  target?: "install" | "account" | "computer";
   reason?: "guest" | "no-gpu" | "token" | "refused" | "off";
   checkedAt?: number | null;
   stale?: boolean;
@@ -119,11 +122,18 @@ export function openGpuSetup(detail: GpuSetupDetail): void {
 
 export type CheckEvent = ({ type: "line" } & CheckLine) | ({ type: "report" } & ReadinessView) | { type: "error"; error: string };
 
-/** POST /api/gpu/check, reading its lines as they come. Resolves with the board (or throws the refusal). */
+/**
+ * POST /api/gpu/check, reading its lines as they come. Resolves with the board (or throws the refusal). A ComfyUI on
+ * the person's own computer is checked from this tab instead, and what it found is sent to the server.
+ */
 export async function runGpuCheck(onLine: (l: CheckLine) => void): Promise<ReadinessView> {
   const res = await fetch("/api/gpu/check", { method: "POST" });
   if (!res.ok || !res.body) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string; wait?: number };
+    const body = (await res.json().catch(() => ({}))) as { error?: string; wait?: number; code?: string };
+    if (res.status === 409 && body.code === "browser") {
+      const where = rememberedComfy() ?? { port: 8188, host: "127.0.0.1" };
+      return sendCheck<ReadinessView>(await checkThisComputer(where.port, { host: where.host, onLine }));
+    }
     throw Object.assign(responseError(res, body.error ?? `The check didn't start (${res.status})`), { status: res.status, wait: body.wait });
   }
   const reader = res.body.getReader();

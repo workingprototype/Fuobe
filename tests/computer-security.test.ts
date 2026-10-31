@@ -21,7 +21,6 @@ const { setSetting } = await import("@/server/settings");
 const tasks = await import("@/server/computer/tasks");
 const { onComputer, outputFetch } = await import("@/server/providers/comfyui");
 const { accountMayChange, accountOwnRead, guestRead } = await import("@/lib/guest-access");
-const gpuRoute = await import("@/app/api/account/gpu/route");
 
 type Principal = import("@/server/computer/tasks").Principal;
 
@@ -75,7 +74,10 @@ function call(who: Who, method: string, url: string, o: { body?: unknown; raw?: 
     headers.set("content-type", "application/json");
     headers.set("content-length", String(Buffer.byteLength(body)));
   }
-  for (const [k, v] of Object.entries(o.headers ?? {})) (v === "" ? headers.delete(k) : headers.set(k, v));
+  for (const [k, v] of Object.entries(o.headers ?? {})) {
+    if (v === "") headers.delete(k);
+    else headers.set(k, v);
+  }
   const req = new Request(`${SITE}${url}`, { method, headers, body, duplex: "half" } as RequestInit);
   const params = (p: Record<string, string>) => ({ params: Promise.resolve(p) });
   const u = new URL(req.url).pathname;

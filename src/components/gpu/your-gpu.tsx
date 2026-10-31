@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { responseError, toastError } from "@/lib/refusals";
 
 interface GpuState {
-  gpu: { url: string; hasToken: boolean } | null;
+  /** A link, or the ComfyUI on this computer (connect-choice.tsx shows that one). */
+  gpu: { mode?: "link"; url: string; hasToken: boolean } | { mode: "computer" } | null;
 }
 interface GpuInfo {
   device?: string;
@@ -54,6 +55,8 @@ export function YourGpu() {
       setInfo(r.info);
       if (!test) {
         qc.setQueryData(["account-gpu"], { gpu: r.gpu });
+        // Runs go to the link now, not to a Fuobe tab on this computer.
+        void qc.invalidateQueries({ queryKey: ["viewer"] });
         toast.success("Your GPU is connected. Runs go to your ComfyUI now.");
         setUrl("");
         setToken("");
@@ -79,10 +82,10 @@ export function YourGpu() {
 
   if (q.isError) return <p className="text-[13px] text-muted-foreground">{q.error.message}</p>;
   if (!q.data) return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
-  const gpu = q.data.gpu;
+  const gpu = q.data.gpu?.mode === "computer" ? null : q.data.gpu;
 
   return (
-    <div className="space-y-4 sm:w-[36rem] sm:max-w-full">
+    <div className="w-full min-w-0 space-y-4 sm:max-w-[36rem]">
       <p className="text-[13px] text-muted-foreground">
         Free accounts run on their own ComfyUI, never on this studio&apos;s keys or GPU. Runs from the Image, Video and Audio studios on open-source models go to it. It must be
         reachable from the internet, for example through a Cloudflare Tunnel or ngrok in front of your ComfyUI.

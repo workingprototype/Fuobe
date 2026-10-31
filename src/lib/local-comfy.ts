@@ -188,3 +188,50 @@ export function statsFacts(s: SystemStats, origin: string) {
     ...(cors && { cors }),
   };
 }
+
+/**
+ * The GPU check from the browser (lib/gpu/gather.ts): ComfyUI's facts and lists, and the Manager's read-only answers
+ * (its version, whether it is busy, the packs it has, why a pack didn't load). Never a prompt, an upload, a file, an
+ * install or a log. Throws for anything else. ComfyUI also answers under /api.
+ */
+export function preflightPath(method: "GET" | "POST", path: string): string {
+  const [p0, query = ""] = path.split("?");
+  const p = p0.startsWith("/api/") ? p0.slice(4) : p0;
+  if (method === "POST") {
+    if (!query && /^\/(v2\/)?customnode\/import_fail_info(_bulk)?$/.test(p)) return path;
+    throw new LocalComfyError(`Fuobe doesn't send ${p0} to your ComfyUI`);
+  }
+  if (!query && /^\/(experiment\/models(\/[A-Za-z0-9_.-]{1,64})?|features|(v2\/)?manager\/(version|queue\/status)|(v2\/)?customnode\/installed)$/.test(p)) return path;
+  if (p.startsWith("/api/") || p === "/view" || p === "/ws" || p === "/upload/image") throw new LocalComfyError(`Fuobe doesn't read ${p0} on your ComfyUI`);
+  readPath(query ? `${p}?${query}` : p);
+  return path;
+}
+
+/**
+ * Can this browser reach a ComfyUI on its own computer? Chrome, Edge, Brave and Firefox on a computer can. Safari
+ * can't (an https page may not call http://127.0.0.1), nor can any browser on an iPhone or iPad (all are Safari
+ * underneath), nor a phone (no ComfyUI there): those get the link instead.
+ */
+export function browserSupport(
+  nav: { userAgent?: string; userAgentData?: { mobile?: boolean; platform?: string } },
+  screen: { narrow: boolean; coarse?: boolean },
+): "ok" | "safari" | "phone" {
+  const ua = nav.userAgent ?? "";
+  if (/iPhone|iPad|iPod/.test(ua) || nav.userAgentData?.mobile || /Android.+Mobile|Mobile Safari/.test(ua)) return "phone";
+  if (screen.narrow && screen.coarse !== false) return "phone";
+  if (!nav.userAgentData && /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|Edg|Firefox|OPR/.test(ua)) return "safari";
+  return "ok";
+}
+
+/**
+ * Can a page at this address ask for the permission at all? Chrome turns it down for a page on plain http at a network
+ * address (a self-hosted studio on the LAN); https and localhost are fine.
+ */
+export function pageCanReach(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    return u.protocol === "https:" || LOCAL_HOSTS.has(u.hostname === "::1" ? "[::1]" : u.hostname) || u.hostname.endsWith(".localhost");
+  } catch {
+    return false;
+  }
+}

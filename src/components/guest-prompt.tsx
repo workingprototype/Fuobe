@@ -4,7 +4,8 @@ import { Cpu, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
-import { YourGpu } from "@/components/gpu/your-gpu";
+import { ConnectChoice } from "@/components/gpu/connect-choice";
+import { takeGpuRetry } from "@/hooks/use-gpu";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CONNECT_GPU_EVENT, GUEST_PROMPT_EVENT, refusalCard, signInHref, watchGuestRefusals, type RefusalCard } from "@/lib/api";
@@ -15,23 +16,37 @@ import { CONNECT_GPU_EVENT, GUEST_PROMPT_EVENT, refusalCard, signInHref, watchGu
  * change anything, and "Connect your GPU to run this" for an account (accounts run only on their
  * own ComfyUI, never the owner's keys or GPU). Mounted once, in the app's providers, so it outlives
  * the page: a card closes when the page changes (its own Sign up or Log in, Back), and never opens
- * on the sign-in page (refusalCard).
+ * on the sign-in page (refusalCard). Opened by a run that was refused, "Connect your GPU" keeps that
+ * run and starts it by itself once the GPU is connected.
  */
 export function GuestPrompt() {
   // The last card stays while the dialog animates out.
   const [card, setCard] = useState<RefusalCard | null>(null);
   const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
+  // ComfyUI came back without Fuobe's setting (the runner's note): find it again and show the fix.
+  const [refind, setRefind] = useState(false);
+  const [retry, setRetry] = useState<{ retry: () => void } | null>(null);
+  const close = useCallback(() => {
+    setOpen(false);
+    setRetry(null);
+  }, []);
   useEffect(() => {
     watchGuestRefusals();
     const show = (kind: RefusalCard["kind"]) => {
       const next = refusalCard(kind, window.location);
-      if (!next) return;
+      if (!next) return false;
       setCard(next);
       setOpen(true);
+      return true;
     };
     const guest = () => show("guest");
-    const gpu = () => show("gpu");
+    const gpu = (e: Event) => {
+      // The run that was refused (the composer leaves its retry as it sends): kept until the GPU is connected.
+      const r = takeGpuRetry();
+      if (!show("gpu")) return;
+      setRetry(r);
+      setRefind((e as CustomEvent<{ refind?: boolean } | undefined>).detail?.refind === true);
+    };
     window.addEventListener(GUEST_PROMPT_EVENT, guest);
     window.addEventListener(CONNECT_GPU_EVENT, gpu);
     return () => {
@@ -52,16 +67,19 @@ export function GuestPrompt() {
                 <div className="mb-1 grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
                   <Cpu className="size-5" />
                 </div>
-                <DialogTitle>Connect your GPU to run this</DialogTitle>
-                <DialogDescription>
-                  Or run Fuobe on your own computer: it&apos;s{" "}
-                  <a href="https://github.com/workingprototype/fuobe" target="_blank" rel="noreferrer" className="underline underline-offset-4">
-                    open source
-                  </a>
-                  .
-                </DialogDescription>
+                <DialogTitle>{refind ? "Your ComfyUI needs Fuobe's setting again" : "Connect your GPU to run this"}</DialogTitle>
+                <DialogDescription>Fuobe runs this on the ComfyUI on your computer. It&apos;s free and private.</DialogDescription>
               </DialogHeader>
-              <YourGpu />
+              <ConnectChoice
+                fromRun={!!retry}
+                refind={refind}
+                onStart={() => {
+                  const r = retry;
+                  close();
+                  r?.retry();
+                }}
+                onNotNow={() => setRetry(null)}
+              />
             </>
           ) : (
             <>

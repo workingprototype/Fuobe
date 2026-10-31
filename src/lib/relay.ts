@@ -204,6 +204,29 @@ export function makingWords(kind: MadeKind, value?: number, max?: number): strin
 export const savingWords = (fraction: number | undefined) =>
   fraction !== undefined && fraction > 0 ? `Saving to Fuobe · ${Math.min(100, Math.floor(fraction * 100))}%` : "Saving to Fuobe";
 
+/**
+ * A run's words in the tab that runs its job (lib/computer-runner.ts's LocalJob), at once: the server's own say the same
+ * a poll later. Sending keeps the server's words (they name what is sent); done or failed leaves the last word to it.
+ */
+export function jobWords(
+  job: { phase: "sending" | "queued" | "running" | "saving" | "done" | "failed"; position?: number; value?: number; max?: number; saved?: number },
+  kind: MadeKind,
+  server: string | undefined,
+): string | undefined {
+  switch (job.phase) {
+    case "sending":
+      return server?.startsWith("Sending your") ? server : RELAY_WORDS.starting;
+    case "queued":
+      return queueWords(job.position);
+    case "running":
+      return makingWords(kind, job.value, job.max);
+    case "saving":
+      return savingWords(job.saved);
+    default:
+      return server;
+  }
+}
+
 export const RELAY_WORDS = {
   noComputer: "Open Fuobe on the computer with your ComfyUI to run this",
   starting: "Starting on your computer",

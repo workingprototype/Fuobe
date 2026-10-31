@@ -96,7 +96,7 @@ export function readinessView(t: ReadTarget): ReadinessView {
   if (!snap) return { ...base, checkedAt: null };
   const inv = snap.inventory;
   if (!inv.reachable) {
-    return { ...base, checkedAt: snap.checkedAt, stale: snap.stale, problem: inv.problem ?? "unreachable", problemText: problemText(inv.problem ?? "unreachable"), ...(inv.problemDetail && { problemDetail: inv.problemDetail }) };
+    return { ...base, checkedAt: snap.checkedAt, stale: snap.stale, problem: inv.problem ?? "unreachable", problemText: problemText(inv.problem ?? "unreachable", t.via === "browser" ? "computer" : "link"), ...(inv.problemDetail && { problemDetail: inv.problemDetail }) };
   }
   return { ...base, checkedAt: snap.checkedAt, stale: snap.stale, report: viewsOf(t, snap).report };
 }

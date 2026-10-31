@@ -1,7 +1,7 @@
 "use client";
 
 import { LogOut } from "lucide-react";
-import { YourGpu } from "@/components/gpu/your-gpu";
+import { ConnectChoice } from "@/components/gpu/connect-choice";
 import { Button } from "@/components/ui/button";
 import { useViewer } from "@/lib/api";
 
@@ -30,7 +30,7 @@ export function AccountGpuSection() {
           <LogOut /> Sign out
         </Button>
       </div>
-      <YourGpu />
+      <ConnectChoice />
     </section>
   );
 }

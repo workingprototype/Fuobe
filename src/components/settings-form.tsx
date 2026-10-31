@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { OwnerComfyWhere } from "@/components/gpu/connect-choice";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -595,6 +596,7 @@ export function SettingsForm({ prices }: { prices?: string }) {
         }
         inactive={mode === "cloud" ? "Not used in Paid APIs only mode" : undefined}
       >
+        <OwnerComfyWhere value={get("comfyWhere")?.value || "server"} onChange={(v) => save.mutateAsync({ comfyWhere: v })} />
         <ConnectField name="comfyUrl" setting={get("comfyUrl")} provider="comfyui" label="ComfyUI server URL" placeholder="http://127.0.0.1:8188" hint="Where ComfyUI listens; a local install is http://127.0.0.1:8188." />
         <ConnectField name="comfyToken" setting={get("comfyToken")} provider="comfyui" label="Auth token (optional)" hint="Sent as a Bearer token, for ComfyUI behind a proxy." />
         <ConnectField

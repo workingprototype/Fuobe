@@ -43,7 +43,10 @@ const PROBLEM_TEXT: Record<GpuProblem, string> = {
   redirect: "That address sends Fuobe somewhere else. Use the final https address.",
 };
 
-export const problemText = (p: GpuProblem): string => PROBLEM_TEXT[p];
+/** A ComfyUI on the person's own computer that doesn't answer (read from their tab, there's no link). */
+const COMPUTER_UNREACHABLE = "ComfyUI isn't answering on this computer. Start it, then check again.";
+
+export const problemText = (p: GpuProblem, where: "link" | "computer" = "link"): string => (where === "computer" && p === "unreachable" ? COMPUTER_UNREACHABLE : PROBLEM_TEXT[p]);
 
 const clip = (s: unknown, n: number) => String(s ?? "").slice(0, n);
 
@@ -143,7 +146,7 @@ export async function gatherInventory(t: ComfyTransport, idx: RequirementIndex, 
     inv.problem = problem;
     if (detail) inv.problemDetail = clip(detail, 300);
     inv.tookMs = now() - start;
-    emit({ step: "found", state: "fail", text: PROBLEM_TEXT[problem], ...(detail && { detail: clip(detail, 300) }) });
+    emit({ step: "found", state: "fail", text: problemText(problem, o.where), ...(detail && { detail: clip(detail, 300) }) });
     return inv;
   };
 

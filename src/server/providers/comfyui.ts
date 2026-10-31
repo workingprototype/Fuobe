@@ -150,12 +150,6 @@ export function onOwnGpu<T>(gpu: OwnGpu, fn: () => T): T {
 /** Inside onOwnGpu: the account's ComfyUI. */
 export const ownGpu = (): OwnGpu | undefined => ownGpuStore.getStore();
 
-/** Inside onOwnGpu with a link: its address and token. */
-const ownLink = (): { url: string; token?: string } | undefined => {
-  const own = ownGpu();
-  return own && own.kind !== "computer" ? own : undefined;
-};
-
 /** Run `fn` outside any account's ComfyUI (the install's own again). */
 export const outsideOwnGpu = <T,>(fn: () => T): T => ownGpuStore.exit(fn);
 

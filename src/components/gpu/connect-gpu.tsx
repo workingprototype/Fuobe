@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { PreflightChecklist } from "@/components/gpu/preflight-checklist";
 import { ReadinessBoard } from "@/components/gpu/readiness-board";
-import { YourGpu } from "@/components/gpu/your-gpu";
+import { ConnectChoice } from "@/components/gpu/connect-choice";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGpuCheck, useGpuReadiness } from "@/hooks/use-gpu";
@@ -39,10 +39,11 @@ export function ConnectGpu() {
   // The account's own address: when it changes (connected, edited), the board starts over.
   const gpu = useQuery({
     queryKey: ["account-gpu"],
-    queryFn: async () => (await (await fetch("/api/account/gpu")).json()) as { gpu: { url: string } | null },
+    queryFn: async () => (await (await fetch("/api/account/gpu")).json()) as { gpu: { mode: "computer" } | { mode?: "link"; url: string } | null },
     enabled: isAccount,
   });
-  const url = gpu.data?.gpu?.url ?? null;
+  const g = gpu.data?.gpu;
+  const url = g ? (g.mode === "computer" ? "this computer" : g.url) : null;
   const lastUrl = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (!isAccount || gpu.isLoading) return;
@@ -130,7 +131,7 @@ export function ConnectGpu() {
         {header(1)}
         {isAccount ? (
           <Card>
-            <YourGpu />
+            <ConnectChoice />
           </Card>
         ) : (
           <p className="text-[14px] text-muted-foreground">The GPU check is switched off on this studio (FUOBE_GPU_PREFLIGHT=0).</p>
@@ -145,7 +146,7 @@ export function ConnectGpu() {
         <Card>
           <h2 className="mb-1 text-[16px] font-semibold">Where is ComfyUI running?</h2>
           {reason === "refused" && <p className="mb-3 text-[13px] text-destructive">Fuobe can&apos;t use this address. Connect your own ComfyUI.</p>}
-          <YourGpu />
+          <ConnectChoice />
         </Card>
         {done}
       </div>
@@ -162,7 +163,7 @@ export function ConnectGpu() {
           <h2 className="text-[16px] font-semibold">{check.running ? "Checking your setup" : "Your ComfyUI"}</h2>
           {isAccount ? (
             <Link href="/settings#your-gpu" className="text-[13px] text-brand-text underline-offset-2 hover:underline">
-              Change the link
+              {view?.target === "computer" ? "Change where it runs" : "Change the link"}
             </Link>
           ) : (
             <Link href="/settings#comfyui" className="text-[13px] text-brand-text underline-offset-2 hover:underline">

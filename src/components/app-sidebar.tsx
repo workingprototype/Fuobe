@@ -39,6 +39,7 @@ import { JobNotifications } from "@/components/job-notifications";
 import { NAV, type NavGroupDef } from "@/components/nav-items";
 import { SkillBuilderProvider } from "@/components/skills/skill-builder-provider";
 import { CONNECT_GPU_EVENT, signInHref, useEngineMode, useStatus, useViewer, type StatusInfo } from "@/lib/api";
+import { deviceLabel } from "@/lib/gpu/readiness";
 import { useModKey } from "@/lib/keys";
 import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, NEW_CREATION_HREF, parseClosed, scrollFades, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -438,7 +439,9 @@ function YourGpuChip({ viewer }: { viewer: NonNullable<StatusInfo["viewer"]> }) 
           <StatusDot ok={g.online} /> Your GPU
           <span className="ml-auto">{g.online ? "online" : "offline"}</span>
         </span>
-        {(g.device || vram) && <span className="truncate text-[11px]">{[g.device, vram && `${vram} VRAM`].filter(Boolean).join(" · ")}</span>}
+        {(g.device || vram || g.mode === "computer") && (
+          <span className="truncate text-[11px]">{[g.mode === "computer" && "Your computer", deviceLabel(g.device), vram && `${vram} VRAM`].filter(Boolean).join(" · ")}</span>
+        )}
       </IntentLink>
     );
   }

@@ -5,8 +5,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { corsFlag, fixFor, guessInstall, installFromStats, platformOf, startFile, START_FILE_NAME } from "@/lib/comfy-install";
 import { parseComfyBinary, parseComfyText } from "@/lib/comfy-ws";
-import { COMFY_PORTS, graphProblem, localBase, mayDownload, pickLook, portsToLook, readPath, statsFacts, typedPort, viewPath, writePath } from "@/lib/local-comfy";
-import { makingWords, queueWords, reportAllowed, savingWords, sendingWords, tabFailureWords, type RelayState } from "@/lib/relay";
+import { browserSupport, COMFY_PORTS, graphProblem, localBase, mayDownload, pageCanReach, pickLook, portsToLook, preflightPath, readPath, statsFacts, typedPort, viewPath, writePath } from "@/lib/local-comfy";
+import { jobWords, makingWords, queueWords, reportAllowed, savingWords, sendingWords, tabFailureWords, type RelayState } from "@/lib/relay";
 
 const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const OTHER = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -161,6 +161,18 @@ describe("the run's words", () => {
     }
   });
 
+  it("the tab that runs a job says where it is at once, ahead of the server's next word", () => {
+    expect(jobWords({ phase: "sending" }, "image", "Sending your photo to ComfyUI")).toBe("Sending your photo to ComfyUI");
+    expect(jobWords({ phase: "sending" }, "image", "Queued")).toBe("Starting on your computer");
+    expect(jobWords({ phase: "queued", position: 2 }, "image", "Queued")).toBe("In ComfyUI's queue · 2 ahead");
+    expect(jobWords({ phase: "running", value: 3, max: 8 }, "image", "Queued")).toBe("Making your picture · step 3 of 8");
+    expect(jobWords({ phase: "running" }, "video", undefined)).toBe("Making your clip");
+    expect(jobWords({ phase: "saving", saved: 0.5 }, "image", "Making your picture")).toBe("Saving to Fuobe · 50%");
+    // Done or failed here: the server has the last word.
+    expect(jobWords({ phase: "done" }, "image", "Saving to Fuobe")).toBe("Saving to Fuobe");
+    expect(jobWords({ phase: "failed" }, "image", undefined)).toBeUndefined();
+  });
+
   it("takes each report only in its state", () => {
     const all: RelayState[] = ["waiting", "sending", "queued", "running", "collecting", "done", "failed", "canceled"];
     expect(all.filter((s) => reportAllowed("sent", s))).toEqual(["sending"]);
@@ -227,5 +239,63 @@ describe("ComfyUI's one setting", () => {
       { encoding: "utf8" },
     );
     expect(out.trim()).toBe("0");
+  });
+});
+
+describe("which browsers can reach the ComfyUI on this computer", () => {
+  const nav = (userAgent: string, o: { platform?: string; mobile?: boolean; brands?: boolean } = {}) => ({
+    userAgent,
+    ...(o.brands && { userAgentData: { platform: o.platform ?? "Windows", mobile: !!o.mobile } }),
+  });
+  it("Chrome, Edge and Firefox on a computer can; Safari, any iPhone or iPad browser and phones can't", () => {
+    expect(browserSupport(nav("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36", { brands: true }), { narrow: false })).toBe("ok");
+    expect(browserSupport(nav("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36 Edg/141.0", { brands: true }), { narrow: false })).toBe("ok");
+    expect(browserSupport(nav("Mozilla/5.0 (X11; Linux x86_64; rv:151.0) Gecko/20100101 Firefox/151.0"), { narrow: false })).toBe("ok");
+    expect(browserSupport(nav("Mozilla/5.0 (Macintosh; Intel Mac OS X 15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"), { narrow: false })).toBe("safari");
+    expect(browserSupport(nav("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0 Mobile/15E148 Safari/604.1"), { narrow: true })).toBe("phone");
+    expect(browserSupport(nav("Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"), { narrow: false })).toBe("phone");
+    expect(browserSupport(nav("Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Mobile Safari/537.36", { brands: true, mobile: true, platform: "Android" }), { narrow: true })).toBe("phone");
+    // A narrow window on a computer is still a computer; a phone-width page is a phone.
+    expect(browserSupport(nav("Mozilla/5.0 (Windows NT 10.0) Chrome/141.0 Safari/537.36", { brands: true }), { narrow: true, coarse: true })).toBe("phone");
+  });
+
+  it("an http page on a network address can't ask Chrome for the permission; localhost and https can", () => {
+    expect(pageCanReach("https://fuobe.com")).toBe(true);
+    expect(pageCanReach("http://localhost:3000")).toBe(true);
+    expect(pageCanReach("http://127.0.0.1:3370")).toBe(true);
+    expect(pageCanReach("http://192.168.1.20:3000")).toBe(false);
+    expect(pageCanReach("http://studio.lan")).toBe(false);
+  });
+});
+
+describe("the GPU check from the browser", () => {
+  it("reads only ComfyUI's facts and lists, and asks the Manager only its read-only questions", () => {
+    for (const [m, p] of [
+      ["GET", "/system_stats"],
+      ["GET", "/api/system_stats"],
+      ["GET", "/object_info"],
+      ["GET", "/api/object_info/KSampler"],
+      ["GET", "/models/checkpoints"],
+      ["GET", "/experiment/models"],
+      ["GET", "/experiment/models/loras"],
+      ["GET", "/features"],
+      ["GET", "/manager/version"],
+      ["GET", "/v2/manager/queue/status"],
+      ["GET", "/api/v2/customnode/installed"],
+      ["POST", "/v2/customnode/import_fail_info_bulk"],
+      ["POST", "/customnode/import_fail_info"],
+    ] as const)
+      expect(preflightPath(m, p), `${m} ${p}`).toBe(p);
+    for (const [m, p] of [
+      ["POST", "/prompt"],
+      ["POST", "/upload/image"],
+      ["GET", "/view?filename=a.png&subfolder=&type=input"],
+      ["POST", "/manager/queue/install"],
+      ["POST", "/v2/customnode/install"],
+      ["GET", "/internal/logs"],
+      ["GET", "/userdata/comfy.settings.json"],
+      ["GET", "/api/api/system_stats"],
+    ] as const)
+      expect(() => preflightPath(m, p), `${m} ${p}`).toThrow();
   });
 });

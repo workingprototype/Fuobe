@@ -1,6 +1,6 @@
 import "server-only";
 import crypto from "node:crypto";
-import { accountGpu, requestViewer, validToken, type AccountGpu } from "../auth";
+import { accountGpu, requestViewer, validToken } from "../auth";
 import { fetchPublic, isPrivateAddress, type RemoteFetchOptions } from "../remote-fetch";
 import { comfyRequest } from "../providers/comfyui";
 import { getSetting } from "../settings";
