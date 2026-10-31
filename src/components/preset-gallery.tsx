@@ -35,6 +35,7 @@ export const PresetCard = memo(function PresetCard({
   preset,
   href,
   compact,
+  bare,
   engine,
   gpu,
   gpuName,
@@ -42,6 +43,8 @@ export const PresetCard = memo(function PresetCard({
   preset: PresetCardData;
   href: string;
   compact?: boolean;
+  /** The picture, the name and the description only: no category icon or engine chips (Home's rows). */
+  bare?: boolean;
   /** Settings → Engine mode: with one engine locked in, the other's chip would suggest a route the user turned off. */
   engine?: "cloud" | "open";
   /** Its state on the viewer's GPU (a badge as one string, badgeKey), or none. */
@@ -61,14 +64,18 @@ export const PresetCard = memo(function PresetCard({
     >
       <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-muted">
         <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} flip={previewFlip(preset)} />
-        <span className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/40 to-transparent" />
-        <span className="pointer-events-none absolute bottom-1.5 left-1.5 grid size-6 place-items-center rounded-md bg-black/30 text-white">
-          <Icon className="size-3.5" />
-        </span>
-        <span className="pointer-events-none absolute right-1.5 bottom-1.5 flex gap-1">
-          {preset.cloud && engine !== "open" && <EngineChip engine="cloud" />}
-          {preset.open && engine !== "cloud" && <EngineChip engine="open" />}
-        </span>
+        {!bare && (
+          <>
+            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/40 to-transparent" />
+            <span className="pointer-events-none absolute bottom-1.5 left-1.5 grid size-6 place-items-center rounded-md bg-black/30 text-white">
+              <Icon className="size-3.5" />
+            </span>
+            <span className="pointer-events-none absolute right-1.5 bottom-1.5 flex gap-1">
+              {preset.cloud && engine !== "open" && <EngineChip engine="cloud" />}
+              {preset.open && engine !== "cloud" && <EngineChip engine="open" />}
+            </span>
+          </>
+        )}
         {preset.top && (
           <span className="absolute top-1.5 left-1.5 rounded-[4px] bg-highlight px-1 text-[10px] font-semibold text-highlight-foreground">Popular</span>
         )}
@@ -161,7 +168,7 @@ function RunsOnControl({ value, onChange, locked, owner }: { value: RunsOn; onCh
 }
 
 /** Keeps data-fade-start / data-fade-end on a horizontal scroller in sync with its scroll position. */
-function useFadeEdges<T extends HTMLElement>() {
+export function useFadeEdges<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   useEffect(() => {
     const el = ref.current;

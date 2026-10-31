@@ -179,6 +179,11 @@ export interface PresetPreview {
   poster: string;
   /** A real cover's clip (preset-previews.generated.ts), played instead of the procedural preview. */
   video?: string;
+  /**
+   * Shown at rest instead of the poster: the clip's peak frame (preset-peaks.generated.ts), where the clip starts
+   * (`at`, in seconds) when it plays, so nothing jumps. Home's cards only; the galleries keep their posters.
+   */
+  rest?: { src: string; at: number };
   scene: PreviewScene;
   move?: CameraMove;
   fx?: PreviewFx;

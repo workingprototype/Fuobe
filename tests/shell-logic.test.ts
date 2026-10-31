@@ -433,6 +433,44 @@ describe("preview playback store", () => {
     expect([true, false].map((hover) => autoplays("still", hover))).toEqual([false, false]);
   });
 
+  it('with auto: "touch" (Home\'s studio cards) nothing plays by itself where a pointer can hover', () => {
+    for (const kind of ["clip", "procedural", "still"] as const) expect(autoplays(kind, true, "touch"), kind).toBe(false);
+    // Where nothing can hover (a phone) it plays as any card does.
+    expect((["clip", "procedural", "still"] as const).map((kind) => autoplays(kind, false, "touch"))).toEqual([true, true, false]);
+    expect((["clip", "procedural", "still"] as const).map((kind) => autoplays(kind, false, "touch"))).toEqual((["clip", "procedural", "still"] as const).map((kind) => autoplays(kind, false)));
+  });
+
+  it("paused previews: nothing plays by itself, at once and on every pick, yet a hover still plays; played again, the cards in view are picked", () => {
+    const fake = fakeEnv({ hover: true, width: 1280, height: 800 });
+    const store = createPlaybackStore(fake.env);
+    const seen: string[][] = [];
+    store.subscribe(() => seen.push(store.playing()));
+    watchGrid(store, fake, 1, 3);
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual(["r0c0", "r0c1", "r0c2"]);
+    store.setPaused(true);
+    expect(store.isPaused()).toBe(true);
+    expect(store.playing()).toEqual([]);
+    // Scrolling again picks nothing.
+    fake.scrolled();
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual([]);
+    // The card the pointer rests on still plays.
+    store.play("r0c1");
+    fake.advance(HOVER_INTENT);
+    expect(store.playing()).toEqual(["r0c1"]);
+    store.stop("r0c1");
+    expect(store.playing()).toEqual([]);
+    // Pausing twice changes nothing; playing again waits for the page to be still, then picks what's in view.
+    const before = seen.length;
+    store.setPaused(true);
+    expect(seen.length).toBe(before);
+    store.setPaused(false);
+    expect(store.playing()).toEqual([]);
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual(["r0c0", "r0c1", "r0c2"]);
+  });
+
   it("with reduced motion a hover or tap plays a clip, but a procedural preview keeps its poster", () => {
     expect([false, true].map((reduced) => playsWhenAsked("clip", reduced))).toEqual([true, true]);
     expect([false, true].map((reduced) => playsWhenAsked("procedural", reduced))).toEqual([true, false]);

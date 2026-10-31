@@ -5,7 +5,8 @@
  * download them all. Procedural previews (no clip) play by themselves only where nothing can hover
  * (phones); a still never moves. Nothing plays by itself when the user prefers reduced motion, asks
  * for less data (Save-Data, a 2G connection) or the tab is hidden; reduced motion turned on while the
- * page is open stops what plays by itself at once.
+ * page is open stops what plays by itself at once. The viewer can pause previews too (Home's "Pause previews"): then
+ * nothing plays by itself, anywhere.
  *
  * The hovered or focused card plays too, on top of those, once the pointer has rested on it for a
  * moment (a pointer crossing the grid doesn't start every card it passes); asked for, it plays even
@@ -56,8 +57,18 @@ export type PreviewKind = "clip" | "procedural" | "still";
 
 export const previewKind = (p: { video?: string; move?: string; fx?: string }): PreviewKind => (p.video ? "clip" : p.move || p.fx ? "procedural" : "still");
 
-/** Whether a preview of this kind plays by itself while it's in view: a clip anywhere, a procedural one only where nothing can hover. */
-export const autoplays = (kind: PreviewKind, canHover: boolean) => kind === "clip" || (kind === "procedural" && !canHover);
+/**
+ * When a card plays by itself: "always" (while it's in view), or "touch", only where nothing can hover (Home's studio
+ * cards: with a mouse they wait for it, so the cards above them keep the screen's few clips).
+ */
+export type AutoPlay = "always" | "touch";
+
+/**
+ * Whether a preview of this kind plays by itself while it's in view: a clip anywhere, a procedural one only where
+ * nothing can hover; with "touch", nothing does where a pointer can hover.
+ */
+export const autoplays = (kind: PreviewKind, canHover: boolean, auto: AutoPlay = "always") =>
+  (auto === "always" || !canHover) && (kind === "clip" || (kind === "procedural" && !canHover));
 
 /**
  * Whether a hover, keyboard focus or tap plays a preview of this kind. With reduced motion only a clip
@@ -101,6 +112,8 @@ export function createPlaybackStore(env: PlaybackEnv) {
   /** The card a hover is about to play, and what calls that off. */
   let pending: { id: string; cancel: () => void } | null = null;
   let settle: (() => void) | null = null;
+  /** The viewer paused previews: nothing plays by itself; a hover, focus or tap still plays. */
+  let paused = false;
 
   const notify = () => listeners.forEach((l) => l());
   const setHovered = (id: string | null) => {
@@ -125,7 +138,7 @@ export function createPlaybackStore(env: PlaybackEnv) {
 
   const pick = () => {
     settle = null;
-    if (reducedMotion() || env.saveData()) return setAuto([]);
+    if (paused || reducedMotion() || env.saveData()) return setAuto([]);
     const cx = env.viewportWidth() / 2;
     const cy = env.viewportHeight() / 2;
     const cards: Candidate[] = [];
@@ -156,7 +169,7 @@ export function createPlaybackStore(env: PlaybackEnv) {
     notify();
   };
 
-  const isPlaying = (id: string) => !env.hidden() && (hovered === id || (auto.has(id) && !reducedMotion()));
+  const isPlaying = (id: string) => !env.hidden() && (hovered === id || (auto.has(id) && !paused && !reducedMotion()));
   /** Hover / focus: play this one once it has had the pointer for HOVER_INTENT. */
   const play = (id: string) => {
     cancelPending();
@@ -190,6 +203,17 @@ export function createPlaybackStore(env: PlaybackEnv) {
     /** Every card playing now, by id (for tests). */
     playing: () => [...new Set([...auto, ...(hovered ? [hovered] : [])])].filter(isPlaying).sort(),
     canHover: () => env.matches("(hover: hover) and (pointer: fine)"),
+    isPaused: () => paused,
+    /** Pause previews, or play them again: paused, what plays by itself stops at once; played again, the cards in view are picked. */
+    setPaused(b: boolean) {
+      if (paused === b) return;
+      paused = b;
+      if (b) {
+        cancelSettle();
+        auto = new Set();
+      } else if (watched.size) schedule();
+      notify();
+    },
     reducedMotion,
     saveData: () => env.saveData(),
     play,
