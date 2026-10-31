@@ -6,6 +6,8 @@ import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
 import { SOUL_LOOK_CARDS } from "@/lib/catalog/soul-looks.generated";
 import { toPresetCard } from "@/lib/preset-card-data";
 import { isCover } from "@/lib/preset-cards";
+import { presetCover } from "@/lib/preset-covers";
+import { PRESET_COVERS } from "@/lib/preset-covers.generated";
 import { PRESET_PREVIEWS } from "@/lib/preset-previews.generated";
 
 /*
@@ -57,6 +59,14 @@ describe("the preset covers manifest", () => {
     expect(JSON.stringify(EFFECTS.map(toPresetCard)).length).toBeLessThan(100_000);
   });
 
+  it("gives the pickers every cover through the slim map, with the same files, and nothing else", () => {
+    // Written with the manifest by pnpm eval:covers (scripts/eval/lib/covers.mjs): a manifest changed without it fails here.
+    expect(Object.keys(PRESET_COVERS)).toEqual(entries.map(([k]) => k));
+    for (const [id, e] of entries) expect(presetCover(id), id).toEqual({ poster: e.poster, ...(e.video && { video: e.video }) });
+    for (const p of [...APPS, ...MOTIONS, ...EFFECTS]) if (!PRESET_PREVIEWS[p.id]) expect(presetCover(p.id), p.id).toBeUndefined();
+    for (const id of [undefined, "", "toString", "constructor", "__proto__"]) expect(presetCover(id), String(id)).toBeUndefined();
+  });
+
   it("is read only on the server and in the preset header's own chunk", () => {
     // Client chunks keep whatever client code uses from a module. preset-cards.ts is in the galleries',
     // home's, shorts' and mixed media's chunks, so importing the manifest there (or preset-card-data.ts,
@@ -76,6 +86,13 @@ describe("the preset covers manifest", () => {
       "app/(studio)/page.tsx",
       "components/preset-header.tsx",
     ]);
+    // The slim map (which presets have a cover, and a clip: a few KB) is for the pickers, each in its studio's code:
+    // the camera motion and Mix pickers (their own chunk, next/dynamic in composer.tsx) and Cinema Studio's moves.
+    expect(importers(/from "[^"]*preset-covers\.generated"/)).toEqual(["lib/preset-covers.ts"]);
+    // (A type is no code: the cover tile takes a cover without importing the map.)
+    expect(importers(/^import (?!type )[^;]*from "[^"]*preset-covers";/m)).toEqual(["components/cinema/camera-moves.tsx", "components/studio/preset-chips.tsx"]);
+    const composer = fs.readFileSync(path.join(root, "src", "components", "studio", "composer.tsx"), "utf8");
+    expect(composer).toMatch(/dynamic\(\(\) => import\("\.\/preset-chips"\)/);
     const header = fs.readFileSync(path.join(root, "src", "components", "studio", "studio-page.tsx"), "utf8");
     expect(header).toMatch(/dynamic\(\(\) => import\("@\/components\/preset-header"\)/);
   });

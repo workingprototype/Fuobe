@@ -457,7 +457,9 @@ metric) and makes it that preset's cover. A still becomes a JPEG of at most 768 
 first 4 seconds, muted, at most 512 px, with its first frame as the poster. They go to
 `public/previews/<suite>/`, and `src/lib/preset-previews.generated.ts` lists them by preset id (a
 DoP preset, `effect-thunder-god`) or look id (`v1-general`). The gallery cards play a listed cover
-instead of their procedural preview.
+instead of their procedural preview. Next to it, `src/lib/preset-covers.generated.ts` says only which
+presets have a cover and a clip: the pickers (camera motions, Mix, Cinema Studio's moves) read that in
+the browser.
 
 - `--variant catalog` takes that variant's renders for every case instead, such as what ships today.
 - `--dry-run` lists what it would pick.

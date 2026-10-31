@@ -1,12 +1,14 @@
 "use client";
 
 import { ArrowDownAZ, Check, Hash, ListOrdered, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { CoverScrollBox, CoverTile, usePickerPlayback } from "@/components/cover-tile";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CAMERA_MOVES, cinemaMoveRoute, moveBySlug, type CameraMove } from "@/lib/catalog/cinema";
 import type { Engine } from "@/lib/catalog/types";
+import { moveCover } from "@/lib/preset-covers";
 import { cn } from "@/lib/utils";
 
 /** Name matches first (prefix, then word start, then anywhere), the slug and the hint after. */
@@ -26,6 +28,37 @@ function moveScore(value: string, search: string, keywords?: string[]): number {
 function routeBadge(m: CameraMove, engine: Engine, civitai?: boolean): string | null {
   const r = cinemaMoveRoute(m.slug, engine, true, { civitai });
   return r.via === "camera-lora" ? "Camera LoRA" : r.via === "lora" ? "LoRA" : r.via === "fun-camera" ? "Fun Camera" : r.via === "hosted-move" ? "Focus move" : null;
+}
+
+/**
+ * One move: the cover of the camera motion it runs (its clip plays while the row is highlighted, by the pointer or
+ * the arrow keys), with its place in the shot's order on it once picked; the move's name, how it runs and its hint.
+ */
+function MoveRow({ move: m, badge, order, highlighted, onPick }: { move: CameraMove; badge: string | null; order: number; highlighted: boolean; onPick: () => void }) {
+  const { playing } = usePickerPlayback(m.slug, { highlighted });
+  return (
+    <CommandItem value={m.name} keywords={[m.slug, m.hint]} onSelect={onPick} className="group/move items-start gap-2.5 py-2">
+      <CoverTile
+        cover={moveCover(m)}
+        playing={playing}
+        picked={order >= 0 ? order + 1 : undefined}
+        className="mt-0.5 h-9 w-12 rounded-md"
+        fallback={
+          <span className="absolute inset-0 grid place-items-center text-muted-foreground">
+            <Hash className="size-3.5" />
+          </span>
+        }
+      />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5 text-[13px] font-medium">
+          {m.name}
+          {badge && <span className="rounded-full bg-brand-faint px-1.5 py-px text-[10px] font-medium text-brand-text">{badge}</span>}
+        </span>
+        <span className="block text-[12px] leading-snug text-muted-foreground">{m.hint}</span>
+      </span>
+      <span className="mt-0.5 shrink-0 text-[11px] font-medium text-brand-text opacity-0 group-data-[selected=true]/move:opacity-100">Use</span>
+    </CommandItem>
+  );
 }
 
 export function MoveList({
@@ -50,9 +83,12 @@ export function MoveList({
 }) {
   const [sort, setSort] = useState<"default" | "name">("default");
   const [query, setQuery] = useState(defaultQuery ?? "");
+  // The highlighted row (its value, the move's name): controlled, as cmdk only reports it then.
+  const [highlighted, setHighlighted] = useState("");
+  const box = useRef<HTMLDivElement>(null);
   const moves = useMemo(() => (sort === "name" ? [...CAMERA_MOVES].sort((a, b) => a.name.localeCompare(b.name)) : CAMERA_MOVES), [sort]);
   return (
-    <Command loop className="bg-transparent" filter={moveScore}>
+    <Command loop className="bg-transparent" filter={moveScore} value={highlighted} onValueChange={setHighlighted}>
       <div className="flex items-center gap-1 pr-1">
         <div className="min-w-0 flex-1">
           <CommandInput placeholder="Search camera moves…" value={query} onValueChange={setQuery} autoFocus={autoFocus} />
@@ -71,30 +107,23 @@ export function MoveList({
           <TooltipContent>{sort === "default" ? "Sort: Name (A–Z)" : "Sort: Default"}</TooltipContent>
         </Tooltip>
       </div>
-      <CommandList className="max-h-[min(52vh,360px)]">
-        <CommandEmpty>No camera moves match your search</CommandEmpty>
-        <CommandGroup>
-          {moves.map((m) => {
-            const badge = badges ? routeBadge(m, engine, civitai) : null;
-            const n = selected.indexOf(m.slug);
-            return (
-              <CommandItem key={m.slug} value={m.name} keywords={[m.slug, m.hint]} onSelect={() => onPick(m.slug)} className="group/move items-start gap-2.5 py-2">
-                <span className={cn("mt-0.5 grid size-6 shrink-0 place-items-center rounded-md text-[11px] font-semibold", n >= 0 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
-                  {n >= 0 ? n + 1 : <Hash className="size-3" />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5 text-[13px] font-medium">
-                    {m.name}
-                    {badge && <span className="rounded-full bg-brand-faint px-1.5 py-px text-[10px] font-medium text-brand-text">{badge}</span>}
-                  </span>
-                  <span className="block text-[12px] leading-snug text-muted-foreground">{m.hint}</span>
-                </span>
-                <span className="mt-0.5 shrink-0 text-[11px] font-medium text-brand-text opacity-0 group-data-[selected=true]/move:opacity-100">Use</span>
-              </CommandItem>
-            );
-          })}
-        </CommandGroup>
-      </CommandList>
+      <CoverScrollBox value={box}>
+        <CommandList ref={box} className="max-h-[min(52vh,360px)]">
+          <CommandEmpty>No camera moves match your search</CommandEmpty>
+          <CommandGroup>
+            {moves.map((m) => (
+              <MoveRow
+                key={m.slug}
+                move={m}
+                badge={badges ? routeBadge(m, engine, civitai) : null}
+                order={selected.indexOf(m.slug)}
+                highlighted={highlighted === m.name}
+                onPick={() => onPick(m.slug)}
+              />
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </CoverScrollBox>
     </Command>
   );
 }

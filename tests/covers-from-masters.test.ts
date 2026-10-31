@@ -131,6 +131,24 @@ describe("covers from masters", () => {
     expect(() => coversFromMasters(masters, { ...PROVENANCE, dryRun: true, manifest: broken })).toThrow(/isn't a covers manifest/);
   });
 
+  it("writes the slim covers map the pickers read next to the manifest: 1 for a clip, 0 for a still, files kept elsewhere in full", () => {
+    const manifest = path.join(dir, "slim", "manifest.ts");
+    const elsewhere = { poster: "/previews/dop/effect-thunder-god.jpg", video: "/previews/dop/effect-thunder-god.mp4", run: "r1", engine: "open", model: "m", variant: "v" };
+    writeManifest(
+      {
+        "motion-zoom-in": { poster: "/previews/presets/motion-zoom-in.jpg", video: "/previews/presets/motion-zoom-in.mp4", run: "r", engine: "comfyui", model: "m", variant: "v" },
+        "effect-thunder-god": elsewhere,
+        "app-headshot-generator": { poster: "/previews/presets/app-headshot-generator.jpg", run: "r", engine: "comfyui", model: "m", variant: "v" },
+      },
+      manifest,
+    );
+    const text = fs.readFileSync(path.join(dir, "slim", "preset-covers.generated.ts"), "utf8");
+    expect(text).not.toMatch(/"run"|"engine"|"model"|"variant"/);
+    const slim = JSON.parse(text.slice(text.indexOf("=", text.indexOf("export const PRESET_COVERS")) + 1).trim().replace(/;\s*$/, ""));
+    expect(slim).toEqual({ "app-headshot-generator": 0, "effect-thunder-god": { poster: elsewhere.poster, video: elsewhere.video }, "motion-zoom-in": 1 });
+    expect(Object.keys(slim)).toEqual(["app-headshot-generator", "effect-thunder-god", "motion-zoom-in"]);
+  });
+
   it("makes a clip loop without a jump: its last frames fade into its first, which it then starts after (unless it loops already)", () => {
     const frames = Array.from({ length: 20 }, (_, i) => Buffer.from([i * 10, i * 10]));
     const out = seamless(frames, 4);

@@ -65,10 +65,30 @@ export function readManifest(file = MANIFEST_FILE) {
   }
 }
 
+const SLIM_HEADER = `/**
+ * Which presets have a real cover, for the pickers in the browser (read through presetCover, preset-covers.ts):
+ * 1 for a clip at /previews/presets/<id>.mp4 with its poster at <id>.jpg, 0 for a still there, or the files of a
+ * cover kept elsewhere. The slim side of preset-previews.generated.ts, whose provenance stays on the server.
+ * Generated with it by pnpm eval:covers: run it again rather than editing.
+ */
+export type PresetCoverEntry = 0 | 1 | { poster: string; video?: string };
+
+export const PRESET_COVERS: Record<string, PresetCoverEntry> = `;
+
+/** A manifest entry as the slim map lists it. */
+function slimEntry(id, e) {
+  const base = `/previews/presets/${id}`;
+  if (e.poster === `${base}.jpg` && (e.video === undefined || e.video === `${base}.mp4`)) return e.video ? 1 : 0;
+  return { poster: e.poster, ...(e.video && { video: e.video }) };
+}
+
+/** Write the manifest, and the slim covers map the pickers read next to it (preset-covers.generated.ts). */
 export function writeManifest(entries, file = MANIFEST_FILE) {
   const sorted = Object.fromEntries(Object.entries(entries).sort(([a], [b]) => a.localeCompare(b)));
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${HEADER}${JSON.stringify(sorted, null, 2)};\n`);
+  const slim = Object.fromEntries(Object.entries(sorted).map(([id, e]) => [id, slimEntry(id, e)]));
+  fs.writeFileSync(path.join(path.dirname(file), "preset-covers.generated.ts"), `${SLIM_HEADER}${JSON.stringify(slim, null, 2)};\n`);
 }
 
 /** The preset a case's cover belongs to: a DoP preset id, a Soul look's Fuobe id, else the case id. */
