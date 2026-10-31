@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   CAMERA_MOVES,
   isCover,
@@ -15,8 +15,10 @@ import {
   type PreviewLayer,
   type PreviewScene,
 } from "@/lib/preset-cards";
+import { releaseVideo } from "@/lib/media-release";
 import { glyphFor } from "@/lib/move-glyphs";
 import { browserPlaybackEnv, createPlaybackStore } from "@/lib/preview-playback";
+import { cn } from "@/lib/utils";
 
 /** One preview plays at a time (rules in lib/preview-playback.ts). */
 const store = createPlaybackStore(browserPlaybackEnv);
@@ -256,10 +258,44 @@ function Fx({ fx, scene }: { fx: NonNullable<Preview["fx"]>; scene: PreviewScene
 }
 
 /**
+ * A real cover's clip, mounted only while it plays (a browser allows a page only so many live
+ * players, a phone fewer), over the poster until its first frame is ready. The poster is that
+ * frame, so starting and stopping never flashes.
+ */
+function Clip({ src }: { src: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [ready, setReady] = useState(false);
+  // A layout effect: a page kept hidden after navigating away (Activity) keeps its elements, and a
+  // video only stops when told to. The source is set here too, so a page shown again plays again.
+  useLayoutEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    v.src = src;
+    void v.play().catch(() => {});
+    return () => {
+      releaseVideo(v);
+      setReady(false);
+    };
+  }, [src]);
+  return (
+    <video
+      ref={ref}
+      muted
+      loop
+      playsInline
+      preload="auto"
+      onLoadedData={() => setReady(true)}
+      className={cn("absolute inset-0 size-full object-cover", !ready && "opacity-0")}
+      aria-hidden
+    />
+  );
+}
+
+/**
  * A preset's preview: its real cover when it has one (a clip that plays, or a still), otherwise the
  * procedural version, a camera move over a layered sample still (motions) or an animated treatment (effects, apps).
- * At rest it shows the poster frame (and the treatment's still frame); `playing` runs it. The depth
- * layers a camera move needs are only mounted once the card first plays.
+ * At rest it shows the poster frame (and the treatment's still frame); `playing` runs it. A clip is
+ * only fetched while it plays; the depth layers a camera move needs are only mounted once the card first plays.
  */
 export const PresetPreview = memo(function PresetPreview({
   preview,
@@ -273,39 +309,19 @@ export const PresetPreview = memo(function PresetPreview({
   /** Mirror the still (see previewFlip). */
   flip?: boolean;
 }) {
-  const video = useRef<HTMLVideoElement>(null);
   const [armed, setArmed] = useState(false);
   if (playing && !armed) setArmed(true);
-  useEffect(() => {
-    const v = video.current;
-    if (!v) return;
-    if (playing) void v.play().catch(() => {});
-    else {
-      v.pause();
-      v.currentTime = 0;
-    }
-  }, [playing]);
 
-  if (preview.video)
+  // A real cover: the card's image as rendered, without the procedural preview's tint, bleed or
+  // mirroring (and no move glyph: the picture shows the preset itself), with its clip over it while it plays.
+  if (preview.video || isCover(preview))
     return (
-      <video
-        ref={video}
-        src={preview.video}
-        poster={preview.poster}
-        muted
-        loop
-        playsInline
-        preload="none"
-        className="absolute inset-0 size-full object-cover"
-        aria-hidden
-      />
+      <>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={preview.poster} alt="" draggable={false} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" aria-hidden />
+        {preview.video && playing && <Clip src={preview.video} />}
+      </>
     );
-
-  // A real cover that is a still: the card's image as rendered, without the procedural preview's tint,
-  // bleed or mirroring (and no move glyph: the picture shows the preset itself).
-  if (isCover(preview))
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={preview.poster} alt="" draggable={false} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" aria-hidden />;
 
   const spec: MoveSpec | undefined = preview.move ? CAMERA_MOVES[preview.move] : undefined;
   const glyph = preview.move ? glyphFor(preview.move) : undefined;
