@@ -106,7 +106,14 @@ function ModelRow({
             {m.name}
             {starred && <span className="sr-only">, starred</span>}
           </span>
-          <ModelBadges model={m} max={2} />
+          {/* A dimmed row on a phone: the name first (its badges would cut it to "Na…"). */}
+          {needs ? (
+            <span className="contents max-sm:hidden">
+              <ModelBadges model={m} max={2} />
+            </span>
+          ) : (
+            <ModelBadges model={m} max={2} />
+          )}
           {gpu && <RowDot badge={gpu} gpu={gpuName} />}
           {showEngine && (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] bg-muted px-1 text-[10px] leading-4 font-medium text-muted-foreground">
@@ -126,7 +133,11 @@ function ModelRow({
         )}
       </span>
       {needs ? (
-        <span className="shrink-0 text-right text-[11px] font-medium text-brand-text">{addKeyLabel(needs[0])}</span>
+        // On a phone the short words, so the model's name keeps its room.
+        <span className="shrink-0 text-right text-[11px] font-medium text-brand-text">
+          <span className="sm:hidden">Add key</span>
+          <span className="max-sm:hidden">{addKeyLabel(needs[0])}</span>
+        </span>
       ) : (
         <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{pickerPrice(m, today)}</span>
       )}
@@ -172,18 +183,28 @@ interface PickerProps {
 export function ModelPicker(props: PickerProps) {
   const [open, setOpen] = useState(false);
   const { value, models, onChange } = props;
-  // The model a dimmed row was chosen for: picked once its key is saved (by this picker only).
+  // The model a dimmed row was chosen for (by this picker only): picked once its key is saved and the studio knows it
+  // (the status has the key, so the engine switch is on Cloud and nothing swaps the model back to an open one).
   const waiting = useRef<string | null>(null);
+  const saved = useRef<string | null>(null);
   useEffect(() => {
     const added = (e: Event) => {
       const id = (e as CustomEvent<{ modelId?: string }>).detail?.modelId;
-      const m = id && id === waiting.current ? models.find((x) => x.id === id) : undefined;
+      if (id && id === waiting.current) saved.current = id;
       waiting.current = null;
-      if (m) onChange(m);
     };
     window.addEventListener(KEY_ADDED_EVENT, added);
     return () => window.removeEventListener(KEY_ADDED_EVENT, added);
-  }, [models, onChange]);
+  }, []);
+  // (Saving a key refreshes the status, which runs this again.)
+  const status = useStatus().data;
+  const mode = useEngineMode();
+  useEffect(() => {
+    const m = saved.current ? models.find((x) => x.id === saved.current && !needsKey(x, status) && (x.engine === "open" || mode !== "open")) : undefined;
+    if (!m) return;
+    saved.current = null;
+    onChange(m);
+  }, [models, status, mode, onChange]);
   return (
     <ResponsivePanel
       open={open}
@@ -243,13 +264,26 @@ function PickerList({
   const noneForEngine = !q && !models.some((m) => m.engine === engine);
 
   // An account (public sign-up): paid models it has no key for are dimmed; choosing one asks for the key first.
-  const keys = status?.viewer?.kind === "account" ? (status.viewer.keys ?? []) : null;
+  const viewer = status?.viewer?.kind === "account" ? status.viewer : null;
+  const keys = viewer ? (viewer.keys ?? []) : null;
   const payer = keys?.length && engine === "cloud" ? keys : null;
+  // With no key yet it is on open models only: a search lists the paid models it matches too (dimmed), so "nano
+  // banana" finds Nano Banana and the way to run it.
+  const keyless = !!viewer && !keys?.length && viewer.paidAllowed !== false;
+  const paid = useMemo(
+    () => (keyless && q.trim() && !engines.includes("cloud") ? (groupModels({ models, engine: "cloud", engines: ["cloud"], query: q, recent: [], starred: [], best: [] }).groups[0]?.models ?? []) : []),
+    [keyless, q, engines, models],
+  );
+  const listed = paid.length ? [...groups, { id: "paid" as const, label: "Paid models · with your own key", models: paid }] : groups;
   const pick = (m: ModelDef) => {
     const needs = needsKey(m, status);
     if (needs && onNeedsKey) return onNeedsKey(m, needs[0]);
     onChange(m);
     onPicked();
+  };
+  const addKey = () => {
+    onPicked();
+    openAddKey("fal");
   };
 
   return (
@@ -261,18 +295,31 @@ function PickerList({
         <EngineSwitch value={engine} onChange={onEngineChange} size="sm" />
       </div>
       <div className="flex items-baseline gap-x-2 px-3 pb-1.5 leading-snug text-[11px] text-muted-foreground sm:px-3.5">
-        <span className="shrink-0 whitespace-nowrap tabular-nums">{q ? `${count} result${count === 1 ? "" : "s"}` : `${count} ${engine === "open" ? "open-source" : "cloud"} model${count === 1 ? "" : "s"}`}</span>
-        {keys && engine === "cloud" && (
+        <span className="shrink-0 whitespace-nowrap tabular-nums">
+          {q ? `${count + paid.length} result${count + paid.length === 1 ? "" : "s"}` : `${count} ${engine === "open" ? "open-source" : "cloud"} model${count === 1 ? "" : "s"}`}
+        </span>
+        {payer ? (
           <>
             <span aria-hidden>·</span>
             <span className="min-w-0">
-              {payer ? `Paid models are billed to ${payer.length > 1 ? "your fal.ai and Replicate accounts" : billedTo(payer[0])}` : "Add a fal.ai or Replicate key to run paid models"}
-              {" · "}
+              {`Paid models are billed to ${payer.length > 1 ? "your fal.ai and Replicate accounts" : billedTo(payer[0])} · `}
               <Link href="/settings#your-keys" className="text-brand-text underline underline-offset-2">
-                {payer ? "Your keys" : "Add a key"}
+                Your keys
               </Link>
             </span>
           </>
+        ) : (
+          keyless && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="min-w-0">
+                Paid models like Nano Banana and Kling need your own fal.ai or Replicate key ·{" "}
+                <button type="button" onClick={addKey} className="text-brand-text underline underline-offset-2">
+                  Add a key
+                </button>
+              </span>
+            </>
+          )
         )}
         {demo && !keys && (
           <>
@@ -290,7 +337,7 @@ function PickerList({
         </span>
       </div>
       <CommandList className="max-h-[min(52vh,420px)] border-t sm:max-h-[min(56vh,440px)]">
-        {groups.map((g) => (
+        {listed.map((g) => (
           <CommandGroup key={g.id} heading={g.label}>
             {g.models.map((m) => (
               <CommandItem
@@ -305,7 +352,7 @@ function PickerList({
                   m={m}
                   selected={value?.id === m.id}
                   starred={starred.includes(m.id)}
-                  showEngine={!!q || m.engine !== engine}
+                  showEngine={g.id !== "paid" && (!!q || m.engine !== engine)}
                   today={today}
                   onStar={() => setStarred((s) => toggleIn(s, m.id))}
                   gpu={m.engine === "open" ? badgeFor(badges, { modelId: m.id }) : null}
@@ -316,7 +363,7 @@ function PickerList({
             ))}
           </CommandGroup>
         ))}
-        {!groups.length && (
+        {!listed.length && (
           <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
             <SearchX className="size-5 text-subtle-foreground" />
             {noneForEngine ? (

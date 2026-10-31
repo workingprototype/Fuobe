@@ -98,6 +98,7 @@ const LICENCES = SETTING_ENTRIES.find((e) => e.key === "setting:models")!;
  */
 const ACCOUNT_SETTINGS = [
   visitorSetting("your-gpu", "Your GPU", "/settings#your-gpu", Cpu, "comfyui gpu connect own server open source"),
+  visitorSetting("your-keys", "Your keys", "/settings#your-keys", KeyRound, "fal fal.ai replicate api key token paid models nano banana kling veo billing"),
   visitorSetting("account", "Account", "/settings#account", UserRound, "email sign out delete account"),
   LICENCES,
 ];

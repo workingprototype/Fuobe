@@ -219,14 +219,18 @@ cloudflared tunnel --url http://localhost:8188   # or: ngrok http 8188
 ## Your keys
 
 An account can add its own fal.ai key or Replicate token in **Settings → Your keys** (below Your
-GPU), or from the "Add your key" card that opens when it picks a paid model it has no key for. With
+GPU), or from the "Add your key" card that opens when it picks a paid model it has no key for (a
+search in a model picker lists them, dimmed, and a link to one keeps it, with a note), from the
+locked engine switch, or from "No GPU?" on the welcome page and the Connect your GPU card. With
 a key it runs that provider's paid models (Nano Banana, Seedream, Kling, Veo…), billed to its own
 account with that provider. The studio's own keys are never used for an account's run.
 
 - **Checked first.** `PUT /api/account/keys/fal` (or `/replicate`) with `{ key }` checks the key
   with the provider before it is saved: a free call that runs nothing (fal.ai: the status of a
   request that doesn't exist; Replicate: `GET /v1/account`). A refused key answers 422, a provider
-  out of reach 502, and nothing is saved. `?test=1` only checks. 10 checks a minute per account,
+  out of reach 502, and nothing is saved. A key that works on a provider account with no balance
+  left is saved, with a `note` that says to top it up. `?test=1` only checks. Only a check that
+  reaches the provider counts: 10 a minute per account, 20 per address (behind a trusted proxy),
   120 for all accounts together.
 - **Stored encrypted.** The key is sealed with AES-256-GCM under a server key in
   `data/secrets.key`, made the first time a key is saved, and kept on the account's record in
@@ -242,7 +246,9 @@ account with that provider. The studio's own keys are never used for an account'
 - **Removed with the account.** Deleting an account (by itself or by the owner) switches it off,
   stops its running jobs at the provider with its own key, then removes its runs, files and record,
   keys included. Removing or replacing a key that runs are going on answers 409 `runs-going` first;
-  with `{ stopRuns: true }` those runs are stopped with the old key before it changes.
+  with `{ stopRuns: true }` those runs are stopped with the old key before it changes. A run still
+  being handed to the provider is stopped there when its submit lands: the key (or the deleted
+  account's record) waits for that, up to a minute.
 - **What it changes in the studios.** `GET /api/status` lists the account's keys
   (`viewer.keys`) and its engine mode: `both` while it has a key and the studio isn't open-source
   only, else `open`. The model pickers dim the paid models it has no key for ("Add your Replicate

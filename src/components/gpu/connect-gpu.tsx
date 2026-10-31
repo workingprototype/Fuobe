@@ -8,6 +8,7 @@ import { useEffect, useRef } from "react";
 import { PreflightChecklist } from "@/components/gpu/preflight-checklist";
 import { ReadinessBoard } from "@/components/gpu/readiness-board";
 import { ConnectChoice } from "@/components/gpu/connect-choice";
+import { KeyInstead } from "@/components/keys/your-keys";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGpuCheck, useGpuReadiness } from "@/hooks/use-gpu";
@@ -143,6 +144,8 @@ export function ConnectGpu() {
     return (
       <div className="space-y-6">
         {header(1)}
+        {/* Most people have no ComfyUI to hand: their own fal.ai or Replicate key runs paid models now. */}
+        <KeyInstead className="bg-background" />
         <Card>
           <h2 className="mb-1 text-[16px] font-semibold">Where is ComfyUI running?</h2>
           {reason === "refused" && <p className="mb-3 text-[13px] text-destructive">Fuobe can&apos;t use this address. Connect your own ComfyUI.</p>}

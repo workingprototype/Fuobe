@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
+import { openAddKey } from "@/components/keys/your-keys";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -320,10 +321,21 @@ export function Composer({ docked }: { docked: boolean }) {
   // the engine changes; the same Original on the other engine takes that engine's defaults (480p on the GPU, 720p in the
   // cloud) for the settings the person left alone.
   const seen = useRef<{ engine: Engine; model?: ModelDef }>({ engine, model });
+  // An account's paid model it has no key for yet (from a link, ⌘K or a Reuse) stays picked while its switch is held on
+  // open source: the note under the composer says how to run it, where a swap to an open model would say nothing. The
+  // studio's untouched cloud default still gives way, unless the link names it. Until the status is known, it waits.
+  const heldForKey =
+    !!model &&
+    !lockedModel &&
+    model.engine !== "open" &&
+    engine === "open" &&
+    engineMode === "open" &&
+    (!status || (!!needsKey(model, status) && status.viewer?.paidAllowed !== false));
   useEffect(() => {
     const before = seen.current;
     seen.current = { engine, model };
     if (!model) return;
+    if (heldForKey && (model.id !== config.defaultModels.cloud || new URLSearchParams(window.location.search).get("model") === model.id)) return;
     const next = engineSwitchModel({ model, preset, engine, from: before.engine, defaults });
     const m = next ? catalog.getModel(next) : undefined;
     if (!m) {
@@ -340,7 +352,7 @@ export function Composer({ docked }: { docked: boolean }) {
     // replaced it, and swapping it for the engine's default would undo the link (it landed on Z-Image Turbo).
     const route = m.id === presetModel(preset, engine) ? presetParams(preset, engine) : {};
     setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
-  }, [engine, model, preset, defaults, setDraft, catalog]);
+  }, [engine, model, preset, defaults, setDraft, catalog, heldForKey, config.defaultModels.cloud]);
 
   // Where the server can't write Ideogram 4's caption (writesCaptions), the studio's untouched default moves to its stand-in
   // once the status is known. Ideogram 4 picked after that stays.
@@ -550,9 +562,13 @@ export function Composer({ docked }: { docked: boolean }) {
     openGpuSetup({ ref: gpuRef, name: preset?.open ? preset.name : model?.name });
   };
 
+  // An account's paid model it has no key for yet: Generate asks for the key (the note below says so too).
+  const keyToAdd = model && status?.viewer?.paidAllowed !== false ? needsKey(model, status)?.[0] : undefined;
+
   // `skip` is true only from the guided fix's "Run anyway" (a click handler passes its event here).
   const submit = (skip?: unknown) => {
     const skipGpu = skip === true;
+    if (keyToAdd && model && !create.isPending) return openAddKey(keyToAdd, model.id);
     if (!blocker && gpuSetup && !skipGpu && !create.isPending) return openGpuFix();
     if (blocker || create.isPending || signature.lock.isPending) {
       if (blocker) {
@@ -1219,6 +1235,16 @@ export function Composer({ docked }: { docked: boolean }) {
               </Link>
             </p>
           )}
+        </div>
+      )}
+      {keyToAdd && model && (
+        <div role="note" className="mx-1 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-dashed px-3 py-2 text-[12px] leading-snug text-muted-foreground">
+          <p className="min-w-0 flex-1 basis-56">
+            {model.name} runs on {CLOUD_KEY[keyToAdd].label}, billed to your own {CLOUD_KEY[keyToAdd].label} account. Add your {CLOUD_KEY[keyToAdd].label} key to run it.
+          </p>
+          <Button size="sm" variant="secondary" className="h-7" onMouseDown={(e) => e.preventDefault()} onClick={() => openAddKey(keyToAdd, model.id)}>
+            Add key
+          </Button>
         </div>
       )}
       {sketched.note && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{sketched.note}</p>}

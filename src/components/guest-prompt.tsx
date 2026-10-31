@@ -7,6 +7,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { ConnectChoice } from "@/components/gpu/connect-choice";
 import type { FindReason } from "@/components/gpu/computer-runner";
 import { takeGpuRetry } from "@/hooks/use-gpu";
+import { KeyInstead } from "@/components/keys/your-keys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CONNECT_GPU_EVENT, GUEST_PROMPT_EVENT, refusalCard, signInHref, useStatus, watchGuestRefusals, type RefusalCard } from "@/lib/api";
@@ -15,11 +16,12 @@ import { CLOUD_KEY } from "@/lib/your-keys";
 /**
  * The cards a public studio shows when something is refused (watchGuestRefusals): "Create a free
  * account to run this" for a guest (public sign-up, signed out) who tries to generate, upload or
- * change anything, and "Connect your GPU to run this" for an account (accounts run only on their
- * own ComfyUI, never the owner's keys or GPU). Mounted once, in the app's providers, so it outlives
- * the page: a card closes when the page changes (its own Sign up or Log in, Back), and never opens
- * on the sign-in page (refusalCard). Opened by a run that was refused, "Connect your GPU" keeps that
- * run and starts it by itself once the GPU is connected.
+ * change anything, and "Connect your GPU to run this" for an account (accounts run on their own
+ * ComfyUI, or their own fal.ai or Replicate key, never the owner's keys or GPU), with "No GPU? Add
+ * a key" when it has no key yet. Mounted once, in the app's providers, so it outlives the page: a
+ * card closes when the page changes (its own Sign up or Log in, Back), and never opens on the
+ * sign-in page (refusalCard). Opened by a run that was refused, "Connect your GPU" keeps that run
+ * and starts it by itself once the GPU is connected.
  */
 export function GuestPrompt() {
   // The last card stays while the dialog animates out.
@@ -73,22 +75,12 @@ export function GuestPrompt() {
                 <DialogTitle>{TITLES[reason ?? "run"]}</DialogTitle>
                 <DialogDescription>Fuobe runs this on the ComfyUI on your computer. It&apos;s free and private.</DialogDescription>
                 {/* Paid models run on the account's own key instead (Your keys), when the studio allows them. */}
-                {viewer?.kind === "account" && viewer.paidAllowed !== false && (
-                  <p className="text-[13px] text-muted-foreground">
-                    {viewer.keys?.length ? (
-                      `Or switch to Cloud to use your ${viewer.keys.map((k) => CLOUD_KEY[k].label).join(" or ")} key.`
-                    ) : (
-                      <>
-                        Or{" "}
-                        <Link href="/settings#your-keys" onClick={close} className="text-brand-text underline underline-offset-4">
-                          add your own fal.ai or Replicate key
-                        </Link>{" "}
-                        to use paid models.
-                      </>
-                    )}
-                  </p>
+                {viewer?.kind === "account" && viewer.paidAllowed !== false && !!viewer.keys?.length && (
+                  <p className="text-[13px] text-muted-foreground">{`Or switch to Cloud to use your ${viewer.keys.map((k) => CLOUD_KEY[k].label).join(" or ")} key.`}</p>
                 )}
               </DialogHeader>
+              {/* No key yet: "Add a key" opens here, over the studio (this card makes room). */}
+              <KeyInstead onOpen={close} />
               <ConnectChoice
                 fromRun={!!retry}
                 kind={retry?.kind}

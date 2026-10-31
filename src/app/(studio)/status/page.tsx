@@ -121,15 +121,16 @@ export default async function Page() {
             <Link href="/connect" className={link}>
               connect your own ComfyUI
             </Link>{" "}
-            (Your GPU): your runs go to your GPU.
+            (Your GPU): your runs go to your GPU. Or add your own fal.ai or Replicate key in Settings → Your keys to use paid models like Nano Banana, Kling and
+            Veo, billed to your own account with them.
           </li>
           <li>
             <span className="font-medium">The open engine.</span> Each open-source model runs as a ComfyUI workflow; {workflows.validated} of the {workflows.all} graphs are
             accepted by a real ComfyUI. Every preview clip and still on this site was rendered locally on ComfyUI, on one RTX 5090.
           </li>
           <li>
-            <span className="font-medium">Your own studio.</span> Fuobe is MIT-licensed. Run it yourself to add the cloud engine: frontier models with your own fal.ai or
-            Replicate key, next to the open ones.
+            <span className="font-medium">Your own studio.</span> Fuobe is MIT-licensed. Run it yourself, with no account limits: the open models on your own GPU and the
+            frontier ones on your own fal.ai or Replicate key, all on your own machine.
           </li>
         </ul>
       </section>

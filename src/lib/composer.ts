@@ -952,7 +952,7 @@ export function studioBest(models: ModelDef[], engine: Engine, defaultId: string
 }
 
 export interface ModelGroup {
-  id: "recent" | "starred" | "best" | "all" | "results";
+  id: "recent" | "starred" | "best" | "all" | "results" | "paid";
   label: string;
   models: ModelDef[];
 }

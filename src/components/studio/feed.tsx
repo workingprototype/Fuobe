@@ -325,7 +325,12 @@ export const GenerationGroup = memo(function GenerationGroup({ g, newest }: { g:
               </span>
             ))}
             <span className="before:mr-1.5 before:content-['·']">{timeAgo(g.createdAt)}</span>
-            {g.costUsd ? <span className="font-mono before:mr-1.5 before:content-['·']">{formatCost(g.costUsd)}</span> : null}
+            {/* A run its provider never took (a refused key, an empty balance) cost nothing: said, not priced. */}
+            {g.costUsd && g.notBilled ? (
+              <span className="before:mr-1.5 before:content-['·']">Not billed</span>
+            ) : g.costUsd ? (
+              <span className="font-mono before:mr-1.5 before:content-['·']">{formatCost(g.costUsd)}</span>
+            ) : null}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/gen:opacity-100 sm:focus-within:opacity-100 [@media(hover:none)]:opacity-100">

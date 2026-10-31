@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ADD_KEY_EVENT, preferEngine, useViewer } from "@/lib/api";
+import { ADD_KEY_EVENT, preferEngine, useStatus, useViewer } from "@/lib/api";
 import { settingProblem } from "@/lib/connections";
 import { CLOUD_KEY, CLOUD_PROVIDERS, OPEN_ONLY_MESSAGE, type CloudProvider, type KeyInfo, type YourKeys } from "@/lib/your-keys";
 import { cn } from "@/lib/utils";
@@ -98,14 +98,16 @@ function KeyForm({ provider, replacing, onSaved, onCancel, autoFocus }: { provid
     setBusy(true);
     setError(null);
     try {
-      const r = await call<KeyInfo & { detail?: string }>(`/api/account/keys/${provider}`, "PUT", { key, ...(stopRuns && { stopRuns: true }) });
+      const r = await call<KeyInfo & { detail?: string; note?: string }>(`/api/account/keys/${provider}`, "PUT", { key, ...(stopRuns && { stopRuns: true }) });
       setKey("");
       setGoing(null);
       // The person just asked for paid models: the studios start on Cloud.
       preferEngine("cloud");
       changed();
       const who = provider === "replicate" && r.detail?.startsWith("Signed in as ") ? ` (${r.detail.replace("Signed in as ", "signed in as ")})` : "";
-      toast.success(`Your ${p.label} key works${who}. Paid models on ${p.label} are ready.`);
+      // A key that works on a provider account with nothing on it yet: saved, and the next step said.
+      if (r.note) toast.warning(r.note, { duration: 10_000 });
+      else toast.success(`Your ${p.label} key works${who}. Paid models on ${p.label} are ready.`);
       onSaved(r);
     } catch (e) {
       const k = e as KeyError;
@@ -196,7 +198,8 @@ function KeyCard({ provider, info }: { provider: CloudProvider; info: KeyInfo | 
   };
 
   return (
-    <div className="grid gap-3 rounded-xl border p-4">
+    // content-start: a taller card beside it (an error under its field) doesn't spread this one's rows apart.
+    <div className="grid content-start gap-3 rounded-xl border p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-[14px] font-medium">{p.label}</h3>
@@ -291,7 +294,7 @@ export function AccountKeysSection({ prices }: { prices?: string }) {
             </li>
           )}
           <li>Runs with your key send your prompt and the files you attach to that provider.</li>
-          <li>Account limits still apply: 4 runs at once, 60 an hour, up to 4 pictures a run, 3 GB of files.</li>
+          {q.data && <li>Account limits still apply: {q.data.limits}.</li>}
         </ul>
         {q.data && !q.data.paidAllowed && <p className="rounded-lg bg-muted px-3 py-2 text-[13px] text-muted-foreground">{OPEN_ONLY_MESSAGE}</p>}
         {q.isError ? (
@@ -307,6 +310,34 @@ export function AccountKeysSection({ prices }: { prices?: string }) {
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * "No GPU? Add your own key": for an account with no key yet, on a studio that allows paid models (nothing for anyone
+ * else). The button opens "Add your fal.ai key" where the person is; `onOpen` first (a card closing to make room).
+ */
+export function KeyInstead({ onOpen, className }: { onOpen?: () => void; className?: string }) {
+  const v = useStatus().data?.viewer;
+  if (v?.kind !== "account" || v.paidAllowed === false || v.keys?.length) return null;
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-dashed px-3 py-2.5 text-[13px]", className)}>
+      <KeyRound aria-hidden className="mt-0.5 size-4 shrink-0 self-start text-brand-text" />
+      <p className="min-w-0 flex-1 basis-56 text-muted-foreground">
+        <span className="font-medium text-foreground">No GPU?</span> Add your own fal.ai or Replicate key to use paid models like Nano Banana, Kling and Veo, billed to your
+        account with them.
+      </p>
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => {
+          onOpen?.();
+          openAddKey("fal");
+        }}
+      >
+        Add a key
+      </Button>
+    </div>
   );
 }
 
@@ -338,9 +369,23 @@ export function AddKeyPrompt() {
               <DialogTitle>Add your {p.label} key</DialogTitle>
               <DialogDescription>
                 Runs on {p.label} are billed to your own {p.label} account. Fuobe checks the key with {p.label}, then stores it encrypted on this server.
+                {/* Opened for no model in particular: either provider will do. */}
+                {!ask.modelId && (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      onClick={() => setAsk({ provider: ask.provider === "fal" ? "replicate" : "fal" })}
+                      className="text-brand-text underline-offset-2 hover:underline"
+                    >
+                      {ask.provider === "fal" ? "Have a Replicate token instead?" : "Have a fal.ai key instead?"}
+                    </button>
+                  </>
+                )}
               </DialogDescription>
             </DialogHeader>
             <KeyForm
+              key={ask.provider}
               provider={ask.provider}
               autoFocus
               onSaved={() => {

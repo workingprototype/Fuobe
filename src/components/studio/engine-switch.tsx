@@ -2,6 +2,7 @@
 
 import { Cloud, Cpu, Lock } from "lucide-react";
 import Link from "next/link";
+import { openAddKey } from "@/components/keys/your-keys";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Engine } from "@/lib/catalog/types";
 import { useEngineMode, useStatus, useViewer } from "@/lib/api";
@@ -48,14 +49,26 @@ export function EngineSwitch({
       <>
         <o.icon className="size-3.5" />
         <span className={cn(compact && "hidden sm:inline")}>{text}</span>
+        {/* A phone has room for two words: what to do about the lock. */}
+        {compact && locked?.addKey && <span className="sm:hidden">Add key</span>}
       </>
     );
-    // An account opens Your keys (or Your GPU) from here: the way to paid models is its own key.
+    // An account opens "Add your key" right here (a plain click; Settings → Your keys in a new tab), or Your GPU when
+    // the studio runs open-source models only: the way to paid models is its own key.
     if (locked) {
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Link href={locked.href} aria-label={`${text}. ${locked.tip}`} className={cn(cls, "hover:text-foreground")}>
+            <Link
+              href={locked.href}
+              aria-label={`${text}. ${locked.tip}`}
+              className={cn(cls, "hover:text-foreground")}
+              onClick={(e) => {
+                if (!locked.addKey || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                openAddKey("fal");
+              }}
+            >
               {body}
               <Lock className="size-3 opacity-60" />
             </Link>

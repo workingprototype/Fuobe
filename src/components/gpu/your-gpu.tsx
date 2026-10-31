@@ -87,7 +87,7 @@ export function YourGpu() {
   return (
     <div className="w-full min-w-0 space-y-4 sm:max-w-[36rem]">
       <p className="text-[13px] text-muted-foreground">
-        Free accounts run on their own ComfyUI, never on this studio&apos;s keys or GPU. Runs from the Image, Video and Audio studios on open-source models go to it. It must be
+        Free accounts run on their own ComfyUI, never on this studio&apos;s own keys or GPU. Runs from the Image, Video and Audio studios on open-source models go to it. It must be
         reachable from the internet, for example through a Cloudflare Tunnel or ngrok in front of your ComfyUI.
       </p>
       {gpu ? (

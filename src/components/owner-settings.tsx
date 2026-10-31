@@ -16,7 +16,7 @@ export function SettingsIntro() {
   if (!hydrated || !v) return null;
   if (v.owner)
     return "Choose open source, paid APIs or both, connect providers, point Fuobe at your ComfyUI server, and choose how prompts get enhanced. Keys stay on this server.";
-  return v.account ? "Your account and your GPU. The studio's own settings, keys and tokens are its owner's." : "Create a free account and connect your own GPU.";
+  return v.account ? "Your account, your GPU and your own keys. The studio's own settings are its owner's." : "Create a free account and connect your own GPU.";
 }
 
 /**
@@ -114,7 +114,7 @@ function AccountSection({ email }: { email: string }) {
         <p className="mt-1 text-[13px] [overflow-wrap:anywhere] text-muted-foreground">{email}</p>
       </div>
       <div className="min-w-0 space-y-2">
-        <p className="max-w-xl text-[13px] text-muted-foreground">Deleting your account removes your uploads, your runs and their files, and your GPU connection, and signs you out. It can&apos;t be undone.</p>
+        <p className="max-w-xl text-[13px] text-muted-foreground">Deleting your account removes your uploads, your runs and their files, your GPU connection and your saved fal.ai and Replicate keys, and signs you out. It can&apos;t be undone.</p>
         <Button size="sm" variant="outline" className="text-destructive" onClick={() => setOpen(true)}>
           <Trash2 /> Delete account
         </Button>
