@@ -99,11 +99,11 @@ export function runsHref({ account, status, kind }: { account?: string; status?:
   return s ? `/settings/runs?${s}` : "/settings/runs";
 }
 
-/** Settings' strip (the owner, once someone has signed up): how many, and the way down to Accounts, the last section. */
+/** Settings' strip (the owner): how many accounts, 0 included, and the way down to Accounts, the last section. */
 export function AccountsChip() {
   const owner = useViewer().data?.owner;
   const q = useAdminAccounts(!!owner);
-  if (!q.data?.total) return null;
+  if (!q.data) return null;
   return (
     <a href="#accounts" className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] whitespace-nowrap transition-colors hover:bg-accent">
       <span className="text-muted-foreground">Accounts</span>

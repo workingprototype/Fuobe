@@ -153,7 +153,7 @@ function ChoiceField({
 
 /**
  * What's connected, at a glance and always in view: one chip per connection (green when it works,
- * each a link to its field), the engine mode and, once someone has signed up, the accounts. Also opens the setup guide again.
+ * each a link to its field), the engine mode and, for the owner, the accounts. Also opens the setup guide again.
  */
 function StatusStrip({ status, onGuide, guideOpen }: { status?: StatusInfo; onGuide: () => void; guideOpen: boolean }) {
   return (
