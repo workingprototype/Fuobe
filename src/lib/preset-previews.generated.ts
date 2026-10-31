@@ -53,9 +53,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-age-shift": {
     "poster": "/previews/presets/app-age-shift.jpg",
+    "video": "/previews/presets/app-age-shift.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "app-ai-influencer": {
@@ -75,9 +76,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-angles": {
     "poster": "/previews/presets/app-angles.jpg",
+    "video": "/previews/presets/app-angles.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "app-asmr-add-on": {
@@ -117,9 +119,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-behind-the-scenes": {
     "poster": "/previews/presets/app-behind-the-scenes.jpg",
+    "video": "/previews/presets/app-behind-the-scenes.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "app-billboard-ad": {
@@ -692,6 +695,14 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
     "model": "ideogram4",
     "variant": "lean-json"
   },
+  "app-shots": {
+    "poster": "/previews/presets/app-shots.jpg",
+    "video": "/previews/presets/app-shots.mp4",
+    "run": "comfyui-previews-2026-10",
+    "engine": "comfyui",
+    "model": "minimax-h3",
+    "variant": "lean-json"
+  },
   "app-signboard": {
     "poster": "/previews/presets/app-signboard.jpg",
     "run": "comfyui-previews-2026-10",
@@ -908,9 +919,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "app-zooms": {
     "poster": "/previews/presets/app-zooms.jpg",
+    "video": "/previews/presets/app-zooms.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-acid": {
@@ -1111,9 +1123,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-building-explosion": {
     "poster": "/previews/presets/effect-building-explosion.jpg",
+    "video": "/previews/presets/effect-building-explosion.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-burning-man": {
@@ -1811,9 +1824,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-levitation": {
     "poster": "/previews/presets/effect-levitation.jpg",
+    "video": "/previews/presets/effect-levitation.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-lidar-transition": {
@@ -2561,9 +2575,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-turning-metal": {
     "poster": "/previews/presets/effect-turning-metal.jpg",
+    "video": "/previews/presets/effect-turning-metal.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-turning-monkey": {
@@ -2701,16 +2716,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "motion-360-orbit": {
     "poster": "/previews/presets/motion-360-orbit.jpg",
+    "video": "/previews/presets/motion-360-orbit.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-action-run": {
     "poster": "/previews/presets/motion-action-run.jpg",
+    "video": "/previews/presets/motion-action-run.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-aerial-pullback": {
@@ -2722,44 +2739,50 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "motion-arc-left": {
     "poster": "/previews/presets/motion-arc-left.jpg",
+    "video": "/previews/presets/motion-arc-left.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-arc-right": {
     "poster": "/previews/presets/motion-arc-right.jpg",
+    "video": "/previews/presets/motion-arc-right.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-baseball-kick": {
     "poster": "/previews/presets/motion-baseball-kick.jpg",
+    "video": "/previews/presets/motion-baseball-kick.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-basketball-dunks": {
     "poster": "/previews/presets/motion-basketball-dunks.jpg",
+    "video": "/previews/presets/motion-basketball-dunks.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-boxing": {
     "poster": "/previews/presets/motion-boxing.jpg",
+    "video": "/previews/presets/motion-boxing.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-bts": {
     "poster": "/previews/presets/motion-bts.jpg",
+    "video": "/previews/presets/motion-bts.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-bullet-time": {
@@ -2772,23 +2795,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "motion-car-chasing": {
     "poster": "/previews/presets/motion-car-chasing.jpg",
+    "video": "/previews/presets/motion-car-chasing.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-car-grip": {
     "poster": "/previews/presets/motion-car-grip.jpg",
+    "video": "/previews/presets/motion-car-grip.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-catwalk": {
     "poster": "/previews/presets/motion-catwalk.jpg",
+    "video": "/previews/presets/motion-catwalk.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-classic-static": {
@@ -2800,23 +2826,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "motion-crane-down": {
     "poster": "/previews/presets/motion-crane-down.jpg",
+    "video": "/previews/presets/motion-crane-down.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-crane-over-the-head": {
     "poster": "/previews/presets/motion-crane-over-the-head.jpg",
+    "video": "/previews/presets/motion-crane-over-the-head.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-crane-up": {
     "poster": "/previews/presets/motion-crane-up.jpg",
+    "video": "/previews/presets/motion-crane-up.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-crash-zoom-in": {
@@ -2829,44 +2858,50 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "motion-crash-zoom-out": {
     "poster": "/previews/presets/motion-crash-zoom-out.jpg",
+    "video": "/previews/presets/motion-crash-zoom-out.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-documentary-snap": {
     "poster": "/previews/presets/motion-documentary-snap.jpg",
+    "video": "/previews/presets/motion-documentary-snap.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-dolly-in": {
     "poster": "/previews/presets/motion-dolly-in.jpg",
+    "video": "/previews/presets/motion-dolly-in.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-dolly-left": {
     "poster": "/previews/presets/motion-dolly-left.jpg",
+    "video": "/previews/presets/motion-dolly-left.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-dolly-out": {
     "poster": "/previews/presets/motion-dolly-out.jpg",
+    "video": "/previews/presets/motion-dolly-out.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-dolly-right": {
     "poster": "/previews/presets/motion-dolly-right.jpg",
+    "video": "/previews/presets/motion-dolly-right.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-dolly-zoom-in": {
@@ -2879,9 +2914,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "motion-double-dolly": {
     "poster": "/previews/presets/motion-double-dolly.jpg",
+    "video": "/previews/presets/motion-double-dolly.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-downhill-pov": {
@@ -2893,9 +2929,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "motion-dreamy-flow": {
     "poster": "/previews/presets/motion-dreamy-flow.jpg",
+    "video": "/previews/presets/motion-dreamy-flow.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-drone-reveal": {
@@ -2907,9 +2944,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "motion-dutch-angle": {
     "poster": "/previews/presets/motion-dutch-angle.jpg",
+    "video": "/previews/presets/motion-dutch-angle.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-earth-zoom-out": {
