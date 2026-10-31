@@ -20,15 +20,16 @@ import { glyphFor } from "@/lib/move-glyphs";
 import { autoplays, browserPlaybackEnv, createPlaybackStore, playsWhenAsked, previewKind } from "@/lib/preview-playback";
 import { cn } from "@/lib/utils";
 
-/** Which previews play, shared by every card (rules in lib/preview-playback.ts). */
+/** Which previews play, shared by every card and the preset header (rules in lib/preview-playback.ts). */
 const store = createPlaybackStore(browserPlaybackEnv);
 
 /**
- * Wire a card element to the playback store. Returns whether its preview should play and the
- * handlers to spread on the card (hover and keyboard focus, after a short rest). A clip plays by
- * itself while the card is in view (see autoplays).
+ * Wire a card element to the playback store. Returns whether its preview should play, the handlers
+ * to spread on the card (hover and keyboard focus, after a short rest) and `onTap`, which plays or
+ * stops it from a touch (for an element a tap doesn't otherwise use). A clip plays by itself while
+ * the card is in view; with `always`, any preview that moves does (the preset header).
  */
-export function usePreviewPlayback<T extends HTMLElement>(id: string, preview: Pick<Preview, "video" | "move" | "fx">) {
+export function usePreviewPlayback<T extends HTMLElement>(id: string, preview: Pick<Preview, "video" | "move" | "fx">, { always = false } = {}) {
   const ref = useRef<T | null>(null);
   const playing = useSyncExternalStore(
     store.subscribe,
@@ -38,9 +39,9 @@ export function usePreviewPlayback<T extends HTMLElement>(id: string, preview: P
   const kind = previewKind(preview);
   useEffect(() => {
     const el = ref.current;
-    if (!el || !autoplays(kind, store.canHover())) return;
+    if (!el || !(always ? kind !== "still" : autoplays(kind, store.canHover()))) return;
     return store.watch(el, id);
-  }, [id, kind]);
+  }, [id, kind, always]);
   useEffect(() => () => store.stop(id), [id]);
   const on = () => playsWhenAsked(kind, store.reducedMotion()) && store.play(id);
   const off = () => store.stop(id);
@@ -54,17 +55,8 @@ export function usePreviewPlayback<T extends HTMLElement>(id: string, preview: P
       onFocus: (e: React.FocusEvent) => e.currentTarget.matches(":focus-visible") && on(),
       onBlur: off,
     },
+    onTap: (e: React.PointerEvent) => e.pointerType !== "mouse" && playsWhenAsked(kind, store.reducedMotion()) && store.toggle(id),
   };
-}
-
-const noSubscribe = () => () => {};
-
-/**
- * Save-Data or a 2G connection (lib/preview-playback.ts): a preview that would play without being
- * asked (the preset header's loop) stays on its poster. True before hydration, so nothing starts early.
- */
-export function useSaveData(): boolean {
-  return useSyncExternalStore(noSubscribe, store.saveData, () => true);
 }
 
 const layerVars = (l: PreviewLayer) => ({ "--d": LAYER_DEPTH[l], "--o": LAYER_OFFSET[l] }) as React.CSSProperties;
