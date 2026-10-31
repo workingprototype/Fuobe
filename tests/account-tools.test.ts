@@ -127,7 +127,7 @@ describe("an account runs the catalogue on its own ComfyUI", () => {
   it("runs an app that edits a picture", async () => {
     fake.opts.output = "image";
     const pic = await uploadPng();
-    const r = await generationsRoute.POST(json("/api/generations", "POST", { feature: "app", modelId: "oss-qwen-edit", presetId: "app-headshot-generator", prompt: "", inputs: { images: [pic.url] } }));
+    const r = await generationsRoute.POST(json("/api/generations", "POST", { feature: "app", modelId: "oss-qwen-image-21", presetId: "app-headshot-generator", prompt: "", inputs: { images: [pic.url] } }));
     expect(r.status).toBe(201);
     const g = await settle((await r.json()).items[0].id);
     expect(g?.status, g?.error ?? "").toBe("succeeded");

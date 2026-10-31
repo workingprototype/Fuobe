@@ -900,6 +900,21 @@ export function bestForStudio(models: ModelDef[], engine: Engine, defaultId: str
     .map(([m]) => m);
 }
 
+/**
+ * A studio picker's "Best for this studio": the models that do what the default model does first, when the studio
+ * offers that (`ops`, its main operation first). A default that does something else first (Qwen-Image 2.1 makes
+ * pictures from words first, in the Edit and Inpaint studios) ranks the models that do the first of the studio's
+ * operations it does instead, leaving out the tools that take no words (a garment try-on) unless the default is one.
+ */
+export function studioBest(models: ModelDef[], engine: Engine, defaultId: string | undefined, ops?: Operation[]): string[] {
+  const def = models.find((m) => m.id === defaultId);
+  const first = def?.routes[0]?.op;
+  if (!def || !first || !ops?.length || ops.includes(first)) return bestForStudio(models, engine, defaultId, 4, first).map((m) => m.id);
+  const op = ops.find((o) => def.routes.some((r) => r.op === o)) ?? ops[0];
+  const pool = models.filter((m) => m === def || !m.options.promptless || def.options.promptless);
+  return bestForStudio(pool, engine, defaultId, 4, op).map((m) => m.id);
+}
+
 export interface ModelGroup {
   id: "recent" | "starred" | "best" | "all" | "results";
   label: string;

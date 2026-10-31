@@ -329,8 +329,8 @@ const needsMarks = (m: ModelDef) => !!(m.options.requires?.mask || m.options.req
 
 /** Preferred defaults; anything missing falls back to the first catalog model for that op and engine. */
 const PREFERRED: Partial<Record<Operation, Partial<Record<Engine, string>>>> = {
-  t2i: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" },
-  edit: { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
+  t2i: { cloud: "nano-banana-pro", open: "oss-ideogram-4" },
+  edit: { cloud: "nano-banana-pro", open: "oss-qwen-image-21" },
   t2v: { cloud: "kling-2-5-turbo", open: "oss-wan22-14b-fast" },
   i2v: { cloud: "kling-2-5-turbo", open: "oss-wan22-14b-fast" },
   flf2v: { cloud: "kling-2-5-turbo", open: "oss-wan22-14b-fast" },
@@ -1805,9 +1805,9 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
     build: tpl(
       [
         { id: "product", type: "image-input", x: 0, y: ROW, data: { label: "Product photo" } },
-        { id: "front", type: "model", x: COL, y: 0, data: { mediaKind: "image", label: "Front ¾ angle", op: "edit", prompt: "The same product from a three-quarter front angle on a seamless studio background, soft key light, sharp details" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } },
-        { id: "side", type: "model", x: COL, y: ROW, data: { mediaKind: "image", label: "Side profile", op: "edit", prompt: "The same product in a clean side profile on a seamless studio background, rim light, sharp details" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } },
-        { id: "top", type: "model", x: COL, y: ROW * 2, data: { mediaKind: "image", label: "Top-down", op: "edit", prompt: "The same product shot top-down as a flat lay on a seamless studio background, even light" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } },
+        { id: "front", type: "model", x: COL, y: 0, data: { mediaKind: "image", label: "Front ¾ angle", op: "edit", prompt: "The same product from a three-quarter front angle on a seamless studio background, soft key light, sharp details" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-image-21" } },
+        { id: "side", type: "model", x: COL, y: ROW, data: { mediaKind: "image", label: "Side profile", op: "edit", prompt: "The same product in a clean side profile on a seamless studio background, rim light, sharp details" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-image-21" } },
+        { id: "top", type: "model", x: COL, y: ROW * 2, data: { mediaKind: "image", label: "Top-down", op: "edit", prompt: "The same product shot top-down as a flat lay on a seamless studio background, even light" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-image-21" } },
         { id: "video", type: "model", x: COL * 2, y: ROW - 40, data: { mediaKind: "video", label: "Ad clip", op: "ref2v", prompt: "A premium product commercial: the camera orbits the product from the reference angles, studio lighting, slow and smooth", params: { aspectRatio: "16:9", duration: 5 } }, models: { cloud: "seedance-2-5", open: "oss-wan-vace" } },
         { id: "out", type: "output", x: COL * 3, y: ROW, data: { label: "Ad" } },
       ],
@@ -1891,7 +1891,7 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
     icon: "Columns3",
     hue: 150,
     build: (engine) => {
-      const models = engine === "open" ? ["oss-z-image-turbo", "oss-qwen-image", "oss-flux1-krea"] : ["nano-banana-pro", "seedream-5-pro", "flux-2-pro"];
+      const models = engine === "open" ? ["oss-ideogram-4", "oss-qwen-image-21", "oss-krea2-realism"] : ["nano-banana-pro", "seedream-5-pro", "flux-2-pro"];
       return tpl(
         [
           { id: "prompt", type: "prompt", x: 0, y: ROW - 60, data: { label: "Prompt", text: "Portrait of an elderly fisherman mending a net at dawn, soft window light, film grain" } },

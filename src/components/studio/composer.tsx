@@ -978,6 +978,7 @@ export function Composer({ docked }: { docked: boolean }) {
                   engine={engine}
                   onEngineChange={setEngine}
                   defaultModels={config.defaultModels}
+                  ops={pickerOps}
                   onChange={pickModel}
                 />
               ) : (

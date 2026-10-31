@@ -5,13 +5,14 @@ import type { InputSlot, Preset, PresetOption, PresetRoute } from "./types";
 /*
  * One-click "Apps". Most are an edit model plus a carefully written instruction —
  * exactly how Higgsfield builds them on Nano Banana / Seedream. The open-source route
- * runs the same instruction on Qwen-Image-Edit (or a dedicated ComfyUI workflow).
+ * runs the same instruction on Qwen-Image 2.1 (or a dedicated ComfyUI workflow; apps whose
+ * LoRA was trained on Qwen-Image-Edit 2509 or 2511 name that model).
  * Video apps animate the photo with an image-to-video model and a template prompt
  * (Higgsfield's "viral_transform_video" templates work the same way).
  */
 
 const EDIT_CLOUD = "nano-banana-pro";
-const EDIT_OPEN = "oss-qwen-edit";
+const EDIT_OPEN = "oss-qwen-image-21";
 
 /** Image → video templates. */
 const VIDEO_CLOUD: PresetRoute = { modelId: "kling-2-5-turbo", op: "i2v", params: { duration: 5 } };
@@ -28,7 +29,15 @@ const BG_CLOUD: PresetRoute = { modelId: "birefnet-cloud", op: "bg-remove" };
 const BG_OPEN: PresetRoute = { modelId: "oss-rmbg", op: "bg-remove" };
 const UPSCALE_CLOUD: PresetRoute = { modelId: "topaz-image", op: "upscale-image" };
 const UPSCALE_OPEN: PresetRoute = { modelId: "oss-upscale-image", op: "upscale-image" };
-const OUTPAINT_OPEN: PresetRoute = { modelId: "oss-flux-fill", op: "outpaint" };
+/**
+ * Qwen-Image 2.1's expand: Qwen3-VL describes the picture on its grown canvas, and the words only add what goes in the
+ * new margins. They never name the subject (it would appear again there), so the apps send their own short hint.
+ */
+const OUTPAINT_OPEN: PresetRoute = {
+  modelId: "oss-qwen-image-21",
+  op: "outpaint",
+  promptTemplate: "more of the surrounding scene, continuing naturally past every edge with the same light, perspective and textures",
+};
 
 const photo: InputSlot = { key: "image", label: "Photo", accept: "image", required: true };
 const product: InputSlot = { key: "image", label: "Product", hint: "A clear photo of the product", accept: "image", required: true };

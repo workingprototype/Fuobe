@@ -482,6 +482,58 @@ node validate-workflows.mjs moss-image-t2i --shared
 - **GPU**: no official VRAM figure (16 GB is a guess with ComfyUI's offloading). comfy-kitchen's int8 / w4a8 kernels need a
   PyTorch built for CUDA 13 (cu130); otherwise `comfy/quant_ops.py` turns them off with a warning.
 
+## Owner's SOTA image families (2026-10-31)
+
+Sixteen hand-built graphs for Ideogram 4, Qwen-Image 2.1, Krea 2 and FIBO 2 (MOSS-Image is the graph above). They are the
+first picks on the open engine: the Image studio opens on Ideogram 4, Edit and Inpaint on Qwen-Image 2.1, and every
+studio's "Best" list ranks the new models first (`src/lib/catalog/models.ts`, `tests/open-sota-studios.test.ts`). Each graph
+comes from the owner's saved ComfyUI workflows or from a graph rendered in the preview pipeline, converted once to API
+format; the UI-only nodes (notes, compares, previews, resolution pickers, switches) are removed.
+
+They were built from a ComfyUI that was busy rendering, so nothing was posted to it:
+
+```bash
+npm run build -- <ids>                                  # GET /object_info only (+ Hugging Face sizes)
+node validate-workflows.mjs --subset-only <ids>         # writes their classes to object_info.subset.json, posts nothing
+node build-requirements.mjs
+```
+
+All sixteen are `validated: false` until `node validate-workflows.mjs <ids> --shared` runs on an idle ComfyUI 0.42.0 (the
+library: 174 workflows, 153 validated). Proof: [P] rendered in the preview pipeline, [O] the owner's saved workflow, [I] built
+from an example and not rendered yet.
+
+| id | capability | source | proof |
+|---|---|---|---|
+| `ideogram4-t2i` | t2i | the owner's `image_ideogram4_t2i_int8`: conditional and unconditional int8 models (`DualModelGuider`, `CFGOverride`), the Quality / Default / Turbo table into `Ideogram4Scheduler` (`preset`); the prompt is a JSON caption written from the words (`src/lib/ideogram-caption.ts`) | [P] |
+| `qwen-image-21-t2i` | t2i | the owner's default Qwen-Image 2.1 graph: 25 steps, cfg 1, euler / simple, up to 2048 px on the 32 grid | [O] |
+| `qwen-image-21-edit` | edit | `TextEncodeQwenImage21` with up to 4 references (each scaled to 2048 px, lanczos), `QwenImage21Cache`, 25 steps | [P] |
+| `qwen-image-21-turbo-edit` | edit | the Turbo model on its fixed 8-step `ManualSigmas`, the same 4-reference encoder | [P] |
+| `qwen-image-21-inpaint` | inpaint | AusBoss's example: crop around the mask (red channel, white = change), 25 steps, stitched back | [I] |
+| `qwen-image-21-outpaint` | outpaint | the owner's `qwenImage21Outpaint_v12`: AusBoss pad nodes (`padLeft`…`padBottom` on both), the outpaint-v2 LoRA, Qwen3-VL describes the canvas; the words only add what goes in the margins | [P] |
+| `krea2-realism-t2i` / `krea2-turbo-t2i` | t2i | the owner's Krea 2 Turbo graph, with the Realism V2 LoRA (`loraStrength`) at 6 steps, or plain at 8 | [O]; the LoRA [I] |
+| `krea2-edit-general` / `krea2-edit-identity` | edit | the owner's `Krea2 Image Edit` on comfyui-krea2edit (General or Identity Edit V2 LoRA, `ref_boost` 4 or 2, 8 steps); image 2 is an optional person | [O] |
+| `krea2-turbo-i2i` | edit | the picture scaled to about 2 MP, then Krea 2 Turbo at `denoise` = `strength` | [I] |
+| `krea2-inpaint` / `krea2-outpaint` | inpaint / outpaint | Cierpliwy's examples on ComfyUI-Krea2-Ostris-Edit: the area to paint made black, the inpaint-edit LoRA, 8 steps, euler_ancestral | [I] |
+| `fibo2-dev-t2i` | t2i | the owner's FIBO 2 VGL graph: Qwen3.5 9B writes Bria's JSON prompt, 30 steps, cfg 5 | [O] |
+| `fibo2-dev-edit` / `fibo2-edit-turbo-edit` | edit | the owner's FIBO 2 edit graphs with references 3 and 4 wired like 2: Dev 30 steps / cfg 5, Edit Turbo 4 steps / cfg 1 | [O] |
+
+- **Optional references**: a reference the run doesn't have is left out of `TextEncodeQwenImage21`, `TextEncodeFibo2` and
+  Krea 2's edit nodes (`OPTIONAL_REFERENCE_INPUTS` in `src/server/providers/comfyui.ts`).
+- **Node packs** (`packs.json`; the GPU pre-flight lists them, `install-comfyui.sh` doesn't install them yet): ausboss-nodes
+  @ `bce780f2` (MIT; Qwen-Image 2.1 inpaint and expand), comfyui-krea2edit @ `13ef60f2` (Apache-2.0; Krea 2 Edit and
+  Identity Edit), ComfyUI-Krea2-Ostris-Edit @ `77565661` (MIT; Krea 2 Inpaint). A ComfyUI with comfyui-workflow-encrypt
+  reports that pack as the module of other packs' nodes, so the build names a class's pack from `PACK_CLASSES` first
+  (`packOfClass` in `build-requirements.mjs`).
+- **Weights** (about 92 GB new, revisions, sizes and SHA-256 from the Hugging Face API in `model-pins.json`): the int8 builds
+  of Comfy-Org's Ideogram-4, Qwen-Image-2.1, Fibo-2.0 and MOSS-Image (Qwen3.5 9B) repositories, AusBoss's outpaint LoRA and
+  the Krea 2 LoRAs (Realism V2, General and Identity Edit V2, inpaint-edit v1 512). `variants` in `KNOWN_MODELS` names the same
+  weights in another precision in the same repository (Krea 2 Turbo's fp8 and bf16 builds, …); nothing reads it yet, so a
+  ComfyUI with only those builds still needs the pinned file.
+- **Licences, as information**: Qwen-Image 2.1 and Ideogram 4 weights are non-commercial, FIBO 2 CC BY-NC 4.0, Krea 2 the
+  Krea 2 Community License (the edit LoRAs non-commercial without their author's licence).
+- **GPU**: 20–24 GB estimates (`vramGb`), none measured here. ComfyUI 0.42.0 or newer: `TextEncodeQwenImage21`,
+  `QwenImage21Cache`, `Ideogram4Scheduler`, `DualModelGuider`, `CFGOverride` and `TextEncodeFibo2` came with it.
+
 ## Adding a workflow
 
 1. Find the template name in `$COMFYUI_DIR/.venv/lib/python3.*/site-packages/comfyui_workflow_templates_json/templates/index.json`

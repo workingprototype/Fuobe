@@ -11,9 +11,9 @@ import { badgeFor, useGpuBadges } from "@/hooks/use-gpu";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useToday } from "@/hooks/use-today";
 import type { Badge as BadgeT } from "@/lib/gpu/types";
-import { type Engine, type ModelDef } from "@/lib/catalog/types";
+import { type Engine, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { useEngineMode, useStatus } from "@/lib/api";
-import { bestForStudio, groupModels, toggleIn } from "@/lib/composer";
+import { groupModels, studioBest, toggleIn } from "@/lib/composer";
 import { ISOLATED_NOTE, pickerPrice } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
 import { EngineSwitch } from "./engine-switch";
@@ -150,6 +150,8 @@ interface PickerProps {
   engine: Engine;
   onEngineChange: (e: Engine) => void;
   defaultModels?: { cloud: string; open: string };
+  /** The operations the studio offers, its main one first: "Best for this studio" ranks the models that do it. */
+  ops?: Operation[];
 }
 
 /**
@@ -182,7 +184,7 @@ export function ModelPicker(props: PickerProps) {
 }
 
 /** The searchable list (mounted by the popover / sheet only while it shows). */
-function PickerList({ models, value, onChange, engine, onEngineChange, defaultModels, onPicked }: PickerProps & { onPicked: () => void }) {
+function PickerList({ models, value, onChange, engine, onEngineChange, defaultModels, ops, onPicked }: PickerProps & { onPicked: () => void }) {
   const [q, setQ] = useState("");
   const status = useStatus().data;
   const badges = useGpuBadges().data;
@@ -192,12 +194,8 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
   const [starred, setStarred] = useStoredList(STARRED_MODELS);
   const today = useToday();
   const engines = useMemo<Engine[]>(() => (mode === "both" ? ["cloud", "open"] : [mode]), [mode]);
-  // "Best" ranks models that do what the studio's default does first (its main operation), not single-purpose tools.
-  const best = useMemo(() => {
-    const id = defaultModels?.[engine];
-    const op = models.find((m) => m.id === id)?.routes[0]?.op;
-    return bestForStudio(models, engine, id, 4, op).map((m) => m.id);
-  }, [models, engine, defaultModels]);
+  // "Best" ranks models that do what the studio is for, not single-purpose tools.
+  const best = useMemo(() => studioBest(models, engine, defaultModels?.[engine], ops), [models, engine, defaultModels, ops]);
   const { groups, count } = useMemo(() => groupModels({ models, engine, engines, query: q, recent, starred, best }), [models, engine, engines, q, recent, starred, best]);
   const ready = (m: ModelDef) => m.routes.some((r) => status?.providers[r.provider]?.configured);
   const shown = groups.flatMap((g) => g.models);

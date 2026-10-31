@@ -1487,7 +1487,7 @@ export function cleanCharacter(v: unknown): Omit<CharacterOptions, "dialogue"> |
   return Object.keys(out).length ? out : undefined;
 }
 
-const ANCHOR_IDS = new Set(["gpt-image-2-5-sunburst", "nano-banana-pro", "oss-qwen-edit"]);
+const ANCHOR_IDS = new Set(["gpt-image-2-5-sunburst", "nano-banana-pro", "oss-qwen-image-21", "oss-qwen-edit"]);
 
 /** A setup as a short code ("gj1." + base64url JSON with short keys; empty fields left out). */
 export function encodeSetup(s: GenjutsuSetup): string {

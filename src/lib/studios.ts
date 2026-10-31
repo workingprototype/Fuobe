@@ -17,7 +17,7 @@ export const IMAGE_STUDIO: StudioConfig = {
   feed: { kind: "image", features: ["image", "edit", "app:*", "character:*"] },
   slots: [],
   multiRef: { label: "Add ref", max: 8 },
-  defaultModels: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" },
+  defaultModels: { cloud: "nano-banana-pro", open: "oss-ideogram-4" },
   // A model's own settings (MOSS-Image's Quality, Ideogram's speed) sit under "Options".
   controlsTitle: "Options",
   // Color signature + Moodboard chips, and the models they can move a request to. Fuobe Soul's PixeletedFace look runs
@@ -43,7 +43,7 @@ export const EDIT_STUDIO: StudioConfig = {
   slots: [{ key: "image", label: "Image", accept: "image", required: true }],
   multiRef: { label: "Add ref", max: 6 },
   sketch: ["mask", "draw"],
-  defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
+  defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-image-21" },
   suggestions: [
     "Make it golden hour",
     "Remove the people in the background",
@@ -56,7 +56,7 @@ export const INPAINT_STUDIO: StudioConfig = {
   feature: "edit",
   title: "Inpaint",
   hero: "Paint it, then say what goes there",
-  subtitle: "GPT Image, Ideogram and FLUX Fill take the mask directly; other edit models are shown the painted area.",
+  subtitle: "GPT Image, Ideogram, Qwen-Image 2.1 and FLUX Fill take the mask directly; other edit models are shown the painted area.",
   placeholder: "What should fill the painted area? e.g. “a vase of white tulips”",
   kind: "image",
   ops: ["inpaint", "edit"],
@@ -65,7 +65,7 @@ export const INPAINT_STUDIO: StudioConfig = {
   multiRef: { label: "Add ref", max: 3 },
   sketch: ["mask"],
   sketchAutoOpen: "mask",
-  defaultModels: { cloud: "nano-banana-pro", open: "oss-flux-fill" },
+  defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-image-21" },
   suggestions: ["Remove it and fill in the background", "A golden retriever sitting there", "Make the shirt navy linen", "Add sunglasses"],
 };
 

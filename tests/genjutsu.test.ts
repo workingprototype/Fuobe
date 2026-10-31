@@ -272,7 +272,7 @@ describe("Genjutsu: Character swap", () => {
     const p = ch({ maker: maker(ORIGINALS.character, "open"), prompt: "keep the glasses", character: { description: "a chrome robot", who: "leftmost", maskGrow: 80, lora: "v1", windowFrames: 158, historyFrames: 18 } });
     expect(p.steps.map((s) => s.key)).toEqual(["frame", "anchor", "swap"]);
     expect(step(p, "frame").request).toMatchObject({ modelId: "oss-extract-frame", op: "frame", inputs: { video: clip.url }, params: { startTime: 2, endTime: 2.5, extra: { frameIndex: 0 } } });
-    expect(step(p, "anchor").request).toMatchObject({ modelId: "oss-qwen-edit", op: "edit", inputs: { images: [ref] } });
+    expect(step(p, "anchor").request).toMatchObject({ modelId: "oss-qwen-image-21", op: "edit", inputs: { images: [ref] } });
     expect(step(p, "anchor").request.prompt).toMatch(/^Image 1 is the source frame to edit\. Image 2 is character identity only: a chrome robot/);
     expect(step(p, "anchor").chain).toEqual([{ slot: "images", position: "first" }]);
     const swap = step(p, "swap");
@@ -359,8 +359,10 @@ describe("Genjutsu: Character swap", () => {
     // Through the catalog the ratio stays (no square default merged over it).
     const planned = planGeneration({ ...sunburst, inputs: { images: ["/api/files/f.png", ref] } }, getModel, getPreset);
     expect(planned.params.aspectRatio).toBe("16:9");
-    // The open first frame is Qwen-Image-Edit's own size (the graph fits it to the clip): no ratio is asked.
-    expect(step(ch({ maker: maker(ORIGINALS.character, "open") }), "anchor").request.params?.aspectRatio).toBeUndefined();
+    // On your GPU the first frame keeps the frame's own size: Qwen-Image 2.1 gets the nearest ratio, which its edit graph
+    // doesn't read (the result follows image 1), and Qwen-Image-Edit 2511 is asked none.
+    expect(step(ch({ maker: maker(ORIGINALS.character, "open") }), "anchor").request.params?.aspectRatio).toBe("16:9");
+    expect(step(ch({ maker: maker(ORIGINALS.character, "open"), character: { anchorModel: "oss-qwen-edit" } }), "anchor").request.params?.aspectRatio).toBeUndefined();
   });
 
   it("cloud: a silent clip's result is silent too (H3's own soundtrack is replaced with silence)", () => {

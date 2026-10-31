@@ -31,6 +31,7 @@ const MODEL_NAMES: Record<string, string> = {
   "seedream-5-pro": "Seedream 5.0 Pro",
   "qwen-image-edit-2511-cloud": "Qwen-Image-Edit 2511",
   "oss-qwen-edit": "Qwen-Image-Edit 2511",
+  "oss-qwen-image-21": "Qwen-Image 2.1",
 };
 const TABS = [
   ["all", "All"],

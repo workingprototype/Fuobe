@@ -361,13 +361,14 @@ export function jobSteps(input: LayerJobInput, opts: { batchTitle?: string } = {
     }
     case "expand": {
       const model = toolModel(tool, engine, input.modelId);
-      const fill = "Continue the scene naturally beyond every edge with matching perspective, lighting, textures and grain. Keep the original picture untouched and add no new people or text.";
+      const fill = "Continue the scene naturally beyond every edge with matching perspective, lighting, textures and grain.";
       if (model.engine === "open") {
         const pads = s.pads;
         if (!pads || pads.left + pads.top + pads.right + pads.bottom === 0) throw new LayersError("Drag an edge outward to make room to fill", 400);
+        // The open graphs keep the picture as it is themselves, and read the words as what fills the margins: only that.
         add("expand", base(model, { op: "outpaint", prompt: prompt || fill, inputs: { images: [needImage()] }, params: { extra: { padLeft: pads.left, padTop: pads.top, padRight: pads.right, padBottom: pads.bottom } } }));
       } else {
-        add("expand", base(model, { op: "edit", prompt: `Fill the empty grey margins around the picture. ${fill}${prompt ? ` ${prompt}` : ""}`, inputs: { images: [needImage()] }, params: aspectFor(model) }));
+        add("expand", base(model, { op: "edit", prompt: `Fill the empty grey margins around the picture. ${fill} Keep the original picture untouched and add no new people or text.${prompt ? ` ${prompt}` : ""}`, inputs: { images: [needImage()] }, params: aspectFor(model) }));
       }
       break;
     }

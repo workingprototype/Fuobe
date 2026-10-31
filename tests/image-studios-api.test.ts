@@ -291,11 +291,14 @@ describe("photodump, fashion factory and character sheet runs", () => {
     expect((await retryRoute.POST(json("POST", { id: again[0].id }))).status).toBe(422);
   }, 45_000);
 
-  it("says on Qwen-Image-Edit that the aspect ratio doesn't apply", async () => {
+  it("says on the Qwen edit models that the aspect ratio doesn't apply", async () => {
+    // Qwen-Image 2.1 has ratios for text to image, but its edit graph takes no size: the photo's shape it is.
     const preview = await (await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "open", selfie: upload(), aspectRatio: "16:9" }, "http://x/api/photodump?preview=1"))).json();
-    expect(preview.modelId).toBe("oss-qwen-edit");
+    expect(preview.modelId).toBe("oss-qwen-image-21");
     expect(preview.fixedAspect).toBe(true);
-    expect(preview.notes.join()).toMatch(/keeps the shape of your photo/);
+    expect(preview.notes.join()).toMatch(/Qwen-Image 2.1 keeps the shape of your photo/);
+    const old = await (await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "open", selfie: upload(), aspectRatio: "16:9", modelId: "oss-qwen-edit" }, "http://x/api/photodump?preview=1"))).json();
+    expect(old).toMatchObject({ modelId: "oss-qwen-edit", fixedAspect: true });
     const cloud = await (await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "cloud", selfie: upload(), aspectRatio: "16:9" }, "http://x/api/photodump?preview=1"))).json();
     expect(cloud.fixedAspect).toBe(false);
     // Picking Fuobe Soul with a selfie says why it runs on Qwen-Image-Edit.
@@ -309,7 +312,7 @@ describe("photodump, fashion factory and character sheet runs", () => {
     const el = createElement({ name: "Maya", kind: "character", references: [upload()] });
     const { items } = await (await photodumpRoute.POST(json("POST", { packId: pack.id, engine: "open", elementId: el.id }))).json();
     expect(items).toHaveLength(2);
-    expect(items[0].modelId).toBe("oss-qwen-edit");
+    expect(items[0].modelId).toBe("oss-qwen-image-21");
     // The pack's photo, then Maya's reference (her @mention resolves on the server).
     expect(items[0].request.inputs.images).toEqual([pack.refs[0]]);
     expect(items[0].request.prompt).toMatch(/^@Maya recreated in image 1/);
@@ -331,7 +334,7 @@ describe("photodump, fashion factory and character sheet runs", () => {
     expect(partner.items[0].modelId).toBe("fashn-tryon");
     const set = await (await fashionRoute.POST(json("POST", { step: "photoset", templateId: "red-room", dressed: upload(), engine: "open" }))).json();
     expect(set.items).toHaveLength(9);
-    expect(set.items.every((g: { modelId: string; batchId: string }) => g.modelId === "oss-qwen-edit" && g.batchId === set.batchId)).toBe(true);
+    expect(set.items.every((g: { modelId: string; batchId: string }) => g.modelId === "oss-qwen-image-21" && g.batchId === set.batchId)).toBe(true);
     const missing = await fashionRoute.POST(json("POST", { step: "photoset", templateId: "nope", dressed: upload(), engine: "open" }));
     expect((await missing.json()).error).toBe("Template required");
   });

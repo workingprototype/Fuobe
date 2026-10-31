@@ -600,7 +600,7 @@ export const CAST_SHEET_MODEL = "oss-zimage-soul-cast";
  */
 export const CINEMA_MODELS: Record<CinemaMode, Record<Engine, string[]>> = {
   video: { cloud: [CINEMA_MODEL, "seedance-2-5", "kling-3", "veo-3-1"], open: [CINEMA_MODEL, "oss-ltx25", "oss-wan22-14b"] },
-  image: { cloud: [CINEMA_STILL_MODEL, "nano-banana-pro", "seedream-5-pro"], open: [CINEMA_STILL_MODEL, "oss-z-image-turbo", "oss-qwen-image"] },
+  image: { cloud: [CINEMA_STILL_MODEL, "nano-banana-pro", "seedream-5-pro"], open: [CINEMA_STILL_MODEL, "oss-ideogram-4", "oss-qwen-image-21", "oss-z-image-turbo", "oss-qwen-image"] },
 };
 
 /**
@@ -1614,7 +1614,10 @@ function planGrid(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
  */
 export const CAST_MODELS: Record<Engine, string[]> = { cloud: [SOUL_BUILDER_MODEL, "nano-banana-pro"], open: [CAST_SHEET_MODEL, SOUL_BUILDER_MODEL] };
 /** Soul Location's makers: Fuobe Soul (the Movie look) on both engines, partner and open alternatives after it. */
-export const LOCATION_MODELS: Record<Engine, string[]> = { cloud: [SOUL_BUILDER_MODEL, "nano-banana-pro", "seedream-5-pro"], open: [SOUL_BUILDER_MODEL, "oss-z-image-turbo", "oss-qwen-image"] };
+export const LOCATION_MODELS: Record<Engine, string[]> = {
+  cloud: [SOUL_BUILDER_MODEL, "nano-banana-pro", "seedream-5-pro"],
+  open: [SOUL_BUILDER_MODEL, "oss-ideogram-4", "oss-qwen-image-21", "oss-z-image-turbo", "oss-qwen-image"],
+};
 
 /** A builder's maker: the one asked for when this engine offers it (and this install has it), else the first. */
 function builderModel(list: string[], input: CinemaGenerateInput, ctx: CinemaContext): ModelDef {
@@ -1908,8 +1911,11 @@ function planEdit(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
 
 /** What builds a still's 3D scene: MoGe 2's textured mesh on the open engine, a Marigold depth map on the cloud. */
 export const SCENE_MODELS: Record<Engine, string> = { cloud: "marigold-depth", open: "oss-scene-moge" };
-/** What re-renders a captured view. The first is the default. */
-export const RECOMPOSE_MODELS: Record<Engine, string[]> = { cloud: ["nano-banana-pro", "qwen-multiple-angles"], open: ["oss-qwen-edit"] };
+/**
+ * What re-renders a captured view. The first is the default. On your GPU that stays Qwen-Image-Edit 2511, which runs it
+ * with the Multiple-Angles LoRA trained on it; Qwen-Image 2.1 is the choice after it, with plain words.
+ */
+export const RECOMPOSE_MODELS: Record<Engine, string[]> = { cloud: ["nano-banana-pro", "qwen-multiple-angles"], open: ["oss-qwen-edit", "oss-qwen-image-21"] };
 /** The open scene mesh skips every other pixel: about a quarter of the triangles, light enough for a phone. */
 export const SCENE_DECIMATION = 2;
 
@@ -1935,15 +1941,14 @@ function planScene(input: CinemaGenerateInput): CinemaPlan {
 const REFERENCE_POSE: ScenePose = { horizontal: 0, vertical: 0, zoom: 5 };
 
 /**
- * Re-render a captured view. Nano Banana Pro (cloud) and Qwen-Image-Edit 2511 with the Multiple-Angles LoRA
- * (open) get the capture as image 1 and the still as image 2. The LoRA turns its input by the angles it is told,
+ * Re-render a captured view. Nano Banana Pro (cloud), Qwen-Image 2.1 and Qwen-Image-Edit 2511 with the Multiple-Angles
+ * LoRA (open) get the capture as image 1 and the still as image 2. The LoRA turns its input by the angles it is told,
  * and the capture already shows the new view, so it is told the reference pose (front view, eye level, medium
  * shot: keep this camera); the flown angles stay on the take. Qwen Multiple Angles on the cloud re-shoots the
  * still itself from the flown camera's angles instead.
  */
 function planRecompose(input: CinemaGenerateInput): CinemaPlan {
   const notes: string[] = [];
-  const open = input.engine === "open";
   const list = RECOMPOSE_MODELS[input.engine];
   const model = getModel(input.modelId && list.includes(input.modelId) ? input.modelId : list[0])!;
   const src = input.source?.kind === "image" ? input.source.url : undefined;
@@ -1958,13 +1963,13 @@ function planRecompose(input: CinemaGenerateInput): CinemaPlan {
     request = { feature: "cinema-recompose", modelId: model.id, op: "edit", prompt: anglesNote(lens, aperture, input.prompt), inputs: src ? { images: [src] } : undefined, params };
     notes.push(`${model.name} re-shoots the still from the angles you flew to (${Math.round(pose.horizontal)}° round, ${Math.round(pose.vertical)}° up, zoom ${pose.zoom}) — the capture itself isn't sent`);
   } else {
-    const loras = open ? [ANGLES_2511_LORA] : undefined;
+    const loras = model.id === "oss-qwen-edit" ? [ANGLES_2511_LORA] : undefined;
     const words = recomposePrompt(lens, aperture, input.prompt);
     request = {
       feature: "cinema-recompose",
       modelId: model.id,
       op: "edit",
-      prompt: open ? `<sks> ${poseWords(REFERENCE_POSE)}. ${words}` : words,
+      prompt: loras ? `<sks> ${poseWords(REFERENCE_POSE)}. ${words}` : words,
       inputs: src && cap ? { images: [cap.url, src] } : undefined,
       params,
       ...(loras?.length ? { loras } : {}),

@@ -26,7 +26,7 @@ const LABELS = ["Select presets", "Character", "Generation", "Clothing", "Photos
 const BANNER_KEY = "fuobe.fashion.banner";
 /**
  * The outfit and photoset models' names (FASHION_MODELS has each step's per engine): Fuobe Try-On (the Original, FLUX.2
- * [klein] 4B + a try-on LoRA) and Qwen-Image-Edit 2511 first, partners after.
+ * [klein] 4B + a try-on LoRA) and the Qwen edit models first, partners after.
  */
 const MODEL_LABELS: Record<string, string> = {
   "fuobe-tryon": "Fuobe Try-On",
@@ -34,6 +34,7 @@ const MODEL_LABELS: Record<string, string> = {
   "nano-banana-pro": "Nano Banana Pro",
   "qwen-image-edit-2511-cloud": "Qwen-Image-Edit 2511",
   "oss-qwen-edit": "Qwen-Image-Edit 2511",
+  "oss-qwen-image-21": "Qwen-Image 2.1",
 };
 
 const bannerListeners = new Set<() => void>();

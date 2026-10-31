@@ -391,7 +391,10 @@ export const ANCHOR_MODELS: Record<Engine, { id: string; label: string; note: st
     { id: "gpt-image-2-5-sunburst", label: "GPT Image 2.5 Sunburst", note: "Openjutsu's choice, low quality: billed by tokens", extra: { quality: "low" }, tokens: "$8 per million tokens in, $30 per million out" },
     { id: "nano-banana-pro", label: "Nano Banana Pro", note: "$0.15 an image" },
   ],
-  open: [{ id: "oss-qwen-edit", label: "Qwen-Image-Edit 2511", note: "Free on your GPU (24 GB)" }],
+  open: [
+    { id: "oss-qwen-image-21", label: "Qwen-Image 2.1", note: "Free on your GPU (20 GB)" },
+    { id: "oss-qwen-edit", label: "Qwen-Image-Edit 2511", note: "Free on your GPU (24 GB)" },
+  ],
 };
 
 export const anchorModel = (engine: Engine, id?: string) => ANCHOR_MODELS[engine].find((m) => m.id === id) ?? ANCHOR_MODELS[engine][0];

@@ -222,26 +222,29 @@ export const TOOL_LABELS: Record<LayerTool, string> = {
   enhance: "Enhance",
 };
 
-/** Models each tool offers, per engine (the first is the default). Checked against the catalog in tests. */
+/**
+ * Models each tool offers, per engine (the first is the default). Checked against the catalog in tests. On the open
+ * engine the owner's newest models come first (Qwen-Image 2.1 edits, inpaints and expands; Ideogram 4 makes a layer).
+ */
 export const TOOL_MODELS: Record<LayerTool, { cloud: string[]; open: string[] }> = {
   decompose: { cloud: ["seedream-5-layers", "seedream-5-flash-layers", "qwen-image-layered-cloud"], open: ["oss-qwen-layered"] },
   split: { cloud: ["seedream-5-layers", "seedream-5-flash-layers", "qwen-image-layered-cloud"], open: ["oss-qwen-layered", "oss-qwen-layered-control"] },
-  regenerate: { cloud: ["nano-banana-pro", "seedream-5-pro", "nano-banana-2"], open: ["oss-qwen-edit", "oss-flux-kontext"] },
-  "generate-layer": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-z-image-turbo", "oss-qwen-image"] },
+  regenerate: { cloud: ["nano-banana-pro", "seedream-5-pro", "nano-banana-2"], open: ["oss-qwen-image-21", "oss-qwen-image-21-turbo", "oss-qwen-edit", "oss-flux-kontext"] },
+  "generate-layer": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-ideogram-4", "oss-qwen-image-21", "oss-z-image-turbo", "oss-qwen-image"] },
   // Ideogram ($0.09) also lifts the text off the picture, which the editor doesn't use; Florence-2 only
   // reads it (fal lists $0 per compute second, real cost unverified: the catalog's $0.001 is a placeholder).
   "text-detect": { cloud: ["ideogram-3-text-layers", "florence-2-ocr"], open: ["oss-ocr-lines"] },
-  "text-edit": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-qwen-edit"] },
+  "text-edit": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-qwen-image-21", "oss-qwen-edit"] },
   "bg-remove": { cloud: ["birefnet-cloud", "ideogram-remove-bg"], open: ["oss-rmbg"] },
-  regional: { cloud: ["seedream-5-pro", "nano-banana-pro"], open: ["oss-qwen-edit", "oss-flux-kontext"] },
+  regional: { cloud: ["seedream-5-pro", "nano-banana-pro"], open: ["oss-qwen-image-21", "oss-qwen-edit", "oss-flux-kontext"] },
   upscale: { cloud: ["topaz-image", "seedvr-image", "recraft-crisp"], open: ["oss-upscale-image", "oss-seedvr2-image"] },
   relight: { cloud: ["nano-banana-pro"], open: ["oss-qwen-relight"] },
   angles: { cloud: ["qwen-multiple-angles", "nano-banana-pro"], open: ["oss-qwen-edit"] },
-  expand: { cloud: ["nano-banana-pro"], open: ["oss-flux-fill"] },
+  expand: { cloud: ["nano-banana-pro"], open: ["oss-qwen-image-21", "oss-flux-fill"] },
   // Nano Banana Pro sees the painted area tinted red (Higgsfield's nano_banana_pro_inpaint); the others take the mask itself.
-  inpaint: { cloud: ["nano-banana-pro", "flux-fill-pro", "z-image-inpaint"], open: ["oss-flux-fill"] },
+  inpaint: { cloud: ["nano-banana-pro", "flux-fill-pro", "z-image-inpaint"], open: ["oss-qwen-image-21", "oss-flux-fill"] },
   // The retouch looks; Detail runs on {@link ENHANCE_DETAIL_MODELS}.
-  enhance: { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-qwen-edit"] },
+  enhance: { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-qwen-image-21", "oss-qwen-edit"] },
 };
 
 // ---------------------------------------------------------------------------

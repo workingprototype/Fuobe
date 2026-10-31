@@ -49,8 +49,8 @@ describe("offline planner (U18)", () => {
     expect(jobs[0].after).toBeUndefined();
     expect(jobs[1]).toMatchObject({ model_id: "seedance-2-5", after: 0, shots: 3 });
     expect(p.say).toMatch(/still first, then animate it as a 3-shot clip/);
-    // The open engine picks the open defaults.
-    expect((agent.offlinePlan("A photo of a lighthouse, then animate it", "open")!.input as { jobs: { model_id: string }[] }).jobs.map((j) => j.model_id)).toEqual(["oss-z-image-turbo", "oss-wan22-14b-fast"]);
+    // The open engine picks the open defaults (the Image studio's is Ideogram 4).
+    expect((agent.offlinePlan("A photo of a lighthouse, then animate it", "open")!.input as { jobs: { model_id: string }[] }).jobs.map((j) => j.model_id)).toEqual(["oss-ideogram-4", "oss-wan22-14b-fast"]);
   });
 
   it("reads 'N portraits' as N takes and 'N-shot' video as one multi-shot clip", () => {

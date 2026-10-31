@@ -85,12 +85,13 @@ describe("Character swap: the prompt", () => {
     expect(brief).toMatch(/One full-aspect edited source frame\.$/);
   });
 
-  it("the anchor model per engine: GPT Image 2.5 Sunburst (low) or Nano Banana Pro in the cloud, Qwen-Image-Edit on your GPU", () => {
+  it("the anchor model per engine: GPT Image 2.5 Sunburst (low) or Nano Banana Pro in the cloud, Qwen-Image 2.1 (or Qwen-Image-Edit 2511) on your GPU", () => {
     expect(anchorModel("cloud")).toMatchObject({ id: "gpt-image-2-5-sunburst", extra: { quality: "low" } });
     expect(anchorModel("cloud", "nano-banana-pro").id).toBe("nano-banana-pro");
-    expect(anchorModel("open").id).toBe("oss-qwen-edit");
+    expect(anchorModel("open").id).toBe("oss-qwen-image-21");
+    expect(anchorModel("open", "oss-qwen-edit").id).toBe("oss-qwen-edit");
     // Another engine's model falls back to the engine's own.
-    expect(anchorModel("open", "nano-banana-pro").id).toBe("oss-qwen-edit");
+    expect(anchorModel("open", "nano-banana-pro").id).toBe("oss-qwen-image-21");
   });
 });
 

@@ -66,9 +66,14 @@ describe("Layers on the open engine", () => {
     expect(at("numLayers")).toEqual([2]);
   });
 
-  it("expand: the padding reaches FLUX Fill", async () => {
-    const at = await bind(step({ tool: "expand", settings: { pads: { left: 64, top: 0, right: 128, bottom: 8 } } }));
-    expect([at("padLeft"), at("padTop"), at("padRight"), at("padBottom")]).toEqual([[64], [0], [128], [8]]);
+  it("expand: the padding reaches both of Qwen-Image 2.1's pad nodes, or FLUX Fill when picked", async () => {
+    const pads = { pads: { left: 64, top: 0, right: 128, bottom: 8 } };
+    const at = await bind(step({ tool: "expand", settings: pads }));
+    expect([at("padLeft"), at("padTop"), at("padRight"), at("padBottom")]).toEqual([[64, 64], [0, 0], [128, 128], [8, 8]]);
+    // The words only say what fills the margins: the graph keeps the picture itself.
+    expect(at("prompt")).toEqual(["Continue the scene naturally beyond every edge with matching perspective, lighting, textures and grain."]);
+    const fill = await bind(step({ tool: "expand", modelId: "oss-flux-fill", settings: pads }));
+    expect([fill("padLeft"), fill("padTop"), fill("padRight"), fill("padBottom")]).toEqual([[64], [0], [128], [8]]);
   });
 
   it("relight and edit text: the instruction reaches the edit graphs", async () => {
@@ -80,7 +85,7 @@ describe("Layers on the open engine", () => {
 });
 
 describe("Inpaint and Enhancer on the open engine", () => {
-  it("inpaint: the picture, its painted mask and the prompt reach FLUX Fill", async () => {
+  it("inpaint: the picture, its painted mask and the prompt reach Qwen-Image 2.1's inpaint graph", async () => {
     const req = step({ tool: "inpaint", prompt: "a vase of tulips", mask: "/api/files/m.png", sketch: "/api/files/s.png" });
     const at = await bind(req);
     expect(at("image")).toEqual(["/api/files/a.png"]);
@@ -88,7 +93,7 @@ describe("Inpaint and Enhancer on the open engine", () => {
     expect(String(at("prompt")[0])).toMatch(/^a vase of tulips\. Blend it into the surroundings/);
   });
 
-  it("enhancer: a retouch reaches Qwen-Image-Edit, Detail the SeedVR2 upscaler", async () => {
+  it("enhancer: a retouch reaches Qwen-Image 2.1, Detail the SeedVR2 upscaler", async () => {
     const skin = await bind(step({ tool: "enhance", settings: { look: "skin" } }));
     expect(String(skin("prompt")[0])).toMatch(/^Give the portrait a subtle natural retouch/);
     const detail = await bind(step({ tool: "enhance", settings: { look: "detail" } }));

@@ -499,7 +499,7 @@ describe("Photodump packs and planning", () => {
     // A GPU-only LoRA (no copy Fuobe can send) stays off the cloud: reference photos there.
     expect(planPhotodump({ pack, subject: loraMaya, engine: "cloud" }, {}).modelId).toBe("qwen-image-edit-2511-cloud");
     const qwen = planPhotodump({ pack, subject: selfie, engine: "open", aspectRatio: "auto" }, {});
-    expect(qwen.modelId).toBe("oss-qwen-edit");
+    expect(qwen.modelId).toBe("oss-qwen-image-21");
     expect(qwen.requests[0].inputs?.images).toEqual([selfie.url]);
     expect(qwen.requests[0].params?.aspectRatio).toBeUndefined();
 
@@ -543,7 +543,8 @@ describe("Photodump: model choice and retries", () => {
   const selfie: PhotoSubject = { kind: "selfie", url: "/api/files/uploads/me.png" };
 
   it("says why a pick that can't run ends up on another model", () => {
-    expect(photodumpModel(selfie, "open", {}, "fuobe-soul")).toEqual({ modelId: "oss-qwen-edit", note: "Fuobe Soul needs a character with a trained Soul ID — Qwen-Image-Edit 2511 works from your photo" });
+    expect(photodumpModel(selfie, "open", {}, "fuobe-soul")).toEqual({ modelId: "oss-qwen-image-21", note: "Fuobe Soul needs a character with a trained Soul ID — Qwen-Image 2.1 works from your photo" });
+    expect(photodumpModel(selfie, "open", {}, "oss-qwen-edit").modelId).toBe("oss-qwen-edit");
     expect(photodumpModel(selfie, "cloud", {}, "fuobe-soul")).toEqual({ modelId: "qwen-image-edit-2511-cloud", note: "Fuobe Soul needs a character with a trained Soul ID — Qwen-Image-Edit 2511 works from your photo" });
     expect(photodumpModel(selfie, "cloud", {}, "nano-banana-pro").modelId).toBe("nano-banana-pro");
     expect(photodumpModel(selfie, "cloud", {}).modelId).toBe("qwen-image-edit-2511-cloud");
@@ -551,7 +552,7 @@ describe("Photodump: model choice and retries", () => {
     expect(photodumpModel(selfie, "open", {}).note).toBeUndefined();
     // A demo training's stand-in isn't a Soul ID.
     const demo: PhotoSubject = { kind: "element", handle: "Maya", name: "Maya", references: ["/a.png"], loras: [{ engine: "cloud", modelId: "fuobe-soul", family: "z-image-turbo", file: "fuobe/x.safetensors", trigger: "t", demo: true }] };
-    expect(photodumpModel(demo, "open", {}).modelId).toBe("oss-qwen-edit");
+    expect(photodumpModel(demo, "open", {}).modelId).toBe("oss-qwen-image-21");
   });
 
   it("a retried base shot or outfit takes the failed one's place in the wizard", () => {
@@ -578,7 +579,7 @@ describe("Fashion Factory", () => {
     // No Soul ID yet: Qwen-Image-Edit 2511 from the character's photos (with one, Fuobe Soul and the LoRA).
     expect(base).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", params: { aspectRatio: "3:4", numOutputs: 4 } });
     expect(base.prompt).toMatch(/@Maya in a bold, saturated colour-blocked studio set/);
-    expect(fashionBaseRequest(t, maya, "open", {}).modelId).toBe("oss-qwen-edit");
+    expect(fashionBaseRequest(t, maya, "open", {}).modelId).toBe("oss-qwen-image-21");
 
     // Fuobe Try-On on both engines (FLUX.2 [klein] 4B + the try-on LoRA); FASHN and Nano Banana Pro stay cloud choices.
     const outfit = fashionOutfitRequest(t, "/api/files/base.png", "/api/files/shirt.png", "cloud");
@@ -601,7 +602,8 @@ describe("Fashion Factory", () => {
     expect(set).toHaveLength(t.shots);
     expect(set[0]).toMatchObject({ modelId: "qwen-image-edit-2511-cloud", inputs: { images: ["/api/files/dressed.png"] }, step: { label: `Photoset 1 of ${t.shots}` } });
     expect(fashionPhotosetRequests(t, "/api/files/dressed.png", "cloud", "nano-banana-pro")[0].modelId).toBe("nano-banana-pro");
-    expect(fashionPhotosetRequests(t, "/api/files/dressed.png", "open")[0].modelId).toBe("oss-qwen-edit");
+    expect(fashionPhotosetRequests(t, "/api/files/dressed.png", "open")[0].modelId).toBe("oss-qwen-image-21");
+    expect(fashionPhotosetRequests(t, "/api/files/dressed.png", "open", "oss-qwen-edit")[0].modelId).toBe("oss-qwen-edit");
   });
 
   it("walks the wizard with Higgsfield's validation messages", () => {

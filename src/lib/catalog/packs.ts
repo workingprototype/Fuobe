@@ -369,13 +369,22 @@ export const PHOTODUMP_SOUL = "fuobe-soul";
  * photo — hosted in the cloud, the 3-image graph on your GPU. It also makes a character's photos before a Soul ID.
  */
 export const PHOTO_EDIT: Record<Engine, string> = { cloud: "qwen-image-edit-2511-cloud", open: "oss-qwen-edit" };
+/** The edit model your GPU runs first: Qwen-Image 2.1 (up to 4 references); Qwen-Image-Edit 2511 stays a choice after it. */
+export const OPEN_PHOTO_EDIT = "oss-qwen-image-21";
 
+/** The models a pack's photos can run on, the default first after Fuobe Soul (which needs a trained Soul ID). */
 export const PHOTODUMP_MODELS: Record<Engine, string[]> = {
   cloud: [PHOTODUMP_SOUL, PHOTO_EDIT.cloud, "nano-banana-pro", "seedream-5-pro"],
-  open: [PHOTODUMP_SOUL, PHOTO_EDIT.open],
+  open: [PHOTODUMP_SOUL, OPEN_PHOTO_EDIT, PHOTO_EDIT.open],
 };
 
-const EDIT_NAMES: Record<string, string> = { "qwen-image-edit-2511-cloud": "Qwen-Image-Edit 2511", "oss-qwen-edit": "Qwen-Image-Edit 2511", "nano-banana-pro": "Nano Banana Pro", "seedream-5-pro": "Seedream 5.0 Pro" };
+const EDIT_NAMES: Record<string, string> = {
+  "qwen-image-edit-2511-cloud": "Qwen-Image-Edit 2511",
+  "oss-qwen-edit": "Qwen-Image-Edit 2511",
+  "oss-qwen-image-21": "Qwen-Image 2.1",
+  "nano-banana-pro": "Nano Banana Pro",
+  "seedream-5-pro": "Seedream 5.0 Pro",
+};
 
 /** The character's Soul ID that runs on Fuobe Soul on this engine (a demo training's stand-in doesn't count). */
 export const soulIdOf = (s: PhotoSubject, engine: Engine): ElementLora | undefined => (s.kind === "element" ? identityFor(s.loras, { id: PHOTODUMP_SOUL, engine }) : undefined);
@@ -388,9 +397,10 @@ export const soulIdOf = (s: PhotoSubject, engine: Engine): ElementLora | undefin
 export function photodumpModel(subject: PhotoSubject, engine: Engine, _caps: PlanCaps, pick?: string, custom = false): { modelId: string; note?: string } {
   const trained = soulIdOf(subject, engine);
   if (!custom && trained && (!pick || pick === PHOTODUMP_SOUL)) return { modelId: PHOTODUMP_SOUL };
-  // Say why when the pick (or a character without a Soul ID) ends up on an edit model: Qwen-Image-Edit 2511 unless a
-  // partner model is picked in the cloud.
-  const fallback = engine === "cloud" && (pick === "nano-banana-pro" || pick === "seedream-5-pro") ? pick : PHOTO_EDIT[engine];
+  // Say why when the pick (or a character without a Soul ID) ends up on an edit model: the engine's first one
+  // (Qwen-Image-Edit 2511 in the cloud, Qwen-Image 2.1 on your GPU) unless another of the list is picked.
+  const edits = PHOTODUMP_MODELS[engine].filter((id) => id !== PHOTODUMP_SOUL);
+  const fallback = pick && edits.includes(pick) ? pick : edits[0];
   const name = EDIT_NAMES[fallback] ?? fallback;
   const note =
     pick === PHOTODUMP_SOUL && custom
@@ -588,13 +598,14 @@ export const getTemplate = (id: string) => FASHION.find((t) => t.id === id);
 
 /**
  * Fashion Factory's models per step (build plan O10): Fuobe Try-On (FLUX.2 [klein] 4B + the try-on LoRA) dresses the
- * base shot on both engines, FASHN and Nano Banana Pro stay as cloud choices and Qwen-Image-Edit 2511 dresses it on your
- * GPU when the try-on can't run; Qwen-Image-Edit 2511 makes the photoset, Nano Banana Pro a cloud choice.
+ * base shot on both engines, FASHN and Nano Banana Pro stay as cloud choices and Qwen-Image 2.1 (then Qwen-Image-Edit
+ * 2511) dresses it on your GPU when the try-on can't run. Qwen-Image-Edit 2511 makes the photoset in the cloud, Nano
+ * Banana Pro a choice; on your GPU Qwen-Image 2.1 makes it, Qwen-Image-Edit 2511 a choice.
  */
 export const TRYON_MODEL = "fuobe-tryon";
 export const FASHION_MODELS = {
-  outfit: { cloud: [TRYON_MODEL, "fashn-tryon", "nano-banana-pro"], open: [TRYON_MODEL, PHOTO_EDIT.open] },
-  photoset: { cloud: [PHOTO_EDIT.cloud, "nano-banana-pro"], open: [PHOTO_EDIT.open] },
+  outfit: { cloud: [TRYON_MODEL, "fashn-tryon", "nano-banana-pro"], open: [TRYON_MODEL, OPEN_PHOTO_EDIT, PHOTO_EDIT.open] },
+  photoset: { cloud: [PHOTO_EDIT.cloud, "nano-banana-pro"], open: [OPEN_PHOTO_EDIT, PHOTO_EDIT.open] },
 } as const;
 
 /**
@@ -643,7 +654,7 @@ export function fashionOutfitRequest(t: FashionTemplate, base: string, garment: 
   };
 }
 
-/** Step 5: one photo per template shot, from the dressed image (Qwen-Image-Edit 2511, or Nano Banana Pro when picked). */
+/** Step 5: one photo per template shot, from the dressed image (the step's first model, or the one picked). */
 export function fashionPhotosetRequests(t: FashionTemplate, dressed: string, engine: Engine, pick?: string, caps?: Pick<PlanCaps, "has">): GenerationRequest[] {
   const modelId = fashionModel("photoset", engine, pick, caps);
   const n = t.photoset.length;

@@ -166,7 +166,7 @@ describe("offline planner", () => {
       input: { jobs: [{ model_id: "seedance-2-5", aspect_ratio: "9:16", outputs: 3 }] },
     });
     expect(agent.offlinePlan("Put a hat on him\n\nAttached files (pass these URLs as inputs):\n- image 1: /api/files/a.png", "open")).toMatchObject({
-      input: { jobs: [{ model_id: "oss-qwen-edit", images: ["/api/files/a.png"] }] },
+      input: { jobs: [{ model_id: "oss-qwen-image-21", images: ["/api/files/a.png"] }] },
     });
     expect(agent.offlinePlan("A storyboard in 6 frames: a heist in Paris", "cloud")).toMatchObject({ tool: "create_storyboard", input: { frames: 6 } });
     expect(agent.offlinePlan("Write a lo-fi song for studying", "open")).toMatchObject({ input: { jobs: [{ model_id: "oss-ace-step" }] } });

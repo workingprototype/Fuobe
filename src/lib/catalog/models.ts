@@ -73,8 +73,10 @@ type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badge
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
 
 const open: ModelDef[] = [
-  // ---- Ideogram 4 (B-I)
-  // The prompt is a JSON caption the server writes from the words (promptFormat; src/lib/ideogram-caption.ts).
+  // ---------------- The owner's newest image models, first picks on your GPU (2026-10-31): text to image in his order
+  // (Ideogram 4, Qwen-Image 2.1, Krea 2, MOSS-Image, FIBO 2), then the edit models (Qwen-Image 2.1, FIBO 2, Krea 2).
+  // A studio's "Best" list is its default, then the `top` models in this order (bestForStudio in src/lib/composer.ts).
+  // Ideogram 4: the prompt is a JSON caption the server writes from the words (promptFormat; src/lib/ideogram-caption.ts).
   o({
     id: "oss-ideogram-4",
     name: "Ideogram 4",
@@ -102,7 +104,7 @@ const open: ModelDef[] = [
     defaults: { aspectRatio: "1:1", resolution: "1.5K" },
   }),
 
-  // ---- Qwen-Image 2.1 (B-Q)
+  // Qwen-Image 2.1: text to image, edits with up to 4 references, inpaint and expand; its Turbo makes 8-step edits.
   o({
     id: "oss-qwen-image-21",
     name: "Qwen-Image 2.1",
@@ -132,7 +134,7 @@ const open: ModelDef[] = [
     options: { maxImages: 4, seed: true },
   }),
 
-  // ---- Krea 2 text to image (B-K)
+  // Krea 2 text to image (its edit models come after FIBO 2's, as the owner ranks them).
   o({
     id: "oss-krea2-realism",
     name: "Krea 2 Realism",
@@ -164,7 +166,29 @@ const open: ModelDef[] = [
     defaults: { aspectRatio: "1:1", resolution: "1K" },
   }),
 
-  // ---- FIBO 2 (B-F)
+  // MOSS-Image (OpenMOSS, Apache-2.0; research #7 §4.6): plain words, or a layout of boxes compiled to its JSON
+  // (src/lib/layout-prompt.ts). The cloud half is `moss-image` on fal.
+  o({
+    id: "oss-moss-image",
+    name: "MOSS-Image",
+    vendor: "OpenMOSS",
+    family: "moss",
+    kind: "image",
+    tagline: "Clean Chinese and English text, follows layout boxes · on your GPU, about 13 GB of files",
+    badges: ["new", "top"],
+    routes: [comfy("t2i", "moss-image-t2i", "MOSS-Image SFT int8, Qwen3.5-9B w4a8, FLUX.2 small decoder; core nodes")],
+    options: {
+      aspectRatios: IMG_AR,
+      resolutions: ["1K", "1.5K"],
+      seed: true,
+      negativePrompt: true,
+      layout: "moss",
+      controls: [MOSS_QUALITY],
+    },
+    defaults: { aspectRatio: "1:1", resolution: "1K" },
+  }),
+
+  // FIBO 2 (Bria FIBO 2.0): text to image from Bria's structured JSON prompt, edits with up to 4 references.
   o({
     id: "oss-fibo2-dev",
     name: "FIBO 2 Dev",
@@ -192,7 +216,7 @@ const open: ModelDef[] = [
     options: { maxImages: 4, seed: true },
   }),
 
-  // ---- Krea 2 edits (B-K)
+  // Krea 2 edits, image to image, inpaint and expand.
   o({
     id: "oss-krea2-edit",
     name: "Krea 2 Edit",
@@ -369,27 +393,6 @@ const open: ModelDef[] = [
     routes: [comfy("t2i", "sdxl-t2i")],
     options: { aspectRatios: IMG_AR, seed: true, negativePrompt: true },
     defaults: { aspectRatio: "1:1" },
-  }),
-  // MOSS-Image (OpenMOSS, Apache-2.0; research #7 §4.6): plain words, or a layout of boxes compiled to its JSON
-  // (src/lib/layout-prompt.ts). The cloud half is `moss-image` on fal.
-  o({
-    id: "oss-moss-image",
-    name: "MOSS-Image",
-    vendor: "OpenMOSS",
-    family: "moss",
-    kind: "image",
-    tagline: "Clean Chinese and English text, follows layout boxes · on your GPU, about 13 GB of files",
-    badges: ["new"],
-    routes: [comfy("t2i", "moss-image-t2i", "MOSS-Image SFT int8, Qwen3.5-9B w4a8, FLUX.2 small decoder; core nodes")],
-    options: {
-      aspectRatios: IMG_AR,
-      resolutions: ["1K", "1.5K"],
-      seed: true,
-      negativePrompt: true,
-      layout: "moss",
-      controls: [MOSS_QUALITY],
-    },
-    defaults: { aspectRatio: "1:1", resolution: "1K" },
   }),
   o({
     id: "oss-qwen-edit",

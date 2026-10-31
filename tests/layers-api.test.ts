@@ -114,14 +114,14 @@ describe("job steps", () => {
       { label: "Layers · Layer edit · cut-out", index: 1, of: 2 },
     ]);
     const open = steps({ tool: "regenerate", engine: "open", prompt: "Make it gold", settings: { keepAlpha: true } });
-    expect(open.map((x) => x.request.modelId)).toEqual(["oss-qwen-edit", "oss-rmbg"]);
+    expect(open.map((x) => x.request.modelId)).toEqual(["oss-qwen-image-21", "oss-rmbg"]);
     expect(() => steps({ tool: "regenerate" })).toThrow(/layer edit prompt/);
   });
 
   it("generates a new transparent layer from text or a reference", () => {
     const t = steps({ tool: "generate-layer", engine: "open", image: undefined, prompt: "a red balloon" });
     expect(t.map((x) => [x.request.modelId, x.request.op])).toEqual([
-      ["oss-z-image-turbo", "t2i"],
+      ["oss-ideogram-4", "t2i"],
       ["oss-rmbg", "bg-remove"],
     ]);
     expect(t[0].request.prompt).toMatch(/^a red balloon\. A single element, isolated/);
@@ -136,7 +136,7 @@ describe("job steps", () => {
       op: "edit",
       prompt: "Preserve the original design and change only the requested text. Change “SALE” to “OPEN”.",
     });
-    expect(steps({ tool: "text-edit", engine: "open", settings: { rows } })[0].request.modelId).toBe("oss-qwen-edit");
+    expect(steps({ tool: "text-edit", engine: "open", settings: { rows } })[0].request.modelId).toBe("oss-qwen-image-21");
     expect(() => steps({ tool: "text-edit", settings: { rows: [{ from: "SALE", to: "SALE" }] } })).toThrow(/Change a line/);
     expect(steps({ tool: "text-detect", settings: { aspect: "16:9" } })[0].request).toMatchObject({ modelId: "ideogram-3-text-layers", op: "text-layers", params: { aspectRatio: "16:9" } });
     // OCR models read the lines (no shape to send): Florence-2 on the cloud, OvisOCR3 on ComfyUI.
@@ -159,7 +159,7 @@ describe("job steps", () => {
     expect(steps({ ...paint, modelId: "flux-fill-pro" })[0].request).toMatchObject({ modelId: "flux-fill-pro", op: "inpaint" });
     const open = steps({ ...paint, engine: "open", settings: { keepAlpha: true } });
     expect(open.map((x) => [x.key, x.request.modelId, x.request.op])).toEqual([
-      ["inpaint", "oss-flux-fill", "inpaint"],
+      ["inpaint", "oss-qwen-image-21", "inpaint"],
       ["cutout", "oss-rmbg", "bg-remove"],
     ]);
     // Only the painted area changes: no plain-background ask, the cut-out restores the transparency.
@@ -173,7 +173,7 @@ describe("job steps", () => {
     const skin = steps({ tool: "enhance", settings: { look: "skin" } })[0].request;
     expect(skin).toMatchObject({ modelId: "nano-banana-pro", op: "edit", inputs: { images: ["/api/files/a.png"] } });
     expect(skin.prompt).toMatch(/^Give the portrait a subtle natural retouch.*Keep the face shape, identity/);
-    expect(steps({ tool: "enhance", engine: "open", settings: { look: "sharpen" } })[0].request).toMatchObject({ modelId: "oss-qwen-edit", op: "edit" });
+    expect(steps({ tool: "enhance", engine: "open", settings: { look: "sharpen" } })[0].request).toMatchObject({ modelId: "oss-qwen-image-21", op: "edit" });
     expect(steps({ tool: "enhance", engine: "open", settings: { look: "sharpen" } })[0].request.prompt).toMatch(/^Sharpen the image.*colours and lighting exactly the same\.$/);
     expect(steps({ tool: "enhance", prompt: "keep the freckles", settings: { look: "glow" } })[0].request.prompt).toMatch(/keep the freckles$/);
     // Detail: the Upscale tool's models (Topaz first, with its face pass), no instruction.
@@ -198,7 +198,7 @@ describe("job steps", () => {
     expect(angles).toMatchObject({ modelId: "qwen-multiple-angles", params: { extra: { horizontal_angle: 90, vertical_angle: 10, zoom: 4 } } });
     expect(steps({ tool: "angles", engine: "open", settings: { angle: "Back" } })[0].request.prompt).toContain("a view from directly behind");
     const expand = steps({ tool: "expand", engine: "open", settings: { pads: { left: 64, top: 0, right: 64, bottom: 8 } } })[0].request;
-    expect(expand).toMatchObject({ modelId: "oss-flux-fill", op: "outpaint", params: { extra: { padLeft: 64, padTop: 0, padRight: 64, padBottom: 8 } } });
+    expect(expand).toMatchObject({ modelId: "oss-qwen-image-21", op: "outpaint", params: { extra: { padLeft: 64, padTop: 0, padRight: 64, padBottom: 8 } } });
     expect(() => steps({ tool: "expand", engine: "open", settings: { pads: { left: 0, top: 0, right: 0, bottom: 0 } } })).toThrow(/Drag an edge/);
     expect(steps({ tool: "expand" })[0].request.prompt).toMatch(/^Fill the empty grey margins/);
     expect(steps({ tool: "regional", prompt: "add a hat" })[0].request).toMatchObject({ modelId: "seedream-5-pro", op: "edit" });
