@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConnectField, type PublicSetting } from "@/components/connect-field";
-import { LLM_PROVIDERS, type LlmProviderDef, type ProviderGroup } from "@/lib/catalog/llm-providers";
+import { LLM_PROVIDERS, offersFree, type LlmProviderDef, type ProviderGroup } from "@/lib/catalog/llm-providers";
 import { cn } from "@/lib/utils";
 
 /** What GET /api/llm says about the hosted providers (no keys). */
@@ -37,9 +37,6 @@ const placeholderOf = (p: LlmProviderDef) => {
   return start ? `${start}…` : "Paste the key";
 };
 
-/** Free models on any key, or a free plan the owner can tick. */
-const hasFree = (p: LlmProviderDef) => p.models.some((m) => m.free === "model") || p.freePlan?.kind === "plan";
-
 function ProviderRow({ p, info, get, set }: { p: LlmProviderDef; info?: HostedInfo["providers"][number]; get: (n: string) => PublicSetting | undefined; set: (n: string) => (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const keySet = !!(p.keySetting && get(p.keySetting)?.isSet);
@@ -66,7 +63,7 @@ function ProviderRow({ p, info, get, set }: { p: LlmProviderDef; info?: HostedIn
       >
         <span className={cn("size-2 shrink-0 rounded-full", info ? (status === "Key rejected" ? "bg-warning" : "bg-success") : "bg-subtle-foreground")} />
         <span className="min-w-0 flex-1 truncate font-medium">{p.label}</span>
-        {hasFree(p) && <span className="shrink-0 rounded-md bg-brand-faint px-1.5 py-0.5 text-[11px] text-brand-text">Free</span>}
+        {offersFree(p) && <span className="shrink-0 rounded-md bg-brand-faint px-1.5 py-0.5 text-[11px] text-brand-text">Free</span>}
         <span className="shrink-0 text-[12px] text-muted-foreground">{status}</span>
         <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>

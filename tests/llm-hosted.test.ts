@@ -17,12 +17,12 @@ import { fakeLlm, type FakeLlm, type Mode } from "./helpers/fake-llm";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-llm-hosted-"));
 process.env.FUOBE_DATA_DIR = dir;
-for (const k of Object.keys(process.env)) if (/_API_KEY$|^HF_TOKEN$|^FUOBE_LLM_TEST_BASE$/.test(k)) delete process.env[k];
+for (const k of Object.keys(process.env)) if (/_API_KEY$|HF_TOKEN$|^FUOBE_LLM_TEST_BASE$/.test(k)) delete process.env[k];
 
 const { setSetting } = await import("@/server/settings");
 const hosted = await import("@/server/llm/hosted");
 const { toHostedMessages } = await import("@/server/llm/hosted-messages");
-const { ContextError, FreeLimitError, HostedError } = await import("@/server/llm/hosted-errors");
+const { ContextError, FreeLimitError, HostedError, hostedError } = await import("@/server/llm/hosted-errors");
 const { runAsTenant } = await import("@/server/tenant");
 
 type Stored = Anthropic.Beta.BetaMessageParam & { replay?: unknown };
@@ -272,12 +272,80 @@ describe("errors, in words that say what to do", () => {
     expect(f.seen.length - n).toBe(1);
   });
 
-  it("a free model's 429 is its free limit running out", async () => {
+  it("a free model's 429 is its free limit running out: OpenRouter's key check says whether for the day or the minute", async () => {
     const or = fakes.find((x) => x.mode === "openrouter")!;
-    or.replies = [{ status: 429, headers: { "retry-after": "0" }, error: { error: { code: 429, message: "Rate limit exceeded: free-models-per-day", metadata: { error_type: "rate_limit_exceeded" } } } }];
-    const e = await call("openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free", [{ role: "user", content: "hi" }]).catch((x) => x);
-    expect(e).toBeInstanceOf(FreeLimitError);
-    expect((e as InstanceType<typeof FreeLimitError>).span).toBe("day");
+    const span = async () => {
+      globalThis.__fuobeOpenRouterKey = undefined;
+      const e = await call("openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free", [{ role: "user", content: "hi" }]).catch((x) => x);
+      expect(e).toBeInstanceOf(FreeLimitError);
+      return (e as InstanceType<typeof FreeLimitError>).span;
+    };
+    // OpenRouter's documented body is the same for both caps (its limits page).
+    const documented = { error: { code: 429, message: "Rate limit exceeded", metadata: { error_type: "rate_limit_exceeded" } } };
+    or.replies = [{ status: 429, headers: { "retry-after": "0" }, error: documented }];
+    or.keyInfo = { is_free_tier: true, free_model_daily_requests: { used: 38, limit: 50, remaining: 12 } };
+    expect(await span()).toBe("minute");
+    or.keyInfo = { is_free_tier: true, free_model_daily_requests: { used: 50, limit: 50, remaining: 0 } };
+    expect(await span()).toBe("day");
+    // Even a message that says per-day: 12 left means it was the minute's cap.
+    or.replies = [{ status: 429, headers: { "retry-after": "0" }, error: { error: { code: 429, message: "Rate limit exceeded: free-models-per-day" } } }];
+    or.keyInfo = { is_free_tier: true, free_model_daily_requests: { used: 38, limit: 50, remaining: 12 } };
+    expect(await span()).toBe("minute");
+    // Without the key check, the words decide: a minute's cap is never read as the day's.
+    or.keyInfo = undefined;
+    expect(await span()).toBe("day");
+    or.replies = [{ status: 429, headers: { "retry-after": "0" }, error: { error: { code: 429, message: "Rate limit exceeded: free-models-per-min" } } }];
+    expect(await span()).toBe("minute");
+    or.replies = [{ status: 429, headers: { "retry-after": "0" }, error: documented }];
+    expect(await span()).toBe("minute");
+  });
+
+  it("reads Gemini's daily quota apart from its per-minute limit (its error codes)", () => {
+    const google = getLlmProvider("google")!;
+    const flash = getLlmModel("google", "gemini-3.8-flash")!;
+    const err = (code: string, message: string) => hostedError(google, 429, JSON.stringify({ error: { code, message } }), flash, "AIzaKEY0123456789", { free: true }) as InstanceType<typeof FreeLimitError>;
+    expect(err("quota_exceeded", "You have exceeded your daily quota.").span).toBe("day");
+    expect(err("rate_limit_exceeded", "You exceeded your current quota for requests per minute.").span).toBe("minute");
+    expect(err("too_many_requests", "Too many requests").span).toBe("minute");
+  });
+
+  it("a day's free limit lasts until the provider's own midnight: UTC for OpenRouter, Pacific for Gemini", () => {
+    const at = Date.parse("2026-10-31T20:00:00Z");
+    expect(new Date(hosted.freeResetAt("openrouter", "day", at)).toISOString()).toBe("2026-11-01T00:00:00.000Z");
+    expect(new Date(hosted.freeResetAt("google", "day", at)).toISOString()).toBe("2026-11-01T07:00:00.000Z");
+    // Pacific winter time: midnight is 08:00 UTC.
+    expect(new Date(hosted.freeResetAt("google", "day", Date.parse("2026-12-10T09:30:00Z"))).toISOString()).toBe("2026-12-11T08:00:00.000Z");
+    expect(new Date(hosted.freeResetAt("google", "day", Date.parse("2026-12-10T07:30:00Z"))).toISOString()).toBe("2026-12-10T08:00:00.000Z");
+    expect(hosted.freeResetAt("openrouter", "minute", at)).toBe(at + 60_000);
+  });
+
+  it("a 403 about one model or request isn't a rejected key; a key that works again (Settings → Test) is cleared", async () => {
+    const q = await fake("qwen");
+    setSetting("qwenWorkspace", "ws-abc123");
+    q.models = ["qwen3.8-max"];
+    const ep = () => hosted.endpointFor("qwen")!;
+    const qwen = (m = "qwen3.8-max") => hosted.chatHosted(ep(), getLlmModel("qwen", m)!, { messages: [{ role: "user", content: "hi" }] });
+    // Free Quota Only on, and this model's free quota is used up (Model Studio's docs): one model, not the key.
+    q.replies = [{ status: 403, error: { code: "AllocationQuota.FreeTierOnly", message: "The free tier of the model has been exhausted." } }];
+    const free = (await qwen().catch((x) => x)) as Error;
+    expect(free.message).toBe("Qwen's free quota for Qwen3.8-Max is used up, and Free Quota Only is on in Model Studio. Pick another model in Manual, or turn Free Quota Only off for it.");
+    expect(hosted.isRejected(ep())).toBe(false);
+    // Another 403 says the provider's words, not "rejected the key".
+    q.replies = [{ status: 403, error: { error: { code: "permission_denied", message: "Your API key does not have permission for this resource, or your project's API access is restricted." } } }];
+    const denied = (await qwen().catch((x) => x)) as Error;
+    expect(denied.message).toMatch(/refused this request \(Your API key does not have permission/);
+    expect(denied.message).not.toMatch(/rejected the key/);
+    expect(hosted.isRejected(ep())).toBe(false);
+    // A 403 that names the key, and a 401, are the key.
+    q.replies = [{ status: 403, error: { code: "InvalidApiKey", message: "Invalid API-key provided." } }];
+    expect(((await qwen().catch((x) => x)) as Error).message).toMatch(/rejected the key/);
+    expect(hosted.isRejected(ep())).toBe(true);
+    // Settings → Test with the same key works: the key isn't marked rejected any more.
+    expect(await hosted.testHosted("qwen")).toMatchObject({ ok: true });
+    expect(hosted.isRejected(ep())).toBe(false);
+    setSetting("qwenWorkspace", "");
+    setSetting("qwenKey", "");
+    process.env.FUOBE_LLM_TEST_BASE = (process.env.FUOBE_LLM_TEST_BASE ?? "").split(",").filter((x) => !x.startsWith("qwen=")).join(",");
   });
 
   it("stops before the call when the chat can't fit the model's context", async () => {
@@ -285,6 +353,11 @@ describe("errors, in words that say what to do", () => {
     const n = f.seen.length;
     await expect(call("together", "openai/gpt-oss-120b", [{ role: "user", content: big }])).rejects.toThrow(/This chat is too long for gpt-oss-120b/);
     expect(f.seen.length).toBe(n);
+    // GPT-5.4 Mini: 400K context, but 272K tokens in at most.
+    const oa = await fake("openai");
+    const before = oa.seen.length;
+    await expect(call("openai", "gpt-5.4-mini", [{ role: "user", content: "word ".repeat(250_000) }])).rejects.toThrow(/This chat is too long for GPT-5\.4 Mini \(about 31\dK tokens\)/);
+    expect(oa.seen.length).toBe(before);
   });
 });
 

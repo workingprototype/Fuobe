@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ASSIST_EFFORTS } from "@/lib/assist";
-import { getLlmModel, LLM_PROVIDERS, LLM_REGISTRY_CHECKED, priceOn } from "@/lib/catalog/llm-providers";
+import { getLlmModel, LLM_PROVIDERS, LLM_REGISTRY_CHECKED, offersFree, priceOn } from "@/lib/catalog/llm-providers";
 
 /*
  * The provider registry is data: these checks keep it honest (official https hosts only, a price or a
@@ -149,5 +149,32 @@ describe("LLM provider registry", () => {
       if (p.freePlan?.setting) expect(settings[p.freePlan.setting]?.options, p.id).toEqual(["0", "1"]);
     }
     expect(settings.anthropicKey.secret).toBe(true);
+  });
+
+  it("reads keys only from names meant for that provider's API, never a token other tools set for something else", () => {
+    const env = (name: string) => [(SETTINGS as Record<string, { env?: string | string[] }>)[name]?.env ?? []].flat();
+    // HF_TOKEN is what Fuobe's own download commands ask for; GOOGLE_API_KEY is set by Google Cloud tools for other APIs.
+    expect(env("huggingfaceToken")).toEqual(["FUOBE_HF_TOKEN"]);
+    expect(env("googleKey")).toEqual(["GEMINI_API_KEY"]);
+    const all = Object.keys(SETTINGS).flatMap(env);
+    expect(all).not.toContain("HF_TOKEN");
+    expect(all).not.toContain("GOOGLE_API_KEY");
+  });
+
+  it("tags a provider Free only when Assist can run on its free models", () => {
+    const tagged = LLM_PROVIDERS.filter(offersFree).map((p) => p.id);
+    expect(tagged).toEqual(expect.arrayContaining(["openrouter", "google", "zai", "mistral"]));
+    // Groq's free plan allows 8,000 tokens a minute: one Assist step is more.
+    expect(tagged).not.toContain("groq");
+    // Trials run out: never tagged.
+    expect(tagged).not.toContain("cerebras");
+    expect(tagged).not.toContain("qwen");
+  });
+
+  it("keeps a model's input limit where the docs give one apart from the context (GPT-5.4 Mini: 400K context, 272K in)", () => {
+    const mini = getLlmModel("openai", "gpt-5.4-mini")!;
+    expect(mini).toMatchObject({ context: 400_000, maxIn: 272_000 });
+    // The over-272K price step can't happen on a model that takes 272K at most.
+    expect(mini.longContext).toBeUndefined();
   });
 });

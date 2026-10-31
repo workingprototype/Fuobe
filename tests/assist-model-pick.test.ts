@@ -55,6 +55,11 @@ describe("Smart", () => {
     expect(list.map((c) => c.provider)).toEqual(["zai", "together"]);
   });
 
+  it("says why when every model connected is blocked, rather than asking for a key that is set", () => {
+    expect(smartPick(world({ providers: [{ id: "deepseek", rejected: true }] })).text).toBe("Smart can't plan with DeepSeek V4 Pro: DeepSeek rejected the key — check it in Settings.");
+    expect(smartPick(world({ providers: [{ id: "deepseek" }], openOnly: true })).text).toBe("Smart can't plan with DeepSeek V4 Pro: Paid API — Open source only is on (Settings).");
+  });
+
   it("on a local model only, says so; with nothing, can't be picked", () => {
     expect(smartPick(world({ local: ollama() })).text).toBe("Smart uses qwen3.8:27b on Ollama, on this machine.");
     const none = smartPick(world());
@@ -75,10 +80,11 @@ describe("Smart", () => {
     expect(smartPick({ ...w, smartPlan: "openai|gpt-6.1-sol" }).plan).toMatchObject({ provider: "anthropic" });
   });
 
-  it("AI helper set to Local model only keeps hosted models out; set to Claude, Smart is Claude", () => {
+  it("AI helper set to Local model only leaves Smart and Manual as they are (it sets the default: Free, local first); set to Claude, Smart is Claude", () => {
     const local = world({ providers: [{ id: "anthropic" }, { id: "openai" }], local: ollama(), helper: "local" });
-    expect(smartPick(local).plan).toMatchObject({ local: true });
-    expect(choices(local).find((c) => c.provider === "openai")!.disabled).toBe("AI helper is set to Local model only (Settings)");
+    expect(smartPick(local).plan).toMatchObject({ provider: "anthropic", model: "claude-opus-5-5" });
+    expect(choices(local).filter((c) => c.disabled)).toEqual([]);
+    expect(freePick({ ...local, providers: [{ id: "openrouter" }] }).pick).toMatchObject({ local: true });
     expect(smartPick(world({ providers: [{ id: "anthropic" }, { id: "openai" }], helper: "anthropic", openOnly: true })).plan).toMatchObject({ provider: "anthropic" });
   });
 });
@@ -120,6 +126,13 @@ describe("Free", () => {
     expect(cloud.pick).toBeNull();
   });
 
+  it("skips OpenRouter's free models once the day's free requests are gone (its key check says 0 left)", () => {
+    const w = world({ providers: [{ id: "openrouter", freeTier: true, freeLeft: 0, freeLimit: 50 }], local: ollama() });
+    expect(choices(w).find((c) => c.model === "nvidia/nemotron-3-ultra-550b-a55b:free")!.disabled).toBe("OpenRouter's free requests for today are used up");
+    expect(freePick(w).pick).toMatchObject({ local: true });
+    expect(smartPick({ ...w, local: null }).plan).toBeNull();
+  });
+
   it("Z.ai's GLM Flash models are free on any key", () => {
     const f = freePick(world({ providers: [{ id: "zai" }] }));
     expect(f.pick).toMatchObject({ provider: "zai", free: true });
@@ -128,19 +141,32 @@ describe("Free", () => {
 });
 
 describe("Open source only", () => {
-  it("allows open-weight models wherever they run, with a label that says where; unknown counts as closed", () => {
+  it("runs only open-weight models that cost nothing: on this machine, or a provider's free ones; nothing goes to a paid API", () => {
     const w = world({ providers: [{ id: "anthropic" }, { id: "moonshot" }, { id: "deepseek" }, { id: "openrouter" }], openOnly: true, local: ollama() });
     const all = choices(w);
     expect(all.find((c) => c.model === "kimi-k3.1-pro")!.disabled).toBe("Not open weights — Open source only is on (Settings)");
     expect(all.find((c) => c.model === "claude-opus-5-5")!.disabled).toBeTruthy();
-    expect(smartPick({ ...w, providers: w.providers.filter((x) => x.id !== "openrouter") }).plan).toMatchObject({ provider: "deepseek", model: "deepseek-v4-pro" });
-    // OpenRouter's free open models count too (its best is free, so it comes first at its tier).
+    // Open weights on a paid API: off, as Settings → Engine promises.
+    expect(all.find((c) => c.model === "deepseek-v4-pro")!.disabled).toBe("Paid API — Open source only is on (Settings)");
+    expect(all.find((c) => c.provider === "openrouter" && c.model === "x-ai/grok-4.7")!.disabled).toBeTruthy();
+    // Paid keys alone: Smart plans on the local model, and nothing paid is the default.
+    expect(smartPick({ ...w, providers: w.providers.filter((x) => x.id !== "openrouter") }).plan).toMatchObject({ local: true });
+    expect(smartPick({ ...w, local: null, providers: [{ id: "deepseek" }] }).plan).toBeNull();
+    // OpenRouter's free open models count (its best is free, so it comes first at its tier), and a free plan the owner ticked.
     expect(smartPick(w).plan).toMatchObject({ provider: "openrouter", model: "nvidia/nemotron-3-ultra-550b-a55b:free" });
+    expect(choices(world({ providers: [{ id: "google", freeTick: true }], openOnly: true })).find((c) => c.model === "gemma-4-31b-it")!.disabled).toBeUndefined();
+    // AI helper set to Claude is still the owner's way to use Claude on an open-source-only install.
+    expect(smartPick({ ...w, helper: "anthropic" }).plan).toMatchObject({ provider: "anthropic" });
     expect(openLabel(all.find((c) => c.model === "deepseek-v4-pro")!)).toBe("Open weights · MIT · runs on DeepSeek's servers");
     expect(openLabel(all.find((c) => c.model === "google/gemma-4-31b-it:free")!)).toBe("Open weights · Apache-2.0 · free through OpenRouter");
     expect(openLabel(all.find((c) => c.local)!)).toBe("Open weights · on this machine");
     const r7b = choices(world({ providers: [{ id: "cohere" }] })).find((c) => c.model === "command-r7b-12-2024")!;
     expect(openLabel(r7b)).toBe("Open weights · CC-BY-NC-4.0 (non-commercial) · runs on Cohere's servers");
+    // Hugging Face routes each id to the provider its suffix names: that provider runs it.
+    const hf = choices(world({ providers: [{ id: "huggingface" }] }));
+    expect(openLabel(hf.find((c) => c.model === "zai-org/GLM-5.3:deepinfra")!)).toBe("Open weights · GLM licence (other) · runs on DeepInfra, through Hugging Face");
+    expect(openLabel(hf.find((c) => c.model === "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita")!)).toBe("Open weights · MIT · runs on Novita, through Hugging Face");
+    expect(openLabel(hf.find((c) => c.model.endsWith(":baseten"))!)).toMatch(/runs on Baseten, through Hugging Face$/);
   });
 });
 

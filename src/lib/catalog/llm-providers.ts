@@ -35,6 +35,8 @@ export interface LlmModelDef {
   /** Tokens. */
   context: number;
   maxOut: number;
+  /** Tokens in at most, where the docs give a limit apart from the context (GPT-5.4 Mini: 400K context, 272K in). */
+  maxIn?: number;
   /** "unverified": the docs don't say it calls tools on this API, so Smart and Free skip it. */
   tools: true | "unverified";
   vision: boolean;
@@ -152,6 +154,8 @@ export interface LlmProviderDef {
   freePlan?: FreePlan;
   /** Free models' account-wide limits (OpenRouter's :free cap covers every free model on the key). */
   freeLimits?: { text: string; caveat?: string; shared?: true };
+  /** The time zone whose midnight resets the free daily limits (Gemini: Pacific). Default UTC (OpenRouter's day). */
+  freeDayZone?: string;
   /** Not wired yet: shown greyed with this line. */
   soon?: string;
   models: LlmModelDef[];
@@ -218,7 +222,7 @@ export const LLM_PROVIDERS: LlmProviderDef[] = [
       { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", tier: 1, speed: "normal", context: 1_050_000, maxOut: 128_000, tools: true, vision: true, price: [usd(2, 10)], efforts: EVERY, longContext: OPENAI_LONG },
       { id: "gpt-6.1-terra", name: "GPT-6.1 Terra", tier: 3, speed: "fast", context: 1_050_000, maxOut: 128_000, tools: true, vision: true, price: [usd(1, 5)], efforts: EVERY, longContext: OPENAI_LONG, note: "Fast, with strong visual reasoning" },
       { id: "gpt-6-luna", name: "GPT-6 Luna", tier: 3, speed: "fast", context: 1_050_000, maxOut: 128_000, tools: true, vision: true, price: [usd(0.1, 0.5)], efforts: LOW_MED_HIGH, longContext: OPENAI_LONG, note: "OpenAI's cheapest" },
-      { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", tier: 3, speed: "fast", context: 400_000, maxOut: 128_000, tools: true, vision: true, price: [usd(0.75, 4.5)], efforts: { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: null }, longContext: OPENAI_LONG },
+      { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", tier: 3, speed: "fast", context: 400_000, maxIn: 272_000, maxOut: 128_000, tools: true, vision: true, price: [usd(0.75, 4.5)], efforts: { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: null } },
       { id: "gpt-6-astra", name: "GPT-6 Astra", tier: 1, speed: "slow", manualOnly: "Flagship; slowest and priciest", context: 1_050_000, maxOut: 128_000, tools: true, vision: true, price: [usd(10, 50)], efforts: EVERY, longContext: OPENAI_LONG },
     ],
     sources: [
@@ -249,6 +253,7 @@ export const LLM_PROVIDERS: LlmProviderDef[] = [
       limits: "Limits per project, shown only in Google AI Studio; daily limits reset at midnight Pacific",
       caveat: "Google uses free-tier prompts to improve its products.",
     },
+    freeDayZone: "America/Los_Angeles",
     models: [
       {
         id: "gemini-4-argon",
@@ -810,6 +815,12 @@ export const KNOWN_LOCAL_MODELS: { match: RegExp; name: string; vision: boolean;
 export const getLlmProvider = (id: string | null | undefined): LlmProviderDef | undefined => LLM_PROVIDERS.find((p) => p.id === id);
 
 export const getLlmModel = (provider: string | null | undefined, model: string | null | undefined): LlmModelDef | undefined => getLlmProvider(provider)?.models.find((m) => m.id === model);
+
+/**
+ * Settings' Free tag: free models on any key, or a free plan the owner can tick that is big enough for Assist
+ * (Groq's isn't: 8,000 tokens a minute). Trials run out, so they never count.
+ */
+export const offersFree = (p: LlmProviderDef): boolean => p.models.some((m) => m.free === "model") || (p.freePlan?.kind === "plan" && !p.freePlan.tooSmall);
 
 /** The price in effect on a day (YYYY-MM-DD): the first step whose `until` hasn't passed. */
 export function priceOn(steps: PriceStep[] | undefined, day: string): PriceStep | undefined {

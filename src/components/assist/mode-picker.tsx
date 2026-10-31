@@ -248,7 +248,7 @@ export function ModePicker({
                 aria-checked={mode === m.id}
                 tabIndex={radioTab(mode === m.id)}
                 disabled={off}
-                title={off ? "Needs a model: add a key or start a local model (Settings)" : undefined}
+                title={off ? can?.smart?.text : undefined}
                 onClick={() => set({ mode: m.id, ...(m.id === "manual" && !shown?.agent && manualStart()) })}
                 className={cn("h-8 rounded-full text-[13px] font-medium transition-colors disabled:opacity-45", mode === m.id ? "bg-background text-foreground shadow-soft" : "text-muted-foreground enabled:hover:text-foreground")}
               >
@@ -259,13 +259,13 @@ export function ModePicker({
         </div>
         <p className="mt-2 px-1 text-[12px] text-muted-foreground">{ASSIST_MODES.find((m) => m.id === mode)?.hint}</p>
         {mode === "smart" && can?.smart?.plan && <p className="mt-2 px-1 text-[12px]">{can.smart.text}</p>}
+        {/* Why Smart can't run: nothing connected, or what blocks the models that are (a rejected key, Open source only…). */}
         {smartOff && (
           <p className="mt-2 px-1 text-[12px] text-warning">
-            Smart needs a model —{" "}
+            {can?.smart?.text}{" "}
             <Link href="/settings#llm-providers" className="underline underline-offset-2">
-              add a key in Settings
-            </Link>{" "}
-            (Anthropic, OpenAI, Google, OpenRouter…) or start a local model.
+              Open Settings
+            </Link>
           </p>
         )}
         {mode === "free" && can?.free && (
@@ -275,7 +275,10 @@ export function ModePicker({
           </div>
         )}
         {can?.openOnly && mode !== "free" && (
-          <p className="mt-2 px-1 text-[11px] text-muted-foreground">Open source only: open-weight models only. Ones that run on a provider&apos;s servers are paid unless they are free.</p>
+          <p className="mt-2 px-1 text-[11px] text-muted-foreground">
+            Open source only: open-weight models that cost nothing, on this machine or a provider&apos;s free ones
+            {can.claude ? ", and Claude (AI helper is set to Claude)." : ". Nothing goes to a paid API."}
+          </p>
         )}
         {mode === "manual" && (
           <div className="mt-3 space-y-3">

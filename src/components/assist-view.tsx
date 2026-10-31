@@ -22,7 +22,7 @@ import { SkillIcon } from "@/components/assist/skill-icon";
 import { Transcript } from "@/components/assist/transcript";
 import { AssistVisitorNote } from "@/components/assist/visitor-note";
 import { useAssistActions, useAssistThread, useEngine } from "@/lib/api";
-import { ASSIST_SUGGESTIONS, modeLabel, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
+import { ASSIST_SUGGESTIONS, modeLabel, threadModeChoice, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 import { toastError } from "@/lib/refusals";
@@ -243,7 +243,7 @@ export function AssistView() {
                   thread && (
                     <>
                       <ModePicker
-                        value={{ mode: thread.mode ?? "smart", agent: thread.agent, model: thread.model, effort: thread.effort }}
+                        value={threadModeChoice(thread)}
                         availability={can}
                         disabled={thread.status === "running"}
                         applyOnClose
@@ -271,7 +271,7 @@ export function AssistView() {
               attachments: first?.role === "user" ? first.attachments : undefined,
               projectId: thread.projectId ?? null,
               engine: thread.engine,
-              mode: { mode: thread.mode ?? "smart", agent: thread.agent, model: thread.model, effort: thread.effort },
+              mode: threadModeChoice(thread),
             };
           })()}
         />

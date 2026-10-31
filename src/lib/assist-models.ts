@@ -43,7 +43,7 @@ export interface World {
   local: LocalWorld | null;
   /** Settings → Engine: Open source only. */
   openOnly: boolean;
-  /** Settings → AI helper → Use. */
+  /** Settings → AI helper → Use: "none" turns Assist's models off; "local" makes Free (local first) the default; "anthropic" allows Claude on Open source only. */
   helper: "auto" | "anthropic" | "local" | "none";
   /** Settings → AI helper → Smart plans with: "auto", or "provider|model". */
   smartPlan: string;
@@ -114,16 +114,27 @@ const blended = (c: Choice) => (c.free ? 0 : c.price ? (3 * c.price.in + c.price
 
 const effortsOf = (m: Pick<LlmModelDef, "efforts">): AssistEffort[] => ASSIST_EFFORTS.map((e) => e.id).filter((e) => m.efforts?.[e] !== undefined && m.efforts?.[e] !== null);
 
+/** $0 on this account: a free model, or a free-plan model while the owner's tick is on. */
+const costsNothing = (p: LlmProviderDef, m: LlmModelDef, conn: ConnectedProvider) => m.free === "model" || (m.free === "plan" && p.freePlan?.kind === "plan" && !!conn.freeTick);
+
+/**
+ * Why a model can't run now. Open source only runs open weights that cost nothing (Settings → Engine: "nothing is
+ * sent to paid APIs"); AI helper set to Claude is the owner's way to use Claude there anyway, as before.
+ */
 function disabledWhy(w: World, p: LlmProviderDef, m: LlmModelDef, conn: ConnectedProvider): string | undefined {
   if (w.helper === "none") return "The AI helper is off (Settings)";
   if (conn.rejected) return `${p.label} rejected the key — check it in Settings`;
-  if (w.helper === "local") return "AI helper is set to Local model only (Settings)";
-  if (w.openOnly && !m.open && !(p.id === "anthropic" && w.helper === "anthropic")) return "Not open weights — Open source only is on (Settings)";
+  if (w.openOnly && !(p.id === "anthropic" && w.helper === "anthropic")) {
+    if (!m.open) return "Not open weights — Open source only is on (Settings)";
+    if (!costsNothing(p, m, conn)) return "Paid API — Open source only is on (Settings)";
+  }
   if (p.freePlan?.kind === "plan" && conn.freeTick) {
     if (m.free !== "plan") return `Your ${p.short} key is on the free plan`;
     if (p.freePlan.tooSmall) return p.freePlan.tooSmall;
   }
   if (p.id === "openrouter" && conn.freeTier && m.free !== "model") return "No credits on OpenRouter yet: only its free models run";
+  // OpenRouter's key check: no free request left today.
+  if (m.free === "model" && conn.freeLeft === 0) return `${p.short}'s free requests for today are used up`;
   if (w.spent?.includes(p.id) && (m.free === "model" || (m.free === "plan" && conn.freeTick))) return `${p.short}'s free requests are used up for now`;
   return undefined;
 }
@@ -138,8 +149,7 @@ export function choices(w: World): Choice[] {
     if (!conn) continue;
     for (const m of p.models) {
       if (m.expires && m.expires < w.today) continue;
-      const tick = p.freePlan?.kind === "plan" && !!conn.freeTick;
-      const free = m.free === "model" || (m.free === "plan" && tick);
+      const free = costsNothing(p, m, conn);
       const steps = conn.cny && m.priceCny ? m.priceCny : m.price;
       const price = priceOn(steps, w.today);
       const next = price?.until ? steps?.[steps.indexOf(price) + 1] : undefined;
@@ -154,7 +164,7 @@ export function choices(w: World): Choice[] {
         agent: p.adapter === "anthropic" ? "claude" : "hosted",
         tier: m.tier,
         speed: m.speed,
-        context: m.context,
+        context: Math.min(m.context, m.maxIn ?? Infinity),
         sees: m.vision,
         free,
         cap: free,
@@ -286,7 +296,12 @@ export function smartPick(w: World): SmartPick {
   const fixed = w.smartPlan !== "auto" ? all.find((c) => c.provider === pid && c.model === mid) : undefined;
   const claude = w.helper === "anthropic" ? all.find((c) => c.provider === "anthropic" && c.model === "claude-opus-5-5") : undefined;
   const plan = fixed ?? claude ?? rank(all)[0] ?? null;
-  if (!plan) return { plan: null, check: null, text: "Smart needs a model: add a key in Settings (Anthropic, OpenAI, Google, OpenRouter…) or start a local model." };
+  if (!plan) {
+    // Models are connected but none can run now (a rejected key, Open source only…): say why, not "add a key".
+    const blocked = rank(choices(w).filter((c) => c.disabled && c.tools && !c.manualOnly && (!c.local || c.model === w.local?.model)))[0];
+    const text = blocked ? `Smart can't plan with ${who(blocked)}: ${blocked.disabled}.` : "Smart needs a model: add a key in Settings (Anthropic, OpenAI, Google, OpenRouter…) or start a local model.";
+    return { plan: null, check: null, text };
+  }
   if (plan.local) return { plan, check: null, text: `Smart uses ${plan.name} on ${plan.providerLabel}, on this machine.` };
   if (plan.free && plan.provider === "openrouter") {
     return { plan, check: null, text: `Smart uses ${plan.name} (free, through OpenRouter). Credits on OpenRouter, or a paid key (Anthropic, OpenAI, Google…), give better plans.` };
@@ -310,10 +325,10 @@ const NOTHING_FREE =
 
 const runsOn = (c: Choice) => (c.local ? `${c.name} on ${c.providerLabel}` : `${c.name} through ${c.providerLabel}`);
 
-/** Free: the best free model (or the local one first, if the owner asks), then the next ones, then the offline planner. */
+/** Free: the best free model (or the local one first, if the owner asks or AI helper is Local model only), then the next ones, then the offline planner. */
 export function freePick(w: World): FreePick {
   const free = rankFree(pickable(w).filter((c) => c.free));
-  const ordered = w.freeOrder === "local" ? [...free.filter((c) => c.local), ...free.filter((c) => !c.local)] : free;
+  const ordered = w.freeOrder === "local" || w.helper === "local" ? [...free.filter((c) => c.local), ...free.filter((c) => !c.local)] : free;
   const [pick, ...rest] = ordered;
   if (!pick) return { pick: null, then: [], text: NOTHING_FREE };
   const sharing = (c: Choice) => pick.sharedCap && c.sharedCap && c.provider === pick.provider;
@@ -384,11 +399,30 @@ export function toOption(c: Choice): AssistModelOption {
   };
 }
 
-/** "Open weights · MIT · runs on DeepSeek's servers"; undefined for a closed (or not confirmed open) model. */
+/** Hugging Face's router: the provider an id's suffix names runs the model ("zai-org/GLM-5.3:deepinfra"). */
+const ROUTED: Record<string, string> = {
+  deepinfra: "DeepInfra",
+  novita: "Novita",
+  baseten: "Baseten",
+  cerebras: "Cerebras",
+  groq: "Groq",
+  together: "Together AI",
+  "fireworks-ai": "Fireworks AI",
+  nebius: "Nebius",
+  sambanova: "SambaNova",
+};
+const routedTo = (c: Choice) => {
+  const suffix = c.provider === "huggingface" ? /:([\w-]+)$/.exec(c.model)?.[1] : undefined;
+  return suffix ? (ROUTED[suffix] ?? suffix) : undefined;
+};
+
+/** "Open weights · MIT · runs on DeepSeek's servers", "… · runs on DeepInfra, through Hugging Face"; undefined for a closed (or not confirmed open) model. */
 export function openLabel(c: Choice): string | undefined {
   if (c.local) return "Open weights · on this machine";
   if (!c.licence) return undefined;
   const licence = c.nonCommercial ? `${c.licence} (non-commercial)` : c.licence;
-  const where = c.provider === "openrouter" ? (c.free ? "free through OpenRouter" : "runs through OpenRouter") : `runs on ${c.providerShort}'s servers`;
+  const host = routedTo(c);
+  const where =
+    c.provider === "openrouter" ? (c.free ? "free through OpenRouter" : "runs through OpenRouter") : host ? `runs on ${host}, through ${c.providerLabel}` : `runs on ${c.providerShort}'s servers`;
   return `Open weights · ${licence} · ${where}`;
 }

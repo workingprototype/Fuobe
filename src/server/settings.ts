@@ -25,11 +25,14 @@ export const SETTINGS = {
   falKey: { key: "fal.key", env: "FAL_KEY", secret: true },
   replicateToken: { key: "replicate.token", env: "REPLICATE_API_TOKEN", secret: true },
   openaiKey: { key: "openai.key", env: "OPENAI_API_KEY", secret: true },
-  googleKey: { key: "google.key", env: ["GEMINI_API_KEY", "GOOGLE_API_KEY"], secret: true },
+  googleKey: { key: "google.key", env: "GEMINI_API_KEY", secret: true },
   anthropicKey: { key: "anthropic.key", env: "ANTHROPIC_API_KEY", secret: true },
   /*
    * Assist's hosted LLM providers (src/lib/catalog/llm-providers.ts): a key each, the region where the
    * provider has several official hosts, and the tick for a free plan Fuobe can't see from the key.
+   * A key is read only from a name meant for that API: never one other tools set for something else
+   * (HF_TOKEN is for downloads, GOOGLE_API_KEY for other Google Cloud APIs), which would connect a paid
+   * provider the owner never added.
    */
   xaiKey: { key: "xai.key", env: "XAI_API_KEY", secret: true },
   /** Meta's docs name no environment variable for Model API keys. */
@@ -46,7 +49,7 @@ export const SETTINGS = {
   cerebrasKey: { key: "cerebras.key", env: "CEREBRAS_API_KEY", secret: true },
   togetherKey: { key: "together.key", env: "TOGETHER_API_KEY", secret: true },
   fireworksKey: { key: "fireworks.key", env: "FIREWORKS_API_KEY", secret: true },
-  huggingfaceToken: { key: "huggingface.token", env: "HF_TOKEN", secret: true },
+  huggingfaceToken: { key: "huggingface.token", env: "FUOBE_HF_TOKEN", secret: true },
   openaiRegion: { key: "openai.region", default: "global", options: ["global", "us", "eu"] },
   xaiRegion: { key: "xai.region", default: "global", options: ["global", "us"] },
   moonshotRegion: { key: "moonshot.region", default: "international", options: ["international", "china"] },

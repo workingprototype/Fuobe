@@ -20,7 +20,7 @@ process.env.COMFYUI_URL = "http://127.0.0.1:9";
 process.env.OLLAMA_URL = "http://127.0.0.1:9";
 process.env.FUOBE_PUBLIC_SIGNUP = "1";
 delete process.env.FUOBE_PASSWORD;
-for (const k of Object.keys(process.env)) if (/_API_KEY$|^HF_TOKEN$|^FUOBE_LLM_/.test(k)) delete process.env[k];
+for (const k of Object.keys(process.env)) if (/_API_KEY$|HF_TOKEN$|^FUOBE_LLM_/.test(k)) delete process.env[k];
 
 const { setSetting } = await import("@/server/settings");
 const auth = await import("@/server/auth");

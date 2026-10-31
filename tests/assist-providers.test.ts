@@ -20,11 +20,12 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-assist-providers-"));
 process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
 process.env.OLLAMA_URL = "http://127.0.0.1:9";
-for (const k of Object.keys(process.env)) if (/_API_KEY$|^HF_TOKEN$|^FUOBE_LLM_|^LM_API_TOKEN$|^LMSTUDIO_|^UNSLOTH_|^FUOBE_ENHANCE_PROVIDER$/.test(k)) delete process.env[k];
+for (const k of Object.keys(process.env)) if (/_API_KEY$|HF_TOKEN$|^FUOBE_LLM_|^LM_API_TOKEN$|^LMSTUDIO_|^UNSLOTH_|^FUOBE_ENHANCE_PROVIDER$/.test(k)) delete process.env[k];
 
 const { setSetting } = await import("@/server/settings");
 const agent = await import("@/server/assist/agent");
-const { modeLabel } = await import("@/lib/assist");
+const { modeLabel, threadModeChoice } = await import("@/lib/assist");
+const hosted = await import("@/server/llm/hosted");
 const { LLM_PROVIDERS, getLlmProvider } = await import("@/lib/catalog/llm-providers");
 
 const fakes: FakeLlm[] = [];
@@ -175,14 +176,69 @@ describe("Free", () => {
     const r = await agent.resolveMode({ mode: "free" });
     expect(r).toMatchObject({ mode: "free", agent: "hosted", provider: "openrouter", model: "nvidia/nemotron-3-ultra-550b-a55b:free" });
     const t = agent.createThread({ engine: "open", agent: r.agent, mode: r.mode, provider: r.provider, model: r.model, effort: r.effort });
+    // The last 3 go elsewhere meanwhile: after the 429, OpenRouter's key check says none are left today.
+    or.keyInfo = { is_free_tier: true, free_model_daily_requests: { used: 50, limit: 50, remaining: 0 } };
     agent.addMessage(t.id, "A fox in snow");
     await agent.run(t.id);
     const thread = agent.getThread(t.id)!.thread;
     expect(thread.items.find((i) => i.role === "notice")).toMatchObject({ text: expect.stringMatching(/^OpenRouter's free requests are used up for today, so this chat goes on with the local model \(your local server\) instead of Nemotron 3 Ultra \(OpenRouter\)\.$/) });
     expect(thread.items.at(-1)).toMatchObject({ role: "assistant", text: "Here's the plan, from this machine." });
     expect(thread).toMatchObject({ agent: "local", mode: "free" });
-    // Free never moves to a paid model, and later Free chats skip OpenRouter until the limit resets.
+    // Free never moves to a paid model, and later Free chats skip OpenRouter until the limit resets (midnight UTC).
     expect((await agent.resolveMode({ mode: "free" })).agent).toBe("local");
+    const now = new Date();
+    expect(globalThis.__fuobeFreeSpent?.get("openrouter")).toBe(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  });
+
+  it("a per-minute free cap moves the chat on for the moment, and OpenRouter is back a minute later", async () => {
+    const or = await fake("openrouter");
+    or.keyInfo = { is_free_tier: true, free_model_daily_requests: { used: 20, limit: 50, remaining: 30 } };
+    or.replies = [{ status: 429, headers: { "retry-after": "0" }, error: { error: { code: 429, message: "Rate limit exceeded", metadata: { error_type: "rate_limit_exceeded" } } } }];
+    const local = fakeLlm("local", "sk-local-0123456789");
+    await local.start();
+    fakes.push(local);
+    local.models = ["qwen3.8:27b"];
+    local.replies = [{ text: "From this machine." }];
+    setSetting("llmUrl", `${local.url}/v1`);
+    setSetting("llmKey", local.key);
+    const r = await agent.resolveMode({ mode: "free" });
+    const t = agent.createThread({ engine: "open", agent: r.agent, mode: r.mode, provider: r.provider, model: r.model, effort: r.effort });
+    agent.addMessage(t.id, "A fox in snow");
+    const before = Date.now();
+    await agent.run(t.id);
+    expect(items(t.id).find((i) => i.role === "notice")).toMatchObject({ text: expect.stringMatching(/^OpenRouter's free requests are used up for the moment, so this chat goes on with/) });
+    const until = globalThis.__fuobeFreeSpent!.get("openrouter")!;
+    expect(until - before).toBeGreaterThanOrEqual(60_000);
+    expect(until - Date.now()).toBeLessThanOrEqual(60_000);
+  });
+});
+
+describe("keys other tools set in the environment", () => {
+  it("HF_TOKEN (for gated downloads) and GOOGLE_API_KEY connect nothing: a local model stays the default", async () => {
+    const local = fakeLlm("local", "sk-local-0123456789");
+    await local.start();
+    fakes.push(local);
+    local.models = ["qwen3.8:27b"];
+    setSetting("llmUrl", `${local.url}/v1`);
+    setSetting("llmKey", local.key);
+    process.env.HF_TOKEN = "hf_downloads0123456789abcdefgh";
+    process.env.GOOGLE_API_KEY = "AIzaCloudTools0123456789abcdefgh";
+    try {
+      expect(hosted.connectedHosted()).toEqual([]);
+      expect(await agent.resolveMode()).toMatchObject({ mode: "free", agent: "local" });
+      expect((await agent.availability()).defaultMode).toBe("free");
+      // With no local model either, new chats stay on the offline planner.
+      setSetting("llmUrl", "http://127.0.0.1:9/v1");
+      expect(await agent.resolveMode()).toMatchObject({ mode: "free", agent: "offline" });
+      expect((await agent.availability()).defaultMode).toBe("free");
+      // Fuobe's own name for an Assist token is the owner saying so.
+      process.env.FUOBE_HF_TOKEN = "hf_inference0123456789abcdefgh";
+      expect(hosted.endpointFor("huggingface")).not.toBeNull();
+    } finally {
+      delete process.env.HF_TOKEN;
+      delete process.env.GOOGLE_API_KEY;
+      delete process.env.FUOBE_HF_TOKEN;
+    }
   });
 });
 
@@ -196,9 +252,42 @@ describe("Manual", () => {
     try {
       await fake("moonshot");
       expect(await agent.resolveMode({ mode: "manual", agent: "hosted", provider: "moonshot", model: "kimi-k3.1-pro" })).toMatchObject({ mode: "free", note: expect.stringMatching(/Not open weights/) });
-      expect(await agent.resolveMode({ mode: "smart" })).toMatchObject({ agent: "hosted", provider: "deepseek", model: "deepseek-v4-pro" });
+      // Open source only sends nothing to a paid API (Settings → Engine): open weights on a paid key don't run, and never by default.
+      expect(await agent.resolveMode({ mode: "manual", agent: "hosted", provider: "deepseek", model: "deepseek-v4-pro" })).toMatchObject({ mode: "free", agent: "offline", note: "DeepSeek V4 Pro can't run here: Paid API — Open source only is on (Settings) — using Free instead." });
+      expect(await agent.resolveMode({ mode: "smart" })).toMatchObject({ mode: "free", agent: "offline", note: expect.stringMatching(/^Smart can't plan with .+: .+Open source only is on \(Settings\)\. Using Free instead\.$/) });
+      expect(await agent.resolveMode()).toMatchObject({ mode: "free", agent: "offline" });
+      expect((await agent.availability()).defaultMode).toBe("free");
     } finally {
       setSetting("engineMode", "both");
+    }
+  });
+
+  it("a Smart chat on a hosted model, switched to Manual without picking a model, stays on that provider and model", async () => {
+    await fake("deepseek");
+    const r = await agent.resolveMode({ mode: "smart" });
+    const t = agent.createThread({ engine: "cloud", agent: r.agent, mode: r.mode, provider: r.provider, model: r.model, effort: r.effort });
+    // What the picker starts from (and sends when it closes on the Manual tab), and what Schedule this request saves.
+    const shown = threadModeChoice(agent.getThread(t.id)!.thread);
+    expect(shown).toMatchObject({ mode: "smart", agent: "hosted", provider: "deepseek", model: "deepseek-v4-pro" });
+    await agent.updateThread(t.id, { mode: { ...shown, mode: "manual" } });
+    const after = agent.getThread(t.id)!.thread;
+    expect(after).toMatchObject({ mode: "manual", agent: "hosted", provider: "deepseek", model: "deepseek-v4-pro", effort: "medium" });
+    expect(after.items.filter((i) => i.role === "notice")).toEqual([]);
+    expect(modeLabel(after)).toBe("DeepSeek V4 Pro · Medium");
+    // A scheduled run from it starts on the same model.
+    expect(await agent.resolveMode(threadModeChoice(after))).toMatchObject({ mode: "manual", agent: "hosted", provider: "deepseek", model: "deepseek-v4-pro" });
+  });
+
+  it("AI helper set to Local model only sets the default (Free) and leaves Smart and Manual's Claude as they were", async () => {
+    setSetting("anthropicKey", "sk-ant-test-0123456789");
+    setSetting("enhanceProvider", "local");
+    try {
+      expect(await agent.resolveMode({ mode: "smart" })).toMatchObject({ mode: "smart", agent: "claude", model: "claude-opus-5-5" });
+      expect(await agent.resolveMode({ mode: "manual", agent: "claude", model: "claude-sonnet-5-5" })).toMatchObject({ mode: "manual", agent: "claude", model: "claude-sonnet-5-5" });
+      expect(await agent.resolveMode()).toMatchObject({ mode: "free" });
+      expect((await agent.availability()).defaultMode).toBe("free");
+    } finally {
+      setSetting("enhanceProvider", "auto");
     }
   });
 

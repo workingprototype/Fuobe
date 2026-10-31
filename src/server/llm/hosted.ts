@@ -6,7 +6,7 @@ import { getLlmProvider, LLM_PROVIDERS, type LlmModelDef, type LlmProviderDef, t
 import { isPrivateAddress } from "../remote-fetch";
 import { getSetting, type SettingName } from "../settings";
 import { tenant } from "../tenant";
-import { ContextError, hostedError, HostedError, retryAfter, scrubKey, tooLongText } from "./hosted-errors";
+import { ContextError, FreeLimitError, freeLimit, hostedError, HostedError, keyRefused, retryAfter, scrubKey, tooLongText } from "./hosted-errors";
 import { FITS_ID } from "./hosted-messages";
 import { healToolCalls } from "./messages";
 import { chatResponses } from "./responses";
@@ -267,8 +267,9 @@ export async function postHosted(ep: Endpoint, path: string, body: unknown, opts
       rejected().delete(keyName(ep));
       return res;
     }
-    if (res.status === 401 || res.status === 403) rejected().add(keyName(ep));
     const text = await res.text().catch(() => "");
+    // Only a refusal of the key itself: a 403 about one model or request (Qwen's free quota, Gemini's permission_denied) isn't.
+    if (keyRefused(res.status, text)) rejected().add(keyName(ep));
     const wait = retryAfter(res.headers.get("retry-after"));
     if (attempt === 0 && RETRY.has(res.status) && (wait ?? 2) <= 30) {
       await sleep((wait ?? 2) * 1000);
@@ -291,10 +292,40 @@ const keyName = (ep: Endpoint) => createHash("sha256").update(`${ep.provider.id}
 /** The provider rejected this key on a real call (and it hasn't worked since). */
 export const isRejected = (ep: Endpoint): boolean => rejected().has(keyName(ep));
 
-/** A free limit ran out: the provider's free models are skipped until the day's (UTC) or the minute's limit resets. */
+/** Midnight after `now` in a time zone, in ms. */
+function nextMidnight(zone: string, now: number): number {
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" });
+  const parts = (t: number) => Object.fromEntries(fmt.formatToParts(t).map((p) => [p.type, Number(p.value)])) as Record<string, number>;
+  // The zone's offset at an instant: its wall clock read as UTC, less the instant.
+  const offset = (t: number) => {
+    const p = parts(t);
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(t / 1000) * 1000;
+  };
+  const p = parts(now);
+  const wall = Date.UTC(p.year, p.month - 1, p.day + 1);
+  return wall - offset(wall - offset(now));
+}
+
+/** When a free limit that ran out comes back: a minute later, or at the provider's midnight (UTC; Gemini's is Pacific). */
+export function freeResetAt(provider: string, span: "day" | "minute", now = Date.now()): number {
+  return span === "minute" ? now + 60_000 : nextMidnight(getLlmProvider(provider)?.freeDayZone ?? "UTC", now);
+}
+
+/** A free limit ran out: the provider's free models are skipped until it resets. */
 export function markFreeSpent(provider: string, span: "day" | "minute"): void {
-  const now = new Date();
-  spent().set(provider, span === "day" ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) : now.getTime() + 60_000);
+  spent().set(provider, freeResetAt(provider, span));
+}
+
+/**
+ * OpenRouter answers its per-minute and per-day free caps with the same 429 body: its key check (GET /key, free)
+ * says which. The day's only when no free request is left today; without an answer, the error's words stand.
+ */
+async function freeSpan(ep: Endpoint, e: unknown): Promise<unknown> {
+  if (!(e instanceof FreeLimitError) || ep.provider.id !== "openrouter") return e;
+  const left = (await openRouterKey(true).catch(() => null))?.left;
+  if (typeof left !== "number") return e;
+  const span = left <= 0 ? "day" : "minute";
+  return span === e.span ? e : freeLimit(ep.provider, span);
 }
 
 /** Providers whose free requests are used up right now. */
@@ -315,7 +346,7 @@ export async function chatHosted(ep: Endpoint, model: LlmModelDef, req: HostedRe
   const p = ep.provider;
   const room = outputRoom(p, model, req.effort, req.maxTokens);
   const tokens = estimateTokens(req.messages, req.tools);
-  if (tokens > model.context - room) throw new ContextError(tooLongText(model, tokens));
+  if (tokens > Math.min(model.context - room, model.maxIn ?? Infinity)) throw new ContextError(tooLongText(model, tokens));
   if (p.adapter === "openai-responses") return chatResponses(ep, model, { ...req, maxTokens: room });
   const q = p.quirks;
   const free = isFree(p, model);
@@ -327,13 +358,15 @@ export async function chatHosted(ep: Endpoint, model: LlmModelDef, req: HostedRe
     timeoutMs,
     signal: req.signal,
     headers: q.chatHeader && req.threadKey ? { [q.chatHeader]: chatName(req.threadKey) } : undefined,
+  }).catch(async (e) => {
+    throw await freeSpan(ep, e);
   });
   if (!res.body) throw new HostedError(`${p.label} sent an empty answer`, 502, p.id);
   let out;
   try {
     out = await readChatStream(res.body, { errorEnvelope: q.errorEnvelope });
   } catch (e) {
-    if (e instanceof StreamError) throw hostedError(p, e.status ?? 502, JSON.stringify({ error: { message: e.message, code: e.code } }), model, ep.key, { free });
+    if (e instanceof StreamError) throw await freeSpan(ep, hostedError(p, e.status ?? 502, JSON.stringify({ error: { message: e.message, code: e.code } }), model, ep.key, { free }));
     throw e;
   }
   const toolIds: Record<string, string> = {};
@@ -373,14 +406,18 @@ export async function chatHosted(ep: Endpoint, model: LlmModelDef, req: HostedRe
 // ---------------------------------------------------------------------------
 // Settings: Test and Try a reply
 
-/** GET with the key (a free call), never following a redirect. */
+/** GET with the key (a free call), never following a redirect. A key that works here isn't "rejected" any more; a 401 is. */
 async function getHosted(ep: Endpoint, path: string): Promise<Response> {
   const url = `${checkBase(ep)}${path}`;
+  let res: Response;
   try {
-    return await fetch(url, { headers: { authorization: `Bearer ${ep.key}`, ...ep.provider.quirks.headers }, redirect: "error", signal: AbortSignal.timeout(15_000) });
+    res = await fetch(url, { headers: { authorization: `Bearer ${ep.key}`, ...ep.provider.quirks.headers }, redirect: "error", signal: AbortSignal.timeout(15_000) });
   } catch (e) {
     throw new HostedError(`Couldn't reach ${ep.provider.label} (${reason(e, ep.key)})`, 0, ep.provider.id);
   }
+  if (res.ok) rejected().delete(keyName(ep));
+  else if (res.status === 401) rejected().add(keyName(ep));
+  return res;
 }
 
 export interface OpenRouterKey {

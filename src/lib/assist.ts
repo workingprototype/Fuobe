@@ -163,6 +163,15 @@ export interface AssistModeChoice {
   effort?: AssistEffort | null;
 }
 
+/** A chat's mode as the picker shows it and Schedule this request saves it: with a hosted model's provider, or Manual can't find the model. */
+export const threadModeChoice = (t: Pick<AssistThread, "mode" | "agent" | "provider" | "model" | "effort">): AssistModeChoice => ({
+  mode: t.mode ?? "smart",
+  agent: t.agent,
+  provider: t.provider ?? null,
+  model: t.model ?? null,
+  effort: t.effort ?? null,
+});
+
 /** A model the mode picker offers (GET /api/assist): words and flags only, never a key or an address. */
 export interface AssistModelOption {
   provider: string;

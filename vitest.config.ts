@@ -22,7 +22,6 @@ export default defineConfig({
         [
           "OPENAI_API_KEY",
           "GEMINI_API_KEY",
-          "GOOGLE_API_KEY",
           "XAI_API_KEY",
           "FUOBE_META_API_KEY",
           "MISTRAL_API_KEY",
@@ -39,7 +38,7 @@ export default defineConfig({
           "CEREBRAS_API_KEY",
           "TOGETHER_API_KEY",
           "FIREWORKS_API_KEY",
-          "HF_TOKEN",
+          "FUOBE_HF_TOKEN",
           "FUOBE_LLM_TEST_BASE",
         ].map((k) => [k, ""]),
       ),

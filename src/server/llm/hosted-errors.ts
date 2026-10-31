@@ -48,7 +48,17 @@ export class HostedError extends Error {
 
 const CONTEXT = /context_length_exceeded|context (?:length|window|size)|maximum context|prompt is too long|too many tokens|input is too long|exceeds? the (?:model'?s? )?(?:context|maximum)/i;
 const NO_MODEL = /model[^.]{0,80}(?:not found|does not exist|doesn't exist|is not available|unknown|no such|invalid|not supported)|unknown model|model_not_found|no such model|invalid model/i;
-const FREE_CAP = /free[- ]models?-per-(day|min)|free_model|free tier|free-tier|quota|free requests/i;
+/** A free limit for the whole day: "per day", "daily", RPD, Gemini's quota_exceeded. Anything else is a minute's (OpenRouter's free-models-per-min). */
+const DAY_CAP = /per[- ]?day|daily|today|\brpd\b|quota_exceeded/i;
+/** A 403 that is about the key itself. Others are about one model or request (Qwen's free quota for a model, Gemini's permission_denied). */
+const KEY_REFUSED = /invalid[ _-]?(?:api[ _-]?)?(?:key|token)|incorrect api key|api[ _-]?key (?:is )?(?:not valid|invalid|expired)|unauthenticated|invalid_authentication|(?:key|token) (?:has )?expired/i;
+
+/** The provider refused the key (401, or a 403 that names the key): Assist skips its models until the key works again. */
+export const keyRefused = (status: number, body: string): boolean => status === 401 || (status === 403 && KEY_REFUSED.test(body));
+
+/** A free limit that ran out: for the day, or for the moment. */
+export const freeLimit = (p: Pick<LlmProviderDef, "id" | "label">, span: "day" | "minute"): FreeLimitError =>
+  new FreeLimitError(span === "day" ? `${p.label}'s free requests for today are used up` : `${p.label}'s free requests are used up for the moment`, span, p.id);
 
 /** "This chat is too long for GPT-6.1 Sol (about 1.1M tokens)…" */
 export function tooLongText(model: Pick<LlmModelDef, "name">, tokens?: number): string {
@@ -74,9 +84,14 @@ export function hostedError(p: LlmProviderDef, status: number, body: string, mod
   const label = p.label;
   const where = `Settings → AI helper → ${label}`;
   const said = detail ? ` (${detail})` : "";
-  if (status === 401 || status === 403) {
-    const extra = p.id === "zai" ? " Z.ai's Standard and Coding Plan keys are separate." : p.id === "qwen" ? " Model Studio keys only work in the region they were made in." : p.id === "huggingface" ? " It needs a fine-grained token with Inference Providers on." : "";
-    return new HostedError(`${label} rejected the key${said}. Check it in ${where}.${extra}`, status, p.id);
+  const hint = p.id === "zai" ? " Z.ai's Standard and Coding Plan keys are separate." : p.id === "qwen" ? " Model Studio keys only work in the region they were made in." : p.id === "huggingface" ? " It needs a fine-grained token with Inference Providers on." : "";
+  if (keyRefused(status, body)) return new HostedError(`${label} rejected the key${said}. Check it in ${where}.${hint}`, status, p.id);
+  if (status === 403) {
+    // Free Quota Only on, and this model's free quota used up (Model Studio's free quota is per model).
+    if (/AllocationQuota\.FreeTierOnly/.test(body)) {
+      return new HostedError(`${p.short}'s free quota for ${model?.name ?? "this model"} is used up, and Free Quota Only is on in Model Studio. Pick another model in Manual, or turn Free Quota Only off for it.`, 403, p.id);
+    }
+    return new HostedError(`${label} refused this request${said}.${model ? " Pick another model in Manual, or check" : " Check"} your account's access on ${p.short}'s site.${p.id === "huggingface" ? hint : ""}`, 403, p.id);
   }
   if (status === 402 || /billing_not_configured|insufficient[_ ]balance|insufficient credits|no credit/i.test(body)) {
     const billing = p.billingUrl ?? p.keysUrl;
@@ -89,10 +104,8 @@ export function hostedError(p: LlmProviderDef, status: number, body: string, mod
   }
   if (status === 404 || NO_MODEL.test(detail)) return new HostedError(`${label} has no model ${model?.id ?? "by that name"} today (it may have been retired). Pick another in Manual.`, status, p.id);
   if (status === 429) {
-    if (opts.free) {
-      const day = /per[- ]day|daily|today|per-day|rpd/i.test(detail) || FREE_CAP.test(detail);
-      return new FreeLimitError(day ? `${label}'s free requests for today are used up` : `${label}'s free requests are used up for the moment`, day ? "day" : "minute", p.id);
-    }
+    // OpenRouter's body is the same for its minute and day caps: hosted.ts asks its key check which it was.
+    if (opts.free) return freeLimit(p, DAY_CAP.test(detail) || DAY_CAP.test(body) ? "day" : "minute");
     const wait = opts.wait ? ` Try again in ${opts.wait} s.` : " Try again in a minute.";
     return new HostedError(`${label} is rate-limited right now.${wait}`, 429, p.id);
   }
