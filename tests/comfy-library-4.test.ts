@@ -88,8 +88,10 @@ describe("round-4 ComfyUI workflows", () => {
     expect(new Set(manifest.workflows.map((w) => w.id)).size).toBe(manifest.workflows.length);
     // The owner's SOTA image families (2026-10-31) wait for a /prompt check on a ComfyUI that isn't rendering, and the
     // MiniMax H3 graphs on node packs this server doesn't have (h3_character_swap, H3 Relay): never installed here,
-    // so their /prompt check names a missing node (tests/comfy-character-swap.test.ts).
+    // so their /prompt check names a missing node (tests/comfy-character-swap.test.ts). MOSS-Image's graph too, since its
+    // encoder became the int8 file (the w4a8 one faulted the driver).
     expect(manifest.workflows.filter((w) => !w.validated).map((w) => w.id)).toEqual([
+      "moss-image-t2i",
       "qwen-image-21-t2i",
       "qwen-image-21-edit",
       "qwen-image-21-turbo-edit",

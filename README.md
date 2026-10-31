@@ -90,7 +90,7 @@ Open **Settings → Engine mode** and connect what you have: a ComfyUI server, a
 
 ## Run on ComfyUI
 
-Choose **Open source only** and Fuobe runs every generation on open weights through your ComfyUI: 158 API-format workflows, 153 of them validated against real node definitions. `scripts/comfy/install-comfyui.sh` installs ComfyUI and its node packs at pinned commits. In Fuobe, the **ComfyUI workflows** page lists the model files each workflow needs and copies the exact install commands.
+Choose **Open source only** and Fuobe runs every generation on open weights through your ComfyUI: 174 API-format workflows, 152 of them validated against real node definitions. `scripts/comfy/install-comfyui.sh` installs ComfyUI and its node packs at pinned commits. In Fuobe, the **ComfyUI workflows** page lists the model files each workflow needs and copies the exact install commands.
 
 [Set up the open-source engine →](docs/SELF-HOSTING.md#the-open-source-engine-comfyui) · [ComfyUI scripts](scripts/comfy/README.md)
 
