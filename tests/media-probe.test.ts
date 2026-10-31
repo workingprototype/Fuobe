@@ -91,7 +91,7 @@ describe("media probe", () => {
   it("reads WAV, FLAC and MP3 lengths", () => {
     expect(probeMedia(wav(2.5))).toEqual({ container: "wav", duration: 2.5, hasVideo: false, hasAudio: true, channels: 1 });
     expect(probeMedia(wav(1, 48000, 2))).toMatchObject({ duration: 1, channels: 2 });
-    // Split soundtrack separates every channel of a 5.1 file on its own: the header says how many there are.
+    // Split soundtrack splits a file with more than 2 channels in mono (ComfyUI saves at most stereo): the header says how many there are.
     expect(probeMedia(wav(1, 48000, 6))?.channels).toBe(6);
     // FLAC STREAMINFO: 44.1 kHz, 132300 samples = 3 s
     const flac = Buffer.alloc(42);
