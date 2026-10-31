@@ -69,10 +69,10 @@ An account is signed in, but it sees the owner's studio as a guest does:
 - **Settings, keys and tokens are the owner's.** Changing settings or model switches, the password,
   API tokens, Public sign-up, LoRA downloads, Assist connectors and the MCP endpoint answer 403 for
   an account.
-- **Accounts never run on the owner's keys or GPU.** An account runs only on its own ComfyUI (see
-  [Your GPU](#your-gpu)). Without one, anything that would reach a model (a generation, an AI
-  helper, a retry) answers 403 with `code: "connect-gpu"`, and the studio shows a "Connect your GPU
-  to run this" card.
+- **Accounts never run on the owner's keys or GPU.** An account runs on its own ComfyUI (see
+  [Your GPU](#your-gpu)) or its own fal.ai or Replicate key (see [Your keys](#your-keys)). With
+  neither, anything that would reach a model (a generation, an AI helper, a retry) answers 403
+  with `code: "connect-gpu"`, and the studio shows a "Connect your GPU to run this" card.
 - **Its own runs are its own.** The runs an account starts on its GPU appear in its own lists
   (`GET /api/generations`), and it can open, cancel and delete them and download their files. They
   stay out of the owner's Library and live feed, and no other account can open them. The studio's
@@ -216,11 +216,49 @@ cloudflared tunnel --url http://localhost:8188   # or: ngrok http 8188
   `GET /api/models` lists the open-source models for a visitor, and the studios price a visitor's
   run as it would go on its own GPU. The studio's own settings page isn't shown to visitors.
 
+## Your keys
+
+An account can add its own fal.ai key or Replicate token in **Settings → Your keys** (below Your
+GPU), or from the "Add your key" card that opens when it picks a paid model it has no key for. With
+a key it runs that provider's paid models (Nano Banana, Seedream, Kling, Veo…), billed to its own
+account with that provider. The studio's own keys are never used for an account's run.
+
+- **Checked first.** `PUT /api/account/keys/fal` (or `/replicate`) with `{ key }` checks the key
+  with the provider before it is saved: a free call that runs nothing (fal.ai: the status of a
+  request that doesn't exist; Replicate: `GET /v1/account`). A refused key answers 422, a provider
+  out of reach 502, and nothing is saved. `?test=1` only checks. 10 checks a minute per account,
+  120 for all accounts together.
+- **Stored encrypted.** The key is sealed with AES-256-GCM under a server key in
+  `data/secrets.key`, made the first time a key is saved, and kept on the account's record in
+  `auth.json`. The server key isn't derived from the sign-in secret, so a new password or "Sign
+  everyone out" leaves saved keys working. Without `secrets.key` (lost, or restored from another
+  server), saved keys can't be opened: accounts are asked to add them again, and the studio's keys
+  are never used instead.
+- **Never shown.** `GET /api/account/keys` gives each key's last 4 characters, when it was added,
+  whether this server can still open it, and whether the provider refused it in a run. No answer,
+  log or error holds a key: a provider's error that echoes the request has it replaced with "••••".
+  The owner's **Settings → Accounts** shows which providers an account has a key for (the CSV has
+  `fal_key` and `replicate_key`), never the key.
+- **Removed with the account.** Deleting an account (by itself or by the owner) switches it off,
+  stops its running jobs at the provider with its own key, then removes its runs, files and record,
+  keys included. Removing or replacing a key that runs are going on answers 409 `runs-going` first;
+  with `{ stopRuns: true }` those runs are stopped with the old key before it changes.
+- **What it changes in the studios.** `GET /api/status` lists the account's keys
+  (`viewer.keys`) and its engine mode: `both` while it has a key and the studio isn't open-source
+  only, else `open`. The model pickers dim the paid models it has no key for ("Add your Replicate
+  key"), and prices say who pays ("≈ $0.15 · your fal.ai account"). A paid run without the key
+  answers 403 with `code: "add-key"` and an `x-fuobe-add-key` header naming the provider.
+- **Limits.** Every account limit applies to paid runs too (4 at once, 60 an hour, 4 outputs a run,
+  its space), checked before anything reaches the provider. Runs with a key send the prompt and the
+  attached files to that provider. civitai LoRAs are left out of runs on an account's key (copying
+  them would use the studio's civitai key). Assist, text steps, 3D and the other tools stay closed.
+- An account on a studio set to **Open source only** keeps its keys, but they aren't used.
+
 ## Uploads
 
-An account with its own ComfyUI connected can upload files (`POST /api/uploads`, the file as the
-request body with its type in `Content-Type` and its name in `X-File-Name`; an older page's
-multipart form works up to 26 MB). Without a connected GPU it answers 403 with
+An account with its own ComfyUI connected, or its own key, can upload files (`POST /api/uploads`,
+the file as the request body with its type in `Content-Type` and its name in `X-File-Name`; an
+older page's multipart form works up to 26 MB). With neither it answers 403 with
 `code: "connect-gpu"`, and a guest gets 401 with the sign-up card.
 
 | What | Types | Largest |
@@ -250,7 +288,11 @@ account? }`.
 The rules are in `src/lib/guest-access.ts` (which paths guests and accounts may use) and
 `src/proxy.ts` (where they are applied). Your GPU is `src/server/account-gpu.ts`, `onOwnGpu` in
 `src/server/providers/comfyui.ts` and `accountRun` in `src/server/generations.ts`; what an account's
-work may read is `src/server/tenant.ts`. Uploads are `src/app/api/uploads/route.ts` (which makes the
+work may read is `src/server/tenant.ts`. Your keys are `src/server/account-keys.ts` (storage),
+`src/server/secret-box.ts` (encryption), `src/server/provider-keys.ts` (`cloudKey`, the one place a
+fal.ai or Replicate key is read) and `src/app/api/account/keys`; their tests are the
+`tests/account-keys*.test.ts` files, `tests/secret-box.test.ts`, `tests/byo-keys-static.test.ts` and
+`tests/e2e/byo-keys.mjs` (against stand-in providers). Uploads are `src/app/api/uploads/route.ts` (which makes the
 proxy's checks itself, `src/server/direct-gate.ts`), the limits are in `src/server/account-files.ts`
 and the clean-up in `src/server/account-sweep.ts`. The owner's view of what accounts make is
 `src/server/account-admin.ts`. The tests are in `tests/public-signup.test.ts`,

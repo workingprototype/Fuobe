@@ -58,7 +58,6 @@ import { comfyLoraFiles, computerScope, onOwnGpu, outputFetch, outsideOwnGpu, OW
 import { accountById, accountGpu, gpuLink, type AccountGpu } from "./auth";
 import { accountEngineMode, accountKey, paidAllowed } from "./account-keys";
 import { addKeyMessage, isCloudProvider, keyRemovedMessage, type CloudProvider } from "@/lib/your-keys";
-import type { ProviderAdapter } from "./providers/types";
 import { CONNECT_GPU_MESSAGE, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { outsideTenant, runAsTenant, tenant, tenantAccount } from "./tenant";
 import { generationAccount } from "./account-library";
@@ -72,7 +71,7 @@ import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from
 import { ACCESS_PLACE } from "@/lib/model-access";
 import { offeredLoras, offeredRoutes, requireOffered } from "./model-access";
 import { llmBackends, llmLabel, llmMissing, llmUsesClaude, probeLocal } from "./providers/llm";
-import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
+import type { PollContext, PollResult, ProviderAdapter, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
 import { modelToFinish, startModelFinish, startTurntable, stopModelFinish, type OutputStore } from "./model3d-finish";
 import { convertMask, decodePng, encodePng } from "./png";
