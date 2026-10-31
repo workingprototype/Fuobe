@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -23,6 +25,9 @@ const { videoLength } = await import("@/server/dub");
 const { resetRates } = await import("@/server/rate");
 const { proxy } = await import("@/proxy");
 const dubRoute = await import("@/app/api/dub/route");
+const audioRoute = await import("@/app/api/audio-tools/route");
+const { gpuState } = await import("@/server/account-gpu");
+const { splitTime } = await import("@/lib/av/split");
 
 const MP4 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "shorts-12s.mp4"));
 
@@ -142,6 +147,88 @@ describe("H-3: price checks read only the header of the asker's own files", () =
     const spies = wholeReads();
     expect(asA(() => videoLength(mine))).toBeCloseTo(12, 0);
     expect(called(spies, mine)).toBe(false);
+  });
+});
+
+describe("a Split soundtrack price check never calls a GPU (main: an account's address a few times a minute at most)", () => {
+  /** A stand-in for an account's ComfyUI (a CUDA host with both DBS models) that counts what it is asked. */
+  async function standInGpu() {
+    const hits: Record<string, number> = {};
+    const server = http.createServer((req, res) => {
+      const at = (req.url ?? "").split("?")[0];
+      hits[at] = (hits[at] ?? 0) + 1;
+      const files = ["DBS-BSRNN-DnR/config.json", "DBS-BSRNN-DnR/model.safetensors", "DBS-TIGER-DnR/config.json", "DBS-TIGER-DnR/model.safetensors"];
+      const body =
+        at === "/system_stats"
+          ? { system: { comfyui_version: "0.41.0" }, devices: [{ name: "cuda:0 NVIDIA GeForce RTX 4090 : cudaMallocAsync", type: "cuda", vram_total: 24 * 2 ** 30 }] }
+          : at === "/models/dbs"
+            ? files
+            : null;
+      res.writeHead(body ? 200 : 404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as AddressInfo).port;
+    return { hits, port, url: `http://127.0.0.1:${port}`, close: () => new Promise<void>((r) => server.close(() => r())) };
+  }
+  const price = (body: unknown, session: string) =>
+    audioRoute.POST(
+      new Request("http://localhost:3000/api/audio-tools?preview=1", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: `${auth.SESSION_COOKIE}=${session}` },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  it("an account's: its GPU is asked nothing; the pick and the time come from what its last status check read", async () => {
+    const gpu = await standInGpu();
+    const g = globalThis as { __fuobeComfyDevice?: unknown; __fuobeComfyDbs?: unknown; __fuobeAccountGpus?: unknown };
+    g.__fuobeComfyDevice = g.__fuobeComfyDbs = g.__fuobeAccountGpus = undefined;
+    globalThis.__fuobeTestGpuPort = gpu.port;
+    auth.setAccountGpu(a, { url: gpu.url });
+    auth.setAccountGpu(b, { url: gpu.url });
+    try {
+      const sessionA = auth.createSession(a).value;
+      const mine = saveFile({ data: wav(30), contentType: "audio/wav", source: "upload", accountId: a }).url;
+      const split = { tool: "split", engine: "open", media: mine, kind: "audio" };
+      // No status check yet: a CPU's pick and time, no device, no models.
+      for (let i = 0; i < 20; i++) {
+        const r = await price(split, sessionA);
+        expect(r.status).toBe(200);
+        const p = await r.json();
+        expect(p).toMatchObject({ demo: false, hostPick: "fast", length: 30, channels: 1 });
+        expect(p.device).toBeUndefined();
+        expect(p.installed).toBeUndefined();
+        expect(p.estimate).toEqual(splitTime({ seconds: 30, quality: "fast", mode: "mono", channels: 1 }));
+      }
+      expect(gpu.hits).toEqual({});
+      // The status strip asks it (main's check, at most every 30 s): from then on the price check knows it is a CUDA GPU.
+      await gpuState(a, auth.accountGpu(a)!);
+      expect(gpu.hits).toEqual({ "/system_stats": 1 });
+      delete gpu.hits["/system_stats"];
+      const all = await Promise.all(Array.from({ length: 10 }, () => price({ ...split, stereo: true }, sessionA)));
+      for (const r of all) {
+        const p = await r.json();
+        expect(p).toMatchObject({ hostPick: "best", device: "cuda" });
+        expect(p.installed).toBeUndefined();
+        expect(p.estimate).toEqual(splitTime({ seconds: 30, quality: "best", mode: "each channel", channels: 1, device: "cuda" }));
+      }
+      expect(gpu.hits).toEqual({});
+      // Another account on the same address hasn't been checked: its price check knows nothing of it, and asks nothing.
+      const theirs = saveFile({ data: wav(10), contentType: "audio/wav", source: "upload", accountId: b }).url;
+      const pb = await (await price({ tool: "split", engine: "open", media: theirs, kind: "audio" }, auth.createSession(b).value)).json();
+      expect(pb).toMatchObject({ hostPick: "fast", length: 10 });
+      expect(pb.device).toBeUndefined();
+      // A guest: an account's file is gone to it, and nothing is asked.
+      expect((await price(split, "")).status).toBe(422);
+      expect(gpu.hits).toEqual({});
+    } finally {
+      auth.setAccountGpu(a, null);
+      auth.setAccountGpu(b, null);
+      g.__fuobeAccountGpus = undefined;
+      globalThis.__fuobeTestGpuPort = undefined;
+      await gpu.close();
+    }
   });
 });
 

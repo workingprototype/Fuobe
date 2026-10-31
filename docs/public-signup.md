@@ -35,7 +35,8 @@ reverse proxy; see below), and so may each account. A price check reads only the
 it names, and only of the asker's own files: a guest owns none. Nor does a price check reveal the
 owner's library: the turnaround video's price check (`/api/turnaround/estimate`, or
 `/api/turnaround?preview=1`) answers 404 "Character not found" for any character a visitor names,
-whether it exists or not.
+whether it exists or not. A price check never calls a GPU either: Split soundtrack's price check
+takes an account's GPU type from the status strip's last check and asks the GPU nothing.
 
 ## Accounts
 

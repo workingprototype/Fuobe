@@ -629,6 +629,8 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
 // The tool
 
 const money = (p: AudioToolPreview) => (p.demo ? "Demo · free" : "Free · runs on your ComfyUI");
+/** Where the time estimate is for: the host's device when it said; else a CPU's, the figures the estimate then uses. */
+const onDevice = (device?: string) => (device === "cuda" ? "on your GPU" : device ? "on your CPU" : "on a CPU");
 
 /** What each model is, shown under the choice (not only on hover). */
 const MODEL_HINTS: Record<SplitQuality, string> = {
@@ -757,7 +759,7 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
                   onChange={(v) => setQuality(v)}
                   options={(["fast", "best"] as const).map((q) => ({ value: q, label: `${QUALITY_LABELS[q]}${p?.installed && !p.installed.includes(q) ? " · not installed" : ""}`, hint: MODEL_HINTS[q] }))}
                 />
-                {!quality && p?.hostPick && <span className="text-[12px] text-muted-foreground">picked for your {p.device === "cuda" ? "GPU" : "CPU"}</span>}
+                {!quality && p?.hostPick && p.device && <span className="text-[12px] text-muted-foreground">picked for your {p.device === "cuda" ? "GPU" : "CPU"}</span>}
               </div>
               <p className="text-[12px] text-muted-foreground sm:pl-[4.5rem]">{MODEL_HINTS[picked]}</p>
               {channels === 1 ? null : channels && channels > 2 ? (
@@ -800,7 +802,7 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
                 ) : p ? (
                   <>
                     <span className="font-mono text-foreground">{money(p)}</span>
-                    {p.estimate && !p.demo ? ` · ${durationWords(p.estimate)} on your ${p.device === "cuda" ? "GPU" : "CPU"}` : ""}
+                    {p.estimate && !p.demo ? ` · ${durationWords(p.estimate)} ${onDevice(p.device)}` : ""}
                   </>
                 ) : (
                   "Checking…"

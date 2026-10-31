@@ -3,11 +3,13 @@ import { z } from "zod";
 import { planJoin, planLoop, CROSSFADE_MAX, JOIN_MAX_CLIPS, LOOP_MAX_SECONDS, type AudioToolPreview, type ToolPlan } from "@/lib/av/audio-tools";
 import { CLOUD_ONLY_PROBLEM, DBS_MODELS, dbsChannelsFor, hostPick, missingDbs, planRemux, planSplit, splitTime } from "@/lib/av/split";
 import type { Engine, Generation } from "@/lib/catalog/types";
+import { lastGpuDevice } from "./account-gpu";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
-import { comfyDbsModels, comfyDevice } from "./providers/comfyui";
+import { comfyDbsModels, comfyDevice, ownGpu } from "./providers/comfyui";
 import { engineMode } from "./settings";
 import { storedMedia } from "./storage";
+import { tenant, tenantAccount } from "./tenant";
 
 /**
  * The Audio hub's Loop / extend, Join and Split soundtrack tools on the server: each clip's length is read from its own
@@ -154,7 +156,16 @@ export async function previewAudioTool(body: AudioToolRequest): Promise<AudioToo
   if (body.tool === "split") {
     // How long it takes on this host: its device (asked once a minute), the model it would use (one it has on disk) and
     // how many passes. A model the host doesn't have is refused here, before the run, with how to install it.
-    const [device, installed] = demo ? [undefined, undefined] : await Promise.all([comfyDevice().catch(() => undefined), comfyDbsModels().catch(() => undefined)]);
+    // A visitor's price check (a guest's, or an account's on its own GPU) never calls a GPU, as main's price checks
+    // don't (the server calls an account's address a few times a minute at most): an account's device is what its last
+    // status check read (lastGpuDevice), a guest has none, and the run checks the models on the GPU's disk.
+    const visitor = !!tenant() || !!ownGpu();
+    const account = tenantAccount();
+    const [device, installed] = demo
+      ? [undefined, undefined]
+      : visitor
+        ? [account ? lastGpuDevice(account) : undefined, undefined]
+        : await Promise.all([comfyDevice().catch(() => undefined), comfyDbsModels().catch(() => undefined)]);
     if (body.quality && installed && !installed.includes(DBS_MODELS[body.quality])) throw new AudioToolError(missingDbs(DBS_MODELS[body.quality], installed));
     const pick = hostPick(device, installed);
     const quality = body.quality ?? pick;

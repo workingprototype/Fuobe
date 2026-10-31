@@ -14,7 +14,7 @@ import type { MediaInfo } from "@/lib/media-probe";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-comfy-dbs-"));
 process.env.FUOBE_DATA_DIR = tmp;
 process.env.COMFYUI_URL = "http://comfy.test:8188";
-const { collectOutputs, comfyDbsModels, prepareWorkflow } = await import("@/server/providers/comfyui");
+const { collectOutputs, comfyDbsModels, comfyDevice, prepareWorkflow } = await import("@/server/providers/comfyui");
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const root = path.resolve(__dirname, "..");
@@ -228,6 +228,33 @@ describe("which DBS models the host has (GET /models/dbs)", () => {
     } finally {
       vi.unstubAllGlobals();
       globalThis.__fuobeComfyDbs = undefined;
+    }
+  });
+
+  it("asks once while a request is on its way: callers that arrive meanwhile share its answer, the device's too", async () => {
+    globalThis.__fuobeComfyDbs = undefined;
+    globalThis.__fuobeComfyDevice = undefined;
+    const asked: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        asked.push(new URL(url).pathname);
+        await new Promise((r) => setTimeout(r, 50));
+        return url.endsWith("/models/dbs") ? Response.json(["DBS-BSRNN-DnR/config.json", "DBS-BSRNN-DnR/model.safetensors"]) : Response.json({ devices: [{ type: "cpu" }] });
+      }),
+    );
+    try {
+      const [models, devices] = await Promise.all([Promise.all(Array.from({ length: 10 }, () => comfyDbsModels("main", 0))), Promise.all(Array.from({ length: 10 }, () => comfyDevice()))]);
+      expect(models.every((m) => m?.join() === "DBS-BSRNN-DnR")).toBe(true);
+      expect(devices.every((d) => d === "cpu")).toBe(true);
+      expect(asked.sort()).toEqual(["/models/dbs", "/system_stats"]);
+      // Once answered, a run asks afresh.
+      await comfyDbsModels("main", 0);
+      expect(asked.filter((a) => a === "/models/dbs")).toHaveLength(2);
+    } finally {
+      vi.unstubAllGlobals();
+      globalThis.__fuobeComfyDbs = undefined;
+      globalThis.__fuobeComfyDevice = undefined;
     }
   });
 });

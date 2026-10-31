@@ -582,6 +582,21 @@ export async function probeComfy(force = false): Promise<boolean> {
 }
 
 declare global {
+  /** comfyDevice's and comfyDbsModels' requests on their way, by path and address. */
+  var __fuobeComfyAsks: Map<string, Promise<unknown>> | undefined;
+}
+
+/** One request at a time per path and address: callers that arrive while it is on its way share its answer. */
+function oneAsk<T>(key: string, ask: () => Promise<T>): Promise<T> {
+  const asks = (globalThis.__fuobeComfyAsks ??= new Map());
+  const going = asks.get(key);
+  if (going) return going as Promise<T>;
+  const p = ask().finally(() => asks.delete(key));
+  asks.set(key, p);
+  return p;
+}
+
+declare global {
   /** The torch device each ComfyUI address reported last (GET /system_stats devices[0].type), and when. */
   var __fuobeComfyDevice: Map<string, { type?: string; at: number }> | undefined;
 }
@@ -596,10 +611,12 @@ export async function comfyDevice(worker: ComfyWorker = "main"): Promise<string 
   const cache = (globalThis.__fuobeComfyDevice ??= new Map());
   const hit = cache.get(url);
   if (hit && Date.now() - hit.at < 60_000) return hit.type;
-  const s = await comfyJson<{ devices?: { type?: unknown }[] }>("/system_stats", worker).catch(() => undefined);
-  const type = typeof s?.devices?.[0]?.type === "string" ? (s.devices[0].type as string) : undefined;
-  if (s) cache.set(url, { type, at: Date.now() });
-  return type;
+  return oneAsk(`/system_stats ${url}`, async () => {
+    const s = await comfyJson<{ devices?: { type?: unknown }[] }>("/system_stats", worker).catch(() => undefined);
+    const type = typeof s?.devices?.[0]?.type === "string" ? (s.devices[0].type as string) : undefined;
+    if (s) cache.set(url, { type, at: Date.now() });
+    return type;
+  });
 }
 
 declare global {
@@ -618,10 +635,12 @@ export async function comfyDbsModels(worker: ComfyWorker = "main", maxAgeMs = 10
   const cache = (globalThis.__fuobeComfyDbs ??= new Map());
   const hit = cache.get(url);
   if (hit && Date.now() - hit.at < maxAgeMs) return hit.models;
-  const files = await comfyJson<unknown>("/models/dbs", worker).catch(() => undefined);
-  const models = Array.isArray(files) ? installedDbs(files.filter((f): f is string => typeof f === "string")) : undefined;
-  cache.set(url, { models, at: Date.now() });
-  return models;
+  return oneAsk(`/models/dbs ${url}`, async () => {
+    const files = await comfyJson<unknown>("/models/dbs", worker).catch(() => undefined);
+    const models = Array.isArray(files) ? installedDbs(files.filter((f): f is string => typeof f === "string")) : undefined;
+    cache.set(url, { models, at: Date.now() });
+    return models;
+  });
 }
 
 /** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
