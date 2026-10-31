@@ -98,11 +98,20 @@ const guestHeaders = { [GUEST_HEADER]: "1", "Cache-Control": "no-store" };
 /** Price checks a guest (per address) or an account may send a minute: free, but each one plans a run. A page sends far fewer. */
 const PRICE_CHECKS_PER_MINUTE = 120;
 
+/**
+ * Without a trusted proxy (FUOBE_TRUST_PROXY) every guest is one shared key: they share a budget ten times larger, so
+ * one busy page or script can't stop every other guest's prices, and the 429 says how to give each visitor their own.
+ */
+const SHARED_PRICE_CHECKS_PER_MINUTE = 10 * PRICE_CHECKS_PER_MINUTE;
+const SHARED_GUEST = `guest:${LoginGuard.DIRECT}`;
+
 /** A guest's or an account's price check, within its budget (the owner's are never counted). */
 function priceCheck(request: NextRequest, who: string): NextResponse {
-  const r = hit(`price:${who}`, PRICE_CHECKS_PER_MINUTE, 60_000);
+  const shared = who === SHARED_GUEST;
+  const r = hit(`price:${who}`, shared ? SHARED_PRICE_CHECKS_PER_MINUTE : PRICE_CHECKS_PER_MINUTE, 60_000);
   if (r.ok) return pass(request);
-  return NextResponse.json({ error: "Too many price checks. Try again in a minute." }, { status: 429, headers: { "Retry-After": String(r.retryAfterS), "Cache-Control": "no-store" } });
+  const hint = shared ? " Behind a reverse proxy? Set FUOBE_TRUST_PROXY=1 so each visitor gets their own limit." : "";
+  return NextResponse.json({ error: `Too many price checks. Try again in a minute.${hint}` }, { status: 429, headers: { "Retry-After": String(r.retryAfterS), "Cache-Control": "no-store" } });
 }
 
 /**

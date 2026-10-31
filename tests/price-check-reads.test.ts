@@ -184,6 +184,15 @@ describe("H-2 / H-3: price checks are rate-limited per visitor", () => {
     }
   });
 
+  it("without a trusted proxy (every guest is one shared key), guests share a much larger budget, and the 429 says how to fix it", async () => {
+    expect(process.env.FUOBE_TRUST_PROXY).toBeUndefined();
+    for (let i = 0; i < 600; i++) expect(passed(proxy(post("/api/ads/multiplier/estimate", undefined, `198.51.100.${i % 250}`))), `check ${i}`).toBe(true);
+    for (let i = 600; i < 1200; i++) proxy(post("/api/ads/multiplier/estimate"));
+    const r = proxy(post("/api/ads/multiplier/estimate"));
+    expect(r.status).toBe(429);
+    expect((await r.json()).error).toMatch(/FUOBE_TRUST_PROXY=1/);
+  });
+
   it("an account gets its own budget; the owner is never limited", () => {
     const account = auth.createSession(a).value;
     for (let i = 0; i < 120; i++) expect(passed(proxy(post("/api/dub?preview=1", account)))).toBe(true);
