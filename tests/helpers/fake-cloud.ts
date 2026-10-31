@@ -7,10 +7,11 @@ import http from "node:http";
  * it with `node --experimental-strip-types`.
  *
  * What a key gets is scripted per key: "good" (works), "broke" (its balance has run out), "echo" (refused, and the
- * error repeats the request's Authorization header, like a proxy that echoes it). Any other key is refused (401).
+ * error repeats the request's Authorization header, like a proxy that echoes it), "outage" (503: says nothing about the key).
+ * Any other key is refused (401).
  */
 
-export type KeyMode = "good" | "broke" | "echo";
+export type KeyMode = "good" | "broke" | "echo" | "outage";
 
 export interface CloudRequest {
   method: string;
@@ -71,6 +72,7 @@ function refused(fake: FakeCloud, r: CloudRequest, res: http.ServerResponse, key
   const mode = key ? fake.keys[key] : undefined;
   if (mode === "good") return false;
   if (mode === "broke") json(res, broke.status, { detail: broke.detail });
+  else if (mode === "outage") json(res, 503, { detail: "Service unavailable" });
   else if (mode === "echo") json(res, 401, { detail: `Invalid credentials: ${r.authorization}` });
   else json(res, 401, { detail: "Unauthorized" });
   return true;

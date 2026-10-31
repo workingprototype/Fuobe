@@ -49,4 +49,6 @@ export const addKeyMessage = (p: CloudProvider) => `Add your ${CLOUD_KEY[p].labe
 export const keyRejectedMessage = (p: CloudProvider) => `${CLOUD_KEY[p].label} didn't accept your key. Check it in Settings → Your keys.`;
 export const balanceMessage = (p: CloudProvider) => `Your ${CLOUD_KEY[p].label} balance has run out. Top it up on ${CLOUD_KEY[p].label}, then run again.`;
 export const keyRemovedMessage = (p: CloudProvider) => `Your ${CLOUD_KEY[p].label} key was removed, so this run stopped.`;
+/** The owner (or anyone not signed in as an account) on /api/account/keys. */
+export const NOT_ACCOUNT_KEYS = "Your keys are for accounts. The studio's own keys are in Settings → Paid API configuration.";
 export const OPEN_ONLY_MESSAGE = "This studio runs open-source models only right now, so your keys aren't used.";
