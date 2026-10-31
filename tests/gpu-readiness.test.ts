@@ -19,7 +19,7 @@ const GB = 2 ** 30;
 function inventory(ids: string[], o: { vram?: number; type?: string; os?: string; version?: string } = {}): GpuInventory {
   const inv = emptyInventory("server", 1);
   inv.reachable = true;
-  inv.comfy = { version: o.version ?? "0.41.2", os: o.os ?? "posix", embeddedPython: false, deployEnv: "local-git", flags: parseArgv(["main.py"]) };
+  inv.comfy = { version: o.version ?? "0.42.1", os: o.os ?? "posix", embeddedPython: false, deployEnv: "local-git", flags: parseArgv(["main.py"]) };
   inv.devices = o.type === "none" ? [] : [{ name: "cuda:0 NVIDIA GeForce RTX 4090 : cudaMallocAsync", type: o.type ?? "cuda", index: 0, vramTotal: (o.vram ?? 24) * GB, vramFree: 0 }];
   inv.manager = { api: "none" };
   inv.nodes = { have: [], missing: [], total: 0, readAt: 1, how: "object_info" };

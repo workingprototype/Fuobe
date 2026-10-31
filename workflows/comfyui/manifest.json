@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-30T09:34:19.291Z",
-  "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
-  "comfyuiVersion": "0.41.0",
-  "workflowTemplatesVersion": "0.11.86",
-  "frontendVersion": "1.55.17",
+  "generatedAt": "2026-10-31T10:53:21.234Z",
+  "comfyuiCommit": "5841c187a76ffdb565c14d9565aacbdb9a54b056",
+  "comfyuiVersion": "0.42.0",
+  "workflowTemplatesVersion": "0.11.93",
+  "frontendVersion": "1.57.1",
   "workflows": [
     {
       "id": "flux1-dev-t2i",
@@ -9377,6 +9377,1594 @@
         "model qwen_3_4b.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors -> no size (HTTP 307)",
         "model ae.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors -> no size (HTTP 307)"
       ]
+    },
+    {
+      "id": "qwen-image-21-t2i",
+      "title": "Qwen-Image 2.1 Text to Image",
+      "capability": "t2i",
+      "file": "qwen-image-21-t2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/qwen-image-21-t2i.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "4",
+            "input": "prompt"
+          }
+        ],
+        "width": [
+          {
+            "node": "5",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "5",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "6",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "6",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 25
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "qwen_image_2.1_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+          "sizeGb": 7.26
+        },
+        {
+          "file": "qwen3vl_8b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+          "sizeGb": 9.35
+        },
+        {
+          "file": "qwen_image_2.1_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+          "sizeGb": 0.68
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 20,
+      "license": "Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only",
+      "validated": false,
+      "notes": "The owner's image_qwen_image_2_1_t2i-working-great-default.json, its subgraph flattened: int8 model, Qwen3-VL 8B int8 text encoder (type qwen_image), TextEncodeQwenImage21 (no negative, resolution 1024, no images), EmptyLatentImage, KSampler 25 steps, cfg 1, euler, simple, denoise 1 (as saved). Removed: the ResolutionSelector (width/height bind the latent, multiples of 32 as the owner's note asks, native up to 2048x2048) and the SaveImageAdvanced (SaveImage after SplitImageWithAlpha). cfg 1: no negative prompt. Proof [O]: the owner's saved workflow; not rendered through Fuobe yet."
+    },
+    {
+      "id": "qwen-image-21-edit",
+      "title": "Qwen-Image 2.1 Image Edit (up to 4 references)",
+      "capability": "edit",
+      "file": "qwen-image-21-edit.json",
+      "source": "hand-built (scripts/comfy/hand-built/qwen-image-21-edit.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "30",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "10",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "11",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "12",
+            "input": "image"
+          }
+        ],
+        "image4": [
+          {
+            "node": "13",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "32",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "32",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "90",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "90",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 25
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "qwen_image_2.1_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+          "sizeGb": 7.26
+        },
+        {
+          "file": "qwen3vl_8b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+          "sizeGb": 9.35
+        },
+        {
+          "file": "qwen_image_2.1_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+          "sizeGb": 0.68
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 20,
+      "license": "Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only",
+      "validated": false,
+      "notes": "The proven preview graph qwen21-edit-25 (FashDash's 25-step camera_q21 stage) with the references wired as the owner's image_qwen_image_2_1_image_edit.json / homecenter graph: each image scaled to 2048 on its long side (lanczos), all of them on one TextEncodeQwenImage21 (images.image_1..4, resolution 0 = each at its own size on the 32 grid, vae linked, no negative), its latent (image 1's size: no custom-size latent, which shifts the edit), QwenImage21Cache auto, KSampler 25 steps, cfg 1, euler, simple. Output follows image 1 (2048 on the long side). Images 2-4 are optional: the provider drops a reference not given (dropBranch into TextEncodeQwenImage21). Prompt: one plain instruction, then one keep clause pointing at the picture (\"Keep ... exactly as in image 1\"); refer to references as image 1/2/3/4. Removed: the ComfySwitchNode custom size, compare and note nodes. Proof [P]: 133 preview edits (qwen21-edit-25 and turbo)."
+    },
+    {
+      "id": "qwen-image-21-turbo-edit",
+      "title": "Qwen-Image 2.1 Turbo Image Edit (8 steps, up to 4 references)",
+      "capability": "edit",
+      "file": "qwen-image-21-turbo-edit.json",
+      "source": "hand-built (scripts/comfy/hand-built/qwen-image-21-turbo-edit.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "30",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "10",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "11",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "12",
+            "input": "image"
+          }
+        ],
+        "image4": [
+          {
+            "node": "13",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "70",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "90",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "90",
+          "kind": "image"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors",
+          "sizeGb": 7.26
+        },
+        {
+          "file": "qwen3vl_8b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+          "sizeGb": 9.35
+        },
+        {
+          "file": "qwen_image_2.1_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+          "sizeGb": 0.68
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 20,
+      "license": "Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only",
+      "validated": false,
+      "notes": "The owner's image_qwen_image_2_1_turbo_image_edit.json as the proven preview graphs qwen21-edit-fast / qwen21-edit-fast-2img run it: turbo int8 model, the fixed 8-step ManualSigmas schedule, KSamplerSelect euler, CFGGuider cfg 1, RandomNoise, SamplerCustomAdvanced on the encoder's latent; references as qwen-image-21-edit (2048 lanczos, resolution 0, up to 4, optional ones dropped). No steps binding: the sigmas are the schedule. Removed: the prompt enhancer branch (Qwen3.5 9B PE model, off in the owner's template), the custom-size switch, compare and notes. FashDash's blind test: as good as 25 steps (dressing 21 vs 22 of 48), weaker only on hard camera turns and product rotations (use qwen-image-21-edit there). Proof [P]: the preview end images."
+    },
+    {
+      "id": "qwen-image-21-inpaint",
+      "title": "Qwen-Image 2.1 Inpaint (crop around the mask, paste back)",
+      "capability": "inpaint",
+      "file": "qwen-image-21-inpaint.json",
+      "source": "hand-built (scripts/comfy/hand-built/qwen-image-21-inpaint.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "22",
+            "input": "values.a"
+          }
+        ],
+        "image": [
+          {
+            "node": "10",
+            "input": "image"
+          }
+        ],
+        "mask": [
+          {
+            "node": "11",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "27",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "27",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "90",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "90",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 25
+      },
+      "limits": {},
+      "models": [
+        {
+          "file": "qwen_image_2.1_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+          "sizeGb": 7.26
+        },
+        {
+          "file": "qwen3vl_8b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+          "sizeGb": 9.35
+        },
+        {
+          "file": "qwen_image_2.1_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+          "sizeGb": 0.68
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ausboss-nodes",
+          "repo": "https://github.com/ausboss/ComfyUI-AusBoss"
+        }
+      ],
+      "vramGb": 20,
+      "license": "Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only; AusBoss nodes MIT",
+      "validated": false,
+      "notes": "The AusBoss pack's example \"Qwen Image 2.1 Inpaint (AusBoss)\" (the only Qwen 2.1 inpaint recipe on the owner's PC; not one of the owner's saved workflows), its two subgraphs flattened: Crop For Inpaint (context 1.6, blend 8 px, multiple 32, 1.5 MP, bicubic) -> GrowMask 8 on the crop's mask -> StringFormat \"{a} Keep everything else exactly the same.\" -> TextEncodeQwenImage21 with the crop as image 1 (resolution 0) -> VAEEncode of the crop + SetLatentNoiseMask -> QwenImage21Cache -> KSampler 25 steps, cfg 1, euler, simple -> SplitImageWithAlpha -> Stitch Inpaint (classic, no colour match) back into the full picture. mask = separate uploaded PNG, same size as image, read from the RED channel: white = change (as flux1-fill-inpaint). Removed: Mask by Touch and its SAM 3.1 model (the mask is uploaded), the speed LoRA (off as saved), the crop/pad loader (LoadImage), compare, timer and notes. Prompt: say what goes in the painted area like asking a person (\"Replace the cup with a glass of orange juice\"). Proof [I]: not rendered yet."
+    },
+    {
+      "id": "qwen-image-21-outpaint",
+      "title": "Qwen-Image 2.1 Expand (outpaint-v2 LoRA, Qwen3-VL scene description)",
+      "capability": "outpaint",
+      "file": "qwen-image-21-outpaint.json",
+      "source": "hand-built (scripts/comfy/hand-built/qwen-image-21-outpaint.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "21",
+            "input": "string"
+          }
+        ],
+        "image": [
+          {
+            "node": "10",
+            "input": "image"
+          },
+          {
+            "node": "11",
+            "input": "image"
+          }
+        ],
+        "padLeft": [
+          {
+            "node": "10",
+            "input": "pad_left"
+          },
+          {
+            "node": "11",
+            "input": "pad_left"
+          }
+        ],
+        "padTop": [
+          {
+            "node": "10",
+            "input": "pad_top"
+          },
+          {
+            "node": "11",
+            "input": "pad_top"
+          }
+        ],
+        "padRight": [
+          {
+            "node": "10",
+            "input": "pad_right"
+          },
+          {
+            "node": "11",
+            "input": "pad_right"
+          }
+        ],
+        "padBottom": [
+          {
+            "node": "10",
+            "input": "pad_bottom"
+          },
+          {
+            "node": "11",
+            "input": "pad_bottom"
+          }
+        ],
+        "seed": [
+          {
+            "node": "32",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "32",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "90",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "90",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 25,
+        "padLeft": 384,
+        "padTop": 288,
+        "padRight": 384,
+        "padBottom": 288
+      },
+      "limits": {
+        "padMultiple": 8
+      },
+      "models": [
+        {
+          "file": "qwen_image_2.1_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+          "sizeGb": 7.26
+        },
+        {
+          "file": "qwen3vl_8b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+          "sizeGb": 9.35
+        },
+        {
+          "file": "qwen_image_2.1_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+          "sizeGb": 0.68
+        },
+        {
+          "file": "qwen-image-2.1-outpaint-v2.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/ausboss/Qwen-Image-2.1-Outpaint-LoRA/resolve/main/qwen-image-2.1-outpaint-v2.safetensors",
+          "sizeGb": 0.16
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ausboss-nodes",
+          "repo": "https://github.com/ausboss/ComfyUI-AusBoss"
+        }
+      ],
+      "vramGb": 20,
+      "license": "Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only; outpaint LoRA by AusBoss under the same licence; AusBoss nodes MIT",
+      "validated": false,
+      "notes": "The owner's qwenImage21Outpaint_v12.json as the proven preview graph qwen21-expand runs it (FashDash's expand stage): Crop + Rotate + Pad puts the photo on a gray (#808080) canvas grown by the pads (feather 12, scaled to 1 MP on the 32 grid) -> outpaint-v2 LoRA at 1 -> Qwen3-VL 8B (the same text encoder, TextGenerate, the owner's instruction, seed fixed) describes the picture, \"Outpaint the image: ... Scene:\" leads -> TextEncodeQwenImage21 with the canvas as image 1 -> KSampler 25 steps, cfg 1, euler, simple, no noise mask (it drew a box at the seam) -> SplitImageWithAlpha -> Stitch Inpaint (blend in, tone match 1) -> scaled to the full-size padded canvas, and the original photo composited back on top (second pad node, feather 48). Pads are the input photo's pixels (multiples of 8); defaults 384/288/384/288 = a 1.5x zoom-out of a 1536x1152 photo. Grow at most about the photo's own size per side per run. prompt = the optional \"what goes there\" hint (the lead-in \"Also include in the prompt:\" is added); it must not name the subject, which then appears again in the margin. Removed: AusBoss Seed/Text/Compare/RunTimer/ShowText/WorkflowNote and its SaveImage (SaveImage). Proof [P]: the preview expand stills."
+    },
+    {
+      "id": "ideogram4-t2i",
+      "title": "Ideogram 4 text to image (int8, dual-model guidance, the Quality / Default / Turbo preset table)",
+      "capability": "t2i",
+      "file": "ideogram4-t2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/ideogram4-t2i.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "98:24",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "98:27",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "98:28",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "98:18",
+            "input": "noise_seed"
+          }
+        ],
+        "preset": [
+          {
+            "node": "98:156",
+            "input": "choice"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "158",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "158",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "preset": "Quality"
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "flux2-vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "qwen3vl_8b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors",
+          "sizeGb": 10.59
+        },
+        {
+          "file": "ideogram4_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_int8_convrot.safetensors",
+          "sizeGb": 9.58
+        },
+        {
+          "file": "ideogram4_unconditional_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_unconditional_int8_convrot.safetensors",
+          "sizeGb": 9.58
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Ideogram Non-Commercial Model Agreement: NON-COMMERCIAL (research and personal use; commercial use needs a paid Ideogram licence)",
+      "validated": false,
+      "notes": "The owner's image_ideogram4_t2i_int8.json, exported through the ComfyUI frontend (subgraph 98 flattened, its LLM caption-template subgraph and preview pruned) and rendered as the preview pipeline's A1 [proven]. Kept as saved: the conditional UNET with CFGOverride (cfg 3 for the last 30% of steps) into DualModelGuider cfg 7, whose negative pass is the unconditional UNET on the zeroed prompt; qwen3vl_8b_fp8_scaled loaded as type ideogram4; flux2-vae; EmptyFlux2LatentImage; euler; SamplerCustomAdvanced; width and height rounded up to 16 (at least 256) by its math nodes. The preset table feeds Ideogram4Scheduler (Quality 48 steps / mu 0 / std 1.5, Default 20 / 0 / 1.75, Turbo 12 / 0.5 / 1.75); the graph runs Quality, the recipe of the approved preview stills with people (those without ran Default, as the saved workflow does). No negative prompt: the guidance is asymmetric with a text-free unconditional pass. The prompt is an Ideogram 4 JSON caption (the app writes one from plain words: src/lib/ideogram-caption.ts); plain sentences often come back as the grey \"blocked by safety filter\" card. The Realism Engine LoRA graph is not used (the approved stills are the stock graph)."
+    },
+    {
+      "id": "krea2-realism-t2i",
+      "title": "Krea 2 Realism: Krea 2 Turbo + the Realism V2 LoRA, 6 steps",
+      "capability": "t2i",
+      "file": "krea2-realism-t2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/krea2-realism-t2i.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "6",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "5",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "5",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "loraStrength": [
+          {
+            "node": "15",
+            "input": "strength_model"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "29",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "29",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1536,
+        "height": 1536,
+        "steps": 6,
+        "loraStrength": 1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "krea2_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
+          "sizeGb": 13.49
+        },
+        {
+          "file": "qwen3vl_4b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+          "sizeGb": 5.24
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Krea2-realism-V2.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/RudySen/Krea2-realism-V2/resolve/main/Krea2-realism-V2.safetensors",
+          "sizeGb": 1.56
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 20,
+      "license": "Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); Krea2-realism-V2 LoRA MIT",
+      "validated": false,
+      "notes": "The owner's image_krea2_turbo_t2i_int8.json (the official Krea 2 Turbo graph) with LoraLoaderModelOnly Krea2-realism-V2 at 1.0 after the UNET, run as the realism creator says: euler / simple, 6 steps (4-8), cfg 1 with ConditioningZeroOut, about 2 MP (1 MP gets noisy), detailed natural-language prose. Removed: the style-LoRA and Refine-prompt switches, the ResolutionSelector (explicit width/height, multiple of 16). The preview pipeline rendered these settings with the merged civitai realism checkpoint, which isn't on Hugging Face; the LoRA on the Comfy-Org Turbo is not rendered yet."
+    },
+    {
+      "id": "krea2-turbo-t2i",
+      "title": "Krea 2 Turbo Text to Image (8 steps)",
+      "capability": "t2i",
+      "file": "krea2-turbo-t2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/krea2-turbo-t2i.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "6",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "5",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "5",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "29",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "29",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 8
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "krea2_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
+          "sizeGb": 13.49
+        },
+        {
+          "file": "qwen3vl_4b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+          "sizeGb": 5.24
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 20,
+      "license": "Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it)",
+      "validated": false,
+      "notes": "The owner's image_krea2_turbo_t2i_int8.json as saved: euler / simple, 8 steps, cfg 1 with ConditioningZeroOut, 1024x1024 by default. Removed: the style-LoRA and Refine-prompt switches (the user's LoRAs attach after the UNET as on every graph), the ResolutionSelector (explicit width/height, multiple of 16)."
+    },
+    {
+      "id": "krea2-edit-general",
+      "title": "Krea 2 Edit: Krea 2 Turbo + the General Edit V2 LoRA, instruction edits with an optional second photo",
+      "capability": "edit",
+      "file": "krea2-edit-general.json",
+      "source": "hand-built (scripts/comfy/hand-built/krea2-edit-general.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "84",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "72",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "90",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "82",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "82",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "53",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "53",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "29",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "29",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 8
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "krea2_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
+          "sizeGb": 13.49
+        },
+        {
+          "file": "qwen3vl_4b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+          "sizeGb": 5.24
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "krea2_general_edit_v2.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_general_edit_v2.safetensors",
+          "sizeGb": 1.83
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "comfyui-krea2edit",
+          "repo": "https://github.com/lbouaraba/comfyui-krea2edit"
+        }
+      ],
+      "vramGb": 20,
+      "license": "Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); the Krea 2 General Edit V2 LoRA is NON-COMMERCIAL (commercial use needs a licence from its author)",
+      "validated": false,
+      "notes": "The owner's \"Krea2 Image Edit.json\" (the comfyui-krea2edit graph) with the pack's V2 LoRA krea2_general_edit_v2 at 1.0 → Krea2EditModelPatch (the photo VAE-encoded as source_latent, the pixel path vae + source_image, target_latent = the KSampler's latent, fit_mode fit, ref_boost 4, ref_boost_a 1, both references aligned) → Krea2EditGroundedEncode with the instruction (grounding_px 768) as the positive and an empty one on the same photo as the negative; EmptySD3LatentImage; KSampler 8 steps (the V2 card; the owner's v1.2 graph used 10), cfg 1, euler, simple. image2 is the person for \"put this person in the scene\" (the group the owner ships bypassed): its loader goes when no second photo is given. The output follows image 1 (\"auto\") or the shape asked for; 1 MP is the sweet spot. Removals need the Raw model at cfg 3 (pack README): Turbo at cfg 1 tends to re-render the subject. Not rendered with the V2 LoRA yet."
+    },
+    {
+      "id": "krea2-edit-identity",
+      "title": "Krea 2 Identity Edit: Krea 2 Turbo + the Identity Edit V2 LoRA, a person restaged from one photo",
+      "capability": "edit",
+      "file": "krea2-edit-identity.json",
+      "source": "hand-built (scripts/comfy/hand-built/krea2-edit-identity.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "84",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "72",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "90",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "82",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "82",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "53",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "53",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "29",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "29",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 8
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "krea2_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
+          "sizeGb": 13.49
+        },
+        {
+          "file": "qwen3vl_4b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+          "sizeGb": 5.24
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "krea2_identity_edit_v2.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v2.safetensors",
+          "sizeGb": 1.83
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "comfyui-krea2edit",
+          "repo": "https://github.com/lbouaraba/comfyui-krea2edit"
+        }
+      ],
+      "vramGb": 20,
+      "license": "Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); the Krea 2 Identity Edit V2 LoRA is NON-COMMERCIAL (commercial use needs a licence from its author)",
+      "validated": false,
+      "notes": "krea2-edit-general's graph (the owner's \"Krea2 Image Edit.json\") with krea2_identity_edit_v2 at 1.0, ref_boost 2 and the person aligned (trained): a new place, pose or outfit, the same face. For a distinctive face, end the instruction with \"Preserve the exact facial identity - distinguishing features: ...\" (pack notes). image2 = a second person or the person to put in the scene, dropped when not given. 8 steps, cfg 1, euler, simple. Not rendered with the V2 LoRA yet."
+    },
+    {
+      "id": "krea2-turbo-i2i",
+      "title": "Krea 2 Turbo image to image (your picture redrawn at the strength you pick)",
+      "capability": "edit",
+      "file": "krea2-turbo-i2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/krea2-turbo-i2i.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "megapixels": [
+          {
+            "node": "2",
+            "input": "megapixels"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "6",
+            "input": "text"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "strength": [
+          {
+            "node": "3",
+            "input": "denoise"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "29",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "29",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 8,
+        "strength": 0.6,
+        "megapixels": 2
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "krea2_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
+          "sizeGb": 13.49
+        },
+        {
+          "file": "qwen3vl_4b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+          "sizeGb": 5.24
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 20,
+      "license": "Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it)",
+      "validated": false,
+      "notes": "The base-latent path of the owner's \"krea2SFWNSFWUncensoredImageTo_v10 - steps fixed.json\", built like z-image-turbo-i2i: the picture scaled to about 2 MP on the 16-pixel grid (the workflow scales to 1.98 MP), VAE-encoded, then Krea 2 Turbo's sampler (8 steps, cfg 1, euler, simple: the workflow's \"linear/euler, simple, 8 steps\" in core samplers) at denoise = strength (0.6). Not used: its image-to-prompt and prompt-enhancer branches, the abliterated text encoder, the NSFW LoRA, the RES4LYF second pass and the SeedVR2 upscaler. The result keeps the picture's shape. Not rendered yet."
+    },
+    {
+      "id": "krea2-inpaint",
+      "title": "Krea 2 Inpaint: the masked area painted by the Krea 2 inpaint-edit LoRA (Ostris edit nodes)",
+      "capability": "inpaint",
+      "file": "krea2-inpaint.json",
+      "source": "hand-built (scripts/comfy/hand-built/krea2-inpaint.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "20",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "mask": [
+          {
+            "node": "2",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "23",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "23",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "29",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "29",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 8
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "krea2_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
+          "sizeGb": 13.49
+        },
+        {
+          "file": "qwen3vl_4b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+          "sizeGb": 5.24
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "krea2_inpaint_edit.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Cierpliwy/krea2-inpaint-edit/resolve/main/v1_512/krea2_inpaint_edit.safetensors",
+          "sizeGb": 0.46
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Krea2-Ostris-Edit",
+          "repo": "https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit"
+        }
+      ],
+      "vramGb": 20,
+      "license": "Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); the inpaint-edit LoRA by Cierpliwy under the same licence; ComfyUI-Krea2-Ostris-Edit MIT",
+      "validated": false,
+      "notes": "The edit stage of Cierpliwy's krea2-inpaint-workflows examples (the owner's krea2-inpaint-workflows/): Krea 2 Turbo → LoRA krea2_inpaint_edit at 1.0 (the v1 512 file on the owner's PC; the model card now recommends krea2_inpaint_edit_v2_17500) → Krea2OstrisEditModelPatch with kv_cache on (the card: needed for correct masked editing); TextEncodeKrea2OstrisEdit (clip, vae, image1 = the photo with the masked area black) as the positive, ConditioningZeroOut as the negative; EmptyLatentImage at the reference's size; KSampler 8 steps, cfg 1, euler_ancestral, simple. mask = separate PNG, red channel, white = paint here (the flux1-fill-inpaint convention). The reference is scaled to about 1 MP on the 16-pixel grid (the add-on's limit until ostris PR #10); the whole picture is redrawn, nothing is pasted back. Needs ComfyUI-Krea2-Ostris-Edit, not installed on the validation server. Not rendered yet."
+    },
+    {
+      "id": "krea2-outpaint",
+      "title": "Krea 2 Expand: the canvas grown on black and filled by the Krea 2 inpaint-edit LoRA (Ostris edit nodes)",
+      "capability": "outpaint",
+      "file": "krea2-outpaint.json",
+      "source": "hand-built (scripts/comfy/hand-built/krea2-outpaint.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "20",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "padLeft": [
+          {
+            "node": "8",
+            "input": "left"
+          }
+        ],
+        "padTop": [
+          {
+            "node": "8",
+            "input": "top"
+          }
+        ],
+        "padRight": [
+          {
+            "node": "8",
+            "input": "right"
+          }
+        ],
+        "padBottom": [
+          {
+            "node": "8",
+            "input": "bottom"
+          }
+        ],
+        "seed": [
+          {
+            "node": "23",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "23",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "29",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "29",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 8,
+        "padLeft": 256,
+        "padTop": 256,
+        "padRight": 256,
+        "padBottom": 256
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "padMultiple": 8
+      },
+      "models": [
+        {
+          "file": "krea2_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
+          "sizeGb": 13.49
+        },
+        {
+          "file": "qwen3vl_4b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+          "sizeGb": 5.24
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "krea2_inpaint_edit.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Cierpliwy/krea2-inpaint-edit/resolve/main/v1_512/krea2_inpaint_edit.safetensors",
+          "sizeGb": 0.46
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Krea2-Ostris-Edit",
+          "repo": "https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit"
+        }
+      ],
+      "vramGb": 20,
+      "license": "Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); the inpaint-edit LoRA by Cierpliwy under the same licence; ComfyUI-Krea2-Ostris-Edit MIT",
+      "validated": false,
+      "notes": "krea2-inpaint's edit stage on a bigger canvas, as in the add-on's outpaint_example: the photo on black grown by padLeft/padTop/padRight/padBottom px (ImagePadForOutpaint with feathering 0, then black over its mask: a hard edge like the example's SolidMask canvas), scaled to about 1 MP, then the same LoRA, patch (kv_cache on) and 8 euler_ancestral steps. Default pads 256 px a side (the example grows a 512 px picture by a quarter of its side on each). The prompt describes the whole scene. The v1 512 LoRA was trained without outpainting masks (v2 adds them, model card). Needs ComfyUI-Krea2-Ostris-Edit. Not rendered yet."
+    },
+    {
+      "id": "fibo2-dev-t2i",
+      "title": "FIBO 2 Dev text to image (Qwen3.5 writes the structured VGL prompt)",
+      "capability": "t2i",
+      "file": "fibo2-dev-t2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/fibo2-dev-t2i.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "112",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "94",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "102",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "102",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "3",
+            "input": "cfg"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "56",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "56",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 30,
+        "cfg": 5
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "fibo2_dev_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_dev_int8_convrot.safetensors",
+          "sizeGb": 8.41
+        },
+        {
+          "file": "qwen3vl_4b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors",
+          "sizeGb": 4.86
+        },
+        {
+          "file": "flux2-vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "qwen3.5_9b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/text_encoders/qwen3.5_9b_int8_convrot.safetensors",
+          "sizeGb": 9.75
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "CC-BY-NC-4.0 (Bria FIBO 2.0 weights: NON-COMMERCIAL; commercial use needs a Bria agreement)",
+      "validated": false,
+      "notes": "The owner's fibo/fibo_2_dev_text2image_vgl.json as saved [O]: core TextGenerate on Qwen3.5 9B int8 (CLIPLoader type stable_diffusion, 2048 tokens, sampling off) turns the words into Bria's VGL JSON with the owner's art-director system prompt, and CLIP Text Encode (fibo2, Qwen3-VL 4B int8) encodes it; empty negative, 30 steps, cfg 5, euler / simple. The ResolutionSelector is replaced by an explicit width x height (FIBO 2 is trained at about 1 MP, multiple of 16); the prompt preview and the notes are removed. Not rendered through Fuobe yet (the preview pipeline rendered FIBO 2 Dev from a hand-written VGL prompt through TextEncodeFibo2 at 40 steps)."
+    },
+    {
+      "id": "fibo2-dev-edit",
+      "title": "FIBO 2 Dev image edit, up to 4 references",
+      "capability": "edit",
+      "file": "fibo2-dev-edit.json",
+      "source": "hand-built (scripts/comfy/hand-built/fibo2-dev-edit.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "112",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "112",
+            "input": "negative_prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "113",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "116",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "117",
+            "input": "image"
+          }
+        ],
+        "image4": [
+          {
+            "node": "118",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "3",
+            "input": "cfg"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "56",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "56",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 30,
+        "cfg": 5
+      },
+      "limits": {},
+      "models": [
+        {
+          "file": "fibo2_dev_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_dev_int8_convrot.safetensors",
+          "sizeGb": 8.41
+        },
+        {
+          "file": "qwen3vl_4b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors",
+          "sizeGb": 4.86
+        },
+        {
+          "file": "flux2-vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+          "sizeGb": 0.34
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "license": "CC-BY-NC-4.0 (Bria FIBO 2.0 weights: NON-COMMERCIAL; commercial use needs a Bria agreement)",
+      "validated": false,
+      "notes": "The owner's fibo/fibo_2_dev_image_edit_multi.json as saved [O]: image 1 scaled to 1 MP and to a multiple of 16 (bicubic), the other references straight into TextEncodeFibo2 (images.image_2..4: the owner's graph wires two, 3 and 4 are wired the same way). The encoder gives the conditioning and the latent at the trained size of image 1's shape (width = height = 0); empty negative (the null caption FIBO 2 was trained with), 30 steps, cfg 5, euler / simple. One picture is scaled and centre-cropped to the result (the edit lines up with it pixel for pixel); several are each scaled to their own trained size. References not given are left out of the encoder. The instruction names the pictures <image_1>, <image_2>... The VGL edit graphs (a 9.75 GB prompt writer on every edit) are not adopted. Not rendered through Fuobe yet."
+    },
+    {
+      "id": "fibo2-edit-turbo-edit",
+      "title": "FIBO 2 Edit Turbo image edit (4 steps), up to 4 references",
+      "capability": "edit",
+      "file": "fibo2-edit-turbo-edit.json",
+      "source": "hand-built (scripts/comfy/hand-built/fibo2-edit-turbo-edit.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "112",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "113",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "116",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "117",
+            "input": "image"
+          }
+        ],
+        "image4": [
+          {
+            "node": "118",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "56",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "56",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 4
+      },
+      "limits": {},
+      "models": [
+        {
+          "file": "fibo2_edit_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_edit_turbo_int8_convrot.safetensors",
+          "sizeGb": 8.41
+        },
+        {
+          "file": "qwen3vl_4b_int8_convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors",
+          "sizeGb": 4.86
+        },
+        {
+          "file": "flux2-vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+          "sizeGb": 0.34
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "license": "CC-BY-NC-4.0 (Bria FIBO 2.0 weights: NON-COMMERCIAL; commercial use needs a Bria agreement)",
+      "validated": false,
+      "notes": "The owner's fibo/fibo_2_edit_turbo_image_edit_multi.json as saved [O]: fibo2-dev-edit on the Edit Turbo weights, 4 steps, cfg 1 (no negative pass), euler / simple; references 3 and 4 wired like reference 2, and left out when not given. Edits only: none of the owner's graphs runs the turbo weights for text to image. Not rendered through Fuobe yet."
     },
     {
       "id": "ltx23-i2v-lora",

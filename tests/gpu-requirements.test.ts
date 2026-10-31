@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { buildIndex, hfParts, indexHash, loadInputs, PT_EXTENSIONS } from "../scripts/comfy/build-requirements.mjs";
+import { buildIndex, hfParts, indexHash, loadInputs, packOfClass, PT_EXTENSIONS } from "../scripts/comfy/build-requirements.mjs";
 import { CUSTOM_NODE_REPOS } from "../scripts/comfy/library.spec.mjs";
 import type { Manifest } from "@/lib/comfy";
 import type { RequirementIndex } from "@/lib/gpu/types";
@@ -111,6 +111,35 @@ describe("requirements.json", () => {
   it("stays within its size budget (200 KB, 25 KB gzipped)", () => {
     expect(Buffer.byteLength(text)).toBeLessThanOrEqual(200 * 1024);
     expect(zlib.gzipSync(text).length).toBeLessThanOrEqual(25 * 1024);
+  });
+});
+
+describe("which pack a node class belongs to (packOfClass)", () => {
+  // A ComfyUI with comfyui-workflow-encrypt reports that pack as the module of other packs' classes.
+  const WRAPPED = "custom_nodes.comfyui-workflow-encrypt";
+
+  it("takes the pack PACK_CLASSES names, whatever module the server reports", () => {
+    expect(packOfClass("AUSBOSS_NODES_StitchInpaint", WRAPPED)).toBe("ausboss-nodes");
+    expect(packOfClass("Krea2EditGroundedEncode", WRAPPED)).toBe("comfyui-krea2edit");
+    expect(packOfClass("H3RelayWindowPlan", undefined)).toBe("h3-relay");
+  });
+
+  it("else the module's pack, else the pack the committed subset recorded", () => {
+    expect(packOfClass("VHS_LoadVideo", "custom_nodes.ComfyUI-VideoHelperSuite")).toBe("ComfyUI-VideoHelperSuite");
+    expect(packOfClass("ImageResizeKJv2", WRAPPED, "custom_nodes.ComfyUI-KJNodes")).toBe("ComfyUI-KJNodes");
+  });
+
+  it("refuses to guess when only the wrapper names a class", () => {
+    expect(() => packOfClass("SomeNewNode", WRAPPED)).toThrow(/can't tell which pack SomeNewNode/);
+    expect(() => packOfClass("SomeNewNode", WRAPPED, WRAPPED)).toThrow(/PACK_CLASSES/);
+  });
+
+  it("records the committed subset's custom classes under packs that packs.json pins", () => {
+    const subset = JSON.parse(read("object_info.subset.json")) as Record<string, { python_module?: string } | null>;
+    for (const [cls, e] of Object.entries(subset)) {
+      const pack = /^custom_nodes.([^.]+)/.exec(e?.python_module ?? "")?.[1];
+      if (pack) expect(packs[pack], `${cls}: ${pack}`).toBeDefined();
+    }
   });
 });
 

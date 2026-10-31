@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SPEC, KNOWN_MODELS, CUSTOM_NODE_REPOS, PACK_CLASSES } from './library.spec.mjs';
 import * as G from './lib/graph.mjs';
 import { resolveSource } from './export-templates.mjs';
-import { writeIndex } from './build-requirements.mjs';
+import { packOfClass, writeIndex } from './build-requirements.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -218,6 +218,7 @@ async function main() {
   const sizeCache = readJson(SIZE_CACHE, {});
   const state = readJson(STATE_FILE, {});
   const prevManifest = readJson(path.join(OUT_DIR, 'manifest.json'), { workflows: [] });
+  const prevSubset = readJson(path.join(OUT_DIR, 'object_info.subset.json'), {});
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   const ids = new Set();
@@ -368,8 +369,12 @@ async function main() {
     const custom = new Set();
     for (const n of Object.values(graph)) {
       const mod = objectInfo[n.class_type]?.python_module || '';
-      const m = mod.match(/^custom_nodes\.([^.]+)/);
-      if (m) custom.add(m[1]);
+      if (!mod.startsWith('custom_nodes.')) continue;
+      try {
+        custom.add(packOfClass(n.class_type, mod, prevSubset[n.class_type]?.python_module));
+      } catch (e) {
+        errs.push(e.message);
+      }
     }
     // Packs this server doesn't have installed (their classes have no python_module here): declared by the entry.
     for (const p of spec.packs || []) custom.add(p);

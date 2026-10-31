@@ -162,7 +162,8 @@ export const CUSTOM_NODE_REPOS = {
 };
 
 // Node classes of the packs entries list in `packs` (packs the validation server doesn't have installed): the build
-// expects them instead of reporting "not installed", and the entry's customNodes name the pack.
+// expects them instead of reporting "not installed", and the entry's customNodes name the pack. A class listed here
+// belongs to that pack whatever module the server reports for it (packOfClass in build-requirements.mjs).
 export const PACK_CLASSES = {
   h3_character_swap: /^H3CharacterSwap/,
   'h3-relay': /^(H3Relay|LabsH3)/,

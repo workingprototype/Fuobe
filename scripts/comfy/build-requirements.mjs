@@ -27,8 +27,27 @@ export const LIBRARY = path.join(REPO, 'workflows', 'comfyui');
 export const PT_EXTENSIONS = ['.ckpt', '.pt', '.pt2', '.bin', '.pth', '.safetensors', '.pkl', '.sft'];
 
 /** Core classes of the newest families, read one by one when /object_info can't be: an older ComfyUI lacks them first. */
-const NEWEST_CORE = /^(SeedVR2|Trellis2|SAM3|LTXV|LTXAV|ComfyMathExpression)/;
+const NEWEST_CORE = /^(SeedVR2|Trellis2|SAM3|LTXV|LTXAV|ComfyMathExpression|TextEncodeQwenImage21|QwenImage21Cache|Ideogram4|TextEncodeFibo2|DualModelGuider|CFGOverride)/;
 const NEWEST_CORE_MODULES = new Set(['comfy_extras.nodes_bg_removal']);
+
+// A pack that registers other packs' nodes again under its own name: on a ComfyUI that has it, /object_info gives
+// its module for their classes (1,700 of them on one server), so it never names a class's pack.
+const WRAPPER_PACKS = new Set(['comfyui-workflow-encrypt']);
+
+/**
+ * The pack a custom class belongs to, from its python_module on the server: the pack PACK_CLASSES names for it, else
+ * the module's pack, else (a wrapper pack's module) the pack the committed object_info.subset.json recorded. Throws
+ * when none of these tells.
+ */
+export function packOfClass(cls, pythonModule, recordedModule, packClasses = PACK_CLASSES) {
+  const named = Object.entries(packClasses).find(([, re]) => re.test(cls))?.[0];
+  if (named) return named;
+  const pack = /^custom_nodes\.([^.]+)/.exec(pythonModule || '')?.[1];
+  if (pack && !WRAPPER_PACKS.has(pack)) return pack;
+  const recorded = /^custom_nodes\.([^.]+)/.exec(recordedModule || '')?.[1];
+  if (recorded && !WRAPPER_PACKS.has(recorded)) return recorded;
+  throw new Error(`can't tell which pack ${cls} belongs to (the server names ${pack ?? 'none'}); add it to PACK_CLASSES`);
+}
 
 /** A manifest URL as it is pinned and compared: without the `?download=true` some templates carry. */
 export const cleanUrl = (u) => u.replace(/\?download=true$/, '');
