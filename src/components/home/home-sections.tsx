@@ -88,7 +88,7 @@ function Cards({ items, className, wide = items.length, lg = wide }: { items: Ho
     <HomeRail className={cn("gap-0 scroll-px-2.5 max-sm:px-2.5 sm:-mx-1.5", className)}>
       {items.map(({ card, caption }, i) => (
         <div key={card.id} className={cn(RAIL_ITEM, i >= wide && "sm:hidden", i >= lg && "lg:max-xl:hidden")}>
-          <PresetCard preset={card} href={presetHref(card.id)} caption={caption} delay={staggered(i)} sizes={CARD_SIZES} bare />
+          <PresetCard preset={card} href={presetHref(card.id)} caption={caption} place={staggered(i)} sizes={CARD_SIZES} bare />
         </div>
       ))}
     </HomeRail>
@@ -214,7 +214,7 @@ export function StudiosSection({ facts, studios, audioTools, pills }: Pick<HomeS
         {studios.map((s, i) => (
           <div key={s.href} className={RAIL_ITEM}>
             {s.card ? (
-              <StudioCard href={s.href} label={s.label} line={s.line} card={s.card} zoom={!s.card.preview.video} delay={staggered(i)} sizes={STUDIO_SIZES} />
+              <StudioCard href={s.href} label={s.label} line={s.line} card={s.card} zoom={!s.card.preview.video} place={staggered(i)} sizes={STUDIO_SIZES} />
             ) : (
               <AudioCard href={s.href} label={s.label} line={s.line} tools={audioTools} />
             )}

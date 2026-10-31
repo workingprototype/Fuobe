@@ -52,12 +52,21 @@ export const NARROW = 640;
 
 export const maxPlaying = (viewportWidth: number) => (viewportWidth < NARROW ? MAX_PLAYING.narrow : MAX_PLAYING.wide);
 
+/** The cycle a row's clips start on (Home's wall and rows): eight places, 350 ms apart. */
+export const STAGGER_CYCLE = 2800;
+
 /**
- * How long (ms) the clip of a row's `i`th card waits on its still before it plays by itself (Home's wall and rows):
- * the clips picked together start apart, so they never loop in step (every effect clip is 4 s long) and some card
- * is always at its height.
+ * The place (ms into STAGGER_CYCLE) where the clip of a row's `i`th card starts playing by itself: the clips of a row
+ * start apart, so they never loop in step (every effect clip is 4 s long) and some card is always at its height.
  */
-export const staggered = (i: number) => (i % 8) * 350;
+export const staggered = (i: number) => (i % 8) * (STAGGER_CYCLE / 8);
+
+/**
+ * How long (ms) from `now` (performance.now()) until the shared clock next reaches `place` in the cycle. A clip waits
+ * for that once it's ready, not for a fixed time from when it was asked for, so clips that take longer or shorter to
+ * load still start at their own places.
+ */
+export const untilPlace = (place: number, now: number) => (((place - now) % STAGGER_CYCLE) + STAGGER_CYCLE) % STAGGER_CYCLE;
 
 /** What a preview shows: a real cover's clip, a procedural animation, or a still. */
 export type PreviewKind = "clip" | "procedural" | "still";

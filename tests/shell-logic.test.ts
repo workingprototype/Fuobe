@@ -30,7 +30,9 @@ import {
   playsWhenAsked,
   previewKind,
   SCROLL_SETTLE,
+  STAGGER_CYCLE,
   staggered,
+  untilPlace,
   type PlaybackEnv,
   type PlaybackStore,
 } from "@/lib/preview-playback";
@@ -487,11 +489,23 @@ describe("preview playback store", () => {
     expect([store.isPlaying("r0c0"), store.isAsked("r0c0")]).toEqual([true, false]);
   });
 
-  it("starts the clips of a row apart (Home), each within three seconds", () => {
-    const waits = Array.from({ length: 8 }, (_, i) => staggered(i));
-    expect(waits[0]).toBe(0);
-    expect(new Set(waits).size).toBe(8);
-    expect(Math.max(...waits)).toBeLessThan(3000);
+  it("starts the clips of a row at their own places in a shared cycle, however long each took to load (Home)", () => {
+    const places = Array.from({ length: 8 }, (_, i) => staggered(i));
+    expect(places[0]).toBe(0);
+    expect(new Set(places).size).toBe(8);
+    expect(Math.max(...places)).toBeLessThan(STAGGER_CYCLE);
+    // Ready at any moment, each clip waits for its place: they start apart by its distance from the others'.
+    for (const now of [0, 1234.5, 99_999.9]) {
+      const starts = places.map((p) => now + untilPlace(p, now));
+      for (const [i, s] of starts.entries()) {
+        expect(s - now).toBeGreaterThanOrEqual(0);
+        expect(s - now).toBeLessThan(STAGGER_CYCLE);
+        expect((((s - places[i]) % STAGGER_CYCLE) + STAGGER_CYCLE) % STAGGER_CYCLE).toBeCloseTo(0, 6);
+      }
+    }
+    // One ready late waits for its next turn, not a fixed time.
+    expect(untilPlace(350, 4 * STAGGER_CYCLE + 350)).toBe(0);
+    expect(untilPlace(350, 4 * STAGGER_CYCLE + 400)).toBeCloseTo(STAGGER_CYCLE - 50, 6);
   });
 
   it("with reduced motion a hover or tap plays a clip, but a procedural preview keeps its poster", () => {

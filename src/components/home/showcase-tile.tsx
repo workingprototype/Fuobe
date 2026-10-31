@@ -41,7 +41,7 @@ export function ShowcaseTile({ card, kind, caption, href, index }: { card: Prese
           hue={card.hue}
           playing={playing}
           asked={asked}
-          delay={staggered(index)}
+          place={staggered(index)}
           sizes={SIZES}
           loading={index < 4 ? "eager" : "lazy"}
           fetchPriority={index === 0 ? "high" : undefined}

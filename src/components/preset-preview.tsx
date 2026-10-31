@@ -18,7 +18,7 @@ import {
 } from "@/lib/preset-cards";
 import { releaseVideo } from "@/lib/media-release";
 import { glyphFor } from "@/lib/move-glyphs";
-import { autoplays, browserPlaybackEnv, createPlaybackStore, playsWhenAsked, previewKind, type AutoPlay } from "@/lib/preview-playback";
+import { autoplays, browserPlaybackEnv, createPlaybackStore, playsWhenAsked, previewKind, untilPlace, type AutoPlay } from "@/lib/preview-playback";
 import { cn } from "@/lib/utils";
 
 /** Which previews play, shared by every card and the preset header (rules in lib/preview-playback.ts). */
@@ -279,6 +279,9 @@ function Fx({ fx, scene }: { fx: NonNullable<Preview["fx"]>; scene: PreviewScene
   }
 }
 
+/** When the clips' shared cycle began (performance.now()), set by the first clip ready to play by itself (Clip). */
+let cycleStart: number | undefined;
+
 /**
  * A real cover's clip, mounted only while it plays (a browser allows a page only so many live
  * players, a phone fewer), over the poster until its first frame is ready. The poster is that
@@ -287,35 +290,47 @@ function Fx({ fx, scene }: { fx: NonNullable<Preview["fx"]>; scene: PreviewScene
  * A card resting on the clip's peak frame (`rest`) starts from that frame when it plays by itself,
  * and shows once the seek there is done, with a short fade. Its loop comes back to just before the
  * change starts (`rest.from`), not to the clip's still opening, and a hover or tap (`asked`) starts
- * there, so the change builds up at once. `delay` (ms) holds a clip that plays by itself on the still
- * for a moment first, so the clips of a row don't all loop in step.
+ * there, so the change builds up at once.
+ *
+ * `place` (staggered) holds a clip that plays by itself on its first frame, once it's ready, until
+ * the shared clock reaches that place in its cycle (untilPlace): the clips of a row start apart
+ * however long each one takes to load, so they never loop in step. The clock starts with the first
+ * clip ready, which plays at once. A hover or tap never waits.
  */
-function Clip({ src, rest, asked, delay = 0 }: { src: string; rest?: Preview["rest"]; asked: boolean; delay?: number }) {
+function Clip({ src, rest, asked, place }: { src: string; rest?: Preview["rest"]; asked: boolean; place?: number }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
-  const [due, setDue] = useState(!delay);
-  // Where it starts, fixed when it does: asked for, at once; by itself, once its delay is over.
-  const [start, setStart] = useState<number>();
-  if (start === undefined && (asked || due)) setStart(rest ? (asked ? rest.from : rest.at) : 0);
-  useEffect(() => {
-    if (due) return;
-    const t = setTimeout(() => setDue(true), delay);
-    return () => clearTimeout(t);
-  }, [due, delay]);
-  const started = start !== undefined;
+  // Where it starts, fixed when it mounts: asked for, where the change starts; by itself, the frame the card rests on.
+  const [start] = useState(() => (rest ? (asked ? rest.from : rest.at) : 0));
+  const [due, setDue] = useState(place === undefined || asked);
+  if (!due && asked) setDue(true);
   // A layout effect: a page kept hidden after navigating away (Activity) keeps its elements, and a
   // video only stops when told to. The source is set here too, so a page shown again plays again.
+  // It plays at once, which is what makes a phone load it; a clip with a place to wait for holds below.
   useLayoutEffect(() => {
     const v = ref.current;
-    if (!v || !started) return;
+    if (!v) return;
     v.src = src;
     void v.play().catch(() => {});
     return () => {
       releaseVideo(v);
       setReady(false);
     };
-  }, [src, started]);
-  const seeks = !!start;
+  }, [src]);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || !ready) return;
+    if (due) {
+      if (v.paused) void v.play().catch(() => {});
+      return;
+    }
+    v.pause();
+    const now = performance.now();
+    cycleStart ??= now - place!;
+    const t = setTimeout(() => setDue(true), untilPlace(place!, now - cycleStart));
+    return () => clearTimeout(t);
+  }, [ready, due, place]);
+  const seeks = start > 0;
   return (
     <video
       ref={ref}
@@ -351,7 +366,7 @@ export const PresetPreview = memo(function PresetPreview({
   hue,
   playing,
   asked = false,
-  delay,
+  place,
   flip,
   loading = "lazy",
   fetchPriority,
@@ -362,8 +377,8 @@ export const PresetPreview = memo(function PresetPreview({
   playing: boolean;
   /** It plays because the viewer asked (usePreviewPlayback's `asked`): a clip resting on its peak starts where the change starts. */
   asked?: boolean;
-  /** How long (ms) a clip that plays by itself waits on its still first (Clip). */
-  delay?: number;
+  /** Where (ms into the shared cycle, staggered) a clip that plays by itself starts, holding its first frame till then (Clip). */
+  place?: number;
   /** Mirror the still (see previewFlip). */
   flip?: boolean;
   /** A real cover's still: "eager" above the fold (Home's wall), lazy everywhere else. */
@@ -397,7 +412,7 @@ export const PresetPreview = memo(function PresetPreview({
           className="absolute inset-0 size-full object-cover"
           aria-hidden
         />
-        {preview.video && playing && <Clip src={preview.video} rest={preview.rest} asked={asked} delay={delay} />}
+        {preview.video && playing && <Clip src={preview.video} rest={preview.rest} asked={asked} place={place} />}
       </>
     );
   }

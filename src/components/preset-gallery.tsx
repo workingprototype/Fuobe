@@ -37,7 +37,7 @@ export const PresetCard = memo(function PresetCard({
   compact,
   bare,
   caption,
-  delay,
+  place,
   sizes,
   engine,
   gpu,
@@ -50,8 +50,8 @@ export const PresetCard = memo(function PresetCard({
   bare?: boolean;
   /** A short line in place of the description (Home's rows); the description stays the tooltip. */
   caption?: string;
-  /** How long (ms) its clip waits on the still before it plays by itself (PresetPreview). */
-  delay?: number;
+  /** Where in the shared cycle its clip starts when it plays by itself (PresetPreview). */
+  place?: number;
   /** How wide its picture shows (PresetPreview). */
   sizes?: string;
   /** Settings → Engine mode: with one engine locked in, the other's chip would suggest a route the user turned off. */
@@ -72,7 +72,7 @@ export const PresetCard = memo(function PresetCard({
       className="group/card flex min-w-0 flex-col gap-2 rounded-xl p-1.5 transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-muted">
-        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} asked={asked} delay={delay} sizes={sizes} flip={previewFlip(preset)} />
+        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} asked={asked} place={place} sizes={sizes} flip={previewFlip(preset)} />
         {!bare && (
           <>
             <span className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/40 to-transparent" />

@@ -77,7 +77,7 @@ export function StudioCard({
   line,
   card,
   zoom,
-  delay,
+  place,
   sizes,
 }: {
   href: string;
@@ -85,14 +85,14 @@ export function StudioCard({
   line: string;
   card: PresetCardData;
   zoom?: boolean;
-  delay?: number;
+  place?: number;
   sizes?: string;
 }) {
   const { ref, playing, asked, handlers } = usePreviewPlayback<HTMLAnchorElement>(card.id, card.preview, { auto: "touch" });
   return (
     <IntentLink ref={ref} href={href} {...handlers} className="group/studio flex min-w-0 flex-col gap-2 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <StudioPicture zoom={zoom}>
-        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} asked={asked} delay={delay} sizes={sizes} />
+        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} asked={asked} place={place} sizes={sizes} />
       </StudioPicture>
       <StudioName label={label} line={line} />
     </IntentLink>
