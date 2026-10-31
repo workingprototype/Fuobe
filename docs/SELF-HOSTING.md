@@ -58,7 +58,7 @@ Each connection field in Settings has **Save & test**: what you typed is tested 
 
 ## Keys, data and files
 
-Keys (and Assist connectors' URLs and tokens) are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser in full. Generated media is saved under `data/files/`, and LoRAs downloaded only to copy them to fal or Replicate, and your trained Soul ID LoRAs, under `data/loras/`. Fuobe is single-user.
+Keys (and Assist connectors' URLs and tokens) are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser in full. Generated media is saved under `data/files/`, and LoRAs downloaded only to copy them to fal or Replicate, and your trained Soul ID LoRAs, under `data/loras/`. One person owns a Fuobe studio. With public sign-up on, other people can make free accounts that run on their own GPU; you see what they make in **Settings → Accounts** ([public-signup.md](public-signup.md)).
 
 ## Security
 
