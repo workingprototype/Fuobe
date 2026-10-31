@@ -40,7 +40,7 @@ import { IntentLink } from "@/components/intent-link";
 import { JobNotifications } from "@/components/job-notifications";
 import { NAV, type NavGroupDef } from "@/components/nav-items";
 import { SkillBuilderProvider } from "@/components/skills/skill-builder-provider";
-import { CONNECT_GPU_EVENT, signInHref, useEngineMode, useStatus, useViewer, type StatusInfo } from "@/lib/api";
+import { CONNECT_GPU_EVENT, signInHref, useEngineMode, useHydrated, useStatus, useViewer, type StatusInfo } from "@/lib/api";
 import { deviceLabel } from "@/lib/gpu/readiness";
 import { useModKey } from "@/lib/keys";
 import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, NEW_CREATION_HREF, parseClosed, scrollFades, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
@@ -530,8 +530,11 @@ export function AppSidebar() {
     if (isMobile && (e.target as Element).closest("a[href]")) setOpenMobile(false);
   };
   const content = useScrollFades<HTMLDivElement>();
-  const status = useStatus().data;
-  const computer = useViewer().data?.computer === true;
+  // Until hydrated, the server's (status-less) sidebar: a status that lands mid-hydration must not change it.
+  const hydrated = useHydrated();
+  const statusData = useStatus().data;
+  const status = hydrated ? statusData : undefined;
+  const computer = useViewer().data?.computer === true && hydrated;
   const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured);
   const comfy = status?.providers.comfyui?.configured;
   const mode = useEngineMode();

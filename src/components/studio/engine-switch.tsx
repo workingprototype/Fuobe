@@ -5,7 +5,7 @@ import Link from "next/link";
 import { openAddKey } from "@/components/keys/your-keys";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Engine } from "@/lib/catalog/types";
-import { useEngineMode, useStatus, useViewer } from "@/lib/api";
+import { useEngineMode, useHydrated, useStatus, useViewer } from "@/lib/api";
 import { accountEngine } from "@/lib/your-keys";
 import { cn } from "@/lib/utils";
 import { radioKeys, radioTab } from "./radio-keys";
@@ -32,10 +32,14 @@ export function EngineSwitch({
   compact?: boolean;
 }) {
   const mode = useEngineMode();
+  // Until hydrated, the server's switch (as useEngineMode): a viewer or status that lands mid-hydration must not change it.
+  const hydrated = useHydrated();
+  const viewer = useViewer().data;
+  const status = useStatus().data;
   // Only the owner can change the engine mode (Settings): anyone else gets a plain badge, not a link to a page they can't use.
-  const owner = useViewer().data?.owner === true;
+  const owner = hydrated && viewer?.owner === true;
   // An account (public sign-up): locked on open source until it adds its own key, and why; with one, who pays.
-  const account = accountEngine(useStatus().data);
+  const account = accountEngine(hydrated ? status : undefined);
   const locked = account && "locked" in account ? account.locked : null;
   const idx = OPTIONS.findIndex((o) => o.value === value);
   if (mode !== "both" || locked) {
