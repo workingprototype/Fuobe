@@ -207,9 +207,10 @@ Rules:
 - Keep the idea's subject and intent. Write in English. No other keys (no aspect_ratio).`;
 
 /**
- * An Ideogram 4 caption for some words at a picture size: an LLM's (Claude, else a local model), checked and asked once more
- * when it breaks the rules, else the plain wrapper. An account's run has no LLM here, so it gets the wrapper.
+ * An Ideogram 4 caption for some words at a picture size: the local model's (the open engine never calls a paid API, so
+ * never Claude: the run is free), checked and asked once more when it breaks the rules, else the plain wrapper. An
+ * account's run has no LLM here, so it gets the wrapper (the Image studio opens such viewers on Qwen-Image 2.1).
  */
 export function ideogramCaption(words: string, size: { width?: number; height?: number } = {}): Promise<string> {
-  return writeCaption(words, size, (request) => llmText(IDEOGRAM_SYSTEM, request, { json: "object" }));
+  return writeCaption(words, size, (request) => llmText(IDEOGRAM_SYSTEM, request, { json: "object", ollamaOnly: true }));
 }

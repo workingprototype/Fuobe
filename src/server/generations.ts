@@ -13,7 +13,7 @@ import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type Rev
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, framesWait, keyframeChain } from "@/lib/catalog/keyframes";
 import { clipWindowProblem } from "@/lib/catalog/clip-windows";
-import { avatarSeconds, clipEditSeconds, estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
+import { avatarSeconds, clipEditSeconds, estimateCost, inferOperation, movedAppRequest, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, loraName, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
@@ -48,6 +48,7 @@ import {
 import { db } from "./db";
 import { listElements } from "./elements";
 import { markStale } from "./gpu/snapshots";
+import { BLOCKED_CARD_MESSAGE, looksBlocked } from "./safety-card";
 import { pollTrainings } from "./training";
 import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt, enhanceSoulWords, ideogramCaption } from "./enhance";
@@ -525,11 +526,15 @@ setResolver((ids) =>
 
 /**
  * A request as it runs now: one that names a model (or an operation) Fuobe retired when it stopped calling Higgsfield moves
- * to what replaced it (src/lib/catalog/replaced.ts), with Cinema Studio's Director fields in words. Every way in goes
- * through it (the API, a retry, a waiting step, a saved project's run); `note` says what changed.
+ * to what replaced it (src/lib/catalog/replaced.ts), with Cinema Studio's Director fields in words; an app run on the model
+ * its app ran on before moves to the app's model now (movedAppRequest). Every way in goes through it (the API, a retry, a
+ * waiting step, a saved project's run); `note` says what changed.
  */
 export function currentRequest(req: GenerationRequest): { request: GenerationRequest; note?: string } {
-  return migrateRequest(req, { directorWords: directorFieldWords });
+  const moved = migrateRequest(req, { directorWords: directorFieldWords });
+  const app = movedAppRequest(moved.request, getModel, getPreset);
+  const note = [moved.note, app.note].filter(Boolean).join("; ");
+  return { request: app.request, ...(note && { note }) };
 }
 
 /**
@@ -1768,6 +1773,21 @@ async function pollOne(r: Row): Promise<void> {
         console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
       }
     }
+  }
+  // Ideogram 4's grey "blocked by safety filter" card is no picture (src/server/safety-card.ts): it is deleted, and a run
+  // left with nothing else fails, saying what to try.
+  if (model.options.promptFormat === "ideogram4") {
+    const cards = new Set<OutputFile>();
+    for (const o of outputs) {
+      const png = o.kind === "image" && o.assetId ? await readRef(o.url).catch(() => null) : null;
+      if (png && looksBlocked(png.data)) cards.add(o);
+    }
+    for (const o of cards) deleteAsset(o.assetId!);
+    if (cards.size && cards.size === outputs.length) {
+      update(r.id, { status: "failed", error: BLOCKED_CARD_MESSAGE, completed_at: Date.now(), message: null });
+      return;
+    }
+    if (cards.size) outputs.splice(0, outputs.length, ...outputs.filter((o) => !cards.has(o)));
   }
   // Fuobe Soul: what follows in the browser (the look's grade, an overlay, Soul Cinema's 21:9 crop), on each image;
   // API clients read it as meta.

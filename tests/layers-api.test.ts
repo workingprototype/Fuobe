@@ -120,8 +120,9 @@ describe("job steps", () => {
 
   it("generates a new transparent layer from text or a reference", () => {
     const t = steps({ tool: "generate-layer", engine: "open", image: undefined, prompt: "a red balloon" });
+    // Qwen-Image 2.1 first: Ideogram 4's safety filter answers most lone objects on a plain background with a grey card.
     expect(t.map((x) => [x.request.modelId, x.request.op])).toEqual([
-      ["oss-ideogram-4", "t2i"],
+      ["oss-qwen-image-21", "t2i"],
       ["oss-rmbg", "bg-remove"],
     ]);
     expect(t[0].request.prompt).toMatch(/^a red balloon\. A single element, isolated/);

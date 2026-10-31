@@ -31,6 +31,9 @@ const { createGenerations, getGeneration } = await import("@/server/generations"
 const { mockProvider } = await import("@/server/providers/mock");
 const { prepareWorkflow } = await import("@/server/providers/comfyui");
 const { ideogramCaption } = await import("@/server/enhance");
+const { looksBlocked } = await import("@/server/safety-card");
+const { encodePng } = await import("@/server/png");
+const { listAssets } = await import("@/server/storage");
 const { getModel, getPreset, MODELS } = await import("@/lib/catalog");
 const { planGeneration } = await import("@/lib/catalog/plan");
 const { computeDimensions } = await import("@/lib/comfy");
@@ -253,6 +256,19 @@ describe("Ideogram 4 captions", () => {
     expect(await ideogramCaption("a red fox")).toBe(captionFromWords("a red fox"));
     expect(llm.seen).toHaveLength(2);
   });
+
+  it("never asks Claude, even with a key and the AI helper set to Anthropic: a run on your GPU stays free", async () => {
+    setSetting("enhanceProvider", "anthropic");
+    setSetting("anthropicKey", "sk-ant-not-a-key");
+    try {
+      llm.answers = [good];
+      expect(await ideogramCaption("a model on a villa terrace")).toBe(good);
+      expect(llm.seen).toHaveLength(1);
+    } finally {
+      setSetting("anthropicKey", "");
+      setSetting("enhanceProvider", "none");
+    }
+  });
 });
 
 describe("Ideogram 4 on the open engine", () => {
@@ -368,5 +384,55 @@ describe("Ideogram 4 runs", () => {
     const { g, handed } = await run("a red fox in deep snow");
     expect(g.prompt).toBe(captionFromWords("a red fox in deep snow"));
     expect(handed[0].prompt).toBe(g.prompt);
+  });
+});
+
+describe("Ideogram 4's grey safety card", () => {
+  /** A picture drawn pixel by pixel, as a PNG. */
+  const png = (w: number, h: number, at: (x: number, y: number) => [number, number, number]) => {
+    const data = Buffer.alloc(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data.set([...at(x, y), 255], (y * w + x) * 4);
+    return encodePng({ width: w, height: h, data });
+  };
+  // The card: flat, slightly warm mid-grey, one line of dark type across the middle.
+  const card = png(640, 480, (x, y) => (y > 232 && y < 248 && x > 180 && x < 460 && x % 4 < 2 ? [58, 58, 57] : [120, 118, 116]));
+  const gradient = png(640, 480, (x, y) => [Math.round((x / 639) * 255), Math.round((y / 479) * 255), 128]);
+  const greyWall = png(640, 480, (_x, y) => {
+    const v = 60 + Math.round((y / 479) * 130);
+    return [v, v, v];
+  });
+
+  it("finds the card, and leaves pictures alone, a grey one too", () => {
+    expect(looksBlocked(card)).toBe(true);
+    expect(looksBlocked(gradient)).toBe(false);
+    expect(looksBlocked(greyWall)).toBe(false);
+    expect(looksBlocked(Buffer.from("not a picture"))).toBe(false);
+  });
+
+  /** A demo run of Ideogram 4 whose GPU answers with this picture. */
+  async function answered(picture: Buffer) {
+    const poll = mockProvider.poll;
+    mockProvider.poll = async (ctx) => (ctx.model.id === "oss-ideogram-4" ? { state: "succeeded", outputs: [{ url: `data:image/png;base64,${picture.toString("base64")}`, kind: "image" }] } : poll(ctx));
+    try {
+      setSetting("enhanceProvider", "none");
+      const [g] = createGenerations({ feature: "image", modelId: "oss-ideogram-4", prompt: "a red fox in deep snow" });
+      return await settled(g.id);
+    } finally {
+      mockProvider.poll = poll;
+    }
+  }
+
+  it("fails the run with what to try, and keeps no file of it", async () => {
+    const g = await answered(card);
+    expect(g.status).toBe("failed");
+    expect(g.error).toBe("Ideogram 4's safety filter blocked this picture and sent its grey card instead. Run it again for a new seed, or try Qwen-Image 2.1 or Krea 2 Realism.");
+    expect(g.outputs).toEqual([]);
+    expect(listAssets({ source: "generation", limit: 1000 }).filter((a) => a.generationId === g.id)).toEqual([]);
+  });
+
+  it("keeps a real picture", async () => {
+    const g = await answered(gradient);
+    expect(g.status, g.error ?? "").toBe("succeeded");
+    expect(g.outputs).toHaveLength(1);
   });
 });

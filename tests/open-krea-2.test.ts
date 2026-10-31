@@ -53,7 +53,8 @@ describe("Krea 2 in the catalog", () => {
     const m = getModel(id)!;
     expect(m, id).toBeDefined();
     expect(m).toMatchObject({ engine: "open", vendor: "Krea", family: "krea", kind: "image" });
-    expect(m.badges).toEqual(expect.arrayContaining(["open", "new"]));
+    // Krea 2 Inpaint has no `new`: it stays out of Inpaint's Best list while its add-on isn't on the owner's ComfyUI.
+    expect(m.badges).toEqual(expect.arrayContaining(id === "oss-krea2-inpaint" ? ["open"] : ["open", "new"]));
     // Taglines tell people what the GPU and the licence ask of them.
     expect(m.tagline).toMatch(/20 GB GPU/);
     expect(Object.fromEntries(m.routes.map((r) => [r.op, r.endpoint]))).toEqual(ops);
@@ -111,7 +112,8 @@ describe("Krea 2 graphs", () => {
     expect(wf["5"].inputs).toMatchObject({ width: 2048, height: 1152 });
     expect(wf["3"].inputs).toMatchObject({ seed: 7, steps: 6, cfg: 1, sampler_name: "euler", scheduler: "simple", model: ["15", 0], negative: ["13", 0] });
     expect(wf["15"]).toMatchObject({ class_type: "LoraLoaderModelOnly", inputs: { lora_name: "Krea2-realism-V2.safetensors", strength_model: 1, model: ["10", 0] } });
-    expect(wf["10"].inputs.unet_name).toBe("krea2_turbo_int8_convrot.safetensors");
+    // The fp8 Krea 2 Turbo the owner's edit workflow loads (his PC has no int8 build of Comfy-Org's).
+    expect(wf["10"].inputs.unet_name).toBe("krea2_turbo_fp8_scaled.safetensors");
     expect(wf["11"].inputs).toMatchObject({ clip_name: "qwen3vl_4b_fp8_scaled.safetensors", type: "krea2" });
     // The Realism slider reaches the LoRA.
     const softer = await prepare("krea2-realism-t2i", { prompt: "x", extra: { loraStrength: 0.7 } }, "t2i");
@@ -248,6 +250,16 @@ describe("Krea 2 files, packs and licences", () => {
 
   it("names the Krea 2 Turbo and text encoder files the ComfyUI may hold in another precision", () => {
     expect(KNOWN_MODELS["krea2_turbo_int8_convrot.safetensors"].variants).toEqual(["krea2_turbo_fp8_scaled.safetensors", "krea2_turbo_bf16.safetensors"]);
+    // Every new Krea 2 graph loads the fp8 build, pinned to Comfy-Org's revision with the Hugging Face API's size and SHA-256.
+    for (const id of ["krea2-realism-t2i", "krea2-turbo-t2i", "krea2-edit-general", "krea2-edit-identity", "krea2-turbo-i2i", "krea2-inpaint", "krea2-outpaint"]) {
+      expect(entry(id).models.map((f) => f.file), id).toContain("krea2_turbo_fp8_scaled.safetensors");
+      expect(entry(id).models.map((f) => f.file), id).not.toContain("krea2_turbo_int8_convrot.safetensors");
+    }
+    expect(pins[KNOWN_MODELS["krea2_turbo_fp8_scaled.safetensors"].url]).toEqual({
+      revision: "1171f4dc7e325bf3734586942e737872506c73e1",
+      sizeBytes: 13141730784,
+      sha256: "eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1",
+    });
     expect(KNOWN_MODELS["qwen3vl_4b_fp8_scaled.safetensors"].variants).toEqual(["qwen3vl_4b_int8_convrot.safetensors", "qwen3vl_4b_bf16.safetensors"]);
   });
 

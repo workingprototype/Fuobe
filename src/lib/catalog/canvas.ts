@@ -1972,13 +1972,13 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
 // Effects 2.0 chains (build plan O13): Higgsfield's "Prompt based" effect chains as Fuobe templates. A photo goes
 // through an image edit that sets the scene, then Fuobe DoP animates it with the effect's words (research
 // higgsfield-originals-5.md §3.8: an image edit, then image to video). Both steps are open weights on both engines:
-// Qwen-Image-Edit 2511 (on your GPU, or hosted on fal) and Fuobe DoP (Wan 2.2 14B on your GPU, or hosted on fal).
+// Qwen-Image 2.1 on your GPU (Qwen-Image-Edit 2511 hosted on fal) and Fuobe DoP (Wan 2.2 14B on your GPU, or hosted on fal).
 // The edit prompts are Fuobe's own words; the motion is the effect's own prompt from the effects catalog.
 
 export const EFFECT_CHAIN_GROUP = "Effects 2.0 chains";
 
 /** Image edit, then image to video: the models per engine (Fuobe DoP is an Original, run on the template's engine). */
-export const EFFECT_CHAIN_MODELS = { edit: { cloud: "qwen-image-edit-2511-cloud", open: "oss-qwen-edit" }, video: "fuobe-dop" } as const;
+export const EFFECT_CHAIN_MODELS = { edit: { cloud: "qwen-image-edit-2511-cloud", open: "oss-qwen-image-21" }, video: "fuobe-dop" } as const;
 
 /** The researched Effects 2.0 chains with a scene to set first: the effect (its name in the effects catalog) and the edit. */
 export const EFFECT_CHAINS: { effect: string; edit: string; icon: string; hue: number }[] = [

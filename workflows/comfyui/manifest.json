@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-31T10:53:21.234Z",
+  "generatedAt": "2026-10-31T12:47:46.118Z",
   "comfyuiCommit": "5841c187a76ffdb565c14d9565aacbdb9a54b056",
   "comfyuiVersion": "0.42.0",
   "workflowTemplatesVersion": "0.11.93",
@@ -1300,10 +1300,10 @@
           "sizeGb": 5.41
         },
         {
-          "file": "qwen3.5_9b_w4a8_gptq.safetensors",
+          "file": "qwen3.5_9b_int8_convrot.safetensors",
           "folder": "text_encoders",
-          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
-          "sizeGb": 7.34
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/text_encoders/qwen3.5_9b_int8_convrot.safetensors",
+          "sizeGb": 9.75
         },
         {
           "file": "flux2-vae_small.safetensors",
@@ -1317,13 +1317,20 @@
           "url": "https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/resolve/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors",
           "sizeGb": 5.41,
           "optional": true
+        },
+        {
+          "file": "moss_image_base_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_base_int8_convrot.safetensors",
+          "sizeGb": 5.41,
+          "optional": true
         }
       ],
       "customNodes": [],
       "vramGb": 16,
-      "license": "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
-      "validated": true,
-      "notes": "Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org's template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; width / height are the layout's canvas (multiples of 16, up to 2048). Standard = the template: 25 steps, CFG 2.5, er_sde / simple, skip-layer guidance on layer 22 for the first half; Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic's SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested). vramGb 16 is a guess: there is no official figure; about 13 GB of files (DiT 5.4 + encoder 7.3 + VAE 0.25) and ComfyUI offloads. The int8 / w4a8 files run through comfy-kitchen's kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. Validated by /prompt on the CPU library server only: no render, speed or text accuracy measured here."
+      "license": "Apache-2.0 (MOSS-Image SFT and Base, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
+      "validated": false,
+      "notes": "Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org's template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; width / height are the layout's canvas (multiples of 16, up to 2048). Standard = the template: 25 steps, CFG 2.5, er_sde / simple, skip-layer guidance on layer 22 for the first half; Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic's SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested); Base = MOSS-Image Base (unet, the owner's image_moss_image_base_t2i) at 50 steps, CFG 3, euler, the preview pipeline's moss-base settings. The text encoder is qwen3.5_9b_int8_convrot, not the template's qwen3.5_9b_w4a8_gptq: loading the w4a8 build after other model families faulted the NVIDIA driver and restarted Windows on 2026-10-23; the preview pipeline then ran 23 MOSS renders (SFT and Base) on the int8 file with no fault. vramGb 16 is a guess: there is no official figure; about 15 GB of files (DiT 5.4 + encoder 9.7 + VAE 0.25) and ComfyUI offloads. The int8 files run through comfy-kitchen's kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. Validated by /prompt on the CPU library server with the w4a8 encoder; the int8 encoder is not validated by /prompt here."
     },
     {
       "id": "qwen-image-edit-2509",
@@ -10027,10 +10034,10 @@
       },
       "models": [
         {
-          "file": "krea2_turbo_int8_convrot.safetensors",
+          "file": "krea2_turbo_fp8_scaled.safetensors",
           "folder": "diffusion_models",
-          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
-          "sizeGb": 13.49
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+          "sizeGb": 13.14
         },
         {
           "file": "qwen3vl_4b_fp8_scaled.safetensors",
@@ -10119,10 +10126,10 @@
       },
       "models": [
         {
-          "file": "krea2_turbo_int8_convrot.safetensors",
+          "file": "krea2_turbo_fp8_scaled.safetensors",
           "folder": "diffusion_models",
-          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
-          "sizeGb": 13.49
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+          "sizeGb": 13.14
         },
         {
           "file": "qwen3vl_4b_fp8_scaled.safetensors",
@@ -10217,10 +10224,10 @@
       },
       "models": [
         {
-          "file": "krea2_turbo_int8_convrot.safetensors",
+          "file": "krea2_turbo_fp8_scaled.safetensors",
           "folder": "diffusion_models",
-          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
-          "sizeGb": 13.49
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+          "sizeGb": 13.14
         },
         {
           "file": "qwen3vl_4b_fp8_scaled.safetensors",
@@ -10326,10 +10333,10 @@
       },
       "models": [
         {
-          "file": "krea2_turbo_int8_convrot.safetensors",
+          "file": "krea2_turbo_fp8_scaled.safetensors",
           "folder": "diffusion_models",
-          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
-          "sizeGb": 13.49
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+          "sizeGb": 13.14
         },
         {
           "file": "qwen3vl_4b_fp8_scaled.safetensors",
@@ -10429,10 +10436,10 @@
       },
       "models": [
         {
-          "file": "krea2_turbo_int8_convrot.safetensors",
+          "file": "krea2_turbo_fp8_scaled.safetensors",
           "folder": "diffusion_models",
-          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
-          "sizeGb": 13.49
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+          "sizeGb": 13.14
         },
         {
           "file": "qwen3vl_4b_fp8_scaled.safetensors",
@@ -10512,10 +10519,10 @@
       },
       "models": [
         {
-          "file": "krea2_turbo_int8_convrot.safetensors",
+          "file": "krea2_turbo_fp8_scaled.safetensors",
           "folder": "diffusion_models",
-          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
-          "sizeGb": 13.49
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+          "sizeGb": 13.14
         },
         {
           "file": "qwen3vl_4b_fp8_scaled.safetensors",
@@ -10629,10 +10636,10 @@
       },
       "models": [
         {
-          "file": "krea2_turbo_int8_convrot.safetensors",
+          "file": "krea2_turbo_fp8_scaled.safetensors",
           "folder": "diffusion_models",
-          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors",
-          "sizeGb": 13.49
+          "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+          "sizeGb": 13.14
         },
         {
           "file": "qwen3vl_4b_fp8_scaled.safetensors",

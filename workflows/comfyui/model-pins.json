@@ -129,6 +129,11 @@
   "sizeBytes": 10588637512,
   "sha256": "4ba424cf62e51392e4d1a39933e803706f4e823c1065f36aaf149c6453f66bcd"
  },
+ "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors": {
+  "revision": "1171f4dc7e325bf3734586942e737872506c73e1",
+  "sizeBytes": 13141730784,
+  "sha256": "eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1"
+ },
  "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors": {
   "revision": "1171f4dc7e325bf3734586942e737872506c73e1",
   "sizeBytes": 13492686496,
@@ -148,6 +153,11 @@
   "revision": "5b072540ef86570fecb8249c505f23d5bdeb88cd",
   "sizeBytes": 335304388,
   "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+ },
+ "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_base_int8_convrot.safetensors": {
+  "revision": "530a4c94f92c35ef6818b1b035a983fe9dcf5f54",
+  "sizeBytes": 5413698958,
+  "sha256": "f601c1e1161915fb3fea003da0c1782e374dd960fbb3978bc0e4e3fa1f2d8e6f"
  },
  "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_sft_int8_convrot.safetensors": {
   "revision": "530a4c94f92c35ef6818b1b035a983fe9dcf5f54",

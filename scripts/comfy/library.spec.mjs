@@ -234,7 +234,10 @@ export const KNOWN_MODELS = {
   // comfyui-oss-3 additions (docs/research/comfyui-oss-3.json, sizes from the Hugging Face tree API)
   // MOSS-Image (research #7 §4.4): Comfy-Org's int8 / w4a8 set (the Comfy template's) at a pinned commit, and Spectrallic's SFT with the
   // 8-step DMD LoRA merged in, a drop-in UNET for the Fast tier (Apache-2.0 throughout; the small VAE is byte-identical to BFL's FLUX.2-small-decoder).
+  // The graph loads the int8 Qwen3.5-9B (its row is with FIBO 2's below), not the w4a8 one: that build faulted the NVIDIA driver here (2026-10-23).
   'moss_image_sft_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_sft_int8_convrot.safetensors' },
+  // MOSS-Image Base, the model before its SFT (the owner's image_moss_image_base_t2i): Quality → Base swaps it in (unet).
+  'moss_image_base_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_base_int8_convrot.safetensors' },
   'qwen3.5_9b_w4a8_gptq.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors' },
   'flux2-vae_small.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/vae/flux2-vae_small.safetensors' },
   'moss_image_sft_8stepdmd_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/resolve/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors' },
@@ -328,8 +331,11 @@ export const KNOWN_MODELS = {
   'krea2_general_edit_v2.safetensors': { folder: 'loras', url: 'https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_general_edit_v2.safetensors' },
   'krea2_identity_edit_v2.safetensors': { folder: 'loras', url: 'https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v2.safetensors' },
   'krea2_inpaint_edit.safetensors': { folder: 'loras', url: 'https://huggingface.co/Cierpliwy/krea2-inpaint-edit/resolve/main/v1_512/krea2_inpaint_edit.safetensors' },
+  // Krea 2 Turbo in fp8, the same weights as the int8 row above: the file the owner's "Krea2 Image Edit.json" loads and his PC has,
+  // so the new Krea 2 graphs run it (Krea 2 Style Reference keeps the int8 file).
+  'krea2_turbo_fp8_scaled.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors' },
   // owner's SOTA families (2026-10-31): FIBO 2. The VAE is the existing flux2-vae row. The text-to-image graph's prompt writer is
-  // Qwen3.5 9B int8 from Comfy-Org's MOSS-Image repository (MOSS-Image itself runs the w4a8 build above). `variants`: the same
+  // Qwen3.5 9B int8 from Comfy-Org's MOSS-Image repository (MOSS-Image's own encoder too). `variants`: the same
   // weights in another precision in the same repo.
   'fibo2_dev_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_dev_int8_convrot.safetensors', variants: ['fibo2_dev_bf16.safetensors'] },
   'fibo2_edit_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_edit_turbo_int8_convrot.safetensors', variants: ['fibo2_edit_turbo_bf16.safetensors'] },
@@ -712,20 +718,23 @@ export const SPEC = [
     outputs: [{ node: '10', kind: 'image' }],
     defaults: { sampler: 'er_sde', scheduler: 'simple', unet: 'moss_image_sft_int8_convrot.safetensors' },
     limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
-    optionalModels: ['moss_image_sft_8stepdmd_int8_convrot.safetensors'],
+    optionalModels: ['moss_image_sft_8stepdmd_int8_convrot.safetensors', 'moss_image_base_int8_convrot.safetensors'],
     vramGb: 16,
-    // §4.5: each file's licence, the optional Fast file's too (Spectrallic's card is Apache-2.0).
+    // §4.5: each file's licence, the optional Fast and Base files' too (Spectrallic's card is Apache-2.0).
     license:
-      "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; " +
+      "Apache-2.0 (MOSS-Image SFT and Base, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; " +
       "Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
     notes:
       'Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org\'s template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. ' +
       'The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; ' +
       'width / height are the layout\'s canvas (multiples of 16, up to 2048). Standard = the template: 25 steps, CFG 2.5, er_sde / simple, skip-layer guidance on layer 22 for the first half; ' +
-      'Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic\'s SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested). ' +
-      'vramGb 16 is a guess: there is no official figure; about 13 GB of files (DiT 5.4 + encoder 7.3 + VAE 0.25) and ComfyUI offloads. ' +
-      'The int8 / w4a8 files run through comfy-kitchen\'s kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. ' +
-      'Validated by /prompt on the CPU library server only: no render, speed or text accuracy measured here.',
+      'Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic\'s SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested); ' +
+      'Base = MOSS-Image Base (unet, the owner\'s image_moss_image_base_t2i) at 50 steps, CFG 3, euler, the preview pipeline\'s moss-base settings. ' +
+      'The text encoder is qwen3.5_9b_int8_convrot, not the template\'s qwen3.5_9b_w4a8_gptq: loading the w4a8 build after other model families faulted the NVIDIA driver and restarted Windows ' +
+      'on 2026-10-23; the preview pipeline then ran 23 MOSS renders (SFT and Base) on the int8 file with no fault. ' +
+      'vramGb 16 is a guess: there is no official figure; about 15 GB of files (DiT 5.4 + encoder 9.7 + VAE 0.25) and ComfyUI offloads. ' +
+      'The int8 files run through comfy-kitchen\'s kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. ' +
+      'Validated by /prompt on the CPU library server with the w4a8 encoder; the int8 encoder is not validated by /prompt here.',
   },
   {
     id: 'qwen-image-edit-2509',
@@ -2336,8 +2345,9 @@ export const SPEC = [
       'No negative prompt: the guidance is asymmetric with a text-free unconditional pass. The prompt is an Ideogram 4 JSON caption (the app writes one from plain words: src/lib/ideogram-caption.ts); ' +
       'plain sentences often come back as the grey "blocked by safety filter" card. The Realism Engine LoRA graph is not used (the approved stills are the stock graph).',
   },
-  // ---- Owner's SOTA image families: Krea 2 (2026-10-31). Every graph runs Krea 2 Turbo (krea2_turbo_int8_convrot), Qwen3-VL 4B
-  // (CLIPLoader type krea2) and the Qwen-Image VAE; Krea's in-graph "Refine prompt" TextGenerate is left out (Fuobe's Enhance does it).
+  // ---- Owner's SOTA image families: Krea 2 (2026-10-31). Every graph runs Krea 2 Turbo (krea2_turbo_fp8_scaled, as the owner's edit
+  // workflow does), Qwen3-VL 4B (CLIPLoader type krea2) and the Qwen-Image VAE; Krea's in-graph "Refine prompt" TextGenerate is left out
+  // (Fuobe's Enhance does it).
   {
     id: 'krea2-realism-t2i',
     title: 'Krea 2 Realism: Krea 2 Turbo + the Realism V2 LoRA, 6 steps',

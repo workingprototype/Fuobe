@@ -464,13 +464,16 @@ node validate-workflows.mjs moss-image-t2i --shared
 
 | id | capability | what | validated here |
 |---|---|---|---|
-| `moss-image-t2i` | t2i | `UNETLoader` (SFT int8; `unet`) → `CLIPLoader` qwen3.5-9b w4a8, type `moss_image` → `VAELoader` FLUX.2 small → `CLIPTextEncode` ×2 (the prompt: plain words or a compiled layout, verbatim) → `EmptyFlux2LatentImage` (`width` / `height`: the layout's canvas) → `SkipLayerGuidanceDiTSimple` (layer 22, first half) → `KSampler` (`steps`, `cfg`, `sampler`, `scheduler`) → `VAEDecode` → `SaveImage` | `/prompt` only (CPU, zero-byte model stand-ins): no render here |
+| `moss-image-t2i` | t2i | `UNETLoader` (SFT int8; `unet`) → `CLIPLoader` qwen3.5-9b int8, type `moss_image` → `VAELoader` FLUX.2 small → `CLIPTextEncode` ×2 (the prompt: plain words or a compiled layout, verbatim) → `EmptyFlux2LatentImage` (`width` / `height`: the layout's canvas) → `SkipLayerGuidanceDiTSimple` (layer 22, first half) → `KSampler` (`steps`, `cfg`, `sampler`, `scheduler`) → `VAEDecode` → `SaveImage` | `/prompt` only with the w4a8 encoder (CPU, zero-byte model stand-ins); the int8 one is not checked by `/prompt` yet; no render here |
 
-- **Weights** (13 GB): Comfy-Org/MOSS-Image at `530a4c94f92c35ef6818b1b035a983fe9dcf5f54` (diffusion model 5.41 GB, text encoder
-  7.34 GB, small VAE 0.25 GB), and, for the Fast setting only, Spectrallic's SFT with the 8-step DMD LoRA merged in (5.41 GB,
-  `optionalModels`). All Apache-2.0. The Workflows page's install commands fetch them; nothing is downloaded at build time.
+- **Weights** (15 GB): Comfy-Org/MOSS-Image at `530a4c94f92c35ef6818b1b035a983fe9dcf5f54` (diffusion model 5.41 GB, small VAE
+  0.25 GB) and its int8 Qwen3.5-9B text encoder (9.75 GB, the row FIBO 2 shares), and, for the Fast setting only, Spectrallic's SFT
+  with the 8-step DMD LoRA merged in (5.41 GB), for Base only MOSS-Image Base int8 (5.41 GB; both `optionalModels`). All Apache-2.0.
+  Not the template's w4a8 encoder: loading it after other model families faulted the NVIDIA driver and restarted Windows on the
+  owner's PC (2026-10-23); the preview pipeline then ran 23 MOSS renders on the int8 file with no fault. The Workflows page's install commands fetch them; nothing is downloaded at build time.
 - **Settings**: Standard is the Comfy template's (25 steps, CFG 2.5, er_sde / simple), Best OpenMOSS's guide (50, 3, euler),
-  Fast the DMD file at 8 steps and CFG 1 (`ModelOptions.controls[].sets` on `oss-moss-image` writes them).
+  Fast the DMD file at 8 steps and CFG 1, Base the Base file at 50 steps, CFG 3, euler (`ModelOptions.controls[].sets` on
+  `oss-moss-image` writes them).
 - **Canvas**: a size the request names (`params.extra.width` / `height`, a layout's canvas) is fitted to the 16-pixel grid
   and 2048 px a side with its shape kept (`fitCanvas` in `src/lib/comfy.ts`), as fal's `image_size` is, so both engines
   render one size (2560 × 1000 becomes 2048 × 800 on both).
@@ -479,7 +482,7 @@ node validate-workflows.mjs moss-image-t2i --shared
 - **Not installed on purpose**: LinXce's Comfyui-Moss-LayoutPrompt (its `MOSSImageLayoutPrompt` id collides with core's) and
   OpenMOSS's loader pack (core's native path is what its own README recommends). Fuobe compiles layouts itself
   (`src/lib/layout-prompt.ts`).
-- **GPU**: no official VRAM figure (16 GB is a guess with ComfyUI's offloading). comfy-kitchen's int8 / w4a8 kernels need a
+- **GPU**: no official VRAM figure (16 GB is a guess with ComfyUI's offloading). comfy-kitchen's int8 kernels need a
   PyTorch built for CUDA 13 (cu130); otherwise `comfy/quant_ops.py` turns them off with a warning.
 
 ## Owner's SOTA image families (2026-10-31)
@@ -526,9 +529,13 @@ from an example and not rendered yet.
   (`packOfClass` in `build-requirements.mjs`).
 - **Weights** (about 92 GB new, revisions, sizes and SHA-256 from the Hugging Face API in `model-pins.json`): the int8 builds
   of Comfy-Org's Ideogram-4, Qwen-Image-2.1, Fibo-2.0 and MOSS-Image (Qwen3.5 9B) repositories, AusBoss's outpaint LoRA and
-  the Krea 2 LoRAs (Realism V2, General and Identity Edit V2, inpaint-edit v1 512). `variants` in `KNOWN_MODELS` names the same
-  weights in another precision in the same repository (Krea 2 Turbo's fp8 and bf16 builds, …); nothing reads it yet, so a
-  ComfyUI with only those builds still needs the pinned file.
+  the Krea 2 LoRAs (Realism V2, General and Identity Edit V2, inpaint-edit v1 512). The Krea 2 graphs load Comfy-Org's fp8 Krea 2
+  Turbo (`krea2_turbo_fp8_scaled`, 13.14 GB), the build the owner's edit workflow loads and his PC has. `variants` in
+  `KNOWN_MODELS` names the same weights in another precision in the same repository (Krea 2 Turbo's bf16 build, …); nothing
+  reads it yet, so a ComfyUI with only those builds still needs the pinned file.
+- **Ideogram 4's safety card**: when its filter refuses a prompt, the graph saves a flat grey "Image blocked by safety filter"
+  card. `src/server/safety-card.ts` (the preview pipeline's `blocked-check.mjs`) finds it in a finished run's picture: the card
+  is deleted and the run fails with what to try.
 - **Licences, as information**: Qwen-Image 2.1 and Ideogram 4 weights are non-commercial, FIBO 2 CC BY-NC 4.0, Krea 2 the
   Krea 2 Community License (the edit LoRAs non-commercial without their author's licence).
 - **GPU**: 20–24 GB estimates (`vramGb`), none measured here. ComfyUI 0.42.0 or newer: `TextEncodeQwenImage21`,

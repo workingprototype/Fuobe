@@ -18,6 +18,9 @@ export const IMAGE_STUDIO: StudioConfig = {
   slots: [],
   multiRef: { label: "Add ref", max: 8 },
   defaultModels: { cloud: "nano-banana-pro", open: "oss-ideogram-4" },
+  // Ideogram 4 runs on a caption the install's local model writes: an account, a guest or an install with none opens on
+  // Qwen-Image 2.1, the next pick (plain words give Ideogram's grey safety card on about half the pictures of people).
+  uncaptioned: { open: "oss-qwen-image-21" },
   // A model's own settings (MOSS-Image's Quality, Ideogram's speed) sit under "Options".
   controlsTitle: "Options",
   // Color signature + Moodboard chips, and the models they can move a request to. Fuobe Soul's PixeletedFace look runs

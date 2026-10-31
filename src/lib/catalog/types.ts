@@ -517,6 +517,16 @@ export interface ModelRoute {
    * Other routes on the graph refuse a LoRA rather than swap out the one its settings are tuned for.
    */
   loraSlot?: true;
+  /**
+   * A ComfyUI graph that takes no size: its picture follows image 1 (Qwen-Image 2.1's and FIBO 2 Dev's edits, Qwen-Image
+   * 2.1's inpaint) or the canvas its pads grow (expand). The composer shows no Aspect ratio or Resolution for its operation.
+   */
+  unsized?: true;
+  /**
+   * The most images this route reads, when fewer than the model's options.maxImages (Qwen-Image 2.1's inpaint and expand
+   * read the picture alone; its edit takes 4): the composer offers no more for its operation, and the plan refuses more.
+   */
+  maxImages?: number;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";

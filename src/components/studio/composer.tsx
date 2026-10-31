@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToday } from "@/hooks/use-today";
-import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
+import { estimateCost, imageLimit, planGeneration, routesFor } from "@/lib/catalog/plan";
 import type { Engine, GenerationRequest, MediaKind, ModelDef, Operation, Preset, VideoFormat } from "@/lib/catalog/types";
 import { dualEngine } from "@/lib/catalog/engines";
 import { locksByDefault } from "@/lib/catalog/palettes";
@@ -63,6 +63,8 @@ import {
   settingsShape,
   showsPrompt,
   startStep,
+  viewerDefaults,
+  writesCaptions,
 } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { toastError } from "@/lib/refusals";
@@ -289,6 +291,10 @@ export function Composer({ docked }: { docked: boolean }) {
     if (needsFull) void loadFullCatalog();
   }, [needsFull]);
 
+  // The studio's defaults as this viewer runs them: Ideogram 4 gives way to its stand-in where the server writes no caption.
+  const writes = writesCaptions(status);
+  const defaults = useMemo(() => viewerDefaults(config.defaultModels, config.uncaptioned, writes), [config.defaultModels, config.uncaptioned, writes]);
+
   // Keep the selected model in sync with the engine switch. A camera motion or effect keeps its Original (Fuobe DoP),
   // moving to the model its move names on this engine (Jib Up: Fuobe DoP on the GPU, Fuobe DoP · LTX in the cloud) when
   // the engine changes; the same Original on the other engine takes that engine's defaults (480p on the GPU, 720p in the
@@ -298,7 +304,7 @@ export function Composer({ docked }: { docked: boolean }) {
     const before = seen.current;
     seen.current = { engine, model };
     if (!model) return;
-    const next = engineSwitchModel({ model, preset, engine, from: before.engine, defaults: config.defaultModels });
+    const next = engineSwitchModel({ model, preset, engine, from: before.engine, defaults });
     const m = next ? catalog.getModel(next) : undefined;
     if (!m) {
       if (before.engine === engine || before.model?.id !== model.id || before.model === model) return;
@@ -314,13 +320,24 @@ export function Composer({ docked }: { docked: boolean }) {
     // replaced it, and swapping it for the engine's default would undo the link (it landed on Z-Image Turbo).
     const route = m.id === presetModel(preset, engine) ? presetParams(preset, engine) : {};
     setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
-  }, [engine, model, preset, config.defaultModels, setDraft, catalog]);
+  }, [engine, model, preset, defaults, setDraft, catalog]);
+
+  // Where the server can't write Ideogram 4's caption (writesCaptions), the studio's untouched default moves to its stand-in
+  // once the status is known. Ideogram 4 picked after that stays.
+  const captionChecked = useRef(false);
+  useEffect(() => {
+    if (captionChecked.current || writes === undefined || !model) return;
+    captionChecked.current = true;
+    const to = defaults[engine];
+    const m = to !== model.id && model.id === config.defaultModels[engine] && !lockedModel ? catalog.getModel(to) : undefined;
+    if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
+  }, [writes, model, defaults, engine, config.defaultModels, lockedModel, catalog, setDraft]);
 
   // Settings → Models & licences switched the model off (a default, a remembered pick, a Reuse, a link): the composer
   // moves to the studio's default on this engine, else the first model of its list that is on, and says so. With
   // none on, Generate says what to turn on (accessError).
   const offModel = model && !catalog.offered(model.id, engine) ? model : undefined;
-  const fallback = offModel ? [config.defaultModels[engine], ...models.filter((m) => m.engine === engine).map((m) => m.id)].find((id) => !!id && catalog.offered(id, engine) && !!catalog.getModel(id)) : undefined;
+  const fallback = offModel ? [defaults[engine], ...models.filter((m) => m.engine === engine).map((m) => m.id)].find((id) => !!id && catalog.offered(id, engine) && !!catalog.getModel(id)) : undefined;
   useEffect(() => {
     if (!offModel || !fallback || lockedModel) return;
     const m = catalog.getModel(fallback)!;
@@ -348,11 +365,11 @@ export function Composer({ docked }: { docked: boolean }) {
     const want = presetOriginal(preset, engine);
     if (!preset || !want || !model || adoptedPreset.current === preset.id) return;
     adoptedPreset.current = preset.id;
-    if (model.id === want || model.id !== config.defaultModels[engine]) return;
+    if (model.id === want || model.id !== defaults[engine]) return;
     const m = catalog.getModel(want);
     const route = presetParams(preset, engine);
     if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
-  }, [preset, engine, model, config.defaultModels, catalog, setDraft]);
+  }, [preset, engine, model, defaults, catalog, setDraft]);
   // A link to a camera motion or effect Fuobe doesn't have (?preset=nope): once every preset is known, the composer
   // drops it and says so, so the chip doesn't wait on it and a plain prompt runs.
   const unknownPreset = catalog.complete && !!draft.presetId && !takesLook && !preset;
@@ -373,12 +390,14 @@ export function Composer({ docked }: { docked: boolean }) {
     [baseSlots, model?.options.imageLabels, config.multiRef?.label, draft.refs.length],
   );
   const slots = named.slots;
-  // Clips: ComfyUI joins 4 at a time. Images: what the model takes beyond the fixed image slots.
+  // Clips: ComfyUI joins 4 at a time. Images: what the model takes beyond the fixed image slots, for the operation the run
+  // will be (a painted mask makes it an inpaint, which Qwen-Image 2.1 runs on the picture alone).
+  const refOp = studioOp ?? (draft.slots.mask?.ref && model && routesFor(model, "inpaint").length ? "inpaint" : undefined);
   const refMax = !config.multiRef
     ? 0
     : config.multiRef.kind === "video"
       ? Math.min(config.multiRef.max, model?.engine === "open" ? 4 : config.multiRef.max)
-      : Math.min(config.multiRef.max, Math.max(0, (opts.maxImages ?? 1) - slots.filter((s) => s.accept === "image").length));
+      : Math.min(config.multiRef.max, Math.max(0, ((model ? imageLimit(model, refOp) : opts.maxImages) ?? 1) - slots.filter((s) => s.accept === "image").length));
   const attach = useAttach(slots, refMax);
 
   // Frames mode (Video studio): up to 10 stills at their times, as the picked model can take them.
@@ -989,7 +1008,7 @@ export function Composer({ docked }: { docked: boolean }) {
                   value={model}
                   engine={engine}
                   onEngineChange={setEngine}
-                  defaultModels={config.defaultModels}
+                  defaultModels={defaults}
                   ops={pickerOps}
                   onChange={pickModel}
                 />

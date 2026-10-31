@@ -224,13 +224,14 @@ export const TOOL_LABELS: Record<LayerTool, string> = {
 
 /**
  * Models each tool offers, per engine (the first is the default). Checked against the catalog in tests. On the open
- * engine the owner's newest models come first (Qwen-Image 2.1 edits, inpaints and expands; Ideogram 4 makes a layer).
+ * engine the owner's newest models come first: Qwen-Image 2.1 edits, inpaints, expands and makes a layer. Ideogram 4 comes
+ * second for a layer: its safety filter answers most lone objects on a plain background with a grey card.
  */
 export const TOOL_MODELS: Record<LayerTool, { cloud: string[]; open: string[] }> = {
   decompose: { cloud: ["seedream-5-layers", "seedream-5-flash-layers", "qwen-image-layered-cloud"], open: ["oss-qwen-layered"] },
   split: { cloud: ["seedream-5-layers", "seedream-5-flash-layers", "qwen-image-layered-cloud"], open: ["oss-qwen-layered", "oss-qwen-layered-control"] },
   regenerate: { cloud: ["nano-banana-pro", "seedream-5-pro", "nano-banana-2"], open: ["oss-qwen-image-21", "oss-qwen-image-21-turbo", "oss-qwen-edit", "oss-flux-kontext"] },
-  "generate-layer": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-ideogram-4", "oss-qwen-image-21", "oss-z-image-turbo", "oss-qwen-image"] },
+  "generate-layer": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-qwen-image-21", "oss-ideogram-4", "oss-z-image-turbo", "oss-qwen-image"] },
   // Ideogram ($0.09) also lifts the text off the picture, which the editor doesn't use; Florence-2 only
   // reads it (fal lists $0 per compute second, real cost unverified: the catalog's $0.001 is a placeholder).
   "text-detect": { cloud: ["ideogram-3-text-layers", "florence-2-ocr"], open: ["oss-ocr-lines"] },

@@ -54,18 +54,20 @@ export const TRYON_PROMPT = "a full-body photo of a person. Replace the outfit w
 /**
  * MOSS-Image's sampler settings on your GPU (the graph's own defaults are Standard): Standard is Comfy's template
  * (25 steps, CFG 2.5, er_sde), Quality OpenMOSS's guide (50 steps, CFG 3, euler), Fast Spectrallic's SFT with the
- * 8-step DMD LoRA merged in (8 steps, CFG 1; a 5.4 GB file of its own; untested on layouts).
+ * 8-step DMD LoRA merged in (8 steps, CFG 1; a 5.4 GB file of its own; untested on layouts), Base MOSS-Image Base, the
+ * model before its SFT (the owner's image_moss_image_base_t2i: 50 steps, CFG 3, euler; a 5.4 GB file of its own).
  */
 const MOSS_QUALITY: NonNullable<ModelOptions["controls"]>[number] = {
   param: "quality",
   label: "Quality",
-  values: ["standard", "quality", "fast"],
+  values: ["standard", "quality", "fast", "base"],
   default: "standard",
-  labels: { standard: "Standard · 25 steps", quality: "Best · 50 steps", fast: "Fast · 8 steps (extra 5.4 GB file)" },
+  labels: { standard: "Standard · 25 steps", quality: "Best · 50 steps", fast: "Fast · 8 steps (extra 5.4 GB file)", base: "Base model · 50 steps (extra 5.4 GB file)" },
   sets: {
     standard: { steps: 25, cfg: 2.5, sampler: "er_sde", scheduler: "simple" },
     quality: { steps: 50, cfg: 3, sampler: "euler", scheduler: "simple" },
     fast: { steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", unet: "moss_image_sft_8stepdmd_int8_convrot.safetensors" },
+    base: { steps: 50, cfg: 3, sampler: "euler", scheduler: "simple", unet: "moss_image_base_int8_convrot.safetensors" },
   },
 };
 
@@ -113,11 +115,13 @@ const open: ModelDef[] = [
     kind: "image",
     tagline: "Native 2K images with clean lettering; edits with up to 4 references, inpaint and expand · 20 GB GPU · non-commercial weights",
     badges: ["new", "top"],
+    // Aspect ratio and size are for text to image: an edit or inpaint follows image 1, an expand the canvas its pads grow.
+    // The inpaint and expand graphs read the picture alone.
     routes: [
       comfy("t2i", "qwen-image-21-t2i"),
-      comfy("edit", "qwen-image-21-edit", "25 steps, up to 4 references"),
-      comfy("inpaint", "qwen-image-21-inpaint", "crops around the mask, 25 steps, pasted back"),
-      comfy("outpaint", "qwen-image-21-outpaint", "outpaint-v2 LoRA; Qwen3-VL describes the scene"),
+      { ...comfy("edit", "qwen-image-21-edit", "25 steps, up to 4 references"), unsized: true },
+      { ...comfy("inpaint", "qwen-image-21-inpaint", "crops around the mask, 25 steps, pasted back"), unsized: true, maxImages: 1 },
+      { ...comfy("outpaint", "qwen-image-21-outpaint", "outpaint-v2 LoRA; Qwen3-VL describes the scene"), unsized: true, maxImages: 1 },
     ],
     options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K", "2K"], maxImages: 4, seed: true },
     defaults: { aspectRatio: "1:1", resolution: "1K" },
@@ -174,9 +178,10 @@ const open: ModelDef[] = [
     vendor: "OpenMOSS",
     family: "moss",
     kind: "image",
-    tagline: "Clean Chinese and English text, follows layout boxes · on your GPU, about 13 GB of files",
+    tagline: "Clean Chinese and English text, follows layout boxes · on your GPU, about 15 GB of files",
     badges: ["new", "top"],
-    routes: [comfy("t2i", "moss-image-t2i", "MOSS-Image SFT int8, Qwen3.5-9B w4a8, FLUX.2 small decoder; core nodes")],
+    // The int8 Qwen3.5-9B, never the template's w4a8 build: that one faulted the NVIDIA driver here (scripts/comfy/library.spec.mjs).
+    routes: [comfy("t2i", "moss-image-t2i", "MOSS-Image SFT int8, Qwen3.5-9B int8, FLUX.2 small decoder; core nodes")],
     options: {
       aspectRatios: IMG_AR,
       resolutions: ["1K", "1.5K"],
@@ -199,7 +204,8 @@ const open: ModelDef[] = [
     badges: ["new", "top"],
     routes: [
       comfy("t2i", "fibo2-dev-t2i", "Qwen3.5 writes Bria's structured JSON prompt; 30 steps"),
-      comfy("edit", "fibo2-dev-edit", "30 steps, up to 4 references"),
+      // An edit follows image 1's size and shape.
+      { ...comfy("edit", "fibo2-dev-edit", "30 steps, up to 4 references"), unsized: true },
     ],
     options: { aspectRatios: IMG_AR, resolutions: ["1K"], maxImages: 4, seed: true, negativePrompt: true },
     defaults: { aspectRatio: "1:1", resolution: "1K" },
@@ -271,7 +277,7 @@ const open: ModelDef[] = [
     family: "krea",
     kind: "image",
     tagline: "Paints the masked area or extends the canvas · 20 GB GPU · needs the Krea 2 Ostris Edit add-on",
-    badges: ["new"],
+    // No `new`: it stays out of Inpaint's "Best" list while its add-on isn't on the owner's ComfyUI (a pick there would fail).
     routes: [
       comfy("inpaint", "krea2-inpaint", "the masked area made black, then the inpaint-edit LoRA paints it"),
       comfy("outpaint", "krea2-outpaint", "the canvas grown on black, then the inpaint-edit LoRA fills it"),

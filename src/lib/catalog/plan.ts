@@ -66,6 +66,15 @@ export function routesFor(model: ModelDef, op: Operation): ModelRoute[] {
   return model.routes.filter((r) => r.op === op);
 }
 
+/**
+ * The most images a run of `op` sends this model: its routes' own limit when they all have one (ModelRoute.maxImages:
+ * Qwen-Image 2.1 inpaints and expands the picture alone), else the model's options.maxImages.
+ */
+export function imageLimit(model: Pick<ModelDef, "options" | "routes">, op: Operation | undefined): number | undefined {
+  const own = op ? model.routes.filter((r) => r.op === op).map((r) => r.maxImages) : [];
+  return own.length && own.every((n) => n !== undefined) ? Math.max(...(own as number[])) : model.options.maxImages;
+}
+
 const clamp01 = (n: number) => Math.max(0, Math.min(1, Number.isFinite(n) ? n : 1));
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -103,6 +112,31 @@ export function composeShots(overall: string, shots: { prompt: string; duration:
 
 export function presetRoute(preset: Preset, engine: Engine): PresetRoute | null {
   return engine === "open" ? preset.open : preset.cloud;
+}
+
+/**
+ * The model apps ran on before they moved to a newer one (2026-10-31, the owner's newest image models): the edit apps
+ * left Qwen-Image-Edit 2511, Expand and Zoom Out left FLUX Fill, both for Qwen-Image 2.1.
+ */
+const APP_MODEL_MOVES: Readonly<Record<string, string>> = { "oss-qwen-edit": "oss-qwen-image-21", "oss-flux-fill": "oss-qwen-image-21" };
+
+/**
+ * Apps pin their model, so a stored app run on the model its app ran on before (a retry, Run again, Reuse, a script)
+ * would be refused: it runs on the app's model now, with the app's operation, and `note` says so. Anything else is
+ * returned as it is (an app a LoRA ties to the old model, Multiple Angles on 2511, still names it).
+ */
+export function movedAppRequest<T extends Pick<GenerationRequest, "modelId" | "op" | "presetId">>(
+  req: T,
+  getModel: (id: string) => ModelDef | undefined,
+  getPreset: (id: string) => Preset | undefined,
+): { request: T; note?: string } {
+  const was = getModel(req.modelId);
+  const preset = req.presetId ? getPreset(req.presetId) : undefined;
+  const route = was && preset?.type === "app" ? presetRoute(preset, was.engine) : null;
+  if (!was || !route || route.modelId === was.id || !Object.hasOwn(APP_MODEL_MOVES, was.id) || APP_MODEL_MOVES[was.id] !== route.modelId) return { request: req };
+  const now = getModel(route.modelId);
+  if (!now) return { request: req };
+  return { request: { ...req, modelId: now.id, ...(route.op && { op: route.op }) }, note: `${preset!.name} now runs on ${now.name}` };
 }
 
 /** Model families a Mix's LoRA may run on instead (said when it can't join the first preset's model). */
@@ -377,6 +411,8 @@ export function planGeneration(
 
   const missing = missingInputs(op, req) ?? unreadInputs(model, op, req) ?? missingImages(model, req);
   if (missing) throw new Error(missing);
+  const tooMany = extraImages(model, op, req);
+  if (tooMany) throw new Error(tooMany);
 
   // Soul Cinema's 21:9 (research §4.5: a crop option): made at 16:9 on both engines, then cropped to 21:9 with
   // its grade after generation (meta.crop).
@@ -605,6 +641,20 @@ function unreadInputs(model: ModelDef, op: Operation, req: Pick<GenerationReques
   if (!attached.length || attached.some(reads)) return null;
   const words = keys.filter(reads).map((k) => INPUT_WORDS[k] ?? k);
   return words.length ? `${model.name} works from ${words.join(" or ")} — add one` : null;
+}
+
+/**
+ * More images than the operation's routes read (ModelRoute.maxImages): refused, never dropped without a word (a reference
+ * added in the Inpaint studio would be ignored by Qwen-Image 2.1's inpaint graph).
+ */
+function extraImages(model: ModelDef, op: Operation, req: Pick<GenerationRequest, "inputs">): string | null {
+  const routes = routesFor(model, op);
+  if (!routes.length || routes.some((r) => r.maxImages === undefined)) return null;
+  const max = imageLimit(model, op)!;
+  if ((req.inputs?.images?.length ?? 0) <= max) return null;
+  if (max === 1 && op === "inpaint") return `${model.name} paints the masked area of one picture — remove the references, or clear the mask to edit with them`;
+  if (max === 1 && op === "outpaint") return `${model.name} expands one picture at a time — remove the other images`;
+  return `${model.name} takes up to ${max} image${max === 1 ? "" : "s"} for this — remove the others`;
 }
 
 /** Models that need several images (try-on: the person, then the garment). */

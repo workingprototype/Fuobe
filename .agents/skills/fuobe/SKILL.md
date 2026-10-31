@@ -25,7 +25,8 @@ an open-source model on their GPU (ComfyUI). Results land in the Fuobe Library a
 ## 2. Pick a model
 `search_models` (kind `image`, `video`, `audio`, `text` or `model3d`, plus words) or
 `fuobe models --kind video --search kling --json`. When the user doesn't care, the studios' own picks:
-images `nano-banana-pro` (cloud) / `oss-z-image-turbo` (open); edits `nano-banana-pro` / `oss-qwen-edit`;
+images `nano-banana-pro` (cloud) / `oss-ideogram-4` (open; `oss-qwen-image-21` when no local model
+writes its caption); edits `nano-banana-pro` / `oss-qwen-image-21`;
 video `seedance-2-5` / `oss-wan22-14b-fast`; speech `elevenlabs-v4` / `oss-chatterbox` (it speaks in
 a cloned voice, so it needs a voice sample: `voice_audio`, or `--voice-audio` on the CLI). In the
 user's own voice on the cloud: `chatterbox-cloud` (the CLI picks it for `--kind audio --voice-audio`).

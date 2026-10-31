@@ -1613,10 +1613,13 @@ function planGrid(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
  * words), which also cuts the sheet's four views, else Fuobe Soul alone.
  */
 export const CAST_MODELS: Record<Engine, string[]> = { cloud: [SOUL_BUILDER_MODEL, "nano-banana-pro"], open: [CAST_SHEET_MODEL, SOUL_BUILDER_MODEL] };
-/** Soul Location's makers: Fuobe Soul (the Movie look) on both engines, partner and open alternatives after it. */
+/**
+ * Soul Location's makers: Fuobe Soul (the Movie look) on both engines, partner and open alternatives after it. Not Ideogram 4:
+ * its safety filter answers most pictures of a place with no one in it with a grey card.
+ */
 export const LOCATION_MODELS: Record<Engine, string[]> = {
   cloud: [SOUL_BUILDER_MODEL, "nano-banana-pro", "seedream-5-pro"],
-  open: [SOUL_BUILDER_MODEL, "oss-ideogram-4", "oss-qwen-image-21", "oss-z-image-turbo", "oss-qwen-image"],
+  open: [SOUL_BUILDER_MODEL, "oss-qwen-image-21", "oss-krea2-realism", "oss-z-image-turbo", "oss-qwen-image"],
 };
 
 /** A builder's maker: the one asked for when this engine offers it (and this install has it), else the first. */

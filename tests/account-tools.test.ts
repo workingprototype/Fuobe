@@ -134,6 +134,24 @@ describe("an account runs the catalogue on its own ComfyUI", () => {
     expect(g!.outputs[0]).toMatchObject({ kind: "image", contentType: "image/png" });
   });
 
+  it("runs an app run stored on the model its app ran on before (Retry, Run again, a script) on the app's model now", async () => {
+    fake.opts.output = "image";
+    const pic = await uploadPng();
+    // The edit apps ran on Qwen-Image-Edit 2511 and Expand Image on FLUX Fill: a stored request still names them.
+    for (const [modelId, presetId, op] of [
+      ["oss-qwen-edit", "app-headshot-generator", "edit"],
+      ["oss-flux-fill", "app-expand-image", "outpaint"],
+    ] as const) {
+      const r = await generationsRoute.POST(json("/api/generations", "POST", { feature: "app", modelId, presetId, op, prompt: "", inputs: { images: [pic.url] } }));
+      expect(r.status, presetId).toBe(201);
+      const body = await r.json();
+      expect(body.notes, presetId).toEqual(expect.arrayContaining([expect.stringMatching(/now runs on Qwen-Image 2\.1$/)]));
+      const g = await settle(body.items[0].id);
+      expect(g?.status, g?.error ?? "").toBe("succeeded");
+      expect([g!.request.modelId, g!.op]).toEqual(["oss-qwen-image-21", op]);
+    }
+  });
+
   it("names a LoRA its ComfyUI doesn't have, with where to get it, before anything is sent", async () => {
     const pic = await uploadPng();
     fake.log.length = 0;

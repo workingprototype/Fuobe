@@ -61,7 +61,7 @@ export interface SettingsShape {
  * transforms (Lipsync), there's still no batch count.
  */
 export function settingsShape(
-  model: Pick<ModelDef, "options" | "defaults"> | undefined,
+  model: (Pick<ModelDef, "options" | "defaults"> & Partial<Pick<ModelDef, "routes">>) | undefined,
   op: Operation | undefined,
   kind: MediaKind,
   showPrompt: boolean,
@@ -75,9 +75,12 @@ export function settingsShape(
   const single = op ? SINGLE_TAKE.has(op) : studioOps.length > 0 && studioOps.every((x) => SINGLE_TAKE.has(x));
   // The operation, or the studio's only one before anything is attached (Video tools → Depth map).
   const is = (x: Operation) => op === x || (!op && studioOps.length > 0 && studioOps.every((y) => y === x));
+  // A graph that takes no size (ModelRoute.unsized: Qwen-Image 2.1's edit follows image 1) has none to pick for this operation.
+  const routes = op ? (model?.routes ?? []).filter((r) => r.op === op) : [];
+  const sized = !routes.length || routes.some((r) => !r.unsized);
   return {
-    aspect: op === "i2v" || op === "flf2v" ? null : many(o.aspectRatios),
-    resolution: many(o.resolutions),
+    aspect: !sized || op === "i2v" || op === "flf2v" ? null : many(o.aspectRatios),
+    resolution: sized ? many(o.resolutions) : null,
     duration: params.shots ? null : many(o.durations),
     count: (kind === "image" || kind === "video") && !single,
     draft: !!o.draft,
@@ -709,6 +712,25 @@ export function presetParams(preset: PresetRoutes | undefined, engine: Engine): 
   const plain: GenParams = { ...route?.params };
   delete plain.extra;
   return plain;
+}
+
+/**
+ * Whether the server writes Ideogram 4's JSON caption for this viewer (src/server/enhance.ts ideogramCaption): with the
+ * install's own local model, never Claude. An account's or a guest's run never uses the install's LLM, and an install whose
+ * local model doesn't answer has none; then Ideogram 4 gets the words as they are, and its safety filter answers about half
+ * the pictures of people with a grey card. Undefined while the status loads.
+ */
+export function writesCaptions(status: { viewer?: unknown; llm?: { helper: string; local: unknown } } | undefined): boolean | undefined {
+  if (!status) return undefined;
+  return !status.viewer && !!status.llm && status.llm.helper !== "none" && !!status.llm.local;
+}
+
+/**
+ * A studio's defaults as this viewer runs them: where the server can't write the default's caption (writesCaptions false),
+ * the stand-in the studio names for it (StudioConfig.uncaptioned: the Image studio's Qwen-Image 2.1 for Ideogram 4).
+ */
+export function viewerDefaults<D extends { cloud: string; open: string }>(defaults: D, uncaptioned: Partial<D> | undefined, writes: boolean | undefined): D {
+  return writes === false && uncaptioned ? { ...defaults, ...uncaptioned } : defaults;
 }
 
 /**

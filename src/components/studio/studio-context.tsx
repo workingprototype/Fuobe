@@ -32,6 +32,11 @@ export interface StudioConfig {
   presetPicker?: "motion" | "effect";
   preset?: Preset;
   defaultModels: { cloud: string; open: string };
+  /**
+   * The default to open on instead where the server can't write the default's caption for this viewer (Ideogram 4 for an
+   * account, a guest, or an install with no local model answering: writesCaptions in src/lib/composer.ts).
+   */
+  uncaptioned?: Partial<{ cloud: string; open: string }>;
   suggestions?: string[];
   /** Prompt is optional (e.g. motions, upscale). */
   promptOptional?: boolean;
