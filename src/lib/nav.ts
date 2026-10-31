@@ -37,7 +37,8 @@ function queryMatches(query: string, search: URLSearchParams) {
 /**
  * Whether a nav link is the current page. A link with a query (`/library?tab=favorites`) is active
  * when the path and every one of its params match; a plain link is active on its path (and below it)
- * unless a sibling query link to the same path matches better.
+ * unless a sibling matches better: a query link to the same path, or a link to a page below it
+ * (Settings yields to About & licences on /settings/about).
  */
 export function navActive(href: string, pathname: string, search: URLSearchParams, siblings: string[] = []): boolean {
   if (!pathname) return false;
@@ -46,6 +47,7 @@ export function navActive(href: string, pathname: string, search: URLSearchParam
   if (query) return queryMatches(query, search);
   return !siblings.some((s) => {
     const [p, q] = s.split("?");
+    if (p !== path && p.startsWith(`${path === "/" ? "" : path}/`)) return pathMatches(p, pathname);
     return !!q && p === path && pathMatches(p, pathname) && queryMatches(q, search);
   });
 }

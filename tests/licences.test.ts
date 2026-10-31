@@ -83,4 +83,17 @@ describe("licences", () => {
     const without = buildLicenceList(MODELS, manifest.workflows.filter((w) => !/triposplat|trellis2|pixal3d/.test(w.id)));
     expect(without.notices.some((n) => n.text === "Built with DINOv3")).toBe(false);
   });
+
+  it("links each licence to where it can be read, as Models & licences does", () => {
+    const list = buildLicenceList(MODELS, manifest.workflows);
+    for (const r of list.rows) expect(r.links.length, r.id).toBe(r.licences.length);
+    const linked = list.rows.flatMap((r) => r.links).filter(Boolean).length;
+    // Every licence the KNOWN table names has its own page; the rest link to the model card of their largest download.
+    expect(linked / list.rows.flatMap((r) => r.links).length).toBeGreaterThan(0.9);
+    expect(list.rows.find((r) => r.id === "oss-flux2-dev")?.links).toEqual(["https://huggingface.co/black-forest-labs/FLUX.2-dev"]);
+    expect(list.rows.find((r) => r.workflows.includes("bg-remove-birefnet"))?.links[0]).toBe("https://spdx.org/licenses/MIT.html");
+    // Without the downloads, a licence with no page of its own has no link.
+    const bare = buildLicenceList(MODELS, manifest.workflows.map((w) => ({ ...w, models: undefined })));
+    expect(bare.rows.flatMap((r) => r.links).filter(Boolean).length).toBeLessThanOrEqual(linked);
+  });
 });

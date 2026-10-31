@@ -101,7 +101,14 @@ const RUNS_ON: { value: RunsOn; label: string; icon?: typeof Cloud }[] = [
 ];
 
 /** "Runs on: All · Cloud · Open source", as a radio group with arrow-key support. */
-function RunsOnControl({ value, onChange, locked }: { value: RunsOn; onChange: (v: RunsOn) => void; locked?: "cloud" | "open" }) {
+function RunsOnControl({ value, onChange, locked, owner }: { value: RunsOn; onChange: (v: RunsOn) => void; locked?: "cloud" | "open"; owner: boolean }) {
+  // Only the owner has Settings → Engine mode; a visitor reads the lock and goes nowhere.
+  if (locked && !owner)
+    return (
+      <span className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-muted px-3 text-[13px] text-muted-foreground" title="Set by the studio's owner">
+        <Lock className="size-3.5" /> {locked === "open" ? "Open source only" : "Cloud only"}
+      </span>
+    );
   if (locked)
     return (
       <Link
@@ -253,7 +260,7 @@ export function PresetGallery({
             <span className="order-last text-[12px] whitespace-nowrap text-muted-foreground tabular-nums sm:order-first sm:mr-2" aria-live="polite">
               {list.length === presets.length ? `${presets.length} ${noun}` : `${list.length} of ${presets.length}`}
             </span>
-            <RunsOnControl value={runsOn} onChange={setRunsOn} locked={locked} />
+            <RunsOnControl value={runsOn} onChange={setRunsOn} locked={locked} owner={!!viewer?.owner} />
           </div>
         </div>
         {visitor && badges && !badges.connected && !badges.off && (

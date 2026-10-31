@@ -3,8 +3,19 @@
  * the model files it still lacks. Pure (no I/O), so it can be tested and run in the browser.
  */
 import type { ManifestModel, ManifestWorkflow } from "./comfy";
+import { FUOBE_REPO } from "./connections";
+import { modelCardOf } from "./licences";
 
 type Installable = Pick<ManifestWorkflow, "customNodes"> & { models: (ManifestModel & { present?: boolean | null })[] };
+
+/** The workflow library's folder on GitHub. */
+export const WORKFLOWS_ON_GITHUB = `${FUOBE_REPO}/tree/main/workflows/comfyui`;
+
+/** A workflow's graph in Fuobe's repo: the file itself (to download), and its page on GitHub. */
+export function workflowSource(file: string): { raw: string; page: string } {
+  const at = `workflows/comfyui/${file}`;
+  return { raw: `${FUOBE_REPO.replace("https://github.com/", "https://raw.githubusercontent.com/")}/main/${at}`, page: `${FUOBE_REPO}/blob/main/${at}` };
+}
 
 /**
  * A pinned GitHub address the manifest links to (…/tree/<commit>, or …/tree/<commit>/<folder> for a pack that lives
@@ -42,11 +53,14 @@ export function nodeInstall(node: { name: string; repo: string }): string {
 export function installScript(wf: Installable): string {
   // Optional alternatives (FILM for RIFE) are listed on the card, not installed by default. A file under a subfolder
   // (DBS: models/dbs/DBS-BSRNN-DnR/model.safetensors) gets that folder made first.
-  const lines = wf.models
-    .filter((m) => m.url && m.present !== true && !m.optional)
-    .map((m) => {
-      const sub = m.file.includes("/") ? `/${m.file.slice(0, m.file.lastIndexOf("/"))}` : "";
-      return `mkdir -p "$COMFYUI/models/${m.folder}${sub}" && wget -c -O "$COMFYUI/models/${m.folder}/${m.file}" "${m.url}"`;
-    });
-  return ["COMFYUI=${COMFYUI:-$HOME/ComfyUI}", ...wf.customNodes.map(nodeInstall), ...lines].join("\n");
+  const missing = wf.models.filter((m) => m.url && m.present !== true && !m.optional);
+  // A gated download (LTX-2.5) answers 401 until its licence is accepted on Hugging Face and a token comes with it.
+  const gated = [...new Set(missing.filter((m) => m.gated).map((m) => modelCardOf(m.url) ?? m.url!))];
+  const accept = gated.map((page) => `# Gated: accept the licence at ${page}, then export HF_TOKEN=<your Hugging Face token>`);
+  const lines = missing.map((m) => {
+    const sub = m.file.includes("/") ? `/${m.file.slice(0, m.file.lastIndexOf("/"))}` : "";
+    const token = m.gated ? ` --header="Authorization: Bearer $HF_TOKEN"` : "";
+    return `mkdir -p "$COMFYUI/models/${m.folder}${sub}" && wget -c${token} -O "$COMFYUI/models/${m.folder}/${m.file}" "${m.url}"`;
+  });
+  return ["COMFYUI=${COMFYUI:-$HOME/ComfyUI}", ...wf.customNodes.map(nodeInstall), ...accept, ...lines].join("\n");
 }

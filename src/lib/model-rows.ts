@@ -29,6 +29,8 @@ export interface ModelRow {
   launch?: { until: string; price: string };
   /** Where it runs when that's not the obvious place ("Runs on the isolated ComfyUI worker"). */
   note?: string;
+  /** Where it opens: a studio, app or tool with ?model= (the Models page adds it, from palette-index's modelHref). */
+  href?: string;
 }
 
 /** The picker's and the Models page's note on models that run on the isolated ComfyUI worker. */
@@ -78,6 +80,16 @@ export function rowPrice(r: Pick<ModelRow, "price" | "launch">, now: number | nu
   if (!r.launch) return r.price;
   if (now === null) return "";
   return launchHolds(r.launch.until, now) ? r.launch.price : r.price;
+}
+
+/**
+ * The price a row shows when the install runs one engine only (`only`): a Fuobe Original is "Free" on the open engine,
+ * and only its cloud price ("Free · $0.08 / second" without "Free · ") on the cloud. Otherwise rowPrice.
+ */
+export function rowPriceOn(r: Pick<ModelRow, "price" | "launch" | "engines">, now: number | null, only?: Engine): string {
+  if (only === "open" && r.engines.includes("open")) return "Free";
+  const price = rowPrice(r, now);
+  return only === "cloud" && r.engines.length > 1 ? price.replace(/^Free · /, "") : price;
 }
 
 const PICKER_UNIT = { image: "/image", second: "/sec", video: "/video", request: "/run", megapixel: "/MP", minute: "/min" } as const;

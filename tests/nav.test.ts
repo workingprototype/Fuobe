@@ -27,6 +27,17 @@ describe("sidebar active state", () => {
     // Other tabs have no link of their own, so "All creations" stays lit.
     expect(navActive("/library", "/library", q("tab=trash"), LIBRARY)).toBe(true);
   });
+
+  it("hands it to a sibling link below the plain one: Settings and About & licences", () => {
+    const engine = NAV.find((g) => g.label === "Engine")!.items.map((i) => i.href);
+    expect(engine).toContain("/settings/about");
+    const lit = (pathname: string) => engine.filter((h) => navActive(h, pathname, q(), engine));
+    expect(lit("/settings/about")).toEqual(["/settings/about"]);
+    expect(lit("/settings")).toEqual(["/settings"]);
+    // Pages below Settings with no link of their own keep Settings lit.
+    expect(lit("/settings/models")).toEqual(["/settings"]);
+    expect(lit("/models")).toEqual(["/models"]);
+  });
 });
 
 describe("remembered sidebar state", () => {

@@ -160,6 +160,46 @@ function SidebarStateScript() {
   );
 }
 
+/**
+ * Scrolls `el` into the scrolling `box` as little as it takes, its top first when it doesn't fit, clear of the box's
+ * faded edges (24px above, 40px below).
+ */
+function reveal(box: HTMLElement | null, el: Element | null | undefined) {
+  if (!box || !el) return;
+  const b = box.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const below = r.bottom + 40 - b.bottom;
+  if (below > 0) box.scrollTop += Math.min(below, Math.max(0, r.top - b.top - 24));
+  else if (r.top - 24 < b.top) box.scrollTop -= b.top - r.top + 24;
+}
+
+/**
+ * Brings the open page's row into view when the page changes: with Studios open, Engine's rows (Models, Settings…)
+ * sit below the fold. Inside Suspense: the pathname is runtime data.
+ */
+function RevealActive({ box }: { box: React.RefObject<HTMLDivElement | null> }) {
+  const pathname = usePathname();
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    // Again whenever the list's box changes size (the guest's Sign up row arrives and pushes it down), until the
+    // person scrolls or clicks in it themselves.
+    let theirs = false;
+    const show = () => theirs || reveal(el, el.querySelector('[data-active="true"]'));
+    const mine = () => (theirs = true);
+    const frame = requestAnimationFrame(show);
+    const resized = new ResizeObserver(show);
+    resized.observe(el);
+    for (const e of ["wheel", "touchstart", "pointerdown", "keydown"]) el.addEventListener(e, mine, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      resized.disconnect();
+      for (const e of ["wheel", "touchstart", "pointerdown", "keydown"]) el.removeEventListener(e, mine);
+    };
+  }, [pathname, box]);
+  return null;
+}
+
 /** Tells the shell which page is open (the pathname is runtime data, so it's read inside Suspense). */
 function PathWatcher({ onPath }: { onPath: (pathname: string) => void }) {
   const pathname = usePathname();
@@ -516,10 +556,21 @@ export function AppSidebar() {
                 <Fragment key={id}>
                   {/* Icon mode hides the group labels: a hairline keeps the groups apart. */}
                   {i > 0 && <SidebarSeparator className="my-1 hidden group-data-[collapsible=icon]:block" />}
-                  <NavGroup group={group} open={!group.collapsible || !closed.includes(id)} onToggle={() => toggle(id)} />
+                  <NavGroup
+                    group={group}
+                    open={!group.collapsible || !closed.includes(id)}
+                    onToggle={() => {
+                      toggle(id);
+                      // A group opened near the bottom scrolls up into view, once its rows are on the page.
+                      if (closed.includes(id)) requestAnimationFrame(() => reveal(content.current, content.current?.querySelector(`[data-nav-group="${id}"]`)));
+                    }}
+                  />
                 </Fragment>
               );
             })}
+            <Suspense fallback={null}>
+              <RevealActive box={content} />
+            </Suspense>
           </SidebarContent>
           <SidebarFooter className="gap-1 border-t border-sidebar-border" onClick={closeOnLink}>
             {status?.viewer ? (

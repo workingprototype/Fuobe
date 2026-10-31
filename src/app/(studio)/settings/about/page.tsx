@@ -37,7 +37,7 @@ async function readAbout() {
     workflowCount: workflows.length,
     list: buildLicenceList(
       MODELS.map((m) => ({ id: m.id, name: m.name, vendor: m.vendor, kind: m.kind, hidden: m.hidden, routes: m.routes.map((r) => ({ provider: r.provider, endpoint: r.endpoint })) })),
-      workflows.map((w) => ({ id: w.id, title: w.title, capability: w.capability, license: w.license })),
+      workflows.map((w) => ({ id: w.id, title: w.title, capability: w.capability, license: w.license, models: w.models.map((m) => ({ url: m.url, sizeGb: m.sizeGb })) })),
     ),
   };
 }
@@ -54,6 +54,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 export default async function Page() {
   const about = await readAbout();
   const { list } = about;
+  const inStudios = list.rows.filter((r) => r.inCatalog).length;
   return (
     <PageShell>
       <Link href="/settings" className="mb-3 inline-flex items-center gap-1.5 rounded-md text-[13px] text-muted-foreground hover:text-foreground">
@@ -61,14 +62,20 @@ export default async function Page() {
       </Link>
       <PageHeader
         title="About & licences"
-        description="Fuobe's code is open source. The open models it runs on your GPU each have their own licence: most allow commercial use, some don't, and a few leave out some countries. Paid models follow the terms of the provider you connect."
+        description="Fuobe's code is open source (MIT). The open models it runs on your GPU each have their own licence: most allow commercial use, some don't, and a few leave out some countries. Paid models follow the terms of the provider you connect."
       />
 
-      <dl className="grid grid-cols-1 gap-4 rounded-2xl border p-5 sm:grid-cols-2 lg:grid-cols-4">
+      <dl className="grid grid-cols-1 gap-4 rounded-2xl border p-5 sm:grid-cols-2 lg:grid-cols-5">
         <Fact label="Fuobe">Version {about.version}</Fact>
         <Fact label="Source code">
           <a href={FUOBE_REPO} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text underline underline-offset-2">
             GitHub <ExternalLink className="size-3" aria-hidden />
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
+        </Fact>
+        <Fact label="Licence">
+          <a href={`${FUOBE_REPO}/blob/main/LICENSE`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text underline underline-offset-2">
+            MIT <ExternalLink className="size-3" aria-hidden />
             <span className="sr-only">(opens in a new tab)</span>
           </a>
         </Fact>
@@ -128,13 +135,14 @@ export default async function Page() {
           Open model licences
         </h2>
         <p className="mt-1 mb-5 max-w-2xl text-[13px] text-muted-foreground">
-          {list.counts.all} models and workflows: {list.counts.clear} allow commercial use, {list.counts.conditions} with conditions (revenue limits or use rules), {list.counts["non-commercial"]}{" "}
-          non-commercial and {list.counts.territory} not available everywhere. Read the licence itself before you sell what you make; this list is a guide, not legal advice. Which of them this
-          install offers is yours to decide in{" "}
+          {list.counts.all} open models with weights of their own: {inStudios} in Fuobe&apos;s studios and {list.counts.all - inStudios} more workflows in the library (tools with no weights
+          aren&apos;t counted). {list.counts.clear} allow commercial use, {list.counts.conditions} with conditions (revenue limits or use rules), {list.counts["non-commercial"]} non-commercial
+          and {list.counts.territory} not available everywhere. Read the licence itself before you sell what you make; this list is a guide, not legal advice. Which models this install offers
+          is set in{" "}
           <Link href="/settings/models" className="text-brand-text underline underline-offset-2">
             Models &amp; licences
           </Link>
-          .
+          , which counts every model in the catalog, paid ones included.
         </p>
         <LicencesView list={list} />
       </section>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Circle, CircleAlert, Copy, ExternalLink, RotateCcw, Search, Workflow } from "lucide-react";
+import { CheckCircle2, Circle, CircleAlert, Copy, Download, ExternalLink, RotateCcw, Search, Workflow } from "lucide-react";
 import Link from "next/link";
 import { useDeferredValue, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -11,7 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useProgressive } from "@/components/use-progressive";
 import { copyText } from "@/lib/clipboard";
 import type { ManifestWorkflow } from "@/lib/comfy";
-import { installScript } from "@/lib/comfy-install";
+import { installScript, workflowSource } from "@/lib/comfy-install";
+import { modelCardOf } from "@/lib/licences";
 import { cn } from "@/lib/utils";
 import { capabilityGroup, usedByIndex, WORKFLOW_GROUPS, type ComfyRoute } from "@/lib/workflow-usage";
 
@@ -32,9 +33,30 @@ async function fetchStatus(): Promise<ComfyStatus> {
   return { reachable: body.reachable === null ? null : !!body.reachable, generatedAt: body.generatedAt ?? "", comfyuiCommit: body.comfyuiCommit, workflows: body.workflows ?? [] };
 }
 
+/**
+ * Saves a workflow's graph as a file. GitHub serves it as text from another site, where a link's download attribute
+ * doesn't count, so it's fetched and saved here; if that fails, the file opens in a new tab.
+ */
+async function downloadGraph(raw: string, name: string) {
+  try {
+    const res = await fetch(raw);
+    if (!res.ok) throw new Error(String(res.status));
+    const url = URL.createObjectURL(new Blob([await res.text()], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch {
+    window.open(raw, "_blank", "noopener,noreferrer");
+  }
+}
+
 function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
   const missing = wf.models.filter((m) => m.present === false && !m.optional).length;
   const total = wf.models.reduce((a, m) => a + (m.optional ? 0 : (m.sizeGb ?? 0)), 0);
+  const source = workflowSource(wf.file);
+  const name = wf.file.slice(wf.file.lastIndexOf("/") + 1);
   return (
     <article className="flex min-w-0 flex-col gap-3 rounded-xl border bg-background p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -61,16 +83,30 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
         <ul className="space-y-1 text-[12px]">
           {wf.models.map((m) => (
             <li key={m.file} className="flex min-w-0 items-center gap-2">
+              {/* A mark only once a GPU has said what it has (present is null for a visitor with none connected). */}
               {m.present === true ? (
                 <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-label="Installed" />
-              ) : m.present === false && !m.optional ? (
-                <CircleAlert className="size-3.5 shrink-0 text-warning" aria-label="Missing" />
-              ) : (
-                <Circle className="size-3.5 shrink-0 text-muted-foreground" aria-label="Unknown" />
-              )}
+              ) : m.present === false ? (
+                m.optional ? (
+                  <Circle className="size-3.5 shrink-0 text-muted-foreground" aria-label="Not installed (optional)" />
+                ) : (
+                  <CircleAlert className="size-3.5 shrink-0 text-warning" aria-label="Missing" />
+                )
+              ) : null}
               <span className="min-w-0 truncate font-mono" title={m.file}>
                 {m.file}
               </span>
+              {m.gated && m.url && (
+                <a
+                  href={modelCardOf(m.url) ?? m.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Accept the licence on Hugging Face, then download with your Hugging Face token"
+                  className="shrink-0 rounded-full bg-warning/15 px-1.5 text-[11px] whitespace-nowrap text-foreground hover:underline"
+                >
+                  gated<span className="max-sm:hidden"> · accept licence</span>
+                </a>
+              )}
               <span className="hidden shrink-0 text-muted-foreground sm:inline">{m.folder}</span>
               {m.optional && <span className="shrink-0 text-muted-foreground">optional</span>}
               {m.sizeGb ? <span className="ml-auto shrink-0 font-mono text-muted-foreground">{m.sizeGb} GB</span> : null}
@@ -95,7 +131,7 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
         </p>
       )}
       {wf.notes && <p className="text-[12px] leading-relaxed break-words text-muted-foreground">{wf.notes}</p>}
-      <div className="mt-auto flex gap-2 pt-1">
+      <div className="mt-auto flex flex-wrap gap-2 pt-1">
         <Button
           variant="secondary"
           size="sm"
@@ -106,6 +142,24 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
           }}
         >
           <Copy /> <span className="truncate">{missing ? `Copy install commands (${missing} missing)` : "Copy install commands"}</span>
+        </Button>
+        <Button asChild variant="ghost" size="sm">
+          <a
+            href={source.raw}
+            download={name}
+            onClick={(e) => {
+              e.preventDefault();
+              void downloadGraph(source.raw, name);
+            }}
+          >
+            <Download /> Download JSON
+          </a>
+        </Button>
+        <Button asChild variant="ghost" size="sm">
+          <a href={source.page} target="_blank" rel="noreferrer">
+            <ExternalLink /> View on GitHub
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
         </Button>
       </div>
     </article>
