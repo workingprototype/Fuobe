@@ -98,6 +98,15 @@ describe("palette ranking", () => {
     expect(rankPalette([...ALL, ...entries], "turntable").find((g) => g.kind === "skill")?.entries.map((e) => e.label)).toEqual(["Run Lamp turntable…"]);
   });
 
+  it("drops letters-in-order guesses next to a real match", () => {
+    // An open-source-only install (every visitor's): IndexTTS-2 is the one model with "tts" in its name.
+    const tts = top("tts", [...PAGES, ...indexEntries(index, "open")]);
+    expect(tts).toContain("IndexTTS-2");
+    for (const noise of ["Settings", "Tentacle Horror", "Glitter Sticker", "Bullet Time Scene"]) expect(tts, noise).not.toContain(noise);
+    // With no real match, the guesses stay: a typo still finds its page.
+    expect(top("cinma")).toContain("Cinema Studio");
+  });
+
   it("matches nothing on an empty query (the palette shows its own start list)", () => {
     expect(rankPalette(ALL, "")).toEqual([]);
     expect(rankPalette(ALL, "   ")).toEqual([]);
