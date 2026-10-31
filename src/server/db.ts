@@ -607,6 +607,66 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS assets_generation ON assets(generation_id);`,
 ];
 
+/**
+ * "Use the ComfyUI on this computer" (src/server/computer/tasks.ts). relay_runners: each principal's computer (the one
+ * that runs its waiting jobs, until its lease lapses) and what its tab said about its ComfyUI. relay_tasks: one per
+ * ComfyUI job of a run on someone's computer, with the graph as the server built it and where the job is. relay_inputs:
+ * the files staged for a job, under the names ComfyUI gets. Safe to run on every start.
+ */
+export const RELAY_TABLES = `CREATE TABLE IF NOT EXISTS relay_runners (
+    principal TEXT PRIMARY KEY,
+    device TEXT NOT NULL,
+    lease_until INTEGER NOT NULL,
+    seen_at INTEGER NOT NULL,
+    port INTEGER,
+    facts_json TEXT
+  );
+  CREATE TABLE IF NOT EXISTS relay_tasks (
+    id TEXT PRIMARY KEY,
+    principal TEXT NOT NULL,
+    generation_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    device TEXT,
+    lease_hash TEXT,
+    graph_json TEXT,
+    prompt_id TEXT NOT NULL,
+    prefix TEXT,
+    meta_batch INTEGER NOT NULL DEFAULT 0,
+    preview INTEGER NOT NULL DEFAULT 0,
+    workflow_id TEXT,
+    extra_json TEXT,
+    wanted_json TEXT,
+    received_json TEXT,
+    result_json TEXT,
+    error TEXT,
+    refusal_json TEXT,
+    stop INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    down_at INTEGER,
+    note TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    claimed_at INTEGER,
+    sent_at INTEGER,
+    started_at INTEGER,
+    finished_at INTEGER,
+    device_seen_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS relay_tasks_principal ON relay_tasks(principal, state, created_at);
+  CREATE INDEX IF NOT EXISTS relay_tasks_generation ON relay_tasks(generation_id);
+  CREATE TABLE IF NOT EXISTS relay_inputs (
+    name TEXT PRIMARY KEY,
+    principal TEXT NOT NULL,
+    task_id TEXT,
+    n INTEGER,
+    content_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    reads INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS relay_inputs_task ON relay_inputs(task_id);`;
+
 declare global {
   var __fuobeDb: Database.Database | undefined;
 }
@@ -652,6 +712,9 @@ function open(): Database.Database {
   if (!(db.prepare("PRAGMA table_info(assist_thread_state)").all() as { name: string }[]).some((c) => c.name === "provider")) {
     db.exec("ALTER TABLE assist_thread_state ADD COLUMN provider TEXT");
   }
+  // "Use the ComfyUI on this computer" (src/server/computer): its tables, made here rather than as a numbered migration,
+  // since other branches add migrations at the same time and a migration is known by its place in the list.
+  db.exec(RELAY_TABLES);
   // An account's own runs (its list, its active runs) are found through this index, not by reading every run. Not a
   // numbered migration, so branches that add migrations never clash over it; a failure only leaves lists slower.
   try {

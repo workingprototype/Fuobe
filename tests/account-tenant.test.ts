@@ -148,7 +148,7 @@ describe("every step an account's run starts is its own", () => {
     await run(() => {
       expect(getSetting("demoMode")).toBe("off");
       expect(tenant()).toEqual({ kind: "account", id: a });
-      expect(ownGpu()?.url).toBe(fake.url);
+      expect(ownGpu()).toMatchObject({ url: fake.url });
       outsideRuns(() => {
         expect(tenant()).toBeUndefined();
         expect(ownGpu()).toBeUndefined();

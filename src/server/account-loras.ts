@@ -21,8 +21,9 @@ const cache = () => (globalThis.__fuobeAccountLoras ??= new Map());
 /** The LoRA files on the account's ComfyUI (inside its run: onOwnGpu), cached a minute; null when it can't say. */
 export async function accountLoraList(route?: ModelRoute): Promise<string[] | null> {
   const gpu = ownGpu();
-  if (!gpu?.url) return null;
-  const key = `${tenantAccount() ?? ""}|${gpu.url}`;
+  const where = gpu?.kind === "computer" ? "computer" : gpu?.url;
+  if (!where) return null;
+  const key = `${tenantAccount() ?? ""}|${where}`;
   const hit = cache().get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.files;
   const files = await comfyLoraFiles(route);

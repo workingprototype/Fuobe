@@ -160,7 +160,7 @@ describe("the status strip", () => {
     const a = auth.createAccount("strip@example.com", "long enough");
     auth.setAccountGpu(a.id, { url: "http://127.0.0.1:8188" });
     const acct = await visitorStatus(auth.accountById(a.id)!);
-    expect(acct.viewer).toEqual({ kind: "account", gpu: { connected: true, online: false } });
+    expect(acct.viewer).toEqual({ kind: "account", gpu: { connected: true, mode: "link", online: false } });
     expect(acct.providers.comfyui.configured).toBe(false);
     expect(JSON.stringify(acct)).not.toContain("owner-comfy.test");
   });

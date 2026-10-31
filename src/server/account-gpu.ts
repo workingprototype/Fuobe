@@ -2,6 +2,7 @@ import "server-only";
 import dns from "node:dns/promises";
 import net from "node:net";
 import { accountGpu, type Account, type AccountGpu } from "./auth";
+import { runnerFacts } from "./computer/tasks";
 import { PROVIDERS } from "./providers";
 import { blockedForAccounts, fetchPublic, isLoopbackGpu } from "./remote-fetch";
 import { isInstallHost, REFUSED_ADDRESS } from "./gpu/hosts";
@@ -65,7 +66,7 @@ export interface GpuInfo {
 }
 
 /** Ask the account's ComfyUI for /system_stats, the check the studio makes of its own. */
-export async function testGpu(gpu: AccountGpu, o: { resolve?: (host: string) => Promise<string[]>; timeoutMs?: number; maxBytes?: number } = {}): Promise<GpuInfo> {
+export async function testGpu(gpu: { url: string; token?: string }, o: { resolve?: (host: string) => Promise<string[]>; timeoutMs?: number; maxBytes?: number } = {}): Promise<GpuInfo> {
   let res: Response;
   try {
     res = await fetchPublic(`${gpu.url}/system_stats`, { headers: gpu.token ? { Authorization: `Bearer ${gpu.token}` } : {} }, { timeoutMs: o.timeoutMs ?? 10_000, deadlineMs: (o.timeoutMs ?? 10_000) + 5_000, maxBytes: o.maxBytes ?? 1 * 2 ** 20, resolve: o.resolve });
@@ -95,6 +96,11 @@ const STATUS_MAX_BYTES = 64 * 1024;
  * status requests that arrive while one is on its way share its answer.
  */
 export async function gpuState(id: string, gpu: AccountGpu): Promise<{ online: boolean } & GpuInfo> {
+  // On the person's own computer: what its Fuobe tab last said (online while it beats).
+  if (gpu.mode === "computer") {
+    const f = runnerFacts(`acct:${id}`);
+    return { online: !!f?.online, ...(f?.device && { device: f.device }), ...(f?.vramBytes && { vramBytes: f.vramBytes }), ...(f?.version && { version: f.version }) };
+  }
   const cache = (globalThis.__fuobeAccountGpus ??= new Map());
   const hit = cache.get(id);
   if (hit && hit.url === gpu.url && Date.now() - hit.at < 30_000) return { online: hit.online, ...hit.info };
@@ -124,6 +130,8 @@ export async function gpuState(id: string, gpu: AccountGpu): Promise<{ online: b
  */
 export function lastGpuDevice(id: string): string | undefined {
   const gpu = accountGpu(id);
+  // On the person's own computer: what its Fuobe tab last said.
+  if (gpu?.mode === "computer") return /^[a-z]+/i.exec(runnerFacts(`acct:${id}`)?.device ?? "")?.[0].toLowerCase();
   const hit = globalThis.__fuobeAccountGpus?.get(id);
   if (!gpu || hit?.url !== gpu.url) return undefined;
   return /^[a-z]+/i.exec(hit.info.device ?? "")?.[0].toLowerCase();
@@ -132,7 +140,8 @@ export function lastGpuDevice(id: string): string | undefined {
 /** What a visitor's status strip shows (GET /api/status): its own GPU, never the install's providers, servers or Demo mode. */
 export interface VisitorView {
   kind: "guest" | "account";
-  gpu: { connected: boolean; online?: boolean; device?: string; vramBytes?: number };
+  /** `mode` "computer": the ComfyUI on the person's own computer, which their Fuobe tab runs. */
+  gpu: { connected: boolean; mode?: "link" | "computer"; online?: boolean; device?: string; vramBytes?: number };
 }
 
 /**
@@ -145,7 +154,9 @@ export async function visitorStatus(account: Account | null) {
   const live = account && gpu ? await gpuState(account.id, gpu) : null;
   const viewer: VisitorView = {
     kind: account ? "account" : "guest",
-    gpu: gpu ? { connected: true, online: !!live?.online, ...(live?.device && { device: live.device }), ...(live?.vramBytes && { vramBytes: live.vramBytes }) } : { connected: false },
+    gpu: gpu
+      ? { connected: true, mode: gpu.mode === "computer" ? "computer" : "link", online: !!live?.online, ...(live?.device && { device: live.device }), ...(live?.vramBytes && { vramBytes: live.vramBytes }) }
+      : { connected: false },
   };
   return {
     providers: Object.fromEntries(Object.values(PROVIDERS).map((p) => [p.id, { label: p.id === "comfyui" ? "Your GPU" : p.label, configured: p.id === "comfyui" ? (gpu ? !!live?.online : true) : false }])),

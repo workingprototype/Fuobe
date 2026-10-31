@@ -30,6 +30,8 @@ export interface LocalComfyOptions {
   steps?: number;
   /** What the next prompt does. */
   failNext?: "oom" | "missing_node" | "missing_model" | "gone" | "never";
+  /** Lose this many prompts in a row (taken, then gone: a restart while it waited). */
+  loseNext?: number;
   /** What a job saves (default: one picture). "fake-png" is a web page named .png. */
   outputs?: ("image" | "video" | "audio" | "exr" | "text" | "fake-png")[];
   /** VHS meta-batch: the job finishes without outputs and queues this many more passes (the last one saves the clip). */
@@ -76,6 +78,10 @@ export interface LocalComfy {
   start: (o?: Partial<LocalComfyOptions>) => Promise<void>;
   close: () => Promise<void>;
 }
+
+/** The ports a stand-in takes when none is given. */
+export const TEST_PORTS = [3360, 3399] as const;
+let nextPort = 0;
 
 export const FAKE_PNG = Buffer.from(
   "89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d240000001149444154789c63381150f11f8419600c005a940a3db632c1b20000000049454e44ae426082",
@@ -275,7 +281,8 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
           devices: [{ name: "cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync", type: "cuda", vram_total: 32 * 2 ** 30 }],
         });
       }
-      if (p === "/models/loras") return reply(200, opts.loras ?? []);
+      // No list given: an older ComfyUI without the route (the run goes ahead, and ComfyUI has the last word).
+      if (p === "/models/loras") return opts.loras ? reply(200, opts.loras) : reply(404, { error: "not found" });
       if (p === "/models") return reply(200, ["checkpoints", "loras", "vae"]);
       if (p.startsWith("/models/")) return reply(200, []);
       if (p === "/object_info") return reply(200, {});
@@ -316,6 +323,10 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
           });
         }
         const id = opts.clientPromptId && typeof json.prompt_id === "string" ? json.prompt_id : randomUUID();
+        if (opts.loseNext && opts.loseNext > 0) {
+          opts.loseNext--;
+          return reply(200, { prompt_id: id, number: ++number, node_errors: {} });
+        }
         if (fail === "gone") return reply(200, { prompt_id: id, number: ++number, node_errors: {} });
         const job: Job = { id, number: ++number, graph: json.prompt ?? {}, clientId: json.client_id, preview: !!json.extra_data?.preview_method && json.extra_data.preview_method !== "none", fail };
         queue.push(job);
@@ -345,6 +356,7 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
         const max = Number(url.searchParams.get("max_items") ?? 64);
         return reply(200, Object.fromEntries([...history.entries()].slice(-max)));
       }
+      if (p === "/api/jobs" && opts.jobsApi) return reply(200, { jobs: [...queue.map((j) => ({ id: j.id, status: "pending" })), ...(running ? [{ id: running.id, status: "in_progress" }] : [])] });
       const job = /^\/api\/jobs\/([^/]+)(\/cancel)?$/.exec(p);
       if (job && opts.jobsApi) {
         if (job[2] && req.method === "POST") return reply(200, { cancelled: cancel(job[1]) });
@@ -397,15 +409,31 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
     if (running && running.clientId === clientId) event(clientId, "executing", { node: "1", prompt_id: running.id });
   };
 
-  const listen = (at: number) =>
-    new Promise<number>((resolve) => {
+  const listenOn = (at: number) =>
+    new Promise<number>((resolve, reject) => {
       server = http.createServer(handler);
       server.on("upgrade", upgrade);
+      server.once("error", reject);
       server.listen(at, "127.0.0.1", () => {
         const addr = server.address();
         resolve(typeof addr === "object" && addr ? addr.port : at);
       });
     });
+  // No port given: a free one of the test ports (never ComfyUI's own 8188 and its neighbours), not the one the last
+  // stand-in had (a client may still hold a connection to it).
+  const listen = async (at: number): Promise<number> => {
+    if (at) return listenOn(at);
+    const span = TEST_PORTS[1] - TEST_PORTS[0] + 1;
+    for (let i = 0; i < span; i++) {
+      const p = TEST_PORTS[0] + ((nextPort++ + process.pid) % span);
+      try {
+        return await listenOn(p);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
+      }
+    }
+    throw new Error(`No free port in ${TEST_PORTS.join("–")}`);
+  };
 
   const closeSockets = () => {
     for (const set of sockets.values()) for (const s of set) s.destroy();

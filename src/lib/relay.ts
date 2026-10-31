@@ -92,6 +92,8 @@ export interface TaskInput {
 /** What a claim hands the tab. */
 export interface ClaimedTask {
   id: string;
+  /** The run it is for (the person's own), so the tab can show its progress there. */
+  generationId: string;
   /** The claim's token: every call about this task carries it. */
   lease: string;
   graph: Record<string, { class_type: string; inputs: Record<string, unknown> }>;

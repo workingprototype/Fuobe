@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   if (!REF.test(ref)) return Response.json({ error: "Name a tool (ref)" }, { status: 400, headers });
   const t = gpuTargetFor(request, "read");
   if (t.kind === "none") return Response.json({ error: "Connect your GPU first.", code: "connect-gpu" }, { status: 409, headers });
-  const plan = await planFor(t, ref, t.kind === "account" ? t.accountId : "owner");
+  const plan = await planFor(t, ref, t.kind === "account" ? t.accountId : t.kind === "computer" ? (t.accountId ?? "owner") : "owner");
   if (!plan) return Response.json({ error: "Check your GPU first, or that tool doesn't run on ComfyUI.", code: "no-check" }, { status: 404, headers });
   return Response.json(plan, { headers });
 }

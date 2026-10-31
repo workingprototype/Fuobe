@@ -165,11 +165,22 @@ export function accountGeneration(method: string, pathname: string): string | un
  */
 export function accountOwnRead(pathname: string): boolean {
   if (ACCOUNT_LISTS.has(pathname)) return true;
-  return pathname === "/api/generations" || pathname === "/api/account/gpu" || GPU_READS.has(pathname);
+  return pathname === "/api/generations" || pathname === "/api/account/gpu" || GPU_READS.has(pathname) || COMPUTER_READ.test(pathname);
 }
 
 /** The Library's counts and its Uploads (its stored files): each route answers an account with its own only. */
 const ACCOUNT_LISTS = new Set(["/api/generations/facets", "/api/assets"]);
+
+/**
+ * "Use the ComfyUI on this computer": the routes the person's own Fuobe tab runs their jobs through. Each takes whose
+ * jobs from the session, and only that person's (src/server/computer/http.ts principalOf).
+ */
+const COMPUTER_READ = /^\/api\/gpu\/computer\/tasks\/[^/]+\/(inputs|outputs)\/[^/]+$/;
+const COMPUTER_CHANGES: [method: string, path: RegExp][] = [
+  ["POST", /^\/api\/gpu\/computer\/(beat|claim)$/],
+  ["POST", /^\/api\/gpu\/computer\/tasks\/[^/]+\/(report|release)$/],
+  ["PUT", /^\/api\/gpu\/computer\/tasks\/[^/]+\/outputs\/[^/]+$/],
+];
 
 /** GPU pre-flight reads: each answers for the account's own GPU only (src/server/gpu/target.ts). */
 const GPU_READS = new Set(["/api/gpu/readiness", "/api/gpu/badges", "/api/gpu/plan"]);
@@ -184,6 +195,8 @@ export function accountMayChange(method: string, pathname: string, search: strin
   if ((method === "PUT" || method === "DELETE") && pathname === "/api/account/gpu") return true;
   // GPU pre-flight: checking its own ComfyUI (reads only; the routes check the target and the request themselves).
   if ((method === "POST" && pathname === "/api/gpu/check") || (method === "PUT" && pathname === "/api/gpu/inventory")) return true;
+  // Running its own jobs on its own computer.
+  if (COMPUTER_CHANGES.some(([m, p]) => m === method && p.test(pathname))) return true;
   if (method === "POST" && (pathname === "/api/uploads" || pathname === "/api/media/probe")) return true;
   // Like, pin or review many of its own runs at once (the route checks each is its own, and refuses the rest).
   if (method === "POST" && pathname === "/api/generations/bulk") return true;

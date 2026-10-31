@@ -327,8 +327,9 @@ export const config = {
   // SVGs at the root. Generated SVGs under /api/files stay behind sign-in. The routes that take a file in a form
   // (/api/uploads, a Soul finish, a Layers render, a skill upload, an Assist source, an explainer document), and Split
   // soundtrack's mix export (a WAV in parts of 16 MB), make the same checks themselves (src/server/direct-gate.ts): the
-  // proxy would hold the whole file in memory first.
+  // proxy would hold the whole file in memory first. So do a computer's report of a finished job and its results
+  // (src/app/api/gpu/computer/tasks).
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico$|apple-icon\\.png$|samples/|previews/|vendor/|api/uploads$|api/generations/[^/]+/finish$|api/layers/renders$|api/assist/skills/upload$|api/assist/projects/[^/]+/sources$|api/explainer/document$|api/audio-tools/export$|[^/]+\\.svg$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico$|apple-icon\\.png$|samples/|previews/|vendor/|api/uploads$|api/generations/[^/]+/finish$|api/layers/renders$|api/assist/skills/upload$|api/assist/projects/[^/]+/sources$|api/explainer/document$|api/audio-tools/export$|api/gpu/computer/tasks/[^/]+/(?:report|outputs/[^/]+)$|[^/]+\\.svg$).*)",
   ],
 };

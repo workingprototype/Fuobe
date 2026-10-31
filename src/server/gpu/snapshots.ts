@@ -3,7 +3,7 @@ import { db } from "../db";
 import { gatherInventory, type GatherOptions } from "@/lib/gpu/gather";
 import type { CheckLine, GpuInventory } from "@/lib/gpu/types";
 import { loadIndex } from "./index-file";
-import { targetHost, transportFor, urlHash, type ServerTarget, type TransportOptions } from "./target";
+import { targetHost, transportFor, urlHash, type ReadTarget, type ServerTarget, type TransportOptions } from "./target";
 
 /**
  * Snapshots of what a target's ComfyUI had (SPEC §5.2, §15), in memory and in SQLite, per target and per way it
@@ -51,12 +51,12 @@ export const CHECK_INTERVAL_MS = 10_000;
 
 const memKey = (key: string, via: string) => `${key}|${via}`;
 
-export function readSnapshot(t: ServerTarget): Snapshot | null {
+export function readSnapshot(t: ReadTarget): Snapshot | null {
   const hash = urlHash(t);
-  const k = memKey(t.key, "server");
+  const k = memKey(t.key, t.via);
   const hit = mem().get(k);
   if (hit) return hit.urlHash === hash ? hit : null;
-  const row = db().prepare("SELECT * FROM gpu_snapshots WHERE target_key = ? AND via = 'server'").get(t.key) as Row | undefined;
+  const row = db().prepare("SELECT * FROM gpu_snapshots WHERE target_key = ? AND via = ?").get(t.key, t.via) as Row | undefined;
   if (!row || row.url_hash !== hash) return null;
   let inventory: GpuInventory;
   try {
@@ -68,22 +68,23 @@ export function readSnapshot(t: ServerTarget): Snapshot | null {
   try {
     views = row.report_json ? (JSON.parse(row.report_json) as Snapshot["views"]) : undefined;
   } catch {}
-  const snap: Snapshot = { targetKey: row.target_key, via: "server", urlHash: row.url_hash, checkedAt: row.checked_at, indexHash: row.index_hash, inventory, views, stale: !!row.stale };
+  const snap: Snapshot = { targetKey: row.target_key, via: t.via, urlHash: row.url_hash, checkedAt: row.checked_at, indexHash: row.index_hash, inventory, views, stale: !!row.stale };
   mem().set(k, snap);
   return snap;
 }
 
-export function writeSnapshot(t: ServerTarget, inventory: GpuInventory): Snapshot {
-  const snap: Snapshot = { targetKey: t.key, via: "server", urlHash: urlHash(t), checkedAt: inventory.checkedAt, indexHash: loadIndex().hash, inventory, stale: false };
+/** Keep a check (the server's own, or one a computer's tab sent in for its own ComfyUI). */
+export function writeSnapshot(t: ReadTarget, inventory: GpuInventory): Snapshot {
+  const snap: Snapshot = { targetKey: t.key, via: t.via, urlHash: urlHash(t), checkedAt: inventory.checkedAt, indexHash: loadIndex().hash, inventory, stale: false };
   db()
     .prepare(
       `INSERT INTO gpu_snapshots (target_key, via, url_hash, checked_at, index_hash, inventory_json, report_json, stale)
-       VALUES (@target_key, 'server', @url_hash, @checked_at, @index_hash, @inventory_json, NULL, 0)
+       VALUES (@target_key, @via, @url_hash, @checked_at, @index_hash, @inventory_json, NULL, 0)
        ON CONFLICT(target_key, via) DO UPDATE SET url_hash = excluded.url_hash, checked_at = excluded.checked_at, index_hash = excluded.index_hash,
          inventory_json = excluded.inventory_json, report_json = NULL, stale = 0`,
     )
-    .run({ target_key: t.key, url_hash: snap.urlHash, checked_at: snap.checkedAt, index_hash: snap.indexHash, inventory_json: JSON.stringify(inventory) });
-  mem().set(memKey(t.key, "server"), snap);
+    .run({ target_key: t.key, via: t.via, url_hash: snap.urlHash, checked_at: snap.checkedAt, index_hash: snap.indexHash, inventory_json: JSON.stringify(inventory) });
+  mem().set(memKey(t.key, t.via), snap);
   return snap;
 }
 

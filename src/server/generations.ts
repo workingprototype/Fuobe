@@ -54,8 +54,8 @@ import { createExtendChain, createKeyframeFilm, createMosaicRun, createRelitClip
 import { enhancePrompt, enhanceSoulWords, ideogramCaption } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
-import { comfyLoraFiles, onOwnGpu, outputFetch, outsideOwnGpu, OWN_OUTPUT_LIMITS, ownGpu, probeComfy } from "./providers/comfyui";
-import { accountGpu } from "./auth";
+import { comfyLoraFiles, computerScope, onOwnGpu, outputFetch, outsideOwnGpu, OWN_OUTPUT_LIMITS, ownGpu, probeComfy, relayFile, type OwnGpu } from "./providers/comfyui";
+import { accountGpu, gpuLink, type AccountGpu } from "./auth";
 import { CONNECT_GPU_MESSAGE, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { outsideTenant, runAsTenant, tenant, tenantAccount } from "./tenant";
 import { generationAccount } from "./account-library";
@@ -1256,7 +1256,13 @@ export function accountRun(accountId: string, providerId: string): { run: <T>(fn
   if (!gpu) return { error: CONNECT_GPU_MESSAGE };
   if (providerId !== "comfyui") return { error: OWN_GPU_ONLY };
   // As the account (tenant.ts: only its own files and runs), on its own ComfyUI, the open engine, no demo outputs.
-  return { run: (fn) => runAsTenant({ kind: "account", id: accountId }, () => onOwnGpu(gpu, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn))) };
+  const own = ownGpuOf(accountId, gpu);
+  return { run: (fn) => runAsTenant({ kind: "account", id: accountId }, () => onOwnGpu(own, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn))) };
+}
+
+/** Where an account's ComfyUI is, as the provider takes it: a link, or the person's own computer (its tab runs the jobs). */
+function ownGpuOf(accountId: string, gpu: AccountGpu): OwnGpu {
+  return gpu.mode === "computer" ? { kind: "computer", principal: `acct:${accountId}` } : { url: gpu.url, token: gpu.token };
 }
 
 /**
@@ -1304,9 +1310,9 @@ export async function accountLoraFix(req: GenerationRequest): Promise<MissingFil
  * yet: an empty address that reaches nothing), the open engine, no demo outputs. For previews; a run goes through
  * accountRun.
  */
-export function asVisitor<T>(gpu: { url: string; token?: string } | null, fn: () => T, accountId?: string): T {
+export function asVisitor<T>(gpu: AccountGpu | null, fn: () => T, accountId?: string): T {
   return runAsTenant(accountId ? { kind: "account", id: accountId } : { kind: "guest" }, () =>
-    onOwnGpu(gpu ?? { url: "" }, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn)),
+    onOwnGpu(gpu && accountId ? ownGpuOf(accountId, gpu) : { url: gpuLink(gpu)?.url ?? "" }, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn)),
   );
 }
 
@@ -1472,8 +1478,8 @@ async function submitNow(
     // file mirrored once to the provider's storage (the civitai key never leaves this server).
     if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
       input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
-    } else if (providerId === "comfyui" && !req.account && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
-      // (Not for an account's own ComfyUI: the download writes to the install's LoRA folder.)
+    } else if (providerId === "comfyui" && !req.account && !computerScope() && (input.loras?.length || graphLoras(route.endpoint, input.extra).length)) {
+      // (Not for an account's own ComfyUI, nor one on the owner's computer: the download writes to the install's LoRA folder.)
       // A graph that loads its own LoRAs (Genjutsu's Character swap: the Turbo and swap LoRAs) gets them downloaded too.
       await ensureLorasOnComfy([...(input.loras ?? []), ...graphLoras(route.endpoint, input.extra)], await comfyLoraFiles(route), (message) => update(id, { message }));
     }
@@ -1712,6 +1718,12 @@ async function pollOne(r: Row): Promise<void> {
   const account = accountOf(r);
   const queueMs = account ? ACCOUNT_LIMITS.queueMs : QUEUE_TIMEOUT_MS;
   if (!res || res.state === "queued" || res.state === "running") {
+    // A job on someone's own computer reached their ComfyUI later than it was handed over (it waited for their tab): its
+    // queue clock starts then.
+    if (res?.sentAt && res.sentAt > run.submitted_at) {
+      recordSubmission(r.id, res.sentAt);
+      run = { submitted_at: res.sentAt, started_at: null };
+    }
     // A job that has just left the queue gets its full running time from now.
     const startsNow = res?.state === "running" && !run.started_at;
     const overdue = run.started_at ? now - run.started_at > TIMEOUT_MS : !startsNow && now - run.submitted_at > queueMs;
@@ -1724,7 +1736,9 @@ async function pollOne(r: Row): Promise<void> {
         status: "failed",
         error: run.started_at
           ? `Timed out after ${TIMEOUT_MS / 60_000} minutes`
-          : account
+          : res?.state === "queued" && res.timeoutError
+            ? res.timeoutError
+            : account
             ? `Timed out waiting ${queueMs / 60_000} minutes in your ComfyUI's queue`
             : `Timed out waiting ${QUEUE_TIMEOUT_MS / 3_600_000} hours in the provider's queue`,
         completed_at: now,
@@ -1738,7 +1752,9 @@ async function pollOne(r: Row): Promise<void> {
     return;
   }
   if (res.state === "failed") {
-    update(r.id, { status: "failed", error: res.error, completed_at: Date.now(), message: null });
+    // What the GPU was missing (a model, a node class): the tile offers "Fix it", and the GPU's check counts as stale.
+    update(r.id, { status: "failed", error: res.error, completed_at: Date.now(), message: null, ...(res.fix && { fix_json: JSON.stringify(res.fix) }) });
+    if (res.fix) markStale(account ? `acct:${account}` : "install");
     return;
   }
   // Mark first so a slow download isn't polled twice.
@@ -2063,9 +2079,34 @@ async function persistAccountOutput(o: RichOutput, generationId: string, account
   };
 }
 
+/**
+ * A result a computer sent in (its task received and checked it, src/server/computer): moved into the files folder as it
+ * is, no second copy, as the type its bytes said. An account's counts against its files first.
+ */
+async function persistRelayOutput(o: RichOutput, generationId: string, account: string | undefined, linked: Record<string, unknown> | undefined): Promise<OutputFile> {
+  const file = relayFile(o.url);
+  if (!file) throw new Error("The result isn't here any more");
+  const from = file.path;
+  const contentType = o.contentType ?? file.contentType ?? "application/octet-stream";
+  const size = fs.statSync(from).size;
+  if (account) roomFor(account, size);
+  const asset = adoptFile({ from, contentType: account ? accountType(contentType) : contentType, source: "generation", generationId, ...(account && { accountId: account }) });
+  const meta = relinkMain(linked, o.url, asset.url);
+  const text = o.text ?? (asset.kind === "text" && asset.size <= MAX_INLINE_TEXT * 4 ? fs.readFileSync(absolutePath(asset.relPath), "utf8") : undefined);
+  return {
+    url: asset.url,
+    kind: asset.contentType === "application/octet-stream" ? (o.kind ?? asset.kind) : asset.kind,
+    contentType: asset.contentType,
+    assetId: asset.id,
+    ...inlineText(text, meta),
+    ...(o.draftId ? { draftId: o.draftId } : {}),
+  };
+}
+
 async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
   const linked = await persistArtifacts(o.meta, generationId, o.url);
   const account = tenantAccount();
+  if (o.url?.startsWith("relay:")) return persistRelayOutput(o, generationId, account, linked);
   if (account && o.url && /^https?:\/\//.test(o.url)) return persistAccountOutput(o, generationId, account, linked);
   let data: Buffer;
   let contentType = o.contentType;

@@ -9,7 +9,7 @@ import { getSetting } from "../settings";
 import { loadIndex } from "./index-file";
 import { probe, readSnapshot, saveViews, checkWait, type Snapshot } from "./snapshots";
 import { STUDIO_ROWS, openModelTools, presetTools, studioOthers, studioTool, toolFor, type Tool } from "./tools";
-import { urlHash, type ServerTarget } from "./target";
+import { urlHash, type ReadTarget } from "./target";
 
 /**
  * The views of a snapshot (SPEC §7.3, §10): the readiness board, the badge map, and one tool's fix plan.
@@ -17,8 +17,8 @@ import { urlHash, type ServerTarget } from "./target";
  * plan's re-check of its own classes and folders when the snapshot is more than 60 s old.
  */
 
-export function contextFor(t: ServerTarget): ReadinessContext {
-  return { account: t.kind === "account", isolatedUrl: t.kind === "install" && !!getSetting("comfyIsolatedUrl") };
+export function contextFor(t: ReadTarget): ReadinessContext {
+  return { account: t.kind === "account" || (t.kind === "computer" && t.key !== "install"), isolatedUrl: t.kind === "install" && !!getSetting("comfyIsolatedUrl") };
 }
 
 export function readinessOf(tool: Tool, inv: GpuInventory, idx: RequirementIndex, ctx: ReadinessContext): ToolReadiness {
@@ -65,7 +65,7 @@ export function buildViews(inv: GpuInventory, idx: RequirementIndex, ctx: Readin
 }
 
 /** The views for a snapshot, cached on it. */
-export function viewsOf(t: ServerTarget, snap: Snapshot): Views {
+export function viewsOf(t: ReadTarget, snap: Snapshot): Views {
   const idx = loadIndex();
   const cached = snap.views as { indexHash: string; data: Views } | undefined;
   if (cached && cached.indexHash === idx.hash) return cached.data;
@@ -77,8 +77,8 @@ export function viewsOf(t: ServerTarget, snap: Snapshot): Views {
 /** GET /api/gpu/readiness: the stored check's board (never probes). */
 export interface ReadinessView {
   connected: boolean;
-  /** Whose ComfyUI: the studio's own, or the account's. */
-  target?: "install" | "account";
+  /** Whose ComfyUI: the studio's own, the account's, or the one on the person's computer (its tab checks it). */
+  target?: "install" | "account" | "computer";
   reason?: "guest" | "no-gpu" | "token" | "refused" | "off";
   checkedAt?: number | null;
   stale?: boolean;
@@ -90,9 +90,9 @@ export interface ReadinessView {
   report?: ReadinessReport;
 }
 
-export function readinessView(t: ServerTarget): ReadinessView {
+export function readinessView(t: ReadTarget): ReadinessView {
   const snap = readSnapshot(t);
-  const base: ReadinessView = { connected: true, target: t.kind, wait: checkWait(t) };
+  const base: ReadinessView = { connected: true, target: t.kind, wait: t.via === "server" ? checkWait(t) : 0 };
   if (!snap) return { ...base, checkedAt: null };
   const inv = snap.inventory;
   if (!inv.reachable) {
@@ -101,7 +101,7 @@ export function readinessView(t: ServerTarget): ReadinessView {
   return { ...base, checkedAt: snap.checkedAt, stale: snap.stale, report: viewsOf(t, snap).report };
 }
 
-export function badgesView(t: ServerTarget): BadgeMap {
+export function badgesView(t: ReadTarget): BadgeMap {
   const snap = readSnapshot(t);
   if (!snap || !snap.inventory.reachable) return { connected: true, ...(snap && { checkedAt: snap.checkedAt }), models: {}, presets: {} };
   // Badges count as fresh for 10 minutes; past that they still show (the board offers "Check again").
@@ -114,7 +114,7 @@ const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex"
  * A tool's fix plan from the snapshot. When the snapshot is more than 60 s old and says something is missing,
  * the plan's own classes and folders are read again first (sharing the target's probe and its 10 s limit).
  */
-export async function planFor(t: ServerTarget, ref: string, actor: string): Promise<FixPlan | null> {
+export async function planFor(t: ReadTarget, ref: string, actor: string): Promise<FixPlan | null> {
   const tool = toolFor(ref);
   if (!tool) return null;
   const idx = loadIndex();
@@ -122,7 +122,8 @@ export async function planFor(t: ServerTarget, ref: string, actor: string): Prom
   let snap = readSnapshot(t);
   if (!snap) return null;
   let r = readinessOf(tool, snap.inventory, idx, ctx);
-  if (snap.inventory.reachable && r.needs.length && Date.now() - snap.checkedAt > 60_000 && checkWait(t) === 0) {
+  // (A computer's ComfyUI is read by its tab: the plan is from what it sent last.)
+  if (t.via === "server" && snap.inventory.reachable && r.needs.length && Date.now() - snap.checkedAt > 60_000 && checkWait(t) === 0) {
     const targets = needTargets(r.needs, idx);
     await probe(t, { actor, ...targets, loraNames: tool.loras.map((l) => l.file) }).catch(() => null);
     snap = readSnapshot(t) ?? snap;
@@ -130,11 +131,11 @@ export async function planFor(t: ServerTarget, ref: string, actor: string): Prom
   }
   const fits = fitsFor(tool, t, snap.inventory, idx, ctx);
   const gpu = snap.inventory.devices[0] ? deviceLabel(snap.inventory.devices[0].name) : undefined;
-  return fixPlan(r, snap.inventory, idx, { hash: sha256, urlHash: urlHash(t), account: t.kind === "account", loras: tool.loras, fits, gpu: gpu && vramGb(snap.inventory.devices[0].vramTotal) ? gpu : undefined });
+  return fixPlan(r, snap.inventory, idx, { hash: sha256, urlHash: urlHash(t), account: ctx.account, loras: tool.loras, fits, gpu: gpu && vramGb(snap.inventory.devices[0].vramTotal) ? gpu : undefined });
 }
 
 /** Other tools of the same studio that fit this GPU (for the "needs a bigger GPU" sheet). */
-function fitsFor(tool: Tool, t: ServerTarget, inv: GpuInventory, idx: RequirementIndex, ctx: ReadinessContext): { ref: ToolRef; name: string; state: "ready" | "almost" }[] {
+function fitsFor(tool: Tool, t: ReadTarget, inv: GpuInventory, idx: RequirementIndex, ctx: ReadinessContext): { ref: ToolRef; name: string; state: "ready" | "almost" }[] {
   const op = /#(.+)$/.exec(tool.ref)?.[1];
   const row = STUDIO_ROWS.find((s) => s.config && (s.config.defaultModels.open === tool.ref.replace(/^model:|#.*$/g, "") || (op && s.config.ops.includes(op as never) && s.config.kind === tool.kind)));
   if (!row) return [];

@@ -62,8 +62,12 @@ export async function gateGeneration(t: GpuTarget, g: GateInput): Promise<GateRe
   if (!snap?.inventory.reachable) return { ok: true };
   let r = toolReadiness(ref, name, [id], loras, snap.inventory, idx, ctx, model?.cloud);
   if (!blocks(r)) return { ok: true };
-  // Confirm with a live read of just these classes and folders, unless the snapshot is from the last 10 s.
-  if (Date.now() - snap.checkedAt > 10_000 && r.state !== "unsupported") {
+  // A ComfyUI on the person's computer is read by their tab, which checks the tool right before the run: only a check
+  // from the last 10 s counts as confirmed (an older one never blocks; ComfyUI's own answer has the last word).
+  if (t.via === "browser") {
+    if (Date.now() - snap.checkedAt > 10_000) return { ok: true };
+  } else if (Date.now() - snap.checkedAt > 10_000 && r.state !== "unsupported") {
+    // Confirm with a live read of just these classes and folders, unless the snapshot is from the last 10 s.
     const fresh = await probe(t, { actor: g.actor, ...needTargets(r.needs, idx), loraNames: loras.map((l) => l.file) }).catch(() => null);
     if (!fresh?.reachable) return { ok: true };
     snap = readSnapshot(t);
@@ -72,9 +76,9 @@ export async function gateGeneration(t: GpuTarget, g: GateInput): Promise<GateRe
     if (!blocks(r)) return { ok: true };
   }
   const dev = snap.inventory.devices[0];
-  const plan = fixPlan(r, snap.inventory, idx, { hash: sha256, urlHash: urlHash(t), account: t.kind === "account", loras, gpu: dev ? deviceLabel(dev.name) : undefined });
+  const plan = fixPlan(r, snap.inventory, idx, { hash: sha256, urlHash: urlHash(t), account: ctx.account, loras, gpu: dev ? deviceLabel(dev.name) : undefined });
   const what = r.state === "unsupported" ? "needs a second ComfyUI" : `needs ${r.needs.filter((n) => n.kind !== "hf-licence").length} more thing${r.needs.length > 1 ? "s" : ""} on your ComfyUI`;
-  if (t.kind === "install") return { ok: true, warning: `${name} ${what}. Open Connect your GPU to see them.` };
+  if (t.key === "install") return { ok: true, warning: `${name} ${what}. Open Connect your GPU to see them.` };
   return { ok: false, ref, plan, message: `${name} ${what} before it can run.` };
 }
 

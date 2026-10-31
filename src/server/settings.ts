@@ -72,6 +72,11 @@ export const SETTINGS = {
   /** A second ComfyUI for workflows whose node packs can't share the main install (LatentSync 1.6, ThinkSound; scripts/comfy/README.md). */
   comfyIsolatedUrl: { key: "comfyui.isolatedUrl", env: "COMFYUI_ISOLATED_URL" },
   /**
+   * Where the owner's ComfyUI runs: on this server (its address above), or on the computer the owner uses, reached
+   * through the owner's own Fuobe tab (a studio on a server, a ComfyUI at home: src/server/computer).
+   */
+  comfyWhere: { key: "comfyui.where", env: "COMFYUI_WHERE", default: "server", options: ["server", "computer"] },
+  /**
    * ComfyUI's models/loras folder, when it's on this machine: trained LoRAs are copied there, and a recipe's
    * LoRAs (looks, motions) are downloaded there before a run needs them (src/server/loras.ts).
    */

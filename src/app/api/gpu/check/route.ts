@@ -21,6 +21,8 @@ export async function POST(request: Request) {
     const error = t.reason === "refused" ? "Fuobe can't use this address. Connect your own ComfyUI." : "Connect your GPU first.";
     return Response.json({ error, code: "connect-gpu" }, { status: 409 });
   }
+  // The ComfyUI on the person's own computer: their Fuobe tab checks it and sends what it found (PUT /api/gpu/inventory).
+  if (t.kind === "computer") return Response.json({ error: "Your ComfyUI is on your computer: Fuobe checks it from this browser.", code: "browser" }, { status: 409 });
   const wait = checkWait(t);
   if (wait > 0 && !probeRunning(t)) {
     return Response.json({ error: `Checked a moment ago. Try again in ${wait} s.`, wait }, { status: 429, headers: { "Retry-After": String(wait) } });

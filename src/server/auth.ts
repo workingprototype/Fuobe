@@ -36,11 +36,14 @@ export interface ApiToken {
   lastUsedAt?: number;
 }
 
-/** An account's own ComfyUI ("Your GPU"): where its runs go, never the install's. A public address (a tunnel). */
-export interface AccountGpu {
-  url: string;
-  token?: string;
-}
+/**
+ * An account's own ComfyUI ("Your GPU"): where its runs go, never the install's. A public address (a tunnel), or the
+ * ComfyUI on the person's own computer, which only their Fuobe tab reaches (src/server/computer).
+ */
+export type AccountGpu = { mode?: "link"; url: string; token?: string } | { mode: "computer" };
+
+/** A GPU reached at a public address (a link), not the person's own computer. */
+export const gpuLink = (gpu: AccountGpu | null | undefined): { url: string; token?: string } | null => (gpu && gpu.mode !== "computer" ? gpu : null);
 
 /** A signed-up visitor (public sign-up). */
 export interface Account {
@@ -424,7 +427,8 @@ function withoutGpu(a: Account): Account {
 export function setAccountGpu(id: string, gpu: AccountGpu | null): void {
   const d = read();
   if (!d.accounts?.some((a) => a.id === id)) throw new AccountError("No such account", 404);
-  write({ ...d, accounts: d.accounts.map((a) => (a.id !== id ? a : gpu ? { ...a, gpu: { url: gpu.url, ...(gpu.token && { token: gpu.token }) } } : withoutGpu(a))) });
+  const kept = (g: AccountGpu): AccountGpu => (g.mode === "computer" ? { mode: "computer" } : { url: g.url, ...(g.token && { token: g.token }) });
+  write({ ...d, accounts: d.accounts.map((a) => (a.id !== id ? a : gpu ? { ...a, gpu: kept(gpu) } : withoutGpu(a))) });
 }
 
 /** Who is asking: the owner (also everyone while no password is set), an account (public sign-up on), or a guest. */
