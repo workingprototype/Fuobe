@@ -228,7 +228,7 @@ account with that provider. The studio's own keys are never used for an account'
 - **Checked first.** `PUT /api/account/keys/fal` (or `/replicate`) with `{ key }` checks the key
   with the provider before it is saved: a free call that runs nothing (fal.ai: the status of a
   request that doesn't exist; Replicate: `GET /v1/account`). A refused key answers 422, a provider
-  out of reach 502, and nothing is saved. A key that works on a provider account with no balance
+  out of reach 503, and nothing is saved. A key that works on a provider account with no balance
   left is saved, with a `note` that says to top it up. `?test=1` only checks. Only a check that
   reaches the provider counts: 10 a minute per account, 20 per address (behind a trusted proxy),
   120 for all accounts together.

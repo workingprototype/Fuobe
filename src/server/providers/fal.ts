@@ -183,13 +183,14 @@ export type KeyCheck = { ok: true; detail: string } | { ok: false; detail: strin
 /**
  * Check a fal.ai key, and only that key (Settings' "Save & test", an account's Your keys): the status of a request that
  * doesn't exist. Free, and nothing runs: 401/403 means a bad key (or, saying so, an empty balance), 404/422 a key that
- * works.
+ * works. The path is the app's (fal-ai/flux), as fal.ai's status paths are: with an endpoint's sub-path
+ * (fal-ai/flux/dev) fal.ai answers 405 to every key.
  */
 export async function testFalKey(k: string): Promise<KeyCheck> {
   if (!k) return { ok: false, detail: "No key set", reason: "rejected" };
   let res: Response;
   try {
-    res = await fetch(`${falQueue()}/fal-ai/flux/dev/requests/00000000-0000-0000-0000-000000000000/status`, {
+    res = await fetch(`${falQueue()}/fal-ai/flux/requests/00000000-0000-0000-0000-000000000000/status`, {
       headers: { Authorization: `Key ${k}` },
       signal: AbortSignal.timeout(15_000),
     });

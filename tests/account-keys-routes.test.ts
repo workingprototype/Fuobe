@@ -121,12 +121,13 @@ describe("adding a key", () => {
 
   it("says when the provider can't be reached or answers oddly", async () => {
     const odd = await put("fal", { key: "outage-key-id-1111:outage-secret-1111" });
-    expect(odd.status).toBe(502);
+    // 503, not 502: a proxy in front (Cloudflare) swaps an origin's 502 for its own page, and the words are lost.
+    expect(odd.status).toBe(503);
     expect((await odd.json()).error).toBe("fal.ai answered 503, so the key couldn't be checked. Try again in a moment.");
     globalThis.__fuobeTestFalUrl = "http://127.0.0.1:9";
     try {
       const down = await put("fal", { key: GOOD_FAL });
-      expect(down.status).toBe(502);
+      expect(down.status).toBe(503);
       expect((await down.json()).error).toBe("Couldn't reach fal.ai to check the key, so it wasn't saved. Try again in a moment.");
     } finally {
       globalThis.__fuobeTestFalUrl = fal.url;
@@ -137,6 +138,8 @@ describe("adding a key", () => {
   it("checks only, with ?test=1", async () => {
     const r = await put("fal", { key: GOOD_FAL }, "?test=1");
     expect(await r.json()).toEqual({ provider: "fal", ok: true, detail: "Key accepted" });
+    // fal.ai's status path without the endpoint's sub-path (with it, fal.ai answers 405 to every key).
+    expect(fal.log.at(-1)?.path).toBe("/fal-ai/flux/requests/00000000-0000-0000-0000-000000000000/status");
     expect((await get()).keys.fal).toBeNull();
   });
 

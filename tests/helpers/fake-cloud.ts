@@ -89,8 +89,12 @@ export function startFakeFal(port = 0): Promise<FakeCloud> {
       const path = r.path.split("?")[0];
       // A file's upload address: the client sends no key there.
       if (r.method === "PUT" && path.startsWith("/upload/")) return json(res, 200, {});
+      // Like fal.ai, a status path keeps only the app's first two parts: one with an endpoint's sub-path
+      // (/fal-ai/flux/dev/requests/…) is 405 whatever the key.
+      if (r.method === "GET" && /^\/[^/]+\/[^/]+\/[^/]+\/requests\//.test(path)) return json(res, 405, {});
       if (refused(fake, r, res, key, { status: 403, detail: "User is locked. Reason: Exhausted balance. Top up your balance at fal.ai/dashboard/billing." })) return;
-      if (path === `/fal-ai/flux/dev/requests/${ZERO}/status`) return json(res, 404, { detail: "Request not found" });
+      // The key check: the status of a request that doesn't exist.
+      if (path === `/fal-ai/flux/requests/${ZERO}/status`) return json(res, 404, { status: "NOT_FOUND" });
       if (r.method === "POST" && path === "/storage/upload/initiate") {
         const id = ++n;
         return json(res, 200, { upload_url: `${fake.url}/upload/${id}`, file_url: `${fake.url}/files/${id}` });
