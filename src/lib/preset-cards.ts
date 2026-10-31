@@ -11,6 +11,7 @@
  * components import this module, and would carry the whole manifest into every chunk they are in.
  */
 import type { Preset } from "./catalog/types";
+import { PRESET_PEAKS } from "./preset-peaks.generated";
 
 /** Bundled sample stills (public/samples/previews, see scripts/gen-preview-scenes.mjs). */
 export type PreviewScene = "landscape" | "portrait" | "city" | "product";
@@ -180,10 +181,11 @@ export interface PresetPreview {
   /** A real cover's clip (preset-previews.generated.ts), played instead of the procedural preview. */
   video?: string;
   /**
-   * Shown at rest instead of the poster: the clip's peak frame (preset-peaks.generated.ts), where the clip starts
-   * (`at`, in seconds) when it plays, so nothing jumps. Home's cards only; the galleries keep their posters.
+   * Shown at rest instead of the poster: the clip's peak frame (preset-peaks.generated.ts, onPeak), where the clip
+   * starts (`at`, in seconds) when it plays by itself, so nothing jumps. Its loop comes back to `from`, just before
+   * the change starts, and a hover starts there. Home's cards and the preset header; the galleries keep their posters.
    */
-  rest?: { src: string; at: number };
+  rest?: { src: string; at: number; from: number };
   scene: PreviewScene;
   move?: CameraMove;
   fx?: PreviewFx;
@@ -402,6 +404,15 @@ export function proceduralPreview(p: Pick<Preset, "id" | "type" | "name" | "cate
  * procedural preview carries a camera move (motions) or a treatment (effects, apps), a cover neither.
  */
 export const isCover = (p: Pick<PresetPreview, "move" | "fx">) => !p.move && !p.fx;
+
+/** A poster's 320 px copy: thumbs/ next to it (pnpm eval:covers makes the covers' own, gen-preset-peaks the peaks'). */
+export const thumbOf = (poster: string) => poster.replace(/\/([^/]+)$/, "/thumbs/$1");
+
+/** The card resting on its clip's peak frame (preset-peaks.generated.ts) when it has one, else as it is. */
+export function onPeak(card: PresetCardData): PresetCardData {
+  const peak = PRESET_PEAKS[card.id];
+  return peak ? { ...card, preview: { ...card.preview, rest: { src: `/previews/presets/peak/${card.id}.jpg`, ...peak } } } : card;
+}
 
 /**
  * Whether a card shows its still mirrored, so neighbouring treatments on the same still differ.

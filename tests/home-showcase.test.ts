@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NAV } from "@/components/nav-items";
 import { APPS, EFFECTS, MODELS, MOTIONS, getPreset } from "@/lib/catalog";
 import { CAMERA_MOVES } from "@/lib/catalog/cinema";
@@ -11,6 +11,7 @@ import { HUB_MODES } from "@/lib/hubs";
 import { buildLicenceList, type LicenceWorkflowInput } from "@/lib/licences";
 import {
   HOME_BEFORE_AFTER,
+  HOME_CAPTION_MAX,
   HOME_EFFECTS,
   HOME_MOTIONS,
   HOME_NEW_OPEN,
@@ -25,8 +26,12 @@ import {
   presetHref,
   roundedDown,
 } from "@/lib/home-showcase";
+import { onPeak, thumbOf } from "@/lib/preset-cards";
 import { PRESET_PEAKS } from "@/lib/preset-peaks.generated";
 import { PRESET_PREVIEWS } from "@/lib/preset-previews.generated";
+
+// homeShowcase() is kept with "use cache" and cacheLife, which only a Next render reads.
+vi.mock("next/cache", () => ({ cacheLife: () => {} }));
 
 /*
  * Home's showcase (src/lib/home-showcase.ts) against the catalog and the files in public/: every preset it names is
@@ -44,7 +49,10 @@ const WHITE_BARS = ["app-dance", "app-simlife", "app-game-dump", "app-japanese-s
 const STILLS = ["app-3d-rotation"];
 
 const studioIds = HOME_STUDIOS.flatMap((s) => (s.id ? [s.id] : []));
-const homeIds = [...HOME_WALL.map((t) => t.id), ...HOME_EFFECTS, ...HOME_MOTIONS, ...HOME_BEFORE_AFTER.map((p) => p.id), ...HOME_REVEALS, ...studioIds];
+const rows = [...HOME_EFFECTS, ...HOME_MOTIONS, ...HOME_REVEALS];
+const homeIds = [...HOME_WALL.map((t) => t.id), ...rows.map((r) => r.id), ...HOME_BEFORE_AFTER.map((p) => p.id), ...studioIds];
+/** Effects whose first frame is the strong one, so their card rests on the poster as the camera motions' do. */
+const ON_POSTER = ["effect-earth-zoom-out"];
 
 describe("Home's showcase", () => {
   it("names real presets, each with its cover and, where the slot plays one, its clip", () => {
@@ -69,17 +77,23 @@ describe("Home's showcase", () => {
 
   it("rests effects and apps on their peak frame, cut and listed; camera motions on their poster", async () => {
     const home = await homeShowcase();
-    const cards = [...home.wall.map((t) => t.card), ...home.effects, ...home.motions, ...home.reveals, ...home.studios.flatMap((s) => (s.card ? [s.card] : []))];
+    const rowCards = [...home.effects, ...home.motions, ...home.reveals].map((r) => r.card);
+    const cards = [...home.wall.map((t) => t.card), ...rowCards, ...home.studios.flatMap((s) => (s.card ? [s.card] : []))];
     for (const c of cards) {
       const peaked = !!PRESET_PEAKS[c.id];
       expect(!!c.preview.rest, c.id).toBe(peaked);
       if (c.preview.rest) {
-        expect(c.preview.rest).toEqual({ src: `/previews/presets/peak/${c.id}.jpg`, at: PRESET_PEAKS[c.id].at });
+        expect(c.preview.rest).toEqual({ src: `/previews/presets/peak/${c.id}.jpg`, ...PRESET_PEAKS[c.id] });
         expect(exists(c.preview.rest.src), c.preview.rest.src).toBe(true);
+        // Its 320 px copy, for a small screen (PresetPreview's sizes).
+        expect(exists(thumbOf(c.preview.rest.src)), thumbOf(c.preview.rest.src)).toBe(true);
       }
+      expect(exists(thumbOf(c.preview.poster)), thumbOf(c.preview.poster)).toBe(true);
       if (c.id.startsWith("motion-")) expect(c.preview.rest, c.id).toBeUndefined();
     }
-    for (const id of [...HOME_EFFECTS, ...HOME_REVEALS, ...HOME_WALL.filter((t) => !t.id.startsWith("motion-")).map((t) => t.id)]) expect(PRESET_PEAKS[id], id).toBeDefined();
+    const peakedIds = [...HOME_EFFECTS, ...HOME_REVEALS, ...HOME_WALL.filter((t) => !t.id.startsWith("motion-"))].map((t) => t.id).filter((id) => !ON_POSTER.includes(id));
+    for (const id of peakedIds) expect(PRESET_PEAKS[id], id).toBeDefined();
+    for (const id of ON_POSTER) expect(PRESET_PEAKS[id], id).toBeUndefined();
     // The before/after: the poster, then the peak.
     for (const p of home.beforeAfter) {
       expect(p.before).toBe(PRESET_PREVIEWS[p.id].poster);
@@ -87,13 +101,30 @@ describe("Home's showcase", () => {
       expect(p.tags).toHaveLength(2);
     }
     // Every peak in the list has its file, and every file is in the list; a peak starts inside its clip's last second.
-    const files = fs.readdirSync(path.join(root, "public", "previews", "presets", "peak")).map((f) => f.replace(/\.jpg$/, ""));
-    expect(files.sort()).toEqual(Object.keys(PRESET_PEAKS).sort());
-    for (const [id, { at }] of Object.entries(PRESET_PEAKS)) {
+    const peakDir = path.join(root, "public", "previews", "presets", "peak");
+    const files = (dir: string) => fs.readdirSync(dir).filter((f) => f.endsWith(".jpg")).map((f) => f.replace(/\.jpg$/, "")).sort();
+    expect(files(peakDir)).toEqual(Object.keys(PRESET_PEAKS).sort());
+    expect(files(path.join(peakDir, "thumbs"))).toEqual(Object.keys(PRESET_PEAKS).sort());
+    // A peak sits in its clip's last second; its loop comes back to within the clip's first one and a half.
+    for (const [id, { at, from }] of Object.entries(PRESET_PEAKS)) {
       expect(PRESET_PREVIEWS[id]?.video, id).toBeDefined();
       expect(at, id).toBeGreaterThan(2.5);
       expect(at, id).toBeLessThan(4);
+      expect(from, id).toBeGreaterThan(0);
+      expect(from, id).toBeLessThan(1.5);
     }
+    // The preset header rests on the same frame (onPeak), and a preset without one keeps its poster.
+    const flame = home.wall.find((t) => t.id === "effect-flame-on")!.card;
+    expect(onPeak({ ...flame, preview: { ...flame.preview, rest: undefined } }).preview.rest).toEqual(flame.preview.rest);
+    const glam = home.wall.find((t) => t.id === "motion-glam")!.card;
+    expect(onPeak(glam)).toBe(glam);
+  });
+
+  it("gives every card a short line that fits whole: a phone's wall tile, two lines of a row's card", async () => {
+    for (const t of HOME_WALL) expect(t.caption.length, t.id).toBeLessThanOrEqual(HOME_CAPTION_MAX.wall);
+    for (const r of rows) expect(r.caption.length, r.id).toBeLessThanOrEqual(HOME_CAPTION_MAX.card);
+    const home = await homeShowcase();
+    expect(home.effects.map((r) => [r.card.id, r.caption])).toEqual(HOME_EFFECTS.map((r) => [r.id, r.caption]));
   });
 
   it("links effects and motions to the Video studio with the preset picked, apps to their own page", async () => {
@@ -191,7 +222,8 @@ describe("Home's showcase", () => {
       expect(["image", "video", "edit"]).toContain(c.mode);
       expect(c.prompt.length).toBeGreaterThan(c.label.length);
     }
-    expect(new Set(HOME_TRY.map((c) => c.mode)).size).toBe(HOME_TRY.length);
+    // The owner's three (Assist's chip takes the last one's place) show one of each.
+    expect(new Set(HOME_TRY.slice(0, -1).map((c) => c.mode)).size).toBe(3);
   });
 });
 

@@ -340,6 +340,19 @@
 .fade-x[data-fade-start] { --fade-l: 32px; }
 .fade-x[data-fade-end] { --fade-r: 32px; }
 
+/*
+ * Home's sections under the fold (home-sections.tsx): the first paint doesn't wait for their layout. Until the page
+ * is idle (home-view.tsx then marks them data-laid-out, one at a time) each one is laid out only once it comes near
+ * the screen, and is --cv high until then: its measured height at that width, so nothing moves when it's drawn.
+ */
+.home-cv {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--cv, 700px);
+}
+.home-cv[data-laid-out] {
+  content-visibility: visible;
+}
+
 /* Sidebar groups that remember being collapsed (app-sidebar.tsx). In icon mode every item shows. */
 [data-nav-group][data-open="false"] [data-nav-items] { display: none; }
 /* A collapsed group still shows the page you're on (only that item), so something is always lit. */

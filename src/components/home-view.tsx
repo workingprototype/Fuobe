@@ -12,7 +12,7 @@ import { HadItemsScript, useHadItems } from "@/components/use-had-items";
 import { IntentLink } from "@/components/intent-link";
 import { useFadeEdges } from "@/components/preset-gallery";
 import { MediaThumb } from "@/components/studio/result-media";
-import { CONNECT_GPU_EVENT, signInHref, useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
+import { CONNECT_GPU_EVENT, signInHref, useEngine, useGenerations, useHydrated, useIsOwner, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
 import { issueStartToken, START_PARAM } from "@/lib/composer";
@@ -144,7 +144,7 @@ export function HomeView({
   /** "130+": the open models a visitor runs on their own GPU (About & licences' count, rounded down). */
   openModels: string;
   chips: readonly TryChip[];
-  /** The Try chip that opens Assist with a job typed in. */
+  /** The chip that opens Assist with a job typed in: the owner's, in place of the last Try chip. */
   assist: { label: string; href: string };
   wall: React.ReactNode;
   children: React.ReactNode;
@@ -177,6 +177,11 @@ export function HomeView({
   const guide = !status || firstRun;
   // A guest or an account (public sign-up) runs open-source models on its own GPU, whatever the install's engines.
   const visitor = status?.viewer;
+  // Only the studio's owner can use Assist: its chip takes the last Try chip's place once the owner is known.
+  const owner = useIsOwner();
+  // A Try chip's prompt fills two lines on a phone and scrolls past that, so the chips and the wall under the
+  // composer stay where the thumb is; typing lets it grow again.
+  const [chipFilled, setChipFilled] = useState(false);
   useEffect(() => {
     if (!status) return;
     try {
@@ -184,6 +189,20 @@ export function HomeView({
     } catch {}
     document.documentElement.setAttribute("data-first-run", firstRun ? "1" : "0");
   }, [status, firstRun]);
+  // The sections under the fold skip layout for the first paint only (.home-cv in globals.css). Once the page is
+  // idle they're laid out one at a time, each when the page is idle again, so no one task holds the page up, and a
+  // jump to one, or a picture of the whole page, finds every one of them drawn.
+  useEffect(() => {
+    const left = [...document.querySelectorAll<HTMLElement>(".home-cv:not([data-laid-out])")];
+    const ric = typeof requestIdleCallback === "function";
+    let id = 0;
+    const next = () => {
+      left.shift()?.setAttribute("data-laid-out", "");
+      if (left.length) id = ric ? requestIdleCallback(next, { timeout: 4000 }) : window.setTimeout(next, 300);
+    };
+    id = ric ? requestIdleCallback(next, { timeout: 4000 }) : window.setTimeout(next, 1500);
+    return () => (ric ? cancelIdleCallback(id) : clearTimeout(id));
+  }, []);
 
   // With a prompt, the studio starts the run itself, or points at the photo it still needs. `go`
   // carries a one-time token from this tab, so only this button can start a run that way.
@@ -203,9 +222,16 @@ export function HomeView({
   const tryChip = (c: TryChip) => {
     setMode(MODES.find((m) => m.id === c.mode) ?? MODES[0]);
     setPrompt(c.prompt);
+    setChipFilled(true);
     setFlash((n) => n + 1);
     box.current?.focus();
-    requestAnimationFrame(() => box.current?.setSelectionRange(c.prompt.length, c.prompt.length));
+    requestAnimationFrame(() => {
+      const el = box.current;
+      if (!el) return;
+      el.setSelectionRange(c.prompt.length, c.prompt.length);
+      // A phone shows its last lines, where the caret is.
+      el.scrollTop = el.scrollHeight;
+    });
   };
 
   return (
@@ -245,7 +271,10 @@ export function HomeView({
           {flash > 0 && <span key={flash} aria-hidden className="pointer-events-none absolute -inset-px animate-ring-flash rounded-[inherit] ring-4 ring-primary/30 motion-reduce:hidden" />}
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              setChipFilled(false);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -257,7 +286,12 @@ export function HomeView({
             autoFocus
             aria-label="Describe what to create"
             placeholder={mode.placeholder}
-            className="field-sizing-content max-h-48 min-h-14 w-full resize-none bg-transparent px-2.5 py-1.5 text-base outline-none placeholder:text-subtle-foreground"
+            className={cn(
+              // Two lines high from the first paint, so a two-line prompt doesn't move what's under it.
+              "field-sizing-content max-h-48 min-h-[60px] w-full resize-none bg-transparent px-2.5 py-1.5 text-base outline-none placeholder:text-subtle-foreground",
+              // The lines above fade out under the top edge, so the field reads as one that scrolls.
+              chipFilled && "max-sm:max-h-[60px] max-sm:overflow-y-auto max-sm:[mask-image:linear-gradient(to_bottom,transparent,#000_14px)]",
+            )}
           />
           <div className="flex items-center gap-1.5">
             <div role="radiogroup" aria-label="What to make" className="flex min-w-0 items-center gap-1">
@@ -325,7 +359,7 @@ export function HomeView({
           className="fade-x scrollbar-none mt-6 flex items-center gap-1.5 max-sm:-mx-4 max-sm:h-8 max-sm:w-[calc(100%+2rem)] max-sm:overflow-x-auto max-sm:px-4 sm:flex-wrap sm:justify-center sm:[mask-image:none]"
         >
           <span className="mr-0.5 hidden shrink-0 text-[12px] text-muted-foreground sm:block">Try</span>
-          {chips.map((c) => {
+          {(owner ? chips.slice(0, -1) : chips).map((c) => {
             const Icon = MODES.find((m) => m.id === c.mode)?.icon ?? ImageIcon;
             return (
               <button
@@ -339,13 +373,15 @@ export function HomeView({
               </button>
             );
           })}
-          <IntentLink
-            href={assist.href}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-transparent bg-brand-faint px-3 text-[13px] whitespace-nowrap text-brand-text transition-colors hover:bg-brand-faint-hover"
-          >
-            <MessageCircle className="size-3.5" />
-            {assist.label}
-          </IntentLink>
+          {owner && (
+            <IntentLink
+              href={assist.href}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-transparent bg-brand-faint px-3 text-[13px] whitespace-nowrap text-brand-text transition-colors hover:bg-brand-faint-hover"
+            >
+              <MessageCircle className="size-3.5" />
+              {assist.label}
+            </IntentLink>
+          )}
         </div>
         {guide ? (
           <>

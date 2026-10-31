@@ -36,6 +36,9 @@ export const PresetCard = memo(function PresetCard({
   href,
   compact,
   bare,
+  caption,
+  delay,
+  sizes,
   engine,
   gpu,
   gpuName,
@@ -45,6 +48,12 @@ export const PresetCard = memo(function PresetCard({
   compact?: boolean;
   /** The picture, the name and the description only: no category icon or engine chips (Home's rows). */
   bare?: boolean;
+  /** A short line in place of the description (Home's rows); the description stays the tooltip. */
+  caption?: string;
+  /** How long (ms) its clip waits on the still before it plays by itself (PresetPreview). */
+  delay?: number;
+  /** How wide its picture shows (PresetPreview). */
+  sizes?: string;
   /** Settings → Engine mode: with one engine locked in, the other's chip would suggest a route the user turned off. */
   engine?: "cloud" | "open";
   /** Its state on the viewer's GPU (a badge as one string, badgeKey), or none. */
@@ -53,7 +62,7 @@ export const PresetCard = memo(function PresetCard({
 }) {
   const badge = engine !== "cloud" ? parseBadgeKey(gpu) : null;
   const Icon = PRESET_ICONS[preset.icon] ?? Sparkles;
-  const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id, preset.preview);
+  const { ref, playing, asked, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id, preset.preview);
   return (
     // Prefetched on hover or touch, not on sight: a gallery shows hundreds of these.
     <IntentLink
@@ -63,7 +72,7 @@ export const PresetCard = memo(function PresetCard({
       className="group/card flex min-w-0 flex-col gap-2 rounded-xl p-1.5 transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-muted">
-        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} flip={previewFlip(preset)} />
+        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} asked={asked} delay={delay} sizes={sizes} flip={previewFlip(preset)} />
         {!bare && (
           <>
             <span className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/40 to-transparent" />
@@ -92,7 +101,7 @@ export const PresetCard = memo(function PresetCard({
           // Two lines hold the card's place in the grid and stay inside the card on hover (a panel over the next
           // row read as broken); the full text is the tooltip and the preset's own page.
           <p title={preset.description} className="line-clamp-2 text-[12px] leading-snug text-muted-foreground">
-            {preset.description}
+            {caption ?? preset.description}
           </p>
         )}
       </div>

@@ -5,7 +5,11 @@
  * Keep it to the pickers' own chunks all the same: tests/preset-covers.test.ts checks the importers.
  */
 import type { CameraMove } from "./catalog/cinema";
+import { thumbOf } from "./preset-cards";
 import { PRESET_COVERS } from "./preset-covers.generated";
+
+/** Where pnpm eval:covers puts a poster's small copy (scripts/eval/lib/covers.mjs, thumbOf). */
+export { thumbOf };
 
 export interface PresetCover {
   /** The still (a clip's first frame), as the gallery card shows it. */
@@ -15,9 +19,6 @@ export interface PresetCover {
   /** The short muted clip, played only while the tile is hovered, focused or picked. */
   video?: string;
 }
-
-/** Where pnpm eval:covers puts a poster's small copy: thumbs/ next to it (scripts/eval/lib/covers.mjs, thumbOf). */
-export const thumbOf = (poster: string) => poster.replace(/\/([^/]+)$/, "/thumbs/$1");
 
 /**
  * Presets without a cover of their own that show another one, of the same shot: the 3D Rotation motion spins the

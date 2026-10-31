@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { Preset } from "@/lib/catalog/types";
 // The covers manifest comes with toPresetCard: this component is loaded on its own (next/dynamic in studio-page.tsx).
 import { toPresetCard } from "@/lib/preset-card-data";
-import { presetHowTo, presetRouteLines, previewFlip } from "@/lib/preset-cards";
+import { onPeak, presetHowTo, presetRouteLines, previewFlip } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,8 +35,9 @@ export function PresetHeader({
   onClear?: () => void;
   className?: string;
 }) {
-  const card = toPresetCard(preset);
-  const { ref, playing, handlers, onTap } = usePreviewPlayback<HTMLDivElement>(card.id, card.preview, { always: true });
+  // On its clip's peak frame when it has one, as Home's card the visitor came from (onPeak).
+  const card = onPeak(toPresetCard(preset));
+  const { ref, playing, asked, handlers, onTap } = usePreviewPlayback<HTMLDivElement>(card.id, card.preview, { always: true });
   const routes = presetRouteLines(preset, modelName);
   // Its state on the viewer's GPU (open engine only): a pill that opens the guided fix.
   const badges = useGpuBadges().data;
@@ -51,7 +52,7 @@ export function PresetHeader({
         onPointerUp={onTap}
         className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-32"
       >
-        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} flip={previewFlip(card)} />
+        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} asked={asked} flip={previewFlip(card)} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-heading text-[19px] leading-snug">{preset.name}</p>

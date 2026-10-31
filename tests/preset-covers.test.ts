@@ -40,9 +40,9 @@ describe("the preset covers manifest", () => {
     }
   });
 
-  it("leaves no cover file in public/previews that no entry names (with its poster's small copy for the pickers, and its clip's peak frame for Home)", () => {
+  it("leaves no cover file in public/previews that no entry names (with its poster's small copy for the pickers, and its clip's peak frame and its small copy for Home)", () => {
     const named = new Set(entries.flatMap(([, e]) => [e.poster, thumbOf(e.poster), e.video].filter(Boolean)));
-    for (const id of Object.keys(PRESET_PEAKS)) named.add(`/previews/presets/peak/${id}.jpg`);
+    for (const id of Object.keys(PRESET_PEAKS)) for (const f of [`/previews/presets/peak/${id}.jpg`, thumbOf(`/previews/presets/peak/${id}.jpg`)]) named.add(f);
     const dir = path.join(root, "public", "previews");
     const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((f) => /\.(jpg|mp4)$/.test(f)) : [];
     const orphans = files.map((f) => `/previews/${f.replaceAll("\\", "/")}`).filter((u) => !named.has(u));

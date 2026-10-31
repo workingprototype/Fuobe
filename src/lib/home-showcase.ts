@@ -16,51 +16,58 @@ import type { Manifest } from "@/lib/comfy";
 import { HUB_MODES } from "@/lib/hubs";
 import { buildLicenceList } from "@/lib/licences";
 import { modelHref } from "@/lib/palette-index";
+import { cacheLife } from "next/cache";
 import { toPresetCard } from "@/lib/preset-card-data";
-import type { PresetCardData } from "@/lib/preset-cards";
-import { PRESET_PEAKS } from "@/lib/preset-peaks.generated";
+import { onPeak, type PresetCardData } from "@/lib/preset-cards";
 
-/** The wall under the composer: the first pictures a visitor sees, each with what it does. */
+/**
+ * The wall under the composer: the first pictures a visitor sees, each with what it does, in a line that fits a
+ * phone's tile (HOME_CAPTION_MAX.wall).
+ */
 export const HOME_WALL = [
-  { id: "effect-flame-on", kind: "Effect", caption: "Bursts into living flame" },
-  { id: "effect-powder-explosion", kind: "Effect", caption: "A burst of colored powder around them" },
+  { id: "effect-flame-on", kind: "Effect", caption: "Bursts into flame" },
+  { id: "effect-powder-explosion", kind: "Effect", caption: "Colored powder bursts" },
   { id: "app-virtual-try-on", kind: "App · before → after", caption: "Any garment, on anyone" },
-  { id: "motion-fpv-drone", kind: "Camera motion", caption: "A drone dive over the cove" },
-  { id: "motion-low-shutter", kind: "Camera motion", caption: "Silk trails at slow shutter" },
-  { id: "effect-clone-explosion", kind: "Effect", caption: "Clones burst out in every direction" },
-  { id: "effect-angel-wings", kind: "Effect", caption: "Wings unfold from their back" },
-  { id: "motion-glam", kind: "Camera motion", caption: "A slow-motion arc in gold" },
+  { id: "motion-fpv-drone", kind: "Camera motion", caption: "Diving over the cove" },
+  { id: "motion-low-shutter", kind: "Camera motion", caption: "Dreamy light trails" },
+  { id: "effect-clone-explosion", kind: "Effect", caption: "Clones burst outward" },
+  { id: "effect-angel-wings", kind: "Effect", caption: "Great wings unfold" },
+  { id: "motion-glam", kind: "Camera motion", caption: "A slow arc in gold" },
 ] as const;
 
+/** The longest caption a wall tile (a phone's, 136 px at 360) and a row's card (two lines) hold whole. */
+export const HOME_CAPTION_MAX = { wall: 22, card: 40 };
+
+/** Each card says in a few words what it does (the catalog's description stays its tooltip). */
 export const HOME_EFFECTS = [
-  "effect-aquarium",
-  "effect-portal",
-  "effect-building-explosion",
-  "effect-diamond",
-  "effect-thunder-god",
-  "effect-jelly-drift",
-  "effect-earth-zoom-out",
-  "effect-fallen-angel",
-  "effect-fire-element",
-  "effect-water-splash",
-  "effect-raven-transition",
-  "effect-northern-lights",
+  { id: "effect-aquarium", caption: "The room floods into an aquarium" },
+  { id: "effect-portal", caption: "A glowing portal pulls them in" },
+  { id: "effect-building-explosion", caption: "The building behind them explodes" },
+  { id: "effect-diamond", caption: "Their body turns to diamond" },
+  { id: "effect-thunder-god", caption: "Lightning crackles around them" },
+  { id: "effect-jelly-drift", caption: "Glowing jellyfish drift around them" },
+  { id: "effect-earth-zoom-out", caption: "Zooms out from them to space" },
+  { id: "effect-fallen-angel", caption: "Dark wings burst as they land" },
+  { id: "effect-fire-element", caption: "Fire spirals up from their hands" },
+  { id: "effect-water-splash", caption: "A huge wave crashes over them" },
+  { id: "effect-raven-transition", caption: "Ravens burst out, then remake them" },
+  { id: "effect-northern-lights", caption: "An aurora ripples across the sky" },
 ];
 
-/** A phone's rail shows all twelve; a wider screen shows the first six, one row (home-sections.tsx). */
+/** A phone's rail shows all twelve; a wider screen shows the first six (four from lg to xl), one row (home-sections.tsx). */
 export const HOME_MOTIONS = [
-  "motion-bullet-time",
-  "motion-mouth-in",
-  "motion-car-chasing",
-  "motion-360-orbit",
-  "motion-flying",
-  "motion-crash-zoom-in",
-  "motion-catwalk",
-  "motion-crane-up",
-  "motion-super-dolly-in",
-  "motion-action-run",
-  "motion-through-object-in",
-  "motion-lazy-susan",
+  { id: "motion-bullet-time", caption: "Time freezes as the camera sweeps" },
+  { id: "motion-mouth-in", caption: "A fast push in to the lips" },
+  { id: "motion-car-chasing", caption: "Chasing the car at speed" },
+  { id: "motion-360-orbit", caption: "A full circle around them" },
+  { id: "motion-flying", caption: "Flying alongside through the air" },
+  { id: "motion-crash-zoom-in", caption: "A crash zoom into the face" },
+  { id: "motion-catwalk", caption: "Tracks them down the runway" },
+  { id: "motion-crane-up", caption: "Rises above to reveal the scene" },
+  { id: "motion-super-dolly-in", caption: "From a wide shot to a close-up, fast" },
+  { id: "motion-action-run", caption: "Running backward as they sprint" },
+  { id: "motion-through-object-in", caption: "Flies through the opening to them" },
+  { id: "motion-lazy-susan", caption: "They turn as if on a turntable" },
 ];
 
 /**
@@ -74,7 +81,14 @@ export const HOME_BEFORE_AFTER = [
 ] as const;
 
 /** Apps whose clip wipes from before to after: at rest they show the after. */
-export const HOME_REVEALS = ["app-face-swap", "app-outfit-swap", "app-hairstyle-try-on", "app-relight", "app-product-shot", "app-steal-the-look"];
+export const HOME_REVEALS = [
+  { id: "app-face-swap", caption: "A new face, same pose and light" },
+  { id: "app-outfit-swap", caption: "Wear the outfit from any photo" },
+  { id: "app-hairstyle-try-on", caption: "Try a new haircut or color" },
+  { id: "app-relight", caption: "Change the light of any photo" },
+  { id: "app-product-shot", caption: "Your product, relit in a new scene" },
+  { id: "app-steal-the-look", caption: "Copy the style of a reference" },
+];
 
 /** Studio cards: a real cover (a clip, or Image to 3D's still) and one line each; Audio shows its tools instead of a picture. */
 export const HOME_STUDIOS: { href: string; id?: string; line: (f: HomeFacts) => string }[] = [
@@ -84,7 +98,7 @@ export const HOME_STUDIOS: { href: string; id?: string; line: (f: HomeFacts) => 
   { href: "/marketing", id: "app-click-to-ad", line: (f) => `From a product link to a finished ad. ${f.adTemplates} ad templates.` },
   { href: "/mixed-media", id: "effect-scrapbook-collage", line: (f) => `Redraw a clip as collage, paper or paint, in ${f.mixedLooks} looks.` },
   { href: "/motion-control", id: "motion-moonwalk-left", line: () => "Give anyone the moves from any clip." },
-  { href: "/audio", line: () => "Voices, music and sound effects. Split any soundtrack into voice, music and effects." },
+  { href: "/audio", line: () => "Voices, music and sound for any clip, made or split apart." },
   { href: "/image-to-3d", id: "app-3d-rotation", line: () => "A photo or a sentence to a 3D model you can spin." },
 ];
 
@@ -116,8 +130,9 @@ export const HOME_NEW_OPEN = [
 ];
 
 /**
- * The chips under the composer. Each fills it with a prompt that looks like a cover on this page (Glam and FPV
- * Drone on the wall, Relight under Apps); nothing runs until Start.
+ * The chips under the composer. Each fills it with a prompt that looks like a cover on this page (Glam, FPV Drone
+ * and Angel Wings on the wall, Relight under Apps); nothing runs until Start. The studio's owner gets Assist's chip in
+ * place of the last (home-view.tsx): only the owner can use Assist.
  */
 export const HOME_TRY = [
   {
@@ -131,6 +146,11 @@ export const HOME_TRY = [
     prompt: "FPV drone dives off a limestone cliff and skims a turquoise cove past a white yacht, bright morning sun",
   },
   { mode: "edit", label: "Make it golden hour", prompt: "Make it golden hour: warm low sun, long soft shadows and a glowing sky" },
+  {
+    mode: "image",
+    label: "Wings above the clouds",
+    prompt: "Fashion portrait of a model in an ivory silk suit with vast white feathered wings, on a cliff above a sea of clouds at sunrise",
+  },
 ] as const;
 
 export interface HomeFacts {
@@ -158,13 +178,11 @@ export const roundedDown = (n: number) => `${Math.floor(n / 10) * 10}+`;
 
 const isOpen = (m: ModelDef) => m.engine === "open" || !!m.engines?.includes("open");
 
-/** A preset's card, resting on its peak frame when it has one. */
+/** A preset's card, resting on its peak frame when it has one (onPeak). */
 export function homeCard(id: string): PresetCardData {
   const p = getPreset(id);
   if (!p) throw new Error(`Home names ${id}, which isn't in the catalog`);
-  const card = toPresetCard(p);
-  const peak = PRESET_PEAKS[id];
-  return peak ? { ...card, preview: { ...card.preview, rest: { src: `/previews/presets/peak/${id}.jpg`, at: peak.at } } } : card;
+  return onPeak(toPresetCard(p));
 }
 
 /** Where a preset's card opens: an app's own page, else the Video studio with it picked. */
@@ -231,9 +249,16 @@ async function readSkills() {
   return { count: has.filter(Boolean).length, starters: titles.flatMap((t) => (t.title ? [{ name: t.name, title: t.title }] : [])) };
 }
 
-/** Everything Home shows below the composer, computed once per build (the page stays prerendered). */
+/** A row's card with its short line. */
+const captioned = ({ id, caption }: { id: string; caption: string }) => ({ card: homeCard(id), caption });
+
+/**
+ * Everything Home shows below the composer, computed once per build (the page stays prerendered): all of it changes
+ * only with a deploy, so it's kept for as long as Next keeps anything ("max").
+ */
 export async function homeShowcase() {
   "use cache";
+  cacheLife("max");
   const [manifest, skills] = await Promise.all([
     readJson<Manifest>(fs.readFile(path.join(process.cwd(), "workflows", "comfyui", "manifest.json"), "utf8")),
     readSkills(),
@@ -263,9 +288,9 @@ export async function homeShowcase() {
   return {
     facts,
     wall: HOME_WALL.map((t) => ({ ...t, card: homeCard(t.id), href: presetHref(t.id) })),
-    effects: HOME_EFFECTS.map(homeCard),
-    motions: HOME_MOTIONS.map(homeCard),
-    reveals: HOME_REVEALS.map(homeCard),
+    effects: HOME_EFFECTS.map(captioned),
+    motions: HOME_MOTIONS.map(captioned),
+    reveals: HOME_REVEALS.map(captioned),
     beforeAfter: HOME_BEFORE_AFTER.map(({ id, tags, zoom }) => {
       const card = homeCard(id);
       return { id, name: card.name, before: card.preview.poster, after: card.preview.rest?.src ?? card.preview.poster, tags: [...tags], zoom, href: presetHref(id) };

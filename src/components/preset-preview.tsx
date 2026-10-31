@@ -10,6 +10,7 @@ import {
   PREVIEW_LAYERS,
   sceneLayer,
   scenePoster,
+  thumbOf,
   type MoveSpec,
   type PresetPreview as Preview,
   type PreviewLayer,
@@ -23,10 +24,13 @@ import { cn } from "@/lib/utils";
 /** Which previews play, shared by every card and the preset header (rules in lib/preview-playback.ts). */
 const store = createPlaybackStore(browserPlaybackEnv);
 
-/** Home's "Pause previews", remembered in this browser: it holds on every page. */
+/**
+ * Home's "Pause previews", kept for this visit (the tab's session): it holds on every page, and a new visit plays
+ * again, so a pause tapped by mistake doesn't keep every gallery still in that browser.
+ */
 const PAUSE_KEY = "fuobe:previews";
 try {
-  if (typeof window !== "undefined" && localStorage.getItem(PAUSE_KEY) === "paused") store.setPaused(true);
+  if (typeof window !== "undefined" && sessionStorage.getItem(PAUSE_KEY) === "paused") store.setPaused(true);
 } catch {}
 
 /** Whether the viewer paused previews (false until hydrated, as on the server). */
@@ -35,17 +39,17 @@ export const usePreviewsPaused = () => useSyncExternalStore(store.subscribe, sto
 export function setPreviewsPaused(paused: boolean) {
   store.setPaused(paused);
   try {
-    if (paused) localStorage.setItem(PAUSE_KEY, "paused");
-    else localStorage.removeItem(PAUSE_KEY);
+    if (paused) sessionStorage.setItem(PAUSE_KEY, "paused");
+    else sessionStorage.removeItem(PAUSE_KEY);
   } catch {}
 }
 
 /**
- * Wire a card element to the playback store. Returns whether its preview should play, the handlers
- * to spread on the card (hover and keyboard focus, after a short rest) and `onTap`, which plays or
- * stops it from a touch (for an element a tap doesn't otherwise use). A clip plays by itself while
- * the card is in view (with `auto: "touch"`, only where nothing can hover); with `always`, any
- * preview that moves does (the preset header).
+ * Wire a card element to the playback store. Returns whether its preview should play (and whether the
+ * viewer asked for it: a hover, focus or tap), the handlers to spread on the card (hover and keyboard
+ * focus, after a short rest) and `onTap`, which plays or stops it from a touch (for an element a tap
+ * doesn't otherwise use). A clip plays by itself while the card is in view (with `auto: "touch"`, only
+ * where nothing can hover); with `always`, any preview that moves does (the preset header).
  */
 export function usePreviewPlayback<T extends HTMLElement>(
   id: string,
@@ -53,11 +57,13 @@ export function usePreviewPlayback<T extends HTMLElement>(
   { always = false, auto = "always" }: { always?: boolean; auto?: AutoPlay } = {},
 ) {
   const ref = useRef<T | null>(null);
-  const playing = useSyncExternalStore(
+  // 0: at rest, 1: playing by itself, 2: playing because the viewer asked.
+  const state = useSyncExternalStore(
     store.subscribe,
-    () => store.isPlaying(id),
-    () => false,
+    () => (store.isPlaying(id) ? (store.isAsked(id) ? 2 : 1) : 0),
+    () => 0,
   );
+  const playing = state > 0;
   const kind = previewKind(preview);
   useEffect(() => {
     const el = ref.current;
@@ -70,6 +76,7 @@ export function usePreviewPlayback<T extends HTMLElement>(
   return {
     ref,
     playing,
+    asked: state === 2,
     handlers: {
       onPointerEnter: (e: React.PointerEvent) => e.pointerType === "mouse" && on(),
       onPointerLeave: (e: React.PointerEvent) => e.pointerType === "mouse" && off(),
@@ -275,35 +282,59 @@ function Fx({ fx, scene }: { fx: NonNullable<Preview["fx"]>; scene: PreviewScene
 /**
  * A real cover's clip, mounted only while it plays (a browser allows a page only so many live
  * players, a phone fewer), over the poster until its first frame is ready. The poster is that
- * frame, so starting and stopping never flashes. With `startAt` (a card resting on the clip's peak
- * frame) it starts from that frame instead, and shows once the seek there is done, with a short fade.
+ * frame, so starting and stopping never flashes.
+ *
+ * A card resting on the clip's peak frame (`rest`) starts from that frame when it plays by itself,
+ * and shows once the seek there is done, with a short fade. Its loop comes back to just before the
+ * change starts (`rest.from`), not to the clip's still opening, and a hover or tap (`asked`) starts
+ * there, so the change builds up at once. `delay` (ms) holds a clip that plays by itself on the still
+ * for a moment first, so the clips of a row don't all loop in step.
  */
-function Clip({ src, startAt }: { src: string; startAt?: number }) {
+function Clip({ src, rest, asked, delay = 0 }: { src: string; rest?: Preview["rest"]; asked: boolean; delay?: number }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
+  const [due, setDue] = useState(!delay);
+  // Where it starts, fixed when it does: asked for, at once; by itself, once its delay is over.
+  const [start, setStart] = useState<number>();
+  if (start === undefined && (asked || due)) setStart(rest ? (asked ? rest.from : rest.at) : 0);
+  useEffect(() => {
+    if (due) return;
+    const t = setTimeout(() => setDue(true), delay);
+    return () => clearTimeout(t);
+  }, [due, delay]);
+  const started = start !== undefined;
   // A layout effect: a page kept hidden after navigating away (Activity) keeps its elements, and a
   // video only stops when told to. The source is set here too, so a page shown again plays again.
   useLayoutEffect(() => {
     const v = ref.current;
-    if (!v) return;
+    if (!v || !started) return;
     v.src = src;
     void v.play().catch(() => {});
     return () => {
       releaseVideo(v);
       setReady(false);
     };
-  }, [src]);
+  }, [src, started]);
+  const seeks = !!start;
   return (
     <video
       ref={ref}
       muted
-      loop
+      loop={!rest}
       playsInline
       preload="auto"
-      onLoadedMetadata={startAt ? (e) => void (e.currentTarget.currentTime = startAt) : undefined}
-      onLoadedData={startAt ? undefined : () => setReady(true)}
-      onSeeked={startAt ? () => setReady(true) : undefined}
-      className={cn("absolute inset-0 size-full object-cover", startAt && "transition-opacity duration-150", !ready && "opacity-0")}
+      onLoadedMetadata={seeks ? (e) => void (e.currentTarget.currentTime = start) : undefined}
+      onLoadedData={seeks ? undefined : () => setReady(true)}
+      onSeeked={seeks ? () => setReady(true) : undefined}
+      onEnded={
+        rest
+          ? (e) => {
+              e.currentTarget.currentTime = rest.from;
+              void e.currentTarget.play().catch(() => {});
+            }
+          : undefined
+      }
+      className={cn("absolute inset-0 size-full object-cover", rest && "transition-opacity duration-150", !ready && "opacity-0")}
       aria-hidden
     />
   );
@@ -319,31 +350,43 @@ export const PresetPreview = memo(function PresetPreview({
   preview,
   hue,
   playing,
+  asked = false,
+  delay,
   flip,
   loading = "lazy",
   fetchPriority,
+  sizes,
 }: {
   preview: Preview;
   hue: number;
   playing: boolean;
+  /** It plays because the viewer asked (usePreviewPlayback's `asked`): a clip resting on its peak starts where the change starts. */
+  asked?: boolean;
+  /** How long (ms) a clip that plays by itself waits on its still first (Clip). */
+  delay?: number;
   /** Mirror the still (see previewFlip). */
   flip?: boolean;
   /** A real cover's still: "eager" above the fold (Home's wall), lazy everywhere else. */
   loading?: "eager" | "lazy";
   /** "high" for the page's largest picture (Next's image guide: instead of preloading it). */
   fetchPriority?: "high";
+  /** How wide a real cover's still shows (the img's `sizes`): with it, a small screen gets the 320 px copy (thumbOf). */
+  sizes?: string;
 }) {
   const [armed, setArmed] = useState(false);
   if (playing && !armed) setArmed(true);
 
   // A real cover: the card's image as rendered, without the procedural preview's tint, bleed or
   // mirroring (and no move glyph: the picture shows the preset itself), with its clip over it while it plays.
-  if (preview.video || isCover(preview))
+  if (preview.video || isCover(preview)) {
+    const still = preview.rest?.src ?? preview.poster;
     return (
       <>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={preview.rest?.src ?? preview.poster}
+          src={still}
+          srcSet={sizes ? `${thumbOf(still)} 320w, ${still} 512w` : undefined}
+          sizes={sizes}
           alt=""
           width={512}
           height={384}
@@ -354,9 +397,10 @@ export const PresetPreview = memo(function PresetPreview({
           className="absolute inset-0 size-full object-cover"
           aria-hidden
         />
-        {preview.video && playing && <Clip src={preview.video} startAt={preview.rest?.at} />}
+        {preview.video && playing && <Clip src={preview.video} rest={preview.rest} asked={asked} delay={delay} />}
       </>
     );
+  }
 
   const spec: MoveSpec | undefined = preview.move ? CAMERA_MOVES[preview.move] : undefined;
   const glyph = preview.move ? glyphFor(preview.move) : undefined;

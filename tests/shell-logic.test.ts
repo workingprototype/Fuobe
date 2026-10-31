@@ -30,6 +30,7 @@ import {
   playsWhenAsked,
   previewKind,
   SCROLL_SETTLE,
+  staggered,
   type PlaybackEnv,
   type PlaybackStore,
 } from "@/lib/preview-playback";
@@ -469,6 +470,28 @@ describe("preview playback store", () => {
     expect(store.playing()).toEqual([]);
     fake.advance(SCROLL_SETTLE);
     expect(store.playing()).toEqual(["r0c0", "r0c1", "r0c2"]);
+  });
+
+  it("tells a card playing because the viewer asked (a hover, focus or tap) from one playing by itself", () => {
+    const fake = fakeEnv({ hover: true, width: 1280, height: 800 });
+    const store = createPlaybackStore(fake.env);
+    store.subscribe(() => {});
+    watchGrid(store, fake, 1, 3);
+    fake.advance(SCROLL_SETTLE);
+    expect([store.isPlaying("r0c0"), store.isAsked("r0c0")]).toEqual([true, false]);
+    store.play("r0c0");
+    fake.advance(HOVER_INTENT);
+    expect([store.isPlaying("r0c0"), store.isAsked("r0c0")]).toEqual([true, true]);
+    // The pointer leaves: it goes on playing by itself.
+    store.stop("r0c0");
+    expect([store.isPlaying("r0c0"), store.isAsked("r0c0")]).toEqual([true, false]);
+  });
+
+  it("starts the clips of a row apart (Home), each within three seconds", () => {
+    const waits = Array.from({ length: 8 }, (_, i) => staggered(i));
+    expect(waits[0]).toBe(0);
+    expect(new Set(waits).size).toBe(8);
+    expect(Math.max(...waits)).toBeLessThan(3000);
   });
 
   it("with reduced motion a hover or tap plays a clip, but a procedural preview keeps its poster", () => {

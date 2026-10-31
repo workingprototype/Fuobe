@@ -52,6 +52,13 @@ export const NARROW = 640;
 
 export const maxPlaying = (viewportWidth: number) => (viewportWidth < NARROW ? MAX_PLAYING.narrow : MAX_PLAYING.wide);
 
+/**
+ * How long (ms) the clip of a row's `i`th card waits on its still before it plays by itself (Home's wall and rows):
+ * the clips picked together start apart, so they never loop in step (every effect clip is 4 s long) and some card
+ * is always at its height.
+ */
+export const staggered = (i: number) => (i % 8) * 350;
+
 /** What a preview shows: a real cover's clip, a procedural animation, or a still. */
 export type PreviewKind = "clip" | "procedural" | "still";
 
@@ -200,6 +207,8 @@ export function createPlaybackStore(env: PlaybackEnv) {
       };
     },
     isPlaying,
+    /** Playing because the viewer asked (a hover, focus or tap), not by itself. */
+    isAsked: (id: string) => !env.hidden() && hovered === id,
     /** Every card playing now, by id (for tests). */
     playing: () => [...new Set([...auto, ...(hovered ? [hovered] : [])])].filter(isPlaying).sort(),
     canHover: () => env.matches("(hover: hover) and (pointer: fine)"),

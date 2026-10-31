@@ -1,37 +1,62 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
+import { preload } from "react-dom";
 import { CardPending, IntentLink } from "@/components/intent-link";
 import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
-import type { PresetCardData } from "@/lib/preset-cards";
+import { thumbOf, type PresetCardData } from "@/lib/preset-cards";
+import { staggered } from "@/lib/preview-playback";
 import { cn } from "@/lib/utils";
+
+/** How wide a tile shows: half a phone, a quarter from sm, half again beside the sidebar from md, a quarter from lg. */
+const SIZES = "(min-width: 1024px) 25vw, (min-width: 768px) 50vw, (min-width: 640px) 25vw, 50vw";
+/** Where tiles 5 to 8 show (the wall has four columns): a tablet held upright, and a desktop. */
+const FOUR_UP = "(min-width: 640px) and (max-width: 767px), (min-width: 1024px)";
 
 /**
  * A tile of Home's wall: a real cover that plays in view, its name, and what it does. On a desktop the line and a
  * "Try it" pill come in on hover or focus; on touch the line always shows. The first tile is the page's largest
- * picture, fetched first; tiles 5 to 8 are hidden (and never fetched) where the wall has two columns.
+ * picture, fetched first. Tiles 5 to 8 are hidden (and never fetched) where the wall has two columns; where it has
+ * four, they're on the first screen, so they're asked for with the page, not after its layout as a lazy image is.
  */
 export function ShowcaseTile({ card, kind, caption, href, index }: { card: PresetCardData; kind: string; caption: string; href: string; index: number }) {
-  const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(card.id, card.preview);
+  const { ref, playing, asked, handlers } = usePreviewPlayback<HTMLAnchorElement>(card.id, card.preview);
+  const still = card.preview.rest?.src ?? card.preview.poster;
+  if (index >= 4) preload(still, { as: "image", imageSrcSet: `${thumbOf(still)} 320w, ${still} 512w`, imageSizes: SIZES, media: FOUR_UP });
   return (
     <IntentLink
       ref={ref}
       href={href}
       {...handlers}
-      aria-label={`${card.name}, ${kind.split(" ·")[0].toLowerCase()}: ${caption.charAt(0).toLowerCase()}${caption.slice(1)}. Try it`}
+      // In the order it shows: the kind (from xl), the name, the line.
+      aria-label={`${kind}: ${card.name}, ${caption}. Try it`}
       className={cn(
         "group/tile relative isolate block overflow-hidden rounded-xl bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         index >= 4 && "max-sm:hidden md:max-lg:hidden",
       )}
     >
       <div className="relative aspect-[4/3] ease-out motion-safe:transition-transform motion-safe:duration-[400ms] motion-safe:group-hover/tile:scale-[1.03]">
-        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} loading={index < 4 ? "eager" : "lazy"} fetchPriority={index === 0 ? "high" : undefined} />
+        <PresetPreview
+          preview={card.preview}
+          hue={card.hue}
+          playing={playing}
+          asked={asked}
+          delay={staggered(index)}
+          sizes={SIZES}
+          loading={index < 4 ? "eager" : "lazy"}
+          fetchPriority={index === 0 ? "high" : undefined}
+        />
       </div>
-      <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-gradient-to-t from-black/65 to-transparent" />
+      {/* A small tile (a phone's, or four across a tablet) is short: a taller, darker shade keeps its white words readable over a bright picture. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-gradient-to-t from-black/65 to-transparent max-md:h-[70%] max-md:via-black/40 max-md:from-black/75"
+      />
       <span aria-hidden className="pointer-events-none absolute inset-x-3 bottom-2.5 flex min-w-0 flex-col text-left text-white [text-shadow:0_1px_2px_rgb(0_0_0/30%)]">
         <span className="hidden text-[11px] tracking-wide text-white/75 uppercase xl:block">{kind}</span>
         <span className="truncate text-[14px] leading-snug font-medium">{card.name}</span>
-        <span className="truncate text-[12px] text-white/80 transition-opacity duration-150 group-hover/tile:opacity-100 group-focus-visible/tile:opacity-100 [@media(hover:hover)]:opacity-0">
+        {/* Whole, on a second line where a tile is narrow. */}
+        <span className="line-clamp-2 text-[12px] leading-snug text-white/80 transition-opacity duration-150 group-hover/tile:opacity-100 group-focus-visible/tile:opacity-100 [@media(hover:hover)]:opacity-0">
           {caption}
         </span>
       </span>

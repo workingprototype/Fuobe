@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { CardPending, IntentLink } from "@/components/intent-link";
 import { useFadeEdges } from "@/components/preset-gallery";
 import { PresetPreview, setPreviewsPaused, usePreviewPlayback, usePreviewsPaused } from "@/components/preset-preview";
-import { CONNECT_GPU_EVENT, signInHref, useHydrated, useStatus } from "@/lib/api";
+import { CONNECT_GPU_EVENT, signInHref, useHydrated, useIsOwner, useStatus } from "@/lib/api";
 import { copyWithToast } from "@/lib/clipboard";
 import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,7 @@ export function HomeRail({ className, children }: { className?: string; children
   return <FadeRow className={cn("flex snap-x snap-mandatory scroll-px-4 sm:grid sm:[mask-image:none]", className)}>{children}</FadeRow>;
 }
 
-/** Stops every preview playing by itself, on every page, and remembers it; a hover still plays one. */
+/** Stops every preview playing by itself, on every page, for this visit; a hover still plays one. */
 export function PausePreviews() {
   const paused = usePreviewsPaused();
   const Icon = paused ? Play : Pause;
@@ -68,14 +68,31 @@ export function CopyCommand({ text }: { text: string }) {
 
 /**
  * A studio's card. It plays where nothing can hover, like the cards above it; with a mouse it waits for one, so the
- * clips higher on the page keep the screen's few players. `zoom`: a still that slowly closes in on hover instead.
+ * clips higher on the page keep the screen's few players. A hover on a card resting on its peak starts where the
+ * change starts (PresetPreview's `asked`). `zoom`: a still that slowly closes in on hover instead.
  */
-export function StudioCard({ href, label, line, card, zoom }: { href: string; label: string; line: string; card: PresetCardData; zoom?: boolean }) {
-  const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(card.id, card.preview, { auto: "touch" });
+export function StudioCard({
+  href,
+  label,
+  line,
+  card,
+  zoom,
+  delay,
+  sizes,
+}: {
+  href: string;
+  label: string;
+  line: string;
+  card: PresetCardData;
+  zoom?: boolean;
+  delay?: number;
+  sizes?: string;
+}) {
+  const { ref, playing, asked, handlers } = usePreviewPlayback<HTMLAnchorElement>(card.id, card.preview, { auto: "touch" });
   return (
     <IntentLink ref={ref} href={href} {...handlers} className="group/studio flex min-w-0 flex-col gap-2 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <StudioPicture zoom={zoom}>
-        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} />
+        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} asked={asked} delay={delay} sizes={sizes} />
       </StudioPicture>
       <StudioName label={label} line={line} />
     </IntentLink>
@@ -98,14 +115,92 @@ export function StudioPicture({ zoom, className, children }: { zoom?: boolean; c
   );
 }
 
+/** A studio card's name, the arrow following its last word wherever the name wraps, and its line. */
 export function StudioName({ label, line }: { label: string; line: string }) {
+  const cut = label.lastIndexOf(" ") + 1;
   return (
     <div className="min-w-0 px-0.5">
-      <p className="flex items-center gap-1.5 text-[14px] font-medium">
-        {label}
-        <ArrowRight className="size-3.5 text-muted-foreground transition-transform duration-150 group-hover/studio:translate-x-0.5 group-hover/studio:text-foreground" />
+      <p className="text-[14px] font-medium">
+        {label.slice(0, cut)}
+        <span className="whitespace-nowrap">
+          {label.slice(cut)}
+          <ArrowRight
+            aria-hidden
+            className="ml-1.5 inline-block size-3.5 align-[-2px] text-muted-foreground transition-transform duration-150 group-hover/studio:translate-x-0.5 group-hover/studio:text-foreground"
+          />
+        </span>
       </p>
       <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{line}</p>
+    </div>
+  );
+}
+
+/** Over Assist's heading, for everyone but the studio's owner: here, Assist is the owner's (AssistSection). */
+export function AssistTag() {
+  if (useIsOwner()) return null;
+  return <p className="mb-2 inline-flex h-6 items-center rounded-full bg-brand-faint px-2.5 text-[12px] font-medium text-brand-text">On your own install</p>;
+}
+
+const ASSIST_ACTION =
+  "group mt-5 inline-flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-[13px] font-medium text-primary-foreground transition hover:opacity-90";
+
+/** The owner opens Assist; anyone else is shown how to run Fuobe themselves (the self-host card, StartSection). */
+export function AssistAction() {
+  const arrow = <ArrowRight className="size-3.5 transition-transform duration-150 group-hover:translate-x-0.5" />;
+  return useIsOwner() ? (
+    <IntentLink href="/assist" className={ASSIST_ACTION}>
+      Open Assist {arrow}
+    </IntentLink>
+  ) : (
+    <a href="#home-start" className={ASSIST_ACTION}>
+      Run Fuobe yourself {arrow}
+    </a>
+  );
+}
+
+/**
+ * What to ask Assist, and the skills it starts from: for the owner, each opens Assist with it typed in (nothing is
+ * sent); for anyone else, examples of what it does. Both keep the same size, so nothing moves when the viewer is known.
+ */
+export function AssistExamples({ prompts, skills }: { prompts: string[]; skills: { name: string; title: string }[] }) {
+  const owner = useIsOwner();
+  const row = "flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-4 py-2.5 text-[13px]";
+  const chip = "inline-flex h-8 items-center rounded-full border px-3 text-[13px]";
+  return (
+    <div className="min-w-0">
+      <h3 className="mb-2 font-sans text-[12px] text-muted-foreground">{owner ? "Try asking" : "Ask it things like"}</h3>
+      <ul className="space-y-1.5">
+        {prompts.map((s) => (
+          <li key={s}>
+            {owner ? (
+              <IntentLink href={`/assist?prompt=${encodeURIComponent(s)}`} className={cn(row, "group transition-colors hover:bg-muted")}>
+                <span className="min-w-0">{s}</span>
+                <ArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-[3px] group-hover:text-foreground" />
+              </IntentLink>
+            ) : (
+              <p className={row}>
+                <span className="min-w-0">“{s}”</span>
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+      <h3 className="mt-5 mb-2 font-sans text-[12px] text-muted-foreground">{owner ? "Or start with a skill" : "Skills it starts from"}</h3>
+      <FadeRow>
+        <ul className="flex gap-1.5 max-sm:w-max sm:flex-wrap">
+          {skills.map((s) => (
+            <li key={s.name}>
+              {owner ? (
+                <IntentLink href={`/assist?skill=${s.name}`} className={cn(chip, "transition-colors hover:bg-accent")}>
+                  {s.title}
+                </IntentLink>
+              ) : (
+                <span className={cn(chip, "border-transparent bg-muted/60")}>{s.title}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </FadeRow>
     </div>
   );
 }
