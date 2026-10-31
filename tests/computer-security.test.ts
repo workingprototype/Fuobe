@@ -91,6 +91,13 @@ function call(who: Who, method: string, url: string, o: { body?: unknown; raw?: 
   throw new Error(`no route ${u}`);
 }
 
+/** A report whose body arrives as a stream (to see when the route reads it), with the job's token in its header. */
+function streamed(who: Who, id: string, lease: string, body: ReadableStream<Uint8Array>): Promise<Response> {
+  const headers = new Headers({ host: HOST, "sec-fetch-site": "same-origin", origin: SITE, "content-type": "application/json", "x-fuobe-lease": lease, ...(who !== "guest" && { cookie: cookies[who] }) });
+  const req = new Request(`${SITE}/api/gpu/computer/tasks/${id}/report`, { method: "POST", headers, body, duplex: "half" } as RequestInit);
+  return Promise.resolve(routes.report.POST(req, { params: Promise.resolve({ id }) }));
+}
+
 const SAVE = { "9": { class_type: "SaveImage", inputs: { filename_prefix: "fuobe/x", images: ["3", 0] } }, "3": { class_type: "KSampler", inputs: {} } };
 
 /** A run of `principal` on its computer with one job waiting (an input staged under the name its graph loads). */
@@ -123,9 +130,10 @@ async function collecting(outputs: Record<string, unknown>, graph = SAVE) {
   const t = waitingTask(`acct:${a}`, graph);
   const c = await claimed("a");
   expect(c.id).toBe(t.id);
-  expect((await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { body: { lease: c.lease, event: "sent", promptId: c.promptId } })).status).toBe(200);
+  expect((await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { headers: { "x-fuobe-lease": c.lease }, body: { event: "sent", promptId: c.promptId } })).status).toBe(200);
   const fin = await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, {
-    body: { lease: c.lease, event: "finished", entry: { status: { status_str: "success", completed: true }, outputs } },
+    headers: { "x-fuobe-lease": c.lease },
+    body: { event: "finished", entry: { status: { status_str: "success", completed: true }, outputs } },
   });
   expect(fin.status).toBe(200);
   return { ...c, generationId: t.generationId, answer: (await fin.json()) as { wanted?: { n: number; kind: string; maxBytes: number }[]; state?: string } };
@@ -209,7 +217,7 @@ describe("one account can't touch another's jobs", () => {
     const c = await claimed("a");
     expect(c.id).toBe(t.id);
     expect((await call("b", "GET", `/api/gpu/computer/tasks/${c.id}/inputs/0`, { headers: { "x-fuobe-lease": c.lease } })).status).toBe(404);
-    expect((await call("b", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { body: { lease: c.lease, event: "sent", promptId: c.promptId } })).status).toBe(404);
+    expect((await call("b", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { headers: { "x-fuobe-lease": c.lease }, body: { event: "sent", promptId: c.promptId } })).status).toBe(404);
     expect((await put("b", c.id, 0, c.lease, FAKE_PNG)).status).toBe(404);
     expect((await call("b", "GET", `/api/gpu/computer/tasks/${c.id}/outputs/0`, { headers: { "x-fuobe-lease": c.lease } })).status).toBe(404);
     expect((await call("b", "POST", `/api/gpu/computer/tasks/${c.id}/release`, { body: { lease: c.lease } })).status).toBe(404);
@@ -272,7 +280,7 @@ describe("inputs", () => {
     for (let i = 1; i < 6; i++) expect((await call("a", "GET", `/api/gpu/computer/tasks/${c.id}/inputs/0`, { headers: { "x-fuobe-lease": c.lease } })).status).toBe(200);
     expect((await call("a", "GET", `/api/gpu/computer/tasks/${c.id}/inputs/0`, { headers: { "x-fuobe-lease": c.lease } })).status).toBe(429);
     expect((await call("a", "GET", `/api/gpu/computer/tasks/${c.id}/inputs/1`, { headers: { "x-fuobe-lease": c.lease } })).status).toBe(404);
-    expect((await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { body: { lease: c.lease, event: "sent", promptId: c.promptId } })).status).toBe(200);
+    expect((await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { headers: { "x-fuobe-lease": c.lease }, body: { event: "sent", promptId: c.promptId } })).status).toBe(200);
     expect((await call("a", "GET", `/api/gpu/computer/tasks/${c.id}/inputs/0`, { headers: { "x-fuobe-lease": c.lease } })).status).toBe(409);
   });
 
@@ -291,7 +299,7 @@ describe("reports", () => {
   it("each is taken only where the job is", async () => {
     waitingTask(`acct:${a}`);
     const c = await claimed("a");
-    const report = (body: Record<string, unknown>) => call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { body: { lease: c.lease, ...body } });
+    const report = (body: Record<string, unknown>) => call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { headers: { "x-fuobe-lease": c.lease }, body: { ...body } });
     expect((await report({ event: "finished", entry: { outputs: ONE_PNG } })).status).toBe(409);
     expect((await report({ event: "running", value: 1, max: 2 })).status).toBe(409);
     expect((await report({ event: "nonsense" })).status).toBe(400);
@@ -303,10 +311,85 @@ describe("reports", () => {
   it("a finished entry over 8 MB is refused", async () => {
     waitingTask(`acct:${a}`);
     const c = await claimed("a");
-    await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { body: { lease: c.lease, event: "sent", promptId: c.promptId } });
-    const big = { lease: c.lease, event: "finished", entry: { outputs: { "9": { text: ["x".repeat(9 * 2 ** 20)] } } } };
-    expect((await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { body: big })).status).toBe(413);
+    await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { headers: { "x-fuobe-lease": c.lease }, body: { event: "sent", promptId: c.promptId } });
+    const big = { event: "finished", entry: { outputs: { "9": { text: ["x".repeat(9 * 2 ** 20)] } } } };
+    expect((await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { headers: { "x-fuobe-lease": c.lease }, body: big })).status).toBe(413);
     expect(state(c.id)).toBe("queued");
+  });
+
+  it("its token goes in a header and is checked before the report is read: a report about no job of yours costs nothing", async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled++;
+        c.enqueue(new Uint8Array(1024 * 1024));
+        if (pulled >= 8) c.close();
+      },
+    });
+    const res = await streamed("a", "AAAAAAAAAAAAAAAA", "0".repeat(64), body);
+    expect(res.status).toBe(404);
+    expect(pulled).toBeLessThanOrEqual(1);
+    // The token in the body (as before) is no token.
+    waitingTask(`acct:${a}`);
+    const c = await claimed("a");
+    expect((await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { body: { lease: c.lease, event: "sent", promptId: c.promptId } })).status).toBe(409);
+  });
+
+  it("a report other than ComfyUI's own answer is a few KB; a refusal is read only while the job sends", async () => {
+    waitingTask(`acct:${a}`);
+    const c = await claimed("a");
+    const report = (body: Record<string, unknown>) => call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { headers: { "x-fuobe-lease": c.lease }, body });
+    // Sending: a refusal may be large-ish, nothing more.
+    expect((await report({ event: "refused", status: 400, body: { pad: "x".repeat(300 * 1024) } })).status).toBe(413);
+    expect((await report({ event: "comfy-down", pad: "x".repeat(20 * 1024) })).status).toBe(413);
+    expect((await report({ event: "sent", promptId: c.promptId })).status).toBe(200);
+    // ComfyUI has it: a finished entry may be large, a progress report may not.
+    expect((await report({ event: "running", value: 1, max: 2, node: "x".repeat(20 * 1024) })).status).toBe(413);
+    expect((await report({ event: "running", value: 1, max: 2 })).status).toBe(200);
+  });
+
+  it("reads two of one person's reports at once at most", async () => {
+    waitingTask(`acct:${a}`);
+    const c = await claimed("a");
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const held = () =>
+      new ReadableStream<Uint8Array>({
+        async pull(ctl) {
+          await gate;
+          ctl.enqueue(new TextEncoder().encode(JSON.stringify({ event: "comfy-down" })));
+          ctl.close();
+        },
+      });
+    const first = streamed("a", c.id, c.lease, held());
+    const second = streamed("a", c.id, c.lease, held());
+    await new Promise((r) => setTimeout(r, 20));
+    const third = await streamed("a", c.id, c.lease, held());
+    expect(third.status).toBe(429);
+    expect(third.headers.get("retry-after")).toBeTruthy();
+    open();
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
+    expect((await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, { headers: { "x-fuobe-lease": c.lease }, body: { event: "comfy-down" } })).status).toBe(200);
+  });
+
+  it("keeps at most 16 KB of a refusal, and still says what was missing", async () => {
+    waitingTask(`acct:${a}`);
+    const c = await claimed("a");
+    const nodeErrors = Object.fromEntries(
+      Array.from({ length: 200 }, (_, i) => [String(i), { class_type: "UNETLoader", errors: [{ message: "Value not in list", details: "d".repeat(400), extra_info: { input_name: "unet_name", received_value: `model_${i}.safetensors` } }] }]),
+    );
+    const res = await call("a", "POST", `/api/gpu/computer/tasks/${c.id}/report`, {
+      headers: { "x-fuobe-lease": c.lease },
+      body: { event: "refused", status: 400, body: { error: { type: "prompt_outputs_failed_validation", message: "m".repeat(50_000) }, node_errors: nodeErrors } },
+    });
+    expect(res.status).toBe(200);
+    const kept = (db().prepare("SELECT refusal_json FROM relay_tasks WHERE id = ?").get(c.id) as { refusal_json: string }).refusal_json;
+    expect(kept.length).toBeLessThanOrEqual(16 * 1024 + 64);
+    expect(JSON.parse(kept).body.error.message.length).toBeLessThanOrEqual(1024);
+    expect(tasks.keptRefusal({ node_errors: { "4": { class_type: "UNETLoader", errors: [{ message: "Value not in list", extra_info: { received_value: "x.safetensors" } }] } } })).toMatchObject({
+      node_errors: { "4": { errors: [{ extra_info: { received_value: "x.safetensors" } }] } },
+    });
   });
 
   it("a forged entry with 500 pictures gets 16 wanted, the most an account's run keeps", async () => {

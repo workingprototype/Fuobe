@@ -50,7 +50,7 @@ export function readPath(path: string): string {
     if (query) throw new LocalComfyError(`No query on ${p}`);
     return path;
   };
-  if (["/system_stats", "/api/system_stats", "/object_info", "/models", "/embeddings", "/queue", "/api/jobs"].includes(p)) return noQuery();
+  if (["/system_stats", "/api/system_stats", "/object_info", "/models", "/embeddings", "/queue", "/api/jobs", "/fuobe/guard"].includes(p)) return noQuery();
   if (p.startsWith("/object_info/") && NODE_CLASS.test(decodeURIComponent(p.slice(13)))) return noQuery();
   if (p.startsWith("/models/") && MODEL_FOLDER.test(p.slice(8))) return noQuery();
   if (p.startsWith("/history/") && UUID.test(p.slice(9))) return noQuery();
@@ -151,28 +151,84 @@ export function mayDownload(f: Pick<WantedFile, "filename" | "subfolder" | "type
 }
 
 /** What a look on one port found. */
-export type PortLook = { port: number; host?: string; state: "found"; stats: SystemStats } | { port: number; host?: string; state: "unreadable" } | { port: number; host?: string; state: "none" };
+export type PortLook =
+  | { port: number; host?: string; state: "found"; stats: SystemStats; guard?: boolean }
+  | { port: number; host?: string; state: "unreadable" }
+  | { port: number; host?: string; state: "none" };
 
 export interface SystemStats {
   system?: { os?: string; comfyui_version?: string; ram_total?: number; embedded_python?: boolean; argv?: string[]; python_version?: string };
   devices?: { name?: string; type?: string; vram_total?: number }[];
 }
 
+/** A port's place among ComfyUI's usual ones (8188 first); one the person typed comes after them, lowest first. */
+const portRank = (port: number) => {
+  const at = (COMFY_PORTS as readonly number[]).indexOf(port);
+  return at >= 0 ? at : COMFY_PORTS.length + port;
+};
+
 /**
  * The ComfyUI to use from several looks: one Fuobe can read before one it can't, the remembered port first, then the
- * lowest. "none" when nothing answered.
+ * usual order (8188 before Desktop's 8000: another app on 8000 doesn't win). "none" when nothing answered.
  */
 export function pickLook(looks: PortLook[], remembered?: number): PortLook | { state: "none" } {
   const rank = (l: PortLook) => (l.state === "found" ? 0 : l.state === "unreadable" ? 1 : 2);
-  const sorted = looks.filter((l) => l.state !== "none").sort((a, b) => rank(a) - rank(b) || Number(b.port === remembered) - Number(a.port === remembered) || a.port - b.port);
+  const sorted = looks.filter((l) => l.state !== "none").sort((a, b) => rank(a) - rank(b) || Number(b.port === remembered) - Number(a.port === remembered) || portRank(a.port) - portRank(b.port));
   return sorted[0] ?? { state: "none" };
 }
 
 /** The ports to look at, the remembered one first. */
 export const portsToLook = (remembered?: number): number[] => [...new Set([...(remembered ? [remembered] : []), ...COMFY_PORTS])];
 
-/** Facts for the server from /system_stats: never the command line, only whether its cross-site setting names this site. */
-export function statsFacts(s: SystemStats, origin: string) {
+/** What the "Use the ComfyUI on this computer" card shows (components/gpu/use-local-comfy.ts finds it). */
+export type Finder =
+  /** The browser will ask to let Fuobe reach apps on this computer: a click starts the first look. */
+  | { s: "start" }
+  | { s: "looking" }
+  /** Found and readable: the caller connects. */
+  | { s: "found"; port: number; host: string; stats: SystemStats }
+  /**
+   * ComfyUI answers but can't be read: it needs the setting (`back`: it restarted, still without it). `others`: other
+   * ports where something answers too (the person picks where their ComfyUI is).
+   */
+  | { s: "needs-setting"; port: number; back: boolean; others?: number[] }
+  /** The port went quiet after it needed the setting: ComfyUI is restarting. */
+  | { s: "waiting"; port: number; since: number }
+  | { s: "none"; missed?: number }
+  /** The browser keeps Fuobe from reaching apps on this computer. */
+  | { s: "blocked" }
+  /** This browser or page can't: Safari, a phone, or a studio on plain http at a network address. */
+  | { s: "unsupported"; why: "safari" | "phone" | "http" };
+
+/**
+ * The card's next screen after a look (`typed`: the one port the person asked about). A readable ComfyUI on any port
+ * connects. While it waits for one ComfyUI to come back with the setting, that port decides: quiet there is ComfyUI
+ * restarting, and another app answering on another port changes nothing.
+ */
+export function settled(was: Finder, looks: PortLook[], remembered: number | undefined, typed: number | undefined, now: number): Finder {
+  const best = pickLook(looks, remembered);
+  if (best.state === "found") return { s: "found", port: best.port, host: best.host ?? "127.0.0.1", stats: best.stats };
+  const answering = looks.filter((l) => l.state === "unreadable").map((l) => l.port);
+  const others = (port: number) => {
+    const rest = answering.filter((p) => p !== port);
+    return rest.length ? { others: rest } : {};
+  };
+  if ((was.s === "needs-setting" || was.s === "waiting") && looks.some((l) => l.port === was.port)) {
+    if (answering.includes(was.port)) return { s: "needs-setting", port: was.port, back: was.s === "waiting" || (was.s === "needs-setting" && was.back), ...others(was.port) };
+    return { s: "waiting", port: was.port, since: was.s === "waiting" ? was.since : now };
+  }
+  if (best.state === "unreadable") return { s: "needs-setting", port: best.port, back: false, ...others(best.port) };
+  return { s: "none", ...(typed && { missed: typed }) };
+}
+
+/** The same screen (a quiet look that found nothing new changes nothing). */
+export const sameFinder = (a: Finder, b: Finder): boolean => a.s === b.s && JSON.stringify({ ...a, stats: undefined }) === JSON.stringify({ ...b, stats: undefined });
+
+/**
+ * Facts for the server from /system_stats: never the command line, only whether its cross-site setting names this site;
+ * and whether Fuobe's guard answered (`guard`, when it was asked).
+ */
+export function statsFacts(s: SystemStats, origin: string, guard?: boolean) {
   const argv = s.system?.argv ?? [];
   const at = argv.indexOf("--enable-cors-header");
   const value = at >= 0 ? argv[at + 1] : undefined;
@@ -186,6 +242,7 @@ export function statsFacts(s: SystemStats, origin: string) {
     ...(s.system?.os && { os: String(s.system.os).slice(0, 40) }),
     ...(typeof s.system?.embedded_python === "boolean" && { portable: s.system.embedded_python }),
     ...(cors && { cors }),
+    ...(guard !== undefined && { guard }),
   };
 }
 

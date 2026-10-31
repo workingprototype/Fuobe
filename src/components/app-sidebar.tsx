@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useLinkStatus } from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -43,6 +44,9 @@ import { deviceLabel } from "@/lib/gpu/readiness";
 import { useModKey } from "@/lib/keys";
 import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, NEW_CREATION_HREF, parseClosed, scrollFades, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
+
+// The note of a tab that runs the person's jobs on their own computer's ComfyUI (only for someone whose runs go there).
+const ComputerNote = dynamic(() => import("@/components/gpu/computer-runner").then((m) => m.ComputerNote), { ssr: false });
 
 const NO_SEARCH = new URLSearchParams();
 
@@ -437,7 +441,7 @@ function YourGpuChip({ viewer }: { viewer: NonNullable<StatusInfo["viewer"]> }) 
       <IntentLink href="/connect" className={cls}>
         <span className="flex items-center gap-2">
           <StatusDot ok={g.online} /> Your GPU
-          <span className="ml-auto">{g.online ? "online" : "offline"}</span>
+          <span className="ml-auto">{g.online ? "online" : g.comfy === "down" ? "ComfyUI not running" : g.comfy === "no-setting" ? "needs a setting" : "offline"}</span>
         </span>
         {(g.device || vram || g.mode === "computer") && (
           <span className="truncate text-[11px]">{[g.mode === "computer" && "Your computer", deviceLabel(g.device), vram && `${vram} VRAM`].filter(Boolean).join(" · ")}</span>
@@ -535,6 +539,7 @@ export function AppSidebar() {
   };
   const content = useScrollFades<HTMLDivElement>();
   const status = useStatus().data;
+  const computer = useViewer().data?.computer === true;
   const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured);
   const comfy = status?.providers.comfyui?.configured;
   const mode = useEngineMode();
@@ -610,6 +615,7 @@ export function AppSidebar() {
             </Suspense>
           </SidebarContent>
           <SidebarFooter className="gap-1 border-t border-sidebar-border" onClick={closeOnLink}>
+            {computer && <ComputerNote />}
             {status?.viewer ? (
               <YourGpuChip viewer={status.viewer} />
             ) : !status ? (

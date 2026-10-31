@@ -7,9 +7,10 @@
  * send. No React and no browser-only API is needed: the page (src/components/gpu/computer-runner.tsx) gives it fetch,
  * a socket and a clock, and the tests drive it from Node against a stand-in ComfyUI.
  */
+import { isGuard } from "./comfy-guard";
 import { parseComfyBinary, parseComfyText } from "./comfy-ws";
 import { graphProblem, localBase, mayDownload, readPath, statsFacts, viewPath, writePath, type SystemStats } from "./local-comfy";
-import { RELAY_LIMITS, RELAY_TIMES, type BeatAnswer, type ClaimedTask, type ComputerFacts, type HistoryEntryLike, type RelayState, type ReportEvent, type WantedFile } from "./relay";
+import { DONE_SHOWN_MS, RELAY_LIMITS, RELAY_TIMES, type BeatAnswer, type ClaimedTask, type ComputerFacts, type HistoryEntryLike, type RelayState, type ReportEvent, type WantedFile } from "./relay";
 
 /** The parts of a WebSocket the runner uses (the browser's, or Node's). */
 export interface SocketLike {
@@ -31,6 +32,13 @@ export interface RunnerDeps {
   sha256: (data: ArrayBuffer) => Promise<string>;
   /** This site's address, as ComfyUI's setting must name it. */
   origin: string;
+  /**
+   * ComfyUI stopped answering where the runner looks: is it on another port now? (The page looks on ComfyUI's usual
+   * ports, only when the browser already lets Fuobe reach this computer.) The port and host, or null.
+   */
+  find?: (except: number) => Promise<{ port: number; host?: string } | null>;
+  /** The runner moved to another port (the page remembers it). */
+  moved?: (port: number, host: string) => void;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -46,6 +54,10 @@ export interface LocalJob {
   /** The latest live preview (an image the page shows under the tile's shimmer). */
   preview?: Blob;
   saved?: number;
+  /** Saving waits for the studio (it is busy saving other results). */
+  waiting?: boolean;
+  /** When it was saved, or failed (this tab's clock). */
+  endedAt?: number;
 }
 
 export interface RunnerView {
@@ -56,6 +68,13 @@ export interface RunnerView {
   waiting: number;
   /** ComfyUI here: answering, not answering, or answering without Fuobe's setting. */
   comfy: "ok" | "down" | "no-setting";
+  /**
+   * This browser may not reach apps on this computer yet: it would ask first ("ask"), or it was told no ("blocked").
+   * Then the runner only listens (how many wait) and never touches ComfyUI.
+   */
+  access?: "ask" | "blocked";
+  /** Where it looks for ComfyUI. */
+  port: number;
   /** The session ended, or the person disconnected: the runner stopped. */
   stopped?: "signed-out" | "disconnected";
   jobs: LocalJob[];
@@ -66,6 +85,15 @@ class Stopped extends Error {}
 
 const PROGRESS_EVERY_MS = 500;
 const POLL_MS = 1000;
+/** How often a ComfyUI that stopped answering is looked for on the other ports. */
+const FIND_EVERY_MS = 20_000;
+/** Ended jobs the view keeps (a tile shows the last preview until its run moves on). */
+const KEEP_ENDED = 6;
+/** How long a result may wait for a busy studio before the run gives up. */
+const SAVE_WAIT_MS = 60 * 60_000;
+
+/** Retry-After in ms (1 to 30 s; 2 s when it doesn't say). */
+const retryAfter = (res: Response) => Math.min(30, Math.max(1, Number(res.headers.get("retry-after")) || 2)) * 1000;
 
 /** The prompts of a meta-batch job: their entries name the job's filename prefix. */
 const hasPrefix = (prompt: unknown, prefix: string) =>
@@ -75,7 +103,7 @@ const hasPrefix = (prompt: unknown, prefix: string) =>
 const slim = (e: HistoryEntryLike & { prompt?: unknown[] }): HistoryEntryLike => ({ prompt: e.prompt ? [e.prompt[0], e.prompt[1]] : undefined, status: e.status, outputs: e.outputs });
 
 export class ComputerRunner {
-  readonly view: RunnerView = { runner: false, heldElsewhere: false, waiting: 0, comfy: "ok", jobs: [] };
+  readonly view: RunnerView;
   private listeners = new Set<(v: RunnerView) => void>();
   private busy = false;
   private stopping = new Set<string>();
@@ -84,6 +112,8 @@ export class ComputerRunner {
   private events = new Map<string, { value?: number; max?: number; node?: string; nodesDone: number; done?: boolean }>();
   private factsSentAt = 0;
   private factsWithLoras = 0;
+  private foundAt = 0;
+  private guard: boolean | undefined;
   private jobsApi: boolean | undefined;
   private alive = true;
   private now: () => number;
@@ -92,11 +122,12 @@ export class ComputerRunner {
 
   constructor(
     private deps: RunnerDeps,
-    private o: { device: string; port: number; host?: string; clientId: string },
+    private o: { device: string; port: number; host?: string; clientId: string; access?: "ask" | "blocked" },
   ) {
     this.now = deps.now ?? Date.now;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.base = localBase(o.port, o.host);
+    this.view = { runner: false, heldElsewhere: false, waiting: 0, comfy: "ok", port: o.port, ...(o.access && { access: o.access }), jobs: [] };
   }
 
   onChange(fn: (v: RunnerView) => void): () => void {
@@ -110,8 +141,17 @@ export class ComputerRunner {
 
   private job(t: Pick<ClaimedTask, "id" | "generationId">, patch: Partial<LocalJob>) {
     const at = this.view.jobs.findIndex((j) => j.taskId === t.id);
-    const next = { ...(at >= 0 ? this.view.jobs[at] : { taskId: t.id, generationId: t.generationId, phase: "sending" as const }), ...patch };
-    this.view.jobs = at >= 0 ? this.view.jobs.map((j, i) => (i === at ? next : j)) : [...this.view.jobs, next];
+    const was: LocalJob = at >= 0 ? this.view.jobs[at] : { taskId: t.id, generationId: t.generationId, phase: "sending" };
+    const ends = (patch.phase === "done" || patch.phase === "failed") && patch.phase !== was.phase;
+    const next = { ...was, ...patch, ...(ends && { endedAt: this.now() }) };
+    let jobs = at >= 0 ? this.view.jobs.map((j, i) => (i === at ? next : j)) : [...this.view.jobs, next];
+    // Ended jobs stay a while (their tile keeps the last preview until the run moves on), the newest few.
+    const ended = jobs.filter((j) => j.phase === "done" || j.phase === "failed");
+    if (ended.length > KEEP_ENDED) {
+      const drop = new Set(ended.slice(0, ended.length - KEEP_ENDED));
+      jobs = jobs.filter((j) => !drop.has(j));
+    }
+    this.view.jobs = jobs;
     this.emit();
   }
 
@@ -138,24 +178,60 @@ export class ComputerRunner {
     return this.deps.local(`${this.base}${writePath(path, check, own)}`, { ...init, method: "POST", credentials: "omit", cache: "no-store" });
   }
 
-  /** What ComfyUI here is, for the server (its GPU, memory, version; its LoRA names now and then). */
-  async facts(withLoras = false): Promise<ComputerFacts | null> {
+  /**
+   * ComfyUI here, as every caller sees it: readable (its facts), answering but not to this site (it runs without Fuobe's
+   * setting: a no-cors look sees that something answers), or not answering. One look, so the page never hears two
+   * stories. Not answering where it was, it is looked for on the other ports now and then (the page's `find`).
+   */
+  private async look(): Promise<{ comfy: "ok"; stats: SystemStats } | { comfy: "down" | "no-setting" }> {
+    let l: { comfy: "ok"; stats: SystemStats } | { comfy: "down" | "no-setting" };
     try {
-      const stats = await this.read<SystemStats>("/system_stats");
-      const f: ComputerFacts = statsFacts(stats, this.deps.origin);
-      if (withLoras) {
-        const loras = await this.read<unknown>("/models/loras").catch(() => null);
-        if (Array.isArray(loras)) f.loras = loras.filter((x): x is string => typeof x === "string");
-      }
-      this.view.comfy = "ok";
-      this.view.facts = f;
-      return f;
+      l = { comfy: "ok", stats: await this.read<SystemStats>("/system_stats") };
     } catch (e) {
-      // A browser can't read a ComfyUI that doesn't let this site in, but a no-cors look sees that something answers.
       const answers = (e as { status?: number }).status === 403 || (await this.deps.local(`${this.base}/system_stats`, { mode: "no-cors", credentials: "omit", cache: "no-store" }).then(() => true, () => false));
-      this.view.comfy = answers ? "no-setting" : "down";
-      return null;
+      l = { comfy: answers ? "no-setting" : "down" };
+      if (!answers && (await this.findElsewhere())) return this.look();
     }
+    if (this.view.comfy !== l.comfy) {
+      this.view.comfy = l.comfy;
+      this.emit();
+    }
+    return l;
+  }
+
+  /** ComfyUI isn't where the runner looks: when it answers on another port, the runner goes there. True when it moved. */
+  private async findElsewhere(): Promise<boolean> {
+    if (!this.deps.find || this.now() - this.foundAt < FIND_EVERY_MS) return false;
+    this.foundAt = this.now();
+    const there = await this.deps.find(this.o.port).catch(() => null);
+    if (!there || there.port === this.o.port) return false;
+    const host = there.host ?? "127.0.0.1";
+    this.base = localBase(there.port, host);
+    Object.assign(this.o, { port: there.port, host });
+    this.view.port = there.port;
+    this.guard = undefined;
+    this.jobsApi = undefined;
+    // The live socket was to the old port.
+    try {
+      this.ws?.close();
+    } catch {}
+    this.deps.moved?.(there.port, host);
+    this.emit();
+    return true;
+  }
+
+  /** What ComfyUI here is, for the server (its GPU, memory, version, Fuobe's guard; its LoRA names now and then). */
+  async facts(o: { loras?: boolean; guard?: boolean } = {}): Promise<ComputerFacts | null> {
+    const l = await this.look();
+    if (l.comfy !== "ok") return null;
+    if (o.guard || this.guard === undefined) this.guard = await this.read<unknown>("/fuobe/guard").then(isGuard, () => false);
+    const f: ComputerFacts = statsFacts(l.stats, this.deps.origin, this.guard);
+    if (o.loras) {
+      const loras = await this.read<unknown>("/models/loras").catch(() => null);
+      if (Array.isArray(loras)) f.loras = loras.filter((x): x is string => typeof x === "string");
+    }
+    this.view.facts = f;
+    return f;
   }
 
   private socket() {
@@ -226,9 +302,12 @@ export class ComputerRunner {
   // -------------------------------------------------------------------------
   // The server
 
+  /** A report about a job (its token in a header, so the studio checks it before it reads the report). */
   private async report(t: ClaimedTask, e: ReportEvent): Promise<{ wanted?: WantedFile[]; follow?: string; stop?: boolean; state?: RelayState }> {
-    for (let i = 0; ; i++) {
-      const res = await this.deps.api(`/api/gpu/computer/tasks/${t.id}/report`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lease: t.lease, ...e }) });
+    // A busy studio (429) is waited out, for a while; other failures are tried a few times.
+    const until = this.now() + 2 * 60_000;
+    for (let i = 0; ; ) {
+      const res = await this.deps.api(`/api/gpu/computer/tasks/${t.id}/report`, { method: "POST", headers: { "Content-Type": "application/json", "X-Fuobe-Lease": t.lease }, body: JSON.stringify(e) });
       if (res.ok) return (await res.json()) as { wanted?: WantedFile[]; follow?: string; stop?: boolean; state?: RelayState };
       if (res.status === 401) {
         this.stop("signed-out");
@@ -236,8 +315,12 @@ export class ComputerRunner {
       }
       // The job ended or another tab has it: this tab lets go.
       if (res.status === 404 || res.status === 409) throw new Stopped();
-      if (i >= 4) throw new Error(`The studio answered HTTP ${res.status}`);
-      await this.sleep(res.status === 429 ? 2000 : 1000 * (i + 1));
+      if (res.status === 429 && this.now() < until) {
+        await this.sleep(retryAfter(res));
+        continue;
+      }
+      if (++i > 4) throw new Error(`The studio answered HTTP ${res.status}`);
+      await this.sleep(1000 * i);
     }
   }
 
@@ -245,11 +328,13 @@ export class ComputerRunner {
   async beat(takeover = false): Promise<BeatAnswer | null> {
     if (!this.alive) return null;
     const t = this.now();
+    // A browser that may not reach this computer yet only hears how many jobs wait (never ComfyUI, never the jobs).
+    if (this.o.access) return this.beatWith({ device: this.o.device, ready: false, listen: true, running: [] });
     // A look at ComfyUI here every beat (only a computer whose ComfyUI answers takes the jobs); its facts go to the
     // server every minute, the LoRA names every 5 minutes.
     const due = t - this.factsSentAt > 60_000;
     const loras = due && t - this.factsWithLoras > 5 * 60_000;
-    const read = await this.facts(loras);
+    const read = await this.facts({ loras, guard: due });
     const facts = due ? read : null;
     if (facts) {
       this.factsSentAt = t;
@@ -262,11 +347,23 @@ export class ComputerRunner {
         return { task: j.taskId, ...(j.position !== undefined && { position: j.position }), ...(j.phase === "running" && ev && { value: ev.value, max: ev.max, nodesDone: ev.nodesDone }) };
       });
     const stopped = [...this.stoppedDone];
-    const res = await this.deps.api("/api/gpu/computer/beat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device: this.o.device, port: this.o.port, ready: !!read, ...(facts && { facts }), running, ...(stopped.length && { stopped }), ...(takeover && { takeover: true }) }),
-    });
+    return this.beatWith(
+      {
+        device: this.o.device,
+        port: this.o.port,
+        ready: !!read,
+        ...(this.view.comfy === "no-setting" && { why: "setting" }),
+        ...(facts && { facts }),
+        running,
+        ...(stopped.length && { stopped }),
+        ...(takeover && { takeover: true }),
+      },
+      stopped,
+    );
+  }
+
+  private async beatWith(body: Record<string, unknown>, stopped: string[] = []): Promise<BeatAnswer | null> {
+    const res = await this.deps.api("/api/gpu/computer/beat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (res.ok) for (const s of stopped) this.stoppedDone.delete(s);
     if (res.status === 401) {
       this.stop("signed-out");
@@ -280,7 +377,7 @@ export class ComputerRunner {
     const a = (await res.json()) as BeatAnswer;
     Object.assign(this.view, { runner: a.runner, heldElsewhere: a.heldElsewhere, waiting: a.waiting });
     this.emit();
-    for (const s of a.stops) void this.takeOff(s);
+    if (!this.o.access) for (const s of a.stops) void this.takeOff(s);
     return a;
   }
 
@@ -324,11 +421,15 @@ export class ComputerRunner {
   private promptOf = new Map<string, string>();
   private stoppedDone = new Set<string>();
 
-  /** Ask for a job and run it (one at a time). True when there was one. */
+  /**
+   * Ask for a job and run it (one at a time). True when there was one. Only while ComfyUI here answers to this site: a
+   * computer whose ComfyUI is closed, or runs without Fuobe's setting, keeps its place but takes nothing.
+   */
   async claimAndRun(): Promise<boolean> {
-    if (!this.alive || this.busy) return false;
+    if (!this.alive || this.busy || this.o.access) return false;
     this.busy = true;
     try {
+      if ((await this.look()).comfy !== "ok") return false;
       const running = this.view.jobs.filter((j) => j.phase !== "done" && j.phase !== "failed").map((j) => j.taskId);
       const res = await this.deps.api("/api/gpu/computer/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device: this.o.device, running }) });
       if (res.status !== 200) {
@@ -460,26 +561,20 @@ export class ComputerRunner {
     return true;
   }
 
-  /** ComfyUI here stopped answering: say so once, then wait until it answers again. */
+  /**
+   * ComfyUI here stopped answering, or answers without Fuobe's setting: say which (again when that changes), then wait
+   * until it answers to this site again.
+   */
   private async waitForComfy(t: ClaimedTask) {
-    let told = false;
+    let told: string | undefined;
     for (;;) {
       if (!this.alive) throw new Stopped();
-      const ok = await this.read("/system_stats").then(
-        () => true,
-        () => false,
-      );
-      if (ok) {
-        this.view.comfy = "ok";
-        this.emit();
-        return;
-      }
-      this.view.comfy = "down";
-      this.emit();
-      if (!told) {
-        const a = await this.report(t, { event: "comfy-down" });
+      const l = await this.look();
+      if (l.comfy === "ok") return;
+      if (told !== l.comfy) {
+        const a = await this.report(t, { event: "comfy-down", ...(l.comfy === "no-setting" && { why: "setting" as const }) });
         if (a.stop) throw new Stopped();
-        told = true;
+        told = l.comfy;
       }
       await this.sleep(3000);
     }
@@ -567,13 +662,18 @@ export class ComputerRunner {
       }
       if (!(await this.upload(t, w, blob, offset))) return this.job(t, { phase: "failed" });
     }
-    this.job(t, { phase: "done", preview: undefined });
+    // Saved: the tile says so (over the last preview) until the run itself moves on.
+    this.job(t, { phase: "done", saved: 1, waiting: false });
   }
 
-  /** One file in parts of 16 MB; a failed part is tried again (three times in a row at most). */
+  /**
+   * One file in parts of 16 MB; a failed part is tried again (three times in a row at most). A busy studio (429) isn't a
+   * failure: the part waits as long as it says, up to an hour in all.
+   */
   private async upload(t: ClaimedTask, w: WantedFile, blob: Blob, from: number): Promise<boolean> {
     let offset = from;
     let fails = 0;
+    const until = this.now() + SAVE_WAIT_MS;
     while (offset < blob.size || blob.size === 0) {
       if (!this.alive) throw new Stopped();
       const part = blob.slice(offset, Math.min(blob.size, offset + RELAY_LIMITS.partBytes));
@@ -588,8 +688,13 @@ export class ComputerRunner {
         const r = (await res.json()) as { received: number; done: boolean };
         offset = r.received;
         fails = 0;
-        this.job(t, { saved: offset / Math.max(1, blob.size) });
+        this.job(t, { saved: offset / Math.max(1, blob.size), waiting: false });
         if (r.done) return true;
+        continue;
+      }
+      if (res?.status === 429 && this.now() < until) {
+        this.job(t, { waiting: true });
+        await this.sleep(retryAfter(res));
         continue;
       }
       if (res && (res.status === 404 || res.status === 413 || res.status === 415)) return false;
@@ -605,7 +710,7 @@ export class ComputerRunner {
         await this.report(t, { event: "failed", reason: "save-failed" }).catch(() => null);
         return false;
       }
-      await this.sleep(res?.status === 429 ? 2000 : 1500 * fails);
+      await this.sleep(1500 * fails);
     }
     return true;
   }
@@ -617,6 +722,16 @@ export class ComputerRunner {
       if (lease && j.phase === "sending") send(`/api/gpu/computer/tasks/${j.taskId}/release`, JSON.stringify({ lease }));
     }
   }
+}
+
+/**
+ * The job a run's tile shows: the run's latest one. A saved one only for a short while (its tile says it is saving over
+ * the last preview until the run itself moves on), so a run's next step, or a run sent again, never shows an old job.
+ */
+export function tileJob(jobs: readonly LocalJob[], generationId: string, now: number): LocalJob | undefined {
+  const job = jobs.findLast((j) => j.generationId === generationId);
+  if (!job || (job.phase === "done" && now - (job.endedAt ?? 0) > DONE_SHOWN_MS)) return undefined;
+  return job;
 }
 
 /** How often the runner beats: faster while it has work. */

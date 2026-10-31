@@ -9,6 +9,9 @@ export interface PromptErrorBody {
   node_errors?: unknown;
 }
 
+/** "Node 'My Node' not found", "Cannot execute because node MyNode does not exist": the class, quoted or not. */
+const MISSING_NODE = /node (?:type )?(?:'([^'\n]{1,128})'|([^'"\s]{1,128})) (?:not found|does not exist)/i;
+
 export function fixFromPromptError(
   body: PromptErrorBody,
   workflowId: string,
@@ -28,7 +31,9 @@ export function fixFromPromptError(
   }
   if (items.length) return { code: "comfy_missing_model", workflowId, items };
   if (body.error?.type === "missing_node_type") {
-    const cls = body.error.extra_info?.class_type ?? /node (?:type )?'?([^'"]+?)'? (?:not found|does not exist)/i.exec(body.error.message ?? "")?.[1];
+    // A bounded pattern on the message's start: a long message (a ComfyUI's answer, or what a tab reports) can't stall it.
+    const said = MISSING_NODE.exec(String(body.error.message ?? "").slice(0, 1024));
+    const cls = body.error.extra_info?.class_type ?? said?.[1] ?? said?.[2];
     if (cls) {
       const pack = packOf(cls);
       return { code: "comfy_missing_node", workflowId, items: [{ class: cls, ...(pack && { pack }) }] };

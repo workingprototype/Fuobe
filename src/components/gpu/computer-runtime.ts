@@ -6,8 +6,10 @@
  * component (computer-runner.tsx) starts it and the tiles read its store.
  */
 import { COMPUTER_KICK_EVENT } from "@/lib/api";
-import { beatEvery, ComputerRunner, type LocalJob, type RunnerView } from "@/lib/computer-runner";
+import { beatEvery, ComputerRunner, tileJob, type LocalJob, type RunnerView } from "@/lib/computer-runner";
 import { loopbackFetch } from "@/lib/gpu/browser-check";
+import { pickLook, portsToLook } from "@/lib/local-comfy";
+import { lookOn } from "./use-local-comfy";
 
 export { COMPUTER_KICK_EVENT };
 
@@ -18,6 +20,8 @@ const KEYS = {
   host: "fuobe.comfy.host",
   install: "fuobe.comfy.install",
   firstRun: "fuobe.computer.first-run",
+  /** This browser has read the ComfyUI on this computer before (so reaching it asks nothing new). */
+  reached: "fuobe.computer.reached",
 } as const;
 
 const memory = new Map<string, string>();
@@ -83,8 +87,11 @@ function set(next: ComputerState) {
   for (const fn of listeners) fn();
 }
 
-/** The job this browser runs for a run (its phase, steps and latest preview), wherever its tile is open. */
-export const jobFor = (s: ComputerState, generationId: string): LocalJob | undefined => s.view?.jobs.find((j) => j.generationId === generationId && j.phase !== "done");
+/**
+ * The job this browser runs for a run (its phase, steps and latest preview), wherever its tile is open. A saved one
+ * stays a few seconds, so the tile says it is saving until the run shows its result.
+ */
+export const jobFor = (s: ComputerState, generationId: string, now: number): LocalJob | undefined => (s.view ? tileJob(s.view.jobs, generationId, now) : undefined);
 
 const active = (j: LocalJob) => j.phase !== "done" && j.phase !== "failed";
 
@@ -123,18 +130,25 @@ const sha256 = async (data: ArrayBuffer) => [...new Uint8Array(await crypto.subt
 /** The jobs as another tab gets them (the previews go too: they're Blobs). */
 type Heard = { holder: "this"; view: RunnerView } | { holder: "none" };
 
+/** How the runner starts: the port the server last heard of (when this browser remembers none), and its access. */
+export interface RunnerStart {
+  port?: number;
+  /** This browser may not reach apps on this computer yet ("ask"), or was told no ("blocked"): it only listens. */
+  access?: "ask" | "blocked";
+}
+
 /**
  * Run this person's jobs from this browser while the page is open: this tab when it gets the lock, else it listens to
  * the tab that has it (and takes over when that one closes). Returns the stop.
  */
-export function startComputerRunner(): () => void {
+export function startComputerRunner(o: RunnerStart = {}): () => void {
   const stop = new AbortController();
   const channel = typeof BroadcastChannel === "function" ? new BroadcastChannel("fuobe-computer") : null;
   channel?.addEventListener("message", (e: MessageEvent<Heard>) => {
     if (state.holder === "this") return;
     set(e.data.holder === "this" ? { holder: "other", view: e.data.view } : { holder: "none", view: null });
   });
-  const run = () => hold(stop.signal, (view) => channel?.postMessage({ holder: "this", view } satisfies Heard)).finally(() => channel?.postMessage({ holder: "none" } satisfies Heard));
+  const run = () => hold(stop.signal, (view) => channel?.postMessage({ holder: "this", view } satisfies Heard), o).finally(() => channel?.postMessage({ holder: "none" } satisfies Heard));
   if (navigator.locks?.request) {
     navigator.locks.request("fuobe-runner", { signal: stop.signal }, run).catch(() => {});
   } else {
@@ -148,9 +162,11 @@ export function startComputerRunner(): () => void {
 }
 
 /** This tab runs the jobs until the signal (or the session ends, or the person disconnects). */
-async function hold(signal: AbortSignal, publish: (v: RunnerView) => void): Promise<void> {
+async function hold(signal: AbortSignal, publish: (v: RunnerView) => void, o: RunnerStart): Promise<void> {
   if (signal.aborted) return;
-  const where = rememberedComfy() ?? { port: 8188, host: "127.0.0.1" };
+  // Where this browser found ComfyUI last; else where the person's computer said it was (another browser, cleared site
+  // data); else ComfyUI's usual port. When it stops answering there, the runner looks on the other usual ports.
+  const where = rememberedComfy() ?? { port: o.port ?? 8188, host: "127.0.0.1" };
   const runner = new ComputerRunner(
     {
       api: (path, init) => fetch(path, { ...init, credentials: "same-origin" }),
@@ -158,12 +174,19 @@ async function hold(signal: AbortSignal, publish: (v: RunnerView) => void): Prom
       socket: (url) => (typeof WebSocket === "function" ? (new WebSocket(url) as never) : null),
       sha256,
       origin: window.location.origin,
+      find: async (except) => {
+        const looks = await Promise.all(portsToLook().filter((p) => p !== except).map((p) => lookOn(p)));
+        const best = pickLook(looks);
+        return best.state === "none" ? null : { port: best.port, host: best.host };
+      },
+      moved: (port, host) => rememberComfy(port, host),
     },
-    { device: idFor("device"), port: where.port, host: where.host, clientId: `fuobe-${idFor("client")}` },
+    { device: idFor("device"), port: where.port, host: where.host, clientId: `fuobe-${idFor("client")}`, ...(o.access && { access: o.access }) },
   );
   let last = 0;
   const show = (v: RunnerView) => {
     set({ holder: "this", view: { ...v, jobs: [...v.jobs] } });
+    if (v.facts && !stored("reached")) store("reached", "1");
     // Other tabs hear it a few times a second at most.
     const now = Date.now();
     if (now - last > 250 || !v.jobs.some(active)) {
@@ -187,11 +210,14 @@ async function hold(signal: AbortSignal, publish: (v: RunnerView) => void): Prom
   window.addEventListener(COMPUTER_KICK_EVENT, kick);
   window.addEventListener("pagehide", release);
   window.addEventListener("beforeunload", leaving);
+  // ComfyUI here as the server last heard it: a change (closed, back, without the setting) is told at once.
+  let told = runner.view.comfy;
   const tick = () => {
     const now = Date.now();
-    if (!beating && (now >= nextBeat || takeover)) {
+    if (!beating && (now >= nextBeat || takeover || runner.view.comfy !== told)) {
       beating = true;
       nextBeat = now + beatEvery(runner.view.jobs.some(active));
+      told = runner.view.comfy;
       const take = takeover;
       takeover = false;
       runner

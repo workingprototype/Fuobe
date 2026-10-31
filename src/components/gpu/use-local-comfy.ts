@@ -2,32 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { loopbackFetch } from "@/lib/gpu/browser-check";
-import { browserSupport, localBase, pageCanReach, pickLook, portsToLook, type PortLook, type SystemStats } from "@/lib/local-comfy";
+import { browserSupport, localBase, pageCanReach, portsToLook, sameFinder, settled, type Finder, type PortLook, type SystemStats } from "@/lib/local-comfy";
 import { rememberedComfy } from "./computer-runtime";
 
 /**
  * Finding the ComfyUI on this computer from the page ("Use the ComfyUI on this computer"). It looks at the ports
  * ComfyUI uses (the one that answered last first), tells a ComfyUI it can read from one that answers without Fuobe's
- * setting, and, while the card is open and the tab is in view, looks again quietly: every 2 s while it waits for
- * ComfyUI to come back with the setting, every 5 s while nothing answers. It never looks on its own while the browser
- * would still ask (Chrome's advice): the person's click does the first look.
+ * setting, and, while the card is open and the tab is in view, looks again quietly at every port: every 2 s while it
+ * waits for ComfyUI to come back with the setting, every 5 s while nothing answers. It never looks on its own while the
+ * browser would still ask (Chrome's advice): the person's click does the first look.
  */
 
-export type Finder =
-  /** The browser will ask to let Fuobe reach apps on this computer: a click starts the first look. */
-  | { s: "start" }
-  | { s: "looking" }
-  /** Found and readable: the caller connects. */
-  | { s: "found"; port: number; host: string; stats: SystemStats }
-  /** ComfyUI answers but can't be read: it needs the setting (`back`: it restarted, still without it). */
-  | { s: "needs-setting"; port: number; back: boolean }
-  /** The port went quiet after it needed the setting: ComfyUI is restarting. */
-  | { s: "waiting"; port: number; since: number }
-  | { s: "none"; missed?: number }
-  /** The browser keeps Fuobe from reaching apps on this computer. */
-  | { s: "blocked" }
-  /** This browser or page can't: Safari, a phone, or a studio on plain http at a network address. */
-  | { s: "unsupported"; why: "safari" | "phone" | "http" };
+export type { Finder };
 
 const LOOK_MS = 1500;
 
@@ -61,14 +47,18 @@ export async function lookOn(port: number, host = "127.0.0.1"): Promise<PortLook
 
 type Permission = "granted" | "prompt" | "denied" | "unknown";
 
-/** Chrome's "Apps on device" permission for this site ("unknown" where the browser doesn't say: Firefox). */
-async function loopbackPermission(): Promise<{ state: Permission; status?: PermissionStatus }> {
-  try {
-    const status = await navigator.permissions.query({ name: "loopback-network" as PermissionName });
-    return { state: status.state as Permission, status };
-  } catch {
-    return { state: "unknown" };
+/**
+ * Chrome's "Apps on device" permission for this site (its newer name, then the one before it), or "unknown" where the
+ * browser doesn't say (Firefox).
+ */
+export async function loopbackPermission(): Promise<{ state: Permission; status?: PermissionStatus }> {
+  for (const name of ["loopback-network", "local-network-access"]) {
+    try {
+      const status = await navigator.permissions.query({ name: name as PermissionName });
+      return { state: status.state as Permission, status };
+    } catch {}
   }
+  return { state: "unknown" };
 }
 
 const NARROW = "(max-width: 767px)";
@@ -100,14 +90,17 @@ export function useLocalComfy(active: boolean) {
   }, [state]);
   const busy = useRef(false);
 
+  /** The screen for what the looks found; the same state (no new render) when nothing changed. */
   const settle = useCallback((looks: PortLook[], port?: number) => {
-    const best = pickLook(looks, rememberedComfy()?.port);
     const was = cur.current;
-    if (best.state === "found") return setState({ s: "found", port: best.port, host: best.host ?? "127.0.0.1", stats: best.stats });
-    if (best.state === "unreadable") return setState({ s: "needs-setting", port: best.port, back: was.s === "waiting" || (was.s === "needs-setting" && was.back) });
-    // Nothing answers: right after it needed the setting, that's ComfyUI restarting.
-    if (was.s === "needs-setting" || (was.s === "waiting" && was.port === port)) return setState({ s: "waiting", port: was.port, since: was.s === "waiting" ? was.since : Date.now() });
-    setState({ s: "none", ...(port && { missed: port }) });
+    const next = settled(was, looks, rememberedComfy()?.port, port, Date.now());
+    if (!sameFinder(was, next)) setState(next);
+  }, []);
+
+  /** "My ComfyUI is on that port": the fix and the quiet looks follow it. */
+  const choose = useCallback((port: number) => {
+    const was = cur.current;
+    if (was.s === "needs-setting") setState({ s: "needs-setting", port, back: false, others: [...new Set([was.port, ...(was.others ?? [])])].filter((p) => p !== port) });
   }, []);
 
   /** Look on every port (or the ones given), then say what was found. `quiet`: keep the screen as it is meanwhile. */
@@ -152,21 +145,14 @@ export function useLocalComfy(active: boolean) {
     };
   }, [active, support, look]);
 
-  // Quiet looks while it waits for ComfyUI (with the setting) or for any ComfyUI to start.
+  // Quiet looks at every port while it waits for ComfyUI (with the setting: a readable ComfyUI on any port connects) or
+  // for any ComfyUI to start.
+  const every = state.s === "needs-setting" || state.s === "waiting" ? 2000 : state.s === "none" ? 5000 : 0;
   useEffect(() => {
-    if (!active) return;
-    const s = state;
-    // One port while it waits for that ComfyUI to come back; every port while nothing answers.
-    const port = s.s === "needs-setting" || s.s === "waiting" ? s.port : undefined;
-    const every = port ? 2000 : s.s === "none" ? 5000 : 0;
-    if (!every) return;
-    const id = setInterval(() => {
-      if (!visible()) return;
-      const remembered = rememberedComfy();
-      void look({ quiet: true, ...(port && { ports: [{ port, host: remembered && remembered.port === port ? remembered.host : "127.0.0.1" }] }) });
-    }, every);
+    if (!active || !every) return;
+    const id = setInterval(() => visible() && void look({ quiet: true }), every);
     return () => clearInterval(id);
-  }, [active, state, look]);
+  }, [active, every, look]);
 
-  return { state: support !== "ok" ? ({ s: "unsupported", why: support } as Finder) : state, look, support };
+  return { state: support !== "ok" ? ({ s: "unsupported", why: support } as Finder) : state, look, choose, support };
 }

@@ -3,6 +3,7 @@
  * the model files it still lacks. Pure (no I/O), so it can be tested and run in the browser.
  */
 import type { ManifestModel, ManifestWorkflow } from "./comfy";
+import { GUARD_FILE_NAME, guardBase64 } from "./comfy-guard";
 import { FUOBE_REPO } from "./connections";
 import { modelCardOf } from "./licences";
 
@@ -117,12 +118,16 @@ export interface InstallFix {
   path?: string[];
   /** What to copy: the whole setting, or only the address for a field that takes it. */
   copy: string;
-  /** Windows portable or Easy-Install: a start file can do it. */
+  /** A whole command with the setting in it, as an example (a terminal). */
+  example?: string;
+  /** Windows portable or Easy-Install: a start file can do it (the setting and Fuobe's guard). */
   startFile?: boolean;
+  /** Where Fuobe's guard goes (lib/comfy-guard.ts), for the installs whose guard the person puts in by hand. */
+  guard?: string;
 }
 
-/** The fix for each install, in the words the card shows. */
-export function fixFor(install: ComfyInstall, origin: string): InstallFix {
+/** The fix for each install, in the words the card shows (`port`: where ComfyUI was found). */
+export function fixFor(install: ComfyInstall, origin: string, port = 8188): InstallFix {
   const flag = corsFlag(origin);
   switch (install) {
     case "desktop":
@@ -130,21 +135,29 @@ export function fixFor(install: ComfyInstall, origin: string): InstallFix {
         lead: "In ComfyUI Desktop, open Settings, then Server-Config, and paste this into Enable CORS header. Restart when it asks.",
         path: ["Settings (the gear, bottom left)", "Server-Config", "Enable CORS header"],
         copy: origin,
+        guard: "Put it in the custom_nodes folder of your ComfyUI folder (Documents → ComfyUI, unless you chose another when you installed it).",
       };
     case "stability-matrix":
       return {
         lead: "In Stability Matrix, open ComfyUI's Launch Options and add this to Extra Launch Arguments. Then stop and launch ComfyUI.",
         path: ["Packages", "ComfyUI's ⋮ menu", "Launch Options", "Extra Launch Arguments"],
         copy: flag,
+        guard: "Put it in ComfyUI's custom_nodes folder (ComfyUI's ⋮ menu → Open in Explorer).",
       };
     case "portable":
       return {
-        lead: "Download this start file and open it. It restarts ComfyUI with Fuobe allowed in, and keeps your other settings.",
+        lead: "Download this start file and open it. It restarts ComfyUI with Fuobe's setting and Fuobe's guard, and keeps your other settings.",
         copy: flag,
         startFile: true,
       };
     default:
-      return { lead: "Stop ComfyUI (Ctrl+C in its window) and start it again with this:", copy: `python main.py ${flag}` };
+      // The setting goes into their own command (their python, their arguments); the example keeps the port it was on.
+      return {
+        lead: "Add this to the command you start ComfyUI with, then start it again (Ctrl+C in its window stops it):",
+        copy: flag,
+        example: `python main.py ${flag}${port !== 8188 ? ` --port ${port}` : ""}`,
+        guard: "Put it in ComfyUI's custom_nodes folder.",
+      };
   }
 }
 
@@ -153,21 +166,26 @@ const ps = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
 /**
  * "Start ComfyUI for Fuobe.bat", made in the browser for the port and this site: it finds the ComfyUI listening on the
- * port, asks before restarting it, and starts it again the same way with Fuobe's setting added. It leaves a start file
- * with that command next to ComfyUI, and offers to add the setting to the person's own start file (keeping a .bak).
- * It downloads nothing, sends nothing, and needs no admin rights. ComfyUI Desktop and Stability Matrix keep their own
- * settings: for those it says where the setting is instead. Windows line endings.
+ * port, asks before restarting it, puts Fuobe's guard (lib/comfy-guard.ts) into its custom_nodes folder, and starts it
+ * again the same way with Fuobe's setting added. It leaves a start file with that command next to ComfyUI for next
+ * time, and never changes the person's own start files. It downloads nothing, sends nothing, and needs no admin rights.
+ * ComfyUI Desktop and Stability Matrix keep their own settings: for those it says where the setting is instead (Desktop
+ * gets the guard too, when its folder shows). Windows line endings.
  */
 export function startFile(port: number, origin: string): string {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("That isn't a port");
   const flag = corsFlag(origin);
+  // A --base-directory in a command line: ComfyUI's custom nodes are there.
+  const baseDir = "'--base-directory\\s+(\"([^\"]+)\"|(\\S+))'";
   const lines = [
     "@echo off",
     "rem Start ComfyUI for Fuobe",
     `rem Restarts the ComfyUI on port ${port} with one more setting, so ${origin} can use it from your browser:`,
     `rem   ${flag}`,
+    `rem It also puts Fuobe's guard (${GUARD_FILE_NAME}) in ComfyUI's custom_nodes folder: while the setting is on, it keeps`,
+    "rem every other website out of your ComfyUI.",
     "rem It asks before it stops anything, keeps your other settings, downloads nothing and sends nothing.",
-    "rem To undo it, start ComfyUI the usual way.",
+    "rem To undo it, start ComfyUI the usual way, and delete the guard from custom_nodes.",
     'set "FUOBE_BAT=%~f0"',
     `powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=[IO.File]::ReadAllText($env:FUOBE_BAT); iex $s.Substring($s.IndexOf('#FUOBE'+'-PS'))"`,
     "echo.",
@@ -176,11 +194,21 @@ export function startFile(port: number, origin: string): string {
     "#FUOBE-PS",
     `$Port = ${port}`,
     `$Flag = ${ps(flag)}`,
+    "function Add-Guard($nodes) {",
+    "  if (-not $nodes -or -not (Test-Path $nodes)) { return }",
+    `  [IO.File]::WriteAllBytes((Join-Path $nodes ${ps(GUARD_FILE_NAME)}), [Convert]::FromBase64String('${guardBase64()}'))`,
+    `  Write-Host "Added Fuobe's guard to $nodes. It keeps every other website out of your ComfyUI." }`,
+    "function Base-Nodes($cmdline, $from) {",
+    `  if ($cmdline -notmatch ${baseDir}) { return $null }`,
+    "  $b = if ($Matches[2]) { $Matches[2] } else { $Matches[3] }",
+    "  if (-not [IO.Path]::IsPathRooted($b)) { $b = Join-Path $from $b }",
+    "  return (Join-Path $b 'custom_nodes') }",
     "$conn = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1",
     'if (-not $conn) { Write-Host "Nothing is running on port $Port. Start ComfyUI the usual way, then open this file again."; return }',
     '$proc = Get-CimInstance Win32_Process -Filter "ProcessId = $($conn.OwningProcess)"',
     '$parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.ParentProcessId)" -ErrorAction SilentlyContinue',
     "if ($proc.Name -match '^ComfyUI' -or $parent.Name -match '^ComfyUI') {",
+    "  Add-Guard (Base-Nodes $proc.CommandLine $env:USERPROFILE)",
     `  Write-Host "This is ComfyUI Desktop. Open its Settings, then Server-Config, and paste ${origin} into Enable CORS header. Restart when it asks."; return }`,
     "if ($parent.Name -match '^StabilityMatrix') {",
     '  Write-Host "This ComfyUI runs from Stability Matrix. Open ComfyUI\'s Launch Options there, add this to Extra Launch Arguments, then stop and launch it:"; Write-Host "  $Flag"; return }',
@@ -191,33 +219,25 @@ export function startFile(port: number, origin: string): string {
     "if ($exe -match '\\\\Scripts\\\\python(w)?\\.exe$') { $dir = Split-Path $dir }",
     "if (-not (Test-Path (Join-Path $dir 'ComfyUI\\main.py')) -and -not (Test-Path (Join-Path $dir 'main.py'))) {",
     "  if ($cmd -match '\"?([A-Za-z]:\\\\[^\"]*?main\\.py)') { $dir = Split-Path $Matches[1] } else { Write-Host \"Couldn't tell which folder ComfyUI runs from. Add this to the end of the line that starts it in your start file, then start it again:\"; Write-Host \"  $Flag\"; return } }",
+    "$comfy = if (Test-Path (Join-Path $dir 'ComfyUI\\main.py')) { Join-Path $dir 'ComfyUI' } else { $dir }",
     "$args0 = if ($cmd.StartsWith('\"')) { $cmd.Substring($cmd.IndexOf('\"', 1) + 1) } else { $cmd.Substring(($cmd + ' ').IndexOf(' ')) }",
     "$args0 = ($args0 -replace '\\s--enable-cors-header(\\s+(\"[^\"]*\"|[^\\s-]\\S*))?', '').Trim()",
+    "$nodes = Base-Nodes $args0 $dir",
+    "if (-not $nodes) { $nodes = Join-Path $comfy 'custom_nodes' }",
     '$line = "`"$exe`" $args0 $Flag"',
     'Write-Host "ComfyUI is running on port $Port from $dir."',
     "$yes = Read-Host 'Restart it now so Fuobe can use it? Anything it is making right now stops. [Y/N]'",
     "if ($yes -notmatch '^[Yy]') { Write-Host 'Nothing was changed.'; return }",
     "$bat = if ($parent.Name -eq 'cmd.exe' -and $parent.CommandLine -match '([^\"]+\\.bat)') { $Matches[1].Trim() } else { $null }",
-    "if ($bat -and -not [IO.Path]::IsPathRooted($bat)) { $bat = Join-Path $dir $bat }",
     "if ($parent.Name -eq 'cmd.exe' -and $bat) { Stop-Process -Id $parent.ProcessId -Force -ErrorAction SilentlyContinue }",
     "Stop-Process -Id $proc.ProcessId -Force",
     "for ($i = 0; $i -lt 40 -and (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 250 }",
+    "Add-Guard $nodes",
     `$mine = Join-Path $dir ${ps(START_FILE_NAME)}`,
     "Set-Content -Path $mine -Encoding OEM -Value @('@echo off', \"cd /d `\"$dir`\"\", \"title ComfyUI for Fuobe\", $line, 'pause')",
     "Start-Process -FilePath $mine -WorkingDirectory $dir",
     'Write-Host "Started ComfyUI again with Fuobe\'s setting. Fuobe connects by itself when it is ready."',
     'Write-Host "Next time, start it with: $mine"',
-    "if ($bat -and (Test-Path $bat) -and ([IO.Path]::GetFileName($bat) -ne " + ps(START_FILE_NAME) + ")) {",
-    "  $text = Get-Content -Raw $bat; $runs = @(Select-String -Path $bat -Pattern 'main\\.py')",
-    "  if ($runs.Count -eq 1 -and $text -notmatch [regex]::Escape($Flag)) {",
-    "    $add = Read-Host \"Also add this setting to $([IO.Path]::GetFileName($bat)), so it's always on? [Y/N]\"",
-    "    if ($add -match '^[Yy]') {",
-    "      Copy-Item $bat \"$bat.bak\" -Force",
-    // Code page 437 maps every byte to a character and back: the rest of their file stays byte for byte.
-    "      $enc = [Text.Encoding]::GetEncoding(437); $all = [IO.File]::ReadAllLines($bat, $enc); $n = $runs[0].LineNumber - 1",
-    "      $all[$n] = ($all[$n] -replace '\\s--enable-cors-header(\\s+(\"[^\"]*\"|[^\\s-]\\S*))?', '') + ' ' + $Flag",
-    "      [IO.File]::WriteAllLines($bat, $all, $enc)",
-    '      Write-Host "Added it. The old file is kept as $bat.bak." } } }',
   ];
   return lines.join("\r\n") + "\r\n";
 }

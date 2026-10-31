@@ -100,14 +100,15 @@ export interface GpuSetupDetail {
 }
 
 /** What "Try again" and "Run anyway" do for the request that was stopped (the composer that sent it sets them). */
-let pendingRetry: { at: number; retry: () => void; skip: () => void } | null = null;
+let pendingRetry: { at: number; retry: () => void; skip: () => void; kind?: string } | null = null;
 
-export function setGpuRetry(retry: () => void, skip: () => void): void {
-  pendingRetry = { at: Date.now(), retry, skip };
+/** `kind`: what the run makes (image, video, audio), for the words of the card that starts it. */
+export function setGpuRetry(retry: () => void, skip: () => void, kind?: string): void {
+  pendingRetry = { at: Date.now(), retry, skip, ...(kind && { kind }) };
 }
 
 /** The composer's retry, when it asked within the last few seconds (another page's stale one never applies). */
-export function takeGpuRetry(): { retry: () => void; skip: () => void } | null {
+export function takeGpuRetry(): { retry: () => void; skip: () => void; kind?: string } | null {
   const p = pendingRetry;
   pendingRetry = null;
   return p && Date.now() - p.at < 15_000 ? p : null;

@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Send JSON" }, { status: 400 });
   }
   try {
-    return Response.json(beat(principal, { device: String(body?.device ?? ""), port: body?.port, facts: body?.facts, running: Array.isArray(body?.running) ? body.running : [], takeover: body?.takeover === true, stopped: Array.isArray(body?.stopped) ? body.stopped : [], ready: body?.ready !== false }), {
+    return Response.json(beat(principal, { device: String(body?.device ?? ""), port: body?.port, facts: body?.facts, running: Array.isArray(body?.running) ? body.running : [], takeover: body?.takeover === true, stopped: Array.isArray(body?.stopped) ? body.stopped : [], ready: body?.ready !== false, ...(body?.why === "setting" && { why: "setting" as const }), listen: body?.listen === true }), {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (e) {

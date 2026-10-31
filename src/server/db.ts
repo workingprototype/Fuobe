@@ -619,7 +619,8 @@ export const RELAY_TABLES = `CREATE TABLE IF NOT EXISTS relay_runners (
     lease_until INTEGER NOT NULL,
     seen_at INTEGER NOT NULL,
     port INTEGER,
-    facts_json TEXT
+    facts_json TEXT,
+    comfy TEXT NOT NULL DEFAULT 'ok'
   );
   CREATE TABLE IF NOT EXISTS relay_tasks (
     id TEXT PRIMARY KEY,
@@ -643,6 +644,7 @@ export const RELAY_TABLES = `CREATE TABLE IF NOT EXISTS relay_runners (
     stop INTEGER NOT NULL DEFAULT 0,
     attempts INTEGER NOT NULL DEFAULT 0,
     down_at INTEGER,
+    down_why TEXT,
     note TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -666,6 +668,12 @@ export const RELAY_TABLES = `CREATE TABLE IF NOT EXISTS relay_runners (
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS relay_inputs_task ON relay_inputs(task_id);`;
+
+/** Columns of the relay tables that came later: [table, column, type]. */
+const RELAY_COLUMNS: [string, string, string][] = [
+  ["relay_runners", "comfy", "TEXT NOT NULL DEFAULT 'ok'"],
+  ["relay_tasks", "down_why", "TEXT"],
+];
 
 declare global {
   var __fuobeDb: Database.Database | undefined;
@@ -715,6 +723,11 @@ function open(): Database.Database {
   // "Use the ComfyUI on this computer" (src/server/computer): its tables, made here rather than as a numbered migration,
   // since other branches add migrations at the same time and a migration is known by its place in the list.
   db.exec(RELAY_TABLES);
+  // Columns added after the tables were first made (a data folder that ran an earlier build of this feature).
+  for (const [table, column, type] of RELAY_COLUMNS) {
+    const has = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
+    if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
   // An account's own runs (its list, its active runs) are found through this index, not by reading every run. Not a
   // numbered migration, so branches that add migrations never clash over it; a failure only leaves lists slower.
   try {

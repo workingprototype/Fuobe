@@ -2,6 +2,7 @@
 
 import { CheckCircle2, Cpu, Download, Layers } from "lucide-react";
 import { badgeState, badgeText } from "@/hooks/use-gpu";
+import { useStatus } from "@/lib/api";
 import type { Badge } from "@/lib/gpu/types";
 import { cn } from "@/lib/utils";
 
@@ -49,14 +50,19 @@ export function CardChip({ badge, gpu }: { badge: Badge; gpu?: string }) {
   );
 }
 
-/** The header pill (StudioHeader, PresetHeader): a button when it opens the guided fix. */
+/**
+ * The header pill (StudioHeader, PresetHeader): a button when it opens the guided fix. A tool that's ready on a GPU that
+ * isn't there right now (ComfyUI closed, without Fuobe's setting, a link that doesn't answer) says that instead.
+ */
 export function HeaderPill({ badge, gpu, onOpen, compact }: { badge: Badge; gpu?: string; onOpen?: () => void; compact?: boolean }) {
+  const own = useStatus().data?.viewer?.gpu;
   const s = badgeState(badge);
   const t = badgeText(badge, gpu);
   const tenths = badge[2];
+  const away = s === "ready" && !(badge[3] & 4) && own?.connected && !own.online ? (own.comfy === "down" ? "ComfyUI isn't running" : own.comfy === "no-setting" ? "ComfyUI needs a setting" : "Your GPU is offline") : null;
   const label =
-    s === "ready" ? (badge[3] & 4 ? "Runs on any computer" : "Ready on your GPU") : s === "gpu" ? "Needs a bigger GPU" : s === "unsupported" ? "Not on your GPU yet" : `Set up${tenths ? ` · ${tenths / 10} GB` : ""}`;
-  const Icon = s === "ready" ? CheckCircle2 : s === "gpu" ? Cpu : s === "unsupported" ? Layers : Download;
+    away ?? (s === "ready" ? (badge[3] & 4 ? "Runs on any computer" : "Ready on your GPU") : s === "gpu" ? "Needs a bigger GPU" : s === "unsupported" ? "Not on your GPU yet" : `Set up${tenths ? ` · ${tenths / 10} GB` : ""}`);
+  const Icon = away ? Cpu : s === "ready" ? CheckCircle2 : s === "gpu" ? Cpu : s === "unsupported" ? Layers : Download;
   const cls = cn(
     "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium",
     s === "ready" ? "bg-secondary text-foreground" : s === "almost" || s === "setup" ? "bg-highlight text-highlight-foreground" : "bg-muted text-muted-foreground",
@@ -64,7 +70,7 @@ export function HeaderPill({ badge, gpu, onOpen, compact }: { badge: Badge; gpu?
   );
   const inner = (
     <>
-      <Icon aria-hidden className={cn("size-3.5", s === "ready" && "text-success")} />
+      <Icon aria-hidden className={cn("size-3.5", s === "ready" && !away && "text-success")} />
       <span className={cn(compact && "max-sm:sr-only")}>{label}</span>
     </>
   );

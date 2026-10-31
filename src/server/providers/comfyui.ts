@@ -86,7 +86,6 @@ import {
   requestStop,
   resultOf,
   runnerFacts,
-  runnerOnline,
   stageInput,
   taskProgress,
   type FinishedPlan,
@@ -160,7 +159,20 @@ export const outsideOwnGpu = <T,>(fn: () => T): T => ownGpuStore.exit(fn);
 export function computerScope(): Principal | undefined {
   const own = ownGpu();
   if (own) return own.kind === "computer" ? own.principal : undefined;
+  if (serverScope.getStore()) return undefined;
   return getSetting("comfyWhere") === "computer" ? "owner" : undefined;
+}
+
+/** A run the owner sent to the studio's own ComfyUI before Settings moved ComfyUI to the owner's computer. */
+const serverScope = new AsyncLocalStorage<true>();
+
+/**
+ * Whose computer a run sent there belongs to, whatever ComfyUI's place is now: the account's (as its tenant), or the
+ * owner's.
+ */
+function relayPrincipal(): Principal {
+  const account = tenantAccount();
+  return account ? `acct:${account}` : "owner";
 }
 
 /** Said when something would call a ComfyUI that only the person's own tab may reach. */
@@ -1564,7 +1576,7 @@ export function promptRefusal(body: PromptRefusalBody, status: number, manifest:
     body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on ${where} (see scripts/comfy/README.md)` : undefined;
   // A LoRA it lacks: point at its model card (a civitai download URL answers 401 without the key) and the LoRA folder setting.
   const loraModels = loras.map((l) => ({ file: l.file, folder: "loras", url: loraByFile(l.file)?.page ?? (l.url && !needsToken(l.url) ? l.url : undefined) }));
-  let detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...loraModels] }) : (missingPack ?? body.error?.message);
+  let detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...loraModels] }) : (missingPack ?? (typeof body.error?.message === "string" ? body.error.message.slice(0, 1024) : undefined));
   // (Settings → LoRAs is the owner's page, for the server's own ComfyUI: an account's, or one on a computer, gets its LoRAs by hand.)
   if (detail && !ownGpu() && !computerScope() && loraModels.some((l) => detail!.includes(`"${l.file}"`))) detail = `${detail}\nSet the LoRA folder in Settings → LoRAs and Fuobe downloads LoRAs before a run`;
   void status;
@@ -1761,14 +1773,18 @@ async function pollComputer(principal: Principal, meta: Record<string, unknown>,
   const t = checkClocks(found);
   const p = taskProgress(t.id);
   const kind = extraOf(t).made ?? made ?? "image";
-  const waitMinutes = Math.round((tenantAccount() ? ACCOUNT_LIMITS.queueMs : 4 * 3_600_000) / 60_000);
+  const waitMs = tenantAccount() ? ACCOUNT_LIMITS.queueMs : 4 * 3_600_000;
   const sentAt = t.sent_at ?? undefined;
-  const down = t.down_at ? RELAY_WORDS.comfyDown : undefined;
+  const down = t.down_at ? (t.down_why === "setting" ? RELAY_WORDS.comfyNoSetting : RELAY_WORDS.comfyDown) : undefined;
   switch (t.state) {
-    case "waiting":
-      return { state: "queued", message: runnerOnline(principal) ? RELAY_WORDS.starting : RELAY_WORDS.noComputer, timeoutError: RELAY_WORDS.waitedTooLong(waitMinutes) };
+    case "waiting": {
+      // The computer's tab is open, but its ComfyUI is closed or runs without Fuobe's setting: say that, not "open Fuobe".
+      const f = runnerFacts(principal);
+      const message = f?.online ? RELAY_WORDS.starting : f?.comfy === "no-setting" ? RELAY_WORDS.comfyNoSetting : f?.comfy === "down" ? RELAY_WORDS.comfyDown : RELAY_WORDS.noComputer;
+      return { state: "queued", message, timeoutError: RELAY_WORDS.waitedTooLong(waitMs) };
+    }
     case "sending":
-      return { state: "queued", message: down ?? (t.note === "resent" ? RELAY_WORDS.resent : sendingWords(inputKinds(t))), timeoutError: RELAY_WORDS.waitedTooLong(waitMinutes), ...(sentAt && { sentAt }) };
+      return { state: "queued", message: down ?? (t.note === "resent" ? RELAY_WORDS.resent : sendingWords(inputKinds(t))), timeoutError: RELAY_WORDS.waitedTooLong(waitMs), ...(sentAt && { sentAt }) };
     case "queued":
       return { state: "queued", message: down ?? queueWords(p?.position), ...(sentAt && { sentAt }) };
     case "running": {
@@ -1798,7 +1814,7 @@ async function pollComputer(principal: Principal, meta: Record<string, unknown>,
       return { state: "succeeded", outputs: await withLayerBoxes(outputs) };
     }
     case "canceled":
-      return { state: "failed", error: RELAY_WORDS.stopped };
+      return { state: "failed", error: t.error === "switched" ? RELAY_WORDS.switched : RELAY_WORDS.stopped };
     default:
       return { state: "failed", ...relayFailure(t, manifest) };
   }
@@ -1881,15 +1897,20 @@ export const comfyProvider: ProviderAdapter = {
     return { externalId: body.prompt_id, meta: { ...meta, generationId, ...(worker === "isolated" && { worker }) }, payload: wf };
   },
 
-  async poll({ externalId, meta, model }) {
+  async poll({ externalId, meta, model, ...rest }) {
     if (!PROMPT_ID.test(externalId)) return { state: "failed", error: "ComfyUI answered with a job id Fuobe can't use." };
     const worker: ComfyWorker = meta.worker === "isolated" ? "isolated" : "main";
     let manifest: ManifestWorkflow | undefined;
     try {
       manifest = getWorkflow(String(meta.workflowId)).manifest;
     } catch {}
-    const computer = computerScope();
-    if (computer) return pollComputer(computer, meta, manifest, model?.kind);
+    // A run is followed where it was sent (Settings, or the account's GPU, may have moved since).
+    if (typeof meta.relay === "string") return pollComputer(relayPrincipal(), meta, manifest, model?.kind);
+    if (computerScope()) {
+      // Sent to a link before the account chose this computer: that link is gone.
+      if (ownGpu()) return { state: "failed", error: RELAY_WORDS.switched };
+      return serverScope.run(true, () => comfyProvider.poll({ externalId, meta, model, ...rest }));
+    }
     const finished = async (entry: HistoryEntry) => {
       if (entry.status?.status_str === "error") {
         forget(externalId);
@@ -1948,11 +1969,13 @@ export const comfyProvider: ProviderAdapter = {
     };
   },
 
-  async cancel({ externalId, meta }) {
+  async cancel(ctx) {
+    const { externalId, meta } = ctx;
     // On someone's computer: the task ends now, and its prompt comes off their ComfyUI at their tab's next beat.
-    const computer = computerScope();
-    if (computer) {
-      if (typeof meta?.relay === "string") requestStop(computer, meta.relay);
+    if (typeof meta?.relay === "string") return requestStop(relayPrincipal(), meta.relay);
+    if (computerScope()) {
+      // Sent before ComfyUI moved to a computer: the owner's goes off the studio's own ComfyUI (a link is gone).
+      if (!ownGpu()) await serverScope.run(true, () => comfyProvider.cancel!(ctx));
       return;
     }
     const worker: ComfyWorker = meta?.worker === "isolated" ? "isolated" : "main";

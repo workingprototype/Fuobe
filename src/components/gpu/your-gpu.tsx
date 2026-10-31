@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cpu, Loader2, Unplug } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
-import { ComfyFinder, gib, isLocalAddress } from "@/components/gpu/comfy-finder";
+import { gib, isLocalAddress, TunnelSteps } from "@/components/gpu/comfy-finder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,7 +34,7 @@ async function call<T>(method: string, body?: unknown, test = false): Promise<T>
 /**
  * "Your GPU" (public sign-up): an account's own ComfyUI, where its runs go (never this studio's keys
  * or GPU). The server calls it, so it needs a public address: a Cloudflare Tunnel or ngrok in front
- * of a local ComfyUI. The finder looks for one on this computer and shows the tunnel command.
+ * of a local ComfyUI. Nothing here looks for a ComfyUI on this device: it shows the tunnel command.
  */
 export function YourGpu() {
   const qc = useQueryClient();
@@ -105,7 +105,7 @@ export function YourGpu() {
           </Button>
         </div>
       ) : (
-        <ComfyFinder />
+        <TunnelSteps />
       )}
       <div className="space-y-3">
         <div className="space-y-1.5">

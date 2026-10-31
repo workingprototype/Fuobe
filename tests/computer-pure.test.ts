@@ -4,9 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { corsFlag, fixFor, guessInstall, installFromStats, platformOf, startFile, START_FILE_NAME } from "@/lib/comfy-install";
+import { GUARD_FILE_NAME, GUARD_SOURCE, guardBase64 } from "@/lib/comfy-guard";
+import { explainComfyError } from "@/lib/comfy";
+import { fixFromPromptError } from "@/lib/gpu/fix-codes";
 import { parseComfyBinary, parseComfyText } from "@/lib/comfy-ws";
-import { browserSupport, COMFY_PORTS, graphProblem, localBase, mayDownload, pageCanReach, pickLook, portsToLook, preflightPath, readPath, statsFacts, typedPort, viewPath, writePath } from "@/lib/local-comfy";
-import { jobWords, makingWords, queueWords, reportAllowed, savingWords, sendingWords, tabFailureWords, type RelayState } from "@/lib/relay";
+import { tileJob, type LocalJob } from "@/lib/computer-runner";
+import { browserSupport, COMFY_PORTS, graphProblem, localBase, mayDownload, pageCanReach, pickLook, portsToLook, preflightPath, readPath, sameFinder, settled, statsFacts, typedPort, viewPath, writePath, type Finder } from "@/lib/local-comfy";
+import { DONE_SHOWN_MS, duration, jobFraction, jobWords, madeNoun, makingWords, queueWords, RELAY_WORDS, reportAllowed, savingWords, sendingWords, tabFailureWords, type RelayState } from "@/lib/relay";
 
 const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const OTHER = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -92,12 +96,47 @@ describe("the local ComfyUI's addresses", () => {
     expect(mayDownload({ filename: "fuobe_00001_.png", subfolder: "", type: "output" }, [entry])).toBe(false);
   });
 
-  it("picks the ComfyUI it can read, then the remembered port, then the lowest", () => {
+  it("picks the ComfyUI it can read, then the remembered port, then the usual order (8188 before 8000)", () => {
     const stats = { system: {} };
     expect(pickLook([{ port: 8000, state: "unreadable" }, { port: 8188, state: "found", stats }])).toMatchObject({ port: 8188, state: "found" });
     expect(pickLook([{ port: 8188, state: "unreadable" }, { port: 8000, state: "unreadable" }], 8000)).toMatchObject({ port: 8000 });
     expect(pickLook([{ port: 8189, state: "unreadable" }, { port: 8188, state: "unreadable" }])).toMatchObject({ port: 8188 });
+    // Another app on 8000 (a dev server, SillyTavern…) doesn't win over ComfyUI's own port.
+    expect(pickLook([{ port: 8000, state: "unreadable" }, { port: 8188, state: "unreadable" }])).toMatchObject({ port: 8188 });
+    expect(pickLook([{ port: 7821, state: "unreadable" }, { port: 8001, state: "unreadable" }, { port: 8189, state: "unreadable" }])).toMatchObject({ port: 8189 });
+    // A port the person typed, outside the usual ones, comes after them.
+    expect(pickLook([{ port: 3391, state: "unreadable" }, { port: 8190, state: "unreadable" }])).toMatchObject({ port: 8190 });
     expect(pickLook([{ port: 8188, state: "none" }])).toEqual({ state: "none" });
+  });
+
+  it("the card's screens: several answering ports to pick from, one ComfyUI followed while it restarts, any readable one connects", () => {
+    const stats = { system: {} };
+    const start: Finder = { s: "start" };
+    // Two answer without the setting: ComfyUI's own port first, the other offered.
+    const two = settled(start, [{ port: 8000, state: "unreadable" }, { port: 8188, state: "unreadable" }, { port: 8189, state: "none" }], undefined, undefined, 1);
+    expect(two).toEqual({ s: "needs-setting", port: 8188, back: false, others: [8000] });
+    // ComfyUI on 8188 restarts: waiting for it, though another app still answers on 8000.
+    const waiting = settled(two, [{ port: 8000, state: "unreadable" }, { port: 8188, state: "none" }], undefined, undefined, 5);
+    expect(waiting).toEqual({ s: "waiting", port: 8188, since: 5 });
+    // Each quiet look while it waits keeps the same screen (the same "since", so the 2-minute help comes).
+    const again = settled(waiting, [{ port: 8000, state: "unreadable" }, { port: 8188, state: "none" }], undefined, undefined, 9);
+    expect(again).toEqual(waiting);
+    expect(sameFinder(waiting, again)).toBe(true);
+    // Back without the setting yet.
+    expect(settled(waiting, [{ port: 8188, state: "unreadable" }], undefined, undefined, 11)).toEqual({ s: "needs-setting", port: 8188, back: true });
+    // Back with it on another port (ComfyUI moved): connects.
+    expect(settled(waiting, [{ port: 8188, state: "none" }, { port: 8189, state: "found", stats }], undefined, undefined, 12)).toMatchObject({ s: "found", port: 8189 });
+    // Nothing anywhere; a typed port that missed.
+    expect(settled(start, [{ port: 8188, state: "none" }], undefined, undefined, 1)).toEqual({ s: "none" });
+    expect(settled({ s: "none" }, [{ port: 3391, state: "none" }], undefined, 3391, 1)).toEqual({ s: "none", missed: 3391 });
+    expect(sameFinder({ s: "none" }, { s: "none", missed: 3391 })).toBe(false);
+  });
+
+  it("can tell Fuobe's guard is there", () => {
+    expect(readPath("/fuobe/guard")).toBe("/fuobe/guard");
+    expect(statsFacts({ system: { argv: ["main.py", "--enable-cors-header", "https://fuobe.com"] } }, "https://fuobe.com", true)).toMatchObject({ cors: "exact", guard: true });
+    expect(statsFacts({ system: {} }, "https://fuobe.com", false).guard).toBe(false);
+    expect(statsFacts({ system: {} }, "https://fuobe.com").guard).toBeUndefined();
   });
 
   it("tells the server about the machine, never its command line", () => {
@@ -145,6 +184,24 @@ describe("ComfyUI's live socket", () => {
   });
 });
 
+describe("a ComfyUI refusal", () => {
+  it("names a missing node from its message, quoted or not", () => {
+    const fix = (message: string) => fixFromPromptError({ error: { type: "missing_node_type", message } }, "wf", [], () => undefined);
+    expect(fix("Node 'Image Resize' not found. The custom node may not be installed.")).toMatchObject({ code: "comfy_missing_node", items: [{ class: "Image Resize" }] });
+    expect(fix("Cannot execute because node FancyNode does not exist.")).toMatchObject({ items: [{ class: "FancyNode" }] });
+  });
+
+  it("can't stall the server, however long the message (a tab reports what its ComfyUI said)", () => {
+    const at = performance.now();
+    expect(fixFromPromptError({ error: { type: "missing_node_type", message: "node ".repeat(52_000) } }, "wf", [], () => undefined)).toBeNull();
+    const nodeErrors = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [String(i), { class_type: "X".repeat(5000), errors: Array.from({ length: 50 }, () => ({ message: "node ".repeat(2000), details: "d".repeat(5000) })) }]));
+    const words = explainComfyError(nodeErrors);
+    expect(performance.now() - at).toBeLessThan(500);
+    expect(words.split("\n").length).toBeLessThanOrEqual(20);
+    expect(words.length).toBeLessThan(20 * 1000);
+  });
+});
+
 describe("the run's words", () => {
   it("says what is happening, without jargon", () => {
     expect(sendingWords(["image/png"])).toBe("Sending your photo to ComfyUI");
@@ -168,9 +225,48 @@ describe("the run's words", () => {
     expect(jobWords({ phase: "running", value: 3, max: 8 }, "image", "Queued")).toBe("Making your picture · step 3 of 8");
     expect(jobWords({ phase: "running" }, "video", undefined)).toBe("Making your clip");
     expect(jobWords({ phase: "saving", saved: 0.5 }, "image", "Making your picture")).toBe("Saving to Fuobe · 50%");
-    // Done or failed here: the server has the last word.
-    expect(jobWords({ phase: "done" }, "image", "Saving to Fuobe")).toBe("Saving to Fuobe");
+    expect(jobWords({ phase: "saving", saved: 0.5, waiting: true }, "image", undefined)).toBe("Saving to Fuobe · waiting for the studio");
+    // Done here: still saving until the run itself moves on (never back to an older step the server said).
+    expect(jobWords({ phase: "done" }, "image", "Making your picture · step 6 of 8")).toBe("Saving to Fuobe · 100%");
+    // Failed here: the server has the last word.
     expect(jobWords({ phase: "failed" }, "image", undefined)).toBeUndefined();
+  });
+
+  it("the tab never says all is well while ComfyUI here is closed or runs without Fuobe's setting", () => {
+    expect(jobWords({ phase: "sending" }, "image", "Queued", "down")).toBe(RELAY_WORDS.comfyDown);
+    expect(jobWords({ phase: "sending" }, "image", "Queued", "no-setting")).toBe(RELAY_WORDS.comfyNoSetting);
+    expect(jobWords({ phase: "running", value: 3, max: 8 }, "image", undefined, "down")).toBe(RELAY_WORDS.comfyDown);
+    // The server's own words for a problem come through while the job is sending.
+    for (const w of [RELAY_WORDS.comfyDown, RELAY_WORDS.comfyNoSetting, RELAY_WORDS.resent, RELAY_WORDS.noComputer]) expect(jobWords({ phase: "sending" }, "image", w)).toBe(w);
+    // Saving goes on from the studio's side whatever ComfyUI does now.
+    expect(jobWords({ phase: "saving", saved: 0.2 }, "image", undefined, "down")).toBe("Saving to Fuobe · 20%");
+  });
+
+  it("says long waits in hours", () => {
+    expect(RELAY_WORDS.waitedTooLong(30 * 60_000)).toContain("for 30 minutes");
+    expect(RELAY_WORDS.waitedTooLong(4 * 3_600_000)).toContain("for 4 hours");
+    expect(duration(3_600_000)).toBe("1 hour");
+    expect(duration(90 * 60_000)).toBe("90 minutes");
+  });
+
+  it("a tile's % and time left come from the job's own steps, and its words name what it makes", () => {
+    expect(jobFraction({ phase: "running", value: 9, max: 12 })).toBe(0.75);
+    expect(jobFraction({ phase: "running", value: 12, max: 12 })).toBe(0.99);
+    expect(jobFraction({ phase: "running" })).toBeNull();
+    expect(jobFraction({ phase: "saving", value: 12, max: 12 })).toBeNull();
+    expect([madeNoun("image"), madeNoun("video"), madeNoun("audio"), madeNoun(undefined)]).toEqual(["picture", "clip", "sound", "picture"]);
+  });
+
+  it("a saved job stays on its tile, saying it is saving, until its run moves on (or a short while)", () => {
+    const job = (taskId: string, phase: LocalJob["phase"], endedAt?: number): LocalJob => ({ taskId, generationId: "g", phase, ...(endedAt !== undefined && { endedAt }) });
+    const saved = job("t1", "done", 1000);
+    expect(tileJob([saved], "g", 1000 + DONE_SHOWN_MS - 1)).toBe(saved);
+    expect(jobWords(saved, "image", "Making your picture · step 6 of 8")).toBe("Saving to Fuobe · 100%");
+    expect(tileJob([saved], "g", 1000 + DONE_SHOWN_MS + 1)).toBeUndefined();
+    // The run's next step (or a run sent again) shows its own job, never the old one.
+    const next = job("t2", "sending");
+    expect(tileJob([saved, next], "g", 1001)).toBe(next);
+    expect(tileJob([saved, next], "other", 1001)).toBeUndefined();
   });
 
   it("takes each report only in its state", () => {
@@ -204,11 +300,21 @@ describe("ComfyUI's one setting", () => {
     expect(platformOf({ userAgent: "Mozilla/5.0 (X11; Linux x86_64)" })).toBe("linux");
   });
 
-  it("gives each install its one fix", () => {
+  it("gives each install its one fix, with Fuobe's guard", () => {
     expect(fixFor("desktop", "https://fuobe.com")).toMatchObject({ copy: "https://fuobe.com", path: ["Settings (the gear, bottom left)", "Server-Config", "Enable CORS header"] });
     expect(fixFor("portable", "https://fuobe.com")).toMatchObject({ startFile: true, copy: "--enable-cors-header https://fuobe.com" });
-    expect(fixFor("terminal", "https://fuobe.com").copy).toBe("python main.py --enable-cors-header https://fuobe.com");
     expect(fixFor("stability-matrix", "https://fuobe.com").path).toContain("Extra Launch Arguments");
+    // The start file adds the guard itself; every other install gets it to put in custom_nodes.
+    expect(fixFor("portable", "https://fuobe.com").guard).toBeUndefined();
+    for (const i of ["desktop", "stability-matrix", "terminal"] as const) expect(fixFor(i, "https://fuobe.com").guard).toMatch(/custom_nodes/);
+  });
+
+  it("a terminal's fix is the setting to add to its own command, and keeps the port ComfyUI was found on", () => {
+    const usual = fixFor("terminal", "https://fuobe.com", 8188);
+    expect(usual.copy).toBe("--enable-cors-header https://fuobe.com");
+    expect(usual.lead).toMatch(/Add this to the command you start ComfyUI with/);
+    expect(usual.example).toBe("python main.py --enable-cors-header https://fuobe.com");
+    expect(fixFor("terminal", "https://fuobe.com", 8189).example).toBe("python main.py --enable-cors-header https://fuobe.com --port 8189");
   });
 
   it("makes a Windows start file for the port and this site only", () => {
@@ -219,9 +325,14 @@ describe("ComfyUI's one setting", () => {
     expect(bat).toContain("$Port = 8188");
     expect(bat).toContain("$Flag = '--enable-cors-header https://fuobe.com'");
     expect(bat).toContain(START_FILE_NAME);
-    // It asks before it stops anything, and keeps a copy of a start file it changes.
+    // It asks before it stops anything, and never changes the person's own start files.
     expect(bat.indexOf("Read-Host")).toBeLessThan(bat.indexOf("Stop-Process"));
-    expect(bat).toContain('.bak"');
+    expect(bat).not.toMatch(/\.bak|WriteAllLines|Also add this setting/);
+    // It puts Fuobe's guard into ComfyUI's custom_nodes before ComfyUI starts again, byte for byte.
+    expect(bat).toContain(`FromBase64String('${guardBase64()}')`);
+    expect(bat).toContain(GUARD_FILE_NAME);
+    expect(bat.indexOf(GUARD_FILE_NAME)).toBeLessThan(bat.indexOf("Start-Process"));
+    expect(Buffer.from(guardBase64(), "base64").toString("latin1")).toBe(GUARD_SOURCE);
     // It downloads nothing and sends nothing.
     expect(bat).not.toMatch(/Invoke-WebRequest|Invoke-RestMethod|DownloadString|curl|wget|bitsadmin|Net\.WebClient/i);
     expect(() => startFile(8188, "https://fuobe.com'; Remove-Item C:\\ -Recurse; '")).toThrow();

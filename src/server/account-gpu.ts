@@ -95,11 +95,12 @@ const STATUS_MAX_BYTES = 64 * 1024;
  * Is the account's ComfyUI answering, and what is it? Asked at most every 30 s per account, and one check at a time:
  * status requests that arrive while one is on its way share its answer.
  */
-export async function gpuState(id: string, gpu: AccountGpu): Promise<{ online: boolean } & GpuInfo> {
-  // On the person's own computer: what its Fuobe tab last said (online while it beats).
+export async function gpuState(id: string, gpu: AccountGpu): Promise<{ online: boolean; comfy?: "down" | "no-setting" } & GpuInfo> {
+  // On the person's own computer: what its Fuobe tab last said (online while it beats and its ComfyUI answers; `comfy`:
+  // the tab is open, but ComfyUI is closed or runs without Fuobe's setting).
   if (gpu.mode === "computer") {
     const f = runnerFacts(`acct:${id}`);
-    return { online: !!f?.online, ...(f?.device && { device: f.device }), ...(f?.vramBytes && { vramBytes: f.vramBytes }), ...(f?.version && { version: f.version }) };
+    return { online: !!f?.online, ...(f?.comfy && { comfy: f.comfy }), ...(f?.device && { device: f.device }), ...(f?.vramBytes && { vramBytes: f.vramBytes }), ...(f?.version && { version: f.version }) };
   }
   const cache = (globalThis.__fuobeAccountGpus ??= new Map());
   const hit = cache.get(id);
@@ -141,7 +142,7 @@ export function lastGpuDevice(id: string): string | undefined {
 export interface VisitorView {
   kind: "guest" | "account";
   /** `mode` "computer": the ComfyUI on the person's own computer, which their Fuobe tab runs. */
-  gpu: { connected: boolean; mode?: "link" | "computer"; online?: boolean; device?: string; vramBytes?: number };
+  gpu: { connected: boolean; mode?: "link" | "computer"; online?: boolean; comfy?: "down" | "no-setting"; device?: string; vramBytes?: number };
 }
 
 /**
@@ -155,7 +156,7 @@ export async function visitorStatus(account: Account | null) {
   const viewer: VisitorView = {
     kind: account ? "account" : "guest",
     gpu: gpu
-      ? { connected: true, mode: gpu.mode === "computer" ? "computer" : "link", online: !!live?.online, ...(live?.device && { device: live.device }), ...(live?.vramBytes && { vramBytes: live.vramBytes }) }
+      ? { connected: true, mode: gpu.mode === "computer" ? "computer" : "link", online: !!live?.online, ...(live?.comfy && { comfy: live.comfy }), ...(live?.device && { device: live.device }), ...(live?.vramBytes && { vramBytes: live.vramBytes }) }
       : { connected: false },
   };
   return {

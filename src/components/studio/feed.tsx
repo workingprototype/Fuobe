@@ -3,7 +3,7 @@
 import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, Wrench, X } from "lucide-react";
 import { openGpuSetup } from "@/hooks/use-gpu";
 import { useLocalJob } from "@/components/gpu/computer-runner";
-import { jobWords } from "@/lib/relay";
+import { jobFraction, jobWords } from "@/lib/relay";
 import Link from "next/link";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -44,17 +44,25 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   const { cancel } = useGenerationActions();
   // The clock runs between the job's reports (a fal queue or Higgsfield may report rarely).
   const now = useNow(1000);
-  const pct = g.progress != null ? Math.round(g.progress * 100) : null;
   // Running on the ComfyUI on this computer: its live preview (sharper with each step), where it runs, and its step now.
-  const local = useLocalJob(g.id);
-  const label = (local && jobWords(local.job, g.kind, g.message ?? undefined)) ?? (g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…"));
+  // Its % and time left come from its own steps then, so they agree with "step 9 of 12".
+  const local = useLocalJob(g.id, now);
+  const label = (local && jobWords(local.job, g.kind, g.message ?? undefined, local.comfy)) ?? (g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…"));
+  const steps = local ? jobFraction(local.job) : null;
+  const saving = local && (local.job.phase === "saving" || local.job.phase === "done");
+  const fraction = local ? (saving ? null : steps) : g.progress;
+  const pct = fraction != null ? Math.round(fraction * 100) : null;
   // When progress moved (not every poll: each one rewrites updatedAt) gives the pace, so the time left.
   // Keyed by id: a chain's tile moves on to its next step's generation.
-  const report = g.status === "running" ? g.progress : null;
-  const [track, setTrack] = useState(() => ({ id: g.id, pace: notePace(null, g.updatedAt, report) }));
-  const pace = track.id === g.id ? notePace(track.pace, g.updatedAt, report) : notePace(null, g.updatedAt, report);
+  const report = local ? steps : g.status === "running" ? g.progress : null;
+  const at = local ? now : g.updatedAt;
+  const [track, setTrack] = useState(() => ({ id: g.id, pace: notePace(null, at, report) }));
+  const pace = track.id === g.id ? notePace(track.pace, at, report) : notePace(null, at, report);
   if (track.id !== g.id || pace !== track.pace) setTrack({ id: g.id, pace });
-  const left = pace.first && pace.last ? timeLeft(pace.first, pace.last, now) : null;
+  const left = !saving && pace.first && pace.last ? timeLeft(pace.first, pace.last, now) : null;
+  // The bar: the steps, or how much of the result has reached the studio.
+  const bar = saving ? Math.round((local.job.phase === "done" ? 1 : (local.job.saved ?? 0)) * 100) : pct;
+  const where = local ? (local.here ? "Keep this tab open" : "Running in another Fuobe tab") : null;
   return (
     // max-w-full: in a grid row stretched by a taller neighbour (a card with a footer), h-full + aspect-ratio would
     // otherwise make the tile wider than its column and spill over the next card.
@@ -73,8 +81,14 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
       )}
       <div className={cn("absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3", local?.preview && "bg-gradient-to-t from-background/85 to-transparent pt-8")}>
         <div className="min-w-0">
-          <p className="shimmer-text animate-shimmer-text truncate text-[13px] font-medium">{label}</p>
-          {local && <p className="truncate text-[11px] text-muted-foreground">{local.here ? "On your computer · keep this tab open" : "Running in another Fuobe tab"}</p>}
+          <p title={label} className="shimmer-text animate-shimmer-text line-clamp-2 text-[13px] font-medium">
+            {label}
+          </p>
+          {where && (
+            <p title={where} className="line-clamp-2 text-[11px] text-muted-foreground">
+              {where}
+            </p>
+          )}
           <p className="flex flex-wrap gap-x-1.5 font-mono text-[11px] text-muted-foreground tabular-nums">
             {pct != null && <span>{pct}%</span>}
             <span className={cn(pct != null && "before:mr-1.5 before:content-['·']")}>{elapsed(g.createdAt, Math.max(now, g.createdAt))}</span>
@@ -97,9 +111,9 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
           <TooltipContent>Cancel</TooltipContent>
         </Tooltip>
       </div>
-      {pct != null && (
+      {bar != null && (
         <div className="absolute inset-x-0 top-0 h-0.5 bg-transparent">
-          <div className="h-full bg-primary transition-[width] duration-500" style={{ width: `${pct}%` }} />
+          <div className="h-full bg-primary transition-[width] duration-500" style={{ width: `${bar}%` }} />
         </div>
       )}
     </div>

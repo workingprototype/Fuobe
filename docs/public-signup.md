@@ -121,22 +121,48 @@ are deleted with it.
 
 ## Your GPU
 
-An account connects its own ComfyUI in **Settings → Your GPU**, or from the "Connect your GPU" card.
-The studio's server calls that ComfyUI, so it must be reachable from the internet. Put a tunnel in
-front of a local ComfyUI and paste the https address it prints:
+An account connects its own ComfyUI in **Settings → Your GPU**, or from the "Connect your GPU" card,
+in one of two ways.
+
+### The ComfyUI on this computer
+
+The first choice: the account's open Fuobe tab runs its jobs on the ComfyUI on the same computer.
+The server still plans every run (templates, inputs, checks, limits, history). Each ComfyUI call
+becomes a job that the tab takes (`/api/gpu/computer/*`), sends to `http://127.0.0.1:<port>`,
+follows, and whose results it uploads back; results are checked like uploads, and a job takes only
+its own results, once. The server never calls the person's computer. Runs wait while no tab is open
+("Open Fuobe on the computer with your ComfyUI to run this") and stop cleanly after a while.
+
+- **Finding ComfyUI.** The card looks on ports 8188, 8000 (ComfyUI Desktop), 8189, 8190, 8288, 8001
+  and 7821, or one the person types. While the browser would still ask to let the site reach apps
+  on this device, it looks only after a click, and explains that question first. A tab never
+  reaches the computer's apps by itself before that.
+- **Fuobe's setting.** A page can read a ComfyUI on the computer only when ComfyUI runs with
+  `--enable-cors-header <the site's address>`. The card gives the fix for the install it finds: a
+  start file for Windows portable or Easy-Install (it restarts ComfyUI with the setting and leaves a
+  start file with it for next time; it never changes the person's own start files), the place in
+  ComfyUI Desktop's Server-Config, Stability Matrix's launch options, or the flag for a terminal.
+  It notices by itself when ComfyUI is back with it.
+- **Fuobe's guard.** With that setting, ComfyUI stops turning away other websites' requests.
+  `fuobe_guard.py` (src/lib/comfy-guard.ts), a custom node that the start file puts in
+  `custom_nodes` and that the other installs download from the card, puts the check back: a request
+  from a web page gets in only from ComfyUI's own page or the site the setting names, the live
+  socket included. It answers `GET /fuobe/guard`, and the card warns while it's missing.
+- **Phones and Safari** can't reach a ComfyUI on the device: they get the link instead, with why.
+
+The owner can do the same on a deployed studio: **Settings → Where ComfyUI runs → On the computer
+you're using**. A studio with ComfyUI on its own machine keeps calling it from the server.
+
+### A link
+
+For runs that go on with the tab closed. The studio's server calls that ComfyUI, so it must be
+reachable from the internet. Put a tunnel in front of a local ComfyUI and paste the https address
+it prints:
 
 ```bash
 cloudflared tunnel --url http://localhost:8188   # or: ngrok http 8188
 ```
 
-- **Finding ComfyUI.** The page looks for a ComfyUI on the visitor's own computer, from the browser
-  (the server can't see that computer). It tries `http://127.0.0.1` on ports 8188, 8000 (ComfyUI
-  Desktop), 8189, 8190 and 8288. When ComfyUI answers, the page names the GPU and its VRAM and shows
-  the tunnel command. When a port answers but the browser can't read it, ComfyUI was started
-  without CORS: the page shows the flag to add, `--enable-cors-header https://fuobe.com`. Chrome
-  may ask to let the site reach devices on the local network. When nothing answers, the visitor
-  can enter a port or an address. A local address is used only by the browser and is never sent to
-  the server.
 - **Saving.** `PUT /api/account/gpu` with `{ "url", "token"? }` checks the address and asks that
   ComfyUI for `/system_stats` (`?test=1` checks without saving). `DELETE` disconnects. The address
   and the optional token (sent as `Authorization: Bearer`) are stored with the account in

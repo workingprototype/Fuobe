@@ -25,6 +25,8 @@ function computerView(id: string) {
   return {
     mode: "computer" as const,
     online: !!f?.online,
+    ...(f?.comfy && { comfy: f.comfy }),
+    ...(f?.guard !== undefined && { guard: f.guard }),
     ...(f?.device && { device: f.device }),
     ...(f?.vramBytes && { vramBytes: f.vramBytes }),
     ...(f?.version && { version: f.version }),
@@ -73,8 +75,8 @@ export async function PUT(request: Request) {
     if (new URL(request.url).searchParams.get("test") !== "1") {
       setAccountGpu(a.id, { url, token });
       clearAccountLoras(a.id);
-      // Runs waiting for a computer stop: they go to the link from now on.
-      if (before?.mode === "computer") forgetComputer(`acct:${a.id}`);
+      // Runs on the computer stop (saying why): they go to the link from now on.
+      if (before?.mode === "computer") forgetComputer(`acct:${a.id}`, "switched");
     }
     return Response.json({ gpu: { mode: "link", url, hasToken: !!token }, info });
   } catch (e) {

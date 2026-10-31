@@ -534,6 +534,7 @@ export function Composer({ docked }: { docked: boolean }) {
     setGpuRetry(
       () => submitRef.current(),
       () => submitRef.current(true),
+      model?.kind,
     );
     openGpuSetup({ ref: gpuRef, name: preset?.open ? preset.name : model?.name });
   };
@@ -565,6 +566,7 @@ export function Composer({ docked }: { docked: boolean }) {
     setGpuRetry(
       () => submitRef.current(),
       () => submitRef.current(true),
+      model?.kind,
     );
     create.mutate(skipGpu ? ({ ...sent.request, gpuCheck: "skip" } as typeof sent.request) : sent.request, {
       // Stopped by the GPU pre-flight, or refused with its own card: the guided fix or the card is open already, so no error toast on top.

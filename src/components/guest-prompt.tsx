@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { ConnectChoice } from "@/components/gpu/connect-choice";
+import type { FindReason } from "@/components/gpu/computer-runner";
 import { takeGpuRetry } from "@/hooks/use-gpu";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,9 +24,9 @@ export function GuestPrompt() {
   // The last card stays while the dialog animates out.
   const [card, setCard] = useState<RefusalCard | null>(null);
   const [open, setOpen] = useState(false);
-  // ComfyUI came back without Fuobe's setting (the runner's note): find it again and show the fix.
-  const [refind, setRefind] = useState(false);
-  const [retry, setRetry] = useState<{ retry: () => void } | null>(null);
+  // Opened by the runner's note: ComfyUI needs Fuobe's setting again, find ComfyUI, or let this browser reach it.
+  const [reason, setReason] = useState<FindReason | undefined>(undefined);
+  const [retry, setRetry] = useState<{ retry: () => void; kind?: string } | null>(null);
   const close = useCallback(() => {
     setOpen(false);
     setRetry(null);
@@ -45,7 +46,7 @@ export function GuestPrompt() {
       const r = takeGpuRetry();
       if (!show("gpu")) return;
       setRetry(r);
-      setRefind((e as CustomEvent<{ refind?: boolean } | undefined>).detail?.refind === true);
+      setReason((e as CustomEvent<{ reason?: FindReason } | undefined>).detail?.reason);
     };
     window.addEventListener(GUEST_PROMPT_EVENT, guest);
     window.addEventListener(CONNECT_GPU_EVENT, gpu);
@@ -67,12 +68,13 @@ export function GuestPrompt() {
                 <div className="mb-1 grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
                   <Cpu className="size-5" />
                 </div>
-                <DialogTitle>{refind ? "Your ComfyUI needs Fuobe's setting again" : "Connect your GPU to run this"}</DialogTitle>
+                <DialogTitle>{TITLES[reason ?? "run"]}</DialogTitle>
                 <DialogDescription>Fuobe runs this on the ComfyUI on your computer. It&apos;s free and private.</DialogDescription>
               </DialogHeader>
               <ConnectChoice
                 fromRun={!!retry}
-                refind={refind}
+                kind={retry?.kind}
+                reason={reason}
                 onStart={() => {
                   const r = retry;
                   close();
@@ -109,6 +111,13 @@ export function GuestPrompt() {
     </>
   );
 }
+
+const TITLES: Record<FindReason | "run", string> = {
+  run: "Connect your GPU to run this",
+  setting: "Your ComfyUI needs Fuobe's setting again",
+  find: "Find your ComfyUI",
+  browser: "Run your GPU jobs from this browser",
+};
 
 /** Closes the card when the page changes. Reads the path (runtime data), so it sits under Suspense: routes still prerender. */
 function CloseOnNavigation({ close }: { close: () => void }) {

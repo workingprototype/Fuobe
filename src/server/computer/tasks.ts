@@ -84,6 +84,8 @@ export interface TaskRow {
   stop: number;
   attempts: number;
   down_at: number | null;
+  /** Why the computer's ComfyUI can't take it: "setting" (it answers, without Fuobe's setting), else it doesn't answer. */
+  down_why: string | null;
   note: string | null;
   created_at: number;
   updated_at: number;
@@ -224,28 +226,34 @@ interface RunnerRow {
   seen_at: number;
   port: number | null;
   facts_json: string | null;
+  /** Its ComfyUI at the last beat: answering ("ok"), not ("down"), or answering without Fuobe's setting. */
+  comfy: "ok" | "down" | "no-setting";
 }
 
 const runnerOf = (principal: Principal) => rdb().prepare("SELECT * FROM relay_runners WHERE principal = ?").get(principal) as RunnerRow | undefined;
 
-/** Is a computer of this principal's online (it beat in the last 30 s)? */
+/** Is a computer of this principal's online: it beat in the last 30 s, and its ComfyUI answered? */
 export function runnerOnline(principal: Principal, now = Date.now()): boolean {
   const r = runnerOf(principal);
-  return !!r && now - r.seen_at < RELAY_TIMES.onlineMs;
+  return !!r && r.comfy === "ok" && now - r.seen_at < RELAY_TIMES.onlineMs;
 }
 
-/** What the computer said about its ComfyUI (the last report), and its port. */
-export function runnerFacts(principal: Principal): (ComputerFacts & { port?: number; seenAt: number; online: boolean }) | null {
+/**
+ * What the computer said about its ComfyUI (the last report), and its port. Online: it beat in the last 30 s and its
+ * ComfyUI answered then (a tab whose ComfyUI is closed, or runs without Fuobe's setting, keeps beating: not online).
+ */
+export function runnerFacts(principal: Principal): (ComputerFacts & { port?: number; seenAt: number; online: boolean; comfy?: "down" | "no-setting" }) | null {
   const r = runnerOf(principal);
   if (!r) return null;
-  return { ...json<ComputerFacts>(r.facts_json, {}), ...(r.port && { port: r.port }), seenAt: r.seen_at, online: Date.now() - r.seen_at < RELAY_TIMES.onlineMs };
+  const here = Date.now() - r.seen_at < RELAY_TIMES.onlineMs;
+  return { ...json<ComputerFacts>(r.facts_json, {}), ...(r.port && { port: r.port }), seenAt: r.seen_at, online: here && r.comfy === "ok", ...(here && r.comfy !== "ok" && { comfy: r.comfy }) };
 }
 
-/** Forget a principal's computer (it disconnected, or the account went). */
-export function forgetComputer(principal: Principal): void {
+/** Forget a principal's computer (it disconnected, its runs moved elsewhere: `switched`, or the account went). */
+export function forgetComputer(principal: Principal, why: "Stopped" | "switched" = "Stopped"): void {
   rdb().prepare("DELETE FROM relay_runners WHERE principal = ?").run(principal);
   for (const t of rdb().prepare(`SELECT id FROM relay_tasks WHERE principal = ? AND state IN (${ACTIVE_STATES.map(() => "?").join(",")})`).all(principal, ...ACTIVE_STATES) as { id: string }[]) {
-    endTask(t.id, "canceled", { error: "Stopped" });
+    endTask(t.id, "canceled", { error: why });
   }
 }
 
@@ -266,6 +274,7 @@ export function cleanFacts(f: unknown, keep?: ComputerFacts): ComputerFacts {
     ...(str(o.os, 40) && { os: str(o.os, 40) }),
     ...(typeof o.portable === "boolean" && { portable: o.portable }),
     ...((o.cors === "exact" || o.cors === "any" || o.cors === "other") && { cors: o.cors }),
+    ...(typeof o.guard === "boolean" && { guard: o.guard }),
     ...(loras && { loras }),
   };
 }
@@ -281,6 +290,10 @@ export interface BeatInput {
   stopped?: string[];
   /** False: this computer's ComfyUI doesn't answer (a phone, a laptop without one, or ComfyUI restarting). */
   ready?: boolean;
+  /** Not ready because ComfyUI answers without Fuobe's setting. */
+  why?: "setting";
+  /** A browser that may not reach this computer's apps yet (it hasn't been allowed): it hears how many wait, never runs them. */
+  listen?: boolean;
 }
 
 /**
@@ -294,14 +307,14 @@ export function beat(principal: Principal, b: BeatInput, now = Date.now()): Beat
   sweepPrincipal(principal);
   const cur = runnerOf(principal);
   const elsewhere = !!cur && cur.device !== b.device && cur.lease_until >= now;
-  const free = b.ready === false ? cur?.device === b.device : !elsewhere || b.takeover === true;
+  const free = b.listen ? false : b.ready === false ? cur?.device === b.device : !elsewhere || b.takeover === true;
   const port = Number.isInteger(b.port) && b.port! > 0 && b.port! < 65536 ? b.port! : null;
   if (free) {
     const facts = b.facts !== undefined ? cleanFacts(b.facts, json<ComputerFacts>(cur?.facts_json ?? null, {})) : json<ComputerFacts>(cur?.device === b.device ? cur.facts_json : null, {});
     d.prepare(
-      `INSERT INTO relay_runners (principal, device, lease_until, seen_at, port, facts_json) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(principal) DO UPDATE SET device = excluded.device, lease_until = excluded.lease_until, seen_at = excluded.seen_at, port = excluded.port, facts_json = excluded.facts_json`,
-    ).run(principal, b.device, now + RELAY_TIMES.leaseMs, now, port, JSON.stringify(facts));
+      `INSERT INTO relay_runners (principal, device, lease_until, seen_at, port, facts_json, comfy) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(principal) DO UPDATE SET device = excluded.device, lease_until = excluded.lease_until, seen_at = excluded.seen_at, port = excluded.port, facts_json = excluded.facts_json, comfy = excluded.comfy`,
+    ).run(principal, b.device, now + RELAY_TIMES.leaseMs, now, port ?? (cur?.device === b.device ? cur.port : null), JSON.stringify(facts), b.ready === false ? (b.why === "setting" ? "no-setting" : "down") : "ok");
   }
   // The tasks this computer works on stay alive, and their live progress is kept.
   for (const r of (b.running ?? []).slice(0, 32)) {
@@ -416,10 +429,36 @@ export function inputFor(t: TaskRow, n: number): { path: string; size: number; c
 function endTask(id: string, state: "done" | "failed" | "canceled", fields: Partial<TaskRow> = {}, takeOff = state === "canceled") {
   const t = rdb().prepare("SELECT state, device FROM relay_tasks WHERE id = ?").get(id) as { state: RelayState; device: string | null } | undefined;
   const stop = takeOff && t && t.device && (SENT_STATES as readonly string[]).includes(t.state) ? 1 : 0;
-  setTask(id, { state, finished_at: Date.now(), down_at: null, ...(stop && { stop }), ...fields });
+  setTask(id, { state, finished_at: Date.now(), down_at: null, down_why: null, ...(stop && { stop }), ...fields });
   progressMap().delete(id);
   for (const i of rdb().prepare("SELECT name FROM relay_inputs WHERE task_id = ?").all(id) as { name: string }[]) fs.rmSync(inputFile(i.name), { force: true });
   rdb().prepare("DELETE FROM relay_inputs WHERE task_id = ?").run(id);
+}
+
+/**
+ * What is kept of ComfyUI's /prompt refusal, as the tab reported it: the parts the run's words and "Fix it" read (the
+ * error, and each node's errors with the value it got), each cut short, at most 16 KB in all.
+ */
+export function keptRefusal(body: unknown): { error?: Record<string, unknown>; node_errors?: Record<string, unknown> } | null {
+  if (!body || typeof body !== "object") return null;
+  const b = body as { error?: unknown; node_errors?: unknown };
+  const cut = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : undefined);
+  const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);
+  const err = obj(b.error);
+  const info = obj(err?.extra_info);
+  const error = err && { type: cut(err.type, 64), message: cut(err.message, 1024), ...(info && { extra_info: { class_type: cut(info.class_type, 128) } }) };
+  const nodes: Record<string, unknown> = {};
+  for (const [id, raw] of Object.entries(obj(b.node_errors) ?? {}).slice(0, 24)) {
+    const ne = obj(raw);
+    const errors = (Array.isArray(ne?.errors) ? ne.errors : []).slice(0, 6).map((x) => {
+      const e = obj(x);
+      const ei = obj(e?.extra_info);
+      return { type: cut(e?.type, 64), message: cut(e?.message, 300), details: cut(e?.details, 300), extra_info: { input_name: cut(ei?.input_name, 64), received_value: cut(ei?.received_value, 256) } };
+    });
+    nodes[id.slice(0, 32)] = { class_type: cut(ne?.class_type, 128), errors };
+  }
+  const kept = { ...(error && { error }), node_errors: nodes };
+  return JSON.stringify(kept).length <= RELAY_LIMITS.keptRefusalBytes ? kept : { ...(error && { error }), node_errors: {} };
 }
 
 /** What the server does with a finished prompt: the files it wants, a meta-batch to follow, or a failure. */
@@ -449,7 +488,7 @@ function reportOnce(t: TaskRow, e: ReportEvent, plan: (entries: HistoryEntryLike
     if (t.state === "canceled") return { ok: true, stop: true };
     throw new RelayError(409, `That doesn't fit this run now (${t.state})`);
   }
-  const seen = { device_seen_at: now, down_at: null };
+  const seen = { device_seen_at: now, down_at: null, down_why: null };
   switch (e.event) {
     case "sent": {
       const promptId = typeof e.promptId === "string" && UUID.test(e.promptId) ? e.promptId : typeof e.promptId === "string" && /^[\w-]{1,64}$/.test(e.promptId) ? e.promptId : null;
@@ -457,12 +496,10 @@ function reportOnce(t: TaskRow, e: ReportEvent, plan: (entries: HistoryEntryLike
       setTask(t.id, { ...seen, state: "queued", prompt_id: promptId, sent_at: now, attempts: t.attempts + 1 });
       return { ok: true };
     }
-    case "refused": {
-      const body = JSON.stringify(e.body ?? null);
-      setTask(t.id, { refusal_json: body.length <= 256 * 1024 ? JSON.stringify({ status: Number(e.status) || 400, body: e.body ?? null }) : JSON.stringify({ status: Number(e.status) || 400, body: null }) });
+    case "refused":
+      setTask(t.id, { refusal_json: JSON.stringify({ status: Number(e.status) || 400, body: keptRefusal(e.body) }) });
       endTask(t.id, "failed");
       return { ok: true };
-    }
     case "queued":
       setTask(t.id, seen);
       noteProgress(t.id, { position: e.position }, now);
@@ -517,7 +554,7 @@ function reportOnce(t: TaskRow, e: ReportEvent, plan: (entries: HistoryEntryLike
       endTask(t.id, "failed", { error: "lost" });
       return { ok: true };
     case "comfy-down":
-      setTask(t.id, { device_seen_at: now, ...(t.down_at ? {} : { down_at: now }) });
+      setTask(t.id, { device_seen_at: now, down_why: e.why ?? null, ...(t.down_at ? {} : { down_at: now }) });
       return { ok: true };
     case "stopped":
       setTask(t.id, { stop: 0 });

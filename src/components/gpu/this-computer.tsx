@@ -1,25 +1,29 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Copy, Download, Loader2, MonitorSmartphone, RefreshCw, Search, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, Copy, Download, Loader2, MonitorSmartphone, RefreshCw, Search, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { gib } from "@/components/gpu/comfy-finder";
+import { useNow } from "@/components/studio/use-now";
 import type { ReadinessView } from "@/hooks/use-gpu";
 import { copyWithToast } from "@/lib/clipboard";
+import { GUARD_FILE_NAME, GUARD_SOURCE, isGuard } from "@/lib/comfy-guard";
 import { corsFlag, fixFor, guessInstall, installFromStats, platformOf, startFile, START_FILE_NAME, type ComfyInstall } from "@/lib/comfy-install";
-import { checkThisComputer, sendCheck } from "@/lib/gpu/browser-check";
+import { checkThisComputer, loopbackFetch, sendCheck } from "@/lib/gpu/browser-check";
 import { deviceLabel } from "@/lib/gpu/readiness";
-import { statsFacts, typedPort, type SystemStats } from "@/lib/local-comfy";
+import { localBase, statsFacts, typedPort, type SystemStats } from "@/lib/local-comfy";
+import { madeNoun } from "@/lib/relay";
 import { cn } from "@/lib/utils";
-import { rememberComfy, rememberedComfy, store, stored } from "./computer-runtime";
+import { computerState, rememberComfy, rememberedComfy, restartComputerRunner, store, stored } from "./computer-runtime";
 import { useLocalComfy, type Finder } from "./use-local-comfy";
 
 /**
  * "Use the ComfyUI on this computer": finds the person's ComfyUI from this page, gives the one fix its install needs
- * (a start file, a setting, a command), notices by itself when ComfyUI comes back with it, connects, checks what it
- * has, and, when it was opened from a run, starts that run. Every state has its own screen and words (DESIGN 9.1).
+ * (a start file, a setting, a command) with Fuobe's guard, notices by itself when ComfyUI comes back with it, connects,
+ * checks what it has, and, when it was opened from a run, starts that run. Every state has its own screen and words
+ * (DESIGN 9.1).
  */
 
 const INSTALLS: { id: ComfyInstall; label: string }[] = [
@@ -93,29 +97,88 @@ const UNSUPPORTED: Record<"safari" | "phone" | "http", string> = {
 
 export const unsupportedWords = (why: "safari" | "phone" | "http") => UNSUPPORTED[why];
 
-/** The fix for the install the person has: a start file, a setting in an app, or a command. */
-function SettingFix({ port, back }: { port: number; back: boolean }) {
-  const [install, setInstall] = useState<ComfyInstall>(() => (stored("install") as ComfyInstall | null) ?? guessInstall(port, platformOf(nav())));
+/** Save a file the page made (the start file, the guard). */
+function save(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/octet-stream" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+const installOf = (port: number): ComfyInstall => (stored("install") as ComfyInstall | null) ?? guessInstall(port, platformOf(nav()));
+
+/**
+ * Fuobe's guard, for the person to add: the start file does it on Windows (portable, Easy-Install); for the other
+ * installs, the file and where it goes. ComfyUI loads it at its next start.
+ */
+export function GuardFix({ port, install = installOf(port) }: { port: number; install?: ComfyInstall }) {
+  const fix = fixFor(install, origin(), port);
+  if (fix.startFile) {
+    return (
+      <Button size="sm" variant="secondary" onClick={() => save(START_FILE_NAME, startFile(port, origin()))}>
+        <Download /> Download start file
+      </Button>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <Button size="sm" variant="secondary" onClick={() => save(GUARD_FILE_NAME, GUARD_SOURCE)}>
+        <Download /> Download Fuobe&apos;s guard
+      </Button>
+      <p className="text-[12px] text-muted-foreground">{fix.guard} Then restart ComfyUI.</p>
+    </div>
+  );
+}
+
+/**
+ * The fix for the install the person has: a start file, a setting in an app, or a command; and, before it, what the
+ * setting does to other websites and the guard that keeps them out. `back`: ComfyUI restarted, still without it.
+ * `again`: it had the setting before (started the usual way this time). `others`: more ports where something answers.
+ */
+export function SettingFix({ port, back, again, others, onChoose }: { port: number; back: boolean; again?: boolean; others?: number[]; onChoose?: (port: number) => void }) {
+  const [install, setInstall] = useState<ComfyInstall>(() => installOf(port));
   const [choosing, setChoosing] = useState(false);
   const [yourself, setYourself] = useState(false);
-  const fix = fixFor(install, origin());
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([startFile(port, origin())], { type: "application/octet-stream" }));
-    const a = Object.assign(document.createElement("a"), { href: url, download: START_FILE_NAME });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  };
+  const fix = fixFor(install, origin(), port);
+  // ComfyUI's usual port, or the one it was found on before, is surely ComfyUI; another app may answer on another one
+  // (8000 is a common default).
+  const known = port === 8188 || rememberedComfy()?.port === port;
+  const heading = back
+    ? "ComfyUI is back, but without the setting yet."
+    : again
+      ? "ComfyUI is running, but without Fuobe's setting this time."
+      : known
+        ? "Found ComfyUI. It needs one setting to work with Fuobe."
+        : `Something answers on port ${port}. If it's ComfyUI, it needs one setting to work with Fuobe.`;
   return (
     <div className="space-y-3">
       <div>
-        <p className="text-[15px] font-medium">{back ? "ComfyUI is back, but without the setting yet." : "Found ComfyUI. It needs one setting to work with Fuobe."}</p>
+        <p className="text-[15px] font-medium">{heading}</p>
         <p className="mt-1 text-[13px] text-muted-foreground">{fix.lead}</p>
+        {back && <p className="mt-1 text-[12px] text-muted-foreground">The address must be exactly {origin()}, with nothing after it.</p>}
+        {again && fix.startFile && <p className="mt-1 text-[12px] text-muted-foreground">Next time, start ComfyUI with {START_FILE_NAME} (next to ComfyUI): it has the setting.</p>}
       </div>
+      {!!others?.length && onChoose && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted-foreground">
+          Something answers on {others.length === 1 ? `port ${others[0]}` : `ports ${others.join(", ")}`} too. Is ComfyUI there?
+          {others.map((p) => (
+            <button key={p} type="button" onClick={() => onChoose(p)} className="font-medium text-brand-text underline-offset-4 hover:underline">
+              Use port {p}
+            </button>
+          ))}
+        </p>
+      )}
+      <p className="flex items-start gap-1.5 rounded-lg bg-muted/60 px-2.5 py-2 text-[12px] text-muted-foreground">
+        <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-brand-text" />
+        {fix.startFile
+          ? "On its own, this setting would also let other websites send work to your ComfyUI. The start file adds Fuobe's guard, which turns them away."
+          : "On its own, this setting would also let other websites send work to your ComfyUI. Add Fuobe's guard too: it turns them away."}
+      </p>
       {fix.startFile ? (
         <>
-          <Button className="h-11 sm:h-9" onClick={download}>
+          <Button className="h-11 sm:h-9" onClick={() => save(START_FILE_NAME, startFile(port, origin()))}>
             <Download /> Download start file
           </Button>
           <p className="text-[12px] text-muted-foreground">
@@ -129,6 +192,7 @@ function SettingFix({ port, back }: { port: number; back: boolean }) {
               <div className="mt-2 space-y-1.5">
                 <p className="text-[12px] text-muted-foreground">Add this to the end of the line that starts ComfyUI in your start file, then start ComfyUI again:</p>
                 <CopyLine text={corsFlag(origin())} label="the setting" />
+                <GuardFix port={port} install="terminal" />
               </div>
             )}
           </div>
@@ -137,6 +201,8 @@ function SettingFix({ port, back }: { port: number; back: boolean }) {
         <>
           <CopyLine text={fix.copy} label={install === "desktop" ? "the address" : "the setting"} />
           {fix.path && <p className="text-[12px] text-muted-foreground">{fix.path.join(" → ")}</p>}
+          {fix.example && <p className="text-[12px] text-muted-foreground">For example: <code className="font-mono">{fix.example}</code></p>}
+          <GuardFix port={port} install={install} />
         </>
       )}
       <div>
@@ -191,7 +257,7 @@ function OtherPort({ onLook, missed }: { onLook: (port: number, host: string) =>
   );
 }
 
-type Connected = { port: number; stats: SystemStats; board?: ReadinessView | null; checkFailed?: boolean };
+type Connected = { port: number; stats: SystemStats; guard: boolean; board?: ReadinessView | null; checkFailed?: boolean };
 
 function readyLine(board: ReadinessView | null | undefined): string | null {
   const studios = board?.report?.studios;
@@ -202,8 +268,8 @@ function readyLine(board: ReadinessView | null | undefined): string | null {
 }
 
 /** The connected screen: the GPU, what's ready, and the run starting (when it was opened from one). */
-function Celebration({ c, fromRun, onStart, onNotNow }: { c: Connected; fromRun?: boolean; onStart?: () => void; onNotNow?: () => void }) {
-  const facts = statsFacts(c.stats, origin());
+function Celebration({ c, fromRun, kind, onStart, onNotNow }: { c: Connected; fromRun?: boolean; kind?: string; onStart?: () => void; onNotNow?: () => void }) {
+  const facts = statsFacts(c.stats, origin(), c.guard);
   const gpu = [facts.device && deviceLabel(facts.device), gib(facts.vramBytes), facts.version && `ComfyUI ${facts.version}`].filter(Boolean).join(" · ");
   const ready = readyLine(c.board);
   const checked = c.board !== undefined || c.checkFailed;
@@ -220,6 +286,8 @@ function Celebration({ c, fromRun, onStart, onNotNow }: { c: Connected; fromRun?
     const t = setTimeout(() => onStart?.(), 1200);
     return () => clearTimeout(t);
   }, [starting, stopped, onStart]);
+  // The run about to start stays this page's: what's ready is a link once it has started, or when there is none.
+  const waitingRun = fromRun && !stopped;
   return (
     <div className="space-y-3 rounded-2xl bg-brand-faint p-4">
       <div className="flex items-center gap-3">
@@ -231,12 +299,23 @@ function Celebration({ c, fromRun, onStart, onNotNow }: { c: Connected; fromRun?
           {gpu && <p className="truncate text-[13px] text-muted-foreground">{gpu}</p>}
         </div>
       </div>
-      {facts.cors === "any" && (
+      {facts.cors === "any" ? (
         <div className="space-y-1.5 text-[12px]">
           <p className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
             <TriangleAlert className="size-3.5" /> Your ComfyUI lets every website in. To keep it private, use {origin()} instead:
           </p>
           <CopyLine text={corsFlag(origin())} label="the setting" />
+        </div>
+      ) : c.guard ? (
+        <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+          <ShieldCheck className="size-3.5 text-brand-text" /> Fuobe&apos;s guard keeps other websites out of your ComfyUI.
+        </p>
+      ) : (
+        <div className="space-y-1.5 text-[12px]">
+          <p className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" /> Other websites could also send work to your ComfyUI. Add Fuobe&apos;s guard to turn them away:
+          </p>
+          <GuardFix port={c.port} />
         </div>
       )}
       <p className="text-[13px]">
@@ -247,15 +326,25 @@ function Celebration({ c, fromRun, onStart, onNotNow }: { c: Connected; fromRun?
         ) : ready ? (
           <>
             {ready}.{" "}
-            <a href="/connect" className="text-brand-text underline-offset-4 hover:underline">
-              See them
-            </a>
+            {!waitingRun && (
+              <a href="/connect" className="text-brand-text underline-offset-4 hover:underline">
+                See them
+              </a>
+            )}
           </>
         ) : null}
       </p>
-      {fromRun && !stopped ? (
+      {waitingRun ? (
         <div className="flex items-center justify-between gap-2">
-          <p className="flex items-center gap-2 text-[13px] text-muted-foreground">{starting ? <><Loader2 className="size-3.5 animate-spin" /> Starting your picture…</> : "Your run starts in a moment."}</p>
+          <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            {starting ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" /> Starting your {madeNoun(kind)}…
+              </>
+            ) : (
+              "Your run starts in a moment."
+            )}
+          </p>
           <Button
             size="sm"
             variant="ghost"
@@ -279,17 +368,28 @@ export interface ThisComputerProps {
   connect: () => Promise<void>;
   /** Opened from a run that needs a GPU: it starts by itself once connected. */
   fromRun?: boolean;
+  /** What that run makes (image, video, audio). */
+  kind?: string;
   /** Start the run (fromRun), then close. */
   onStart?: () => void;
   onNotNow?: () => void;
-  /** Look at once (Settings, after the person picked this option). */
+  /** Look at once (Settings, after the person picked this option; ComfyUI needs the setting again). */
   autoLook?: boolean;
+  /** ComfyUI had Fuobe's setting before, and runs without it now (the fix says so). */
+  again?: boolean;
 }
 
+/** Is Fuobe's guard in this ComfyUI (it answers at /fuobe/guard)? */
+const guardAt = (port: number, host: string) =>
+  loopbackFetch(`${localBase(port, host)}/fuobe/guard`, { credentials: "omit", cache: "no-store" }).then(
+    (r) => (r.ok ? r.json().then(isGuard, () => false) : false),
+    () => false,
+  );
+
 /** The whole flow, from "Find my ComfyUI" to connected. */
-export function ThisComputer({ connect, fromRun, onStart, onNotNow, autoLook }: ThisComputerProps) {
+export function ThisComputer({ connect, fromRun, kind, onStart, onNotNow, autoLook, again }: ThisComputerProps) {
   const qc = useQueryClient();
-  const { state, look } = useLocalComfy(true);
+  const { state, look, choose } = useLocalComfy(true);
   const [done, setDone] = useState<Connected | null>(null);
   const [error, setError] = useState<string | null>(null);
   const connecting = useRef<string | null>(null);
@@ -312,9 +412,14 @@ export function ThisComputer({ connect, fromRun, onStart, onNotNow, autoLook }: 
       try {
         await connect();
         rememberComfy(port, host);
+        store("reached", "1");
         store("install", installFromStats(stats, port, platformOf(nav())));
+        // The tab that runs the jobs goes there now (another port, or a browser that only listened until now).
+        const running = computerState().view;
+        if (running && (running.port !== port || running.access)) restartComputerRunner();
+        const guard = await guardAt(port, host);
         setError(null);
-        setDone({ port, stats });
+        setDone({ port, stats, guard });
         void qc.invalidateQueries({ queryKey: ["viewer"] });
         void qc.invalidateQueries({ queryKey: ["account-gpu"] });
         try {
@@ -322,9 +427,9 @@ export function ThisComputer({ connect, fromRun, onStart, onNotNow, autoLook }: 
           qc.setQueryData(["gpu", "readiness"], board);
           void qc.invalidateQueries({ queryKey: ["gpu", "badges"] });
           void qc.invalidateQueries({ queryKey: ["gpu", "plan"] });
-          setDone({ port, stats, board });
+          setDone({ port, stats, guard, board });
         } catch {
-          setDone({ port, stats, checkFailed: true });
+          setDone({ port, stats, guard, checkFailed: true });
         }
       } catch (e) {
         connecting.current = null;
@@ -333,23 +438,40 @@ export function ThisComputer({ connect, fromRun, onStart, onNotNow, autoLook }: 
     })();
   }, [state, connect, qc]);
 
-  if (done) return <Celebration c={done} fromRun={fromRun} onStart={onStart} onNotNow={onNotNow} />;
+  if (done) return <Celebration c={done} fromRun={fromRun} kind={kind} onStart={onStart} onNotNow={onNotNow} />;
   return (
     <div className="space-y-3 text-[13px]">
-      <Screen state={state} look={look} />
+      <Screen state={state} look={look} choose={choose} again={again} />
       {error && <p className="text-[12px] text-destructive">{error}</p>}
     </div>
   );
 }
 
-function Screen({ state, look }: { state: Finder; look: ReturnType<typeof useLocalComfy>["look"] }) {
-  const [since, setSince] = useState(0);
-  // "Still waiting" after two minutes.
-  useEffect(() => {
-    if (state.s !== "waiting") return;
-    const t = setInterval(() => setSince(Date.now() - state.since), 5000);
-    return () => clearInterval(t);
-  }, [state]);
+/** Waiting for ComfyUI to start; after two minutes, what to check. */
+function WaitingScreen({ port, since, onLook }: { port: number; since: number; onLook: () => void }) {
+  const now = useNow(1000);
+  const long = now - since >= 120_000;
+  return (
+    <div className="space-y-2">
+      <p className="flex items-center gap-2 font-medium">
+        <Loader2 className="size-4 animate-spin" /> Waiting for ComfyUI to start…
+      </p>
+      {!long ? (
+        <p className="text-[12px] text-muted-foreground">This usually takes 10 to 30 seconds.</p>
+      ) : (
+        <div className="space-y-2 text-[12px] text-muted-foreground">
+          <p>Still waiting. Is ComfyUI&apos;s window open? It says &ldquo;To see the GUI go to: http://127.0.0.1:{port}&rdquo; when it&apos;s ready.</p>
+          <p>Check that the address is exactly {origin()}, with nothing after it.</p>
+          <Button size="sm" variant="secondary" onClick={onLook}>
+            <RefreshCw /> Look again
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Screen({ state, look, choose, again }: { state: Finder; look: ReturnType<typeof useLocalComfy>["look"]; choose: (port: number) => void; again?: boolean }) {
   const lookAt = (port: number, host: string) => void look({ ports: [{ port, host }] });
   switch (state.s) {
     case "unsupported":
@@ -383,26 +505,9 @@ function Screen({ state, look }: { state: Finder; look: ReturnType<typeof useLoc
         </p>
       );
     case "needs-setting":
-      return <SettingFix port={state.port} back={state.back} />;
+      return <SettingFix key={state.port} port={state.port} back={state.back} again={again} others={state.others} onChoose={choose} />;
     case "waiting":
-      return (
-        <div className="space-y-2">
-          <p className="flex items-center gap-2 font-medium">
-            <Loader2 className="size-4 animate-spin" /> Waiting for ComfyUI to start…
-          </p>
-          {since < 120_000 ? (
-            <p className="text-[12px] text-muted-foreground">This usually takes 10 to 30 seconds.</p>
-          ) : (
-            <div className="space-y-2 text-[12px] text-muted-foreground">
-              <p>Still waiting. Is ComfyUI&apos;s window open? It says &ldquo;To see the GUI go to: http://127.0.0.1:{state.port}&rdquo; when it&apos;s ready.</p>
-              <p>Check that the address is exactly {origin()}, with nothing after it.</p>
-              <Button size="sm" variant="secondary" onClick={() => lookAt(state.port, "127.0.0.1")}>
-                <RefreshCw /> Look again
-              </Button>
-            </div>
-          )}
-        </div>
-      );
+      return <WaitingScreen port={state.port} since={state.since} onLook={() => lookAt(state.port, "127.0.0.1")} />;
     case "none":
       return (
         <div className="space-y-3">

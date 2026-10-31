@@ -839,7 +839,7 @@ export interface StatusInfo {
    * Public sign-up: a guest or an account is looking. Then everything else here is its own view
    * (its own GPU as ComfyUI, the open engine, no Demo mode), never the install's (src/server/account-gpu.ts).
    */
-  viewer?: { kind: "guest" | "account"; gpu: { connected: boolean; mode?: "computer" | "link"; online?: boolean; device?: string; vramBytes?: number } };
+  viewer?: { kind: "guest" | "account"; gpu: { connected: boolean; mode?: "computer" | "link"; online?: boolean; comfy?: "down" | "no-setting"; device?: string; vramBytes?: number } };
 }
 
 /** A connection test's answer (POST /api/providers/test). */
@@ -1073,6 +1073,8 @@ export interface ViewerInfo {
   account?: { email: string };
   /** Runs go to the ComfyUI on the person's own computer, which a Fuobe tab of theirs runs (components/gpu/computer-runner.tsx). */
   computer?: boolean;
+  /** The port their computer's tab last found ComfyUI on (a browser that remembers none starts there). */
+  comfyPort?: number;
 }
 
 export function useViewer() {

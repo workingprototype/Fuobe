@@ -43,8 +43,8 @@ export type ReportEvent =
   | { event: "passes"; running: boolean; entries: HistoryEntryLike[] }
   /** ComfyUI has no trace of it (restarted): the server sends it again once. */
   | { event: "gone" }
-  /** The tab can't reach ComfyUI. */
-  | { event: "comfy-down" }
+  /** The tab can't use ComfyUI: it doesn't answer, or (`why: "setting"`) it answers without Fuobe's setting. */
+  | { event: "comfy-down"; why?: "setting" }
   /** A stop the server asked for is done. */
   | { event: "stopped" }
   /** The tab gave up for one of its own reasons. */
@@ -122,6 +122,8 @@ export interface ComputerFacts {
   portable?: boolean;
   /** Its --enable-cors-header: this site exactly, every site ("any"), or something else. */
   cors?: "exact" | "any" | "other";
+  /** Fuobe's guard is in its custom nodes (it turns away every other website while the setting is on). */
+  guard?: boolean;
   /** Its LoRA files (sent now and then, not on every beat). */
   loras?: string[];
 }
@@ -157,8 +159,11 @@ export const RELAY_TIMES = {
   stagedMs: 60 * 60_000,
 };
 
-/** The largest part of an output the tab sends at once, and the largest report. */
-export const RELAY_LIMITS = { partBytes: 16 * 2 ** 20, reportBytes: 8 * 2 ** 20, inputReads: 6 };
+/**
+ * The largest part of an output the tab sends at once; the largest report (a finished entry, while ComfyUI has the job),
+ * a refusal's (while it sends) and any other's; how much of a refusal is kept.
+ */
+export const RELAY_LIMITS = { partBytes: 16 * 2 ** 20, reportBytes: 8 * 2 ** 20, refusalBytes: 256 * 1024, smallReportBytes: 8 * 1024, keptRefusalBytes: 16 * 1024, inputReads: 6 };
 
 /** A ComfyUI prompt id the server mints, and what the tab may name in a URL. */
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -195,50 +200,84 @@ export function queueWords(position: number | undefined): string {
   return position === 0 ? "Next in ComfyUI's queue" : `In ComfyUI's queue · ${position} ahead`;
 }
 
+/** "picture", "clip", "sound": what a run of this kind makes. */
+export const madeNoun = (kind: MadeKind | undefined): string => (kind && MADE[kind]) || "picture";
+
 /** "Making your picture · step 12 of 30". */
 export function makingWords(kind: MadeKind, value?: number, max?: number): string {
   const noun = MADE[kind] ?? "result";
   return max && max > 1 && value !== undefined ? `Making your ${noun} · step ${Math.min(value, max)} of ${max}` : `Making your ${noun}`;
 }
 
-export const savingWords = (fraction: number | undefined) =>
-  fraction !== undefined && fraction > 0 ? `Saving to Fuobe · ${Math.min(100, Math.floor(fraction * 100))}%` : "Saving to Fuobe";
+/**
+ * How far a job on this computer is, from its own steps (so the tile's % and time left agree with "step 9 of 12"), or
+ * null when its steps don't say.
+ */
+export function jobFraction(job: { phase: string; value?: number; max?: number }): number | null {
+  if (job.phase !== "running" || !job.max || job.max < 2 || job.value === undefined) return null;
+  return Math.min(0.99, Math.max(0, job.value / job.max));
+}
+
+/** How long a saved job's tile says it is saving, at most, when its run doesn't move on first. */
+export const DONE_SHOWN_MS = 20_000;
+
+export const savingWords = (fraction: number | undefined, waiting = false) =>
+  waiting ? "Saving to Fuobe · waiting for the studio" : fraction !== undefined && fraction > 0 ? `Saving to Fuobe · ${Math.min(100, Math.floor(fraction * 100))}%` : "Saving to Fuobe";
+
+/** The server's words that say something is wrong (the tab shows them over its own). */
+const PROBLEM = (server: string | undefined) =>
+  !!server && [RELAY_WORDS.comfyDown, RELAY_WORDS.comfyNoSetting, RELAY_WORDS.resent, RELAY_WORDS.noComputer].includes(server as never);
 
 /**
  * A run's words in the tab that runs its job (lib/computer-runner.ts's LocalJob), at once: the server's own say the same
- * a poll later. Sending keeps the server's words (they name what is sent); done or failed leaves the last word to it.
+ * a poll later. ComfyUI here not answering, or answering without Fuobe's setting (`comfy`), says so whatever the job's
+ * phase until its results are saving. Sending keeps the server's words when they name what is sent or what is wrong;
+ * done says it is saving until the run's own status moves on; failed leaves the last word to the server.
  */
 export function jobWords(
-  job: { phase: "sending" | "queued" | "running" | "saving" | "done" | "failed"; position?: number; value?: number; max?: number; saved?: number },
+  job: { phase: "sending" | "queued" | "running" | "saving" | "done" | "failed"; position?: number; value?: number; max?: number; saved?: number; waiting?: boolean },
   kind: MadeKind,
   server: string | undefined,
+  comfy: "ok" | "down" | "no-setting" = "ok",
 ): string | undefined {
+  if (comfy !== "ok" && job.phase !== "saving" && job.phase !== "done" && job.phase !== "failed") return comfy === "down" ? RELAY_WORDS.comfyDown : RELAY_WORDS.comfyNoSetting;
   switch (job.phase) {
     case "sending":
-      return server?.startsWith("Sending your") ? server : RELAY_WORDS.starting;
+      return server?.startsWith("Sending your") || PROBLEM(server) ? server : RELAY_WORDS.starting;
     case "queued":
       return queueWords(job.position);
     case "running":
       return makingWords(kind, job.value, job.max);
     case "saving":
-      return savingWords(job.saved);
+      return savingWords(job.saved, job.waiting);
+    case "done":
+      return savingWords(1);
     default:
       return server;
   }
 }
 
+/** "30 minutes", "4 hours", "1 hour". */
+export function duration(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes % 60 === 0) return minutes === 60 ? "1 hour" : `${minutes / 60} hours`;
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
+
 export const RELAY_WORDS = {
   noComputer: "Open Fuobe on the computer with your ComfyUI to run this",
   starting: "Starting on your computer",
-  waitedTooLong: (minutes: number) => `Fuobe couldn't reach your computer for ${minutes} minutes. Open Fuobe there, then press Retry.`,
+  waitedTooLong: (ms: number) => `Fuobe couldn't reach your computer for ${duration(ms)}. Open Fuobe there, then press Retry.`,
   computerSilent: "Your computer stopped answering. If ComfyUI finished, open Fuobe there and press Retry.",
   comfyDown: "ComfyUI isn't answering. Start it again, and Fuobe goes on by itself.",
+  comfyNoSetting: "ComfyUI is running without Fuobe's setting. Fuobe goes on once it has it.",
   comfyDownTooLong: "ComfyUI didn't come back within 30 minutes. Start it, then press Retry.",
   resent: "ComfyUI restarted, so Fuobe sent it again",
   lost: "ComfyUI restarted and lost this run. Press Retry.",
   outOfMemory: "Your GPU ran out of memory. Try a smaller size or a shorter clip.",
   tooBig: "Your ComfyUI made a file over 1 GB. Try a shorter clip or a lower size.",
   stopped: "Stopped",
+  switched: "This run stopped because ComfyUI now runs somewhere else. Press Retry.",
 } as const;
 
 /** The words for a tab's own failure. */

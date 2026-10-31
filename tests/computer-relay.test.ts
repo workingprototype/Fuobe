@@ -262,6 +262,105 @@ describe("a run on the ComfyUI on the person's own computer", () => {
     fake.opts.cors = "http://localhost:3000";
   });
 
+  it("ComfyUI started without Fuobe's setting: the tab says so steadily, takes nothing, and the run and the status strip say the same", async () => {
+    const t = tab(routes, cookie, fake.port);
+    await t.runner.beat();
+    fake.opts.cors = "off";
+    try {
+      const pic = await uploadPng();
+      const [id] = await run({ feature: "app", modelId: "oss-qwen-edit", presetId: "app-headshot-generator", prompt: "", inputs: { images: [pic.url] } });
+      await handedOver(id);
+      const seen = new Set<string>();
+      const off = t.runner.onChange((v) => seen.add(v.comfy));
+      const posts = fake.posts();
+      for (let i = 0; i < 3; i++) {
+        expect(await t.runner.beat()).toMatchObject({ runner: true, waiting: 1 });
+        expect(await t.runner.claimAndRun()).toBe(false);
+      }
+      off();
+      // One story, never "isn't answering" in between.
+      expect([...seen]).toEqual(["no-setting"]);
+      expect(fake.posts()).toBe(posts);
+      await tick();
+      expect(getGeneration(id)?.message).toBe(RELAY_WORDS.comfyNoSetting);
+      const { gpuState } = await import("@/server/account-gpu");
+      expect(await gpuState(a, { mode: "computer" })).toMatchObject({ online: false, comfy: "no-setting" });
+      // ComfyUI comes back with the setting: the run goes on by itself.
+      fake.opts.cors = "http://localhost:3000";
+      await work(t);
+      expect((await settle(id))?.status).toBe("succeeded");
+      expect(await gpuState(a, { mode: "computer" })).toMatchObject({ online: true });
+    } finally {
+      fake.opts.cors = "http://localhost:3000";
+    }
+  });
+
+  it("ComfyUI restarted without the setting while it ran a job: the run says the setting is missing, then goes on", async () => {
+    fake.opts.steps = 60;
+    fake.opts.stepMs = 30;
+    const t = tab(routes, cookie, fake.port);
+    await t.runner.beat();
+    const pic = await uploadPng();
+    const [id] = await run({ feature: "app", modelId: "oss-qwen-edit", presetId: "app-headshot-generator", prompt: "", inputs: { images: [pic.url] } });
+    await handedOver(id);
+    const job = t.runner.claimAndRun();
+    for (let i = 0; i < 200 && !t.runner.view.jobs.some((j) => j.phase === "running"); i++) await new Promise((r) => setTimeout(r, 20));
+    fake.opts.cors = "off";
+    try {
+      for (let i = 0; i < 200 && (db().prepare("SELECT down_why FROM relay_tasks WHERE generation_id = ?").get(id) as { down_why: string | null }).down_why !== "setting"; i++) await new Promise((r) => setTimeout(r, 20));
+      await tick();
+      expect(getGeneration(id)?.message).toBe(RELAY_WORDS.comfyNoSetting);
+      expect(t.runner.view.comfy).toBe("no-setting");
+    } finally {
+      fake.opts.cors = "http://localhost:3000";
+    }
+    await job;
+    await work(t);
+    expect((await settle(id))?.status).toBe("succeeded");
+  });
+
+  it("a tab with nothing remembered finds ComfyUI on another port by itself, and runs there", async () => {
+    const { ComputerRunner } = await import("@/lib/computer-runner");
+    const { apiAs, browserLocal, sha256 } = await import("./helpers/computer-tab");
+    const moved: number[] = [];
+    // It starts where nothing answers (the port the studio last heard of, or 8188), as a second browser would.
+    const runner = new ComputerRunner(
+      {
+        api: apiAs(routes, cookie),
+        local: browserLocal(),
+        socket: (url) => new WebSocket(url) as never,
+        sha256,
+        origin: "http://localhost:3000",
+        sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 50))),
+        find: async () => ({ port: fake.port }),
+        moved: (port) => moved.push(port),
+      },
+      { device: "device-second-browser", port: 3399, clientId: "client-second-browser" },
+    );
+    await runner.beat();
+    expect(runner.view).toMatchObject({ port: fake.port, comfy: "ok" });
+    expect(moved).toEqual([fake.port]);
+    const pic = await uploadPng();
+    const [id] = await run({ feature: "app", modelId: "oss-qwen-edit", presetId: "app-headshot-generator", prompt: "", inputs: { images: [pic.url] } });
+    await work({ runner } as never);
+    expect((await settle(id))?.status).toBe("succeeded");
+  });
+
+  it("a browser that may not reach this computer yet hears how many runs wait, and never touches ComfyUI or takes the jobs", async () => {
+    const urls: string[] = [];
+    const listening = tab(routes, cookie, fake.port, { device: "device-asking-1", access: "ask", local: async (u) => (urls.push(u), Promise.reject(new TypeError("no"))) });
+    const pic = await uploadPng();
+    const [id] = await run({ feature: "app", modelId: "oss-qwen-edit", presetId: "app-headshot-generator", prompt: "", inputs: { images: [pic.url] } });
+    await handedOver(id);
+    expect(await listening.runner.beat()).toMatchObject({ runner: false, waiting: 1 });
+    expect(await listening.runner.claimAndRun()).toBe(false);
+    expect(urls).toEqual([]);
+    const desk = tab(routes, cookie, fake.port, { device: "device-desk-2" });
+    expect(await desk.runner.beat()).toMatchObject({ runner: true });
+    await work(desk);
+    expect((await settle(id))?.status).toBe("succeeded");
+  });
+
   it("sends a job again once when ComfyUI restarts and loses it, and fails it kindly the second time", async () => {
     const t = tab(routes, cookie, fake.port);
     await t.runner.beat();
@@ -341,6 +440,42 @@ describe("a run on the ComfyUI on the person's own computer", () => {
       // A run on a computer can't reach the studio's ComfyUI even by mistake.
       const { comfyLoraFiles, onComputer } = await import("@/server/providers/comfyui");
       expect(await onComputer("owner", () => comfyLoraFiles())).toBeNull();
+    } finally {
+      setSetting("comfyWhere", "server");
+    }
+  });
+
+  it("follows each run where it was sent when Settings moves ComfyUI: a run on the computer stops saying why, one on the studio's ComfyUI goes on there", async () => {
+    const { setSetting } = await import("@/server/settings");
+    const settingsRoute = await import("@/app/api/settings/route");
+    const { comfyProvider } = await import("@/server/providers/comfyui");
+    setSetting("comfyWhere", "computer");
+    setSetting("engineMode", "open");
+    setSetting("demoMode", "off");
+    const owner = `${auth.SESSION_COOKIE}=${auth.createSession().value}`;
+    try {
+      const text = JSON.stringify({ feature: "image", modelId: "oss-z-image-turbo", prompt: "a lighthouse at dusk" });
+      const r = await generationsRoute.POST(new Request("http://localhost:3000/api/generations", { method: "POST", headers: { cookie: owner, ...SITE_HEADERS, "content-type": "application/json", "content-length": String(Buffer.byteLength(text)) }, body: text }));
+      expect(r.status).toBe(201);
+      const id = ((await r.json()).items as { id: string }[])[0].id;
+      await handedOver(id);
+      fetched.length = 0;
+      await settingsRoute.PUT(new Request("http://localhost:3000/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ comfyWhere: "server" }) }));
+      const g = await settle(id);
+      expect(g?.status).toBe("failed");
+      expect(g?.error).toBe(RELAY_WORDS.switched);
+      expect(fetched.filter((u) => u.includes("owner-comfy.test"))).toEqual([]);
+
+      // The other way: a run sent to the studio's ComfyUI is still asked about there, and stopped there.
+      setSetting("comfyWhere", "computer");
+      fetched.length = 0;
+      const ctx = { externalId: "11111111-1111-4111-8111-111111111111", meta: {}, model: undefined } as unknown as Parameters<typeof comfyProvider.poll>[0];
+      const polled = await comfyProvider.poll(ctx).catch(() => null);
+      expect(polled?.state === "failed" && /lost|disappeared/i.test(polled.error ?? "")).toBe(false);
+      expect(fetched.some((u) => u.startsWith("http://owner-comfy.test:8188/history/11111111"))).toBe(true);
+      fetched.length = 0;
+      await comfyProvider.cancel!(ctx).catch(() => null);
+      expect(fetched.some((u) => u.startsWith("http://owner-comfy.test:8188/"))).toBe(true);
     } finally {
       setSetting("comfyWhere", "server");
     }

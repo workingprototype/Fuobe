@@ -300,22 +300,27 @@ export function referencedModels(wf: ComfyWorkflow): string[] {
 export function explainComfyError(nodeErrors: unknown, manifest?: ManifestWorkflow): string {
   const parts: string[] = [];
   const errs = (nodeErrors ?? {}) as Record<string, { errors?: { message?: string; details?: string; extra_info?: { input_name?: string; received_value?: unknown } }[]; class_type?: string }>;
-  for (const [nodeId, ne] of Object.entries(errs)) {
-    for (const e of ne.errors ?? []) {
-      const received = e.extra_info?.received_value;
-      if (e.message?.includes("not in list") && typeof received === "string") {
+  // A ComfyUI's answer can be large (or, from someone's own computer, anything): its words are cut short, and few.
+  const cut = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : undefined);
+  for (const [nodeId, ne] of Object.entries(errs).slice(0, 24)) {
+    for (const e of (Array.isArray(ne?.errors) ? ne.errors : []).slice(0, 6)) {
+      const received = cut(e?.extra_info?.received_value, 256);
+      const message = cut(e?.message, 300);
+      const cls = cut(ne?.class_type, 128) ?? `node ${nodeId.slice(0, 32)}`;
+      if (message?.includes("not in list") && received !== undefined) {
         const m = manifest?.models.find((mm) => mm.file === received);
         parts.push(
           m
             ? `Missing model "${received}" — put it in ComfyUI/models/${m.folder}${m.url ? ` (download: ${m.url})` : ""}`
-            : `ComfyUI can't find "${received}" (${ne.class_type ?? nodeId}.${e.extra_info?.input_name ?? "input"})`,
+            : `ComfyUI can't find "${received}" (${cls}.${cut(e.extra_info?.input_name, 64) ?? "input"})`,
         );
       } else {
-        parts.push(`${ne.class_type ?? `node ${nodeId}`}: ${e.message ?? "error"}${e.details ? ` — ${e.details}` : ""}`);
+        const details = cut(e?.details, 300);
+        parts.push(`${cls}: ${message ?? "error"}${details ? ` — ${details}` : ""}`);
       }
     }
   }
-  return [...new Set(parts)].join("\n") || "ComfyUI rejected the workflow";
+  return [...new Set(parts)].slice(0, 20).join("\n") || "ComfyUI rejected the workflow";
 }
 
 // ---------------------------------------------------------------------------

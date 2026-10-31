@@ -40,6 +40,8 @@ export interface LocalComfyOptions {
   /** Embedded Python (portable / Easy-Install). */
   portable?: boolean;
   loras?: string[];
+  /** Fuobe's guard is in its custom nodes (it answers GET /fuobe/guard). */
+  guard?: boolean;
   /**
    * Everything a requirement index names is installed (the studio's workflows/comfyui/requirements.json): its node
    * classes, with the loaders listing its files, and its model files. Without it, this ComfyUI has nothing.
@@ -323,6 +325,7 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
       }
       // No list given: an older ComfyUI without the route (the run goes ahead, and ComfyUI has the last word).
       if (p === "/models/loras") return opts.loras ? reply(200, opts.loras) : reply(404, { error: "not found" });
+      if (p === "/fuobe/guard") return opts.guard ? reply(200, { guard: 1 }) : reply(404, { error: "not found" });
       const has = opts.has ? installed(opts.has) : null;
       if (p === "/models") return reply(200, has ? [...has.folders.keys()] : ["checkpoints", "loras", "vae"]);
       if (p.startsWith("/models/")) return reply(200, (has?.folders.get(decodeURIComponent(p.slice(8))) ?? []).map((f) => f.name));
@@ -530,7 +533,7 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
 }
 
 // Run on its own: node tests/helpers/fake-local-comfy.ts --port 3371 --cors http://127.0.0.1:3370
-// [--has workflows/comfyui/requirements.json]: everything that index names is installed.
+// [--has workflows/comfyui/requirements.json]: everything that index names is installed. [--guard 1]: Fuobe's guard answers.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const arg = (name: string) => {
     const i = process.argv.indexOf(`--${name}`);
@@ -538,6 +541,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   };
   const index = arg("has");
   const has = index ? (JSON.parse(readFileSync(index, "utf8")) as IndexLike) : undefined;
-  const fake = await startLocalComfy({ cors: arg("cors") ?? "off", steps: Number(arg("steps") ?? 8), stepMs: Number(arg("step-ms") ?? 250), portable: arg("portable") === "1", has }, Number(arg("port") ?? 3371));
+  const fake = await startLocalComfy({ cors: arg("cors") ?? "off", steps: Number(arg("steps") ?? 8), stepMs: Number(arg("step-ms") ?? 250), portable: arg("portable") === "1", guard: arg("guard") === "1", has }, Number(arg("port") ?? 3371));
   console.log(`fake ComfyUI on ${fake.url} (cross-site setting: ${fake.opts.cors})`);
 }

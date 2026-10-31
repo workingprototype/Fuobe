@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { z } from "zod";
 import { accountGpu, authEnabled, deleteAccount, publicSignup, SESSION_COOKIE, sessionCookieOf, sessionViewer, validToken, verifyAccount } from "@/server/auth";
+import { runnerFacts } from "@/server/computer/tasks";
 import { getSetting } from "@/server/settings";
 import { purgeAccount } from "@/server/account-sweep";
 import { hit } from "@/server/rate";
@@ -15,13 +16,15 @@ export async function GET(request: Request) {
   const account = !owner && open && session?.kind === "account" ? session.account : null;
   // Runs go to the ComfyUI on this person's own computer: their Fuobe tab runs them (never for an API token: a script isn't a tab).
   const computer = account ? accountGpu(account.id)?.mode === "computer" : owner && !validToken(request.headers.get("authorization")) && getSetting("comfyWhere") === "computer";
+  // Where that computer's tab last found ComfyUI (another browser of theirs starts looking there).
+  const comfyPort = computer ? runnerFacts(account ? `acct:${account.id}` : "owner")?.port : undefined;
   return Response.json(
     {
       signedIn: owner || !!account,
       owner,
       publicSignup: open,
       ...(account && { account: { email: account.email } }),
-      ...(computer && { computer: true }),
+      ...(computer && { computer: true, ...(comfyPort && { comfyPort }) }),
     },
     { headers: { "Cache-Control": "no-store" } },
   );

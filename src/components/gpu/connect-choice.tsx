@@ -1,19 +1,20 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Globe, Loader2, Unplug } from "lucide-react";
+import { ChevronDown, Cpu, Globe, Loader2, TriangleAlert, Unplug } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { gib } from "@/components/gpu/comfy-finder";
 import { YourGpu } from "@/components/gpu/your-gpu";
 import { Button } from "@/components/ui/button";
 import { deviceLabel } from "@/lib/gpu/readiness";
+import { useViewer } from "@/lib/api";
 import { RELAY_WORDS } from "@/lib/relay";
 import { cn } from "@/lib/utils";
 import { restartComputerRunner, rememberComfy, rememberedComfy } from "./computer-runtime";
-import { ThisComputer, unsupportedWords } from "./this-computer";
+import { GuardFix, SettingFix, ThisComputer, unsupportedWords } from "./this-computer";
 import { lookOn, useComputerSupport } from "./use-local-comfy";
-import { useComputerState } from "./computer-runner";
+import { openFinder, useComputerState, type FindReason } from "./computer-runner";
 
 /**
  * "Connect your GPU" for an account: the ComfyUI on this computer first (the quickest way: nothing to install, runs
@@ -22,7 +23,7 @@ import { useComputerState } from "./computer-runner";
  */
 
 export type AccountGpuView =
-  | { mode: "computer"; online: boolean; device?: string; vramBytes?: number; version?: string; port?: number; cors?: "exact" | "any" | "other" }
+  | { mode: "computer"; online: boolean; comfy?: "down" | "no-setting"; device?: string; vramBytes?: number; version?: string; port?: number; cors?: "exact" | "any" | "other"; guard?: boolean }
   | { mode: "link"; url: string; hasToken: boolean };
 
 async function gpuCall<T>(method: string, body?: unknown): Promise<T> {
@@ -41,30 +42,110 @@ export async function connectThisComputer(): Promise<void> {
   await gpuCall("PUT", { mode: "computer" });
 }
 
+/** The owner's: ComfyUI runs on the computer the owner uses (Settings → Where ComfyUI runs). */
+async function connectOwnerComputer(): Promise<void> {
+  const res = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ comfyWhere: "computer" }) });
+  if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Request failed (${res.status})`);
+}
+
 const ABOUT =
-  "Fuobe's setting lets the Fuobe page use your ComfyUI. While it's on, other websites could also send work to your ComfyUI if your browser lets them reach apps on this computer. Chrome, Edge and Firefox ask you first. To turn it off, start ComfyUI the usual way.";
+  "Fuobe's setting lets the Fuobe page use your ComfyUI. On its own, it would also let other websites send work to your ComfyUI if your browser lets them reach apps on this computer (Chrome, Edge and Firefox ask you first). Fuobe's guard, a small file in ComfyUI's custom_nodes folder, turns them away. To turn the setting off, start ComfyUI the usual way.";
+
+/**
+ * What this browser knows of the ComfyUI on this computer, when one of its tabs runs the jobs (or would, once allowed):
+ * that tab's own look beats the server's word. Null when this browser doesn't run them (another computer has the jobs,
+ * or no tab of this browser holds them yet).
+ */
+function useHere() {
+  const local = useComputerState();
+  if (local.holder === "other") return { other: true as const };
+  const v = local.holder === "this" ? local.view : null;
+  if (!v || v.stopped || v.heldElsewhere) return null;
+  return { other: false as const, comfy: v.comfy, access: v.access, port: v.port, facts: v.facts };
+}
+
+const Act = ({ children, onClick }: { children: React.ReactNode; onClick: () => void }) => (
+  <button type="button" className="font-medium text-brand-text underline-offset-4 hover:underline" onClick={onClick}>
+    {children}
+  </button>
+);
+
+/** What is wrong with the ComfyUI on this computer, as this browser sees it, with its one fix; elsewhere the server's word. */
+function ComputerProblem({ here, server }: { here: ReturnType<typeof useHere>; server?: "down" | "no-setting" }) {
+  if (here?.other) return <p className="text-[12px] text-muted-foreground">Running in another Fuobe tab of this browser.</p>;
+  if (here) {
+    if (here.access === "ask")
+      return (
+        <p className="text-[12px] text-muted-foreground">
+          This browser hasn&apos;t been allowed to reach ComfyUI yet. <Act onClick={() => openFinder("browser")}>Connect</Act>
+        </p>
+      );
+    if (here.access === "blocked")
+      return (
+        <p className="text-[12px] text-muted-foreground">
+          Your browser is blocking Fuobe from reaching ComfyUI on this computer. <Act onClick={() => openFinder("browser")}>Show me how</Act>
+        </p>
+      );
+    if (here.comfy === "down")
+      return (
+        <p className="text-[12px] text-muted-foreground">
+          ComfyUI isn&apos;t running on this computer. Start it, and Fuobe connects by itself. <Act onClick={() => openFinder("find")}>Find my ComfyUI</Act>
+        </p>
+      );
+    if (here.comfy === "no-setting")
+      return (
+        <div className="mt-2">
+          <SettingFix key={here.port} port={here.port} back={false} again />
+        </div>
+      );
+    return null;
+  }
+  return (
+    <p className="text-[12px] text-muted-foreground">
+      {server === "down" ? "ComfyUI isn't running on your computer. Start it there." : server === "no-setting" ? "ComfyUI on your computer needs Fuobe's setting again. Open Fuobe there to see how." : RELAY_WORDS.noComputer}
+    </p>
+  );
+}
+
+/** "Other websites could also send work to your ComfyUI": the guard isn't in it yet. */
+function NoGuard({ port }: { port: number }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="flex items-start gap-1.5 text-[12px] text-amber-700 dark:text-amber-400">
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0" /> Other websites could also send work to your ComfyUI. Add Fuobe&apos;s guard to turn them away:
+      </p>
+      <GuardFix port={port} />
+    </div>
+  );
+}
 
 /** "This computer · RTX 5090 · port 8188 · Ready", another port, a link instead, Disconnect. */
 function ComputerStatus({ gpu, onLink }: { gpu: Extract<AccountGpuView, { mode: "computer" }>; onLink: () => void }) {
   const qc = useQueryClient();
-  const local = useComputerState();
+  const here = useHere();
   const [busy, setBusy] = useState(false);
   const [about, setAbout] = useState(false);
   const [port, setPort] = useState(String(rememberedComfy()?.port ?? gpu.port ?? 8188));
   const [note, setNote] = useState<string | null>(null);
-  const here = local.holder === "this" && local.view?.comfy === "ok";
-  const online = gpu.online || here;
-  const facts = [gpu.device && deviceLabel(gpu.device), gib(gpu.vramBytes), (rememberedComfy()?.port ?? gpu.port) && `port ${rememberedComfy()?.port ?? gpu.port}`].filter(Boolean).join(" · ");
+  const [fixPort, setFixPort] = useState<number | null>(null);
+  // A tab of this browser runs the jobs: what it sees now. Elsewhere (a phone, another computer has them): the server.
+  const mine = here && !here.other ? here : null;
+  const online = mine ? mine.comfy === "ok" && !mine.access : gpu.online;
+  const shownPort = mine?.port ?? rememberedComfy()?.port ?? gpu.port;
+  const facts = [gpu.device && deviceLabel(gpu.device), gib(gpu.vramBytes), shownPort && `port ${shownPort}`].filter(Boolean).join(" · ");
+  const guard = mine?.facts ? mine.facts.guard : gpu.guard;
   const lookAt = async () => {
     const p = Number(port);
     if (!Number.isInteger(p) || p < 1 || p > 65535) return setNote("Enter the port ComfyUI shows, like 8188.");
     setNote(null);
+    setFixPort(null);
     const l = await lookOn(p);
-    if (l.state === "found") {
-      rememberComfy(p);
-      restartComputerRunner();
-      setNote(`Found ComfyUI on port ${p}. Fuobe uses it from now on.`);
-    } else setNote(l.state === "unreadable" ? `Something answers on port ${p}, but it needs Fuobe's setting. Disconnect, then connect again to see how.` : `Nothing answered on port ${p}.`);
+    if (l.state === "none") return setNote(`Nothing answered on port ${p}.`);
+    // The tab that runs the jobs goes there; it needs the setting first, the fix shows here.
+    rememberComfy(p);
+    restartComputerRunner();
+    if (l.state === "found") setNote(`Found ComfyUI on port ${p}. Fuobe uses it from now on.`);
+    else setFixPort(p);
   };
   const remove = async () => {
     setBusy(true);
@@ -83,13 +164,14 @@ function ComputerStatus({ gpu, onLink }: { gpu: Extract<AccountGpuView, { mode: 
         <Cpu className="mt-0.5 size-4 shrink-0 text-brand-text" />
         <div className="min-w-0 flex-1">
           <p className="font-medium">This computer{online ? " · Ready" : ""}</p>
-          <p className="truncate text-[12px] text-muted-foreground">{online ? facts || "Your ComfyUI" : RELAY_WORDS.noComputer}</p>
+          {online ? <p className="truncate text-[12px] text-muted-foreground">{facts || "Your ComfyUI"}</p> : <ComputerProblem here={here} server={gpu.comfy} />}
         </div>
         <Button size="sm" variant="ghost" className="-my-1 h-7" onClick={() => void remove()} disabled={busy}>
           {busy ? <Loader2 className="animate-spin" /> : <Unplug />} Disconnect
         </Button>
       </div>
       {gpu.cors === "any" && <p className="text-[12px] text-amber-700 dark:text-amber-400">Your ComfyUI lets every website in. To keep it private, start it with --enable-cors-header {window.location.origin} instead.</p>}
+      {online && guard === false && gpu.cors !== "any" && shownPort && <NoGuard port={shownPort} />}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[12px] text-muted-foreground">ComfyUI on another port?</span>
         <input aria-label="ComfyUI's port" inputMode="numeric" className="h-8 w-20 rounded-md border bg-background px-2 text-[13px]" value={port} onChange={(e) => setPort(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void lookAt()} />
@@ -98,6 +180,7 @@ function ComputerStatus({ gpu, onLink }: { gpu: Extract<AccountGpuView, { mode: 
         </Button>
       </div>
       {note && <p className="text-[12px] text-muted-foreground">{note}</p>}
+      {fixPort && <SettingFix key={fixPort} port={fixPort} back={false} />}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
         <button type="button" className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={onLink}>
           Use a link instead
@@ -114,22 +197,34 @@ function ComputerStatus({ gpu, onLink }: { gpu: Extract<AccountGpuView, { mode: 
 export interface ConnectChoiceProps {
   /** Opened from a run: once connected, the run starts by itself. */
   fromRun?: boolean;
-  /** ComfyUI came back without the setting: find it again, and show the fix. */
-  refind?: boolean;
+  /** What that run makes (image, video, audio). */
+  kind?: string;
+  /**
+   * Opened by the note of the tab that runs the jobs: ComfyUI needs the setting again, or doesn't answer (both look at
+   * once), or this browser hasn't been allowed to reach it yet (the browser's question is explained first).
+   */
+  reason?: FindReason;
   onStart?: () => void;
   onNotNow?: () => void;
 }
 
-export function ConnectChoice({ fromRun, refind, onStart, onNotNow }: ConnectChoiceProps) {
+export function ConnectChoice({ fromRun, kind, reason, onStart, onNotNow }: ConnectChoiceProps) {
   const support = useComputerSupport();
-  const q = useAccountGpu();
+  // The owner (whose runs go to their own computer when Settings says so) has no account GPU: only the finder.
+  const owner = useViewer().data?.owner === true;
+  const q = useAccountGpu(!owner);
   const gpu = q.data?.gpu ?? null;
   // Once the person starts finding their ComfyUI, the flow stays on screen through to "connected".
-  const [flow, setFlow] = useState(!!refind);
+  const [flow, setFlow] = useState(!!reason);
   const [link, setLink] = useState(false);
+  if (owner) {
+    if (support !== "ok") return <p className="text-[13px] text-muted-foreground">{unsupportedWords(support)}</p>;
+    return <ThisComputer connect={connectOwnerComputer} fromRun={fromRun} kind={kind} onStart={onStart} onNotNow={onNotNow} autoLook={reason === "setting" || reason === "find"} again={reason === "setting"} />;
+  }
   if (q.isError) return <p className="text-[13px] text-muted-foreground">{q.error.message}</p>;
   if (!q.data) return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
   if (support !== "ok") {
+    // A phone, Safari, a plain-http page: only the link, and nothing looks for a ComfyUI on this device.
     return (
       <div className="space-y-4">
         <p className="rounded-xl bg-muted px-3 py-2.5 text-[13px] text-muted-foreground">{unsupportedWords(support)}</p>
@@ -158,9 +253,11 @@ export function ConnectChoice({ fromRun, refind, onStart, onNotNow }: ConnectCho
               await connectThisComputer();
             }}
             fromRun={fromRun}
+            kind={kind}
             onStart={onStart}
             onNotNow={onNotNow}
-            autoLook={refind}
+            autoLook={reason === "setting" || reason === "find"}
+            again={reason === "setting"}
           />
         </div>
       </div>
@@ -233,22 +330,24 @@ export function OwnerComfyWhere({ value, onChange }: { value: string; onChange: 
       ) : computer ? (
         <OwnerComputerLine />
       ) : null}
+      {computer && <p className="text-[12px] text-muted-foreground">Moving ComfyUI to this server stops the runs still going on your computer.</p>}
     </div>
   );
 }
 
 function OwnerComputerLine() {
-  const local = useComputerState();
-  const facts = local.view?.facts;
-  const ready = local.holder === "this" && local.view?.comfy === "ok";
+  const here = useHere();
+  const mine = here && !here.other ? here : null;
+  const facts = mine?.facts;
+  const ready = !!mine && mine.comfy === "ok" && !mine.access;
   return (
-    <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-      <Cpu className="size-4 shrink-0 text-brand-text" />
-      {ready
-        ? ["This computer", facts?.device && deviceLabel(facts.device), gib(facts?.vramBytes), `port ${rememberedComfy()?.port ?? 8188}`, "Ready"].filter(Boolean).join(" · ")
-        : local.holder === "other"
-          ? "This computer · running in another Fuobe tab"
-          : `This computer · ${RELAY_WORDS.noComputer}`}
-    </p>
+    <div className="flex items-start gap-2 text-[13px] text-muted-foreground">
+      <Cpu className="mt-0.5 size-4 shrink-0 text-brand-text" />
+      <div className="min-w-0 flex-1 space-y-1">
+        <p>{ready && mine ? ["This computer", facts?.device && deviceLabel(facts.device), gib(facts?.vramBytes), `port ${mine.port}`, "Ready"].filter(Boolean).join(" · ") : "This computer"}</p>
+        {!ready && <ComputerProblem here={here} />}
+        {ready && mine && facts?.guard === false && facts.cors !== "any" && <NoGuard port={mine.port} />}
+      </div>
+    </div>
   );
 }
