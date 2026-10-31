@@ -1377,16 +1377,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-earth-element": {
     "poster": "/previews/presets/effect-earth-element.jpg",
+    "video": "/previews/presets/effect-earth-element.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-earth-wave": {
     "poster": "/previews/presets/effect-earth-wave.jpg",
+    "video": "/previews/presets/effect-earth-wave.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-earth-zoom-out": {
@@ -1454,16 +1456,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-fire-element": {
     "poster": "/previews/presets/effect-fire-element.jpg",
+    "video": "/previews/presets/effect-fire-element.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-firelava": {
     "poster": "/previews/presets/effect-firelava.jpg",
+    "video": "/previews/presets/effect-firelava.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-firework": {
@@ -1482,9 +1486,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-flame-on": {
     "poster": "/previews/presets/effect-flame-on.jpg",
+    "video": "/previews/presets/effect-flame-on.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-flame-transition": {
@@ -1545,9 +1550,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-freezing": {
     "poster": "/previews/presets/effect-freezing.jpg",
+    "video": "/previews/presets/effect-freezing.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-frozen-in-motion": {
@@ -1686,9 +1692,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-head-off": {
     "poster": "/previews/presets/effect-head-off.jpg",
+    "video": "/previews/presets/effect-head-off.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-helicopter-escape": {
@@ -2277,9 +2284,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-sand-storm": {
     "poster": "/previews/presets/effect-sand-storm.jpg",
+    "video": "/previews/presets/effect-sand-storm.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-scrapbook-collage": {
@@ -2530,9 +2538,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-thunder-god": {
     "poster": "/previews/presets/effect-thunder-god.jpg",
+    "video": "/previews/presets/effect-thunder-god.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-tiny-planet": {
@@ -2629,16 +2638,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-water-bending": {
     "poster": "/previews/presets/effect-water-bending.jpg",
+    "video": "/previews/presets/effect-water-bending.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-water-element": {
     "poster": "/previews/presets/effect-water-element.jpg",
+    "video": "/previews/presets/effect-water-element.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-water-splash": {
@@ -2664,9 +2675,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-wind-to-face": {
     "poster": "/previews/presets/effect-wind-to-face.jpg",
+    "video": "/previews/presets/effect-wind-to-face.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-window": {
