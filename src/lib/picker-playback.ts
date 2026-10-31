@@ -5,8 +5,9 @@
  * being in view: a picker shows dozens of tiles at once.
  *
  * The picked tile plays unasked, so not with Save-Data or on 2G, and only once no other tile has played for
- * PICKED_RESUME (moving the pointer from tile to tile doesn't restart it each time). Nothing plays when the user
- * prefers reduced motion.
+ * PICKED_RESUME (moving the pointer from tile to tile doesn't restart it each time). When the pointer or focus
+ * leaves the picked tile itself, or a tile picked while it played, its clip just goes on. Nothing plays when the
+ * user prefers reduced motion.
  *
  * Pure apart from the environment it's given, so the rules are testable without a browser.
  */
@@ -59,11 +60,15 @@ export function createPickerPlayback(env: Pick<PlaybackEnv, "matches" | "delay" 
       }, HOVER_INTENT);
       pending = { id, cancel };
     },
-    /** Stop this one, if it's the one playing (or about to); the picked tile plays again after PICKED_RESUME. */
-    stop(id: string) {
+    /**
+     * Stop this one, if it's the one playing (or about to); the picked tile plays again after PICKED_RESUME. When this
+     * one is the picked tile (`picked`), it plays on as that, without a gap.
+     */
+    stop(id: string, picked = false) {
       if (pending?.id === id) cancelPending();
       if (asked === id) {
         asked = null;
+        if (picked) resting = true;
         notify();
       }
       if (asked === null && !pending && !resting && !resume)

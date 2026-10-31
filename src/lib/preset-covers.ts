@@ -8,18 +8,30 @@ import type { CameraMove } from "./catalog/cinema";
 import { PRESET_COVERS } from "./preset-covers.generated";
 
 export interface PresetCover {
-  /** The still (a clip's first frame), shown at rest. */
+  /** The still (a clip's first frame), as the gallery card shows it. */
   poster: string;
+  /** The poster's small copy (320 px wide), which a picker's tile shows at rest. */
+  thumb: string;
   /** The short muted clip, played only while the tile is hovered, focused or picked. */
   video?: string;
 }
 
+/** Where pnpm eval:covers puts a poster's small copy: thumbs/ next to it (scripts/eval/lib/covers.mjs, thumbOf). */
+export const thumbOf = (poster: string) => poster.replace(/\/([^/]+)$/, "/thumbs/$1");
+
+/**
+ * Presets without a cover of their own that show another one, of the same shot: the 3D Rotation motion spins the
+ * subject in place like a product on a turntable, which is the 3D Rotation app's cover.
+ */
+const SAME_SHOT: Record<string, string> = { "motion-3d-rotation": "app-3d-rotation" };
+
 export function presetCover(id: string | undefined): PresetCover | undefined {
-  if (!id || !Object.hasOwn(PRESET_COVERS, id)) return undefined;
+  if (!id) return undefined;
+  if (!Object.hasOwn(PRESET_COVERS, id)) return Object.hasOwn(SAME_SHOT, id) ? presetCover(SAME_SHOT[id]) : undefined;
   const c = PRESET_COVERS[id];
-  if (typeof c === "object") return c;
   const base = `/previews/presets/${id}`;
-  return c ? { poster: `${base}.jpg`, video: `${base}.mp4` } : { poster: `${base}.jpg` };
+  const { poster, video } = typeof c === "object" ? c : { poster: `${base}.jpg`, video: c ? `${base}.mp4` : undefined };
+  return { poster, thumb: thumbOf(poster), ...(video && { video }) };
 }
 
 /**

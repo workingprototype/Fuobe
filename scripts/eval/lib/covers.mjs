@@ -22,6 +22,11 @@ const CLIP_SECONDS = 4;
 const CLIP_FPS = 24;
 /** Frames at a clip's end crossfaded into its first ones: the cards play clips with `loop`, and this hides the jump. */
 const LOOP_FADE = 6;
+/** Width of a poster's small copy (px), which the pickers' tiles show: enough for a 136 px tile on a 2x screen. */
+const THUMB_PX = 320;
+
+/** Where a poster's small copy goes: thumbs/ next to it (the pickers read it there: thumbOf, src/lib/preset-covers.ts). */
+export const thumbOf = (poster) => poster.replace(/\/([^/]+)$/, "/thumbs/$1");
 
 const HEADER = `/**
  * Real preset covers: renders from measured runs of the evaluation harness (scripts/eval, pnpm eval:covers),
@@ -68,7 +73,8 @@ export function readManifest(file = MANIFEST_FILE) {
 const SLIM_HEADER = `/**
  * Which presets have a real cover, for the pickers in the browser (read through presetCover, preset-covers.ts):
  * 1 for a clip at /previews/presets/<id>.mp4 with its poster at <id>.jpg, 0 for a still there, or the files of a
- * cover kept elsewhere. The slim side of preset-previews.generated.ts, whose provenance stays on the server.
+ * cover kept elsewhere. Each poster has a small copy for the pickers' tiles in thumbs/ next to it. The slim side
+ * of preset-previews.generated.ts, whose provenance stays on the server.
  * Generated with it by pnpm eval:covers: run it again rather than editing.
  */
 export type PresetCoverEntry = 0 | 1 | { poster: string; video?: string };
@@ -89,6 +95,29 @@ export function writeManifest(entries, file = MANIFEST_FILE) {
   fs.writeFileSync(file, `${HEADER}${JSON.stringify(sorted, null, 2)};\n`);
   const slim = Object.fromEntries(Object.entries(sorted).map(([id, e]) => [id, slimEntry(id, e)]));
   fs.writeFileSync(path.join(path.dirname(file), "preset-covers.generated.ts"), `${SLIM_HEADER}${JSON.stringify(slim, null, 2)};\n`);
+}
+
+/** A /previews URL as a file in publicDir; null for anything else. */
+function previewFile(url, publicDir) {
+  const parts = typeof url === "string" ? url.split("/").filter(Boolean) : [];
+  return parts[0] === "previews" && !parts.includes("..") ? path.join(publicDir, ...parts) : null;
+}
+
+/**
+ * Make the small copy of every listed poster that the pickers' tiles show (thumbOf: THUMB_PX wide, about 5 to 12 KB
+ * where the poster is 40 to 70), where it's missing or older than its poster. Returns the files it made.
+ */
+export function writeThumbs(entries, publicDir = path.dirname(COVERS_DIR)) {
+  const made = [];
+  for (const e of Object.values(entries)) {
+    const poster = previewFile(e.poster, publicDir);
+    const thumb = previewFile(typeof e.poster === "string" && thumbOf(e.poster), publicDir);
+    if (!poster || !thumb || !fs.existsSync(poster) || newer(thumb, poster)) continue;
+    fs.mkdirSync(path.dirname(thumb), { recursive: true });
+    run(["-i", poster, "-vf", `scale='min(${THUMB_PX},iw)':-2,format=yuvj420p`, "-frames:v", "1", "-q:v", "5", thumb]);
+    made.push(thumb);
+  }
+  return made;
 }
 
 /** The preset a case's cover belongs to: a DoP preset id, a Soul look's Fuobe id, else the case id. */
@@ -264,18 +293,21 @@ export function makeCovers(dir, opts = {}) {
     dropReplaced(before, manifest, publicDir);
     result.covers.push({ key: p.key, caseId: p.caseId, job: p.row.id, metric: p.metric, score: p.score, ...(p.licence && { licence: p.licence }), ...manifest[p.key] });
   }
-  if (picked.length) writeManifest(manifest, opts.manifest);
+  if (picked.length) {
+    writeThumbs(manifest, publicDir);
+    writeManifest(manifest, opts.manifest);
+  }
   return result;
 }
 
 /** Remove a replaced entry's files that no entry names any more (its cover now lives in another folder). */
 function dropReplaced(old, manifest, publicDir) {
   if (!old) return;
-  const named = new Set(Object.values(manifest).flatMap((e) => [e.poster, e.video].filter(Boolean)));
-  for (const url of [old.poster, old.video]) {
-    const parts = typeof url === "string" ? url.split("/").filter(Boolean) : [];
-    if (named.has(url) || parts[0] !== "previews" || parts.includes("..")) continue;
-    fs.rmSync(path.join(publicDir, ...parts), { force: true });
+  const files = (e) => [e.poster, e.video, typeof e.poster === "string" && thumbOf(e.poster)].filter(Boolean);
+  const named = new Set(Object.values(manifest).flatMap(files));
+  for (const url of files(old)) {
+    const file = previewFile(url, publicDir);
+    if (!named.has(url) && file) fs.rmSync(file, { force: true });
   }
 }
 
@@ -370,6 +402,9 @@ export function coversFromMasters(dir, opts) {
     }
     result.covers.push({ key: p.id, kind: p.kind, from: p.src, ...(kept && { kept: true }), ...entry });
   }
-  if (ours.length && !opts.dryRun) writeManifest(manifest, opts.manifest);
+  if (ours.length && !opts.dryRun) {
+    writeThumbs(manifest, publicDir);
+    writeManifest(manifest, opts.manifest);
+  }
   return result;
 }

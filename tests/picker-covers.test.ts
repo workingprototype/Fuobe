@@ -1,21 +1,29 @@
+import fs from "node:fs";
+import path from "node:path";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MoveList } from "@/components/cinema/camera-moves";
+import { MoveList } from "@/components/cinema/move-list";
 import { CoverTile } from "@/components/cover-tile";
-import { PresetGrid } from "@/components/studio/preset-chips";
+import { CatalogProvider } from "@/components/studio/catalog";
+import { ClearableChip } from "@/components/studio/chip";
+import { MixChip, PresetChip, PresetGrid } from "@/components/studio/preset-chips";
+import type { StudioConfig } from "@/components/studio/studio-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { EFFECTS, MOTIONS } from "@/lib/catalog";
+import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
 import { CAMERA_MOVES } from "@/lib/catalog/cinema";
 import type { Preset } from "@/lib/catalog/types";
 import { createPickerPlayback, PICKED_RESUME } from "@/lib/picker-playback";
-import { moveCover, presetCover } from "@/lib/preset-covers";
+import { moveCover, presetCover, thumbOf } from "@/lib/preset-covers";
+import { PRESET_COVERS } from "@/lib/preset-covers.generated";
 import { PRESET_PREVIEWS } from "@/lib/preset-previews.generated";
 import { HOVER_INTENT } from "@/lib/preview-playback";
+import type { StudioCatalog } from "@/lib/studio-catalog";
 
 /*
  * The pickers show the same real covers as the galleries (the camera motion and Mix grids, Cinema Studio's moves),
- * rendered on the server as they first paint: posters only, every clip waits for a hover, focus or pick.
+ * rendered on the server as they first paint: small posters only, every clip waits for a hover, focus or pick.
  */
 
 const grid = (list: Preset[], value?: string) => renderToStaticMarkup(createElement(PresetGrid, { list, value, noneLabel: "None", onPick: () => {} }));
@@ -25,23 +33,24 @@ const tiles = (html: string) =>
     .split("<button")
     .slice(1)
     .filter((b) => !b.includes('role="tab"'));
-const covered = (list: Preset[]) => list.filter((p) => PRESET_PREVIEWS[p.id]);
+const covered = (list: Preset[]) => list.filter((p) => presetCover(p.id));
 const count = (html: string, s: string) => html.split(s).length - 1;
 const mixable = [...MOTIONS, ...EFFECTS].filter((p) => !p.inputs.some((i) => i.key === "endImage"));
+const motion = (id: string) => MOTIONS.find((p) => p.id === id)!;
 
 describe("the camera motion picker", () => {
   const html = grid(MOTIONS);
   const all = tiles(html);
   const tile = (p: Preset) => all.find((t) => t.includes(`>${p.name.replaceAll("&", "&amp;").replaceAll("'", "&#x27;")}</span>`))!;
 
-  it("shows every motion's cover where it has one, as a lazy poster; the others and None keep their drawn tile", () => {
+  it("shows every motion's cover where it has one, as a small lazy poster; the others and None keep their drawn tile", () => {
     expect(all).toHaveLength(MOTIONS.length + 1);
     for (const p of MOTIONS) {
       const t = tile(p);
       expect(t, p.id).toBeDefined();
-      const cover = PRESET_PREVIEWS[p.id];
+      const cover = presetCover(p.id);
       if (cover) {
-        expect(t, p.id).toContain(`src="${cover.poster}"`);
+        expect(t, p.id).toContain(`src="${cover.thumb}"`);
         expect(t, p.id).toMatch(/<img[^>]*loading="lazy"[^>]*decoding="async"/);
         expect(t, p.id).not.toContain("linear-gradient");
       } else {
@@ -58,8 +67,15 @@ describe("the camera motion picker", () => {
   });
 
   it("never borrows another move's cover: Dolly Zoom Out isn't shown with Dolly Zoom In's opposite move", () => {
-    const out = MOTIONS.find((p) => p.id === "motion-dolly-zoom-out")!;
-    expect(tile(out)).not.toContain("motion-dolly-zoom-in");
+    expect(tile(motion("motion-dolly-zoom-out"))).not.toContain("motion-dolly-zoom-in");
+    expect(presetCover("motion-dolly-zoom-out")).toBeUndefined();
+  });
+
+  it("shows 3D Rotation with the 3D Rotation app's cover, the same turntable shot", () => {
+    const t = tile(motion("motion-3d-rotation"));
+    expect(t).toContain('src="/previews/presets/thumbs/app-3d-rotation.jpg"');
+    expect(t).not.toContain("linear-gradient");
+    expect(presetCover("motion-3d-rotation")).toEqual(presetCover("app-3d-rotation"));
   });
 
   it("loads no clip until one is hovered, focused or picked", () => {
@@ -68,43 +84,81 @@ describe("the camera motion picker", () => {
   });
 
   it("marks the picked motion on its picture, and only that one", () => {
-    const picked = covered(MOTIONS).find((p) => PRESET_PREVIEWS[p.id].video)!;
+    const picked = covered(MOTIONS).find((p) => presetCover(p.id)!.video)!;
     const html = grid(MOTIONS, picked.id);
     const marked = tiles(html).filter((t) => t.includes('aria-pressed="true"'));
     expect(marked).toHaveLength(1);
-    expect(marked[0]).toContain(`src="${PRESET_PREVIEWS[picked.id].poster}"`);
+    expect(marked[0]).toContain(`src="${presetCover(picked.id)!.thumb}"`);
     expect(marked[0]).toContain('data-picked=""');
     expect(count(html, "data-picked")).toBe(1);
   });
 });
 
 describe("the Mix picker", () => {
-  it("shows the cover of every motion and effect that has one, posters only", () => {
+  it("shows the cover of every motion and effect that has one, small posters only", () => {
     const html = grid(mixable);
-    for (const p of covered(mixable)) expect(html, p.id).toContain(`src="${PRESET_PREVIEWS[p.id].poster}"`);
+    for (const p of covered(mixable)) expect(html, p.id).toContain(`src="${presetCover(p.id)!.thumb}"`);
     expect(count(html, "<img")).toBe(covered(mixable).length);
     expect(count(html, "linear-gradient")).toBe(mixable.length - covered(mixable).length);
     expect(html).not.toContain("<video");
   });
 });
 
+/** A JPEG's width and height, from its first frame header. */
+function jpegSize(buf: Buffer): { width: number; height: number } {
+  for (let i = 2; i < buf.length; ) {
+    const marker = buf[i + 1];
+    const len = buf.readUInt16BE(i + 2);
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+    i += 2 + len;
+  }
+  throw new Error("no frame header");
+}
+
+describe("the pickers' small posters", () => {
+  const pub = path.join(process.cwd(), "public");
+  const file = (url: string) => path.join(pub, ...url.split("/").filter(Boolean));
+
+  it("are each poster at most 320 px wide, in thumbs/ next to it, a fraction of its size", () => {
+    let total = 0;
+    for (const id of Object.keys(PRESET_COVERS)) {
+      const cover = presetCover(id)!;
+      expect(cover.thumb, id).toBe(thumbOf(cover.poster));
+      expect(cover.thumb, id).toBe(cover.poster.replace(/\/([^/]+)$/, "/thumbs/$1"));
+      const thumb = fs.readFileSync(file(cover.thumb));
+      const { width } = jpegSize(thumb);
+      expect(width, id).toBeLessThanOrEqual(320);
+      expect(width, id).toBeGreaterThanOrEqual(Math.min(320, jpegSize(fs.readFileSync(file(cover.poster))).width));
+      expect(thumb.length, id).toBeLessThan(fs.statSync(file(cover.poster)).size);
+      total += thumb.length;
+    }
+    // About 12 KB each where the posters are 40 to 70: a tab of 16 tiles is about 200 KB, not 1.3 MB.
+    expect(total / Object.keys(PRESET_COVERS).length).toBeLessThan(16_000);
+  });
+});
+
 describe("the cover tile", () => {
-  const clip = { poster: "/previews/presets/motion-zoom-in.jpg", video: "/previews/presets/motion-zoom-in.mp4" };
+  const clip = { poster: "/previews/presets/motion-zoom-in.jpg", thumb: "/previews/presets/thumbs/motion-zoom-in.jpg", video: "/previews/presets/motion-zoom-in.mp4" };
   const tile = (props: Partial<React.ComponentProps<typeof CoverTile>>) =>
     renderToStaticMarkup(createElement(CoverTile, { cover: clip, playing: false, className: "aspect-video", ...props }));
 
-  it("shows the poster at rest, lazily, filling its box without shifting anything", () => {
+  it("shows the small poster at rest, lazily, filling its box without shifting anything", () => {
     const html = tile({});
     expect(html).toMatch(/<span class="[^"]*relative[^"]*aspect-video[^"]*"/);
-    expect(html).toMatch(/<img [^>]*src="\/previews\/presets\/motion-zoom-in\.jpg"/);
+    expect(html).toMatch(/<img [^>]*src="\/previews\/presets\/thumbs\/motion-zoom-in\.jpg"/);
     expect(html).toMatch(/loading="lazy"/);
     expect(html).toMatch(/class="absolute inset-0 size-full object-cover"/);
     expect(html).not.toContain("<video");
+    expect(html).not.toContain(clip.poster);
   });
 
-  it("adds the clip only while it plays, and never for a cover that is a still", () => {
-    expect(tile({ playing: true })).toMatch(/<video [^>]*src="\/previews\/presets\/motion-zoom-in\.mp4"/);
-    expect(tile({ playing: true, cover: { poster: clip.poster } })).not.toContain("<video");
+  it("adds the clip only while it plays, over the same small poster, and never for a cover that is a still", () => {
+    // The galleries' clip player (PresetPreview's Clip), which sets its source once mounted in the browser.
+    const playing = tile({ playing: true });
+    expect(count(playing, "<video")).toBe(1);
+    expect(playing).toMatch(/<img [^>]*src="\/previews\/presets\/thumbs\/motion-zoom-in\.jpg"[^>]*>(<!-- -->)?<video /);
+    expect(playing).not.toContain(clip.poster);
+    expect(tile({ playing: true, cover: { poster: clip.poster, thumb: clip.thumb } })).not.toContain("<video");
   });
 
   it("draws the fallback when there is no cover", () => {
@@ -114,10 +168,54 @@ describe("the cover tile", () => {
     expect(html).not.toContain("<video");
   });
 
-  it("marks a picked tile with a check, or with its place in an order", () => {
+  it("marks a picked tile with a check, or with its place in an order, which a screen reader reads", () => {
     expect(tile({})).not.toContain("data-picked");
-    expect(tile({ picked: true })).toMatch(/data-picked=""[^>]*>.*<svg/);
-    expect(tile({ picked: 2 })).toMatch(/data-picked=""[^>]*>2</);
+    expect(tile({ picked: true })).toMatch(/data-picked=""[^>]*aria-hidden="true"[^>]*>.*<svg/);
+    expect(tile({ picked: 2 })).toMatch(/<span data-picked=""(?![^>]*aria-hidden)[^>]*>2</);
+  });
+});
+
+describe("the camera motion and Mix chips", () => {
+  const config = (preset: Preset) => ({ feature: "video", kind: "video", ops: [], slots: [], preset }) as unknown as StudioConfig;
+  const render = (preset: Preset, chip: React.ReactElement) =>
+    renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(CatalogProvider, { catalog: { models: [], lookup: [] } as unknown as StudioCatalog, config: config(preset) } as React.ComponentProps<typeof CatalogProvider>, chip),
+      ),
+    );
+  /** The chip itself (the popover's trigger), not its clear button. */
+  const trigger = (html: string) => html.split("<button")[1];
+  const bare = motion("motion-dolly-zoom-out");
+  const zoom = motion("motion-zoom-in");
+
+  it("show the picked motion's small poster in place of its icon, and the icon when it has no cover", () => {
+    const withCover = trigger(render(zoom, createElement(PresetChip, { type: "motion", value: zoom.id, onChange: () => {} })));
+    expect(withCover).toContain(`src="${presetCover(zoom.id)!.thumb}"`);
+    expect(withCover).not.toContain("<svg");
+    expect(withCover).toContain(">Zoom In</button>");
+    const without = trigger(render(bare, createElement(PresetChip, { type: "motion", value: bare.id, onChange: () => {} })));
+    expect(without).not.toContain("<img");
+    expect(without).toContain("<svg");
+  });
+
+  it("show the mixed preset's small poster in place of the Mix icon", () => {
+    const mix = (second: Preset) =>
+      trigger(render(second, createElement(MixChip, { primary: motion("motion-crash-zoom-in"), strength: 0.8, mix: { presetId: second.id, strength: 0.6 }, onChange: () => {} })));
+    expect(mix(zoom)).toContain(`src="${presetCover(zoom.id)!.thumb}"`);
+    expect(mix(zoom)).not.toContain("<svg");
+    expect(mix(bare)).not.toContain("<img");
+    expect(mix(bare)).toContain("lucide-shuffle");
+  });
+
+  it("keep the chip where it is when a pick makes it clearable, so an open Mix doesn't remount and restart the clip", () => {
+    // React keeps a subtree only while the elements above it stay the same: the chip sits in the same wrapper,
+    // first, with or without its clear button.
+    const chip = (active: boolean) =>
+      renderToStaticMarkup(createElement(ClearableChip, { active, onClear: () => {}, clearLabel: "Remove the mix" } as React.ComponentProps<typeof ClearableChip>, createElement("i")));
+    expect(chip(false)).toMatch(/^<span class="contents"><i><\/i><\/span>$/);
+    expect(chip(true)).toMatch(/^<span class="[^"]*inline-flex[^"]*"><i><\/i><button [^>]*aria-label="Remove the mix"/);
   });
 });
 
@@ -132,18 +230,27 @@ describe("Cinema Studio's camera moves", () => {
     expect(CAMERA_MOVES.filter((m) => moveCover(m)).length).toBeGreaterThan(30);
   });
 
-  it("list them with their poster, and the order number on it once picked", () => {
+  it("list them with their small poster, and the order number on it once picked, read out with the move", () => {
     const html = renderToStaticMarkup(createElement(TooltipProvider, null, createElement(MoveList, { engine: "open", selected: ["dolly-in"], onPick: () => {} })));
     const rows = html.split('cmdk-item=""').slice(1);
     expect(rows).toHaveLength(CAMERA_MOVES.length);
     for (const m of CAMERA_MOVES) {
       const row = rows.find((r) => r.includes(`>${m.name}<`))!;
       const cover = moveCover(m);
-      if (cover) expect(row, m.slug).toContain(`src="${cover.poster}"`);
+      if (cover) expect(row, m.slug).toContain(`src="${cover.thumb}"`);
       else expect(row, m.slug).not.toContain("<img");
     }
     expect(html).not.toContain("<video");
-    expect(rows.find((r) => r.includes(">Dolly In<"))).toMatch(/data-picked=""[^>]*>1</);
+    const dolly = rows.find((r) => r.includes(">Dolly In<"))!;
+    // The number is in no aria-hidden element: the row's name starts with it, as before the covers.
+    expect(dolly).toMatch(/<span data-picked=""(?![^>]*aria-hidden)[^>]*>1<\/span>/);
+  });
+});
+
+describe("which covers the pickers borrow", () => {
+  it("only 3D Rotation's, from the app that films the same turntable shot", () => {
+    const borrowed = [...APPS, ...MOTIONS, ...EFFECTS].filter((p) => !PRESET_PREVIEWS[p.id] && presetCover(p.id)).map((p) => p.id);
+    expect(borrowed).toEqual(["motion-3d-rotation"]);
   });
 });
 
@@ -207,15 +314,34 @@ describe("which picker tile plays", () => {
     expect(p.plays("picked", true)).toBe(true);
   });
 
-  it("keeps the picked tile playing while the pointer rests on it", () => {
+  it("keeps the picked tile's clip going while the pointer rests on it and after it leaves: no gap, no restart", () => {
     const { env, advance } = fakeEnv();
     const p = createPickerPlayback(env);
     p.play("picked");
     advance(HOVER_INTENT);
     expect(p.plays("picked", true)).toBe(true);
-    p.stop("picked");
+    // The pointer (or keyboard focus) leaves the picked tile: it plays on at once, so its clip isn't remounted.
+    p.stop("picked", true);
+    expect(p.plays("picked", true)).toBe(true);
     advance(PICKED_RESUME);
     expect(p.plays("picked", true)).toBe(true);
+    // Another tile still takes over once the pointer rests on it, and gives the picked one back after.
+    p.play("other");
+    advance(HOVER_INTENT);
+    expect([p.plays("picked", true), p.plays("other")]).toEqual([false, true]);
+    p.stop("other");
+    advance(PICKED_RESUME);
+    expect(p.plays("picked", true)).toBe(true);
+  });
+
+  it("keeps a tile playing that was picked while it played, when the pointer goes on to the strength slider", () => {
+    const { env, advance } = fakeEnv();
+    const p = createPickerPlayback(env);
+    p.play("a");
+    advance(HOVER_INTENT);
+    // Clicked: "a" is the picked tile now (Mix stays open after a pick), and the pointer leaves it.
+    p.stop("a", true);
+    expect(p.plays("a", true)).toBe(true);
   });
 
   it("plays one tile at a time, the last one asked for", () => {

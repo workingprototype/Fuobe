@@ -459,7 +459,8 @@ first 4 seconds, muted, at most 512 px, with its first frame as the poster. They
 DoP preset, `effect-thunder-god`) or look id (`v1-general`). The gallery cards play a listed cover
 instead of their procedural preview. Next to it, `src/lib/preset-covers.generated.ts` says only which
 presets have a cover and a clip: the pickers (camera motions, Mix, Cinema Studio's moves) read that in
-the browser.
+the browser. Their tiles show each poster's small copy (320 px wide) from `thumbs/` next to it, which
+every run makes where it's missing or older than its poster.
 
 - `--variant catalog` takes that variant's renders for every case instead, such as what ships today.
 - `--dry-run` lists what it would pick.

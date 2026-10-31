@@ -13,8 +13,8 @@ const playback = createPickerPlayback(browserPlaybackEnv);
 
 /**
  * Whether a picker's tile plays its clip, and the handlers to spread on it: hovered with a mouse or focused from the
- * keyboard, after a short rest; `highlighted`, a list's active row (where the device can hover: a list highlights its
- * first row by itself, which on a phone would play unasked); else, while none of those plays, `picked`.
+ * keyboard, after a short rest; `highlighted`, a list's row the arrow keys moved to (where the device can hover);
+ * else, while none of those plays, `picked`. The pointer or focus leaving the picked tile doesn't stop its clip.
  */
 export function usePickerPlayback(id: string, { picked = false, highlighted = false } = {}) {
   const playing = useSyncExternalStore(
@@ -32,10 +32,10 @@ export function usePickerPlayback(id: string, { picked = false, highlighted = fa
     playing,
     handlers: {
       onPointerEnter: (e: React.PointerEvent) => e.pointerType === "mouse" && playback.play(id),
-      onPointerLeave: (e: React.PointerEvent) => e.pointerType === "mouse" && playback.stop(id),
+      onPointerLeave: (e: React.PointerEvent) => e.pointerType === "mouse" && playback.stop(id, picked),
       // Keyboard focus only: a tap (or click) focuses the tile too.
       onFocus: (e: React.FocusEvent) => e.currentTarget.matches(":focus-visible") && playback.play(id),
-      onBlur: () => playback.stop(id),
+      onBlur: () => playback.stop(id, picked),
     },
   };
 }
@@ -75,10 +75,11 @@ function whenNear(el: Element, box: Element, onNear: () => void): () => void {
 
 /**
  * A preset's picture in a picker (the camera motion and Mix grids, Cinema Studio's moves, the chips): its real
- * cover, the one its gallery card shows (presetCover), else `fallback`, the drawn tile. The poster loads lazily and
- * the clip goes over it only while `playing` (usePickerPlayback: hovered, keyboard-focused, highlighted or picked,
- * one at a time). `className` gives the box its size or aspect ratio, so nothing shifts while the poster loads. A
- * picked tile is marked on the picture: a check, or its place in an order.
+ * cover, the one its gallery card shows (presetCover), else `fallback`, the drawn tile. The poster's small copy
+ * loads lazily and the clip goes over it only while `playing` (usePickerPlayback: hovered, keyboard-focused,
+ * highlighted or picked, one at a time). `className` gives the box its size or aspect ratio, so nothing shifts while
+ * the poster loads. A picked tile is marked on the picture: a check (the tile says it's picked, aria-pressed), or
+ * its place in an order, which a screen reader reads with the tile's name.
  */
 export function CoverTile({
   cover,
@@ -106,20 +107,13 @@ export function CoverTile({
   }, [near, hasCover, box]);
   return (
     <span ref={ref} className={cn("relative block shrink-0 overflow-hidden bg-muted", className)}>
-      {cover
-        ? near && (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={cover.poster} alt="" draggable={false} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" aria-hidden />
-              {/* A cover is drawn as rendered: the scene is only for procedural previews. */}
-              {cover.video && playing && <PresetPreview preview={{ ...cover, scene: "portrait" }} hue={0} playing />}
-            </>
-          )
-        : fallback}
+      {/* The galleries' cover: the lazy poster (here its small copy), and the clip over it only while it plays. The
+          scene is only for procedural previews. */}
+      {cover ? near && <PresetPreview preview={{ poster: cover.thumb, video: cover.video, scene: "portrait" }} hue={0} playing={playing} /> : fallback}
       {picked !== undefined && picked !== false && (
         <span
           data-picked=""
-          aria-hidden
+          aria-hidden={picked === true || undefined}
           className="absolute top-1 right-1 grid size-4 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground shadow-sm ring-1 ring-black/15"
         >
           {picked === true ? <Check className="size-3" strokeWidth={3} /> : picked}

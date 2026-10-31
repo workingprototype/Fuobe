@@ -90,12 +90,21 @@ describe("covers from masters", () => {
     expect(v.streams.map((x: { codec_type: string }) => x.codec_type)).toEqual(["video"]);
     expect(Math.max(v.streams[0].width, v.streams[0].height)).toBeLessThanOrEqual(512);
     expect(Number(v.format.duration)).toBeLessThanOrEqual(4.1);
+    // Each poster's small copy for the pickers' tiles, in thumbs/ next to it: at most 320 px wide, a fraction of the poster.
+    for (const id of ["app-headshot-generator", "effect-set-on-fire"]) {
+      const t = probe(path.join("thumbs", `${id}.jpg`)).streams[0];
+      expect(t.width, id).toBe(Math.min(320, probe(`${id}.jpg`).streams[0].width));
+      expect(fs.statSync(path.join(out, "thumbs", `${id}.jpg`)).size, id).toBeLessThan(fs.statSync(path.join(out, `${id}.jpg`)).size);
+    }
+    const thumbTime = () => fs.statSync(path.join(out, "thumbs", "effect-set-on-fire.jpg")).mtimeMs;
+    const thumbAt = thumbTime();
 
     // Again: nothing changed, so nothing is encoded; the manifest is the same.
     const before = fs.readFileSync(manifest, "utf8");
     const again = coversFromMasters(masters, { ...PROVENANCE, publicDir: pub, manifest });
     expect(again.covers.every((c) => c.kept)).toBe(true);
     expect(fs.readFileSync(manifest, "utf8")).toBe(before);
+    expect(thumbTime()).toBe(thumbAt);
 
     // A preset whose clip goes away becomes a still cover and loses its old clip; --only touches just that id.
     fs.rmSync(path.join(masters, "effect-set-on-fire", "clip.mp4"));
@@ -105,11 +114,13 @@ describe("covers from masters", () => {
     expect(readManifest(manifest)["effect-set-on-fire"]).toEqual({ poster: "/previews/presets/effect-set-on-fire.jpg", run: "comfyui-previews-test", engine: "comfyui", model: "ideogram4", variant: "lean-json" });
     expect(fs.existsSync(path.join(out, "effect-set-on-fire.mp4"))).toBe(false);
     expect(readManifest(manifest)["effect-thunder-god"]).toEqual(measured);
+    // Its new poster gets a new small copy.
+    expect(thumbTime()).toBeGreaterThan(thumbAt);
 
     // A master for a preset whose cover a measured run made: kept, and listed, unless --replace.
     const dop = path.join(pub, "previews", "dop");
-    fs.mkdirSync(dop, { recursive: true });
-    for (const ext of ["jpg", "mp4"]) fs.writeFileSync(path.join(dop, `effect-thunder-god.${ext}`), "x");
+    fs.mkdirSync(path.join(dop, "thumbs"), { recursive: true });
+    for (const f of ["effect-thunder-god.jpg", "effect-thunder-god.mp4", "thumbs/effect-thunder-god.jpg"]) fs.writeFileSync(path.join(dop, f), "x");
     master(masters, "effect-thunder-god", { "start.png": still() });
     const held = coversFromMasters(masters, { ...PROVENANCE, publicDir: pub, manifest, only: ["effect-thunder-god"] });
     expect(held.covers).toEqual([]);
@@ -118,7 +129,9 @@ describe("covers from masters", () => {
     const replaced = coversFromMasters(masters, { ...PROVENANCE, publicDir: pub, manifest, only: ["effect-thunder-god"], replace: true });
     expect(replaced.covers.map((c) => c.key)).toEqual(["effect-thunder-god"]);
     expect(readManifest(manifest)["effect-thunder-god"]).toMatchObject({ poster: "/previews/presets/effect-thunder-god.jpg", run: "comfyui-previews-test" });
-    expect(fs.readdirSync(dop)).toEqual([]);
+    // The replaced cover's files go, its poster's small copy too.
+    expect(fs.readdirSync(dop, { recursive: true, encoding: "utf8" }).filter((f) => /\.(jpg|mp4)$/.test(f))).toEqual([]);
+    expect(fs.existsSync(path.join(out, "thumbs", "effect-thunder-god.jpg"))).toBe(true);
   });
 
   it("reads a missing manifest as empty, and stops at one it can't read rather than write over it", () => {
