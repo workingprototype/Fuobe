@@ -1,3 +1,4 @@
+import { gateAsProxy, readFormWithin } from "@/server/direct-gate";
 import { saveFile } from "@/server/storage";
 
 const MAX_BYTES = 64 * 1024 * 1024;
@@ -9,7 +10,11 @@ const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
  * stays out of the Library's Uploads and the pickers; projects that use it keep it (ASSET_REFS).
  */
 export async function POST(request: Request) {
-  const form = await request.formData().catch(() => null);
+  // The proxy doesn't run on this route (a big form): its checks run here.
+  const denied = gateAsProxy(request);
+  if (denied) return denied;
+  const form = await readFormWithin(request, MAX_BYTES);
+  if (form === "too-big") return Response.json({ error: "That render is too large (64 MB max)" }, { status: 413 });
   const file = form?.get("file");
   if (!(file instanceof File)) return Response.json({ error: "No file" }, { status: 400 });
   if (file.size > MAX_BYTES) return Response.json({ error: "That render is too large (64 MB max)" }, { status: 413 });

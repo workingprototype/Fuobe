@@ -52,6 +52,13 @@ beforeAll(async () => {
   b = auth.createAccount("review-b@example.com", "long enough").id;
   auth.setAccountGpu(a, { url: fake.url });
   cookie = `${auth.SESSION_COOKIE}=${auth.createSession(a).value}`;
+  // Accounts past their first week, so their files may reach 3 GB (a new account keeps 1 GB).
+  const authFile = path.join(dir, "auth.json");
+  const data = JSON.parse(fs.readFileSync(authFile, "utf8")) as { accounts: { createdAt: number }[] };
+  for (const x of data.accounts) x.createdAt -= 8 * 24 * 60 * 60_000;
+  fs.writeFileSync(authFile, JSON.stringify(data));
+  // A new modified time, so the auth module reads the file again (it caches by that time).
+  fs.utimesSync(authFile, new Date(), new Date(Date.now() + 5000));
 });
 afterAll(async () => {
   globalThis.fetch = realFetch;
@@ -183,14 +190,14 @@ describe("an account's ComfyUI can't make the server download without end", () =
     return asA(() => comfyProvider.poll({ externalId, meta: { workflowId, generationId: `g-${workflowId}` } } as never));
   }
 
-  it("reads at most 16 layers, one at a time", async () => {
+  it("M-7: never decodes an account's layers on the server (each 40 MP layer froze it for over a second)", async () => {
     fake.opts.layers = 300;
     const res = await pollAs("layers-qwen-image-layered");
     expect(res.state).toBe("succeeded");
-    expect(fake.log.filter((e) => e.path.startsWith("/view")).length).toBeLessThanOrEqual(ACCOUNT_LIMITS.outputsPerJob);
-    // The boxed layers stay links (saved later, straight to disk), never data held in memory.
+    // Nothing is fetched to find a layer's box: the layers stay links (saved later, straight to disk, 16 at most).
+    expect(fake.log.filter((e) => e.path.startsWith("/view")).length).toBe(0);
     const outs = (res as { outputs: { url: string; meta?: { bbox?: unknown } }[] }).outputs;
-    expect(outs.filter((o) => o.meta?.bbox).length).toBe(ACCOUNT_LIMITS.outputsPerJob);
+    expect(outs.filter((o) => o.meta?.bbox).length).toBe(0);
     expect(outs.some((o) => o.url.startsWith("data:"))).toBe(false);
   });
 

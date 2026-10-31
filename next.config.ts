@@ -3,15 +3,25 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
+  poweredByHeader: false,
   partialPrefetching: true,
   experimental: {
-    // The sign-in proxy buffers request bodies (10 MB by default). Uploads skip it (src/proxy.ts matcher), so this is
-    // the largest other body: a Soul finish or a Layers render (64 MB) plus the form overhead. A body over it reaches
-    // the route cut short, with no error.
-    proxyClientMaxBodySize: "66mb",
+    // The sign-in proxy holds every request body it sees in memory, up to this size, even one it refuses: a small limit
+    // keeps many open requests from filling the server's memory. The routes that take a file in a form (uploads, a Soul
+    // finish, a Layers render, a skill, an Assist source, an explainer document) skip the proxy and check the asker
+    // themselves (src/proxy.ts matcher). Everything else sends JSON: Evolution's 2 MB frame is the largest. A body over
+    // the limit reaches the route cut short, with no error (POST /api/generations then says it is too large).
+    proxyClientMaxBodySize: "4mb",
   },
   async headers() {
     return [
+      // Pages: a fixed policy that holds without nonces (pages are prerendered): no plugins, no <base> elsewhere, no
+      // framing by other sites, forms post only here. Stored files (/api/files, a share's /s/<token>/f/) keep their own,
+      // stricter policy (src/server/file-response.ts).
+      {
+        source: "/:path((?!api/|s/[^/]+/f/).*)",
+        headers: [{ key: "Content-Security-Policy", value: "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'" }],
+      },
       // Vendored scripts (public/vendor: the 3D viewer's meshopt decoder) keep their name across upgrades:
       // a day, then revalidated in the background.
       { source: "/vendor/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }] },

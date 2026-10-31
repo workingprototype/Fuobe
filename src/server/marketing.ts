@@ -46,7 +46,6 @@ import {
 } from "@/lib/catalog/marketing";
 import { dualEngine } from "@/lib/catalog/engines";
 import { routesFor } from "@/lib/catalog/plan";
-import { probeMedia } from "@/lib/media-probe";
 import { themeFrom } from "@/components/ads/layout";
 import type { ChainSlot, Engine, GenerationRequest, ModelDef, Operation } from "@/lib/catalog/types";
 import { getBrand, getProduct } from "./brand";
@@ -58,7 +57,7 @@ import { isOffered } from "./model-access";
 import { keepOffered } from "@/lib/model-access";
 import { engineMode } from "./settings";
 import { encodePng } from "./png";
-import { readRef, saveFile } from "./storage";
+import { saveFile, storedMedia } from "./storage";
 
 /**
  * Marketing Studio (templates → product shots, posters, ads, product motion, UGC presenters),
@@ -68,7 +67,7 @@ import { readRef, saveFile } from "./storage";
  * over open-engine posters). Both engines; demo mode runs every step on the mock provider.
  */
 
-const FILE = z.string().startsWith("/api/files/");
+const FILE = z.string().startsWith("/api/files/").max(500);
 
 // ---------------------------------------------------------------------------
 // Inputs
@@ -1201,26 +1200,15 @@ export async function runClickToAd(input: ClickToAdInput): Promise<{ run: Market
   return { run: launch(plan, { ...input, script }), script };
 }
 
-declare global {
-  var __fuobeClipFacts: Map<string, { sound: boolean | null; aspect?: string }> | undefined;
-}
-const clipFacts = () => (globalThis.__fuobeClipFacts ??= new Map());
-
-/** Whether a stored clip has a soundtrack, and its shape, from the file's own header (cached per file). */
+/**
+ * Whether a stored clip has a soundtrack, and its shape, from the file's own header: only the header is read, cached by
+ * the file itself (not by the text of the request), and a visitor's price check reads only its own clip (storedMedia).
+ * Not readable here: unknown, and the plan falls back to what works without knowing.
+ */
 export async function referenceFacts(ref: string): Promise<{ sound: boolean | null; aspect?: string }> {
-  const cache = clipFacts();
-  const hit = cache.get(ref);
-  if (hit) return hit;
-  let facts: { sound: boolean | null; aspect?: string } = { sound: null };
-  try {
-    const info = probeMedia(new Uint8Array((await readRef(ref)).data));
-    if (info?.hasVideo) facts = { sound: info.hasAudio, aspect: info.width && info.height ? nearestAspect(`${info.width}:${info.height}`, ["9:16", "4:5", "3:4", "1:1", "4:3", "16:9", "21:9"]) : undefined };
-  } catch {
-    // Not readable here: the plan falls back to what works without knowing.
-  }
-  if (cache.size > 200) cache.clear();
-  cache.set(ref, facts);
-  return facts;
+  const info = storedMedia(ref)?.info;
+  if (!info?.hasVideo) return { sound: null };
+  return { sound: info.hasAudio, aspect: info.width && info.height ? nearestAspect(`${info.width}:${info.height}`, ["9:16", "4:5", "3:4", "1:1", "4:3", "16:9", "21:9"]) : undefined };
 }
 
 async function multiplierContext(input: MultiplierInput): Promise<MultiplierContext> {

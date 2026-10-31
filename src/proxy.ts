@@ -20,8 +20,9 @@ import {
   ownerOnly,
   ownGpuRun,
 } from "@/lib/guest-access";
-import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, SESSION_COOKIE, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
+import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, sessionCookieOf, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
 import { fileAccount, generationAccount } from "@/server/account-library";
+import { hit } from "@/server/rate";
 import { recordExists } from "@/server/records";
 import { findShare, shareGuard, shareTargetExists } from "@/server/share-access";
 
@@ -49,22 +50,69 @@ function pass(request: NextRequest): NextResponse {
   return NextResponse.next();
 }
 
-const notFound = (request: NextRequest) => NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+/**
+ * A 404 page made here, for a request that reached the server through an HTTPS reverse proxy. Next builds the
+ * proxy's request address from its own name for the server ("localhost") and the forwarded protocol, and the address
+ * it routes by from the host it listens on (`next start -H 127.0.0.1`): when they differ, a rewrite to the app's own
+ * 404 page goes out as a request to another server, which fails over HTTPS and answered 500. Plain HTTP (a local
+ * install) keeps the rewrite to the app's own pages.
+ */
+function plain404(title: string, text: string, home: boolean): NextResponse {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title} · Fuobe</title><style>
+:root{color-scheme:light dark;--bg:#fafafa;--fg:#111113;--muted:#6b6b73;--btn:#111113;--btn-fg:#fafafa}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0b0c;--fg:#ededef;--muted:#9a9aa2;--btn:#ededef;--btn-fg:#0b0b0c}}
+body{margin:0;min-height:100svh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center}
+main{max-width:460px;padding:24px 16px 10vh}h1{margin:0;font-size:30px;line-height:1.2;font-weight:600;text-wrap:balance}
+p{margin:10px 0 0;color:var(--muted);text-wrap:pretty}a{display:inline-block;margin-top:22px;padding:9px 16px;border-radius:10px;background:var(--btn);color:var(--btn-fg);text-decoration:none;font-weight:500}
+</style></head><body><main><h1>${title}</h1><p>${text}</p>${home ? '<a href="/">Back to Home</a>' : ""}</main></body></html>`;
+  return new NextResponse(html, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
+const behindHttps = (request: NextRequest) => request.nextUrl.protocol === "https:";
+
+const notFound = (request: NextRequest) =>
+  behindHttps(request)
+    ? plain404("Nothing here", "The page you’re looking for moved, or never existed. Everything you made is still in your library.", true)
+    : NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+
+const shareGone = (request: NextRequest) =>
+  behindHttps(request)
+    ? plain404("This link isn’t available", "It may have expired or been turned off, or what it shared was removed. Ask the person who sent it for a new link.", false)
+    : NextResponse.rewrite(new URL("/s/gone", request.url), { status: 404 });
 
 /** Share pages and their files: never indexed, and the token never leaks to another site in a Referer. */
 const SHARE_HEADERS = { "X-Robots-Tag": "noindex, nofollow, noarchive", "Referrer-Policy": "no-referrer" };
 
 /** The owner: the install password's session, or an API token. */
-const signedIn = (request: NextRequest) => validSession(request.cookies.get(SESSION_COOKIE)?.value) || validToken(request.headers.get("authorization"));
+const signedIn = (request: NextRequest) => validSession(sessionCookieOf(request)) || validToken(request.headers.get("authorization"));
 
 /** The owner, an account (only while public sign-up is on), or null (a guest). */
 function viewerOf(request: NextRequest, open: boolean): Viewer | null {
-  const session = sessionViewer(request.cookies.get(SESSION_COOKIE)?.value);
+  const session = sessionViewer(sessionCookieOf(request));
   if (session?.kind === "owner" || validToken(request.headers.get("authorization"))) return { kind: "owner" };
   return open && session?.kind === "account" ? session : null;
 }
 
 const guestHeaders = { [GUEST_HEADER]: "1", "Cache-Control": "no-store" };
+
+/** Price checks a guest (per address) or an account may send a minute: free, but each one plans a run. A page sends far fewer. */
+const PRICE_CHECKS_PER_MINUTE = 120;
+
+/**
+ * Without a trusted proxy (FUOBE_TRUST_PROXY) every guest is one shared key: they share a budget ten times larger, so
+ * one busy page or script can't stop every other guest's prices, and the 429 says how to give each visitor their own.
+ */
+const SHARED_PRICE_CHECKS_PER_MINUTE = 10 * PRICE_CHECKS_PER_MINUTE;
+const SHARED_GUEST = `guest:${LoginGuard.DIRECT}`;
+
+/** A guest's or an account's price check, within its budget (the owner's are never counted). */
+function priceCheck(request: NextRequest, who: string): NextResponse {
+  const shared = who === SHARED_GUEST;
+  const r = hit(`price:${who}`, shared ? SHARED_PRICE_CHECKS_PER_MINUTE : PRICE_CHECKS_PER_MINUTE, 60_000);
+  if (r.ok) return pass(request);
+  const hint = shared ? " Behind a reverse proxy? Set FUOBE_TRUST_PROXY=1 so each visitor gets their own limit." : "";
+  return NextResponse.json({ error: `Too many price checks. Try again in a minute.${hint}` }, { status: 429, headers: { "Retry-After": String(r.retryAfterS), "Cache-Control": "no-store" } });
+}
 
 /**
  * A guest (public sign-up on, signed out): every page and the catalog reads, the owner's lists
@@ -73,7 +121,7 @@ const guestHeaders = { [GUEST_HEADER]: "1", "Cache-Control": "no-store" };
 function guest(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
   if (request.method === "GET" || request.method === "HEAD") return readAsGuest(request, false);
-  if (isPriceCheck(request.method, pathname, search)) return pass(request);
+  if (isPriceCheck(request.method, pathname, search)) return priceCheck(request, `guest:${LoginGuard.clientKey(request.headers)}`);
   return NextResponse.json({ error: GUEST_RUN_MESSAGE }, { status: 401, headers: guestHeaders });
 }
 
@@ -116,6 +164,7 @@ function account(request: NextRequest, who: Account): NextResponse {
   const file = request.method === "GET" || request.method === "HEAD" ? /^\/api\/files\/(.+)$/.exec(pathname)?.[1] : undefined;
   if (file !== undefined) return fileAccount(safeDecode(file)) === who.id ? pass(request) : notYours();
   if (request.method === "GET" || request.method === "HEAD") return accountOwnRead(pathname) ? pass(request) : readAsGuest(request, true);
+  if (isPriceCheck(request.method, pathname, search)) return priceCheck(request, `account:${who.id}`);
   if (accountMayChange(request.method, pathname, search)) return pass(request);
   if (isLibraryChange(request.method, pathname)) return NextResponse.json({ error: LIBRARY_MESSAGE, code: "library" }, { status: 403 });
   if (!who.gpu) return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
@@ -151,7 +200,7 @@ function openShare(request: NextRequest, token: string, file: boolean): NextResp
       guard.miss(key, token, key === LoginGuard.DIRECT);
       if (spent) return tooMany(60);
     }
-    res = NextResponse.rewrite(new URL("/s/gone", request.url), { status: 404 });
+    res = shareGone(request);
   } else {
     // Only the proxy says what counts as a view: a visitor can't send the header themselves.
     const headers = new Headers(request.headers);
@@ -207,7 +256,10 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Everything except build assets and the public folder's own files: the favicon and app icons,
   // the demo samples, the preset covers, vendored scripts (the 3D viewer's meshopt decoder) and the
-  // SVGs at the root. Generated SVGs under /api/files stay behind sign-in. /api/uploads makes the same
-  // checks itself (src/server/direct-gate.ts): the proxy would hold the whole file in memory first.
-  matcher: ["/((?!_next/static|_next/image|favicon\\.ico$|apple-icon\\.png$|samples/|previews/|vendor/|api/uploads$|[^/]+\\.svg$).*)"],
+  // SVGs at the root. Generated SVGs under /api/files stay behind sign-in. The routes that take a file in a form
+  // (/api/uploads, a Soul finish, a Layers render, a skill upload, an Assist source, an explainer document) make the
+  // same checks themselves (src/server/direct-gate.ts): the proxy would hold the whole file in memory first.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon\\.ico$|apple-icon\\.png$|samples/|previews/|vendor/|api/uploads$|api/generations/[^/]+/finish$|api/layers/renders$|api/assist/skills/upload$|api/assist/projects/[^/]+/sources$|api/explainer/document$|[^/]+\\.svg$).*)",
+  ],
 };

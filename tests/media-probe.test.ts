@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { probeBlob, probeMedia, probeMediaRanges, probeUrl } from "@/lib/media-probe";
+import { probeBlob, probeMedia, probeMediaRanges, probeMediaRangesSync, probeUrl } from "@/lib/media-probe";
 
 const u32 = (...v: number[]) =>
   Buffer.concat(
@@ -232,5 +232,36 @@ describe("probing without reading the whole file (Trim, the Ad Multiplier)", () 
     const r = reader(webm);
     expect(await probeMediaRanges(r.read, webm.length)).toBeNull();
     expect(r.reads).toHaveLength(1);
+  });
+});
+
+describe("a crafted MP4 can't make the box walk read without end", () => {
+  /** "ftyp", then `n` empty 8-byte "free" boxes, then a real moov: without a cap, each box past the first read is one more read. */
+  function freeBoxes(n: number): Buffer {
+    const whole = mp4();
+    const free = Buffer.alloc(8 * n);
+    for (let i = 0; i < n; i++) {
+      free.writeUInt32BE(8, i * 8);
+      free.write("free", i * 8 + 4);
+    }
+    return Buffer.concat([whole.subarray(0, 16), free, whole.subarray(16 + 72)]);
+  }
+
+  it("gives up after a few dozen top-level boxes, with only a few reads (at once and in turns)", async () => {
+    const buf = freeBoxes(400_000); // 3.2 MB of boxes: past the first read, one 16-byte read per box without a cap
+    let reads = 0;
+    const sync = (start: number, end: number) => (reads++, new Uint8Array(buf.subarray(start, end)));
+    expect(probeMediaRangesSync(sync, buf.length, { headBytes: 1024 * 1024 })).toBeNull();
+    expect(reads).toBeLessThan(100);
+    reads = 0;
+    const inTurns = async (start: number, end: number) => (reads++, new Uint8Array(buf.subarray(start, end)));
+    expect(await probeMediaRanges(inTurns, buf.length)).toBeNull();
+    expect(reads).toBeLessThan(100);
+  });
+
+  it("still finds the moov of a real file after a handful of top-level boxes", async () => {
+    const buf = freeBoxes(6);
+    expect(probeMediaRangesSync((s, e) => new Uint8Array(buf.subarray(s, e)), buf.length)).toEqual(probeMedia(mp4()));
+    expect(await probeMediaRanges(async (s, e) => new Uint8Array(buf.subarray(s, e)), buf.length)).toEqual(probeMedia(mp4()));
   });
 });

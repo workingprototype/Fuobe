@@ -5,7 +5,18 @@ import { Copy, KeyRound, Loader2, LogOut, ShieldAlert, ShieldCheck, Trash2 } fro
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -195,6 +206,64 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
   );
 }
 
+/**
+ * A new session secret: every sign-in on every device ends (this browser's too, and every account's), and the owner
+ * signs in again with the same password. It works when the password is set on the server (FUOBE_PASSWORD), which
+ * Settings can't change. Optionally revokes every API token as well: offered even when the list looked empty when the
+ * page loaded, since a token made since then would otherwise stay.
+ */
+function SignOutEveryone({ tokens }: { tokens: number }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [revoke, setRevoke] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const id = useId();
+  const run = async () => {
+    setBusy(true);
+    try {
+      await call("/api/auth/sessions", "POST", { tokens: revoke });
+      // This browser is signed out too.
+      router.replace("/login?owner=1");
+    } catch (e) {
+      toast.error((e as Error).message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-1.5 sm:w-[36rem] sm:max-w-full">
+      <div className="flex items-center gap-3">
+        <h3 className="flex-1 text-[13px] font-medium">Sign everyone out</h3>
+        <Button size="sm" variant="secondary" className="h-8" disabled={busy} onClick={() => setOpen(true)}>
+          {busy ? <Loader2 className="animate-spin" /> : <LogOut />} Sign everyone out
+        </Button>
+      </div>
+      <p className="text-[12px] text-muted-foreground">
+        Ends every sign-in on every device: yours, this browser&apos;s and every account&apos;s. Use it if you think someone else signed in as you. Your password stays the same.
+      </p>
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign everyone out?</AlertDialogTitle>
+            <AlertDialogDescription>Everyone has to sign in again, you too. You go to the sign-in page next.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex items-start gap-2">
+            <Checkbox id={`${id}-tokens`} className="mt-0.5" checked={revoke} onCheckedChange={(v) => setRevoke(!!v)} />
+            <Label htmlFor={`${id}-tokens`} className="text-[13px] leading-snug font-normal">
+              Also revoke every API token{tokens > 0 ? ` (${tokens})` : ""}. Scripts and agents that use one stop working until you give them a new one.
+            </Label>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void run()}>
+              Sign everyone out
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
 interface PublicSignupStatus {
   setting: boolean;
   fromEnv: boolean | null;
@@ -272,6 +341,7 @@ export function SecuritySettings() {
       )}
       {!s.fromEnv && <PasswordForm status={s} onDone={refresh} />}
       {s.enabled && <PublicSignup />}
+      {s.enabled && <SignOutEveryone tokens={s.tokens.length} />}
       <Tokens status={s} onChange={refresh} />
     </div>
   );

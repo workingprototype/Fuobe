@@ -646,6 +646,13 @@ function open(): Database.Database {
       db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(i);
     })();
   });
+  // An account's own runs (its list, its active runs) are found through this index, not by reading every run. Not a
+  // numbered migration, so branches that add migrations never clash over it; a failure only leaves lists slower.
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS generations_account ON generations(json_extract(request_json, '$.account'), created_at DESC)");
+  } catch (e) {
+    console.warn(`[fuobe] Couldn't index runs by account: ${(e as Error).message}`);
+  }
   return db;
 }
 

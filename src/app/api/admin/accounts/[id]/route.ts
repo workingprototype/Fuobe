@@ -1,10 +1,9 @@
-import { cookies } from "next/headers";
 import { z } from "zod";
-import { AccountError, deleteAccount, isOwnerRequest, listAccounts, SESSION_COOKIE, setAccountDisabled } from "@/server/auth";
+import { AccountError, deleteAccount, isOwnerRequest, listAccounts, sessionCookieOf, setAccountDisabled } from "@/server/auth";
 import { purgeAccount } from "@/server/account-sweep";
 
 async function owner(request: Request): Promise<Response | null> {
-  return isOwnerRequest(request, (await cookies()).get(SESSION_COOKIE)?.value) ? null : Response.json({ error: "Only the studio's owner manages accounts" }, { status: 403 });
+  return isOwnerRequest(request, sessionCookieOf(request)) ? null : Response.json({ error: "Only the studio's owner manages accounts" }, { status: 403 });
 }
 
 const failed = (e: unknown) => {

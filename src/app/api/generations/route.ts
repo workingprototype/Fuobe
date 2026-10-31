@@ -1,9 +1,9 @@
 import { connection } from "next/server";
-import { CONNECT_GPU_HEADER, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
+import { CONNECT_GPU_HEADER, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { missingFilesMessage } from "@/lib/missing-files";
-import { accountGpu, requestAccount, requestViewer } from "@/server/auth";
+import { accountGpu, requestViewer } from "@/server/auth";
 import { OPERATION_LABELS } from "@/lib/catalog/types";
-import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountUsage, diskHasRoom } from "@/server/account-files";
+import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "@/server/account-files";
 import { accountInputProblem } from "@/server/account-inputs";
 import { db } from "@/server/db";
 import { accountLoraFix, accountRun, asVisitor, createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
@@ -22,9 +22,10 @@ import { gpuTargetFor } from "@/server/gpu/target";
 export async function GET(request: Request) {
   await connection();
   ensureTrashPurge();
-  // An account (public sign-up) lists only its own runs; the owner only theirs.
-  const account = requestAccount(request);
-  return Response.json({ items: listGenerations({ ...listOptionsFrom(new URL(request.url).searchParams), account: account?.id }) });
+  // An account (public sign-up) lists only its own runs; the owner only theirs; anyone else nothing.
+  const viewer = requestViewer(request);
+  if (viewer.kind === "guest") return Response.json({ items: [] });
+  return Response.json({ items: listGenerations({ ...listOptionsFrom(new URL(request.url).searchParams), account: viewer.kind === "account" ? viewer.account.id : undefined }) });
 }
 
 /** An account's runs going now (queued or running), counted as runs: a run's jobs and chain steps share a batch. */
@@ -37,6 +38,10 @@ function activeRuns(accountId: string): number {
   return r.n;
 }
 
+/** What the sign-in proxy passes on of a request body (next.config.ts proxyClientMaxBodySize). */
+const PROXY_BODY_BYTES = 4 * 1024 * 1024;
+const BODY_TOO_BIG = "That request is over 4 MB. Upload pictures and clips first (POST /api/uploads), then send their /api/files/ paths.";
+
 const refuse = (status: number, error: string, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}) =>
   Response.json({ error, ...extra }, { status, headers: { "Cache-Control": "no-store", ...headers } });
 
@@ -45,6 +50,8 @@ export async function POST(request: Request) {
   const viewer = requestViewer(request);
   const account = viewer.kind === "account" ? viewer.account : null;
   const preview = new URL(request.url).searchParams.get("preview") === "1";
+  // Without a viewer only a price check: a run is the owner's or an account's, never "nobody, so the owner".
+  if (viewer.kind === "guest" && !preview) return refuse(401, GUEST_RUN_MESSAGE);
   // An account's run request is words and file paths (files are uploaded first): small.
   const limitBody = !!account && !preview;
   if (limitBody && Number(request.headers.get("content-length") ?? 0) > ACCOUNT_LIMITS.runBodyBytes) return refuse(413, ACCOUNT_MESSAGES.bodyTooBig);
@@ -53,7 +60,10 @@ export async function POST(request: Request) {
   let body: unknown = null;
   try {
     body = JSON.parse(text);
-  } catch {}
+  } catch {
+    // The sign-in proxy passes on the first 4 MB of a body (next.config.ts): a bigger one arrives cut short.
+    if (Number(request.headers.get("content-length") ?? 0) > PROXY_BODY_BYTES) return refuse(413, BODY_TOO_BIG);
+  }
   const parsed = GenerationRequestSchema.safeParse(body);
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
@@ -74,7 +84,7 @@ export async function POST(request: Request) {
   if (account && !preview) {
     // Room on the server, room in the account's files, and a fair share of runs.
     if (!diskHasRoom()) return refuse(503, ACCOUNT_MESSAGES.diskLow);
-    if (accountUsage(account.id).total >= ACCOUNT_LIMITS.totalBytes) return refuse(413, ACCOUNT_MESSAGES.filesFull);
+    if (accountUsage(account.id).total >= accountTotalBytes(account.id)) return refuse(413, filesFullMessage(account.id));
     if (activeRuns(account.id) >= ACCOUNT_LIMITS.activeRuns) return refuse(429, ACCOUNT_MESSAGES.activeRuns, {}, { "Retry-After": "30" });
     const rate = hit(`run:${account.id}`, ACCOUNT_LIMITS.runsPerHour, 60 * 60_000);
     if (!rate.ok) return refuse(429, ACCOUNT_MESSAGES.runRate, {}, { "Retry-After": String(rate.retryAfterS) });
@@ -128,6 +138,12 @@ export async function POST(request: Request) {
         unhit(`run:${account.id}`);
         return refuse(409, missingFilesMessage(fix), { code: "comfy_missing_model", fix });
       }
+    }
+    // Counted again just before the run is stored, with nothing awaited in between: requests that arrived together all
+    // passed the first count while the checks above waited.
+    if (account && activeRuns(account.id) >= ACCOUNT_LIMITS.activeRuns) {
+      unhit(`run:${account.id}`);
+      return refuse(429, ACCOUNT_MESSAGES.activeRuns, {}, { "Retry-After": "30" });
     }
     const items = onOwn(() => createGenerations(req));
     // What the run leaves out or changes (a model that replaced a retired one, a LoRA that runs only on a GPU, a length the API rounds).

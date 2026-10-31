@@ -1,15 +1,13 @@
 import "server-only";
-import fs from "node:fs/promises";
 import { z } from "zod";
 import { planJoin, planLoop, CROSSFADE_MAX, JOIN_MAX_CLIPS, LOOP_MAX_SECONDS, type AudioToolPreview, type ToolPlan } from "@/lib/av/audio-tools";
 import { CLOUD_ONLY_PROBLEM, DBS_MODELS, dbsChannelsFor, hostPick, missingDbs, planRemux, planSplit, splitTime } from "@/lib/av/split";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
-import { fileInfo } from "./media-facts";
 import { comfyDbsModels, comfyDevice } from "./providers/comfyui";
 import { engineMode } from "./settings";
-import { absolutePath } from "./storage";
+import { storedMedia } from "./storage";
 
 /**
  * The Audio hub's Loop / extend, Join and Split soundtrack tools on the server: each clip's length is read from its own
@@ -76,57 +74,34 @@ interface ClipFacts {
   hasAudio?: boolean;
 }
 
-declare global {
-  var __fuobeAudioFacts: Map<string, ClipFacts | null> | undefined;
-}
 /**
- * Lengths already read, by file and version (path, size, modified time): the page asks for a price after
- * every settled change, and a Join of big WAVs would read every file again each time.
+ * A clip's length from its header (WAV, FLAC, MP3, M4A), else the browser's. Only the header is read, once per file
+ * (storedMedia caches it: the page asks for a price after every settled change). A visitor's price check reads only its
+ * own files: another's answers like one that is gone.
  */
-const lengths = (globalThis.__fuobeAudioFacts ??= new Map<string, ClipFacts | null>());
-const LENGTHS_KEPT = 500;
-
-/** A clip's length from its header (WAV, FLAC, MP3, M4A), else the browser's. Read without blocking the server. */
-async function lengthOf(url: string, given?: number): Promise<number | undefined> {
-  return (await factsOf(url))?.duration ?? given;
+function lengthOf(url: string, given?: number): number | undefined {
+  const found = storedMedia(url);
+  if (!found) throw new AudioToolError("That audio file is gone — add it again");
+  const d = found.info?.duration;
+  return d && d > 0 ? Math.round(d * 1000) / 1000 : given;
 }
 
-/** Throws `gone` unless the file is still in storage. */
-async function present(url: string, gone: string): Promise<void> {
-  try {
-    if (!(await fs.stat(absolutePath(decodeURIComponent(url.slice("/api/files/".length))))).isFile()) throw new Error("not a file");
-  } catch {
-    throw new AudioToolError(gone);
-  }
+/** Throws `gone` unless the file is still in storage (and, in a visitor's price check, the visitor's own). */
+function present(url: string, gone: string): void {
+  if (!storedMedia(url)) throw new AudioToolError(gone);
 }
 
 /**
- * A clip's length, channel count and whether it has sound, from its header (cached by file version; read in ranges, so a
- * file of any size costs a few small reads), or null when no reader knows the file.
+ * A clip's length, channel count and whether it has sound, from its header (read as {@link lengthOf} reads it, through
+ * storedMedia: only the asker's own files), or null when no reader knows the file.
  */
-async function factsOf(url: string): Promise<ClipFacts | null> {
-  let file: string;
-  let key: string;
-  try {
-    file = absolutePath(decodeURIComponent(url.slice("/api/files/".length)));
-    const st = await fs.stat(file);
-    if (!st.isFile()) throw new Error("not a file");
-    key = `${file}:${st.size}:${st.mtimeMs}`;
-  } catch {
-    throw new AudioToolError("That audio file is gone — add it again");
-  }
-  if (!lengths.has(key)) {
-    let info: Awaited<ReturnType<typeof fileInfo>>;
-    try {
-      info = await fileInfo(file);
-    } catch {
-      throw new AudioToolError("That audio file is gone — add it again");
-    }
-    if (lengths.size >= LENGTHS_KEPT) lengths.delete(lengths.keys().next().value!);
-    const duration = info?.duration && info.duration > 0 ? Math.round(info.duration * 1000) / 1000 : undefined;
-    lengths.set(key, info ? { ...(duration && { duration }), ...(info.channels && { channels: info.channels }), hasAudio: info.hasAudio } : null);
-  }
-  return lengths.get(key) ?? null;
+function factsOf(url: string): ClipFacts | null {
+  const found = storedMedia(url);
+  if (!found) throw new AudioToolError("That audio file is gone — add it again");
+  const info = found.info;
+  if (!info) return null;
+  const duration = info.duration && info.duration > 0 ? Math.round(info.duration * 1000) / 1000 : undefined;
+  return { ...(duration && { duration }), ...(info.channels && { channels: info.channels }), hasAudio: info.hasAudio };
 }
 
 async function plan(body: AudioToolRequest): Promise<ToolPlan & { engine: Engine; split?: ClipFacts; headerChannels?: number }> {
@@ -136,7 +111,7 @@ async function plan(body: AudioToolRequest): Promise<ToolPlan & { engine: Engine
   if (mode !== "both" && body.engine !== mode) throw new AudioToolError(mode === "open" ? "This install is set to open source only (Settings → Engine mode)" : "This install is set to paid cloud APIs only (Settings → Engine mode)");
   try {
     if (body.tool === "split") {
-      const facts = await factsOf(body.media);
+      const facts = factsOf(body.media);
       // A clip made without sound (a silent text-to-video take): nothing to split, said before anything is queued.
       if (facts?.hasAudio === false) throw new AudioToolError(body.kind === "video" ? "This video has no sound to split" : "This file has no sound to split");
       const seconds = facts?.duration ?? body.sourceDuration;
@@ -144,15 +119,15 @@ async function plan(body: AudioToolRequest): Promise<ToolPlan & { engine: Engine
       return { engine: body.engine, ...planSplit({ ...body, seconds, channels }), split: { duration: seconds, channels }, headerChannels: facts?.channels };
     }
     if (body.tool === "remux") {
-      await present(body.audio, "That mix is gone — export it again");
-      await present(body.video, "That video is gone — add it again");
+      present(body.audio, "That mix is gone — export it again");
+      present(body.video, "That video is gone — add it again");
       return { engine: body.engine, ...planRemux(body) };
     }
     if (body.tool === "loop") {
-      const sourceDuration = await lengthOf(body.audio, body.sourceDuration);
+      const sourceDuration = lengthOf(body.audio, body.sourceDuration);
       return { engine: body.engine, ...planLoop({ ...body, sourceDuration: sourceDuration ?? 0 }) };
     }
-    const clips = await Promise.all(body.clips.map(async (c) => ({ ...c, duration: await lengthOf(c.url, c.duration) })));
+    const clips = body.clips.map((c) => ({ ...c, duration: lengthOf(c.url, c.duration) }));
     return { engine: body.engine, ...planJoin({ ...body, clips }) };
   } catch (e) {
     throw e instanceof AudioToolError ? e : new AudioToolError((e as Error).message);

@@ -24,6 +24,7 @@ const FILE = path.join(DATA_DIR, "auth.json");
 
 export const SESSION_COOKIE = "fuobe_session";
 const SESSION_DAYS = 30;
+const SESSION_MS = SESSION_DAYS * 86_400_000;
 
 export interface ApiToken {
   id: string;
@@ -59,35 +60,64 @@ export interface Account {
 interface AuthFile {
   /** scrypt hash of the UI-set password ("salt:hash", hex). */
   password?: string;
-  /** Signs session cookies; replaced when the password changes, which signs everyone out. */
+  /**
+   * Signs session cookies (an owner's with the password's fingerprint too: keyFor). Replaced when the Settings password
+   * changes and by Settings → Security → Sign everyone out, which both sign every browser out.
+   */
   secret: string;
   tokens: ApiToken[];
   accounts?: Account[];
   /** Settings → Security: guests may browse and anyone may sign up (FUOBE_PUBLIC_SIGNUP overrides it). */
   publicSignup?: boolean;
+  /** In memory only: the file is there but can't be read or parsed. Sign-in stays on, nobody is signed in, nothing is written. */
+  unreadable?: true;
 }
 
 let cache: { mtime: number; data: AuthFile } | null = null;
+let warnedUnreadable = 0;
 
+/**
+ * The auth file. No file yet: no Settings password, no accounts (a new install). A file that is there but can't be read
+ * or parsed fails closed: sign-in stays on with nobody signed in, never an open studio, and nothing writes over it.
+ */
 function read(): AuthFile {
   try {
     const mtime = fs.statSync(FILE).mtimeMs;
     if (cache?.mtime === mtime) return cache.data;
-    const data = JSON.parse(fs.readFileSync(FILE, "utf8")) as AuthFile;
+    const data = JSON.parse(fs.readFileSync(FILE, "utf8")) as AuthFile | null;
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("not an object");
+    data.tokens ??= [];
     cache = { mtime, data };
     return data;
-  } catch {
-    return { secret: "", tokens: [] };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { secret: "", tokens: [] };
+    if (Date.now() - warnedUnreadable > 60 * 60_000) {
+      warnedUnreadable = Date.now();
+      console.warn(`[fuobe] ${FILE} can't be read (${(e as Error).message}): sign-in stays on and nobody can sign in until it is fixed or restored.`);
+    }
+    return { secret: "", tokens: [], unreadable: true };
   }
 }
 
+declare global {
+  var __fuobeAuthWrites: number | undefined;
+}
+
 function write(data: AuthFile): void {
+  if (data.unreadable) throw new Error("The sign-in file (auth.json) can't be read. Fix or restore it: Fuobe won't write over it.");
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = `${FILE}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, FILE);
   cache = null;
+  globalThis.__fuobeAuthWrites = (globalThis.__fuobeAuthWrites ?? 0) + 1;
 }
+
+/**
+ * Changes when this server writes the sign-in file (a sign-out of everyone, a new password, a token revoked…): a request
+ * that stays open, like the live feed, checks who is asking again when it changes.
+ */
+export const authVersion = () => globalThis.__fuobeAuthWrites ?? 0;
 
 function withSecret(data: AuthFile): AuthFile {
   return data.secret ? data : { ...data, secret: crypto.randomBytes(32).toString("hex") };
@@ -97,12 +127,17 @@ const envPassword = () => process.env.FUOBE_PASSWORD || "";
 
 export function authStatus(): { enabled: boolean; fromEnv: boolean; tokens: Omit<ApiToken, "hash">[] } {
   const d = read();
-  return { enabled: !!(envPassword() || d.password), fromEnv: !!envPassword(), tokens: d.tokens.map(publicToken) };
+  return { enabled: !!(envPassword() || d.password || d.unreadable), fromEnv: !!envPassword(), tokens: d.tokens.map(publicToken) };
 }
 
 const publicToken = (t: ApiToken): Omit<ApiToken, "hash"> => ({ id: t.id, name: t.name, prefix: t.prefix, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt });
 
-export const authEnabled = () => !!(envPassword() || read().password);
+/** Sign-in is on: a password is set (FUOBE_PASSWORD or Settings), or the auth file can't be read (fail closed). */
+export const authEnabled = () => {
+  if (envPassword()) return true;
+  const d = read();
+  return !!(d.password || d.unreadable);
+};
 
 // ---------------------------------------------------------------------------
 // Passwords
@@ -120,12 +155,28 @@ function verifyHash(pw: string, stored: string): boolean {
   return same(crypto.scryptSync(pw, Buffer.from(salt, "hex"), 32), Buffer.from(hash, "hex"));
 }
 
+/** scrypt off the main thread: the server keeps answering everyone else while a password is checked. */
+const scrypt = (pw: string, salt: Buffer) => new Promise<Buffer>((resolve, reject) => crypto.scrypt(pw, salt, 32, (e, key) => (e ? reject(e) : resolve(key))));
+
+async function verifyHashAsync(pw: string, stored: string): Promise<boolean> {
+  const [salt, hash] = stored.split(":");
+  if (!salt || !hash) return false;
+  return same(await scrypt(pw, Buffer.from(salt, "hex")), Buffer.from(hash, "hex"));
+}
+
 export function checkPassword(pw: string): boolean {
   const env = envPassword();
   if (env) return same(crypto.createHash("sha256").update(pw).digest(), crypto.createHash("sha256").update(env).digest());
   const stored = read().password;
   if (!stored) return false;
   return verifyHash(pw, stored);
+}
+
+/** {@link checkPassword} for a request: the Settings password's scrypt runs off the main thread. */
+export async function verifyPassword(pw: string): Promise<boolean> {
+  if (envPassword()) return checkPassword(pw);
+  const stored = read().password;
+  return !!stored && (await verifyHashAsync(pw, stored));
 }
 
 /** Set, change or (with null) remove the UI password. Signs every browser out. */
@@ -142,8 +193,18 @@ export function setPassword(pw: string | null): void {
 const sign = (secret: string, payload: string) => crypto.createHmac("sha256", secret).update(payload).digest("base64url");
 
 /**
+ * The key a session is signed with. An owner's also holds the password's fingerprint, so a new password (FUOBE_PASSWORD
+ * after a restart, or the Settings one) ends every owner sign-in at once, and the secret alone (auth.json) can't make an
+ * owner cookie. An account's is the secret alone, so the owner's new password doesn't sign every account out.
+ */
+function keyFor(d: AuthFile, owner: boolean): string {
+  if (!owner) return d.secret;
+  return `${d.secret}.${crypto.createHash("sha256").update(envPassword() || d.password || "").digest("hex")}`;
+}
+
+/**
  * A session cookie: "<expiry>.<mac>" for the owner, "<expiry>.<account id>.<mac>" for an account.
- * The two sign different text, so neither can be turned into the other.
+ * The two sign different text with different keys, so neither can be turned into the other.
  */
 export function createSession(accountId?: string): { value: string; maxAge: number } {
   let d = read();
@@ -151,13 +212,23 @@ export function createSession(accountId?: string): { value: string; maxAge: numb
     d = withSecret(d);
     write(d);
   }
-  const exp = Date.now() + SESSION_DAYS * 86_400_000;
+  const exp = Date.now() + SESSION_MS;
   const payload = accountId ? `${exp}.${accountId}` : String(exp);
-  return { value: `${payload}.${sign(d.secret, payload)}`, maxAge: SESSION_DAYS * 86_400 };
+  return { value: `${payload}.${sign(keyFor(d, !accountId), payload)}`, maxAge: SESSION_DAYS * 86_400 };
 }
 
 /** Who a session cookie belongs to: the owner, an account that still exists, or nobody. */
 export type Viewer = { kind: "owner" } | { kind: "account"; account: Account };
+
+/**
+ * A cookie's expiry: the digits createSession wrote, not past and no further ahead than a session lasts. Whoever got hold
+ * of the secret could sign any expiry; a far one is refused, so such a cookie ends with the session lifetime too.
+ */
+function liveExpiry(exp: string, now = Date.now()): boolean {
+  if (!/^\d{1,16}$/.test(exp)) return false;
+  const t = Number(exp);
+  return t >= now && t <= now + SESSION_MS;
+}
 
 export function sessionViewer(value: string | undefined): Viewer | null {
   if (!value) return null;
@@ -166,11 +237,21 @@ export function sessionViewer(value: string | undefined): Viewer | null {
   const exp = parts[0];
   const mac = parts[parts.length - 1];
   const d = read();
-  if (!d.secret || !exp || !mac || !(Number(exp) >= Date.now())) return null;
-  if (!same(Buffer.from(mac), Buffer.from(sign(d.secret, parts.slice(0, -1).join("."))))) return null;
+  if (!d.secret || !mac || !liveExpiry(exp)) return null;
+  if (!same(Buffer.from(mac), Buffer.from(sign(keyFor(d, parts.length === 2), parts.slice(0, -1).join("."))))) return null;
   if (parts.length === 2) return { kind: "owner" };
   const account = d.accounts?.find((a) => a.id === parts[1]);
   return account && !account.disabled ? { kind: "account", account } : null;
+}
+
+/**
+ * Settings → Security → Sign everyone out: a new secret, so every session cookie (the owner's and every account's,
+ * this browser's too) stops working at once. Works while FUOBE_PASSWORD is set, which the Settings password change
+ * can't. With `tokens`, every API token is revoked as well. The password stays as it is.
+ */
+export function signOutEveryone(opts: { tokens?: boolean } = {}): void {
+  const d = read();
+  write({ ...d, secret: crypto.randomBytes(32).toString("hex"), ...(opts.tokens && { tokens: [] }) });
 }
 
 /** The owner's session (the install password's): what Settings → Security and the tokens need. */
@@ -217,9 +298,30 @@ export function checkAccount(email: string, password: string): Account | null {
   return account && ok ? account : null;
 }
 
-/** Remember a log-in (Settings → Accounts shows it). */
+let dummyAsync: Promise<string> | undefined;
+
+/** {@link checkAccount} for a request: scrypt runs off the main thread, and an unknown email costs the same as a known one. */
+export async function verifyAccount(email: string, password: string): Promise<Account | null> {
+  const e = normalizeEmail(email);
+  const account = e ? read().accounts?.find((a) => a.email === e) : undefined;
+  const stored =
+    account?.hash ??
+    (await (dummyAsync ??= (async () => {
+      const salt = crypto.randomBytes(16);
+      return `${salt.toString("hex")}:${(await scrypt(crypto.randomBytes(12).toString("hex"), salt)).toString("hex")}`;
+    })()));
+  const ok = await verifyHashAsync(password, stored);
+  return account && ok ? account : null;
+}
+
+/** How often a log-in is written down: each write rewrites the whole accounts file. */
+const LOGIN_RECORD_MS = 60 * 60_000;
+
+/** Remember a log-in (Settings → Accounts shows it), at most once an hour per account. */
 export function recordLogin(id: string): void {
   const d = read();
+  const account = d.accounts?.find((a) => a.id === id);
+  if (!account || Date.now() - (account.lastLoginAt ?? 0) < LOGIN_RECORD_MS) return;
   write({ ...d, accounts: d.accounts?.map((a) => (a.id === id ? { ...a, lastLoginAt: Date.now() } : a)) });
 }
 
@@ -287,8 +389,11 @@ export function accountsCsv(items = listAccounts()): string {
 
 export const accountById = (id: string): Account | undefined => read().accounts?.find((a) => a.id === id);
 
-/** The account's own ComfyUI, or null when it hasn't connected one. */
-export const accountGpu = (id: string): AccountGpu | null => accountById(id)?.gpu ?? null;
+/** The account's own ComfyUI, or null when it hasn't connected one or the owner switched the account off. */
+export const accountGpu = (id: string): AccountGpu | null => {
+  const a = accountById(id);
+  return a && !a.disabled ? (a.gpu ?? null) : null;
+};
 
 function withoutGpu(a: Account): Account {
   const copy = { ...a };
@@ -306,13 +411,26 @@ export function setAccountGpu(id: string, gpu: AccountGpu | null): void {
 /** Who is asking: the owner (also everyone while no password is set), an account (public sign-up on), or a guest. */
 export type RequestViewer = { kind: "owner" } | { kind: "account"; account: Account } | { kind: "guest" };
 
+/**
+ * The session cookie in a Cookie header: the one reading the proxy and every route use, so they always agree on who is
+ * asking. Exactly one fuobe_session pair whose value is a plain token (letters, digits, "_", "-", "."). Two pairs, or an
+ * encoded value, mean no session: parsers that pick a different pair (Next keeps the last and decodes it) would
+ * otherwise let the proxy check one viewer while a route acts for another.
+ */
+export function sessionCookieFrom(header: string | null | undefined): string | undefined {
+  let found: string | undefined;
+  for (const part of (header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0 || part.slice(0, eq).trim() !== SESSION_COOKIE) continue;
+    if (found !== undefined) return undefined;
+    found = part.slice(eq + 1).trim();
+  }
+  return found && /^[\w.-]+$/.test(found) ? found : undefined;
+}
+
 /** The session cookie a request carries (read from its Cookie header: works outside Next's request scope too). */
 export function sessionCookieOf(request: Request): string | undefined {
-  for (const part of (request.headers.get("cookie") ?? "").split(";")) {
-    const eq = part.indexOf("=");
-    if (eq > 0 && part.slice(0, eq).trim() === SESSION_COOKIE) return part.slice(eq + 1).trim();
-  }
-  return undefined;
+  return sessionCookieFrom(request.headers.get("cookie"));
 }
 
 export function requestViewer(request: Request, cookie = sessionCookieOf(request)): RequestViewer {
@@ -442,6 +560,22 @@ export function hostAllowed(host: string | null): boolean {
 // ---------------------------------------------------------------------------
 // Sign-in attempts
 
+/** A visitor's key from its address: IPv4 as it is, IPv6 by its first 64 bits ("2001:db8:1:2::/64"). */
+function clientOf(address: string): string {
+  const a = address.replace(/^\[(.*)\]$/, "$1").toLowerCase();
+  if (!net.isIPv6(a)) return a;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(a);
+  if (mapped) return mapped[1];
+  // A trailing dotted IPv4 part is two groups.
+  const v4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(a);
+  const hex = v4 ? a.slice(0, v4.index) + [((+v4[1] << 8) | +v4[2]).toString(16), ((+v4[3] << 8) | +v4[4]).toString(16)].join(":") : a;
+  const [head, tail] = hex.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail !== undefined && tail ? tail.split(":") : [];
+  const groups = tail === undefined ? left : [...left, ...Array<string>(8 - left.length - right.length).fill("0"), ...right];
+  return `${groups.slice(0, 4).map((g) => (parseInt(g, 16) || 0).toString(16)).join(":")}::/64`;
+}
+
 /**
  * Wrong-password limits. Route handlers can't see the socket address, and Next keeps any
  * X-Forwarded-For a client sends, so that header only identifies a client behind a reverse proxy
@@ -456,15 +590,31 @@ export class LoginGuard {
   private failures = new Map<string, { n: number; first: number; until: number }>();
   private recent: number[] = [];
 
+  /**
+   * `shared`: keys that stand for every visitor at once (no trusted proxy), which are slowed down past their budget,
+   * never locked. By default the shared key itself.
+   */
   constructor(
     private readonly o = { perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, throttleMs: 4_000, maxClients: 5000 },
+    private readonly shared: (key: string) => boolean = (key) => key === LoginGuard.DIRECT,
   ) {}
 
-  /** Who is signing in: the last X-Forwarded-For hop when a trusted proxy sets it, else one shared key. */
+  /** This key's misses in its window (0 once the window has passed). */
+  misses(key: string, now = Date.now()): number {
+    const f = this.failures.get(key);
+    return f && now - f.first <= this.o.windowMs ? f.n : 0;
+  }
+
+  /**
+   * Who is signing in: the last X-Forwarded-For hop when a trusted proxy sets it, else one shared key. An IPv6 address
+   * counts by its /64 (one home or one server gets a whole /64, so the rest of the address is free to change), and an
+   * IPv4 address written as IPv6 (::ffff:a.b.c.d) as that IPv4 address.
+   */
   static clientKey(headers: Headers, trustProxy = process.env.FUOBE_TRUST_PROXY === "1"): string {
     if (!trustProxy) return LoginGuard.DIRECT;
     const hops = (headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    return hops.at(-1) ?? LoginGuard.DIRECT;
+    const last = hops.at(-1);
+    return last ? clientOf(last) : LoginGuard.DIRECT;
   }
 
   /** Milliseconds until this client may try again (0 = now). */
@@ -472,7 +622,7 @@ export class LoginGuard {
     this.recent = this.recent.filter((t) => now - t < this.o.windowMs);
     const f = this.failures.get(key);
     const own = f && f.until > now ? f.until - now : 0;
-    const shared = key === LoginGuard.DIRECT && !!f && now - f.first <= this.o.windowMs && f.n >= this.o.perClient;
+    const shared = this.shared(key) && !!f && now - f.first <= this.o.windowMs && f.n >= this.o.perClient;
     const last = this.recent.at(-1);
     const throttle = (shared || this.recent.length >= this.o.global) && last !== undefined ? Math.max(0, last + this.o.throttleMs - now) : 0;
     return Math.max(own, throttle);
@@ -485,7 +635,7 @@ export class LoginGuard {
     const n = fresh ? 1 : f.n + 1;
     this.failures.delete(key);
     // The shared key is throttled (blockedFor), never locked.
-    const locks = key !== LoginGuard.DIRECT && n >= this.o.perClient;
+    const locks = !this.shared(key) && n >= this.o.perClient;
     this.failures.set(key, { n, first: fresh ? now : f.first, until: locks ? now + this.o.lockMs : 0 });
     // Forget old entries; never let the map grow without bound.
     for (const [k, v] of this.failures) {

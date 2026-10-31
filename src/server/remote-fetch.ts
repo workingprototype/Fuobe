@@ -143,8 +143,35 @@ export function blockedForAccounts(ip: string): boolean {
   if (inner.wrapped) return true;
   const self = selfAddresses();
   if (self.has(canonical(ip)) || inner.v4.some((x) => self.has(x))) return true;
-  if (loopbackish(ip)) return true;
+  if (loopbackish(ip) || linkLocalOrMetadata(ip) || inner.v4.some(linkLocalOrMetadata)) return true;
   return !allowPrivate() && isPrivateAddress(ip);
+}
+
+/**
+ * Link-local addresses and the clouds' metadata services (169.254.0.0/16, fe80::/10, Alibaba's 100.100.100.200, AWS's
+ * fd00:ec2::254): never an account's GPU, whatever FUOBE_ALLOW_PRIVATE_URLS says. No tunnel or LAN server is there.
+ */
+function linkLocalOrMetadata(ip: string): boolean {
+  if (net.isIPv4(ip)) {
+    const [a, b] = v4(ip);
+    return (a === 169 && b === 254) || ip === "100.100.100.200";
+  }
+  const h = hextets(ip);
+  if (!h) return true;
+  return (h[0] & 0xffc0) === 0xfe80 || canonical(ip) === canonical("fd00:ec2::254");
+}
+
+/**
+ * The default check for links someone hands the owner's studio (fetchRemote): private and reserved networks (unless
+ * FUOBE_ALLOW_PRIVATE_URLS=1), and always this machine's own public addresses, so a page can't steer the server into
+ * fetching itself past the reverse proxy.
+ */
+export function blockedForLinks(ip: string): boolean {
+  if (!allowPrivate() && isPrivateAddress(ip)) return true;
+  const h = net.isIPv6(ip) ? hextets(ip) : null;
+  const inner = h ? innerV4(h) : { v4: [] as string[], wrapped: false };
+  const self = selfAddresses();
+  return self.has(canonical(ip)) && !isPrivateAddress(ip) ? true : inner.v4.some((x) => self.has(x) && !isPrivateAddress(x));
 }
 
 /** Ports a stand-in ComfyUI may never use (the real ones on this machine, and the studio's own). */
@@ -212,7 +239,7 @@ export async function fetchRemoteToFile(url: string, dest: string, o: RemoteFetc
 
 async function download(url: string, o: RemoteFetchOptions, dest?: string): Promise<{ data?: Buffer; bytes: number; contentType: string | null; url: string }> {
   const maxBytes = o.maxBytes ?? MAX_REMOTE_BYTES;
-  const blocked = o.blocked ?? ((ip: string) => !allowPrivate() && isPrivateAddress(ip));
+  const blocked = o.blocked ?? blockedForLinks;
   const resolve = o.resolve ?? (async (host: string) => (await dns.lookup(host, { all: true, verbatim: true })).map((a) => a.address));
   const deadline = Date.now() + (o.timeoutMs ?? 60_000);
   let current = new URL(url);

@@ -1,11 +1,11 @@
-import { cookies } from "next/headers";
+import { headers } from "next/headers";
 import { connection } from "next/server";
 import { z } from "zod";
-import { authEnabled, authStatus, createToken, revokeToken, SESSION_COOKIE, validSession } from "@/server/auth";
+import { authEnabled, authStatus, createToken, revokeToken, sessionCookieFrom, validSession } from "@/server/auth";
 
 /** Tokens are managed from a signed-in browser only: a token can't mint or revoke tokens. */
 async function browserOnly(): Promise<Response | null> {
-  if (!authEnabled() || validSession((await cookies()).get(SESSION_COOKIE)?.value)) return null;
+  if (!authEnabled() || validSession(sessionCookieFrom((await headers()).get("cookie")))) return null;
   return Response.json({ error: "Manage API tokens from a signed-in browser" }, { status: 403 });
 }
 

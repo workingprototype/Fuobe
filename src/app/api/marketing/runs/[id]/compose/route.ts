@@ -2,7 +2,7 @@ import { z } from "zod";
 import { failure, readBody, saveRunComposite } from "@/server/marketing";
 
 const Body = z.object({
-  url: z.string().startsWith("/api/files/"),
+  url: z.string().startsWith("/api/files/").max(500),
   ratio: z.string().regex(/^\d+:\d+$/),
   text: z.string().max(1000).default(""),
   /** The words as set (kept on the run, so "Edit text" opens with them). */

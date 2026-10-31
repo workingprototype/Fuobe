@@ -30,9 +30,12 @@ it (files, uploads, projects, settings values, tokens) answer 401 "Sign up to se
 Every change a guest sends (generate, upload, save a setting, create a project…) answers 401. The
 studio shows a "Create a free account to run this" card with **Sign up** and **Log in**. Price
 checks (the estimate routes, and `?preview=1` on the run routes that support it) stay open, so the
-studios can show prices. They don't reveal the owner's library: the turnaround video's price check
-(`/api/turnaround/estimate`, or `/api/turnaround?preview=1`) answers 404 "Character not found" for
-any character a visitor names, whether it exists or not.
+studios can show prices. A guest may send 120 price checks a minute (per visitor behind a trusted
+reverse proxy; see below), and so may each account. A price check reads only the header of a file
+it names, and only of the asker's own files: a guest owns none. Nor does a price check reveal the
+owner's library: the turnaround video's price check (`/api/turnaround/estimate`, or
+`/api/turnaround?preview=1`) answers 404 "Character not found" for any character a visitor names,
+whether it exists or not.
 
 ## Accounts
 
@@ -45,7 +48,13 @@ any character a visitor names, whether it exists or not.
 - Accounts are stored in `auth.json` in the data folder: the email in lower case, a salted scrypt
   hash of the password (the same scheme as the install password), and the creation time.
 - Sign-up and log-in attempts are rate limited per visitor (set `FUOBE_TRUST_PROXY=1` behind a
-  reverse proxy, so that each visitor gets their own limit).
+  reverse proxy, so that each visitor gets their own limit; an IPv6 address counts by its /64).
+  A visitor gets 30 account log-ins a minute, right or wrong, and 10 a minute for one email. After
+  5 wrong passwords for one email, that visitor is locked out of it for 15 minutes. After 10 wrong
+  passwords for one email from any number of addresses, the email is locked for 15 minutes, but
+  only for the addresses that got it wrong twice or more. The person whose account it is still
+  gets in from anywhere else, so nobody can lock a chosen account out. Account log-ins and the
+  install password have separate limits, so guessing at one never slows down the other.
 
 An account is signed in, but it sees the owner's studio as a guest does:
 
@@ -167,9 +176,15 @@ multipart form works up to 26 MB). Without a connected GPU it answers 403 with
 
 - The type is read from the file's first bytes. A file that isn't one of these answers 415.
 - `Content-Length` is required (411), and a file over its size answers 413 before it is read.
-- An account keeps up to 1 GB of uploads and 3 GB of files in all (uploads and results). Past that,
-  uploads and runs answer 413: delete some runs to make room.
-- Up to 60 uploads an hour, 300 a day and 2 at once (429 with `Retry-After`).
+- An account keeps up to 1 GB of uploads and 3 GB of files in all (uploads and results); in its
+  first 7 days, 1 GB in all. Past that, uploads and runs answer 413: delete some runs to make room.
+- All accounts together keep at most a quarter of the data disk (`FUOBE_ACCOUNTS_DISK_GB` sets
+  it), and the disk always keeps its free floor (`FUOBE_ACCOUNT_DISK_FREE_GB`). Past either,
+  account uploads and runs answer 503 "short of space"; the owner's work is not affected.
+- Up to 60 uploads an hour, 300 a day and 2 at once (429 with `Retry-After`). An upload sent as a
+  form (older pages, held in memory) also waits for a place among 8 from every account together.
+  An upload ends with 408 when nothing arrives for a minute, or when it takes over 30 minutes.
+  One address (one network) makes at most 20 accounts a day.
 - **How long files stay.** Uploads are removed after 14 days, even when a run still uses them.
   Runs and their results are removed after 30 days. Everything goes at once when the account is
   deleted.

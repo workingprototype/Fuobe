@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createFashion, previewFashion, type FashionRun } from "@/server/photodump";
 
-const File = z.string().startsWith("/api/files/");
+const File = z.string().startsWith("/api/files/").max(500);
 const Engine = z.enum(["cloud", "open"]);
 
 const Body = z.discriminatedUnion("step", [
