@@ -34,6 +34,17 @@ const json = (status: number, body: Record<string, unknown>, headers: Record<str
   Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
 
 class TooBig extends Error {}
+class Stalled extends Error {}
+
+/** One read of a body, or Stalled when nothing arrives within `ms`. */
+function readWithin<T>(reader: ReadableStreamDefaultReader<T>, ms: number): Promise<ReadableStreamReadResult<T>> {
+  if (!Number.isFinite(ms)) return reader.read();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Stalled()), Math.max(0, ms));
+  });
+  return Promise.race([reader.read(), late]).finally(() => clearTimeout(timer));
+}
 
 /** The file's name as display text only: no folders, no control or path characters, at most 120 characters. */
 function displayName(raw: string | null): string | undefined {
@@ -58,14 +69,18 @@ function declaredType(contentType: string | null, name: string | undefined): str
 
 const kindOf = (type: string): SniffKind | null => (/^image\//.test(type) ? "image" : /^video\//.test(type) ? "video" : /^audio\//.test(type) ? "audio" : null);
 
-/** Stream a request body into `dest`, at most `max` bytes (TooBig past it; no file is left on any failure). */
-async function streamTo(body: ReadableStream<Uint8Array> | null, dest: string, max: number): Promise<number> {
+/**
+ * Stream a request body into `dest`, at most `max` bytes (TooBig past it; no file is left on any failure). With
+ * `idleMs` / `totalMs`: Stalled when nothing arrives for that long, or the whole body takes longer.
+ */
+async function streamTo(body: ReadableStream<Uint8Array> | null, dest: string, max: number, opts: { idleMs?: number; totalMs?: number } = {}): Promise<number> {
   const out = fs.createWriteStream(dest);
   const reader = body?.getReader();
+  const deadline = Date.now() + (opts.totalMs ?? Infinity);
   let bytes = 0;
   try {
     while (reader) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithin(reader, Math.min(opts.idleMs ?? Infinity, deadline - Date.now()));
       if (done) break;
       bytes += value.length;
       if (bytes > max) throw new TooBig();
@@ -149,11 +164,13 @@ async function accountUpload(request: Request, account: Account): Promise<Respon
   if (!hour.ok || !day.ok) return json(429, { error: ACCOUNT_MESSAGES.uploadRate }, { "Retry-After": String(Math.max(hour.retryAfterS, day.retryAfterS)) });
   const release = enter(`up:${account.id}`, ACCOUNT_LIMITS.uploadsAtOnce);
   if (!release) return json(429, { error: ACCOUNT_MESSAGES.uploadRate }, { "Retry-After": "10" });
-  // And a few at once from every account together.
-  const releaseAll = enter("up:accounts", ACCOUNT_LIMITS.uploadsAtOnceAll);
+  // And a few forms at once from every account together: a form is held in memory. A file sent as it is streams to
+  // disk (it holds no memory), so it never waits for other accounts' uploads.
+  const multipart = (request.headers.get("content-type") ?? "").toLowerCase().startsWith("multipart/form-data");
+  const releaseAll = multipart ? enter("up:accounts", ACCOUNT_LIMITS.uploadsAtOnceAll) : () => {};
   if (!releaseAll) {
     release();
-    return json(429, { error: ACCOUNT_MESSAGES.uploadRate }, { "Retry-After": "10" });
+    return json(429, { error: ACCOUNT_MESSAGES.uploadsBusy }, { "Retry-After": "10" });
   }
   try {
     return await accountUploadBody(request, account);
@@ -194,12 +211,13 @@ async function accountUploadBody(request: Request, account: Account): Promise<Re
       bytes = file.size;
     } else {
       declaredFull = request.headers.get("content-type") ?? "";
-      // Never more than it said it would send.
-      bytes = await streamTo(request.body, dest, Math.min(length, ACCOUNT_LIMITS.videoBytes));
+      // Never more than it said it would send, and never one that stops arriving (it would hold its place for good).
+      bytes = await streamTo(request.body, dest, Math.min(length, ACCOUNT_LIMITS.videoBytes), { idleMs: ACCOUNT_LIMITS.uploadIdleMs, totalMs: ACCOUNT_LIMITS.uploadMaxMs });
     }
   } catch (e) {
     fs.rmSync(dest, { force: true });
     if (e instanceof TooBig) return json(413, { error: ACCOUNT_MESSAGES.videoTooBig });
+    if (e instanceof Stalled) return json(408, { error: ACCOUNT_MESSAGES.uploadStalled });
     throw e;
   }
   const drop = (status: number, error: string) => {

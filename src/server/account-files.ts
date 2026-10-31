@@ -33,8 +33,11 @@ export const ACCOUNT_LIMITS = {
   uploadsPerHour: 60,
   uploadsPerDay: 300,
   uploadsAtOnce: 2,
-  /** Uploads at once from every account together (a multipart one is held in memory). */
+  /** Form (multipart) uploads at once from every account together: a form is held in memory. A file sent as it is isn't counted. */
   uploadsAtOnceAll: 8,
+  /** An upload ends when nothing arrives for this long, or when it takes longer than this in all (95 MB at about 55 KB/s). */
+  uploadIdleMs: 60_000,
+  uploadMaxMs: 30 * 60_000,
   /** Retention: uploads (even when a run still names them), and runs with their files. */
   uploadDays: 14,
   runDays: 30,

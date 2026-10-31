@@ -174,8 +174,10 @@ multipart form works up to 26 MB). Without a connected GPU it answers 403 with
 - All accounts together keep at most a quarter of the data disk (`FUOBE_ACCOUNTS_DISK_GB` sets
   it), and the disk always keeps its free floor (`FUOBE_ACCOUNT_DISK_FREE_GB`). Past either,
   account uploads and runs answer 503 "short of space"; the owner's work is not affected.
-- Up to 60 uploads an hour, 300 a day and 2 at once (429 with `Retry-After`), and 8 at once from
-  every account together. One address makes at most 5 accounts a day.
+- Up to 60 uploads an hour, 300 a day and 2 at once (429 with `Retry-After`). An upload sent as a
+  form (older pages, held in memory) also waits for a place among 8 from every account together.
+  An upload ends with 408 when nothing arrives for a minute, or when it takes over 30 minutes.
+  One address (one network) makes at most 20 accounts a day.
 - **How long files stay.** Uploads are removed after 14 days, even when a run still uses them.
   Runs and their results are removed after 30 days. Everything goes at once when the account is
   deleted.
