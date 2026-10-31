@@ -6,7 +6,7 @@ import { absolutePath, contentTypeFor } from "./storage";
 
 /**
  * A stored file as an HTTP response, with byte ranges (video seeking), a UTF-8 charset for text,
- * `nosniff`, and a script-free CSP for SVG. `relPath` is under the files folder; traversal is
+ * `nosniff`, a sandbox CSP (and a script-free one for SVG). `relPath` is under the files folder; traversal is
  * refused. Used by /api/files (signed in) and the share routes (/s/<token>/f/…). `clean` serves the
  * file without the generation data embedded in it (src/server/media-clean.ts): same size and byte
  * ranges, metadata blanked as it streams; a file whose metadata can't be read isn't served.
@@ -57,9 +57,11 @@ export function fileResponse(request: Request, relPath: string, opts: { cache?: 
     "Accept-Ranges": "bytes",
     "Cache-Control": opts.cache ?? "private, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",
+    // Opened on its own, a stored file runs no script as this site (one could drive a ComfyUI that lets the site in).
+    "Content-Security-Policy": "sandbox",
     ...opts.headers,
   };
-  if (type === "image/svg+xml") headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'";
+  if (type === "image/svg+xml") headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
   const download = new URL(request.url).searchParams.get("download");
   if (download) headers["Content-Disposition"] = `attachment; filename="${download.replace(/[^\w.-]/g, "_")}"`;
   const range = request.headers.get("range");

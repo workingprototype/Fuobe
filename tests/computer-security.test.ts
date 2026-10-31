@@ -353,6 +353,24 @@ describe("results are checked like uploads", () => {
     expect((await put("a", svg.id, 0, svg.lease, Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>`.padEnd(80, " ")))).status).toBe(415);
   });
 
+  it("a stored file opened on its own can't run scripts as the site, whatever its type", async () => {
+    // A script on the site's own address could drive the person's ComfyUI: stored files never get to run one.
+    const { saveFile } = await import("@/server/storage");
+    const { fileResponse } = await import("@/server/file-response");
+    for (const [name, contentType, data] of [
+      ["a.png", "image/png", FAKE_PNG],
+      ["a.svg", "image/svg+xml", Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg"/>`)],
+      ["a.txt", "text/plain", Buffer.from("hello")],
+    ] as const) {
+      const url = saveFile({ data, contentType, name, source: "upload" }).url;
+      const res = fileResponse(new Request(`${SITE}${url}`), url.replace(/^\/api\/files\//, ""));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("content-security-policy")?.split(/;\s*/)).toContain("sandbox");
+      await res.body?.cancel();
+    }
+  });
+
   it("a real picture sent as a web page is kept as the picture its bytes say", async () => {
     const c = await collecting(ONE_PNG);
     expect((await put("a", c.id, 0, c.lease, FAKE_PNG, 0, FAKE_PNG.length, { "content-type": "text/html" })).status).toBe(200);
