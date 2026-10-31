@@ -65,6 +65,8 @@ export interface ChatToolCall {
   id: string;
   name: string;
   input: unknown;
+  /** Gemini's thought signature on the call (tool_calls[i].extra_content), sent back as received. */
+  extra?: unknown;
 }
 
 export interface ChatMessage {
@@ -77,6 +79,31 @@ export interface ChatMessage {
   toolName?: string;
   /** User turns: pictures for a model that can see (base64, JPEG, PNG, GIF or WebP); a text-only model answers from the words. */
   images?: { data: string; contentType: string }[];
+  /** Assistant turns (hosted providers): the reasoning to send back, under the field it came in. */
+  reasoning?: { field: string; text: string };
+  /** Assistant turns on OpenRouter: reasoning_details, sent back as received. */
+  details?: unknown[];
+  /** Assistant turns on OpenAI's Responses API: the turn's output items (encrypted reasoning included), sent back unchanged. */
+  items?: unknown[];
+}
+
+/**
+ * What a hosted provider needs back on its own earlier turns, kept on the stored assistant message as
+ * `replay`. It goes back only to the provider that made it (reasoning only to the same model), and
+ * never to Anthropic (src/server/assist/agent.ts forAnthropic).
+ */
+export interface Replay {
+  provider: string;
+  model: string;
+  reasoning?: { field: string; text: string };
+  /** OpenRouter's reasoning_details. */
+  details?: unknown[];
+  /** OpenAI Responses: the turn's output items (encrypted reasoning included), replayed unchanged. */
+  items?: unknown[];
+  /** Stored tool_use id → the provider's own id, when its id didn't fit the stored pattern. */
+  toolIds?: Record<string, string>;
+  /** Stored tool_use id → Gemini's extra_content (its thought signature). */
+  extra?: Record<string, unknown>;
 }
 
 /** A JSON Schema the answer must follow (root object or array), or "object" for any JSON object. */

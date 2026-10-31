@@ -3,6 +3,7 @@
  * connection test route: which settings each provider's test reads, what a well-formed key or
  * address looks like, when to offer the first-run guide, and each connection's one-line status.
  */
+import { LLM_PROVIDERS } from "./catalog/llm-providers";
 
 export type TestProvider = "fal" | "replicate" | "comfyui" | "llm" | "civitai" | "ai-toolkit";
 
@@ -28,6 +29,32 @@ export const PROVIDER_SETTINGS = {
     "llmModel",
     "llmKey",
     "llmContext",
+    // Assist's hosted providers: keys, regions and Qwen's workspace (src/lib/catalog/llm-providers.ts).
+    "openaiKey",
+    "openaiRegion",
+    "googleKey",
+    "xaiKey",
+    "xaiRegion",
+    "metaKey",
+    "mistralKey",
+    "cohereKey",
+    "deepseekKey",
+    "moonshotKey",
+    "moonshotRegion",
+    "zaiKey",
+    "zaiRegion",
+    "qwenKey",
+    "qwenRegion",
+    "qwenWorkspace",
+    "minimaxKey",
+    "minimaxRegion",
+    "openrouterKey",
+    "groqKey",
+    "cerebrasKey",
+    "togetherKey",
+    "togetherRegion",
+    "fireworksKey",
+    "huggingfaceToken",
   ],
   // Not a model provider: the key that downloads a recipe's civitai LoRAs (Settings → LoRAs).
   civitai: ["civitaiKey"],
@@ -111,7 +138,12 @@ export function settingProblem(name: string, raw: string): string | null {
       return addressProblem(v, DEFAULT_AI_TOOLKIT_URL);
     case "aiToolkitDatasetDir":
       return v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v) ? null : "Use a full path, like /mnt/shared/datasets";
+    case "qwenWorkspace":
+      return /^[a-z0-9-]{1,64}$/.test(v) ? null : "Use the workspace id from Model Studio's Workspace page (lowercase letters, digits and hyphens), not an address";
   }
+  // An LLM provider's key: the format its docs give.
+  const hint = LLM_PROVIDERS.find((p) => p.keySetting === name)?.keyHint;
+  if (hint) return new RegExp(hint.pattern).test(v) ? null : hint.text;
   return null;
 }
 
