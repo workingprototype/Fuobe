@@ -437,6 +437,19 @@ export const NODE_PACKS: NodePack[] = [
     ...GPL,
     note: "H3 Relay 2.0 (Sendy Software LLC and contributors); GPL-3.0 code, vendored Context Loop and Spectrum GPL-3.0. Opt-in (H3_RELAY=1): it registers HTTP routes when it loads",
   }),
+  // Krea 2's edits (the owner's SOTA image families, 2026-10-31).
+  pack("comfyui-krea2edit", "https://github.com/lbouaraba/comfyui-krea2edit", {
+    name: "Apache-2.0",
+    class: "commercial",
+    url: SPDX("Apache-2.0"),
+    note: "Krea 2 Identity Edit's nodes (Krea 2 Edit and Identity Edit); Apache-2.0 code. The V2 edit LoRAs they run are non-commercial without a licence from their author",
+  }),
+  pack("ComfyUI-Krea2-Ostris-Edit", "https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit", {
+    name: "MIT",
+    class: "commercial",
+    url: SPDX("MIT"),
+    note: "Ostris' Krea 2 edit nodes (Krea 2 Inpaint); MIT code. The inpaint LoRA it runs is under the Krea 2 Community License",
+  }),
 ];
 
 export const nodePack = (name: string): NodePack | undefined => NODE_PACKS.find((p) => p.name === name);
