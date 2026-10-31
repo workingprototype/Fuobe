@@ -47,6 +47,11 @@ const NO_COVER = ["app-fuobe-angles", "app-talking-photo", "motion-dolly-zoom-ou
 const WHITE_BARS = ["app-dance", "app-simlife", "app-game-dump", "app-japanese-show", "app-comic-book", "app-banana-eating", "app-change-background", "effect-boiling-point", "effect-color-rain", "app-text-edit"];
 /** Studio cards that rest on a still: Image to 3D's turntable shot. */
 const STILLS = ["app-3d-rotation"];
+/**
+ * Slots whose clip was taken down with the still it was made from (Flying's eagle had three wings): the card rests
+ * on its new still until the new clip is published. Take an id out when its clip is back.
+ */
+const CLIP_PENDING = ["motion-flying"];
 
 const studioIds = HOME_STUDIOS.flatMap((s) => (s.id ? [s.id] : []));
 const rows = [...HOME_EFFECTS, ...HOME_MOTIONS, ...HOME_REVEALS];
@@ -61,7 +66,7 @@ describe("Home's showcase", () => {
       const cover = PRESET_PREVIEWS[id];
       expect(cover, `${id} has a real cover`).toBeDefined();
       expect(exists(cover.poster), cover.poster).toBe(true);
-      if (!STILLS.includes(id)) {
+      if (!STILLS.includes(id) && !(CLIP_PENDING.includes(id) && !cover.video)) {
         expect(cover.video, `${id} has a clip`).toBeDefined();
         expect(exists(cover.video!), cover.video).toBe(true);
       }

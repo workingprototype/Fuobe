@@ -66,16 +66,17 @@ describe("the camera motion picker", () => {
     expect(covered(MOTIONS).length).toBeGreaterThan(MOTIONS.length * 0.9);
   });
 
-  it("never borrows another move's cover: Dolly Zoom Out isn't shown with Dolly Zoom In's opposite move", () => {
-    expect(tile(motion("motion-dolly-zoom-out"))).not.toContain("motion-dolly-zoom-in");
-    expect(presetCover("motion-dolly-zoom-out")).toBeUndefined();
+  it("never borrows another move's cover: Dolly Zoom Out shows its own, not Dolly Zoom In's opposite move", () => {
+    const t = tile(motion("motion-dolly-zoom-out"));
+    expect(t).not.toContain("motion-dolly-zoom-in");
+    expect(t).toContain('src="/previews/presets/thumbs/motion-dolly-zoom-out.jpg"');
   });
 
-  it("shows 3D Rotation with the 3D Rotation app's cover, the same turntable shot", () => {
+  it("shows 3D Rotation with its own turntable cover, not the 3D Rotation app's it showed before it had one", () => {
     const t = tile(motion("motion-3d-rotation"));
-    expect(t).toContain('src="/previews/presets/thumbs/app-3d-rotation.jpg"');
+    expect(t).toContain('src="/previews/presets/thumbs/motion-3d-rotation.jpg"');
+    expect(t).not.toContain("app-3d-rotation");
     expect(t).not.toContain("linear-gradient");
-    expect(presetCover("motion-3d-rotation")).toEqual(presetCover("app-3d-rotation"));
   });
 
   it("loads no clip until one is hovered, focused or picked", () => {
@@ -187,7 +188,8 @@ describe("the camera motion and Mix chips", () => {
     );
   /** The chip itself (the popover's trigger), not its clear button. */
   const trigger = (html: string) => html.split("<button")[1];
-  const bare = motion("motion-dolly-zoom-out");
+  /** Every camera motion has a cover now: one without, as a motion added before its cover would be. */
+  const bare: Preset = { ...motion("motion-dolly-zoom-out"), id: "motion-without-a-cover" };
   const zoom = motion("motion-zoom-in");
 
   it("show the picked motion's small poster in place of its icon, and the icon when it has no cover", () => {
@@ -248,9 +250,9 @@ describe("Cinema Studio's camera moves", () => {
 });
 
 describe("which covers the pickers borrow", () => {
-  it("only 3D Rotation's, from the app that films the same turntable shot", () => {
+  it("none while every preset has its own (3D Rotation shows the 3D Rotation app's turntable shot only without one)", () => {
     const borrowed = [...APPS, ...MOTIONS, ...EFFECTS].filter((p) => !PRESET_PREVIEWS[p.id] && presetCover(p.id)).map((p) => p.id);
-    expect(borrowed).toEqual(["motion-3d-rotation"]);
+    expect(borrowed).toEqual([]);
   });
 });
 
