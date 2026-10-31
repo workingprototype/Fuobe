@@ -8,7 +8,7 @@ const root = path.join(__dirname, "../src");
 const files = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(d, e.name)) : /\.tsx?$/.test(e.name) ? [path.join(d, e.name)] : []));
 const form = fs.readFileSync(path.join(root, "components/settings-form.tsx"), "utf8");
 /** The anchors Settings has: its sections' and fields' ids (id="…", or a Section's id prop on its own line), the form's and the sections around it. */
-const page = [form, ...["components/gpu/account-gpu-section.tsx", "components/owner-settings.tsx", "components/accounts-admin.tsx"].map((f) => fs.readFileSync(path.join(root, f), "utf8"))].join("\n");
+const page = [form, ...["components/gpu/account-gpu-section.tsx", "components/keys/your-keys.tsx", "components/owner-settings.tsx", "components/accounts-admin.tsx"].map((f) => fs.readFileSync(path.join(root, f), "utf8"))].join("\n");
 const anchors = new Set([...page.matchAll(/\bid="([a-z0-9-]+)"/g)].map((m) => m[1]));
 
 describe("Settings deep links", () => {
@@ -20,7 +20,8 @@ describe("Settings deep links", () => {
 
   it("every \"Settings → …\" the app tells people names a section or field Settings has", () => {
     // Section titles ("Prompt enhancement · Claude or Ollama": the whole, or either side of the "·") and field labels.
-    const titles = [...page.matchAll(/\btitle="([^"]+)"/g)].map((m) => m[1]);
+    // (An account's own sections, Your GPU and Your keys, are titled by their heading.)
+    const titles = [...page.matchAll(/\btitle="([^"]+)"/g), ...page.matchAll(/<h2\b[^>]*>\s*([^<{]+?)\s*<\/h2>/g)].map((m) => m[1]);
     const labels = [...page.matchAll(/\blabel="([^"]+)"/g)].map((m) => m[1]);
     const norm = (x: string) => x.replace(/&amp;/g, "&").replace(/\s*·\s*/g, " ").toLowerCase();
     const names = [...titles, ...titles.flatMap((t) => t.split("·").map((x) => x.trim())), ...labels].map(norm);

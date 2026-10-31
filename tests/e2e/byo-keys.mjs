@@ -83,6 +83,11 @@ const api = async (route, { method = "GET", body, cookie } = {}) => {
 };
 const cookieOf = (res) => /fuobe_session=[^;]+/.exec(res.headers.get("set-cookie") ?? "")?.[0];
 const readable = [];
+/** Settings → Your keys alone, scrolled into view. */
+const shootKeys = async (page, name) => {
+  await page.waitForTimeout(400);
+  await page.locator("#your-keys").screenshot({ path: path.join(shots, name) });
+};
 
 try {
   // The server is up (first compile can take a while).
@@ -138,19 +143,18 @@ try {
   // Settings → Your keys: a bad key, then a good one.
   await page.goto("/settings#your-keys", { waitUntil: "load", timeout: 180_000 });
   await page.getByRole("heading", { name: "Your keys" }).waitFor({ timeout: 60_000 });
-  await page.screenshot({ path: path.join(shots, "your-keys-empty-desktop.png"), fullPage: false });
+  await shootKeys(page, "your-keys-empty-desktop.png");
   const falField = page.getByLabel("fal.ai API key");
   await falField.fill(BAD_FAL);
   await page.getByRole("button", { name: "Check and save" }).first().click();
   await page.getByText("fal.ai didn't accept this key").waitFor({ timeout: 30_000 });
   check(true, "a bad key is refused with plain words");
-  await page.screenshot({ path: path.join(shots, "your-keys-refused-desktop.png") });
+  await shootKeys(page, "your-keys-refused-desktop.png");
   await falField.fill(ACCT_FAL);
   await page.getByRole("button", { name: "Check and save" }).first().click();
   await page.getByText("Key ending in").waitFor({ timeout: 30_000 });
   check((await page.content()).includes("9f3a"), "a good key is saved and shown by its last 4 characters");
-  await page.waitForTimeout(800);
-  await page.screenshot({ path: path.join(shots, "your-keys-saved-desktop.png") });
+  await shootKeys(page, "your-keys-saved-desktop.png");
   readable.push(await page.content());
 
   // The Image studio again: the switch opens, the picker dims Replicate-only models, the price says who pays.
@@ -173,6 +177,7 @@ try {
   await page.getByText("Add your Replicate key").first().click();
   await page.getByRole("dialog").getByText("Add your Replicate key").waitFor({ timeout: 10_000 });
   check(true, "choosing a dimmed model opens Add your Replicate key");
+  await page.waitForTimeout(700);
   await page.screenshot({ path: path.join(shots, "add-key-dialog-desktop.png") });
   await page.keyboard.press("Escape");
   readable.push(await page.content());
@@ -206,7 +211,7 @@ try {
   await page.getByRole("button", { name: "Remove", exact: true }).first().click();
   await page.getByRole("button", { name: "Remove key" }).click();
   await page.getByText(/run is using this key now/).waitFor({ timeout: 20_000 });
-  await page.screenshot({ path: path.join(shots, "your-keys-runs-going-desktop.png") });
+  await shootKeys(page, "your-keys-runs-going-desktop.png");
   await page.getByRole("button", { name: "Stop runs and remove" }).click();
   await page.getByText("Your fal.ai key is removed from this studio.").waitFor({ timeout: 20_000 });
   const cancel = fal.log.find((r) => r.path.endsWith("/cancel"));
@@ -219,8 +224,7 @@ try {
   const p2 = await phone.newPage();
   await p2.goto("/settings#your-keys", { waitUntil: "load", timeout: 180_000 });
   await p2.getByRole("heading", { name: "Your keys" }).waitFor({ timeout: 60_000 });
-  await p2.waitForTimeout(800);
-  await p2.screenshot({ path: path.join(shots, "your-keys-phone.png"), fullPage: true });
+  await shootKeys(p2, "your-keys-phone.png");
   const sideways = await p2.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check(sideways <= 0, `no sideways scroll on a phone (${sideways}px)`);
 
