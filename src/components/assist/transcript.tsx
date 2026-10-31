@@ -3,7 +3,6 @@
 import { AppWindow, ArrowUpRight, Brain, Captions, Check, CircleAlert, Clapperboard, Film, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Plug, Scissors, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { useCreateGeneration } from "@/lib/api";
@@ -11,6 +10,7 @@ import { memoryCardLine, planRunnable, type AssistItem, type AssistThread, type 
 import type { Generation } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { PlanJobs } from "./plan-jobs";
 import { SkillIcon } from "./skill-icon";
 
@@ -61,7 +61,7 @@ export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistIte
     try {
       await onAnswer(ok);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(null);
     }
@@ -173,7 +173,7 @@ export function GenerationCards({ ids, all, storyboard, onOpen }: { ids: string[
       });
     }
     if (g.status === "failed" || g.status === "canceled") {
-      return [<FailedTile key={g.id} g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />];
+      return [<FailedTile key={g.id} g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toastError(e) })} />];
     }
     return Array.from({ length: Math.max(1, g.request.params?.numOutputs ?? 1) }, (_, i) => <PendingTile key={`${g.id}-${i}`} g={g} ratio={ratio} />);
   });

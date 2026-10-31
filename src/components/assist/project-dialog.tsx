@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PROJECT_COLORS, PROJECT_LIMITS, PROJECT_SWATCH, type AssistProject, type ProjectColor } from "@/lib/assist";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useProjectActions, useSkills } from "./hooks";
 import { SkillIcon } from "./skill-icon";
@@ -59,7 +60,7 @@ function Form({ project, onDone }: { project?: AssistProject; onDone: (p?: Assis
       if (!project) toast.success("Project created", { duration: 1500 });
       onDone(p);
     } catch (err) {
-      toast.error((err as Error).message);
+      toastError(err);
     } finally {
       setBusy(false);
     }

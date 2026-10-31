@@ -56,6 +56,7 @@ import type { Generation, OutputFile } from "@/lib/catalog/types";
 import { formatCost, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { copyWithToast } from "@/lib/clipboard";
+import { toastError } from "@/lib/refusals";
 import { MoveToItems } from "./folder-sidebar";
 import { foreign, useItemActions, type CinemaGeneration } from "./hooks";
 
@@ -255,7 +256,7 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
                 </a>
               </DropdownMenuItem>
             )}
-        <DropdownMenuItem onClick={() => void actions.favorite([u.g.id], !u.g.favorite).catch((e) => toast.error((e as Error).message))}>
+        <DropdownMenuItem onClick={() => void actions.favorite([u.g.id], !u.g.favorite).catch((e) => toastError(e))}>
           <Heart /> {u.g.favorite ? "Unlike" : "Like"}
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -283,7 +284,7 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
                     void actions
                       .move([u.g.id], f)
                       .then((n) => toast(n ? "Moved" : "That take isn't in this project", { duration: 1500 }))
-                      .catch((e) => toast.error((e as Error).message))
+                      .catch((e) => toastError(e))
                   }
                 />
               </DropdownMenuSubContent>
@@ -335,7 +336,7 @@ function TileView({
     active(g) ? (
       <PendingTile g={g} ratio={aspect} />
     ) : g.status !== "succeeded" ? (
-      <FailedTile g={g} ratio={aspect} onRetry={() => void actions.retry(g).catch((e) => toast.error((e as Error).message))} />
+      <FailedTile g={g} ratio={aspect} onRetry={() => void actions.retry(g).catch((e) => toastError(e))} />
     ) : (
       <div className={cn("relative size-full", fit && "bg-muted")}>
         {/* Behind the video: visible until (or if) the browser can draw its first frame. */}
@@ -628,13 +629,13 @@ export function CinemaFeed({
     try {
       await actions.remove(list);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
       return;
     }
     toast(list.length > 1 ? `${list.length} takes moved to Trash` : "Moved to Trash", {
       id: "cinema-trash",
       duration: 6000,
-      action: { label: "Undo", onClick: () => void actions.restore(list).catch((e) => toast.error((e as Error).message)) },
+      action: { label: "Undo", onClick: () => void actions.restore(list).catch((e) => toastError(e)) },
     });
   };
   const own = live.filter((id) => !items.some((g) => g.id === id && foreign(g, projectId)));
@@ -722,7 +723,7 @@ export function CinemaFeed({
           <span className="flex-1" />
           <button
             type="button"
-            onClick={() => void actions.favorite(live, !items.filter((g) => live.includes(g.id)).every((g) => g.favorite)).catch((e) => toast.error((e as Error).message))}
+            onClick={() => void actions.favorite(live, !items.filter((g) => live.includes(g.id)).every((g) => g.favorite)).catch((e) => toastError(e))}
             className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium hover:bg-accent"
           >
             <Heart className="size-3.5" /> {items.filter((g) => live.includes(g.id)).every((g) => g.favorite) ? "Unlike" : "Like"}
@@ -745,7 +746,7 @@ export function CinemaFeed({
                         toast(`Moved ${n} take${n === 1 ? "" : "s"}`, { duration: 1500 });
                         setSelected(new Set());
                       })
-                      .catch((e) => toast.error((e as Error).message))
+                      .catch((e) => toastError(e))
                   }
                 />
               </DropdownMenuContent>

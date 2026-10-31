@@ -65,6 +65,7 @@ import {
   startStep,
 } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
+import { toastError } from "@/lib/refusals";
 import { cn } from "@/lib/utils";
 import { badgeFor, badgeText, openGpuSetup, setGpuRetry, useGpuBadges } from "@/hooks/use-gpu";
 import { AttachMenu } from "./attach-menu";
@@ -82,7 +83,7 @@ import { SettingsChip } from "./settings-panel";
 import { ShotsEditor } from "./shots-editor";
 import { SketchTools } from "./sketch-tools";
 import { RECENT_MODELS, useStoredList } from "./stored-list";
-import { useStartRequest, useStudio, type Draft } from "./studio-context";
+import { usePresetUrl, useStartRequest, useStudio, type Draft } from "./studio-context";
 import { useEdgeFade } from "./use-edge-fade";
 import { useSignature } from "../palettes/use-signature";
 
@@ -212,6 +213,7 @@ function slotButton(root: HTMLElement | null, key: string) {
 export function Composer({ docked }: { docked: boolean }) {
   const { config, draft: typed, setDraft, setSlot } = useStudio();
   const catalog = useCatalog();
+  const presetUrl = usePresetUrl();
   const [engine, setEngine, engineMode] = useEngine();
   const create = useCreateGeneration();
   const [enhancing, setEnhancing] = useState(false);
@@ -330,6 +332,7 @@ export function Composer({ docked }: { docked: boolean }) {
   // with the move's own settings (Focus Change: 6 s, silent). Another video model can be picked after it; it takes
   // the move's words. A move whose cloud route is a partner model's words leaves the person's model as it is.
   const pickPreset = (id?: string) => {
+    presetUrl(id);
     if (!id) return setDraft({ presetId: undefined, mix: undefined, presetStrength: undefined });
     const picked = catalog.getPreset(id);
     const want = presetOriginal(picked, engine);
@@ -350,6 +353,15 @@ export function Composer({ docked }: { docked: boolean }) {
     const route = presetParams(preset, engine);
     if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
   }, [preset, engine, model, config.defaultModels, catalog, setDraft]);
+  // A link to a camera motion or effect Fuobe doesn't have (?preset=nope): once every preset is known, the composer
+  // drops it and says so, so the chip doesn't wait on it and a plain prompt runs.
+  const unknownPreset = catalog.complete && !!draft.presetId && !takesLook && !preset;
+  useEffect(() => {
+    if (!unknownPreset) return;
+    setDraft({ presetId: config.preset?.id, mix: undefined, presetStrength: undefined });
+    presetUrl(undefined);
+    toast("That camera motion or effect isn't available. Pick another one.", { id: "unknown-preset" });
+  }, [unknownPreset, config.preset, presetUrl, setDraft]);
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
   const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
@@ -510,15 +522,15 @@ export function Composer({ docked }: { docked: boolean }) {
     // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
     const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx, targetFor(draft.modelId)));
     // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
-    if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
+    if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toastError(e) });
     // If the server's pre-flight stops it (409 gpu-setup), the guided fix that opens can try again, or run it anyway.
     setGpuRetry(
       () => submitRef.current(),
       () => submitRef.current(true),
     );
     create.mutate(skipGpu ? ({ ...sent.request, gpuCheck: "skip" } as typeof sent.request) : sent.request, {
-      // Stopped by the GPU pre-flight: the guided fix is open already, so no error toast on top.
-      onError: (e) => void ((e as { gpuSetup?: boolean }).gpuSetup || toast.error((e as Error).message)),
+      // Stopped by the GPU pre-flight, or refused with its own card: the guided fix or the card is open already, so no error toast on top.
+      onError: (e) => void ((e as { gpuSetup?: boolean }).gpuSetup || toastError(e)),
     });
   };
 
@@ -529,7 +541,7 @@ export function Composer({ docked }: { docked: boolean }) {
       const p = await enhance(draft.prompt, config.kind, op ?? (config.kind === "video" ? "t2v" : "t2i"));
       setDraft({ prompt: p });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setEnhancing(false);
     }
@@ -943,10 +955,10 @@ export function Composer({ docked }: { docked: boolean }) {
         </div>
       ) : null}
 
-      {/* Toolbar: one row; it scrolls (with faded edges) when it doesn't fit. */}
+      {/* Toolbar: one row on phones (it scrolls, with faded edges, when it does not fit); from sm up it wraps, so every chip shows. */}
       <div className="flex items-center gap-2">
         {/* Phones (below sm): "+", Settings (icon), the model (it shrinks to fit) and @; the other chips are in the settings sheet. */}
-        <div ref={chipRow} style={fade} data-composer-toolbar className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1">
+        <div ref={chipRow} style={fade} data-composer-toolbar className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1 sm:flex-wrap sm:overflow-x-visible">
           {kinds.length > 0 && <AttachMenu kinds={kinds} onFiles={attach.attachFiles} onPick={attach.attach} />}
           {collapsed && showAttachments && attached.length > 0 && (
             <button

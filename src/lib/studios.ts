@@ -330,9 +330,9 @@ export function appStudio(preset: Preset): StudioConfig {
     feature: `app:${preset.id}`,
     title: preset.name,
     hero: preset.description,
-    // Which model runs it on each engine lives in the preset header's Details popover (U23); the
-    // hero only says when an engine has no version, plus how the two versions differ.
-    subtitle: [!preset.cloud ? "Open source only for now" : !preset.open ? "Cloud only for now" : undefined, preset.parity].filter(Boolean).join(" · "),
+    // Which model runs it on each engine, and how the two versions differ, live in the preset header's Details popover
+    // (U23); the hero only says when an engine has no version.
+    subtitle: !preset.cloud ? "Open source only for now" : !preset.open ? "Cloud only for now" : undefined,
     placeholder: preset.promptPlaceholder ?? "Add details (optional)",
     kind,
     ops,
@@ -349,6 +349,10 @@ export function appStudio(preset: Preset): StudioConfig {
 /** Apps whose job a studio does in more depth: linked under the hero. */
 const APP_RELATED: Record<string, { href: string; label: string }> = {
   "app-ai-influencer": { href: "/influencer", label: "Build one game-style: 18 categories, creatures, Shuffle" },
+  // Their clips come out silent: the sound is a second step.
+  "app-asmr-classic": { href: "/audio/video", label: "Add sound to your clip" },
+  "app-asmr-add-on": { href: "/audio/video", label: "Add sound to your clip" },
+  "app-rap-god": { href: "/audio/video", label: "Add sound to your clip" },
 };
 
 export const MOTION_CONTROL_STUDIO: StudioConfig = {

@@ -524,7 +524,7 @@ export const SPEC = [
     outputs: [{ node: '9', kind: 'image' }],
     limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
     vramGb: 32,
-    notes: 'Mistral-Small text encoder (18 GB bf16) + 32B fp8mixed transformer; needs ~64 GB system RAM for offloading on 24 GB cards. Width/height must be set on BOTH the latent and the Flux2Scheduler (both listed).',
+    notes: 'Mistral-Small text encoder (36 GB bf16) + 32B fp8mixed transformer; needs ~64 GB system RAM for offloading on 24 GB cards. Width/height must be set on BOTH the latent and the Flux2Scheduler (both listed).',
   },
   {
     id: 'flux2-dev-t2i-turbo',

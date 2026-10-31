@@ -25,6 +25,7 @@ import type { Engine, Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { BOARD_TITLES_KEY, boardTitle, filmReady, rememberTitle } from "@/lib/storyboard-board";
 import { cn } from "@/lib/utils";
+import { responseError, toastError } from "@/lib/refusals";
 
 const ASPECTS: readonly string[] = STORYBOARD_ASPECTS;
 
@@ -128,7 +129,7 @@ function FilmStrip({ items, ratio, onOpen }: { items: Generation[]; ratio: numbe
         <MediaThumb output={g.outputs[0]} autoPlay={g === film} />
       </button>
     ) : g.status === "failed" || g.status === "canceled" ? (
-      <FailedTile g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />
+      <FailedTile g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toastError(e) })} />
     ) : (
       <PendingTile g={g} ratio={ratio} />
     );
@@ -174,7 +175,7 @@ function FrameTile({ g, index, ratio, onOpen }: { g: Generation; index: number; 
             </span>
           </>
         ) : g.status === "failed" || g.status === "canceled" ? (
-          <FailedTile g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />
+          <FailedTile g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toastError(e) })} />
         ) : (
           <PendingTile g={g} ratio={ratio} />
         )}
@@ -211,14 +212,14 @@ function Board({
     mutationFn: async () => {
       const res = await fetch(`/api/storyboards/${first.batchId}/film`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error);
+      if (!res.ok) throw responseError(res, body.error);
       return body as { items: Generation[] };
     },
     onSuccess: (b) => {
       toast.success(`Animating ${b.items.length - 1} shots, then joining them into one film`);
       void qc.invalidateQueries({ queryKey: ["generations"] });
     },
-    onError: (e) => toast.error((e as Error).message),
+    onError: (e) => toastError(e),
   });
   const filmButton = (
     <Button variant="secondary" size="sm" disabled={!ready || makeFilm.isPending} onClick={() => makeFilm.mutate()} className="whitespace-nowrap">
@@ -329,7 +330,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
     queryFn: async () => {
       const res = await fetch("/api/storyboards/estimate", { method: "POST", headers: { "Content-Type": "application/json" }, body: priceKey });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error);
+      if (!res.ok) throw responseError(res, body.error);
       return body as BoardEstimate;
     },
     placeholderData: keepPreviousData,
@@ -345,7 +346,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
         body: JSON.stringify({ ...boardBody, references: refs.filter((r) => r.ref).map((r) => r.ref) }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error);
+      if (!res.ok) throw responseError(res, body.error);
       return body as { scenes: string[]; batchId?: string };
     },
     onSuccess: (b) => {
@@ -354,7 +355,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
       toast.success(`${b.scenes.length} frames on the way — each one builds on the last`);
       void qc.invalidateQueries({ queryKey: ["generations"] });
     },
-    onError: (e) => toast.error((e as Error).message),
+    onError: (e) => toastError(e),
   });
 
   const ready = (mode === "auto" ? story.trim().length > 3 : scenes.some((s) => s.trim())) && !refs.some((r) => r.uploading);

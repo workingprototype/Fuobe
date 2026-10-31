@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { saveSettings, testConnection, type ConnectionTest } from "@/lib/api";
 import { settingProblem, type TestProvider } from "@/lib/connections";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 
 export interface PublicSetting {
   name: string;
@@ -129,7 +130,7 @@ export function ConnectField({
       refresh();
       toast.success("Saved — it didn't connect yet");
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     }
   };
 
@@ -141,7 +142,7 @@ export function ConnectField({
       refresh();
       toast.success(`${label} cleared`);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     }
   };
 

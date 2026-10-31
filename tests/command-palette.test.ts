@@ -5,7 +5,7 @@ import { NAV } from "@/components/nav-items";
 import { APPS, EFFECTS, getModel, MODELS, MOTIONS } from "@/lib/catalog";
 import { entryScore, indexEntries, normalize, rankPalette, skillEntries, wordScore, type PaletteEntry } from "@/lib/command-search";
 import { modelHref, paletteIndex } from "@/lib/palette-index";
-import { modelSearchText, toModelRow } from "@/lib/model-rows";
+import { modelSearchText, rowPriceOn, toModelRow } from "@/lib/model-rows";
 import { hubModePaths, studioRoutes } from "./e2e/_routes.mjs";
 
 const page = (label: string, href: string, keywords?: string): PaletteEntry => ({ key: `page:${href}`, kind: "page", label, href, keywords });
@@ -196,5 +196,29 @@ describe("palette index", () => {
     expect(entries.find((e) => e.kind === "app")?.href).toMatch(/^\/apps\/app-/);
     expect(entries.find((e) => e.kind === "motion")?.href).toMatch(/^\/video\?preset=/);
     expect(entries.find((e) => e.kind === "effect")?.href).toMatch(/^\/video\?preset=/);
+  });
+});
+
+describe("palette settings by viewer", () => {
+  it("offers the install's settings to its owner only; a visitor gets its own GPU, its account and the licences", async () => {
+    const { settingEntries } = await import("@/components/command-palette");
+    const hrefs = (v: Parameters<typeof settingEntries>[0]) => settingEntries(v).map((e) => e.href);
+    expect(hrefs({ owner: true })).toEqual(expect.arrayContaining(["/settings#engine", "/settings#cloud", "/settings#security", "/settings/models"]));
+    expect(hrefs({ owner: false, account: { email: "a@example.com" } })).toEqual(["/settings#your-gpu", "/settings#account", "/settings/models"]);
+    expect(hrefs({ owner: false })).toEqual(["/connect", "/settings/models"]);
+    // Not known yet: nothing of the owner's.
+    expect(hrefs(undefined)).toEqual(["/connect", "/settings/models"]);
+  });
+});
+
+describe("Models page rows", () => {
+  it("open a model where it runs, and show one engine's price when the install runs one", () => {
+    const soul = getModel("fuobe-soul")!;
+    const row = toModelRow(soul);
+    expect(row.engines).toEqual(["open", "cloud"]);
+    expect(modelHref(soul)).toMatch(/\?model=fuobe-soul$/);
+    expect(rowPriceOn(row, Date.UTC(2026, 9, 31), "open")).toBe("Free");
+    expect(rowPriceOn(row, Date.UTC(2026, 9, 31), "cloud")).not.toMatch(/^Free/);
+    expect(rowPriceOn(row, Date.UTC(2026, 9, 31))).toMatch(/^Free · /);
   });
 });

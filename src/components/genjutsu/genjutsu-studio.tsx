@@ -54,6 +54,7 @@ import type { Generation, PixelPoint } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
+import { refusalShown, toastError } from "@/lib/refusals";
 import { CharacterControls, CharacterFacts } from "./character-panel";
 import { useDescribeCharacter, useGenjutsuEstimate, useGenjutsuRun, useTranscribeClip, waitForGeneration, type GenjutsuBody } from "./hooks";
 import { LookPicker, type LookSource } from "./look-picker";
@@ -198,7 +199,7 @@ export function GenjutsuStudio() {
       if (r.problem) toast.error(r.problem, { description: "The project is open: add the clip there." });
       router.push(`/character-swap/${encodeURIComponent(r.id)}`);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
       setOpening(false);
     }
   };
@@ -214,7 +215,7 @@ export function GenjutsuStudio() {
     describeMutation
       .mutateAsync({ engine, image })
       .then((r) => setCharacter((c) => ({ ...c, description: r.description })))
-      .catch((e: Error) => toast.error(friendly(e.message)));
+      .catch((e: Error) => !refusalShown(e) && toast.error(friendly(e.message)));
   };
   const fillClipWords = async () => {
     if (!clip?.url || !range) return;
@@ -459,7 +460,7 @@ export function GenjutsuStudio() {
         setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before, start: at, ratio, body: base });
         toast("Genjutsu is on it", { description: "Follow it below — it lands in your Library too." });
       })
-      .catch((e: Error) => toast.error(friendly(e.message)));
+      .catch((e: Error) => !refusalShown(e) && toast.error(friendly(e.message)));
   };
 
   const modeInfo = getMode(mode);

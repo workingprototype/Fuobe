@@ -16,6 +16,7 @@ import { uploadFile } from "@/lib/api";
 import { AD_STYLES, END_CARD, KIT_LABELS, type BrandKit, type MarketingRun, type Product, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { endCardPng, renderEndCard, siteLabel, type EndCardInput } from "./end-card";
 import { addRuns, send, useBrand, useEstimate, useProductActions, useProducts, useReadingProduct, useUpdateBrand } from "./hooks";
 import type { ModelInfo } from "./model-info";
@@ -93,7 +94,7 @@ function KitBrand({ brand }: { brand: BrandKit }) {
   }
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<(() => void) | null>(null);
-  const save = (patch: Partial<Pick<BrandKit, "logo" | "colors">>) => update.mutate(patch, { onError: (e) => toast.error((e as Error).message) });
+  const save = (patch: Partial<Pick<BrandKit, "logo" | "colors">>) => update.mutate(patch, { onError: (e) => toastError(e) });
   // Colours typed just before leaving the step still get saved.
   useEffect(() => {
     const t = timer;
@@ -227,7 +228,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
       setScript(r.script);
       if (r.by === "rules") toast("Written from your product's facts — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for livelier scripts", { duration: 4000 });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setWriting(false);
     }
@@ -243,7 +244,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
       toast.success("Creating your video", { duration: 1600 });
       resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }

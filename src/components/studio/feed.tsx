@@ -21,6 +21,7 @@ import { downloadHref, downloadName, userTitle } from "@/lib/library";
 import { isLayered, nextSteps, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 import { copyWithToast } from "@/lib/clipboard";
+import { toastError } from "@/lib/refusals";
 import { ACTION_ICONS, TileActions, useCanHover, type RunnerOptions } from "./result-actions";
 import { LayersStack, MediaThumb } from "./result-media";
 import { useNow } from "./use-now";
@@ -129,7 +130,7 @@ export function useFinalizeDraft() {
   return (g: Generation, draftId: string) =>
     create.mutate(
       { feature: g.feature, modelId: g.modelId, op: "finalize", prompt: g.request.prompt, params: { draftId, resolution: "1080p", duration: g.request.params?.duration } },
-      { onSuccess: () => toast.success("Rendering the final 1080p version"), onError: (e) => toast.error((e as Error).message) },
+      { onSuccess: () => toast.success("Rendering the final 1080p version"), onError: (e) => toastError(e) },
     );
 }
 
@@ -396,7 +397,7 @@ export function Feed({
   const api = useMemo<FeedApi>(
     () => ({
       open: openAt,
-      retry: (g) => createRef.current.mutate(g.request, { onError: (e) => toast.error((e as Error).message) }),
+      retry: (g) => createRef.current.mutate(g.request, { onError: (e) => toastError(e) }),
       reuse: hasReuse ? (g) => reuseRef.current?.(g) : undefined,
       runner: { onOpen: openAt, onReuse: hasReuse ? (g) => reuseRef.current?.(g) : undefined },
     }),

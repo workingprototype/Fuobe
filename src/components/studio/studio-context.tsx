@@ -174,6 +174,16 @@ export function useStartRequest(): number {
   return useContext(StartRequestCtx);
 }
 
+/**
+ * Puts the camera motion or effect the composer shows into the address (`?preset=`, gone once cleared), so a reload or
+ * a shared link opens on it. The studio page provides it; elsewhere it does nothing.
+ */
+export const PresetUrlCtx = createContext<(id: string | undefined) => void>(() => {});
+
+export function usePresetUrl(): (id: string | undefined) => void {
+  return useContext(PresetUrlCtx);
+}
+
 /** Replace a slot value by key, updating only when it's the same upload (async upload callbacks). */
 export function slotUpdater(setSlot: Actions["setSlot"], key: SlotKey) {
   return (v: SlotValue | null) => setSlot(key, v);

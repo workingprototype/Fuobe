@@ -868,6 +868,18 @@ export function withoutStart(href: string): string {
 }
 
 /**
+ * The same address with the camera motion or effect the composer shows (`?preset=`), or without one once it's
+ * cleared, so a reload or a shared link opens on it.
+ */
+export function withPreset(href: string, id: string | undefined): string {
+  const u = new URL(href, "http://x");
+  if (id) u.searchParams.set("preset", id);
+  else u.searchParams.delete("preset");
+  const rest = `${u.pathname}${u.search}${u.hash}`;
+  return /^https?:\/\//.test(href) ? `${u.origin}${rest}` : rest;
+}
+
+/**
  * What a studio does with a start request now: wait while models, presets or uploads are still
  * loading (their blockers are temporary), run when nothing blocks, else explain — the blocker's
  * toast names what's missing and points at its slot (Edit and Video's photo).

@@ -20,6 +20,7 @@ import type { CanvasNodeType, CanvasSummary, Outline } from "@/lib/catalog/canva
 import type { Engine } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { NodeIcon } from "./canvas-context";
 import { useCanvasActions, useCanvases } from "./use-canvas";
 
@@ -116,7 +117,7 @@ function CanvasCard({ c, onRename, onDelete }: { c: CanvasSummary; onRename: () 
             onSelect={() =>
               void duplicate(c.id).then(
                 (copy) => toast.success("Duplicated", { action: { label: "Open", onClick: () => router.push(`/canvas/${copy.id}`) } }),
-                (e) => toast.error((e as Error).message),
+                (e) => toastError(e),
               )
             }
           >
@@ -198,7 +199,7 @@ function ListInner({ templates }: { templates: TemplateCardData[] }) {
       const c = await create(body);
       router.push(`/canvas/${c.id}`);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
       setCreating(null);
     }
   };
@@ -322,7 +323,7 @@ function ListInner({ templates }: { templates: TemplateCardData[] }) {
               const c = renaming!;
               const name = draft.trim();
               setRenaming(null);
-              if (name && name !== c.name) void rename(c.id, name).then(() => toast.success("Renamed", { duration: 1500 }), (err) => toast.error((err as Error).message));
+              if (name && name !== c.name) void rename(c.id, name).then(() => toast.success("Renamed", { duration: 1500 }), (err) => toastError(err));
             }}
           >
             <Input autoFocus value={draft} maxLength={80} onChange={(e) => setDraft(e.target.value)} aria-label="Name" />
@@ -351,7 +352,7 @@ function ListInner({ templates }: { templates: TemplateCardData[] }) {
               onClick={() => {
                 const c = deleting!;
                 setDeleting(null);
-                void remove(c.id).then(() => toast("Deleted", { duration: 1500 }), (e) => toast.error((e as Error).message));
+                void remove(c.id).then(() => toast("Deleted", { duration: 1500 }), (e) => toastError(e));
               }}
             >
               Delete

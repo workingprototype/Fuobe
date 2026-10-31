@@ -27,6 +27,7 @@ import type { Engine } from "@/lib/catalog/types";
 import type { TrimRange } from "@/lib/trim-range";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { CustomPresetDialog } from "./custom-preset-dialog";
 import { useShortsActions, useShortsEstimate, useShortsPresets, useSubmitGuard, type ShortsBody } from "./hooks";
 import { CreateCard, CustomCard, LookCard } from "./preset-card";
@@ -384,7 +385,7 @@ function SetupPanel({
         setLeaving(true);
         router.push(`/shorts/${s.id}`);
       })
-      .catch((e: Error) => toast.error(e.message));
+      .catch((e: Error) => toastError(e));
   };
 
   return (

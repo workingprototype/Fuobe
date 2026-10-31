@@ -12,6 +12,10 @@
 //    without changing the remembered state; opened by hand, it stays open inside that studio only.
 // 6. Deep links into Settings (/settings#comfyui) scroll to the section after a client navigation.
 // 7. Galleries: "Show more" pressed from the keyboard moves focus to the first new card.
+// 8. New creation on Home starts over (empty composer, focused); the sidebar's bottom fade is never
+//    deeper than what's hidden below it.
+// 9. With public sign-up on: an account sees its email in the sidebar, and its menu signs it out
+//    (a throwaway qa account, deleted at the end).
 import assert from "node:assert/strict";
 import path from "node:path";
 import { DESKTOP, launch, openRoute, PHONE, root } from "./_browser.mjs";
@@ -188,6 +192,51 @@ try {
     const focused = await page.evaluate(() => document.activeElement?.getAttribute("href"));
     assert.equal(focused, await cards.nth(before).getAttribute("href"));
     await ctx.close();
+  }
+  {
+    const ctx = await browser.newContext(DESKTOP);
+    const page = await ctx.newPage();
+    step("New creation on Home clears the prompt, focuses the composer and leaves no flag in the address");
+    await openRoute(page, `${app}/`);
+    const box = page.getByRole("textbox", { name: "Describe what to create" });
+    await box.fill("a red fox");
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "New creation" }).click();
+    await page.waitForFunction(() => location.search === "" && document.activeElement?.getAttribute("aria-label") === "Describe what to create", null, { timeout: 10_000 });
+    assert.equal(await box.inputValue(), "");
+
+    step("the sidebar's bottom fade is no deeper than what's hidden below it");
+    const fade = await page.locator('[data-sidebar="content"]').evaluate((el) => ({
+      hidden: el.scrollHeight - el.clientHeight - el.scrollTop,
+      depth: parseFloat(el.style.getPropertyValue("--fade-b")) || 0,
+    }));
+    assert.ok(fade.depth <= Math.max(0, Math.ceil(fade.hidden)) && fade.depth <= 40, `fade ${fade.depth}px for ${fade.hidden}px hidden`);
+    await ctx.close();
+  }
+  if (!(await fetch(`${app}/api/auth/me`).then((r) => r.json()).catch(() => null))?.publicSignup) {
+    step("(skipped: the account row needs public sign-up)");
+  } else {
+    const ctx = await browser.newContext(DESKTOP);
+    const page = await ctx.newPage();
+    step("an account sees its email in the sidebar, and its menu signs it out");
+    const email = `qa-shell-${Date.now().toString(36)}@example.com`;
+    const password = `Qa-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+    try {
+      assert.ok((await ctx.request.post(`${app}/api/auth/signup`, { data: { email, password } })).ok(), "signed up");
+      await openRoute(page, `${app}/`);
+      const nav = page.getByRole("navigation", { name: "Main" });
+      await nav.getByText(email).waitFor({ timeout: 15_000 });
+      await nav.getByRole("button", { name: `Account: ${email}` }).click();
+      const menu = page.getByRole("menu");
+      for (const name of ["Settings", "Your GPU", "Sign out"]) await menu.getByRole("menuitem", { name }).waitFor();
+      await menu.getByRole("menuitem", { name: "Sign out" }).click();
+      await nav.getByRole("link", { name: "Log in" }).waitFor({ timeout: 15_000 });
+      assert.equal(await nav.getByText(email).count(), 0, "signed out");
+    } finally {
+      await ctx.request.post(`${app}/api/auth/login`, { data: { email, password } }).catch(() => {});
+      const gone = await ctx.request.delete(`${app}/api/auth/me`, { data: { password } }).catch(() => null);
+      if (gone?.status() !== 204) console.warn(`  (couldn't delete ${email}: ${gone?.status()})`);
+      await ctx.close();
+    }
   }
   console.log("\nShell checks passed.");
 } catch (e) {

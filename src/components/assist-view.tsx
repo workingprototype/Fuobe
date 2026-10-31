@@ -24,6 +24,7 @@ import { useAssistActions, useAssistThread, useEngine } from "@/lib/api";
 import { ASSIST_SUGGESTIONS, modeLabel, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 
 /** Skills offered as one-tap starters on the empty page (Supercomputer's suggestion cards). */
 const STARTER_SKILLS = ["product-photoshoot", "ugc-video", "thumbnail-generation", "faceless-video", "short-film", "localization"];
@@ -200,7 +201,7 @@ export function AssistView() {
               {ASSIST_SUGGESTIONS.map((s) => (
                 <button
                   key={s}
-                  onClick={() => start(s).catch((e) => toast.error((e as Error).message))}
+                  onClick={() => start(s).catch((e) => toastError(e))}
                   className="max-w-full rounded-full border bg-background px-3.5 py-1.5 text-left text-[13px] text-muted-foreground transition hover:border-primary hover:text-foreground"
                 >
                   {s}
@@ -243,7 +244,7 @@ export function AssistView() {
                         availability={can}
                         disabled={thread.status === "running"}
                         applyOnClose
-                        onChange={(c) => void actions.patch(thread.id, { mode: c }).catch((e) => toast.error((e as Error).message))}
+                        onChange={(c) => void actions.patch(thread.id, { mode: c }).catch((e) => toastError(e))}
                       />
                       <AskFirst checked={!thread.autoApprove} onChange={(v) => void assist.setAutoApprove(thread.id, !v)} />
                     </>

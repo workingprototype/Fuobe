@@ -49,6 +49,7 @@ import { useElements, useEngine } from "@/lib/api";
 import { MAX_PROJECT_SOURCES, type AssistProject, type ProjectSource, type SourceKind } from "@/lib/assist";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { ChatMenu } from "./chat-menu";
 import { useChatActions, useChats, useProject, useProjectActions, useProjectAssets, useSkills } from "./hooks";
 import { MemoryView } from "./memory-view";
@@ -209,7 +210,7 @@ function Project({ p }: { p: AssistProject }) {
                   toast("Project deleted", { duration: 1500 });
                   router.push("/assist");
                 } catch (e) {
-                  toast.error((e as Error).message);
+                  toastError(e);
                 }
               }}
             >
@@ -286,7 +287,7 @@ function Sources({ p }: { p: AssistProject }) {
       else toast.success(`Added ${s.title}`, { duration: 1500 });
       return true;
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
       return false;
     } finally {
       setBusy(null);
@@ -444,7 +445,7 @@ function SourceRow({ s, projectId }: { s: ProjectSource; projectId: string }) {
                 const r = await actions.refreshSource(projectId, s.id);
                 toast(r.status === "ready" ? "Updated" : "Still can't read it", { duration: 1500 });
               } catch (e) {
-                toast.error((e as Error).message);
+                toastError(e);
               } finally {
                 setBusy(false);
               }
@@ -453,7 +454,7 @@ function SourceRow({ s, projectId }: { s: ProjectSource; projectId: string }) {
             <RotateCw className={cn(busy && "animate-spin")} />
           </Button>
         )}
-        <Button variant="ghost" size="icon-sm" className="hover:text-destructive" aria-label={`Remove ${s.title}`} onClick={() => void actions.removeSource(projectId, s.id).catch((e) => toast.error((e as Error).message))}>
+        <Button variant="ghost" size="icon-sm" className="hover:text-destructive" aria-label={`Remove ${s.title}`} onClick={() => void actions.removeSource(projectId, s.id).catch((e) => toastError(e))}>
           <Trash2 />
         </Button>
       </div>

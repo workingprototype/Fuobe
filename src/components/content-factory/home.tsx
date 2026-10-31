@@ -30,6 +30,7 @@ import {
 } from "@/lib/catalog/content-factory";
 import { GENRES, type EpisodeAspect, type FacelessGenre, type NarratorVoice, type PickerData } from "@/lib/catalog/faceless";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { ApiError, discardDraft, useCreateSeries, useGenerateSeries, useRereadSeries, useSeries, useSeriesEstimate, useSeriesList, useUpdateSeries, type SeriesAsk } from "./hooks";
 import { BriefCard, ClaudeDialog, PresetGrid, ReferenceCard, SeriesPriceLine } from "./parts";
 
@@ -163,7 +164,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
       const asset = await uploadFile(f);
       await startSeries({ kind: "upload", url: asset.url, title: f.name });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setUploading(false);
     }
@@ -195,7 +196,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
       writeDraft(null);
       router.push(`/content-factory/${id}`);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       submitting.current = false;
     }
@@ -240,7 +241,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
                   analysis={view.analysis}
                   styleId={view.brief?.styleId ?? "colorful-3d"}
                   onClear={() => choosePreset(DEFAULT_PRESET)}
-                  onReread={() => reread.mutate({ id: view.id, engine }, { onError: (e) => toast.error((e as Error).message) })}
+                  onReread={() => reread.mutate({ id: view.id, engine }, { onError: (e) => toastError(e) })}
                   rereading={reread.isPending}
                 />
               ) : seriesId && series.isLoading ? (
@@ -456,7 +457,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
                   const id = seriesId ?? (await startSeries({ kind: "preset", presetId })).id;
                   await updateBrief.mutateAsync({ id, brief: b });
                 } catch (e) {
-                  toast.error((e as Error).message);
+                  toastError(e);
                 }
               }}
             />

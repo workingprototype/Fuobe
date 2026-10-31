@@ -934,9 +934,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-act-natural": {
     "poster": "/previews/presets/effect-act-natural.jpg",
+    "video": "/previews/presets/effect-act-natural.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-agamemnon": {
@@ -948,9 +949,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-agent-reveal": {
     "poster": "/previews/presets/effect-agent-reveal.jpg",
+    "video": "/previews/presets/effect-agent-reveal.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-air-bending": {
@@ -969,79 +971,90 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-angel-wings": {
     "poster": "/previews/presets/effect-angel-wings.jpg",
+    "video": "/previews/presets/effect-angel-wings.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-angry-mode": {
     "poster": "/previews/presets/effect-angry-mode.jpg",
+    "video": "/previews/presets/effect-angry-mode.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-animalization": {
     "poster": "/previews/presets/effect-animalization.jpg",
+    "video": "/previews/presets/effect-animalization.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-aquarium": {
     "poster": "/previews/presets/effect-aquarium.jpg",
+    "video": "/previews/presets/effect-aquarium.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-architecture-wave": {
     "poster": "/previews/presets/effect-architecture-wave.jpg",
+    "video": "/previews/presets/effect-architecture-wave.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-atomic": {
     "poster": "/previews/presets/effect-atomic.jpg",
+    "video": "/previews/presets/effect-atomic.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-attack-of-clones": {
     "poster": "/previews/presets/effect-attack-of-clones.jpg",
+    "video": "/previews/presets/effect-attack-of-clones.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-ballet": {
     "poster": "/previews/presets/effect-ballet.jpg",
+    "video": "/previews/presets/effect-ballet.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-balloon": {
     "poster": "/previews/presets/effect-balloon.jpg",
+    "video": "/previews/presets/effect-balloon.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-beach-ride": {
     "poster": "/previews/presets/effect-beach-ride.jpg",
+    "video": "/previews/presets/effect-beach-ride.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-beast-appearance": {
     "poster": "/previews/presets/effect-beast-appearance.jpg",
+    "video": "/previews/presets/effect-beast-appearance.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-black-gloss": {
@@ -1116,9 +1129,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-buddy": {
     "poster": "/previews/presets/effect-buddy.jpg",
+    "video": "/previews/presets/effect-buddy.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-building-explosion": {
@@ -1131,16 +1145,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-burning-man": {
     "poster": "/previews/presets/effect-burning-man.jpg",
+    "video": "/previews/presets/effect-burning-man.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-cakeify": {
     "poster": "/previews/presets/effect-cakeify.jpg",
+    "video": "/previews/presets/effect-cakeify.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-candy-pink": {
@@ -1166,9 +1182,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-car-drive": {
     "poster": "/previews/presets/effect-car-drive.jpg",
+    "video": "/previews/presets/effect-car-drive.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-car-explosion": {
@@ -1181,9 +1198,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-censorship": {
     "poster": "/previews/presets/effect-censorship.jpg",
+    "video": "/previews/presets/effect-censorship.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-classic-bw": {
@@ -1195,23 +1213,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-clone-explosion": {
     "poster": "/previews/presets/effect-clone-explosion.jpg",
+    "video": "/previews/presets/effect-clone-explosion.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-clones": {
     "poster": "/previews/presets/effect-clones.jpg",
+    "video": "/previews/presets/effect-clones.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-clothes-rain": {
     "poster": "/previews/presets/effect-clothes-rain.jpg",
+    "video": "/previews/presets/effect-clothes-rain.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-cold-steel": {
@@ -1237,9 +1258,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-column-wipe": {
     "poster": "/previews/presets/effect-column-wipe.jpg",
+    "video": "/previews/presets/effect-column-wipe.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-comic": {
@@ -1258,9 +1280,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-cotton-cloud": {
     "poster": "/previews/presets/effect-cotton-cloud.jpg",
+    "video": "/previews/presets/effect-cotton-cloud.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-crimson-vigil": {
@@ -1279,9 +1302,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-crying": {
     "poster": "/previews/presets/effect-crying.jpg",
+    "video": "/previews/presets/effect-crying.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-cutout": {
@@ -1293,44 +1317,50 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-cyborg": {
     "poster": "/previews/presets/effect-cyborg.jpg",
+    "video": "/previews/presets/effect-cyborg.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-cyclope": {
     "poster": "/previews/presets/effect-cyclope.jpg",
+    "video": "/previews/presets/effect-cyclope.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-datamosh": {
     "poster": "/previews/presets/effect-datamosh.jpg",
+    "video": "/previews/presets/effect-datamosh.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-deflate": {
     "poster": "/previews/presets/effect-deflate.jpg",
+    "video": "/previews/presets/effect-deflate.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-diamond": {
     "poster": "/previews/presets/effect-diamond.jpg",
+    "video": "/previews/presets/effect-diamond.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-dirty-lens": {
     "poster": "/previews/presets/effect-dirty-lens.jpg",
+    "video": "/previews/presets/effect-dirty-lens.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-disintegration": {
@@ -1342,9 +1372,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-display-transition": {
     "poster": "/previews/presets/effect-display-transition.jpg",
+    "video": "/previews/presets/effect-display-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-dolphin-ride": {
@@ -1356,23 +1387,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-dream-date": {
     "poster": "/previews/presets/effect-dream-date.jpg",
+    "video": "/previews/presets/effect-dream-date.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-drunk-master": {
     "poster": "/previews/presets/effect-drunk-master.jpg",
+    "video": "/previews/presets/effect-drunk-master.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-duplicate": {
     "poster": "/previews/presets/effect-duplicate.jpg",
+    "video": "/previews/presets/effect-duplicate.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-earth-element": {
@@ -1393,16 +1427,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-earth-zoom-out": {
     "poster": "/previews/presets/effect-earth-zoom-out.jpg",
+    "video": "/previews/presets/effect-earth-zoom-out.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-eating": {
     "poster": "/previews/presets/effect-eating.jpg",
+    "video": "/previews/presets/effect-eating.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-exploded-view": {
@@ -1414,16 +1450,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-explosion": {
     "poster": "/previews/presets/effect-explosion.jpg",
+    "video": "/previews/presets/effect-explosion.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-fairies-around": {
     "poster": "/previews/presets/effect-fairies-around.jpg",
+    "video": "/previews/presets/effect-fairies-around.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-fairytale-castle": {
@@ -1435,9 +1473,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-fallen-angel": {
     "poster": "/previews/presets/effect-fallen-angel.jpg",
+    "video": "/previews/presets/effect-fallen-angel.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-film-colors": {
@@ -1449,9 +1488,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-fire-breath": {
     "poster": "/previews/presets/effect-fire-breath.jpg",
+    "video": "/previews/presets/effect-fire-breath.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-fire-element": {
@@ -1472,16 +1512,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-firework": {
     "poster": "/previews/presets/effect-firework.jpg",
+    "video": "/previews/presets/effect-firework.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-fix-and-pose": {
     "poster": "/previews/presets/effect-fix-and-pose.jpg",
+    "video": "/previews/presets/effect-fix-and-pose.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-flame-on": {
@@ -1494,9 +1536,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-flame-transition": {
     "poster": "/previews/presets/effect-flame-transition.jpg",
+    "video": "/previews/presets/effect-flame-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-flash-comic": {
@@ -1508,30 +1551,34 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-flashback": {
     "poster": "/previews/presets/effect-flashback.jpg",
+    "video": "/previews/presets/effect-flashback.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-floating-fall": {
     "poster": "/previews/presets/effect-floating-fall.jpg",
+    "video": "/previews/presets/effect-floating-fall.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-floating-fish": {
     "poster": "/previews/presets/effect-floating-fish.jpg",
+    "video": "/previews/presets/effect-floating-fish.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-flood": {
     "poster": "/previews/presets/effect-flood.jpg",
+    "video": "/previews/presets/effect-flood.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-floral-eyes": {
@@ -1565,86 +1612,98 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-garden-bloom": {
     "poster": "/previews/presets/effect-garden-bloom.jpg",
+    "video": "/previews/presets/effect-garden-bloom.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-gas-transformation": {
     "poster": "/previews/presets/effect-gas-transformation.jpg",
+    "video": "/previews/presets/effect-gas-transformation.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-giant": {
     "poster": "/previews/presets/effect-giant.jpg",
+    "video": "/previews/presets/effect-giant.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-giant-grab": {
     "poster": "/previews/presets/effect-giant-grab.jpg",
+    "video": "/previews/presets/effect-giant-grab.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-giant-people": {
     "poster": "/previews/presets/effect-giant-people.jpg",
+    "video": "/previews/presets/effect-giant-people.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-glitch": {
     "poster": "/previews/presets/effect-glitch.jpg",
+    "video": "/previews/presets/effect-glitch.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-glow-trace": {
     "poster": "/previews/presets/effect-glow-trace.jpg",
+    "video": "/previews/presets/effect-glow-trace.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-glowing-fish": {
     "poster": "/previews/presets/effect-glowing-fish.jpg",
+    "video": "/previews/presets/effect-glowing-fish.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-glowshift": {
     "poster": "/previews/presets/effect-glowshift.jpg",
+    "video": "/previews/presets/effect-glowshift.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-gorilla-transfer": {
     "poster": "/previews/presets/effect-gorilla-transfer.jpg",
+    "video": "/previews/presets/effect-gorilla-transfer.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-group-photo": {
     "poster": "/previews/presets/effect-group-photo.jpg",
+    "video": "/previews/presets/effect-group-photo.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-hair-style": {
     "poster": "/previews/presets/effect-hair-style.jpg",
+    "video": "/previews/presets/effect-hair-style.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-hand-paint": {
@@ -1656,30 +1715,34 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-hand-transition": {
     "poster": "/previews/presets/effect-hand-transition.jpg",
+    "video": "/previews/presets/effect-hand-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-handheld-run": {
     "poster": "/previews/presets/effect-handheld-run.jpg",
+    "video": "/previews/presets/effect-handheld-run.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-happy": {
     "poster": "/previews/presets/effect-happy.jpg",
+    "video": "/previews/presets/effect-happy.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-happy-mode": {
     "poster": "/previews/presets/effect-happy-mode.jpg",
+    "video": "/previews/presets/effect-happy-mode.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-head-explosion": {
@@ -1707,30 +1770,34 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-hero-flight": {
     "poster": "/previews/presets/effect-hero-flight.jpg",
+    "video": "/previews/presets/effect-hero-flight.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-high-flip": {
     "poster": "/previews/presets/effect-high-flip.jpg",
+    "video": "/previews/presets/effect-high-flip.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-hole-transition": {
     "poster": "/previews/presets/effect-hole-transition.jpg",
+    "video": "/previews/presets/effect-hole-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-horror-face": {
     "poster": "/previews/presets/effect-horror-face.jpg",
+    "video": "/previews/presets/effect-horror-face.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-hyper-neon": {
@@ -1742,58 +1809,66 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-i-can-fly": {
     "poster": "/previews/presets/effect-i-can-fly.jpg",
+    "video": "/previews/presets/effect-i-can-fly.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-ice-rose": {
     "poster": "/previews/presets/effect-ice-rose.jpg",
+    "video": "/previews/presets/effect-ice-rose.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-infinite-clones": {
     "poster": "/previews/presets/effect-infinite-clones.jpg",
+    "video": "/previews/presets/effect-infinite-clones.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-inflate": {
     "poster": "/previews/presets/effect-inflate.jpg",
+    "video": "/previews/presets/effect-inflate.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-innerlight": {
     "poster": "/previews/presets/effect-innerlight.jpg",
+    "video": "/previews/presets/effect-innerlight.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-invisible": {
     "poster": "/previews/presets/effect-invisible.jpg",
+    "video": "/previews/presets/effect-invisible.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-jelly-drift": {
     "poster": "/previews/presets/effect-jelly-drift.jpg",
+    "video": "/previews/presets/effect-jelly-drift.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-jump-transition": {
     "poster": "/previews/presets/effect-jump-transition.jpg",
+    "video": "/previews/presets/effect-jump-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-lacewalker": {
@@ -1827,9 +1902,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-lens-flare": {
     "poster": "/previews/presets/effect-lens-flare.jpg",
+    "video": "/previews/presets/effect-lens-flare.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-levitation": {
@@ -1856,16 +1932,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-live-concert": {
     "poster": "/previews/presets/effect-live-concert.jpg",
+    "video": "/previews/presets/effect-live-concert.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-look-boom": {
     "poster": "/previews/presets/effect-look-boom.jpg",
+    "video": "/previews/presets/effect-look-boom.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-lsd": {
@@ -1877,9 +1955,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-luminous-gaze": {
     "poster": "/previews/presets/effect-luminous-gaze.jpg",
+    "video": "/previews/presets/effect-luminous-gaze.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-magazine": {
@@ -1898,23 +1977,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-medusa-gorgona": {
     "poster": "/previews/presets/effect-medusa-gorgona.jpg",
+    "video": "/previews/presets/effect-medusa-gorgona.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-melt-transition": {
     "poster": "/previews/presets/effect-melt-transition.jpg",
+    "video": "/previews/presets/effect-melt-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-melting": {
     "poster": "/previews/presets/effect-melting.jpg",
+    "video": "/previews/presets/effect-melting.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-mighty-fighter": {
@@ -1940,23 +2022,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-money-rain": {
     "poster": "/previews/presets/effect-money-rain.jpg",
+    "video": "/previews/presets/effect-money-rain.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-monster-dab": {
     "poster": "/previews/presets/effect-monster-dab.jpg",
+    "video": "/previews/presets/effect-monster-dab.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-monstrosity": {
     "poster": "/previews/presets/effect-monstrosity.jpg",
+    "video": "/previews/presets/effect-monstrosity.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-moonwalk": {
@@ -1968,23 +2053,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-morning-routine": {
     "poster": "/previews/presets/effect-morning-routine.jpg",
+    "video": "/previews/presets/effect-morning-routine.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-morphskin": {
     "poster": "/previews/presets/effect-morphskin.jpg",
+    "video": "/previews/presets/effect-morphskin.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-motor-ride": {
     "poster": "/previews/presets/effect-motor-ride.jpg",
+    "video": "/previews/presets/effect-motor-ride.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-multiverse": {
@@ -1996,9 +2084,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-muscle-up": {
     "poster": "/previews/presets/effect-muscle-up.jpg",
+    "video": "/previews/presets/effect-muscle-up.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-mystification": {
@@ -2017,9 +2106,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-nature-bloom": {
     "poster": "/previews/presets/effect-nature-bloom.jpg",
+    "video": "/previews/presets/effect-nature-bloom.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-noir": {
@@ -2031,9 +2121,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-northern-lights": {
     "poster": "/previews/presets/effect-northern-lights.jpg",
+    "video": "/previews/presets/effect-northern-lights.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-nostalgic-blue": {
@@ -2045,9 +2136,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-objects-around": {
     "poster": "/previews/presets/effect-objects-around.jpg",
+    "video": "/previews/presets/effect-objects-around.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-ocean": {
@@ -2059,9 +2151,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-oni-mask": {
     "poster": "/previews/presets/effect-oni-mask.jpg",
+    "video": "/previews/presets/effect-oni-mask.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-origami": {
@@ -2073,16 +2166,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-outfit-check": {
     "poster": "/previews/presets/effect-outfit-check.jpg",
+    "video": "/previews/presets/effect-outfit-check.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-outfit-switch": {
     "poster": "/previews/presets/effect-outfit-switch.jpg",
+    "video": "/previews/presets/effect-outfit-switch.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-overexposed": {
@@ -2122,9 +2217,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-paparazzi": {
     "poster": "/previews/presets/effect-paparazzi.jpg",
+    "video": "/previews/presets/effect-paparazzi.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-paper": {
@@ -2143,9 +2239,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-peak-moment": {
     "poster": "/previews/presets/effect-peak-moment.jpg",
+    "video": "/previews/presets/effect-peak-moment.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-pearl-earring": {
@@ -2164,58 +2261,66 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-pixelated-face": {
     "poster": "/previews/presets/effect-pixelated-face.jpg",
+    "video": "/previews/presets/effect-pixelated-face.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-pizza-fall": {
     "poster": "/previews/presets/effect-pizza-fall.jpg",
+    "video": "/previews/presets/effect-pizza-fall.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-plasma-explosion": {
     "poster": "/previews/presets/effect-plasma-explosion.jpg",
+    "video": "/previews/presets/effect-plasma-explosion.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-plate-check": {
     "poster": "/previews/presets/effect-plate-check.jpg",
+    "video": "/previews/presets/effect-plate-check.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-point-cloud": {
     "poster": "/previews/presets/effect-point-cloud.jpg",
+    "video": "/previews/presets/effect-point-cloud.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-polygon": {
     "poster": "/previews/presets/effect-polygon.jpg",
+    "video": "/previews/presets/effect-polygon.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-pool-jump": {
     "poster": "/previews/presets/effect-pool-jump.jpg",
+    "video": "/previews/presets/effect-pool-jump.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-portal": {
     "poster": "/previews/presets/effect-portal.jpg",
+    "video": "/previews/presets/effect-portal.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-powder-explosion": {
@@ -2235,9 +2340,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-push-to-glass": {
     "poster": "/previews/presets/effect-push-to-glass.jpg",
+    "video": "/previews/presets/effect-push-to-glass.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-random-glow": {
@@ -2249,37 +2355,42 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-raven-transition": {
     "poster": "/previews/presets/effect-raven-transition.jpg",
+    "video": "/previews/presets/effect-raven-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-red-carpet": {
     "poster": "/previews/presets/effect-red-carpet.jpg",
+    "video": "/previews/presets/effect-red-carpet.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-saint-glow": {
     "poster": "/previews/presets/effect-saint-glow.jpg",
+    "video": "/previews/presets/effect-saint-glow.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-sakura-petals": {
     "poster": "/previews/presets/effect-sakura-petals.jpg",
+    "video": "/previews/presets/effect-sakura-petals.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-sand-cut": {
     "poster": "/previews/presets/effect-sand-cut.jpg",
+    "video": "/previews/presets/effect-sand-cut.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-sand-storm": {
@@ -2292,30 +2403,34 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-scrapbook-collage": {
     "poster": "/previews/presets/effect-scrapbook-collage.jpg",
+    "video": "/previews/presets/effect-scrapbook-collage.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-seamless-transition": {
     "poster": "/previews/presets/effect-seamless-transition.jpg",
+    "video": "/previews/presets/effect-seamless-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-selfception": {
     "poster": "/previews/presets/effect-selfception.jpg",
+    "video": "/previews/presets/effect-selfception.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-selfie": {
     "poster": "/previews/presets/effect-selfie.jpg",
+    "video": "/previews/presets/effect-selfie.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-selfie-outfit": {
@@ -2327,9 +2442,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-selfie-posing": {
     "poster": "/previews/presets/effect-selfie-posing.jpg",
+    "video": "/previews/presets/effect-selfie-posing.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-set-on-fire": {
@@ -2342,16 +2458,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-shadow-smoke": {
     "poster": "/previews/presets/effect-shadow-smoke.jpg",
+    "video": "/previews/presets/effect-shadow-smoke.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-shocked": {
     "poster": "/previews/presets/effect-shocked.jpg",
+    "video": "/previews/presets/effect-shocked.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-silhouette": {
@@ -2377,23 +2495,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-skin-surge": {
     "poster": "/previews/presets/effect-skin-surge.jpg",
+    "video": "/previews/presets/effect-skin-surge.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-smash-and-grab": {
     "poster": "/previews/presets/effect-smash-and-grab.jpg",
+    "video": "/previews/presets/effect-smash-and-grab.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-smoke-transition": {
     "poster": "/previews/presets/effect-smoke-transition.jpg",
+    "video": "/previews/presets/effect-smoke-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-sodium-decay": {
@@ -2419,93 +2540,106 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-soul-jump": {
     "poster": "/previews/presets/effect-soul-jump.jpg",
+    "video": "/previews/presets/effect-soul-jump.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-spiders-from-mouth": {
     "poster": "/previews/presets/effect-spiders-from-mouth.jpg",
+    "video": "/previews/presets/effect-spiders-from-mouth.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-spirit-animal": {
     "poster": "/previews/presets/effect-spirit-animal.jpg",
+    "video": "/previews/presets/effect-spirit-animal.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-splash-transition": {
     "poster": "/previews/presets/effect-splash-transition.jpg",
+    "video": "/previews/presets/effect-splash-transition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-squish": {
     "poster": "/previews/presets/effect-squish.jpg",
+    "video": "/previews/presets/effect-squish.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-starship-troopers": {
     "poster": "/previews/presets/effect-starship-troopers.jpg",
+    "video": "/previews/presets/effect-starship-troopers.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-static-posing": {
     "poster": "/previews/presets/effect-static-posing.jpg",
+    "video": "/previews/presets/effect-static-posing.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-stop-world": {
     "poster": "/previews/presets/effect-stop-world.jpg",
+    "video": "/previews/presets/effect-stop-world.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-street-colossus": {
     "poster": "/previews/presets/effect-street-colossus.jpg",
+    "video": "/previews/presets/effect-street-colossus.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-studio-slide": {
     "poster": "/previews/presets/effect-studio-slide.jpg",
+    "video": "/previews/presets/effect-studio-slide.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-sunglasses": {
     "poster": "/previews/presets/effect-sunglasses.jpg",
+    "video": "/previews/presets/effect-sunglasses.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-super-fast-run": {
     "poster": "/previews/presets/effect-super-fast-run.jpg",
+    "video": "/previews/presets/effect-super-fast-run.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-super-saiyan": {
     "poster": "/previews/presets/effect-super-saiyan.jpg",
+    "video": "/previews/presets/effect-super-saiyan.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-superstar": {
@@ -2517,9 +2651,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-tattoo-animation": {
     "poster": "/previews/presets/effect-tattoo-animation.jpg",
+    "video": "/previews/presets/effect-tattoo-animation.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-teal-orange-epic": {
@@ -2531,9 +2666,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-tentacles": {
     "poster": "/previews/presets/effect-tentacles.jpg",
+    "video": "/previews/presets/effect-tentacles.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-thunder-god": {
@@ -2546,9 +2682,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-tiny-planet": {
     "poster": "/previews/presets/effect-tiny-planet.jpg",
+    "video": "/previews/presets/effect-tiny-planet.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-toxic": {
@@ -2567,16 +2704,18 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-train-rush": {
     "poster": "/previews/presets/effect-train-rush.jpg",
+    "video": "/previews/presets/effect-train-rush.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-trucksition": {
     "poster": "/previews/presets/effect-trucksition.jpg",
+    "video": "/previews/presets/effect-trucksition.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-turn-into-statue": {
@@ -2596,9 +2735,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-turning-monkey": {
     "poster": "/previews/presets/effect-turning-monkey.jpg",
+    "video": "/previews/presets/effect-turning-monkey.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-two-color": {
@@ -2617,9 +2757,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-vanish": {
     "poster": "/previews/presets/effect-vanish.jpg",
+    "video": "/previews/presets/effect-vanish.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-vintage": {
@@ -2631,9 +2772,10 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-visor-x": {
     "poster": "/previews/presets/effect-visor-x.jpg",
+    "video": "/previews/presets/effect-visor-x.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-water-bending": {
@@ -2654,23 +2796,26 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-water-splash": {
     "poster": "/previews/presets/effect-water-splash.jpg",
+    "video": "/previews/presets/effect-water-splash.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-werewolf": {
     "poster": "/previews/presets/effect-werewolf.jpg",
+    "video": "/previews/presets/effect-werewolf.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-wild-ride": {
     "poster": "/previews/presets/effect-wild-ride.jpg",
+    "video": "/previews/presets/effect-wild-ride.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-wind-to-face": {
@@ -2697,37 +2842,42 @@ export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = {
   },
   "effect-wireframe": {
     "poster": "/previews/presets/effect-wireframe.jpg",
+    "video": "/previews/presets/effect-wireframe.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-wonderland": {
     "poster": "/previews/presets/effect-wonderland.jpg",
+    "video": "/previews/presets/effect-wonderland.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-world-morphing": {
     "poster": "/previews/presets/effect-world-morphing.jpg",
+    "video": "/previews/presets/effect-world-morphing.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-x-ray": {
     "poster": "/previews/presets/effect-x-ray.jpg",
+    "video": "/previews/presets/effect-x-ray.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "effect-yacht": {
     "poster": "/previews/presets/effect-yacht.jpg",
+    "video": "/previews/presets/effect-yacht.mp4",
     "run": "comfyui-previews-2026-10",
     "engine": "comfyui",
-    "model": "ideogram4",
+    "model": "minimax-h3",
     "variant": "lean-json"
   },
   "motion-360-orbit": {

@@ -19,6 +19,7 @@ import { keepOffered, offered } from "@/lib/model-access";
 import { FASHION, FASHION_MODELS, FASHION_START, FASHION_STEPS, fashionBlocker, fashionReducer, getTemplate, type FashionState } from "@/lib/catalog/packs";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useStoredReducer } from "./stored";
 import { TemplatePreview } from "./template-preview";
 
@@ -116,21 +117,21 @@ export function FashionView() {
     if (block(fashionBlocker(s)) || !baseBody) return;
     base.mutate(baseBody, {
       onSuccess: (r) => dispatch({ type: "baseStarted", ids: r.items.map((g) => g.id) }),
-      onError: (e) => toast.error((e as Error).message || "JobSet wasn't created"),
+      onError: (e) => toastError(e, "JobSet wasn't created"),
     });
   };
   const startOutfit = () => {
     if (block(fashionBlocker(s, "outfit")) || !outfitBody) return;
     outfit.mutate(outfitBody, {
       onSuccess: (r) => dispatch({ type: "outfitStarted", ids: r.items.map((g) => g.id) }),
-      onError: (e) => toast.error((e as Error).message || "JobSet wasn't created"),
+      onError: (e) => toastError(e, "JobSet wasn't created"),
     });
   };
   const startSet = () => {
     if (block(fashionBlocker(s)) || !setBody) return;
     photoset.mutate(setBody, {
       onSuccess: (r) => dispatch({ type: "photosetStarted", batchId: r.batchId ?? r.items[0]?.batchId ?? r.items[0]?.id }),
-      onError: (e) => toast.error((e as Error).message || "JobSet wasn't created"),
+      onError: (e) => toastError(e, "JobSet wasn't created"),
     });
   };
 

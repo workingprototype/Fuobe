@@ -21,6 +21,7 @@ import { DIRECTION_CUT_NOTE, directionPrompt, EVOLUTION, EVOLUTION_DEFAULT_RESOL
 import { chainState } from "@/lib/catalog/shorts";
 import { downloadHref, downloadName } from "@/lib/library";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useEvolutionActions, useEvolutionEstimate, type EvolutionBody } from "./hooks";
 
 const LIMITS = `MP4, MOV or WebM · ${EVOLUTION.minSeconds}–${EVOLUTION.maxSeconds} s · ${EVOLUTION.maxBytes / 1024 / 1024} MB`;
@@ -123,7 +124,7 @@ export function EvolutionTool({ tabs }: { tabs?: React.ReactNode }) {
           setBy(d.by);
           if (d.by === "offline" && d.why) toast("Written offline", { description: `Fuobe's own writer wrote it: ${d.why}. Edit it as you like.` });
         },
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   };
@@ -142,7 +143,7 @@ export function EvolutionTool({ tabs }: { tabs?: React.ReactNode }) {
         }
         toast("Evolving your clip", { description: "Follow it below — it lands in your Library too." });
       })
-      .catch((e: Error) => toast.error(e.message));
+      .catch((e: Error) => toastError(e));
   };
 
   const addMany = (files: FileList | null) => {

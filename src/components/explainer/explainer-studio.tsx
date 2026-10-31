@@ -33,6 +33,7 @@ import {
   type PickerData,
 } from "@/lib/catalog/faceless";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { EpisodeTile } from "../faceless/cards";
 import { EstimateLine, Segmented, ToggleRow } from "../faceless/controls";
 import { readDocument, readLink, useCreateExplainer, useEstimate, useExplainers, useLikeEpisode } from "../faceless/hooks";
@@ -95,7 +96,7 @@ function LinkPopover({ engine, disabled, onAdd }: { engine: EpisodeSettings["eng
       setUrl("");
       setOpen(false);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }
@@ -221,7 +222,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
           },
           (e: Error) => {
             setSources((xs) => xs.filter((x) => !(x.kind === "reading" && x.id === id)));
-            toast.error(e.message);
+            toastError(e);
           },
         );
       } else if (/\.(doc|odt|rtf|pages|pptx?|key)$/i.test(f.name) || /msword|opendocument|rtf|presentation/.test(f.type)) {
@@ -244,7 +245,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
       { prompt: prompt.trim(), sources: payload, settings, review },
       {
         onSuccess: (ep) => router.push(`/explainer/${ep.id}`),
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   };

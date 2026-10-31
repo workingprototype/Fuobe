@@ -82,7 +82,7 @@ export function PresetChip({ type, value, onChange }: { type: "motion" | "effect
   const Icon = selected ? (PRESET_ICONS[selected.look.icon] ?? Film) : value && !catalog.complete ? Loader2 : Film;
   const noun = type === "motion" ? "camera motion" : "effect";
   return (
-    <ClearableChip active={!!value} onClear={() => onChange(undefined)} clearLabel={`Clear ${noun}`}>
+    <ClearableChip active={!!value} onClear={() => onChange(undefined)} clearLabel={`Clear ${selected?.name ?? noun}`}>
       <Popover
         open={open}
         onOpenChange={(o) => {

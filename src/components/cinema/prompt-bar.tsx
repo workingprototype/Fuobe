@@ -67,6 +67,7 @@ import type { Engine, MediaKind } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { modKey } from "@/lib/keys";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { MoveChips, MovePicker } from "./camera-moves";
 import { CameraChip, EmotionChip, FilmSetupChip, LightingChip, PaletteChip } from "./director-panel";
 import { directorPicks, draftToInput, type BarAction, type CinemaDraft, type RefItem } from "./draft";
@@ -234,7 +235,7 @@ export function useAddRefs(setDraft: (fn: (d: CinemaDraft) => Partial<CinemaDraf
         .then((a) => setDraft((d) => ({ refs: d.refs.map((r) => (r.id === id ? { ...r, ref: a.url, preview: a.url, uploading: false } : r)) })))
         .catch((e) => {
           setDraft((d) => ({ refs: d.refs.filter((r) => r.id !== id) }));
-          toast.error((e as Error).message || "Upload failed. Please try again.");
+          toastError(e, "Upload failed. Please try again.");
         });
     }
   };
@@ -405,7 +406,7 @@ export function PromptBar(props: PromptBarProps) {
           // The scene was deleted meanwhile: say where the take went.
           if (folderId && r.folderId === null) toast(r.plan.notes[0] ?? "That scene was deleted, so the take is in Home", { duration: 4000 });
         },
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   };

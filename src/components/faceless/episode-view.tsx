@@ -58,6 +58,7 @@ import type { Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { downloadHref, downloadName } from "@/lib/library";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { Segmented, usd } from "./controls";
 import { useApplyChange, useChangePreview, useDeleteEpisode, useEpisode, useEpisodeAction, useUpdateEpisode, type ChangeDraft } from "./hooks";
 import { ScriptReview } from "./script-review";
@@ -251,7 +252,7 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
         toast.success(`Re-rendering ${scenes.length > 1 ? `${scenes.length} scenes` : `scene ${scenes[0].index + 1}`}`);
         discard();
       },
-      onError: (e) => toast.error((e as Error).message),
+      onError: (e) => toastError(e),
     });
   };
 
@@ -294,7 +295,7 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
             size="sm"
             variant="outline"
             disabled={retry.isPending || busy}
-            onClick={() => retry.mutate("retry", { onSuccess: () => toast.success("Retrying what failed"), onError: (e) => toast.error((e as Error).message) })}
+            onClick={() => retry.mutate("retry", { onSuccess: () => toast.success("Retrying what failed"), onError: (e) => toastError(e) })}
           >
             <RotateCcw /> Retry
           </Button>
@@ -476,7 +477,7 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
   const upscaling = !!view?.upscaled && active(view.upscaled);
   const film = upscaled ?? view?.final;
   const filmOut = film?.outputs.find((o) => o.kind === "video");
-  const run = (a: "retry" | "rewrite" | "undo" | "upscale", ok?: string) => action.mutate(a, { onSuccess: () => ok && toast.success(ok), onError: (e) => toast.error((e as Error).message) });
+  const run = (a: "retry" | "rewrite" | "undo" | "upscale", ok?: string) => action.mutate(a, { onSuccess: () => ok && toast.success(ok), onError: (e) => toastError(e) });
 
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
@@ -639,7 +640,7 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
                     toast("Episode deleted");
                     router.push(backHref);
                   },
-                  onError: (e) => toast.error((e as Error).message),
+                  onError: (e) => toastError(e),
                 })
               }
             >

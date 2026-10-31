@@ -54,6 +54,7 @@ import type { Engine, Generation, OutputFile } from "@/lib/catalog/types";
 import { downloadHref } from "@/lib/library";
 import { probeUrl } from "@/lib/media-probe";
 import { cn } from "@/lib/utils";
+import { responseError, toastError } from "@/lib/refusals";
 import { useAudioToolPreview, useAudioToolRun, useSettled, type AudioToolBody } from "./hooks";
 
 /**
@@ -486,7 +487,7 @@ async function exportWav(stems: Stem[], buffers: Partial<Record<StemId, AudioBuf
     const q = new URLSearchParams({ offset: String(offset), ...(id && { id }), ...(last && { last: "1", name }) });
     const res = await fetch(`/api/audio-tools/export?${q}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: new Blob([mixPart(plan, f, f + per, k) as BlobPart]) });
     const body = (await res.json().catch(() => ({}))) as { id?: string; received?: number; url?: string; error?: string };
-    if (!res.ok) throw new Error(body.error ?? `Export failed (${res.status})`);
+    if (!res.ok) throw responseError(res, body.error ?? `Export failed (${res.status})`);
     if (last) {
       if (!body.url) throw new Error("Export failed");
       return { url: body.url, lowered: k < 1 };
@@ -526,7 +527,7 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
       await exportMix();
       toast.success("Mix saved to your Library", { action: { label: "Open Library", onClick: () => router.push("/library") } });
     } catch (e) {
-      toast.error((e as Error).message || "Couldn't export the mix");
+      toastError(e, "Couldn't export the mix");
     } finally {
       setBusy(null);
     }
@@ -538,7 +539,7 @@ function Mixer({ stems, source, engine }: { stems: Stem[]; source: Source; engin
       await remux.mutateAsync({ tool: "remux", engine, video: source.ref, audio, name });
       toast.success(engine === "open" ? "Putting the mix on your video (picture copied as it is)" : "Putting the mix on your video");
     } catch (e) {
-      toast.error((e as Error).message || "Couldn't put the mix on the video");
+      toastError(e, "Couldn't put the mix on the video");
     } finally {
       setBusy(null);
     }
@@ -704,7 +705,7 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
         setResultId(r.result.id);
         toast.success("Splitting on your ComfyUI");
       },
-      onError: (e) => toast.error((e as Error).message),
+      onError: (e) => toastError(e),
     });
   };
   const g = result.data;

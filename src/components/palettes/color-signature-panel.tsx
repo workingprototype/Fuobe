@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch";
 import { uploadFile } from "@/lib/api";
 import { MAX_SOURCE_IMAGES, NAME_MAX, suggestName, type Palette, type PalettePick } from "@/lib/catalog/palettes";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { extractFromFiles } from "./extract";
 import { usePaletteActions, usePalettes } from "./hooks";
 import { PaletteCard, Strip } from "./palette-card";
@@ -52,7 +53,7 @@ function FromImages({ files, setFiles, onSaved }: { files: File[]; setFiles: (f:
       .catch((e) => {
         if (!live) return;
         setDone({ files, colors: [], background: null, name: "" });
-        toast.error((e as Error).message);
+        toastError(e);
       });
     return () => {
       live = false;
@@ -71,7 +72,7 @@ function FromImages({ files, setFiles, onSaved }: { files: File[]; setFiles: (f:
       toast.success("Palette saved");
       onSaved(p);
     } catch (e) {
-      toast.error((e as Error).message || "Failed to save palette");
+      toastError(e, "Failed to save palette");
     } finally {
       setSaving(false);
     }
@@ -212,7 +213,7 @@ export function ColorSignaturePanel({
                             if (value?.id === p.id) onPick(undefined);
                             toast("Palette deleted");
                           },
-                          onError: (e) => toast.error((e as Error).message),
+                          onError: (e) => toastError(e),
                         })
                       }
                     />
@@ -276,7 +277,7 @@ export function ColorSignaturePanel({
                   setView("list");
                   onPick(toPalettePick(p, value?.lock));
                 },
-                onError: (e) => toast.error((e as Error).message || "Failed to save palette"),
+                onError: (e) => toastError(e, "Failed to save palette"),
               },
             )
           }

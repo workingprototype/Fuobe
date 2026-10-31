@@ -28,6 +28,8 @@ export interface LicenceWorkflowInput {
   title: string;
   capability: string;
   license?: string;
+  /** Its model downloads: a licence with no page of its own links to their Hugging Face page (licenceInfo). */
+  models?: { url?: string; sizeGb?: number }[];
 }
 
 export interface LicenceRow {
@@ -40,6 +42,8 @@ export interface LicenceRow {
   workflows: string[];
   /** Distinct licence texts of its workflows. */
   licences: string[];
+  /** Where to read each of `licences` (same order; null when nothing is recorded), as Models & licences links it. */
+  links: (string | null)[];
   flags: LicenceFlag[];
   /** Who a territory-restricted licence leaves out ("the EU, UK and South Korea"). */
   excludes?: string;
@@ -120,12 +124,23 @@ function endpointIds(endpoint: string, workflows: LicenceWorkflowInput[]): strin
   return workflows.filter((w) => re.test(w.id)).map((w) => w.id);
 }
 
-function rowFor(base: Omit<LicenceRow, "licences" | "flags" | "excludes" | "notices">, licences: string[]): LicenceRow & { noWeights: boolean } {
+/** Where to read a licence its workflows state: its own page, else the largest download's model card (as licenceInfo). */
+function licenceLink(text: string, workflows: LicenceWorkflowInput[]): string | null {
+  const cards = workflows
+    .filter((w) => workflowLicence(w) === text)
+    .flatMap((w) => w.models ?? [])
+    .sort((a, b) => (b.sizeGb ?? 0) - (a.sizeGb ?? 0))
+    .flatMap((m) => (m.url ? [m.url] : []));
+  return licenceInfo(text, cards).url ?? null;
+}
+
+function rowFor(base: Omit<LicenceRow, "licences" | "links" | "flags" | "excludes" | "notices">, licences: string[], workflows: LicenceWorkflowInput[]): LicenceRow & { noWeights: boolean } {
   const terms = licences.map(licenceTerms);
   const flags = (["non-commercial", "territory", "conditions"] as const).filter((f) => terms.some((t) => t.flags.includes(f)));
   return {
     ...base,
     licences,
+    links: licences.map((l) => licenceLink(l, workflows)),
     // A row with a stricter catch doesn't also say "conditions".
     flags: flags.includes("conditions") && flags.length > 1 ? flags.filter((f) => f !== "conditions") : flags,
     excludes: terms.find((t) => t.excludes)?.excludes,
@@ -156,12 +171,13 @@ export function buildLicenceList(models: LicenceModelInput[], workflows: Licence
     const ids = [...new Set(m.routes.filter((r) => r.provider === "comfyui").flatMap((r) => endpointIds(r.endpoint, workflows)))];
     if (!ids.length || ids.every((id) => id.startsWith("selftest-"))) continue;
     ids.forEach((id) => used.add(id));
-    const licences = [...new Set(ids.map((id) => workflowLicence(byId.get(id) ?? { id })))];
-    add(rowFor({ id: m.id, name: m.name, by: m.vendor, kind: m.kind, workflows: ids, inCatalog: true }, licences));
+    const wfs = ids.map((id) => byId.get(id) ?? { id, title: id, capability: m.kind });
+    const licences = [...new Set(wfs.map(workflowLicence))];
+    add(rowFor({ id: m.id, name: m.name, by: m.vendor, kind: m.kind, workflows: ids, inCatalog: true }, licences, wfs));
   }
   for (const w of workflows) {
     if (used.has(w.id) || w.id.startsWith("selftest-")) continue;
-    add(rowFor({ id: w.id, name: w.title, by: "Workflow library", kind: w.capability, workflows: [w.id], inCatalog: false }, [workflowLicence(w)]));
+    add(rowFor({ id: w.id, name: w.title, by: "Workflow library", kind: w.capability, workflows: [w.id], inCatalog: false }, [workflowLicence(w)], [w]));
   }
 
   const notices = new Map<string, string[]>();

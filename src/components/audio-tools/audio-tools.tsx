@@ -29,6 +29,7 @@ import { cloudLoopLength, cloudLoopPasses } from "@/lib/av/crossfade";
 import { parseCueTime } from "@/lib/av/cue-edit";
 import type { Engine } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useAudioToolPreview, useAudioToolRun, useSettled, type AudioToolBody } from "./hooks";
 
 /**
@@ -327,7 +328,7 @@ export function AudioLoopTool({ tabs }: { tabs?: React.ReactNode }) {
   const go = () => {
     if (blocker) return void toast(blocker);
     if (preview.error) return void toast.error((preview.error as Error).message);
-    run.mutate(body!, { onSuccess: () => toast.success(engine === "open" ? "Looping on your ComfyUI" : "Looping"), onError: (e) => toast.error((e as Error).message) });
+    run.mutate(body!, { onSuccess: () => toast.success(engine === "open" ? "Looping on your ComfyUI" : "Looping"), onError: (e) => toastError(e) });
   };
   return (
     <ToolShell title="Audio" tabs={tabs}>
@@ -417,7 +418,7 @@ export function AudioJoinTool({ tabs }: { tabs?: React.ReactNode }) {
   const go = () => {
     if (blocker) return void toast(blocker);
     if (preview.error) return void toast.error((preview.error as Error).message);
-    run.mutate(body!, { onSuccess: () => toast.success(engine === "open" ? "Joining on your ComfyUI" : "Joining"), onError: (e) => toast.error((e as Error).message) });
+    run.mutate(body!, { onSuccess: () => toast.success(engine === "open" ? "Joining on your ComfyUI" : "Joining"), onError: (e) => toastError(e) });
   };
   return (
     <ToolShell title="Audio" tabs={tabs}>

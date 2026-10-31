@@ -25,6 +25,7 @@ import {
   type TopicIdea,
 } from "@/lib/catalog/faceless";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { ChannelAvatar } from "./cards";
 import { EstimateLine, Section, Segmented, ToggleRow } from "./controls";
 import { pendingScriptKey } from "./faceless-home";
@@ -122,7 +123,7 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
       setOffline(res.offline);
       setPicked(null);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setLoadingTopics(false);
     }
@@ -163,7 +164,7 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
       { channelId, topic: topic || script.trim().slice(0, 120), script: scriptMode === "pasted" ? script : undefined, settings, saveLook: keepLook },
       {
         onSuccess: (ep) => router.push(`/faceless/${channelId}/${ep.id}`),
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   };

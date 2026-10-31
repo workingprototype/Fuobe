@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { copyWithToast } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
+import { responseError, toastError } from "@/lib/refusals";
 
 interface TokenInfo {
   id: string;
@@ -40,7 +41,7 @@ async function call<T>(url: string, method: string, body?: unknown): Promise<T> 
   const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   if (res.status === 204) return undefined as T;
   const j = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(j.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw responseError(res, j.error ?? `Request failed (${res.status})`);
   return j;
 }
 
@@ -60,7 +61,7 @@ function PasswordForm({ status, onDone }: { status: AuthStatus; onDone: () => vo
       setConfirm("");
       onDone();
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }
@@ -136,7 +137,7 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
       setName("");
       onChange();
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     }
   };
   return (
@@ -179,7 +180,7 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
                 className="size-8 text-muted-foreground hover:text-destructive"
                 aria-label={`Revoke ${t.name}`}
                 onClick={async () => {
-                  await call(`/api/auth/tokens?id=${t.id}`, "DELETE").catch((e) => toast.error((e as Error).message));
+                  await call(`/api/auth/tokens?id=${t.id}`, "DELETE").catch((e) => toastError(e));
                   onChange();
                 }}
               >
@@ -225,7 +226,7 @@ function SignOutEveryone({ tokens }: { tokens: number }) {
       // This browser is signed out too.
       router.replace("/login?owner=1");
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
       setBusy(false);
     }
   };
@@ -284,7 +285,7 @@ function PublicSignup() {
       qc.setQueryData(["auth", "public"], await call<PublicSignupStatus>("/api/auth/public", "PUT", { on }));
       void qc.invalidateQueries({ queryKey: ["viewer"] });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }

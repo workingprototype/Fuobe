@@ -38,6 +38,7 @@ import { finishedUrl } from "@/lib/soul-post";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useCinemaGenerate, useCinemaItems } from "./hooks";
 
 interface BuilderProps {
@@ -218,7 +219,7 @@ function SaveElement({ kind, defaultName, picked, description, onSaved }: { kind
                 toast.success(`Saved as @${el.handle}`, { action: { label: "Open", onClick: () => router.push(`/elements/${el.id}`) } });
                 onSaved();
               },
-              onError: (e) => toast.error((e as Error).message),
+              onError: (e) => toastError(e),
             },
           )
         }
@@ -260,7 +261,7 @@ function SoulCast({ projectId, folderId, engine, context, brief, onOpenChange }:
           setIds(r.items.map((g) => g.id));
           setPicked([]);
         },
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   return (
@@ -406,7 +407,7 @@ function SoulLocation({ projectId, folderId, engine, settings, context, brief, o
           setIds((ids) => (extra ? [...ids, ...r.items.map((g) => g.id)] : r.items.map((g) => g.id)));
           if (!extra) setPicked([]);
         },
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   return (

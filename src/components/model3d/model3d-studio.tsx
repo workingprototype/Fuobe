@@ -36,6 +36,7 @@ import {
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { priceLine, useRunPreview } from "./hooks";
 import { ModelCard } from "./model-card";
 
@@ -161,7 +162,7 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
     if (blocker) return void toast(blocker, { id: "3d-blocker" });
     create.mutate(model3dRequest(input), {
       onSuccess: () => toast.success(mode === "splat" ? "Making your splat" : mode === "text" && engine === "open" ? "Drawing the object, then building it in 3D" : "Building your 3D model"),
-      onError: (e) => toast.error((e as Error).message),
+      onError: (e) => toastError(e),
     });
   };
   const licence = modelId ? info[modelId]?.licence : undefined;
@@ -358,6 +359,6 @@ function retryOf(g: Generation): GenerationRequest {
 function ResultCard({ g, info, cloudAllowed }: { g: Generation; info: Record<string, Model3dInfo>; cloudAllowed: boolean }) {
   const create = useCreateGeneration();
   if (g.status === "queued" || g.status === "running") return <PendingTile g={g} ratio={4 / 3} />;
-  if (g.status !== "succeeded") return <FailedTile g={g} ratio={4 / 3} onRetry={() => create.mutate(retryOf(g), { onError: (e) => toast.error((e as Error).message) })} />;
+  if (g.status !== "succeeded") return <FailedTile g={g} ratio={4 / 3} onRetry={() => create.mutate(retryOf(g), { onError: (e) => toastError(e) })} />;
   return <ModelCard g={g} info={info} cloudAllowed={cloudAllowed} />;
 }

@@ -18,8 +18,8 @@ import {
   Wand2,
   ZoomIn,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { GetStarted } from "@/components/get-started";
 import { PageShell } from "@/components/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +33,7 @@ import type { Generation } from "@/lib/catalog/types";
 import { issueStartToken, START_PARAM } from "@/lib/composer";
 import { FIRST_RUN_KEY, FIRST_RUN_SCRIPT, nothingConnected as noConnection, showFirstRun, startLine, type StartQuote } from "@/lib/connections";
 import { userTitle } from "@/lib/library";
+import { NEW_CREATION_PARAM } from "@/lib/nav";
 import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
@@ -151,6 +152,21 @@ function FirstRunScript() {
   return <script type={typeof window === "undefined" ? "text/javascript" : "text/plain"} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: FIRST_RUN_SCRIPT }} />;
 }
 
+/**
+ * "New creation" (the sidebar, ⌘K) opens Home with ?new=1: the composer starts empty and takes the
+ * focus, and the flag leaves the address. It reads the URL, so it sits under Suspense.
+ */
+function NewCreation({ onNew }: { onNew: () => void }) {
+  const router = useRouter();
+  const fresh = useSearchParams().has(NEW_CREATION_PARAM);
+  useEffect(() => {
+    if (!fresh) return;
+    onNew();
+    router.replace("/", { scroll: false });
+  }, [fresh, onNew, router]);
+  return null;
+}
+
 export function HomeView({
   counts,
   motions,
@@ -206,9 +222,16 @@ export function HomeView({
   // What Start will run, and what it costs, before it's pressed (or why it's a demo, and the engine that would run it).
   const runsFor = status ? startLine(status, quotes?.[mode.id], engine, mode.id as "image" | "video" | "edit") : null;
   const focusComposer = () => requestAnimationFrame(() => box.current?.focus());
+  const startOver = useCallback(() => {
+    setPrompt("");
+    requestAnimationFrame(() => box.current?.focus());
+  }, []);
 
   return (
     <PageShell>
+      <Suspense fallback={null}>
+        <NewCreation onNew={startOver} />
+      </Suspense>
       <div className="flex flex-col items-center pt-[8vh] text-center">
         <h1 className="font-heading text-display text-balance sm:text-[44px]">What will you create today?</h1>
         <p className="mt-2 text-[15px] text-muted-foreground">

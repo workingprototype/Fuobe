@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clapperboard, Cpu, Film, GraduationCap, KeyRound, Layers, LayoutGrid, Loader2, Play, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
+import { Bell, Clapperboard, Cpu, Film, GraduationCap, KeyRound, Layers, LayoutGrid, Loader2, Play, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, UserRound, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSkills } from "@/components/assist/hooks";
@@ -10,11 +10,12 @@ import { MediaThumb } from "@/components/studio/result-media";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Kbd } from "@/components/ui/kbd";
 import { Command as CommandPrimitive } from "cmdk";
-import { useEngineMode, useGenerations, useModelAccess } from "@/lib/api";
+import { useEngineMode, useGenerations, useModelAccess, useViewer, type ViewerInfo } from "@/lib/api";
 import type { Generation } from "@/lib/catalog/types";
 import { indexEntries, KIND_LABELS, rankPalette, skillEntries, type PaletteEntry, type PaletteIndex, type PaletteKind } from "@/lib/command-search";
 import { useModKey } from "@/lib/keys";
 import { userTitle } from "@/lib/library";
+import { NEW_CREATION_HREF } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 // The viewer is only needed once a recent creation is opened from the palette.
@@ -79,9 +80,36 @@ const SETTING_ENTRIES: (PaletteEntry & { icon: LucideIcon })[] = SETTINGS.map((s
   keywords: s.keywords,
   icon: s.icon,
 }));
+const visitorSetting = (key: string, label: string, href: string, icon: LucideIcon, keywords: string): PaletteEntry & { icon: LucideIcon } => ({
+  key: `setting:${key}`,
+  kind: "setting",
+  label,
+  hint: "Settings",
+  href,
+  keywords,
+  icon,
+});
+const LICENCES = SETTING_ENTRIES.find((e) => e.key === "setting:models")!;
+/**
+ * The install's settings are its owner's: an account (public sign-up) gets its own GPU and account, a guest the way to
+ * connect a GPU; both get the licences, which they may read.
+ */
+const ACCOUNT_SETTINGS = [
+  visitorSetting("your-gpu", "Your GPU", "/settings#your-gpu", Cpu, "comfyui gpu connect own server open source"),
+  visitorSetting("account", "Account", "/settings#account", UserRound, "email sign out delete account"),
+  LICENCES,
+];
+const GUEST_SETTINGS = [visitorSetting("connect", "Connect your GPU", "/connect", Cpu, "comfyui gpu own server sign up account open source"), LICENCES];
+
+/** The settings the palette offers this viewer (none of the install's to anyone but its owner). */
+export function settingEntries(viewer: Pick<ViewerInfo, "owner" | "account"> | undefined): (PaletteEntry & { icon: LucideIcon })[] {
+  if (viewer?.owner) return SETTING_ENTRIES;
+  return viewer?.account ? ACCOUNT_SETTINGS : GUEST_SETTINGS;
+}
+
 // Icons as elements made once (a component picked during render would remount on every keystroke).
 const iconEl = (Icon: LucideIcon) => <Icon className="text-muted-foreground" />;
-const ICONS = new Map<string, React.ReactNode>([...PAGES, ...SETTING_ENTRIES].map((e) => [e.key, iconEl(e.icon)]));
+const ICONS = new Map<string, React.ReactNode>([...PAGES, ...SETTING_ENTRIES, ...ACCOUNT_SETTINGS, ...GUEST_SETTINGS].map((e) => [e.key, iconEl(e.icon)]));
 const KIND_ICONS: Partial<Record<PaletteKind, React.ReactNode>> = { app: iconEl(LayoutGrid), motion: iconEl(Film), effect: iconEl(Wand2), model: iconEl(Clapperboard), skill: iconEl(Play) };
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -145,6 +173,7 @@ function PaletteBody({ onPick, onOpenRecent, onClose }: { onPick: (e: PaletteEnt
   const dq = useDebounced(q.trim(), 200);
   const mode = useEngineMode();
   const access = useModelAccess();
+  const settings = settingEntries(useViewer().data);
   // The apps, motions, effects and models load on first open (and stay for the session).
   const index = useQuery({
     queryKey: ["palette-index"],
@@ -155,8 +184,8 @@ function PaletteBody({ onPick, onOpenRecent, onClose }: { onPick: (e: PaletteEnt
   // Skills that run by themselves: "Run <skill>…" opens its Run form.
   const skills = useSkills();
   const entries = useMemo(
-    () => [...PAGES, ...SETTING_ENTRIES, ...skillEntries(skills.data ?? []), ...(index.data ? indexEntries(index.data, mode, access) : [])],
-    [index.data, mode, access, skills.data],
+    () => [...PAGES, ...settings, ...skillEntries(skills.data ?? []), ...(index.data ? indexEntries(index.data, mode, access) : [])],
+    [index.data, mode, access, skills.data, settings],
   );
   const groups = useMemo(() => rankPalette(entries, query), [entries, query]);
   const recentItems = (recent.data ?? []).filter((g) => g.outputs[0]);
@@ -213,7 +242,7 @@ function PaletteBody({ onPick, onOpenRecent, onClose }: { onPick: (e: PaletteEnt
           <>
             <CommandGroup>
               {/* Enter on an empty query keeps what ⌘K always did: a new creation. */}
-              <CommandItem value="new" onSelect={() => onPick({ key: "new", kind: "page", label: "New creation", href: "/" })} className="h-9 gap-2.5 text-[14px]">
+              <CommandItem value="new" onSelect={() => onPick({ key: "new", kind: "page", label: "New creation", href: NEW_CREATION_HREF })} className="h-9 gap-2.5 text-[14px]">
                 <Plus className="text-muted-foreground" />
                 New creation
                 <span data-slot="command-shortcut" className="ml-auto text-[12px] text-muted-foreground">Home</span>
@@ -232,7 +261,7 @@ function PaletteBody({ onPick, onOpenRecent, onClose }: { onPick: (e: PaletteEnt
               ))}
             </CommandGroup>
             <CommandGroup heading={KIND_LABELS.setting}>
-              {SETTING_ENTRIES.map((e) => (
+              {settings.map((e) => (
                 <Row key={e.key} entry={e} onPick={onPick} />
               ))}
             </CommandGroup>

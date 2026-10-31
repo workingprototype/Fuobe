@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useViewer } from "@/lib/api";
 import { storageSize, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { responseError, toastError } from "@/lib/refusals";
 
 /** An account as GET /api/admin/accounts lists it: who, and what it made (src/server/account-admin.ts). */
 export interface AccountRow {
@@ -44,7 +45,7 @@ export async function adminCall<T>(url: string, method = "GET", body?: unknown):
   const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   if (res.status === 204) return undefined as T;
   const j = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(j.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw responseError(res, j.error ?? `Request failed (${res.status})`);
   return j;
 }
 
@@ -66,7 +67,7 @@ export function useAdminAction() {
       await fn();
       toast.success(done);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       void qc.invalidateQueries({ queryKey: ["admin-accounts"] });
       void qc.invalidateQueries({ queryKey: ["admin-runs"] });

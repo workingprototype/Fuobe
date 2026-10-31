@@ -1,9 +1,8 @@
 "use client";
 
 import { Cloud, Cpu, Info, X } from "lucide-react";
-import { useSyncExternalStore } from "react";
 import { HeaderPill } from "@/components/gpu/readiness-chip";
-import { PresetPreview, useSaveData } from "@/components/preset-preview";
+import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
 import { openGpuSetup, useGpuBadges } from "@/hooks/use-gpu";
 import { useEngine } from "@/lib/api";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -13,23 +12,11 @@ import { toPresetCard } from "@/lib/preset-card-data";
 import { presetHowTo, presetRouteLines, previewFlip } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
-const REDUCED = "(prefers-reduced-motion: reduce)";
-function useReducedMotion() {
-  return useSyncExternalStore(
-    (cb) => {
-      const mq = window.matchMedia(REDUCED);
-      mq.addEventListener("change", cb);
-      return () => mq.removeEventListener("change", cb);
-    },
-    () => window.matchMedia(REDUCED).matches,
-    () => true,
-  );
-}
-
 /**
  * The card a studio shows above its composer while a preset (app, camera motion, effect) is active
- * and the feed is still empty: the preview looping, the name, one line on what to do, the models it
- * runs on behind a Details popover, and a way to clear the preset.
+ * and the feed is still empty: the preview looping while it's in view (with reduced motion, Save-Data
+ * or on 2G it waits for a hover or a tap), the name, one line on what to do, the models it runs on
+ * behind a Details popover, and a way to clear the preset.
  *
  * Hook (studio-page.tsx, empty state, above the composer):
  *   {preset && !hasItems && <PresetHeader preset={preset} modelName={(id) => getModel(id)?.name}
@@ -49,9 +36,7 @@ export function PresetHeader({
   className?: string;
 }) {
   const card = toPresetCard(preset);
-  const reduced = useReducedMotion();
-  // Not with Save-Data or on 2G either: a clip cover would download as soon as the studio opens.
-  const saveData = useSaveData();
+  const { ref, playing, handlers, onTap } = usePreviewPlayback<HTMLDivElement>(card.id, card.preview, { always: true });
   const routes = presetRouteLines(preset, modelName);
   // Its state on the viewer's GPU (open engine only): a pill that opens the guided fix.
   const badges = useGpuBadges().data;
@@ -59,12 +44,18 @@ export function PresetHeader({
   const gpu = preset.open && engine === "open" ? (badges?.presets[preset.id] ?? null) : null;
   return (
     <div className={cn("mx-auto flex w-full max-w-[760px] items-center gap-3 rounded-2xl border bg-background p-2 pr-3 text-left shadow-soft", className)}>
-      <div className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-32">
-        <PresetPreview preview={card.preview} hue={card.hue} playing={!reduced && !saveData} flip={previewFlip(card)} />
+      <div
+        ref={ref}
+        onPointerEnter={handlers.onPointerEnter}
+        onPointerLeave={handlers.onPointerLeave}
+        onPointerUp={onTap}
+        className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-32"
+      >
+        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} flip={previewFlip(card)} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-heading text-[19px] leading-snug">{preset.name}</p>
-        <p className="line-clamp-2 text-[13px] text-muted-foreground">{presetHowTo(preset)}</p>
+        <p className="line-clamp-2 text-[13px] text-muted-foreground max-sm:line-clamp-3">{presetHowTo(preset)}</p>
       </div>
       {gpu && <HeaderPill badge={gpu} gpu={badges?.gpu} compact onOpen={() => openGpuSetup({ ref: `preset:${preset.id}`, name: preset.name })} />}
       <Popover>

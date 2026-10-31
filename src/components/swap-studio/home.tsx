@@ -14,6 +14,7 @@ import { useEngine } from "@/lib/api";
 import { characterLicenceLine } from "@/lib/catalog/character-swap";
 import { SWAP_STUDIO, type SwapProjectCard } from "@/lib/catalog/swap-studio";
 import { STUDIO_MODELS } from "@/lib/catalog/swap-studio-plan";
+import { toastError } from "@/lib/refusals";
 import { useCreateSwapProject, useDeleteSwapProject, useSwapProjects } from "./hooks";
 
 const STEPS = [
@@ -46,7 +47,7 @@ export function SwapStudioHome() {
       { name: name.trim() || undefined, engine },
       {
         onSuccess: (p) => router.push(`/character-swap/${p.id}`),
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
 
@@ -166,7 +167,7 @@ export function SwapStudioHome() {
                 confirm &&
                 del.mutate(confirm.id, {
                   onSuccess: () => toast("Project deleted"),
-                  onError: (e) => toast.error((e as Error).message),
+                  onError: (e) => toastError(e),
                 })
               }
             >

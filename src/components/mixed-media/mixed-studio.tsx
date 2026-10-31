@@ -38,6 +38,7 @@ import type { Engine, Generation } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
 import type { TrimRange } from "@/lib/trim-range";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { MixedHistory } from "./history";
 import { isFrameRender, renderSteps, useFramesProgress, useMixedActions, useMixedEstimate, useWatchedChain, useWatchedGeneration, type MixedBody } from "./hooks";
 import { AdvancedSettings, loadSaved } from "./settings";
@@ -438,7 +439,7 @@ function Editor({
       }
       const g = await actions.preview.mutateAsync({ ...body, frameUrl, requestId });
       setPreviewId(g.id);
-    }).catch((e: Error) => toast.error(e.message));
+    }).catch((e: Error) => toastError(e));
   };
 
   const generate = () => {
@@ -451,7 +452,7 @@ function Editor({
         setRenderFrames(r.frames ?? 0);
         toast("Rendering your video", { description: "It shows up in History too." });
       })
-      .catch((e: Error) => toast.error(e.message));
+      .catch((e: Error) => toastError(e));
   };
 
   return (

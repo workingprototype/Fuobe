@@ -18,6 +18,7 @@ import { probeBlob, probeUrl } from "@/lib/media-probe";
 import { useModelAccess } from "@/lib/api";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { addRuns, send, useEstimate } from "@/components/marketing/hooks";
 import type { ModelInfo } from "@/components/marketing/model-info";
 import { RunsList } from "@/components/marketing/runs";
@@ -295,7 +296,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
       toast.success(r.runs.length > 1 ? `Making ${r.runs.length} versions` : "Making your new version", { duration: 1600 });
       resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(null);
     }

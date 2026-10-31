@@ -30,6 +30,7 @@ import {
 import { useFolderActions } from "@/lib/api";
 import { childFolders, DEFAULT_FOLDER_COLOR, FOLDER_COLORS, folderMoveError, folderPath, folderSwatch, folderTree, MAX_FOLDER_DEPTH, type Folder } from "@/lib/library";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 
 /** Generation ids dragged from a card (the selection when the card is selected). */
 export const DRAG_TYPE = "application/x-fuobe-generations";
@@ -123,7 +124,7 @@ export function useMoveFolder(all: Folder[]) {
     if (error) return void toast(error);
     actions.update(id, { parentId: target?.id ?? null }).then(
       () => toast.success(target ? `Moved “${f.name}” into “${target.name}”` : `Moved “${f.name}” to the top of your Library`),
-      (e: Error) => toast.error(e.message),
+      (e: Error) => toastError(e),
     );
   };
 }
@@ -158,7 +159,7 @@ export function FolderDialog({
       onSaved?.(f);
       if (!folder) toast.success(parent ? `Created “${f.name}” in “${parent.name}”` : `Created “${f.name}”`);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }
@@ -271,7 +272,7 @@ function FolderMenu({ folder, all, onOpen, onGone, steps, triggerClassName }: { 
           <DropdownMenuItem onSelect={later("edit")}>
             <Pencil /> Rename or recolour
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void actions.update(folder.id, { pinned: !folder.pinnedAt }).catch((e: Error) => toast.error(e.message))}>
+          <DropdownMenuItem onSelect={() => void actions.update(folder.id, { pinned: !folder.pinnedAt }).catch((e: Error) => toastError(e))}>
             {folder.pinnedAt ? <PinOff /> : <Pin />} {folder.pinnedAt ? "Unpin" : "Pin to top"}
           </DropdownMenuItem>
           <DropdownMenuSub>

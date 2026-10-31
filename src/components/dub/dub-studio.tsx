@@ -22,6 +22,7 @@ import { BACKGROUND_DB, crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS,
 import { languageByCode, supportsTarget, type DubRoute } from "@/lib/av/languages";
 import type { Cue } from "@/lib/cues";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useDubActions, useDubPrice, useDubSessions, useVoicePrice } from "./hooks";
 
 const ONE_SHOT: Record<OneShotModel, { name: string; note: string }> = {
@@ -121,7 +122,7 @@ function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
           setDuration(undefined);
           onStarted(s.id);
         },
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   };
@@ -363,7 +364,7 @@ function SessionView({ s, onBack }: { s: DubSessionView; onBack: () => void }) {
                       toast("Dub removed");
                       onBack();
                     },
-                    onError: (e) => toast.error((e as Error).message),
+                    onError: (e) => toastError(e),
                   })
                 }
               >
@@ -480,7 +481,7 @@ function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; ti
     if (body === savedBody) return;
     const t = setTimeout(() => {
       setSavedBody(body);
-      save.current({ id: s.id, lang, cues: JSON.parse(body) as Cue[] }, { onError: (e) => toast.error((e as Error).message) });
+      save.current({ id: s.id, lang, cues: JSON.parse(body) as Cue[] }, { onError: (e) => toastError(e) });
     }, 800);
     return () => clearTimeout(t);
   }, [body, savedBody, s.id, lang]);
@@ -507,7 +508,7 @@ function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; ti
   const start = (c: Cue[]) =>
     voice.mutate(
       { id: s.id, lang, cues: c, lipsync },
-      { onSuccess: () => toast.success(`Voicing ${name}`), onError: (e) => toast.error((e as Error).message) },
+      { onSuccess: () => toast.success(`Voicing ${name}`), onError: (e) => toastError(e) },
     );
   return (
     <>

@@ -9,6 +9,7 @@ import { uploadFile, useHydrated } from "@/lib/api";
 import { animateSpinHref, animationName, model3dView, stillOf, type Model3dView } from "@/lib/av/model3d";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { loadModelViewer, TURNTABLE_BACKDROP, useViewerSrc, viewerLook } from "./model-viewer";
 import type { Model3dInfo } from "./model3d-studio";
 import { RigDialog } from "./rig-dialog";
@@ -100,7 +101,7 @@ export function ModelCard({ g, info, cloudAllowed }: { g: Generation; info: Reco
         setRecorded({ url, saved: asset.url });
         toast.success("Turntable recorded — saved to your uploads");
       } catch (e) {
-        toast.error((e as Error).message);
+        toastError(e);
       } finally {
         setRecording(null);
       }

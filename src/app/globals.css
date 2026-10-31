@@ -336,9 +336,13 @@
 [data-collapsible="icon"] [data-nav-group] [data-nav-items] { display: flex; }
 [data-collapsible="icon"] [data-nav-group][data-open] [data-nav-items] > li { display: revert-layer; }
 
-/* A vertical scroller with more below the fold fades out at the bottom (app-sidebar.tsx). */
-.fade-bottom[data-more-below] {
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+/*
+ * A vertical scroller fades out at an edge with more past it (app-sidebar.tsx). --fade-t and --fade-b
+ * are as deep as what's hidden there, up to 24px and 40px (scrollFades in src/lib/nav.ts).
+ */
+.fade-y[data-more-above],
+.fade-y[data-more-below] {
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-t, 0px), #000 calc(100% - var(--fade-b, 0px)), transparent);
 }
 
 /* ---------------------------------------------------------------------------------------------

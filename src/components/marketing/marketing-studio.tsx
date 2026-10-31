@@ -18,6 +18,7 @@ import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { addRuns, send, useBrands, useEstimate } from "./hooks";
 import type { MarketingRun } from "@/lib/catalog/marketing";
+import { toastError } from "@/lib/refusals";
 import type { ModelInfo } from "./model-info";
 import { AvatarSlot, HookPicker, ProductSlot, SettingPicker, VoiceControl, type ProductChoice } from "./pickers";
 import { RunsList } from "./runs";
@@ -355,7 +356,7 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
       toast.success(r.runs.length > 1 ? `${r.runs.length} runs started` : f.pipeline === "image" ? "Generating" : `Started · ${est.data?.steps.length ?? ""} steps`, { duration: 1600 });
       set({ prompt: "" });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }

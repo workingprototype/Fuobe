@@ -13,6 +13,7 @@ import { useElements, useSaveElement } from "@/lib/api";
 import type { StudioElement } from "@/lib/catalog/elements";
 import { SOUL_ID_COPY, SOUL_ID_PHOTOS } from "@/lib/catalog/training";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 
 /** What a character brings: a trained Soul ID (Fuobe Soul), an old Higgsfield one to retrain, or just photos. */
 export function identityLabel(el: StudioElement): string {
@@ -110,7 +111,7 @@ export function QuickCharacter({ open, onOpenChange, onCreated }: { open: boolea
                     setPhotos([]);
                     onOpenChange(false);
                   },
-                  onError: (e) => toast.error((e as Error).message),
+                  onError: (e) => toastError(e),
                 },
               )
             }
