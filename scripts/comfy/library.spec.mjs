@@ -327,6 +327,13 @@ export const KNOWN_MODELS = {
   'krea2_general_edit_v2.safetensors': { folder: 'loras', url: 'https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_general_edit_v2.safetensors' },
   'krea2_identity_edit_v2.safetensors': { folder: 'loras', url: 'https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v2.safetensors' },
   'krea2_inpaint_edit.safetensors': { folder: 'loras', url: 'https://huggingface.co/Cierpliwy/krea2-inpaint-edit/resolve/main/v1_512/krea2_inpaint_edit.safetensors' },
+  // owner's SOTA families (2026-10-31): FIBO 2. The VAE is the existing flux2-vae row. The text-to-image graph's prompt writer is
+  // Qwen3.5 9B int8 from Comfy-Org's MOSS-Image repository (MOSS-Image itself runs the w4a8 build above). `variants`: the same
+  // weights in another precision in the same repo.
+  'fibo2_dev_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_dev_int8_convrot.safetensors', variants: ['fibo2_dev_bf16.safetensors'] },
+  'fibo2_edit_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_edit_turbo_int8_convrot.safetensors', variants: ['fibo2_edit_turbo_bf16.safetensors'] },
+  'qwen3vl_4b_int8_convrot.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors' },
+  'qwen3.5_9b_int8_convrot.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/text_encoders/qwen3.5_9b_int8_convrot.safetensors', variants: ['qwen3.5_9b_bf16.safetensors'] },
 };
 
 const WAN_NEG_EN =
@@ -2458,6 +2465,62 @@ export const SPEC = [
       'then black over its mask: a hard edge like the example\'s SolidMask canvas), scaled to about 1 MP, then the same LoRA, patch (kv_cache on) and 8 euler_ancestral steps. Default pads 256 px a side ' +
       '(the example grows a 512 px picture by a quarter of its side on each). The prompt describes the whole scene. The v1 512 LoRA was trained without outpainting masks (v2 adds them, model card). ' +
       'Needs ComfyUI-Krea2-Ostris-Edit. Not rendered yet.',
+  },
+  // ---- Owner's SOTA image families: FIBO 2 (Bria FIBO 2.0 Dev and Edit Turbo, core nodes) ------------------------
+  {
+    id: 'fibo2-dev-t2i',
+    title: 'FIBO 2 Dev text to image (Qwen3.5 writes the structured VGL prompt)',
+    capability: 't2i',
+    handBuilt: 'hand-built/fibo2-dev-t2i.json',
+    bindings: {
+      prompt: [b('112', 'prompt')], negativePrompt: [b('94', 'text')], width: [b('102', 'width')], height: [b('102', 'height')],
+      seed: [b('3', 'seed')], steps: [b('3', 'steps')], cfg: [b('3', 'cfg')],
+    },
+    outputs: [{ node: '56', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 24,
+    license: 'CC-BY-NC-4.0 (Bria FIBO 2.0 weights: NON-COMMERCIAL; commercial use needs a Bria agreement)',
+    notes:
+      'The owner\'s fibo/fibo_2_dev_text2image_vgl.json as saved [O]: core TextGenerate on Qwen3.5 9B int8 (CLIPLoader type stable_diffusion, 2048 tokens, sampling off) turns the words ' +
+      'into Bria\'s VGL JSON with the owner\'s art-director system prompt, and CLIP Text Encode (fibo2, Qwen3-VL 4B int8) encodes it; empty negative, 30 steps, cfg 5, euler / simple. ' +
+      'The ResolutionSelector is replaced by an explicit width x height (FIBO 2 is trained at about 1 MP, multiple of 16); the prompt preview and the notes are removed. ' +
+      'Not rendered through Fuobe yet (the preview pipeline rendered FIBO 2 Dev from a hand-written VGL prompt through TextEncodeFibo2 at 40 steps).',
+  },
+  {
+    id: 'fibo2-dev-edit',
+    title: 'FIBO 2 Dev image edit, up to 4 references',
+    capability: 'edit',
+    handBuilt: 'hand-built/fibo2-dev-edit.json',
+    bindings: {
+      prompt: [b('112', 'prompt')], negativePrompt: [b('112', 'negative_prompt')],
+      image: [b('113', 'image')], image2: [b('116', 'image')], image3: [b('117', 'image')], image4: [b('118', 'image')],
+      seed: [b('3', 'seed')], steps: [b('3', 'steps')], cfg: [b('3', 'cfg')],
+    },
+    outputs: [{ node: '56', kind: 'image' }],
+    vramGb: 16,
+    license: 'CC-BY-NC-4.0 (Bria FIBO 2.0 weights: NON-COMMERCIAL; commercial use needs a Bria agreement)',
+    notes:
+      'The owner\'s fibo/fibo_2_dev_image_edit_multi.json as saved [O]: image 1 scaled to 1 MP and to a multiple of 16 (bicubic), the other references straight into TextEncodeFibo2 ' +
+      '(images.image_2..4: the owner\'s graph wires two, 3 and 4 are wired the same way). The encoder gives the conditioning and the latent at the trained size of image 1\'s shape ' +
+      '(width = height = 0); empty negative (the null caption FIBO 2 was trained with), 30 steps, cfg 5, euler / simple. One picture is scaled and centre-cropped to the result (the edit ' +
+      'lines up with it pixel for pixel); several are each scaled to their own trained size. References not given are left out of the encoder. The instruction names the pictures ' +
+      '<image_1>, <image_2>... The VGL edit graphs (a 9.75 GB prompt writer on every edit) are not adopted. Not rendered through Fuobe yet.',
+  },
+  {
+    id: 'fibo2-edit-turbo-edit',
+    title: 'FIBO 2 Edit Turbo image edit (4 steps), up to 4 references',
+    capability: 'edit',
+    handBuilt: 'hand-built/fibo2-edit-turbo-edit.json',
+    bindings: {
+      prompt: [b('112', 'prompt')], image: [b('113', 'image')], image2: [b('116', 'image')], image3: [b('117', 'image')], image4: [b('118', 'image')],
+      seed: [b('3', 'seed')], steps: [b('3', 'steps')],
+    },
+    outputs: [{ node: '56', kind: 'image' }],
+    vramGb: 16,
+    license: 'CC-BY-NC-4.0 (Bria FIBO 2.0 weights: NON-COMMERCIAL; commercial use needs a Bria agreement)',
+    notes:
+      'The owner\'s fibo/fibo_2_edit_turbo_image_edit_multi.json as saved [O]: fibo2-dev-edit on the Edit Turbo weights, 4 steps, cfg 1 (no negative pass), euler / simple; ' +
+      'references 3 and 4 wired like reference 2, and left out when not given. Edits only: none of the owner\'s graphs runs the turbo weights for text to image. Not rendered through Fuobe yet.',
   },
 
   // ---- Fuobe DoP (Originals O4): LTX-2.3 camera moves, FPV and transitions with LoRAs ------------

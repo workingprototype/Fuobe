@@ -39,6 +39,21 @@
   "sizeBytes": 11904639672,
   "sha256": "b17a8c21703c4d6ffb0e300dd920eff3cfd35c9a72a1abaf107e3788e408b8d8"
  },
+ "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_dev_int8_convrot.safetensors": {
+  "revision": "4742d4bec410034142c8e65559e5f00c6f29eccb",
+  "sizeBytes": 8408562474,
+  "sha256": "063dd397395809fd22234c6bd32932cfcb22619f4d2282bdbf1dc58c406fe325"
+ },
+ "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_edit_turbo_int8_convrot.safetensors": {
+  "revision": "4742d4bec410034142c8e65559e5f00c6f29eccb",
+  "sizeBytes": 8408562474,
+  "sha256": "1f6fa7c499191f405467123f655f11762661eaa5bd479d1da8f161398ef72c3b"
+ },
+ "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors": {
+  "revision": "4742d4bec410034142c8e65559e5f00c6f29eccb",
+  "sizeBytes": 4858559240,
+  "sha256": "32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c"
+ },
  "https://huggingface.co/Comfy-Org/Frame-Interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors": {
   "revision": "aa7009be4d1471ea0bac91d6fe4d7e4b637cbbfc",
   "sizeBytes": 68882302,
@@ -148,6 +163,11 @@
   "revision": "530a4c94f92c35ef6818b1b035a983fe9dcf5f54",
   "sizeBytes": 249521340,
   "sha256": "d8d52ba036475f5fb07c8b435e176d3d97ebfa82f0d1a1c317f9cc1e25bd013b"
+ },
+ "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/text_encoders/qwen3.5_9b_int8_convrot.safetensors": {
+  "revision": "530a4c94f92c35ef6818b1b035a983fe9dcf5f54",
+  "sizeBytes": 9748121532,
+  "sha256": "32e3787472f708fa5f83624acbf5ef23f7fc89c439e05065ea57cfe5a97f025a"
  },
  "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/1c41cfca8ebba91d0af792a05c5761fb2c3a7975/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors": {
   "revision": "1c41cfca8ebba91d0af792a05c5761fb2c3a7975",
