@@ -17,31 +17,32 @@ import {
 } from "@/lib/preset-cards";
 import { releaseVideo } from "@/lib/media-release";
 import { glyphFor } from "@/lib/move-glyphs";
-import { browserPlaybackEnv, createPlaybackStore } from "@/lib/preview-playback";
+import { autoplays, browserPlaybackEnv, createPlaybackStore, playsWhenAsked, previewKind } from "@/lib/preview-playback";
 import { cn } from "@/lib/utils";
 
-/** One preview plays at a time (rules in lib/preview-playback.ts). */
+/** Which previews play, shared by every card (rules in lib/preview-playback.ts). */
 const store = createPlaybackStore(browserPlaybackEnv);
 
 /**
  * Wire a card element to the playback store. Returns whether its preview should play and the
- * handlers to spread on the card (hover and keyboard focus on desktop, after a short rest; touch
- * devices use visibility).
+ * handlers to spread on the card (hover and keyboard focus, after a short rest). A clip plays by
+ * itself while the card is in view (see autoplays).
  */
-export function usePreviewPlayback<T extends HTMLElement>(id: string) {
+export function usePreviewPlayback<T extends HTMLElement>(id: string, preview: Pick<Preview, "video" | "move" | "fx">) {
   const ref = useRef<T | null>(null);
   const playing = useSyncExternalStore(
     store.subscribe,
-    () => store.isActive(id),
+    () => store.isPlaying(id),
     () => false,
   );
+  const kind = previewKind(preview);
   useEffect(() => {
     const el = ref.current;
-    if (!el || store.canHover() || store.reducedMotion()) return;
+    if (!el || !autoplays(kind, store.canHover())) return;
     return store.watch(el, id);
-  }, [id]);
+  }, [id, kind]);
   useEffect(() => () => store.stop(id), [id]);
-  const on = () => store.play(id);
+  const on = () => playsWhenAsked(kind, store.reducedMotion()) && store.play(id);
   const off = () => store.stop(id);
   return {
     ref,

@@ -16,7 +16,22 @@ import {
   type CameraMove,
 } from "@/lib/preset-cards";
 import { previewFor, toPresetCard } from "@/lib/preset-card-data";
-import { browserPlaybackEnv, createPlaybackStore, HOVER_INTENT, MIN_VISIBLE, SCROLL_SETTLE, type PlaybackEnv } from "@/lib/preview-playback";
+import {
+  autoplays,
+  browserPlaybackEnv,
+  createPlaybackStore,
+  FULL_VIEW,
+  HOVER_INTENT,
+  MAX_PLAYING,
+  maxPlaying,
+  MIN_VISIBLE,
+  pickPlaying,
+  playsWhenAsked,
+  previewKind,
+  SCROLL_SETTLE,
+  type PlaybackEnv,
+  type PlaybackStore,
+} from "@/lib/preview-playback";
 import { pageAfter, progressiveStart, syncProgressive } from "@/lib/progressive";
 import { storyboardName } from "@/lib/storyboard-board";
 
@@ -81,10 +96,11 @@ describe("progressive list paging", () => {
 });
 
 /** A fake browser for the playback store, with a clock that only moves when `advance` says so. */
-function fakeEnv({ hover = false, reduced = false, height = 800, saveData = false } = {}) {
+function fakeEnv({ hover = false, reduced = false, width = 1280, height = 800, saveData = false } = {}) {
   let ioCallback: IntersectionObserverCallback | null = null;
   const observed = new Set<Element>();
-  const scroll = new Set<() => void>();
+  const listeners = { scroll: new Set<() => void>(), visibilitychange: new Set<() => void>() };
+  let hidden = false;
   let now = 0;
   const timers = new Set<{ at: number; cb: () => void }>();
   const next = () => [...timers].sort((a, b) => a.at - b.at)[0];
@@ -116,117 +132,187 @@ function fakeEnv({ hover = false, reduced = false, height = 800, saveData = fals
       timers.add(t);
       return () => void timers.delete(t);
     },
+    viewportWidth: () => width,
     viewportHeight: () => height,
-    onScroll: (cb) => scroll.add(cb),
-    offScroll: (cb) => scroll.delete(cb),
+    on: (type, cb) => void listeners[type].add(cb),
+    off: (type, cb) => void listeners[type].delete(cb),
+    hidden: () => hidden,
     saveData: () => saveData,
   };
-  const card = (top: number, h = 200) => ({ getBoundingClientRect: () => ({ top, height: h }) }) as unknown as Element;
+  /** A card whose box starts `top` px down and `left` px across the screen. */
+  const card = (top: number, left = 0, width = 240, height = 180) => ({ getBoundingClientRect: () => ({ top, left, width, height }) }) as unknown as Element;
   const intersect = (entries: [Element, number][]) =>
     ioCallback!(entries.map(([target, ratio]) => ({ target, intersectionRatio: ratio, isIntersecting: ratio > 0 }) as IntersectionObserverEntry), null as never);
-  const scrolled = () => scroll.forEach((f) => f());
-  return { env, card, intersect, scrolled, advance, observed, scroll, timers };
+  const scrolled = () => listeners.scroll.forEach((f) => f());
+  /** The tab goes to the background (or comes back). */
+  const setHidden = (h: boolean) => {
+    hidden = h;
+    listeners.visibilitychange.forEach((f) => f());
+  };
+  return { env, card, intersect, scrolled, setHidden, advance, observed, listeners, timers };
+}
+
+/** Cards in a grid, `rows` × `cols` of `w` × `h` with 20 px between them, watched by `store` and all in full view: "r1c2" is row 1, column 2. */
+function watchGrid(store: PlaybackStore, { card, intersect }: ReturnType<typeof fakeEnv>, rows: number, cols: number, w = 240, h = 180) {
+  const cards = new Map<string, Element>();
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cards.set(`r${r}c${c}`, card(r * (h + 20), c * (w + 20), w, h));
+  for (const [id, el] of cards) store.watch(el, id);
+  intersect([...cards.values()].map((el) => [el, 1]));
+  return cards;
 }
 
 describe("preview playback store", () => {
-  it("plays one preview at a time and stops only the one playing", () => {
+  it("plays the card the pointer rests on, one at a time", () => {
     const { env, advance } = fakeEnv({ hover: true });
     const store = createPlaybackStore(env);
-    const seen: (string | null)[] = [];
-    store.subscribe(() => seen.push(store.getActive()));
+    const seen: string[][] = [];
+    store.subscribe(() => seen.push(store.playing()));
     store.play("a");
     advance(HOVER_INTENT);
     store.play("b");
     advance(HOVER_INTENT);
-    expect(store.isActive("a")).toBe(false);
-    expect(store.isActive("b")).toBe(true);
+    expect(store.isPlaying("a")).toBe(false);
+    expect(store.isPlaying("b")).toBe(true);
     store.stop("a");
-    expect(store.getActive()).toBe("b");
+    expect(store.playing()).toEqual(["b"]);
     store.stop("b");
-    expect(seen).toEqual(["a", "b", null]);
+    expect(seen).toEqual([["a"], ["b"], []]);
   });
 
   it("waits for the pointer to rest on a card before playing it", () => {
     const { env, advance, timers } = fakeEnv({ hover: true });
     const store = createPlaybackStore(env);
-    const seen: (string | null)[] = [];
-    store.subscribe(() => seen.push(store.getActive()));
+    const seen: string[][] = [];
+    store.subscribe(() => seen.push(store.playing()));
     // Crossing one card on the way to another starts neither until the pointer stops.
     store.play("a");
     advance(HOVER_INTENT - 20);
     store.stop("a");
     store.play("b");
     advance(HOVER_INTENT - 1);
-    expect(store.getActive()).toBeNull();
+    expect(store.playing()).toEqual([]);
     advance(1);
-    expect(store.getActive()).toBe("b");
+    expect(store.playing()).toEqual(["b"]);
     // Leaving before the intent is up calls it off.
     store.play("c");
     store.stop("c");
     expect(timers.size).toBe(0);
     advance(1000);
-    expect(seen).toEqual(["b"]);
+    expect(seen).toEqual([["b"]]);
   });
 
-  it("plays nothing when the user prefers reduced motion", () => {
-    const { env, advance } = fakeEnv({ reduced: true });
-    const store = createPlaybackStore(env);
-    store.play("a");
-    advance(HOVER_INTENT);
-    expect(store.getActive()).toBeNull();
-    expect(store.reducedMotion()).toBe(true);
-  });
-
-  it("on phones plays the mostly visible card nearest the middle of the screen, once scrolling stops", () => {
-    const { env, card, intersect, scrolled, advance } = fakeEnv({ height: 800 });
-    const store = createPlaybackStore(env);
-    const top = card(0); // centre at 100
-    const mid = card(320); // centre at 420, nearest 400
-    const low = card(560); // centre at 660
-    store.watch(top, "top");
-    store.watch(mid, "mid");
-    store.watch(low, "low");
-    intersect([
-      [top, 1],
-      [mid, MIN_VISIBLE - 0.1],
-      [low, 1],
-    ]);
+  it("plays the cards in view by themselves once scrolling stops, the six nearest the middle of a wide screen", () => {
+    const fake = fakeEnv({ hover: true, width: 1280, height: 800 });
+    const store = createPlaybackStore(fake.env);
+    // Four rows of four: card centres at x 120, 380, 640, 900 and y 90, 290, 490, 690; the screen's middle is (640, 400).
+    watchGrid(store, fake, 4, 4);
     // Still scrolling: nothing starts (or downloads) yet.
-    advance(SCROLL_SETTLE - 100);
-    scrolled();
-    advance(SCROLL_SETTLE - 1);
-    expect(store.getActive()).toBeNull();
-    advance(1);
-    // The middle card isn't visible enough yet.
-    expect(store.getActive()).toBe("low");
-    intersect([[mid, 0.9]]);
-    expect(store.getActive()).toBe("low");
-    advance(SCROLL_SETTLE);
-    expect(store.getActive()).toBe("mid");
+    fake.advance(SCROLL_SETTLE - 100);
+    fake.scrolled();
+    fake.advance(SCROLL_SETTLE - 1);
+    expect(store.playing()).toEqual([]);
+    fake.advance(1);
+    expect(store.playing()).toEqual(["r1c1", "r1c2", "r1c3", "r2c1", "r2c2", "r2c3"]);
   });
 
-  it("stops the playing card as soon as it scrolls mostly out of view", () => {
-    const { env, card, intersect, advance } = fakeEnv();
+  it("plays at most three at once on a phone", () => {
+    const fake = fakeEnv({ width: 390, height: 844 });
+    const store = createPlaybackStore(fake.env);
+    // Two columns, four rows: card centres at y 70, 230, 390, 550 (the middle is 422).
+    watchGrid(store, fake, 4, 2, 175, 140);
+    fake.advance(SCROLL_SETTLE);
+    expect(store.playing()).toHaveLength(MAX_PLAYING.narrow);
+    expect(store.playing()).toEqual(expect.arrayContaining(["r2c0", "r2c1"]));
+    expect(maxPlaying(390)).toBe(MAX_PLAYING.narrow);
+    expect(maxPlaying(1280)).toBe(MAX_PLAYING.wide);
+  });
+
+  it("ranks cards in full view first, then the ones already playing (so a scroll doesn't restart them), then the nearest the middle", () => {
+    const c = (id: string, ratio: number, dist: number, playing = false) => ({ id, ratio, dist, playing });
+    const cards = [c("partly", FULL_VIEW - 0.1, 0, true), c("near", 1, 10), c("playing", 1, 500, true), c("hidden", MIN_VISIBLE - 0.1, 0), c("far", 1, 600)];
+    expect(pickPlaying(cards, 2)).toEqual(["playing", "near"]);
+    expect(pickPlaying(cards, 4)).toEqual(["playing", "near", "far", "partly"]);
+    // Never a card that isn't mostly in view, whatever the room.
+    expect(pickPlaying(cards, 10)).not.toContain("hidden");
+    // The same preset twice on a page takes one place.
+    expect(pickPlaying([c("a", 1, 0), c("a", 1, 5), c("b", 1, 9)], 2)).toEqual(["a", "b"]);
+  });
+
+  it("stops a playing card as soon as it scrolls mostly out of view; the next one waits for the scroll to settle", () => {
+    const { env, card, intersect, advance } = fakeEnv({ width: 390 });
     const store = createPlaybackStore(env);
-    const a = card(300);
-    store.watch(a, "a");
-    intersect([[a, 1]]);
+    const cards = [card(0), card(200), card(400), card(600)];
+    cards.forEach((el, i) => store.watch(el, `c${i}`));
+    intersect(cards.slice(0, 3).map((el) => [el, 1]));
     advance(SCROLL_SETTLE);
-    expect(store.getActive()).toBe("a");
-    intersect([[a, MIN_VISIBLE - 0.1]]);
-    expect(store.getActive()).toBeNull();
+    expect(store.playing()).toEqual(["c0", "c1", "c2"]);
+    intersect([
+      [cards[0], MIN_VISIBLE - 0.1],
+      [cards[3], 1],
+    ]);
+    expect(store.playing()).toEqual(["c1", "c2"]);
+    advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual(["c1", "c2", "c3"]);
   });
 
-  it("doesn't autoplay on phones with Save-Data or on a 2G connection (hover still plays)", () => {
-    const { env, card, advance, observed, scroll } = fakeEnv({ saveData: true });
+  it("keeps a hovered card playing while it plays by itself, and plays a hovered one beyond the cap", () => {
+    const fake = fakeEnv({ hover: true, width: 390 });
+    const store = createPlaybackStore(fake.env);
+    watchGrid(store, fake, 4, 2, 175, 140);
+    fake.advance(SCROLL_SETTLE);
+    const [auto] = store.playing();
+    store.play(auto);
+    fake.advance(HOVER_INTENT);
+    store.stop(auto);
+    expect(store.isPlaying(auto)).toBe(true);
+    store.play("r0c0");
+    fake.advance(HOVER_INTENT);
+    expect(store.playing()).toHaveLength(MAX_PLAYING.narrow + 1);
+  });
+
+  it("pauses everything while the tab is hidden, and goes on when it's back", () => {
+    const fake = fakeEnv({ hover: true, width: 390 });
+    const store = createPlaybackStore(fake.env);
+    const seen: string[][] = [];
+    store.subscribe(() => seen.push(store.playing()));
+    watchGrid(store, fake, 1, 2);
+    fake.advance(SCROLL_SETTLE);
+    store.play("hovered");
+    fake.advance(HOVER_INTENT);
+    fake.scrolled();
+    fake.setHidden(true);
+    expect(store.isPlaying("hovered")).toBe(false);
+    // A pick waiting for the scroll to settle is called off too.
+    expect(fake.timers.size).toBe(0);
+    fake.setHidden(false);
+    expect(seen).toEqual([["r0c0", "r0c1"], ["hovered", "r0c0", "r0c1"], [], ["hovered", "r0c0", "r0c1"]]);
+    // Back in view, it looks again once the page is still.
+    expect(fake.timers.size).toBe(1);
+  });
+
+  it("with reduced motion nothing plays by itself, but hover and keyboard focus still do", () => {
+    const { env, card, advance, observed, listeners } = fakeEnv({ reduced: true });
     const store = createPlaybackStore(env);
     store.watch(card(300), "a")();
     expect(store.watchedCount()).toBe(0);
     expect(observed.size).toBe(0);
-    expect(scroll.size).toBe(0);
+    expect(listeners.scroll.size).toBe(0);
     store.play("a");
     advance(HOVER_INTENT);
-    expect(store.getActive()).toBe("a");
+    expect(store.playing()).toEqual(["a"]);
+    expect(store.reducedMotion()).toBe(true);
+  });
+
+  it("with Save-Data or on a 2G connection nothing plays by itself (hover still does)", () => {
+    const { env, card, advance, observed, listeners } = fakeEnv({ saveData: true });
+    const store = createPlaybackStore(env);
+    store.watch(card(300), "a")();
+    expect(store.watchedCount()).toBe(0);
+    expect(observed.size).toBe(0);
+    expect(listeners.scroll.size).toBe(0);
+    store.play("a");
+    advance(HOVER_INTENT);
+    expect(store.playing()).toEqual(["a"]);
   });
 
   it("reads Save-Data and the connection type from the browser", () => {
@@ -245,27 +331,41 @@ describe("preview playback store", () => {
     }
   });
 
-  it("cleans up: unwatching stops the card and the last one removes the scroll listener", () => {
-    const { env, card, intersect, advance, observed, scroll, timers } = fakeEnv();
+  it("a tap plays a preview and the next tap stops it (the preset header when nothing plays by itself)", () => {
+    const { env, advance } = fakeEnv({ reduced: true });
     const store = createPlaybackStore(env);
-    const a = card(300);
-    const b = card(900);
-    const offA = store.watch(a, "a");
-    const offB = store.watch(b, "b");
-    expect(scroll.size).toBe(1);
-    intersect([[a, 1]]);
+    store.toggle("a");
+    advance(HOVER_INTENT);
+    expect(store.playing()).toEqual(["a"]);
+    store.toggle("a");
+    expect(store.playing()).toEqual([]);
+  });
+
+  it("cleans up: unwatching stops the card and frees its place, the last one removes the listeners", () => {
+    const { env, card, intersect, advance, observed, listeners, timers } = fakeEnv({ width: 390 });
+    const store = createPlaybackStore(env);
+    const off = store.subscribe(() => {});
+    expect(listeners.visibilitychange.size).toBe(1);
+    const els = [card(0), card(200), card(400), card(600)];
+    const unwatch = els.map((el, i) => store.watch(el, `c${i}`));
+    expect(listeners.scroll.size).toBe(1);
+    intersect(els.map((el) => [el, 1]));
     advance(SCROLL_SETTLE);
-    expect(store.getActive()).toBe("a");
-    offA();
-    expect(store.getActive()).toBeNull();
-    expect(observed.has(a)).toBe(false);
-    expect(scroll.size).toBe(1);
-    intersect([[b, 1]]);
-    offB();
+    expect(store.playing()).toEqual(["c1", "c2", "c3"]);
+    unwatch[2]();
+    expect(store.playing()).toEqual(["c1", "c3"]);
+    expect(observed.has(els[2])).toBe(false);
+    advance(SCROLL_SETTLE);
+    expect(store.playing()).toEqual(["c0", "c1", "c3"]);
+    intersect([[els[0], 0.9]]);
+    unwatch.forEach((u) => u());
     expect(store.watchedCount()).toBe(0);
-    expect(scroll.size).toBe(0);
+    expect(store.playing()).toEqual([]);
+    expect(listeners.scroll.size).toBe(0);
     // A pick still waiting for the scroll to settle goes with the last card.
     expect(timers.size).toBe(0);
+    off();
+    expect(listeners.visibilitychange.size).toBe(0);
   });
 
   it("does nothing without IntersectionObserver", () => {
@@ -273,6 +373,22 @@ describe("preview playback store", () => {
     const store = createPlaybackStore({ ...env, IntersectionObserver: undefined });
     store.watch(card(0), "a")();
     expect(store.watchedCount()).toBe(0);
+  });
+
+  it("plays a clip by itself everywhere, a procedural preview only where nothing can hover, a still never", () => {
+    expect(previewKind({ video: "/previews/presets/a.mp4" })).toBe("clip");
+    expect(previewKind({ move: "dolly-in" })).toBe("procedural");
+    expect(previewKind({ fx: "fire" })).toBe("procedural");
+    expect(previewKind({})).toBe("still");
+    expect([true, false].map((hover) => autoplays("clip", hover))).toEqual([true, true]);
+    expect([true, false].map((hover) => autoplays("procedural", hover))).toEqual([false, true]);
+    expect([true, false].map((hover) => autoplays("still", hover))).toEqual([false, false]);
+  });
+
+  it("with reduced motion a hover or tap plays a clip, but a procedural preview keeps its poster", () => {
+    expect([false, true].map((reduced) => playsWhenAsked("clip", reduced))).toEqual([true, true]);
+    expect([false, true].map((reduced) => playsWhenAsked("procedural", reduced))).toEqual([true, false]);
+    expect([false, true].map((reduced) => playsWhenAsked("still", reduced))).toEqual([false, false]);
   });
 });
 

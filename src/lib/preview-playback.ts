@@ -1,9 +1,14 @@
 /**
- * Which gallery preview plays (preset-preview.tsx). One at a time everywhere: on devices that can
- * hover, the hovered or focused card once the pointer has rested on it for a moment (a pointer
- * crossing the grid doesn't start every card it passes); otherwise the card nearest the middle of
- * the screen while it's mostly in view, once scrolling has stopped (phones; not with Save-Data or
- * on a 2G connection). Nothing plays when the user prefers reduced motion.
+ * Which gallery previews play (preset-preview.tsx). A card with a clip plays by itself while it's
+ * mostly in view, once scrolling has stopped: the cards most in view and nearest the middle of the
+ * screen, at most MAX_PLAYING at once, so a gallery with dozens of clips stays smooth and doesn't
+ * download them all. Procedural previews (no clip) play by themselves only where nothing can hover
+ * (phones); a still never moves. Nothing plays by itself when the user prefers reduced motion, asks
+ * for less data (Save-Data, a 2G connection) or the tab is hidden.
+ *
+ * The hovered or focused card plays too, on top of those, once the pointer has rested on it for a
+ * moment (a pointer crossing the grid doesn't start every card it passes); asked for, it plays even
+ * with Save-Data, and a clip even with reduced motion (playsWhenAsked).
  *
  * Pure apart from the environment it's given, so the rules are testable without a browser.
  */
@@ -15,23 +20,76 @@ export interface PlaybackEnv {
   IntersectionObserver?: new (cb: IntersectionObserverCallback, opts?: IntersectionObserverInit) => Pick<IntersectionObserver, "observe" | "unobserve">;
   /** Run `cb` after `ms` milliseconds; returns what cancels it. */
   delay(cb: () => void, ms: number): () => void;
+  viewportWidth(): number;
   viewportHeight(): number;
-  onScroll(cb: () => void): void;
-  offScroll(cb: () => void): void;
+  /** Scrolling anywhere on the page, or the tab being hidden or shown. */
+  on(type: "scroll" | "visibilitychange", cb: () => void): void;
+  off(type: "scroll" | "visibilitychange", cb: () => void): void;
+  /** The tab is in the background. */
+  hidden(): boolean;
   /** The user asked for less data (Save-Data), or the connection is 2G. */
   saveData(): boolean;
 }
 
-/** A card must be at least this much in view to play on a phone. */
+/** A card must be at least this much in view to play by itself. */
 export const MIN_VISIBLE = 0.6;
+/** In full view, near enough (IntersectionObserver reports ratios only as they cross its thresholds). */
+export const FULL_VIEW = 0.85;
 /** How long the pointer (or focus) rests on a card before it plays, in ms. */
 export const HOVER_INTENT = 120;
-/** On phones, how long scrolling must have stopped before the centred card plays, in ms. */
+/** How long scrolling must have stopped before the cards in view play, in ms. */
 export const SCROLL_SETTLE = 400;
+/** At most this many previews play by themselves at once: on a narrow screen (a phone), and wider. */
+export const MAX_PLAYING = { narrow: 3, wide: 6 };
+/** Narrower than this (px) is a phone: the galleries show two columns. */
+export const NARROW = 640;
+
+export const maxPlaying = (viewportWidth: number) => (viewportWidth < NARROW ? MAX_PLAYING.narrow : MAX_PLAYING.wide);
+
+/** What a preview shows: a real cover's clip, a procedural animation, or a still. */
+export type PreviewKind = "clip" | "procedural" | "still";
+
+export const previewKind = (p: { video?: string; move?: string; fx?: string }): PreviewKind => (p.video ? "clip" : p.move || p.fx ? "procedural" : "still");
+
+/** Whether a preview of this kind plays by itself while it's in view: a clip anywhere, a procedural one only where nothing can hover. */
+export const autoplays = (kind: PreviewKind, canHover: boolean) => kind === "clip" || (kind === "procedural" && !canHover);
+
+/**
+ * Whether a hover, keyboard focus or tap plays a preview of this kind. With reduced motion only a clip
+ * does: a procedural preview's animations are off then (globals.css), so it keeps its poster.
+ */
+export const playsWhenAsked = (kind: PreviewKind, reducedMotion: boolean) => kind === "clip" || (kind === "procedural" && !reducedMotion);
+
+/** A watched card when the store picks which play. */
+export interface Candidate {
+  id: string;
+  /** How much of it is in view, 0..1. */
+  ratio: number;
+  /** From its centre to the screen's, in px. */
+  dist: number;
+  playing: boolean;
+}
+
+/**
+ * Which cards play by themselves, at most `max`: only those mostly in view; the ones in full view
+ * first, then the ones already playing (a small scroll doesn't restart them), then the nearest the
+ * middle of the screen.
+ */
+export function pickPlaying(cards: Candidate[], max: number): string[] {
+  const tier = (ratio: number) => (ratio >= FULL_VIEW ? 1 : 0);
+  const ranked = cards
+    .filter((c) => c.ratio >= MIN_VISIBLE)
+    .sort((a, b) => tier(b.ratio) - tier(a.ratio) || Number(b.playing) - Number(a.playing) || a.dist - b.dist);
+  const ids = new Set<string>();
+  for (const c of ranked) if (ids.size < max) ids.add(c.id);
+  return [...ids];
+}
 
 export function createPlaybackStore(env: PlaybackEnv) {
   const listeners = new Set<() => void>();
-  let active: string | null = null;
+  /** The cards playing by themselves, and the one the pointer (or focus) is on. */
+  let auto = new Set<string>();
+  let hovered: string | null = null;
   const watched = new Map<Element, string>();
   const ratios = new Map<Element, number>();
   let observer: Pick<IntersectionObserver, "observe" | "unobserve"> | null = null;
@@ -39,97 +97,122 @@ export function createPlaybackStore(env: PlaybackEnv) {
   let pending: { id: string; cancel: () => void } | null = null;
   let settle: (() => void) | null = null;
 
-  const setActive = (id: string | null) => {
-    if (active === id) return;
-    active = id;
-    listeners.forEach((l) => l());
+  const notify = () => listeners.forEach((l) => l());
+  const setHovered = (id: string | null) => {
+    if (hovered === id) return;
+    hovered = id;
+    notify();
+  };
+  const setAuto = (ids: string[]) => {
+    if (ids.length === auto.size && ids.every((id) => auto.has(id))) return;
+    auto = new Set(ids);
+    notify();
   };
   const reducedMotion = () => env.matches("(prefers-reduced-motion: reduce)");
   const cancelPending = () => {
     pending?.cancel();
     pending = null;
   };
-
-  /** Phones: the most visible card closest to the viewport's middle plays. */
-  const pickCentered = () => {
+  const cancelSettle = () => {
+    settle?.();
     settle = null;
-    const mid = env.viewportHeight() / 2;
-    let best: string | null = null;
-    let bestDist = Infinity;
+  };
+
+  const pick = () => {
+    settle = null;
+    const cx = env.viewportWidth() / 2;
+    const cy = env.viewportHeight() / 2;
+    const cards: Candidate[] = [];
     for (const [el, ratio] of ratios) {
       if (ratio < MIN_VISIBLE) continue;
       const r = el.getBoundingClientRect();
-      const dist = Math.abs(r.top + r.height / 2 - mid);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = watched.get(el) ?? null;
-      }
+      const id = watched.get(el)!;
+      cards.push({ id, ratio, dist: Math.hypot(r.left + r.width / 2 - cx, r.top + r.height / 2 - cy), playing: auto.has(id) });
     }
-    setActive(best);
+    setAuto(pickPlaying(cards, maxPlaying(env.viewportWidth())));
   };
   /** Pick once the page is still: every scroll (or visibility change) starts the wait over. */
   const schedule = () => {
-    settle?.();
-    settle = env.delay(pickCentered, SCROLL_SETTLE);
+    cancelSettle();
+    if (!env.hidden()) settle = env.delay(pick, SCROLL_SETTLE);
+  };
+  // A hidden tab plays nothing (isPlaying says so); back in view, the cards on screen may have changed.
+  const onVisibility = () => {
+    if (env.hidden()) cancelSettle();
+    else if (watched.size) schedule();
+    notify();
+  };
+
+  const isPlaying = (id: string) => !env.hidden() && (hovered === id || auto.has(id));
+  /** Hover / focus: play this one once it has had the pointer for HOVER_INTENT. */
+  const play = (id: string) => {
+    cancelPending();
+    const cancel = env.delay(() => {
+      pending = null;
+      setHovered(id);
+    }, HOVER_INTENT);
+    pending = { id, cancel };
+  };
+  /** Stop this one, if it's the one hovered (or about to be); a card playing by itself goes on. */
+  const stop = (id: string) => {
+    if (pending?.id === id) cancelPending();
+    if (hovered === id) setHovered(null);
   };
 
   return {
     subscribe(l: () => void) {
+      if (!listeners.size) env.on("visibilitychange", onVisibility);
       listeners.add(l);
       return () => {
         listeners.delete(l);
+        if (!listeners.size) env.off("visibilitychange", onVisibility);
       };
     },
-    getActive: () => active,
-    isActive: (id: string) => active === id,
+    isPlaying,
+    /** Every card playing now, by id (for tests). */
+    playing: () => [...new Set([...auto, ...(hovered ? [hovered] : [])])].filter(isPlaying).sort(),
     canHover: () => env.matches("(hover: hover) and (pointer: fine)"),
     reducedMotion,
     saveData: () => env.saveData(),
-    /** Hover / focus: play this one once it has had the pointer for HOVER_INTENT (unless motion is reduced). */
-    play(id: string) {
-      cancelPending();
-      if (reducedMotion()) return;
-      const cancel = env.delay(() => {
-        pending = null;
-        setActive(id);
-      }, HOVER_INTENT);
-      pending = { id, cancel };
-    },
-    /** Stop this one, if it's the one playing (or about to). */
-    stop(id: string) {
-      if (pending?.id === id) cancelPending();
-      if (active === id) setActive(null);
-    },
-    /** Touch devices: let visibility decide whether `el` plays. Returns the cleanup. */
+    play,
+    stop,
+    /** A tap: play this one, or stop it if a tap already did. */
+    toggle: (id: string) => (hovered === id || pending?.id === id ? stop(id) : play(id)),
+    /** Let visibility decide whether `el` plays by itself (see autoplays). Returns the cleanup. */
     watch(el: Element, id: string): () => void {
       const IO = env.IntersectionObserver;
-      // Each card passing the middle of the screen would start a download: none with Save-Data or on 2G.
-      if (!IO || env.saveData()) return () => {};
+      // Each card that comes into view would start a download, and motion the user didn't ask for: none
+      // with Save-Data, on 2G or with reduced motion.
+      if (!IO || env.saveData() || reducedMotion()) return () => {};
       observer ??= new IO(
         (entries) => {
           for (const e of entries) {
+            const card = watched.get(e.target);
+            if (card === undefined) continue;
             const ratio = e.isIntersecting ? e.intersectionRatio : 0;
             ratios.set(e.target, ratio);
-            // The playing card stops as soon as it's mostly out of view; the next one waits for the scroll to settle.
-            if (ratio < MIN_VISIBLE && active !== null && watched.get(e.target) === active) setActive(null);
+            // A playing card stops as soon as it's mostly out of view; the next ones wait for the scroll to settle.
+            if (ratio < MIN_VISIBLE && auto.has(card)) setAuto([...auto].filter((a) => a !== card));
           }
           schedule();
         },
-        { threshold: [0, MIN_VISIBLE, 0.85, 1] },
+        { threshold: [0, MIN_VISIBLE, FULL_VIEW, 1] },
       );
-      if (!watched.size) env.onScroll(schedule);
+      if (!watched.size) env.on("scroll", schedule);
       watched.set(el, id);
       observer.observe(el);
       return () => {
         observer?.unobserve(el);
         watched.delete(el);
         ratios.delete(el);
-        if (!watched.size) {
-          env.offScroll(schedule);
-          settle?.();
-          settle = null;
+        if (auto.has(id)) setAuto([...auto].filter((a) => a !== id));
+        if (watched.size) {
+          // Its place goes to the next card in view.
+          schedule();
+        } else {
+          env.off("scroll", schedule);
+          cancelSettle();
         }
-        if (active === id) setActive(null);
       };
     },
     /** For tests: how many cards are watched. */
@@ -151,9 +234,12 @@ export const browserPlaybackEnv: PlaybackEnv = {
     const t = setTimeout(cb, ms);
     return () => clearTimeout(t);
   },
+  viewportWidth: () => window.innerWidth,
   viewportHeight: () => window.innerHeight,
-  onScroll: (cb) => window.addEventListener("scroll", cb, { passive: true, capture: true }),
-  offScroll: (cb) => window.removeEventListener("scroll", cb, { capture: true }),
+  // Scrolls are caught from every scroller (capture), a horizontal row's included.
+  on: (type, cb) => (type === "scroll" ? window.addEventListener("scroll", cb, { passive: true, capture: true }) : document.addEventListener(type, cb)),
+  off: (type, cb) => (type === "scroll" ? window.removeEventListener("scroll", cb, { capture: true }) : document.removeEventListener(type, cb)),
+  hidden: () => typeof document !== "undefined" && document.hidden,
   saveData: () => {
     const c = typeof navigator === "undefined" ? undefined : (navigator as Navigator & { connection?: Connection }).connection;
     // effectiveType is "slow-2g", "2g", "3g" or "4g" (Chromium only; elsewhere this is false).

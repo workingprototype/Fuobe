@@ -50,7 +50,7 @@ export const PresetCard = memo(function PresetCard({
 }) {
   const badge = engine !== "cloud" ? parseBadgeKey(gpu) : null;
   const Icon = PRESET_ICONS[preset.icon] ?? Sparkles;
-  const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id);
+  const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id, preset.preview);
   return (
     // Prefetched on hover or touch, not on sight: a gallery shows hundreds of these.
     <IntentLink

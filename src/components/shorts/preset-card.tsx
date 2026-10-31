@@ -9,7 +9,7 @@ import { LookMotif } from "./look-motif";
 
 /**
  * A selectable look card (Shorts Studio and Mixed Media): the procedural preview from the
- * galleries (plays on hover or focus, the centred card on phones), name and one line.
+ * galleries (plays on hover or focus; on phones, by itself while in view), name and one line.
  */
 export const LookCard = memo(function LookCard({
   id,
@@ -30,7 +30,7 @@ export const LookCard = memo(function LookCard({
   onSelect: (id: string) => void;
   badge?: string;
 }) {
-  const { ref, playing, handlers } = usePreviewPlayback<HTMLButtonElement>(id);
+  const { ref, playing, handlers } = usePreviewPlayback<HTMLButtonElement>(id, preview);
   return (
     <button
       ref={ref}
