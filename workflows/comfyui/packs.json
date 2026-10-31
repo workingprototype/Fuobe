@@ -152,6 +152,15 @@
     "subdir": null,
     "folders": []
   },
+  "ausboss-nodes": {
+    "repo": "https://github.com/ausboss/ComfyUI-AusBoss",
+    "commit": "bce780f2598f47c239cbf6503ea0984f96229391",
+    "registry": { "id": "ausboss-nodes", "version": "" },
+    "requirementsTxt": false,
+    "isolated": false,
+    "subdir": null,
+    "folders": []
+  },
   "h3-relay": {
     "repo": "https://github.com/akatz-ai/h3-relay",
     "commit": "e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220",

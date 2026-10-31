@@ -281,7 +281,7 @@ async function main() {
     }
 
     // Every media input must be bound, otherwise the workflow references a template example asset.
-    const FILE_INPUTS = { LoadImage: 'image', LoadImageMask: 'image', LoadVideo: 'file', VHS_LoadVideo: 'video', LoadAudio: 'audio', VHS_LoadAudioUpload: 'audio' };
+    const FILE_INPUTS = { LoadImage: 'image', LoadImageMask: 'image', LoadVideo: 'file', VHS_LoadVideo: 'video', LoadAudio: 'audio', VHS_LoadAudioUpload: 'audio', AUSBOSS_NODES_ImageCropRotatePad: 'image' };
     const boundTargets = new Set(Object.values(bindings).flat().map((t) => `${t.node}.${t.input}`));
     for (const [nid, n] of Object.entries(graph)) {
       const inp = FILE_INPUTS[n.class_type];

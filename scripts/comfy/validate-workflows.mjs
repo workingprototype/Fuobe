@@ -106,7 +106,7 @@ function sampleValue(key, entry, uploads) {
 
 const DUMMY_LORAS = { loraHigh: 'fuobe_validate_lora_high.safetensors', loraLow: 'fuobe_validate_lora_low.safetensors', lora: 'fuobe_validate_lora.safetensors' };
 // Loader inputs whose combo lists the server's input folder (the same loaders build-library.mjs requires a binding for).
-const UPLOAD_INPUTS = { LoadImage: 'image', LoadImageMask: 'image', LoadVideo: 'file', VHS_LoadVideo: 'video', LoadAudio: 'audio', VHS_LoadAudioUpload: 'audio' };
+const UPLOAD_INPUTS = { LoadImage: 'image', LoadImageMask: 'image', LoadVideo: 'file', VHS_LoadVideo: 'video', LoadAudio: 'audio', VHS_LoadAudioUpload: 'audio', AUSBOSS_NODES_ImageCropRotatePad: 'image' };
 
 function ensureDummy(folder, file, created) {
   const p = path.join(MODELS_DIR, folder, file);

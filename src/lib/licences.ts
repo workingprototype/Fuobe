@@ -259,6 +259,7 @@ const KNOWN: { re: RegExp; name: string; class: LicenceClass; url?: string }[] =
   { re: /inswapper/, name: "InsightFace inswapper (research only)", class: "research", url: "https://github.com/deepinsight/insightface" },
   { re: /CC-BY-NC-SA-4\.0/, name: "CC BY-NC-SA 4.0", class: "non-commercial", url: SPDX("CC-BY-NC-SA-4.0") },
   { re: /CC[- ]BY[- ]NC(?:[- ]4\.0)?\b/, name: "CC BY-NC 4.0", class: "non-commercial", url: SPDX("CC-BY-NC-4.0") },
+  { re: /Qwen Research License/, name: "Qwen Research License", class: "non-commercial", url: "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE" },
   { re: /Tencent Hunyuan 3D 2\.1 Community License/, name: "Tencent Hunyuan 3D 2.1 Community License", class: "regions" },
   { re: /Tencent Hunyuan Community License/, name: "Tencent Hunyuan Community License", class: "regions" },
   { re: /CogVideoX License/, name: "CogVideoX License", class: "conditions" },
@@ -428,6 +429,7 @@ export const NODE_PACKS: NodePack[] = [
   pack("ComfyUI-Whisper", "https://github.com/yuvraj108c/ComfyUI-Whisper", { name: "CC BY-NC-SA 4.0", class: "non-commercial", url: SPDX("CC-BY-NC-SA-4.0"), note: "Word-timed captions in one job; non-commercial code (the author asks to be contacted for commercial use). The Whisper weights are MIT" }),
   pack("ComfyUI-LatentSyncWrapper", "https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper", NO_FILE("; the LatentSync 1.6 weights are CreativeML OpenRAIL++-M"), "isolated"),
   pack("ComfyUI-ThinkSound_Wrapper", "https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper", NO_FILE("; the ThinkSound weights are Apache-2.0"), "isolated"),
+  pack("ausboss-nodes", "https://github.com/ausboss/ComfyUI-AusBoss", { name: "MIT", class: "commercial", url: SPDX("MIT"), note: "Crop For Inpaint, Stitch Inpaint and Crop + Rotate + Pad for Qwen-Image 2.1's inpaint and expand; MIT code. The Qwen-Image 2.1 weights they run are non-commercial" }),
   // Genjutsu's Character swap (docs/research/openjutsu-6.md §7): Akatz Labs' packs, pinned in install-comfyui.sh.
   pack("h3_character_swap", "https://github.com/akatz-labs/h3-character-swap-tool/tree/0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b/worker_nodes/h3_character_swap", {
     ...GPL,

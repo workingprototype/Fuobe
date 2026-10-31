@@ -56,6 +56,36 @@ type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badge
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
 
 const open: ModelDef[] = [
+  // ---- Qwen-Image 2.1 (B-Q)
+  o({
+    id: "oss-qwen-image-21",
+    name: "Qwen-Image 2.1",
+    vendor: "Alibaba Qwen",
+    family: "qwen-image",
+    kind: "image",
+    tagline: "Native 2K images with clean lettering; edits with up to 4 references, inpaint and expand · 20 GB GPU · non-commercial weights",
+    badges: ["new", "top"],
+    routes: [
+      comfy("t2i", "qwen-image-21-t2i"),
+      comfy("edit", "qwen-image-21-edit", "25 steps, up to 4 references"),
+      comfy("inpaint", "qwen-image-21-inpaint", "crops around the mask, 25 steps, pasted back"),
+      comfy("outpaint", "qwen-image-21-outpaint", "outpaint-v2 LoRA; Qwen3-VL describes the scene"),
+    ],
+    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K", "2K"], maxImages: 4, seed: true },
+    defaults: { aspectRatio: "1:1", resolution: "1K" },
+  }),
+  o({
+    id: "oss-qwen-image-21-turbo",
+    name: "Qwen-Image 2.1 Turbo",
+    vendor: "Alibaba Qwen",
+    family: "qwen-image",
+    kind: "image",
+    tagline: "8-step edits with up to 4 references, close to the full model except on big camera turns · 20 GB GPU · non-commercial weights",
+    badges: ["new", "top", "fast"],
+    routes: [comfy("edit", "qwen-image-21-turbo-edit", "8 steps, up to 4 references")],
+    options: { maxImages: 4, seed: true },
+  }),
+
   // ---------------- Image
   o({
     id: "oss-z-image-turbo",
