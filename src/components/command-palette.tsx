@@ -15,6 +15,7 @@ import type { Generation } from "@/lib/catalog/types";
 import { indexEntries, KIND_LABELS, rankPalette, skillEntries, type PaletteEntry, type PaletteIndex, type PaletteKind } from "@/lib/command-search";
 import { useModKey } from "@/lib/keys";
 import { userTitle } from "@/lib/library";
+import { NEW_CREATION_HREF } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 // The viewer is only needed once a recent creation is opened from the palette.
@@ -213,7 +214,7 @@ function PaletteBody({ onPick, onOpenRecent, onClose }: { onPick: (e: PaletteEnt
           <>
             <CommandGroup>
               {/* Enter on an empty query keeps what ⌘K always did: a new creation. */}
-              <CommandItem value="new" onSelect={() => onPick({ key: "new", kind: "page", label: "New creation", href: "/" })} className="h-9 gap-2.5 text-[14px]">
+              <CommandItem value="new" onSelect={() => onPick({ key: "new", kind: "page", label: "New creation", href: NEW_CREATION_HREF })} className="h-9 gap-2.5 text-[14px]">
                 <Plus className="text-muted-foreground" />
                 New creation
                 <span data-slot="command-shortcut" className="ml-auto text-[12px] text-muted-foreground">Home</span>

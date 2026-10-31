@@ -4,7 +4,7 @@ import { useLinkStatus } from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, Clapperboard, LogIn, Moon, Plus, Search, Sun, UserPlus, X } from "lucide-react";
+import { ChevronRight, ChevronsUpDown, Clapperboard, Cpu, LogIn, LogOut, Moon, Plus, Search, Settings2, Sun, UserPlus, X } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -23,15 +23,23 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { CommandPalette, CommandPaletteProvider, useCommandPalette } from "@/components/command-palette";
 import { IntentLink } from "@/components/intent-link";
 import { JobNotifications } from "@/components/job-notifications";
 import { NAV, type NavGroupDef } from "@/components/nav-items";
 import { SkillBuilderProvider } from "@/components/skills/skill-builder-provider";
-import { CONNECT_GPU_EVENT, signInHref, useEngineMode, useIsGuest, useStatus, type StatusInfo } from "@/lib/api";
+import { CONNECT_GPU_EVENT, signInHref, useEngineMode, useIsGuest, useStatus, useViewer, type StatusInfo } from "@/lib/api";
 import { useModKey } from "@/lib/keys";
-import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, parseClosed, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
+import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, NEW_CREATION_HREF, parseClosed, scrollFades, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 const NO_SEARCH = new URLSearchParams();
@@ -261,13 +269,22 @@ export function StudioChrome({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Keeps data-more-below on a vertical scroller in sync, so a fade hints at items below the fold. */
-function useMoreBelow<T extends HTMLElement>() {
+/**
+ * Keeps a vertical scroller's fades (.fade-y) in sync: data-more-above / data-more-below, and how deep
+ * each fade is (scrollFades), so a fade hints at items past the edge without dimming a row that fits.
+ */
+function useScrollFades<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const update = () => el.toggleAttribute("data-more-below", el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+    const update = () => {
+      const { above, below } = scrollFades(el);
+      el.toggleAttribute("data-more-above", above > 0);
+      el.toggleAttribute("data-more-below", below > 0);
+      el.style.setProperty("--fade-t", `${above}px`);
+      el.style.setProperty("--fade-b", `${below}px`);
+    };
     update();
     el.addEventListener("scroll", update, { passive: true });
     const ro = new ResizeObserver(update);
@@ -368,6 +385,61 @@ function YourGpuChip({ viewer }: { viewer: NonNullable<StatusInfo["viewer"]> }) 
   );
 }
 
+/**
+ * Who is signed in (public sign-up): an account's email, with Settings, Your GPU and Sign out. Nothing
+ * for the owner or a guest. In the rail it's the initial alone; on a phone the menu opens upward.
+ */
+function AccountRow() {
+  const account = useViewer().data?.account;
+  const { isMobile } = useSidebar();
+  if (!account) return null;
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton className="h-9 px-1.5 text-[13px] group-data-[collapsible=icon]:p-1! data-[state=open]:bg-sidebar-accent" aria-label={`Account: ${account.email}`}>
+              <span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-full bg-brand-faint text-[11px] font-semibold text-brand-text">
+                {account.email.charAt(0).toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1 truncate" title={account.email}>
+                {account.email}
+              </span>
+              <ChevronsUpDown className="text-muted-foreground" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side={isMobile ? "top" : "right"} align="end" className="min-w-56">
+            <DropdownMenuLabel className="font-normal">
+              <span className="block text-[11px]">Signed in as</span>
+              <span className="block text-[13px] break-all text-foreground">{account.email}</span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <IntentLink href="/settings">
+                <Settings2 /> Settings
+              </IntentLink>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <IntentLink href="/connect">
+                <Cpu /> Your GPU
+              </IntentLink>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                window.location.reload();
+              }}
+            >
+              <LogOut /> Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
+
 /** The GitHub mark (lucide has no brand icons). */
 function GitHubMark() {
   return (
@@ -384,7 +456,7 @@ export function AppSidebar() {
   const closeOnLink = (e: React.MouseEvent) => {
     if (isMobile && (e.target as Element).closest("a[href]")) setOpenMobile(false);
   };
-  const content = useMoreBelow<HTMLDivElement>();
+  const content = useScrollFades<HTMLDivElement>();
   const status = useStatus().data;
   const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured);
   const comfy = status?.providers.comfyui?.configured;
@@ -429,7 +501,7 @@ export function AppSidebar() {
               <SearchRow />
               <SidebarMenuItem>
                 <SidebarMenuButton asChild tooltip="New creation" className="h-8 text-[13px] has-[[data-pending]]:bg-sidebar-accent">
-                  <IntentLink href="/" eager>
+                  <IntentLink href={NEW_CREATION_HREF} eager>
                     <Plus />
                     <NavLabel>New creation</NavLabel>
                   </IntentLink>
@@ -437,7 +509,7 @@ export function AppSidebar() {
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarHeader>
-          <SidebarContent ref={content} onClick={closeOnLink} className="scrollbar-none fade-bottom group-data-[collapsible=icon]:overflow-y-auto">
+          <SidebarContent ref={content} onClick={closeOnLink} className="scrollbar-none fade-y group-data-[collapsible=icon]:overflow-y-auto">
             {NAV.map((group, i) => {
               const id = groupId(group.label);
               return (
@@ -495,6 +567,7 @@ export function AppSidebar() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
+            <AccountRow />
           </SidebarFooter>
         </nav>
         <SidebarRail />

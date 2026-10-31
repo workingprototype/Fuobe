@@ -12,6 +12,20 @@ export const SIDEBAR_COOKIE = "sidebar_state";
 
 export const groupId = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
+/** "New creation" (the sidebar and ⌘K): Home with a fresh composer, so it does more than the Home row. Home drops the flag. */
+export const NEW_CREATION_PARAM = "new";
+export const NEW_CREATION_HREF = `/?${NEW_CREATION_PARAM}=1`;
+
+/**
+ * How deep the sidebar's fades are, in px: as much as is hidden past each edge, up to 24 at the top
+ * and 40 at the bottom. So a few pixels of padding past the edge never dim the last row, and a row
+ * the edge cuts through is always faded, never cut sharp.
+ */
+export function scrollFades(el: { scrollTop: number; clientHeight: number; scrollHeight: number }): { above: number; below: number } {
+  const depth = (hidden: number, max: number) => (hidden < 1 ? 0 : Math.round(Math.min(hidden, max)));
+  return { above: depth(el.scrollTop, 24), below: depth(el.scrollHeight - el.clientHeight - el.scrollTop, 40) };
+}
+
 function pathMatches(path: string, pathname: string) {
   return path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`);
 }
