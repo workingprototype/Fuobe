@@ -6,8 +6,9 @@
  * Public sign-up (publicSignup: FUOBE_PUBLIC_SIGNUP=1, Settings → Security, or fuobe.com itself)
  * opens a password-protected studio a little: guests may browse it read-only, and anyone may make
  * an account (email + password, no verification) whose session works across the app. An account
- * never runs on the owner's cloud keys or GPU, and install-wide settings, keys and tokens stay the
- * owner's (the install password's session, or an API token): src/proxy.ts, src/lib/guest-access.ts.
+ * never runs on the owner's cloud keys or GPU (only on its own GPU, or its own fal.ai or Replicate key),
+ * and install-wide settings, keys and tokens stay the owner's (the install password's session, or an
+ * API token): src/proxy.ts, src/lib/guest-access.ts.
  *
  * Kept in a small JSON file next to the database, not in SQLite, so the proxy's sign-in check
  * needs nothing but `fs` and `crypto`. (The proxy does open SQLite, for one primary-key lookup on
@@ -45,6 +46,18 @@ export type AccountGpu = { mode?: "link"; url: string; token?: string } | { mode
 /** A GPU reached at a public address (a link), not the person's own computer. */
 export const gpuLink = (gpu: AccountGpu | null | undefined): { url: string; token?: string } | null => (gpu && gpu.mode !== "computer" ? gpu : null);
 
+/** fal.ai or Replicate: the providers an account may bring its own key for (src/lib/your-keys.ts). */
+export type CloudProvider = "fal" | "replicate";
+
+/** An account's own fal.ai key or Replicate token, sealed (src/server/secret-box.ts): never the key itself. */
+export interface StoredKey {
+  sealed: string;
+  last4: string;
+  addedAt: number;
+  /** The provider refused it in a run. */
+  rejectedAt?: number;
+}
+
 /** A signed-up visitor (public sign-up). */
 export interface Account {
   id: string;
@@ -58,6 +71,8 @@ export interface Account {
   /** Switched off by the owner (Settings → Accounts): signed out, and can't log in. */
   disabled?: boolean;
   gpu?: AccountGpu;
+  /** Its own keys ("Your keys"), sealed: src/server/account-keys.ts opens them. */
+  keys?: Partial<Record<CloudProvider, StoredKey>>;
 }
 
 interface AuthFile {
@@ -356,11 +371,15 @@ export interface AccountInfo {
   disabled: boolean;
   /** Its own ComfyUI is connected ("Your GPU"). */
   gpu: boolean;
+  /** The providers it saved its own key for ("Your keys"): never a key. */
+  keys: CloudProvider[];
 }
+
+const keysOf = (a: Pick<Account, "keys">): CloudProvider[] => (["fal", "replicate"] as const).filter((p) => !!a.keys?.[p]);
 
 export function listAccounts(): AccountInfo[] {
   return (read().accounts ?? [])
-    .map((a) => ({ id: a.id, email: a.email, createdAt: a.createdAt, lastLoginAt: a.lastLoginAt ?? null, disabled: !!a.disabled, gpu: !!a.gpu }))
+    .map((a) => ({ id: a.id, email: a.email, createdAt: a.createdAt, lastLoginAt: a.lastLoginAt ?? null, disabled: !!a.disabled, gpu: !!a.gpu, keys: keysOf(a) }))
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -405,7 +424,10 @@ function csvCell(v: string | number | boolean | null): string {
 
 export function accountsCsv(items = listAccounts()): string {
   const iso = (t: number | null) => (t ? new Date(t).toISOString() : null);
-  const rows = [["email", "created", "last_login", "gpu_connected", "disabled"], ...items.map((a) => [a.email, iso(a.createdAt), iso(a.lastLoginAt), a.gpu, a.disabled])];
+  const rows = [
+    ["email", "created", "last_login", "gpu_connected", "fal_key", "replicate_key", "disabled"],
+    ...items.map((a) => [a.email, iso(a.createdAt), iso(a.lastLoginAt), a.gpu, a.keys.includes("fal"), a.keys.includes("replicate"), a.disabled]),
+  ];
   return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
@@ -429,6 +451,30 @@ export function setAccountGpu(id: string, gpu: AccountGpu | null): void {
   if (!d.accounts?.some((a) => a.id === id)) throw new AccountError("No such account", 404);
   const kept = (g: AccountGpu): AccountGpu => (g.mode === "computer" ? { mode: "computer" } : { url: g.url, ...(g.token && { token: g.token }) });
   write({ ...d, accounts: d.accounts.map((a) => (a.id !== id ? a : gpu ? { ...a, gpu: kept(gpu) } : withoutGpu(a))) });
+}
+
+/** It saved a key of its own for fal.ai or Replicate (whether this server can still open it is account-keys.ts's to say). */
+export const hasCloudKey = (a: Pick<Account, "keys">): boolean => !!(a.keys?.fal || a.keys?.replicate);
+
+/** The account's sealed key for a provider, switched off or not (its runs still finish or stop on it), or null. */
+export const accountKeyRecord = (id: string, p: CloudProvider): StoredKey | null => accountById(id)?.keys?.[p] ?? null;
+
+/** Save (or with null, forget) the account's own key for a provider, sealed by the caller (src/server/account-keys.ts). */
+export function setAccountKey(id: string, p: CloudProvider, key: StoredKey | null): void {
+  const d = read();
+  if (!d.accounts?.some((a) => a.id === id)) throw new AccountError("No such account", 404);
+  write({
+    ...d,
+    accounts: d.accounts.map((a) => {
+      if (a.id !== id) return a;
+      const keys = { ...a.keys };
+      if (key) keys[p] = { sealed: key.sealed, last4: key.last4, addedAt: key.addedAt, ...(key.rejectedAt && { rejectedAt: key.rejectedAt }) };
+      else delete keys[p];
+      const copy: Account = { ...a, keys };
+      if (!keys.fal && !keys.replicate) delete copy.keys;
+      return copy;
+    }),
+  });
 }
 
 /** Who is asking: the owner (also everyone while no password is set), an account (public sign-up on), or a guest. */

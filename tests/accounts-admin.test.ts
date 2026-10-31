@@ -39,7 +39,7 @@ describe("Settings → Accounts", () => {
   it("exports CSV that a spreadsheet can't read as a formula", () => {
     auth.createAccount("=cmd@example.com", "long enough");
     const csv = auth.accountsCsv();
-    expect(csv.split("\r\n")[0]).toBe("email,created,last_login,gpu_connected,disabled");
+    expect(csv.split("\r\n")[0]).toBe("email,created,last_login,gpu_connected,fal_key,replicate_key,disabled");
     expect(csv).toContain("'=cmd@example.com");
     expect(csv).not.toContain("hash");
   });

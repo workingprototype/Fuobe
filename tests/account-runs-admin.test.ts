@@ -193,7 +193,7 @@ describe("Settings → Accounts: what accounts make", () => {
     expect(body.items.find((a) => a.id === A)).toMatchObject({ email: "ann@example.com", runs: 5, failedWeek: 1, bytes: accountUsage(A).total });
     expect(body.totals).toMatchObject({ accounts: 3, runsDay: 3, runsWeek: 5, running: 1 });
     const csv = await (await accountsRoute.GET(direct("/api/admin/accounts?format=csv", "GET", { cookie: cookies.owner }))).text();
-    expect(csv.split("\r\n")[0]).toBe("email,created,last_login,gpu_connected,disabled");
+    expect(csv.split("\r\n")[0]).toBe("email,created,last_login,gpu_connected,fal_key,replicate_key,disabled");
   });
 
   it("reads its numbers and lists through the indexes", () => {
