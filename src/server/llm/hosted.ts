@@ -263,7 +263,11 @@ export async function postHosted(ep: Endpoint, path: string, body: unknown, opts
       if ((e as Error)?.name === "TimeoutError") throw new HostedError(`${p.label} took too long to answer. Try again, or pick a faster model.`, 504, p.id);
       throw new HostedError(`Couldn't reach ${p.label} (${reason(e, ep.key)})`, 0, p.id);
     }
-    if (res.ok) return res;
+    if (res.ok) {
+      rejected().delete(keyName(ep));
+      return res;
+    }
+    if (res.status === 401 || res.status === 403) rejected().add(keyName(ep));
     const text = await res.text().catch(() => "");
     const wait = retryAfter(res.headers.get("retry-after"));
     if (attempt === 0 && RETRY.has(res.status) && (wait ?? 2) <= 30) {
@@ -272,6 +276,31 @@ export async function postHosted(ep: Endpoint, path: string, body: unknown, opts
     }
     throw hostedError(p, res.status, text, opts.model, ep.key, { free: opts.free, wait });
   }
+}
+
+declare global {
+  /** Keys a provider rejected on a real call (by hash): "Key rejected" until the key changes or works again. */
+  var __fuobeRejectedKeys: Set<string> | undefined;
+  /** Providers whose free requests are used up, until when (ms). */
+  var __fuobeFreeSpent: Map<string, number> | undefined;
+}
+const rejected = () => (globalThis.__fuobeRejectedKeys ??= new Set());
+const spent = () => (globalThis.__fuobeFreeSpent ??= new Map());
+const keyName = (ep: Endpoint) => createHash("sha256").update(`${ep.provider.id}|${ep.key}`).digest("hex");
+
+/** The provider rejected this key on a real call (and it hasn't worked since). */
+export const isRejected = (ep: Endpoint): boolean => rejected().has(keyName(ep));
+
+/** A free limit ran out: the provider's free models are skipped until the day's (UTC) or the minute's limit resets. */
+export function markFreeSpent(provider: string, span: "day" | "minute"): void {
+  const now = new Date();
+  spent().set(provider, span === "day" ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) : now.getTime() + 60_000);
+}
+
+/** Providers whose free requests are used up right now. */
+export function freeSpent(): string[] {
+  const now = Date.now();
+  return [...spent()].flatMap(([p, until]) => (until > now ? [p] : []));
 }
 
 /** A short, stable name for a chat (xAI caches by it): never the chat's own id. */
@@ -366,13 +395,24 @@ declare global {
   var __fuobeOpenRouterKey: { hash: string; at: number; info: OpenRouterKey | null } | undefined;
 }
 
-/** OpenRouter's GET /api/v1/key (a free call): whether credits were ever bought, and the free requests left today. Kept 60 s. */
-export async function openRouterKey(force = false): Promise<OpenRouterKey | null> {
+/**
+ * OpenRouter's GET /api/v1/key (a free call): whether credits were ever bought, and the free requests left today.
+ * Kept 60 s. `waitMs`: how long a person's question (Assist's panel) waits; an older answer is used meanwhile.
+ */
+export async function openRouterKey(force = false, waitMs?: number): Promise<OpenRouterKey | null> {
   const ep = endpointFor("openrouter");
   if (!ep) return null;
   const hash = createHash("sha256").update(`${ep.baseUrl}|${ep.key}`).digest("hex");
   const c = globalThis.__fuobeOpenRouterKey;
   if (!force && c?.hash === hash && Date.now() - c.at < 60_000) return c.info;
+  const fresh = readOpenRouterKey(ep, hash);
+  if (waitMs === undefined) return fresh;
+  const late = new Promise<"late">((r) => setTimeout(() => r("late"), waitMs).unref?.());
+  const first = await Promise.race([fresh, late]);
+  return first === "late" ? (c?.hash === hash ? c.info : null) : first;
+}
+
+async function readOpenRouterKey(ep: Endpoint, hash: string): Promise<OpenRouterKey | null> {
   let info: OpenRouterKey | null = null;
   try {
     const res = await getHosted(ep, "/key");

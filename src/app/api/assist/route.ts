@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const r = await resolveMode(mode);
   let thread;
   try {
-    thread = createThread({ engine, autoApprove, agent: r.agent, projectId: projectId ?? null, mode: r.mode, model: r.model, effort: r.effort });
+    thread = createThread({ engine, autoApprove, agent: r.agent, projectId: projectId ?? null, mode: r.mode, provider: r.provider, model: r.model, effort: r.effort });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 404 });
   }

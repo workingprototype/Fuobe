@@ -620,7 +620,7 @@ export const LLM_PROVIDERS: LlmProviderDef[] = [
     quirks: { effortField: "reasoning.effort", replayReasoning: "preserve", headers: { "X-OpenRouter-Title": "Fuobe" } },
     freeLimits: {
       text: "20 a minute, 50 a day (1,000 a day once you've bought 10 credits)",
-      caveat: "Some free models' providers may log prompts (OpenRouter → Settings → Privacy).",
+      caveat: "Some free models' providers may log prompts (see the privacy settings on OpenRouter's site).",
       shared: true,
     },
     models: [

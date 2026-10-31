@@ -85,7 +85,7 @@ export function hostedError(p: LlmProviderDef, status: number, body: string, mod
   }
   if (CONTEXT.test(detail) || /"context_length_exceeded"/.test(body)) return new ContextError(tooLongText(model ?? { name: "this model" }));
   if (p.id === "openrouter" && status === 404 && /data policy|no endpoints/i.test(detail)) {
-    return new HostedError(`No OpenRouter provider serves ${model?.name ?? "that model"} with your privacy settings. Allow it in OpenRouter → Settings → Privacy, or pick another free model.`, 404, p.id);
+    return new HostedError(`No OpenRouter provider serves ${model?.name ?? "that model"} with your privacy settings. Allow it in the privacy settings on OpenRouter's site, or pick another free model.`, 404, p.id);
   }
   if (status === 404 || NO_MODEL.test(detail)) return new HostedError(`${label} has no model ${model?.id ?? "by that name"} today (it may have been retired). Pick another in Manual.`, status, p.id);
   if (status === 429) {

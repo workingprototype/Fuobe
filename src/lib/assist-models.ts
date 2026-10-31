@@ -1,4 +1,4 @@
-import { ASSIST_EFFORTS, type AssistEffort } from "./assist";
+import { ASSIST_EFFORTS, type AssistEffort, type AssistModelOption } from "./assist";
 import { KNOWN_LOCAL_MODELS, LLM_PROVIDERS, priceOn, type LlmModelDef, type LlmProviderDef, type PriceStep } from "./catalog/llm-providers";
 
 /**
@@ -53,6 +53,8 @@ export interface World {
   today: string;
   /** A model that can see checks pictures for a planner that can't (check_generations look). */
   checker: boolean;
+  /** Providers whose free requests are used up for now: their free models are skipped. */
+  spent?: string[];
 }
 
 export interface Choice {
@@ -122,6 +124,7 @@ function disabledWhy(w: World, p: LlmProviderDef, m: LlmModelDef, conn: Connecte
     if (p.freePlan.tooSmall) return p.freePlan.tooSmall;
   }
   if (p.id === "openrouter" && conn.freeTier && m.free !== "model") return "No credits on OpenRouter yet: only its free models run";
+  if (w.spent?.includes(p.id) && (m.free === "model" || (m.free === "plan" && conn.freeTick))) return `${p.short}'s free requests are used up for now`;
   return undefined;
 }
 
@@ -358,6 +361,27 @@ export function priceText(c: Choice): string {
   if (!c.price) return c.priceNote ?? "Price not published";
   const now = `${money(c.price.in, c.cny)} in, ${money(c.price.out, c.cny)} out per million tokens`;
   return c.next && c.price.until ? `${now} until ${day(c.price.until)}, then ${money(c.next.in, c.cny)} / ${money(c.next.out, c.cny)}` : now;
+}
+
+/** What the browser gets for a choice: words and flags, never a key or an address. */
+export function toOption(c: Choice): AssistModelOption {
+  const open = openLabel(c);
+  return {
+    provider: c.provider,
+    model: c.model,
+    name: c.name,
+    providerLabel: c.providerLabel,
+    agent: c.agent,
+    price: priceText(c),
+    ...(c.note && { note: c.note }),
+    ...(open && { open }),
+    ...(c.caveat && { caveat: c.caveat }),
+    sees: c.sees,
+    free: c.free,
+    efforts: c.efforts,
+    ...(c.disabled && { disabled: c.disabled }),
+    ...(c.manualOnly && { manualOnly: c.manualOnly }),
+  };
 }
 
 /** "Open weights · MIT · runs on DeepSeek's servers"; undefined for a closed (or not confirmed open) model. */

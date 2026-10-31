@@ -646,6 +646,12 @@ function open(): Database.Database {
       db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(i);
     })();
   });
+  // Assist on hosted LLM providers (src/lib/catalog/llm-providers.ts): the provider of a chat's model ("openai",
+  // "openrouter"…); chats from before read agent "claude" as Anthropic. Added when it's missing rather than as a
+  // numbered migration, so branches that add migrations never clash over its place in the list.
+  if (!(db.prepare("PRAGMA table_info(assist_thread_state)").all() as { name: string }[]).some((c) => c.name === "provider")) {
+    db.exec("ALTER TABLE assist_thread_state ADD COLUMN provider TEXT");
+  }
   // An account's own runs (its list, its active runs) are found through this index, not by reading every run. Not a
   // numbered migration, so branches that add migrations never clash over it; a failure only leaves lists slower.
   try {

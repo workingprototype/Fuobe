@@ -61,7 +61,9 @@ export type Mode =
   | "together"
   | "qwen"
   | "xai"
-  | "huggingface";
+  | "huggingface"
+  /** A local OpenAI-compatible server (llama-server, vLLM…): answers unstreamed calls too. */
+  | "local";
 
 const sse = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
 
@@ -302,6 +304,10 @@ export function fakeLlm(mode: Mode, key = "sk-test-0123456789abcdefghij"): FakeL
         if (typeof enc === "string") for (const i of out) if (i.type === "function_call") f.needs.set(String(i.id), enc);
         res.writeHead(200, { "content-type": "text/event-stream" });
         return res.end(responsesStream(reply, model));
+      }
+      if (mode === "local" && body.stream !== true) {
+        const calls = (reply.calls ?? []).map((c, i) => ({ id: c.id ?? `call_${i}`, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) } }));
+        return json(200, { id: "c1", object: "chat.completion", model, choices: [{ index: 0, finish_reason: calls.length ? "tool_calls" : "stop", message: { role: "assistant", content: reply.text ?? "", ...(calls.length && { tool_calls: calls }) } }] });
       }
       const wrong = broken(mode, body, f.issued);
       if (wrong) return json(400, { error: { message: wrong, type: "invalid_request_error" } });
