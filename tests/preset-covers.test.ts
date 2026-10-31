@@ -45,14 +45,16 @@ describe("the preset covers manifest", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("shows each cover on its card, and keeps the effects gallery's card data under 80 KB with them", () => {
+  // Every one of the 255 effects is getting a hover clip (about 50 bytes of card data each), so the budget is
+  // sized for all of them, not for today's count.
+  it("shows each cover on its card, and keeps the effects gallery's card data under 100 KB with them", () => {
     for (const p of [...APPS, ...MOTIONS, ...EFFECTS]) {
       const c = toPresetCard(p);
       const e = PRESET_PREVIEWS[p.id];
       expect(isCover(c.preview), p.id).toBe(!!e);
       if (e) expect([c.preview.poster, c.preview.video], p.id).toEqual([e.poster, e.video]);
     }
-    expect(JSON.stringify(EFFECTS.map(toPresetCard)).length).toBeLessThan(80_000);
+    expect(JSON.stringify(EFFECTS.map(toPresetCard)).length).toBeLessThan(100_000);
   });
 
   it("is read only on the server and in the preset header's own chunk", () => {
