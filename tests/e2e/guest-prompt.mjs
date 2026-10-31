@@ -1,7 +1,7 @@
 // A refused change shows one card, in the browser. A guest uploads a picture in Color Grading: "Create a free account
 // to run this" opens alone (no error toast, no trip to the sign-in page). Its Log in and Sign up free open the sign-in
 // page with the card closed, Back closes it too, and a wrong password on the sign-in page is the form's own error.
-// Then an account without its GPU: "Connect your GPU" opens alone, and closes when the page changes.
+// Then an account without its GPU: "Connect your GPU" opens alone, its form inside it, and closes when the page changes.
 // Usage: node tests/e2e/guest-prompt.mjs [appUrl] [--shots <dir>]   (the app with a password and FUOBE_PUBLIC_SIGNUP=1).
 // Signs up one throwaway account. Exits 1 on a failed check.
 import fs from "node:fs";
@@ -132,6 +132,8 @@ try {
     await shot(page, "5-connect-gpu");
     check("one card opens: Connect your GPU", s.cards.length === 1 && s.cards[0] === GPU_CARD, JSON.stringify(s.cards));
     check("no error toast on top of it", s.errors.length === 0, JSON.stringify(s.errors));
+    const sideways = await page.getByRole("dialog").evaluate((d) => d.scrollWidth - d.clientWidth);
+    check("its form fits inside it (nothing cut off at the right)", sideways <= 0, `${sideways}px`);
     await page.goBack();
     await page.waitForURL((u) => u.pathname === "/");
     await settled(page);

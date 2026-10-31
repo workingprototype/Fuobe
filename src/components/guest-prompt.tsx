@@ -45,7 +45,7 @@ export function GuestPrompt() {
         <CloseOnNavigation close={close} />
       </Suspense>
       <Dialog open={open} onOpenChange={(o) => !o && close()}>
-        <DialogContent className={card?.kind === "gpu" ? "max-h-[90svh] overflow-y-auto sm:max-w-xl" : "sm:max-w-sm"}>
+        <DialogContent className={card?.kind === "gpu" ? "max-h-[90svh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-xl" : "sm:max-w-sm"}>
           {card?.kind === "gpu" ? (
             <>
               <DialogHeader>
