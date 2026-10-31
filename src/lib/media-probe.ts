@@ -50,6 +50,11 @@ export type ReadRange = (start: number, end: number) => Promise<Uint8Array>;
 const HEAD_BYTES = 256 * 1024;
 const MAX_MOOV_BYTES = 64 * 1024 * 1024;
 const ISO_TOP = ["ftyp", "moov", "mdat", "free", "wide", "skip"];
+/**
+ * The most top-level boxes walked before the moov box. A real MP4 / MOV has a handful (ftyp, free, wide, mdat, uuid…;
+ * a fragmented one puts its moov first). A crafted file of millions of empty boxes would otherwise cost one read each.
+ */
+const MAX_TOP_BOXES = 64;
 
 /**
  * {@link probeMedia} without reading the whole file: an MP4 / MOV is walked box header by box header
@@ -62,7 +67,8 @@ export async function probeMediaRanges(read: ReadRange, size: number): Promise<M
     const head = await read(0, Math.min(size, HEAD_BYTES));
     if (head.length < 12) return null;
     if (!ISO_TOP.includes(fourcc(head, 4))) return size <= head.length ? probeMedia(head) : null;
-    for (let o = 0; o + 8 <= size; ) {
+    for (let o = 0, n = 0; o + 8 <= size; n++) {
+      if (n >= MAX_TOP_BOXES) return null;
       const h = o + 16 <= head.length ? head.subarray(o, o + 16) : await read(o, Math.min(size, o + 16));
       if (h.length < 8) return null;
       const d = new DataView(h.buffer, h.byteOffset, h.byteLength);
@@ -99,7 +105,8 @@ export function probeMediaRangesSync(read: ReadRangeSync, size: number, opts: { 
     const head = read(0, Math.min(size, opts.headBytes ?? HEAD_BYTES));
     if (head.length < 12) return null;
     if (!ISO_TOP.includes(fourcc(head, 4))) return probeMedia(head, size);
-    for (let o = 0; o + 8 <= size; ) {
+    for (let o = 0, n = 0; o + 8 <= size; n++) {
+      if (n >= MAX_TOP_BOXES) return null;
       const h = o + 16 <= head.length ? head.subarray(o, o + 16) : read(o, Math.min(size, o + 16));
       if (h.length < 8) return null;
       const d = new DataView(h.buffer, h.byteOffset, h.byteLength);
