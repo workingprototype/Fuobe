@@ -155,6 +155,10 @@ export const CUSTOM_NODE_REPOS = {
   'ComfyUI-DBS': 'https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/f656e53434b5485c148a2866fbd6ddc6b6152ed6',
   // Owner's SOTA image families (2026-10-31): AusBoss's crop, pad and stitch nodes (Qwen-Image 2.1 inpaint and expand), MIT.
   'ausboss-nodes': 'https://github.com/ausboss/ComfyUI-AusBoss',
+  // Krea 2 edits (the owner's SOTA families, 2026-10-31): the Krea 2 Identity Edit nodes, and Ostris' edit nodes that
+  // Krea 2 Inpaint needs (not installed on the validation server: krea2-inpaint / krea2-outpaint list it with `packs`).
+  'comfyui-krea2edit': 'https://github.com/lbouaraba/comfyui-krea2edit',
+  'ComfyUI-Krea2-Ostris-Edit': 'https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit',
 };
 
 // Node classes of the packs entries list in `packs` (packs the validation server doesn't have installed): the build
@@ -164,6 +168,9 @@ export const PACK_CLASSES = {
   'h3-relay': /^(H3Relay|LabsH3)/,
   'ComfyUI-DBS': /^DBS(Loader|Separate)$/,
   'ausboss-nodes': /^AUSBOSS_NODES_/,
+  // Installed on the validation server, but a ComfyUI with comfyui-workflow-encrypt names that pack as these classes' module.
+  'comfyui-krea2edit': /^Krea2Edit(ModelPatch|GroundedEncode)$/,
+  'ComfyUI-Krea2-Ostris-Edit': /^(TextEncodeKrea2OstrisEdit|Krea2OstrisEditModelPatch)$/,
 };
 
 // Model download locations for files that the source workflow does not annotate
@@ -242,8 +249,8 @@ export const KNOWN_MODELS = {
   'flux-2-klein-4b-fp8.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/flux-2-klein-4b-fp8.safetensors' },
   'flux2-vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors' },
   'tryon-klein-4b.safetensors': { folder: 'loras', url: 'https://huggingface.co/xocialize/tryon-FLUX.2-klein-4B-lora/resolve/main/tryon-klein-4b.safetensors' },
-  'krea2_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors' },
-  'qwen3vl_4b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors' },
+  'krea2_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors', variants: ['krea2_turbo_fp8_scaled.safetensors', 'krea2_turbo_bf16.safetensors'] },
+  'qwen3vl_4b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors', variants: ['qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_bf16.safetensors'] },
   'krea2_style_reference.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/loras/krea2_style_reference.safetensors' },
   'flux1-dev-fp8.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors' },
   'uso-flux1-dit-lora-v1.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/USO_1.0_Repackaged/resolve/main/split_files/loras/uso-flux1-dit-lora-v1.safetensors' },
@@ -314,6 +321,12 @@ export const KNOWN_MODELS = {
   'ideogram4_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_int8_convrot.safetensors', variants: ['ideogram4_fp8_scaled.safetensors'] },
   'ideogram4_unconditional_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_unconditional_int8_convrot.safetensors', variants: ['ideogram4_unconditional_fp8_scaled.safetensors'] },
   'qwen3vl_8b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors' },
+  // owner's SOTA families (2026-10-31): Krea 2. The base files are the Comfy-Org/Krea-2 rows above; these are the LoRAs of
+  // the owner's workflows (revisions, sizes and SHA-256 in model-pins.json, from the Hugging Face API).
+  'Krea2-realism-V2.safetensors': { folder: 'loras', url: 'https://huggingface.co/RudySen/Krea2-realism-V2/resolve/main/Krea2-realism-V2.safetensors' },
+  'krea2_general_edit_v2.safetensors': { folder: 'loras', url: 'https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_general_edit_v2.safetensors' },
+  'krea2_identity_edit_v2.safetensors': { folder: 'loras', url: 'https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v2.safetensors' },
+  'krea2_inpaint_edit.safetensors': { folder: 'loras', url: 'https://huggingface.co/Cierpliwy/krea2-inpaint-edit/resolve/main/v1_512/krea2_inpaint_edit.safetensors' },
 };
 
 const WAN_NEG_EN =
@@ -2314,6 +2327,137 @@ export const SPEC = [
       'The preset table feeds Ideogram4Scheduler (Quality 48 steps / mu 0 / std 1.5, Default 20 / 0 / 1.75, Turbo 12 / 0.5 / 1.75); the graph runs Quality, the recipe of the approved preview stills with people (those without ran Default, as the saved workflow does). ' +
       'No negative prompt: the guidance is asymmetric with a text-free unconditional pass. The prompt is an Ideogram 4 JSON caption (the app writes one from plain words: src/lib/ideogram-caption.ts); ' +
       'plain sentences often come back as the grey "blocked by safety filter" card. The Realism Engine LoRA graph is not used (the approved stills are the stock graph).',
+  },
+  // ---- Owner's SOTA image families: Krea 2 (2026-10-31). Every graph runs Krea 2 Turbo (krea2_turbo_int8_convrot), Qwen3-VL 4B
+  // (CLIPLoader type krea2) and the Qwen-Image VAE; Krea's in-graph "Refine prompt" TextGenerate is left out (Fuobe's Enhance does it).
+  {
+    id: 'krea2-realism-t2i',
+    title: 'Krea 2 Realism: Krea 2 Turbo + the Realism V2 LoRA, 6 steps',
+    capability: 't2i',
+    handBuilt: 'hand-built/krea2-realism-t2i.json',
+    bindings: {
+      prompt: [b('6', 'text')], width: [b('5', 'width')], height: [b('5', 'height')], seed: [b('3', 'seed')], steps: [b('3', 'steps')],
+      loraStrength: [b('15', 'strength_model')],
+    },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 20,
+    license: 'Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); Krea2-realism-V2 LoRA MIT',
+    notes:
+      'The owner\'s image_krea2_turbo_t2i_int8.json (the official Krea 2 Turbo graph) with LoraLoaderModelOnly Krea2-realism-V2 at 1.0 after the UNET, run as the realism creator says: ' +
+      'euler / simple, 6 steps (4-8), cfg 1 with ConditioningZeroOut, about 2 MP (1 MP gets noisy), detailed natural-language prose. Removed: the style-LoRA and Refine-prompt switches, ' +
+      'the ResolutionSelector (explicit width/height, multiple of 16). The preview pipeline rendered these settings with the merged civitai realism checkpoint, which isn\'t on Hugging Face; ' +
+      'the LoRA on the Comfy-Org Turbo is not rendered yet.',
+  },
+  {
+    id: 'krea2-turbo-t2i',
+    title: 'Krea 2 Turbo Text to Image (8 steps)',
+    capability: 't2i',
+    handBuilt: 'hand-built/krea2-turbo-t2i.json',
+    bindings: { prompt: [b('6', 'text')], width: [b('5', 'width')], height: [b('5', 'height')], seed: [b('3', 'seed')], steps: [b('3', 'steps')] },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 20,
+    license: 'Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it)',
+    notes:
+      'The owner\'s image_krea2_turbo_t2i_int8.json as saved: euler / simple, 8 steps, cfg 1 with ConditioningZeroOut, 1024x1024 by default. Removed: the style-LoRA and Refine-prompt switches ' +
+      '(the user\'s LoRAs attach after the UNET as on every graph), the ResolutionSelector (explicit width/height, multiple of 16).',
+  },
+  {
+    id: 'krea2-edit-general',
+    title: 'Krea 2 Edit: Krea 2 Turbo + the General Edit V2 LoRA, instruction edits with an optional second photo',
+    capability: 'edit',
+    handBuilt: 'hand-built/krea2-edit-general.json',
+    bindings: {
+      prompt: [b('84', 'prompt')], image: [b('72', 'image')], image2: [b('90', 'image')], width: [b('82', 'width')], height: [b('82', 'height')],
+      seed: [b('53', 'seed')], steps: [b('53', 'steps')],
+    },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 20,
+    license:
+      'Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); the Krea 2 General Edit V2 LoRA is NON-COMMERCIAL (commercial use needs a licence from its author)',
+    notes:
+      'The owner\'s "Krea2 Image Edit.json" (the comfyui-krea2edit graph) with the pack\'s V2 LoRA krea2_general_edit_v2 at 1.0 → Krea2EditModelPatch (the photo VAE-encoded as source_latent, ' +
+      'the pixel path vae + source_image, target_latent = the KSampler\'s latent, fit_mode fit, ref_boost 4, ref_boost_a 1, both references aligned) → Krea2EditGroundedEncode with the instruction ' +
+      '(grounding_px 768) as the positive and an empty one on the same photo as the negative; EmptySD3LatentImage; KSampler 8 steps (the V2 card; the owner\'s v1.2 graph used 10), cfg 1, euler, simple. ' +
+      'image2 is the person for "put this person in the scene" (the group the owner ships bypassed): its loader goes when no second photo is given. The output follows image 1 ("auto") or the shape asked for; ' +
+      '1 MP is the sweet spot. Removals need the Raw model at cfg 3 (pack README): Turbo at cfg 1 tends to re-render the subject. Not rendered with the V2 LoRA yet.',
+  },
+  {
+    id: 'krea2-edit-identity',
+    title: 'Krea 2 Identity Edit: Krea 2 Turbo + the Identity Edit V2 LoRA, a person restaged from one photo',
+    capability: 'edit',
+    handBuilt: 'hand-built/krea2-edit-identity.json',
+    bindings: {
+      prompt: [b('84', 'prompt')], image: [b('72', 'image')], image2: [b('90', 'image')], width: [b('82', 'width')], height: [b('82', 'height')],
+      seed: [b('53', 'seed')], steps: [b('53', 'steps')],
+    },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 20,
+    license:
+      'Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); the Krea 2 Identity Edit V2 LoRA is NON-COMMERCIAL (commercial use needs a licence from its author)',
+    notes:
+      'krea2-edit-general\'s graph (the owner\'s "Krea2 Image Edit.json") with krea2_identity_edit_v2 at 1.0, ref_boost 2 and the person aligned (trained): a new place, pose or outfit, the same face. ' +
+      'For a distinctive face, end the instruction with "Preserve the exact facial identity - distinguishing features: ..." (pack notes). image2 = a second person or the person to put in the scene, ' +
+      'dropped when not given. 8 steps, cfg 1, euler, simple. Not rendered with the V2 LoRA yet.',
+  },
+  {
+    id: 'krea2-turbo-i2i',
+    title: 'Krea 2 Turbo image to image (your picture redrawn at the strength you pick)',
+    capability: 'edit',
+    handBuilt: 'hand-built/krea2-turbo-i2i.json',
+    bindings: {
+      image: [b('1', 'image')], megapixels: [b('2', 'megapixels')], prompt: [b('6', 'text')], seed: [b('3', 'seed')], steps: [b('3', 'steps')],
+      strength: [b('3', 'denoise')],
+    },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 20,
+    license: 'Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it)',
+    notes:
+      'The base-latent path of the owner\'s "krea2SFWNSFWUncensoredImageTo_v10 - steps fixed.json", built like z-image-turbo-i2i: the picture scaled to about 2 MP on the 16-pixel grid (the workflow scales to 1.98 MP), ' +
+      'VAE-encoded, then Krea 2 Turbo\'s sampler (8 steps, cfg 1, euler, simple: the workflow\'s "linear/euler, simple, 8 steps" in core samplers) at denoise = strength (0.6). Not used: its image-to-prompt and ' +
+      'prompt-enhancer branches, the abliterated text encoder, the NSFW LoRA, the RES4LYF second pass and the SeedVR2 upscaler. The result keeps the picture\'s shape. Not rendered yet.',
+  },
+  {
+    id: 'krea2-inpaint',
+    title: 'Krea 2 Inpaint: the masked area painted by the Krea 2 inpaint-edit LoRA (Ostris edit nodes)',
+    capability: 'inpaint',
+    handBuilt: 'hand-built/krea2-inpaint.json',
+    bindings: { prompt: [b('20', 'prompt')], image: [b('1', 'image')], mask: [b('2', 'image')], seed: [b('23', 'seed')], steps: [b('23', 'steps')] },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048 },
+    packs: ['ComfyUI-Krea2-Ostris-Edit'],
+    vramGb: 20,
+    license: 'Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); the inpaint-edit LoRA by Cierpliwy under the same licence; ComfyUI-Krea2-Ostris-Edit MIT',
+    notes:
+      'The edit stage of Cierpliwy\'s krea2-inpaint-workflows examples (the owner\'s krea2-inpaint-workflows/): Krea 2 Turbo → LoRA krea2_inpaint_edit at 1.0 (the v1 512 file on the owner\'s PC; ' +
+      'the model card now recommends krea2_inpaint_edit_v2_17500) → Krea2OstrisEditModelPatch with kv_cache on (the card: needed for correct masked editing); TextEncodeKrea2OstrisEdit (clip, vae, image1 = ' +
+      'the photo with the masked area black) as the positive, ConditioningZeroOut as the negative; EmptyLatentImage at the reference\'s size; KSampler 8 steps, cfg 1, euler_ancestral, simple. ' +
+      'mask = separate PNG, red channel, white = paint here (the flux1-fill-inpaint convention). The reference is scaled to about 1 MP on the 16-pixel grid (the add-on\'s limit until ostris PR #10); ' +
+      'the whole picture is redrawn, nothing is pasted back. Needs ComfyUI-Krea2-Ostris-Edit, not installed on the validation server. Not rendered yet.',
+  },
+  {
+    id: 'krea2-outpaint',
+    title: 'Krea 2 Expand: the canvas grown on black and filled by the Krea 2 inpaint-edit LoRA (Ostris edit nodes)',
+    capability: 'outpaint',
+    handBuilt: 'hand-built/krea2-outpaint.json',
+    bindings: {
+      prompt: [b('20', 'prompt')], image: [b('1', 'image')], padLeft: [b('8', 'left')], padTop: [b('8', 'top')], padRight: [b('8', 'right')], padBottom: [b('8', 'bottom')],
+      seed: [b('23', 'seed')], steps: [b('23', 'steps')],
+    },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, padMultiple: 8 },
+    packs: ['ComfyUI-Krea2-Ostris-Edit'],
+    vramGb: 20,
+    license: 'Krea 2 Community License (free under US$1M yearly revenue; enterprise terms above it); the inpaint-edit LoRA by Cierpliwy under the same licence; ComfyUI-Krea2-Ostris-Edit MIT',
+    notes:
+      'krea2-inpaint\'s edit stage on a bigger canvas, as in the add-on\'s outpaint_example: the photo on black grown by padLeft/padTop/padRight/padBottom px (ImagePadForOutpaint with feathering 0, ' +
+      'then black over its mask: a hard edge like the example\'s SolidMask canvas), scaled to about 1 MP, then the same LoRA, patch (kv_cache on) and 8 euler_ancestral steps. Default pads 256 px a side ' +
+      '(the example grows a 512 px picture by a quarter of its side on each). The prompt describes the whole scene. The v1 512 LoRA was trained without outpainting masks (v2 adds them, model card). ' +
+      'Needs ComfyUI-Krea2-Ostris-Edit. Not rendered yet.',
   },
 
   // ---- Fuobe DoP (Originals O4): LTX-2.3 camera moves, FPV and transitions with LoRAs ------------

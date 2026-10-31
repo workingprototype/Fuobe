@@ -9,6 +9,11 @@
   "sizeBytes": 2760814880,
   "sha256": "011487390b8020baf22a9d543930c90d74a4809b7241bee6b0622777b17b413b"
  },
+ "https://huggingface.co/Cierpliwy/krea2-inpaint-edit/resolve/main/v1_512/krea2_inpaint_edit.safetensors": {
+  "revision": "30b1c7cf9eab338239c4a50ea331218f4e0ce2d1",
+  "sizeBytes": 457111984,
+  "sha256": "4c09533fdd243200e7afad92f1ed1a92dacd39c53fe64412f938ae093c82a26b"
+ },
  "https://huggingface.co/Comfy-Org/Bernini-R/resolve/main/diffusion_models/wan2.2_bernini_r_high_noise_fp8_scaled.safetensors": {
   "revision": "f7fd9812e54095d0c511d5e7429e6d8f6acc381a",
   "sizeBytes": 15574833216,
@@ -737,6 +742,11 @@
   "sizeBytes": 995765578,
   "sha256": "3160fabf8edf0bc4dd8de40353a180813b111ce586b655ad54af9a7b8c6736de"
  },
+ "https://huggingface.co/RudySen/Krea2-realism-V2/resolve/main/Krea2-realism-V2.safetensors": {
+  "revision": "ad6f07e426303e7087d215362dbc057b0073dca3",
+  "sizeBytes": 1562410344,
+  "sha256": "fb0048ce3340adc2842ccfcc1a9a61a9773b6628b01ae5a2e139ca9c679e715d"
+ },
  "https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/resolve/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors": {
   "revision": "8fdeb392c6322418687fc2519a7958c954497a22",
   "sizeBytes": 5413723302,
@@ -811,6 +821,16 @@
   "revision": "6af2a98e3f615bdfa612fbd85da93d1ed5f69ef5",
   "sizeBytes": 5157348688,
   "sha256": "a498f0485dc9536735258018417c3fd7758dc3bccc0a645feaa472b34955557a"
+ },
+ "https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_general_edit_v2.safetensors": {
+  "revision": "f33b26291c640e8ec50b0da420bfee3c9a660daa",
+  "sizeBytes": 1828285656,
+  "sha256": "fb5315477444c8df6dea2ad347a852bd90e97ab0f9109f4100a39714a7a09356"
+ },
+ "https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v2.safetensors": {
+  "revision": "f33b26291c640e8ec50b0da420bfee3c9a660daa",
+  "sizeBytes": 1828285728,
+  "sha256": "c53843f9451963a6cb3c22dc4975205056b93a6575fb9347dd2bc6e055ef9877"
  },
  "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/GFPGANv1.4.pth": {
   "revision": "079e0e459cd4261bbcba8c71d47df54a4ded7642",

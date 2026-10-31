@@ -44,6 +44,15 @@
     "subdir": null,
     "folders": []
   },
+  "ComfyUI-Krea2-Ostris-Edit": {
+    "repo": "https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit",
+    "commit": "7756566160c4a1b24bb1bd9f0ff3ced1a83d7547",
+    "registry": { "id": "comfyui-krea2-ostris-edit", "version": "" },
+    "requirementsTxt": false,
+    "isolated": false,
+    "subdir": null,
+    "folders": []
+  },
   "ComfyUI-LatentSyncWrapper": {
     "repo": "https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper",
     "commit": "360d5283d7276aee68b4237b1387e594e4ce640e",
@@ -165,6 +174,15 @@
     "repo": "https://github.com/ausboss/ComfyUI-AusBoss",
     "commit": "bce780f2598f47c239cbf6503ea0984f96229391",
     "registry": { "id": "ausboss-nodes", "version": "" },
+    "requirementsTxt": false,
+    "isolated": false,
+    "subdir": null,
+    "folders": []
+  },
+  "comfyui-krea2edit": {
+    "repo": "https://github.com/lbouaraba/comfyui-krea2edit",
+    "commit": "13ef60f20828949becada815d3cbc371eb5ccaab",
+    "registry": { "id": "comfyui-krea2edit", "version": "" },
     "requirementsTxt": false,
     "isolated": false,
     "subdir": null,
