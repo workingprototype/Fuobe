@@ -135,6 +135,16 @@ try {
           const qbox = await quality.boundingBox();
           check(`${tag} open: Quality fits the screen`, !!qbox && qbox.x >= 0 && qbox.x + qbox.width <= width + 1, qbox ? `${Math.round(qbox.x)}+${Math.round(qbox.width)}` : "no box");
           check(`${tag} open: Options shows Quality, Auto = Standard · 25 steps`, /Auto · Standard · 25 steps/.test(flat(await quality.innerText())), flat(await quality.innerText()));
+          // The words read in full: the text is no wider than the box that shows it (it was cut at "Auto · Standard · 2").
+          const cut = () =>
+            quality.evaluate((b) => {
+              const v = b.querySelector('[data-slot="select-value"]') ?? b;
+              const r = document.createRange();
+              r.selectNodeContents(v);
+              return { text: Math.round(r.getBoundingClientRect().width * 10) / 10, box: Math.round(v.getBoundingClientRect().width * 10) / 10 };
+            });
+          const before = await cut();
+          check(`${tag} open: Quality's Auto · Standard · 25 steps isn't cut off`, before.text <= before.box + 0.5, `${before.text} px of text in ${before.box} px`);
           await quality.focus();
           await page.keyboard.press("Enter");
           const best = page.getByRole("option", { name: "Best · 50 steps" });
@@ -153,6 +163,8 @@ try {
           await page.keyboard.press("Enter");
           await page.waitForTimeout(300);
           check(`${tag} open: Best picked from the keyboard`, /Best · 50 steps/.test(flat(await quality.innerText())), flat(await quality.innerText()));
+          const after = await cut();
+          check(`${tag} open: Quality's Best · 50 steps isn't cut off`, after.text <= after.box + 0.5, `${after.text} px of text in ${after.box} px`);
           await shoot(page, `moss-options-${width}-${scheme}.png`);
           await page.keyboard.press("Escape");
           await page.keyboard.press("Escape");
