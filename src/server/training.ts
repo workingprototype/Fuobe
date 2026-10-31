@@ -31,7 +31,8 @@ import { DEFAULT_AI_TOOLKIT_URL } from "@/lib/connections";
 import { DATA_DIR, db } from "./db";
 import { getElement, updateElement } from "./elements";
 import { keepTrainedLora, lorasPath, ownCopy, recordTrainedMirror } from "./loras";
-import { falFetch, falProvider } from "./providers/fal";
+import { cloudKey } from "./provider-keys";
+import { falFetch, falProvider, falQueue } from "./providers/fal";
 import { ProviderError } from "./providers/types";
 import { engineMode, getSetting, isCandidate, savedSetting } from "./settings";
 import { readRef } from "./storage";
@@ -147,7 +148,7 @@ export function trainingBlocker(t: TrainingTarget): string | null {
   if (mode !== "both" && !fam.lead[mode]) {
     return `${fam.name} runs only ${mode === "open" ? "in the cloud" : "on your GPU"}, which this install turned off (${ENGINE_MODE_PLACE})`;
   }
-  if (t.provider === "fal" && !getSetting("falKey")) return "Add a fal.ai key in Settings";
+  if (t.provider === "fal" && !cloudKey("fal")) return "Add a fal.ai key in Settings";
   if (t.provider === "ai-toolkit" && !getSetting("aiToolkitUrl")) return "Set your AI-Toolkit URL in Settings → Training (or download the training kit)";
   return null;
 }
@@ -380,7 +381,7 @@ function testDatasetDir(): { ok: boolean; detail: string } {
 }
 
 /** The fal queue URL of a trainer endpoint. */
-export const falQueueUrl = (endpoint: string) => `https://queue.fal.run/${endpoint}`;
+export const falQueueUrl = (endpoint: string) => `${falQueue()}/${endpoint}`;
 
 async function submit(id: string, el: StudioElement, t: TrainingTarget, trigger: string, images: string[]) {
   const meta = metaOf((db().prepare("SELECT meta_json FROM trainings WHERE id = ?").get(id) as Pick<Row, "meta_json"> | undefined) ?? { meta_json: null });
