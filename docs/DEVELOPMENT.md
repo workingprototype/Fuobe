@@ -12,7 +12,7 @@
 ## Checks and scripts
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm test   # TypeScript, ESLint, Vitest (213 files, 3361 tests; with uv, also the harness's Python metric tests)
+pnpm typecheck && pnpm lint && pnpm test   # TypeScript, ESLint, Vitest (224 files, 3462 tests; with uv, also the harness's Python metric tests)
 pnpm build                                  # production build
 pnpm gen:catalog                            # regenerate cloud models, studio packs, LoRA map, LoRA library, AI Influencer options, Fuobe Soul's looks, Soul ID's trainers and icon map from docs/research/*.json
 pnpm dev:clean                              # clear the Turbopack cache if the dev server gets stuck reloading or serves stale CSS
@@ -55,7 +55,7 @@ node tests/e2e/skills-run.mjs [url]            # a skill with a recipe: the free
 node tests/e2e/skills-builder.mjs [url]        # a 3-step chain made in the composer, turned into a skill from the Library, checked, saved and run with new words
 node tests/e2e/fixes-5.mjs [url]               # Settings → Training against a stand-in AI-Toolkit, the H3 packs' install commands, Edit video's clip price and window
 node tests/e2e/split-soundtrack.mjs [url] [outDir] [--live]  # Audio → Split soundtrack: the cloud engine's "runs on your GPU" note, the open engine's options and price, then a split of an audio file and a video: the stem tiles, the mixer, a preset, Export mix and Put back on the video; needs ffmpeg
-node tests/e2e/moss-image.mjs [url]            # MOSS-Image in the Image studio's model menu on both engines with prices, Options → Quality from the keyboard, its Settings → Models & licences rows, a LoRA run's unknown price
+node tests/e2e/moss-image.mjs [url] [--fal|--live]  # MOSS-Image in the Image studio's model menu on both engines, Options → Quality from the keyboard, its Settings → Models & licences rows; prices follow what the server runs (--fal: $0.05 and a LoRA run's unknown price; --live: Free on your GPU)
 node tests/e2e/cinema-path.mjs [url]           # Fly path in Cinema's 3D scene: + Keyframe and K, a move, Preview, Film on the cloud (an H3 Max take) and on your GPU (the path rendered in the browser, 81 frames), the Path sheet at 390 px
 node tests/e2e/turnaround.mjs [url]            # Turnaround video from a Character Sheet, Fly around on a character's page (the cloud routes and the consent line) and Soul Cast's take in Cinema, with a demo run to the film
 ```
