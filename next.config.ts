@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   poweredByHeader: false,
   partialPrefetching: true,
+  // A deploy can set FUOBE_SKIP_BUILD_TYPECHECK=1 to skip the build's own TypeScript pass: on a small server it holds
+  // another ~1 GB for minutes and can run the build out of memory (Next's memory guide, "Disable static analysis").
+  // `pnpm typecheck` still checks every change before it's pushed; local builds keep the check.
+  typescript: { ignoreBuildErrors: process.env.FUOBE_SKIP_BUILD_TYPECHECK === "1" },
   experimental: {
     // The sign-in proxy holds every request body it sees in memory, up to this size, even one it refuses: a small limit
     // keeps many open requests from filling the server's memory. The routes that take a file in a form (uploads, a Soul
