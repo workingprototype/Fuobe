@@ -96,7 +96,7 @@ function ActiveItems({ group }: { group: NavGroupDef }) {
   );
 }
 
-/** The folded groups: remembered in this browser, else Studios and Engine (DEFAULT_NAV_CLOSED), also on the server. */
+/** The folded groups: remembered in this browser, else Engine (DEFAULT_NAV_CLOSED), also on the server. */
 function readClosed(): string[] {
   try {
     return parseClosed(typeof window === "undefined" ? null : localStorage.getItem(NAV_CLOSED_KEY));

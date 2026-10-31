@@ -63,7 +63,7 @@ export interface NavItem {
 export interface NavGroupDef {
   label: string;
   items: NavItem[];
-  /** Can be folded away; the choice is remembered (Studios and Engine start folded, see DEFAULT_NAV_CLOSED). */
+  /** Can be folded away; the choice is remembered (Engine starts folded, see DEFAULT_NAV_CLOSED). */
   collapsible?: boolean;
   /** Two small items per row. */
   compact?: boolean;

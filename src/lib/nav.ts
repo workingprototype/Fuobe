@@ -3,10 +3,10 @@
 /** Group labels the user collapsed, in localStorage. */
 export const NAV_CLOSED_KEY = "fuobe:nav-closed";
 /**
- * Folded until the user opens them (nothing remembered yet): the sidebar starts short, with Create
- * and Library in view. ⌘K reaches everything in the folded groups too.
+ * Folded until the user opens them (nothing remembered yet). Studios starts open, so a first visit shows
+ * that the studios exist; Engine (models, workflows, settings) starts folded. ⌘K reaches folded rows too.
  */
-export const DEFAULT_NAV_CLOSED: readonly string[] = ["studios", "engine"];
+export const DEFAULT_NAV_CLOSED: readonly string[] = ["engine"];
 /** Written by the shadcn SidebarProvider ("true" / "false"). */
 export const SIDEBAR_COOKIE = "sidebar_state";
 
