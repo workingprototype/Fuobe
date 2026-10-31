@@ -216,6 +216,9 @@
   --animate-caret: caret-blink 1s step-end infinite;
   /* Click feedback while a link's route loads: shows only if the navigation takes a moment. */
   --animate-pending-in: pending-in 150ms ease-out 120ms both;
+  /* Home: the composer's ring brightens once when a Try chip fills it; Audio's waveform ripples on hover. */
+  --animate-ring-flash: ring-flash 260ms ease-out both;
+  --animate-wave-bar: wave-bar 900ms ease-in-out infinite;
 
   @keyframes shimmer-text {
     from { mask-position: 100% 0; }
@@ -240,6 +243,15 @@
   @keyframes caret-blink {
     0%, 49% { opacity: 1; }
     50%, 100% { opacity: 0; }
+  }
+  @keyframes ring-flash {
+    0% { opacity: 0; }
+    35% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes wave-bar {
+    0%, 100% { transform: scaleY(1); }
+    50% { transform: scaleY(0.35); }
   }
 }
 

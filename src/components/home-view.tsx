@@ -1,40 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import {
-  ArrowRight,
-  AudioLines,
-  CircleAlert,
-  Clapperboard,
-  Film,
-  GalleryHorizontal,
-  ImageIcon,
-  Loader2,
-  Mic2,
-  Network,
-  ScanFace,
-  Sparkles,
-  Video,
-  Wand2,
-  ZoomIn,
-} from "lucide-react";
+import { ArrowRight, CircleAlert, ImageIcon, Loader2, MessageCircle, Video, Wand2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { GetStarted } from "@/components/get-started";
+import { GitHubMark } from "@/components/github-mark";
 import { PageShell } from "@/components/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HadItemsScript, useHadItems } from "@/components/use-had-items";
-import { CardPending, IntentLink } from "@/components/intent-link";
-import { PresetCard } from "@/components/preset-gallery";
+import { IntentLink } from "@/components/intent-link";
+import { useFadeEdges } from "@/components/preset-gallery";
 import { MediaThumb } from "@/components/studio/result-media";
 import { CONNECT_GPU_EVENT, signInHref, useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
 import { issueStartToken, START_PARAM } from "@/lib/composer";
-import { FIRST_RUN_KEY, FIRST_RUN_SCRIPT, nothingConnected as noConnection, showFirstRun, startLine, type StartQuote } from "@/lib/connections";
+import { FIRST_RUN_KEY, FIRST_RUN_SCRIPT, FUOBE_REPO, nothingConnected as noConnection, showFirstRun, startLine, type StartQuote } from "@/lib/connections";
 import { userTitle } from "@/lib/library";
 import { NEW_CREATION_PARAM } from "@/lib/nav";
-import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
 // The viewer is only needed once a recent result is opened.
@@ -46,25 +30,12 @@ const MODES = [
   { id: "edit", label: "Edit", icon: Wand2, href: "/edit", placeholder: "Describe a change (you'll add the image next)…" },
 ];
 
-interface Counts {
-  motions: number;
-  effects: number;
-  apps: number;
+/** A Try chip under the composer: it picks the mode and fills in the prompt; Start still runs it. */
+export interface TryChip {
+  mode: "image" | "video" | "edit";
+  label: string;
+  prompt: string;
 }
-
-/** Tool tiles. Append one entry per new destination (the grid holds five per row on wide screens). */
-const tools = (c: Counts) => [
-  { href: "/cinema", label: "Cinema Studio", desc: "Direct a film shot by shot", icon: Clapperboard },
-  { href: "/motions", label: "Camera motions", desc: `${c.motions} director moves`, icon: Film },
-  { href: "/effects", label: "Effects", desc: `${c.effects} viral VFX`, icon: Sparkles },
-  { href: "/apps", label: "Apps", desc: `${c.apps} one-click tools`, icon: Wand2 },
-  { href: "/storyboard", label: "Storyboard", desc: "One idea, consistent frames", icon: GalleryHorizontal },
-  { href: "/canvas", label: "Canvas", desc: "Chain steps into a flow", icon: Network },
-  { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2 },
-  { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace },
-  { href: "/upscale", label: "Upscale", desc: "Video, FPS, HDR & images", icon: ZoomIn },
-  { href: "/audio", label: "Audio", desc: "Voice, SFX, music", icon: AudioLines },
-];
 
 /** The latest results as a compact strip of square thumbnails; a tap opens the viewer. */
 function RecentStrip({ items }: { items: Generation[] }) {
@@ -133,16 +104,6 @@ function Row({ title, href, children, className }: { title: string; href: string
   );
 }
 
-function CardRow({ cards, href, engine }: { cards: PresetCardData[]; href: (c: PresetCardData) => string; engine?: "cloud" | "open" }) {
-  return (
-    <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-6">
-      {cards.map((p) => (
-        <PresetCard key={p.id} preset={p} href={href(p)} compact engine={engine} />
-      ))}
-    </div>
-  );
-}
-
 /**
  * Runs while the HTML is parsed, ahead of the guide: hides the shell's guide before the first paint
  * in a browser that already put it away. On the client it renders as inert text/plain (React warns
@@ -167,18 +128,26 @@ function NewCreation({ onNew }: { onNew: () => void }) {
   return null;
 }
 
+/**
+ * Home: what Fuobe is, the composer, a few prompts to try, then the wall of real covers (`wall`) right under them.
+ * The sections below (`children`) are rendered on the server, so their words and pictures ship no script.
+ */
 export function HomeView({
-  counts,
-  motions,
-  apps,
-  effects,
+  openModels,
+  chips,
+  assist,
+  wall,
+  children,
   prices,
   quotes,
 }: {
-  counts: Counts;
-  motions: PresetCardData[];
-  apps: PresetCardData[];
-  effects: PresetCardData[];
+  /** "130+": the open models a visitor runs on their own GPU (About & licences' count, rounded down). */
+  openModels: string;
+  chips: readonly TryChip[];
+  /** The Try chip that opens Assist with a job typed in. */
+  assist: { label: string; href: string };
+  wall: React.ReactNode;
+  children: React.ReactNode;
   /** What a first paid image and clip cost, for the first-run guide. */
   prices?: string;
   /** What Start runs in each mode, and its price on the paid engine. */
@@ -188,6 +157,9 @@ export function HomeView({
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  // Bumped by a Try chip: the composer's ring brightens once.
+  const [flash, setFlash] = useState(0);
+  const chipRow = useFadeEdges<HTMLDivElement>();
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
   // How many (up to 6): a phone's grid holds 3 a row, so 1 to 3 results are one row of skeletons, 4 to 6 two.
@@ -213,8 +185,6 @@ export function HomeView({
     document.documentElement.setAttribute("data-first-run", firstRun ? "1" : "0");
   }, [status, firstRun]);
 
-  const locked = engineMode === "both" ? undefined : engineMode;
-
   // With a prompt, the studio starts the run itself, or points at the photo it still needs. `go`
   // carries a one-time token from this tab, so only this button can start a run that way.
   const go = () => {
@@ -229,23 +199,50 @@ export function HomeView({
     setPrompt("");
     requestAnimationFrame(() => box.current?.focus());
   }, []);
+  // A Try chip: its mode and prompt go in, the caret goes to the end, and nothing runs until Start.
+  const tryChip = (c: TryChip) => {
+    setMode(MODES.find((m) => m.id === c.mode) ?? MODES[0]);
+    setPrompt(c.prompt);
+    setFlash((n) => n + 1);
+    box.current?.focus();
+    requestAnimationFrame(() => box.current?.setSelectionRange(c.prompt.length, c.prompt.length));
+  };
 
   return (
     <PageShell>
       <Suspense fallback={null}>
         <NewCreation onNew={startOver} />
       </Suspense>
-      <div className="flex flex-col items-center pt-[8vh] text-center">
-        <h1 className="font-heading text-display text-balance sm:text-[44px]">What will you create today?</h1>
-        <p className="mt-2 text-[15px] text-muted-foreground">
+      <div className="flex flex-col items-center pt-[3vh] text-center">
+        <a
+          href={FUOBE_REPO}
+          target="_blank"
+          rel="noopener"
+          className="group mb-3 inline-flex h-7 items-center gap-1.5 rounded-full bg-muted px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <GitHubMark className="size-3.5" />
+          MIT licence
+          <span aria-hidden>·</span>
+          <span className="font-medium text-brand-text">
+            Code on GitHub{" "}
+            <span aria-hidden className="inline-block transition-transform duration-150 group-hover:translate-x-0.5">
+              →
+            </span>
+          </span>
+        </a>
+        <h1 className="font-heading text-display text-balance sm:text-[44px]">
+          <span className="inline-block">A complete AI studio.</span> <span className="inline-block">Open source.</span>
+        </h1>
+        <p className="mt-2 text-[15px] text-pretty text-muted-foreground">
           {/* Before the status: the words a public studio's visitors get (the owner's own install corrects them in a moment). */}
           {!status || visitor || engineMode === "open"
-            ? "Fully open-source models running on your own ComfyUI."
+            ? `Pictures, video, sound and 3D on ${openModels} open models, free on your own GPU through ComfyUI.`
             : engineMode === "cloud"
               ? "Frontier paid models through your own API keys."
               : "Frontier cloud models or fully open-source workflows — same studio, your choice."}
         </p>
-        <div className="mt-8 w-full max-w-[720px] rounded-[20px] border bg-background p-2.5 text-left shadow-soft transition focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
+        <div className="relative mt-6 w-full max-w-[720px] rounded-[20px] border bg-background p-2.5 text-left shadow-soft transition focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
+          {flash > 0 && <span key={flash} aria-hidden className="pointer-events-none absolute -inset-px animate-ring-flash rounded-[inherit] ring-4 ring-primary/30 motion-reduce:hidden" />}
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -290,7 +287,7 @@ export function HomeView({
             </div>
           </div>
         </div>
-        {/* Its line's height is kept from the first paint, so the tools under it don't move when it fills in. */}
+        {/* Its line's height is kept from the first paint, so the chips and the wall under it don't move when it fills in. */}
         {visitor && openModel && !visitor.gpu.connected ? (
           <p className="mt-2 min-h-[18px] text-[12px] text-muted-foreground">
             {visitor.kind === "guest" ? (
@@ -322,6 +319,34 @@ export function HomeView({
             )}
           </p>
         )}
+        {/* A phone's chips are one row that scrolls sideways (none is cut); wider, they wrap, centred (a mouse can't scroll a row with no scrollbar). */}
+        <div
+          ref={chipRow}
+          className="fade-x scrollbar-none mt-6 flex items-center gap-1.5 max-sm:-mx-4 max-sm:h-8 max-sm:w-[calc(100%+2rem)] max-sm:overflow-x-auto max-sm:px-4 sm:flex-wrap sm:justify-center sm:[mask-image:none]"
+        >
+          <span className="mr-0.5 hidden shrink-0 text-[12px] text-muted-foreground sm:block">Try</span>
+          {chips.map((c) => {
+            const Icon = MODES.find((m) => m.id === c.mode)?.icon ?? ImageIcon;
+            return (
+              <button
+                key={c.label}
+                type="button"
+                onClick={() => tryChip(c)}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-background px-3 text-[13px] whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Icon className="size-3.5" />
+                {c.label}
+              </button>
+            );
+          })}
+          <IntentLink
+            href={assist.href}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-transparent bg-brand-faint px-3 text-[13px] whitespace-nowrap text-brand-text transition-colors hover:bg-brand-faint-hover"
+          >
+            <MessageCircle className="size-3.5" />
+            {assist.label}
+          </IntentLink>
+        </div>
         {guide ? (
           <>
             <FirstRunScript />
@@ -347,59 +372,36 @@ export function HomeView({
         )}
       </div>
 
-      <div className="mt-14 grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {tools(counts).map((t) => (
-          // Neutral chrome (Liner): the tile tints on hover, the colour stays in the content below.
-          <IntentLink key={t.href} href={t.href} className="group relative flex min-w-0 flex-col gap-2 rounded-xl border bg-background p-3 transition-colors hover:bg-accent">
-            <span className="grid size-9 place-items-center rounded-lg bg-muted text-foreground transition-colors group-hover:bg-brand-faint group-hover:text-brand-text">
-              <t.icon className="size-4" />
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-[13px] font-medium">{t.label}</span>
-              <span className="block text-[12px] text-muted-foreground">{t.desc}</span>
-            </span>
-            <CardPending />
-          </IntentLink>
-        ))}
-      </div>
+      {wall}
 
-      <div className="mt-14 space-y-12">
-        {recent.data?.length ? (
-          <Row title="Recent" href="/library">
-            <RecentStrip items={recent.data.slice(0, 6)} />
-          </Row>
-        ) : (
-          // Loading, in a browser that saw results here last time: the row keeps its place from the first paint, so the rows below don't move down when it arrives.
-          !recent.data && (
-            <>
-              <HadItemsScript name="home-recent" />
-              <Row title="Recent" href="/library" className="hidden [html[data-had-home-recent]_&]:block">
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-busy="true" aria-label="Loading recent results">
-                  {Array.from({ length: 6 }, (_, i) => (
-                    <Skeleton
-                      key={i}
-                      className={cn(
-                        "aspect-square rounded-xl",
-                        // A phone's second row only when the last visit had more than 3.
-                        i >= 3 && "max-sm:hidden [html[data-had-home-recent='4']_&]:block [html[data-had-home-recent='5']_&]:block [html[data-had-home-recent='6']_&]:block",
-                      )}
-                    />
-                  ))}
-                </div>
-              </Row>
-            </>
-          )
-        )}
-        <Row title="Camera motions" href="/motions">
-          <CardRow cards={motions} href={(p) => `/video?preset=${p.id}`} engine={locked} />
+      {recent.data?.length ? (
+        <Row title="Recent" href="/library" className="mt-12 sm:mt-16">
+          <RecentStrip items={recent.data.slice(0, 6)} />
         </Row>
-        <Row title="Popular apps" href="/apps">
-          <CardRow cards={apps} href={(p) => `/apps/${p.id}`} engine={locked} />
-        </Row>
-        <Row title="Effects" href="/effects">
-          <CardRow cards={effects} href={(p) => `/video?preset=${p.id}`} engine={locked} />
-        </Row>
-      </div>
+      ) : (
+        // Loading, in a browser that saw results here last time: the row keeps its place from the first paint, so the rows below don't move down when it arrives.
+        !recent.data && (
+          <>
+            <HadItemsScript name="home-recent" />
+            <Row title="Recent" href="/library" className="mt-12 hidden sm:mt-16 [html[data-had-home-recent]_&]:block">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-busy="true" aria-label="Loading recent results">
+                {Array.from({ length: 6 }, (_, i) => (
+                  <Skeleton
+                    key={i}
+                    className={cn(
+                      "aspect-square rounded-xl",
+                      // A phone's second row only when the last visit had more than 3.
+                      i >= 3 && "max-sm:hidden [html[data-had-home-recent='4']_&]:block [html[data-had-home-recent='5']_&]:block [html[data-had-home-recent='6']_&]:block",
+                    )}
+                  />
+                ))}
+              </div>
+            </Row>
+          </>
+        )
+      )}
+
+      {children}
     </PageShell>
   );
 }

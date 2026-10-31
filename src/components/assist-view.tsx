@@ -22,7 +22,7 @@ import { SkillIcon } from "@/components/assist/skill-icon";
 import { Transcript } from "@/components/assist/transcript";
 import { AssistVisitorNote } from "@/components/assist/visitor-note";
 import { useAssistActions, useAssistThread, useEngine } from "@/lib/api";
-import { ASSIST_SUGGESTIONS, modeLabel, threadModeChoice, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
+import { ASSIST_SUGGESTIONS, assistDraft, modeLabel, threadModeChoice, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 import { toastError } from "@/lib/refusals";
@@ -92,9 +92,10 @@ export function AssistView() {
   const [engine, setEngine] = useEngine();
   const [askFirst, setAskFirst] = useState(true);
   const [open, setOpen] = useState<{ g: Generation; i: number } | null>(null);
-  // "Use in a new chat" on a skill opens /assist?skill=<name>: the composer starts with "/name ".
+  // "Use in a new chat" on a skill opens /assist?skill=<name>: the composer starts with "/name ". Home's examples open
+  // /assist?prompt=<text>: the composer starts with the text. Neither sends anything.
   const skillParam = params.get("skill");
-  const [draft, setDraft] = useState(() => ({ key: 0, text: skillParam && /^[a-z0-9-]+$/.test(skillParam) ? `/${skillParam} ` : "" }));
+  const [draft, setDraft] = useState(() => ({ key: 0, text: assistDraft(skillParam, params.get("prompt")) }));
   const chats = useChats({ project: "none" });
   const can = chats.data?.availability;
   const [choice, setChoice] = useModeChoice(can?.defaultMode);

@@ -1,0 +1,186 @@
+"use client";
+
+import { ArrowRight, Check, Copy, Pause, Play } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CardPending, IntentLink } from "@/components/intent-link";
+import { useFadeEdges } from "@/components/preset-gallery";
+import { PresetPreview, setPreviewsPaused, usePreviewPlayback, usePreviewsPaused } from "@/components/preset-preview";
+import { CONNECT_GPU_EVENT, signInHref, useHydrated, useStatus } from "@/lib/api";
+import { copyWithToast } from "@/lib/clipboard";
+import type { PresetCardData } from "@/lib/preset-cards";
+import { cn } from "@/lib/utils";
+
+/** A row that scrolls sideways on a phone, its edges fading where there's more to see. */
+export function FadeRow({ className, children }: { className?: string; children: React.ReactNode }) {
+  const ref = useFadeEdges<HTMLDivElement>();
+  return (
+    <div ref={ref} className={cn("fade-x scrollbar-none max-sm:-mx-4 max-sm:overflow-x-auto max-sm:px-4", className)}>
+      {children}
+    </div>
+  );
+}
+
+/** A row of cards: a grid from sm up, a rail that snaps on a phone, with the next card peeking at the edge. */
+export function HomeRail({ className, children }: { className?: string; children: React.ReactNode }) {
+  return <FadeRow className={cn("flex snap-x snap-mandatory scroll-px-4 sm:grid sm:[mask-image:none]", className)}>{children}</FadeRow>;
+}
+
+/** Stops every preview playing by itself, on every page, and remembers it; a hover still plays one. */
+export function PausePreviews() {
+  const paused = usePreviewsPaused();
+  const Icon = paused ? Play : Pause;
+  const label = paused ? "Play previews" : "Pause previews";
+  return (
+    <button
+      type="button"
+      onClick={() => setPreviewsPaused(!paused)}
+      aria-label={label}
+      title={label}
+      className="inline-flex size-7 shrink-0 items-center justify-center gap-1.5 rounded-full border text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:w-[8.5rem]"
+    >
+      <Icon className="size-3" />
+      <span className="max-sm:hidden">{label}</span>
+    </button>
+  );
+}
+
+/** The self-host card's Copy button: the commands go to the clipboard, and the icon turns to a check for a moment. */
+export function CopyCommand({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        if (!(await copyWithToast(text, "Commands copied"))) return;
+        setDone(true);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setDone(false), 1500);
+      }}
+      className="inline-flex h-6 items-center gap-1.5 rounded-full bg-white/10 px-2.5 text-[12px] text-white/80 transition-colors hover:bg-white/15 hover:text-white"
+    >
+      {done ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {done ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+/**
+ * A studio's card. It plays where nothing can hover, like the cards above it; with a mouse it waits for one, so the
+ * clips higher on the page keep the screen's few players. `zoom`: a still that slowly closes in on hover instead.
+ */
+export function StudioCard({ href, label, line, card, zoom }: { href: string; label: string; line: string; card: PresetCardData; zoom?: boolean }) {
+  const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(card.id, card.preview, { auto: "touch" });
+  return (
+    <IntentLink ref={ref} href={href} {...handlers} className="group/studio flex min-w-0 flex-col gap-2 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <StudioPicture zoom={zoom}>
+        <PresetPreview preview={card.preview} hue={card.hue} playing={playing} />
+      </StudioPicture>
+      <StudioName label={label} line={line} />
+    </IntentLink>
+  );
+}
+
+export function StudioPicture({ zoom, className, children }: { zoom?: boolean; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={cn("relative isolate aspect-[4/3] overflow-hidden rounded-lg bg-muted", className)}>
+      <div
+        className={cn(
+          "absolute inset-0 ease-out motion-safe:transition-transform",
+          zoom ? "motion-safe:duration-[1200ms] motion-safe:group-hover/studio:scale-[1.06]" : "motion-safe:duration-[400ms] motion-safe:group-hover/studio:scale-[1.03]",
+        )}
+      >
+        {children}
+      </div>
+      <CardPending />
+    </div>
+  );
+}
+
+export function StudioName({ label, line }: { label: string; line: string }) {
+  return (
+    <div className="min-w-0 px-0.5">
+      <p className="flex items-center gap-1.5 text-[14px] font-medium">
+        {label}
+        <ArrowRight className="size-3.5 text-muted-foreground transition-transform duration-150 group-hover/studio:translate-x-0.5 group-hover/studio:text-foreground" />
+      </p>
+      <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{line}</p>
+    </div>
+  );
+}
+
+/**
+ * The three steps to start, for who's looking: a guest signs up, an account connects its GPU, the owner of their own
+ * install connects ComfyUI or adds a key. Until the status comes, a guest's (as the composer's line); every step
+ * keeps its height, so nothing moves when it changes.
+ */
+export function StartSteps() {
+  const hydrated = useHydrated();
+  const data = useStatus().data;
+  const status = hydrated ? data : undefined;
+  const viewer = status?.viewer;
+  const owner = !!status && !viewer;
+  const link = "inline-flex items-center gap-1 text-[13px] font-medium text-brand-text hover:underline underline-offset-2";
+  const done = (text: string) => (
+    <span className="inline-flex items-center gap-1 text-[13px] font-medium text-foreground">
+      <Check className="size-3.5 text-brand-text" /> {text}
+    </span>
+  );
+  const steps: { title: string; text: string; action: React.ReactNode }[] = [
+    {
+      title: "Look around.",
+      text: "Open every studio, preset and model, no account needed.",
+      action: (
+        <IntentLink href="/effects" className={link}>
+          Browse effects <ArrowRight className="size-3.5" />
+        </IntentLink>
+      ),
+    },
+    {
+      title: "Sign up free.",
+      text: "A free account runs open models on your own GPU, never on ours.",
+      action:
+        viewer?.kind === "account" ? (
+          done("You’re signed in")
+        ) : owner ? (
+          <IntentLink href="/settings#get-started" className={link}>
+            Connect ComfyUI or add a key <ArrowRight className="size-3.5" />
+          </IntentLink>
+        ) : (
+          <a href={signInHref("signup")} className={link}>
+            Sign up free <ArrowRight className="size-3.5" />
+          </a>
+        ),
+    },
+    {
+      title: "Connect your ComfyUI.",
+      text: "Use the ComfyUI on this computer, or a link to one elsewhere. Fuobe checks what it has and shows what runs on it.",
+      action: viewer?.gpu.connected ? (
+        done("Your GPU is connected")
+      ) : viewer?.kind === "account" ? (
+        <button type="button" onClick={() => window.dispatchEvent(new Event(CONNECT_GPU_EVENT))} className={link}>
+          Connect your GPU <ArrowRight className="size-3.5" />
+        </button>
+      ) : (
+        <IntentLink href="/connect" className={link}>
+          Connect your GPU <ArrowRight className="size-3.5" />
+        </IntentLink>
+      ),
+    },
+  ];
+  return (
+    <ol className="space-y-5">
+      {steps.map((s, i) => (
+        <li key={s.title} className="flex gap-3">
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-brand-faint text-[12px] font-semibold text-brand-text tabular-nums">{i + 1}</span>
+          <div className="min-h-[68px] min-w-0">
+            <p className="text-[15px] font-medium">{s.title}</p>
+            <p className="mt-0.5 text-[13px] text-muted-foreground">{s.text}</p>
+            <div className="mt-1.5 flex h-5 items-center">{s.action}</div>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}

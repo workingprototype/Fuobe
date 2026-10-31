@@ -73,8 +73,8 @@ describe("the preset covers manifest", () => {
   it("is read only on the server and in the preset header's own chunk", () => {
     // Client chunks keep whatever client code uses from a module. preset-cards.ts is in the galleries',
     // home's, shorts' and mixed media's chunks, so importing the manifest there (or preset-card-data.ts,
-    // which does) would ship it to all of them. A new importer belongs here only if it's a server page
-    // or loaded on its own (next/dynamic), like the preset header.
+    // which does) would ship it to all of them. A new importer belongs here only if it's a server page,
+    // server-only (Home's showcase) or loaded on its own (next/dynamic), like the preset header.
     const sources = fs
       .readdirSync(path.join(root, "src"), { recursive: true, encoding: "utf8" })
       .filter((f) => /\.tsx?$/.test(f))
@@ -89,9 +89,10 @@ describe("the preset covers manifest", () => {
       "app/(studio)/apps/page.tsx",
       "app/(studio)/effects/page.tsx",
       "app/(studio)/motions/page.tsx",
-      "app/(studio)/page.tsx",
       "components/preset-header.tsx",
+      "lib/home-showcase.ts",
     ]);
+    expect(fs.readFileSync(path.join(root, "src", "lib", "home-showcase.ts"), "utf8")).toMatch(/^import "server-only";$/m);
     // The slim map (which presets have a cover, and a clip: a few KB) is for the pickers, each in its own chunk: the
     // camera motion and Mix pickers (next/dynamic in composer.tsx) and Cinema Studio's moves (next/dynamic in
     // camera-moves.tsx, loaded when the "#" picker or the Director panel's Movement tab shows them).

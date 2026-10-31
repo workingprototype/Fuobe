@@ -123,6 +123,18 @@ export const ASSIST_SUGGESTIONS = [
   "A 10-second vertical video of a fox running through snow, with sound",
 ] as const;
 
+/** The longest prompt a link can type into a new chat (/assist?prompt=). */
+export const ASSIST_PROMPT_MAX = 2000;
+
+/**
+ * What a new chat's composer starts with, from its address: "/name " for ?skill=<name> (a skill's "Use in a new
+ * chat"), else ?prompt=<text> (Home's examples), cut to ASSIST_PROMPT_MAX. Nothing is sent until the viewer sends it.
+ */
+export function assistDraft(skill: string | null, prompt: string | null): string {
+  if (skill) return /^[a-z0-9-]+$/.test(skill) ? `/${skill} ` : "";
+  return (prompt ?? "").slice(0, ASSIST_PROMPT_MAX);
+}
+
 // ---------------------------------------------------------------------------
 // Modes (Supercomputer's Free / Smart / Manual)
 
