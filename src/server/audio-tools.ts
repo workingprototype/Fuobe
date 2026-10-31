@@ -166,9 +166,10 @@ export async function previewAudioTool(body: AudioToolRequest): Promise<AudioToo
       : visitor
         ? [account ? lastGpuDevice(account) : undefined, undefined]
         : await Promise.all([comfyDevice().catch(() => undefined), comfyDbsModels().catch(() => undefined)]);
-    if (body.quality && installed && !installed.includes(DBS_MODELS[body.quality])) throw new AudioToolError(missingDbs(DBS_MODELS[body.quality], installed));
     const pick = hostPick(device, installed);
     const quality = body.quality ?? pick;
+    // Picked or the host's pick: a host with neither model on disk can't run its pick either.
+    if (installed && !installed.includes(DBS_MODELS[quality])) throw new AudioToolError(missingDbs(DBS_MODELS[quality], installed));
     const { duration: seconds, channels } = p.split ?? {};
     Object.assign(out, { hostPick: pick, ...(device && { device }), ...(installed && { installed: installed.map((m) => (m === DBS_MODELS.best ? "best" : "fast")) }), ...(p.headerChannels && { channels: p.headerChannels }) });
     if (seconds) out.estimate = splitTime({ seconds, quality, mode: dbsChannelsFor(body.stereo ? "each channel" : "mono", channels), channels, device });

@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   backgroundLowered,
   CLOUD_ONLY_PROBLEM,
@@ -59,12 +61,17 @@ process.env.FUOBE_DATA_DIR = dir;
 // Nothing listens: the open model runs on the demo provider.
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
 
+const toasts = vi.hoisted(() => ({ error: [] as string[] }));
+vi.mock("sonner", () => ({ toast: Object.assign(() => {}, { error: (m: string) => void toasts.error.push(m) }) }));
+
 const { setSetting } = await import("@/server/settings");
 const { getAsset, saveFile, scratchDir, storedMedia } = await import("@/server/storage");
 const gens = await import("@/server/generations");
 const route = await import("@/app/api/audio-tools/route");
 const exportRoute = await import("@/app/api/audio-tools/export/route");
 const { PART_MAX } = await import("@/server/mix-export");
+const { uploadSource } = await import("@/components/audio-tools/split-tool");
+const { CONNECT_GPU_HEADER, CONNECT_GPU_MESSAGE, GUEST_HEADER, GUEST_RUN_MESSAGE } = await import("@/lib/guest-access");
 
 beforeAll(() => setSetting("demoMode", "auto"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -615,5 +622,112 @@ describe("POST /api/audio-tools/export (a mix sent in parts)", () => {
     const over = stream(new Uint8Array(PART_MAX * 3));
     expect((await exportRoute.POST(req("offset=0", over.body))).status).toBe(413);
     expect(over.pulled()).toBeLessThanOrEqual(PART_MAX + 2 * 1024 ** 2);
+  });
+});
+
+describe("a price check on a ComfyUI without the DBS model it would use", () => {
+  it("refuses the host's pick in words, as it refuses a picked model, before anything runs", async () => {
+    // A CPU ComfyUI with ComfyUI-DBS loaded: GET /models/dbs lists the files on disk.
+    let files: string[] = [];
+    const server = http.createServer((req, res) => {
+      const at = (req.url ?? "").split("?")[0];
+      const body = at === "/system_stats" ? { system: { comfyui_version: "0.41.0" }, devices: [{ name: "cpu", type: "cpu" }] } : at === "/models/dbs" ? files : null;
+      res.writeHead(body ? 200 : 404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    setSetting("comfyUrl", url);
+    globalThis.__fuobeComfyReach = { ok: true, at: Date.now(), url, seen: Date.now() };
+    globalThis.__fuobeComfyDevice = globalThis.__fuobeComfyDbs = undefined;
+    try {
+      const media = upload(5, 2, "pick.wav");
+      const price = (asked: Record<string, unknown>) => post({ tool: "split", engine: "open", media, kind: "audio", ...asked }, true);
+      // Neither model on disk: no quality picked is refused as Fast picked is (the CPU's pick), not priced as if it ran.
+      for (const asked of [{}, { quality: "fast" }]) {
+        const res = await price(asked);
+        expect(res.status).toBe(422);
+        expect((await res.json()).error).toBe(missingDbs("DBS-BSRNN-DnR", []));
+      }
+      // DBS-TIGER alone: the host's pick is it, priced; Fast picked is refused and names Best.
+      files = ["DBS-TIGER-DnR/config.json", "DBS-TIGER-DnR/model.safetensors"];
+      globalThis.__fuobeComfyDbs = undefined;
+      expect(await (await price({})).json()).toMatchObject({ demo: false, hostPick: "best", installed: ["best"], device: "cpu" });
+      expect((await (await price({ quality: "fast" })).json()).error).toBe(missingDbs("DBS-BSRNN-DnR", ["DBS-TIGER-DnR"]));
+    } finally {
+      setSetting("comfyUrl", "");
+      globalThis.__fuobeComfyReach = undefined;
+      globalThis.__fuobeComfyDevice = globalThis.__fuobeComfyDbs = undefined;
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+});
+
+describe("the soundtrack while it uploads (the page's source)", () => {
+  type Shown = { id?: string; ref: string; preview: string; kind: "audio" | "video"; name?: string; uploading?: boolean } | null;
+  const answer = (status: number, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
+  const film = (name = "Film.wav") => new File([new Uint8Array(64)], name, { type: "audio/wav" });
+  let server: () => Response | Promise<Response> = () => answer(500, {});
+  beforeEach(() => {
+    toasts.error.length = 0;
+    vi.stubGlobal("fetch", async () => server());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** The page's source as React keeps it: the upload puts it up, then changes what is there by its answer. */
+  function page() {
+    let source: Shown = null;
+    const seen: Shown[] = [];
+    const put = (s: NonNullable<Shown>) => void seen.push((source = s));
+    const update = (next: (cur: Shown) => Shown) => void seen.push((source = next(source)));
+    return { seen, now: () => source, remove: () => void (source = null), upload: (f = film()) => uploadSource(f, "audio", put, update) };
+  }
+
+  it("a guest's refused upload goes back to the empty tool, not Uploading… for good", async () => {
+    server = () => answer(401, { error: GUEST_RUN_MESSAGE }, { [GUEST_HEADER]: "1" });
+    const p = page();
+    await p.upload();
+    expect(p.seen.map((s) => s && { uploading: s.uploading, name: s.name })).toEqual([{ uploading: true, name: "Film.wav" }, null]);
+    expect(p.now()).toBeNull();
+  });
+
+  it("so does an account's without its GPU, and a file the server reads as another kind (with why)", async () => {
+    server = () => answer(403, { error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { [CONNECT_GPU_HEADER]: "1" });
+    const p = page();
+    await p.upload();
+    expect(p.seen.map((s) => s?.uploading ?? null)).toEqual([true, null]);
+    server = () => answer(201, { id: "a1", url: "/api/files/uploads/a1.png", kind: "image" });
+    toasts.error.length = 0;
+    await p.upload(film("cover.wav"));
+    expect(p.now()).toBeNull();
+    expect(toasts.error).toEqual(["Audio only — drop a sound file here"]);
+  });
+
+  it("a finished upload gives the soundtrack its address and keeps the file's name", async () => {
+    server = () => answer(201, { id: "a2", url: "/api/files/uploads/a2.wav", kind: "audio" });
+    const p = page();
+    await p.upload();
+    expect(p.now()).toMatchObject({ ref: "/api/files/uploads/a2.wav", preview: "/api/files/uploads/a2.wav", kind: "audio", name: "Film.wav", id: p.seen[0]?.id });
+    expect(p.now()?.uploading).toBeUndefined();
+  });
+
+  it("a soundtrack removed or replaced while it uploads stays as it is when the answer comes", async () => {
+    let reply: (r: Response) => void = () => {};
+    server = () => new Promise<Response>((r) => (reply = r));
+    const p = page();
+    const removed = p.upload();
+    p.remove();
+    reply(answer(201, { id: "a3", url: "/api/files/uploads/a3.wav", kind: "audio" }));
+    await removed;
+    expect(p.now()).toBeNull();
+    // Replaced: the newer file stays, whatever the older one's answer.
+    const older = p.upload(film("Older.wav"));
+    const refuse = reply;
+    server = () => answer(201, { id: "a4", url: "/api/files/uploads/a4.wav", kind: "audio" });
+    await p.upload(film("Newer.wav"));
+    refuse(answer(401, { error: GUEST_RUN_MESSAGE }, { [GUEST_HEADER]: "1" }));
+    await older;
+    expect(p.now()).toMatchObject({ ref: "/api/files/uploads/a4.wav", name: "Newer.wav" });
   });
 });

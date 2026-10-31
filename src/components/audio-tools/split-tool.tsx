@@ -117,7 +117,26 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 // ---------------------------------------------------------------------------
 // Input
 
-function AddMedia({ onPick }: { onPick: (s: Source) => void }) {
+/**
+ * Upload a file as the soundtrack: `put` shows it at once with its local preview, then `update` gives it its address,
+ * or takes it away when the upload is refused (a guest, an account without its GPU, a file of another kind) or fails,
+ * so the tool never stays on "Uploading…". Its answer counts only while it's still this upload: a soundtrack removed or
+ * replaced meanwhile stays as it is.
+ */
+export function uploadSource(f: File, kind: "audio" | "video", put: (s: Source) => void, update: (next: (cur: Source | null) => Source | null) => void): Promise<void> {
+  const id = nanoid(8);
+  return fileToSlot(
+    f,
+    (v) => {
+      const s: Source | null = v && { ...v, id, kind: v.kind === "video" ? "video" : "audio", name: f.name };
+      if (s?.uploading) put(s);
+      else update((cur) => (cur?.id === id ? s : cur));
+    },
+    kind,
+  );
+}
+
+function AddMedia({ onPick, onUpdate }: { onPick: (s: Source) => void; onUpdate: (next: (cur: Source | null) => Source | null) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -125,7 +144,7 @@ function AddMedia({ onPick }: { onPick: (s: Source) => void }) {
     if (!f) return;
     const kind = kindOfFile(f);
     if (kind !== "audio" && kind !== "video") return void toast("Audio or video only — drop a sound file or a clip here");
-    void fileToSlot(f, (v) => v && onPick({ ...v, kind: v.kind === "video" ? "video" : "audio", name: f.name }), kind);
+    void uploadSource(f, kind, onPick, onUpdate);
   };
   return (
     <div
@@ -721,7 +740,7 @@ export function SplitSoundtrackTool({ tabs }: { tabs?: React.ReactNode }) {
       )}
       <div className={cn("mx-auto max-w-[860px] space-y-3", source ? "pt-4" : "mt-8")}>
         {!source ? (
-          <AddMedia onPick={take} />
+          <AddMedia onPick={take} onUpdate={setSource} />
         ) : (
           <SourcePanel
             source={source}
