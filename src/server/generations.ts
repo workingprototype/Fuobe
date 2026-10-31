@@ -244,6 +244,8 @@ export interface ListOptions {
    * own: they stay out of the owner's lists).
    */
   account?: string;
+  /** Every account's runs, never the owner's: the owner's view of what accounts make (src/server/account-admin.ts). */
+  accounts?: boolean;
   /** Date range on createdAt: since ≤ t < until. */
   since?: number;
   until?: number;
@@ -261,6 +263,8 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
   };
   const oneOf = (col: string, values: unknown[]) => add(`${col} IN (${values.map(() => "?").join(", ")})`, ...values);
   if (o.account) add("json_extract(g.request_json, '$.account') = ?", o.account);
+  // A range rather than IS NOT NULL: SQLite can search the generations_account index for a range (it scans it whole for IS NOT NULL).
+  else if (o.accounts) add("json_extract(g.request_json, '$.account') > ''");
   else add("json_extract(g.request_json, '$.account') IS NULL");
   if (o.batchId) add("g.batch_id = ?", o.batchId);
   if (o.feature) add("g.feature = ?", o.feature);

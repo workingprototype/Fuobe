@@ -87,9 +87,8 @@ export const ACCOUNT_MESSAGES = {
   lengthNeeded: "Send the file with its size (Content-Length).",
 } as const;
 
-/** What an account may keep in all: 3 GB, or 1 GB in its first 7 days. */
-export function accountTotalBytes(id: string): number {
-  const created = accountById(id)?.createdAt ?? 0;
+/** What an account may keep in all: 3 GB, or 1 GB in its first 7 days (`created`: when it signed up, when known). */
+export function accountTotalBytes(id: string, created = accountById(id)?.createdAt ?? 0): number {
   return Date.now() - created < ACCOUNT_LIMITS.newAccountDays * DAY ? ACCOUNT_LIMITS.newAccountBytes : ACCOUNT_LIMITS.totalBytes;
 }
 

@@ -36,7 +36,7 @@ const DAY = 86_400_000;
 const MAX_IDS = 500;
 
 const STATUSES = new Set(["queued", "running", "succeeded", "failed", "canceled"]);
-const KINDS = new Set(["image", "video", "audio", "text", "model3d"]);
+export const KINDS = new Set(["image", "video", "audio", "text", "model3d"]);
 
 /** A library request that can't be done, with the HTTP status the routes answer with. */
 export class LibraryError extends Error {
@@ -224,7 +224,7 @@ export function setReview(list: string[], review: ReviewStatus | null): number {
 // Folders (nested: each has a parent, null at the library root; one folder per generation)
 
 /** The SQL test for a helper step of `g` (isHelperFeature); the names are constants, not input. */
-const HELPER_SQL = `(g.feature LIKE '%${HELPER_SUFFIX}' OR g.feature IN (${HELPER_FEATURES.map((f) => `'${f}'`).join(", ")}))`;
+export const HELPER_SQL = `(g.feature LIKE '%${HELPER_SUFFIX}' OR g.feature IN (${HELPER_FEATURES.map((f) => `'${f}'`).join(", ")}))`;
 
 interface FolderRow {
   id: string;
