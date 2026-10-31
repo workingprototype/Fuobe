@@ -151,6 +151,8 @@ export const CUSTOM_NODE_REPOS = {
   'h3-relay': 'https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220',
   // DBS soundtrack separation (docs/research/dbs-separation-7.md §4): pinned in install-comfyui.sh, not on the validation server.
   'ComfyUI-DBS': 'https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/f656e53434b5485c148a2866fbd6ddc6b6152ed6',
+  // Owner's SOTA image families (2026-10-31): AusBoss's crop, pad and stitch nodes (Qwen-Image 2.1 inpaint and expand), MIT.
+  'ausboss-nodes': 'https://github.com/ausboss/ComfyUI-AusBoss',
 };
 
 // Node classes of the packs entries list in `packs` (packs the validation server doesn't have installed): the build
@@ -159,6 +161,7 @@ export const PACK_CLASSES = {
   h3_character_swap: /^H3CharacterSwap/,
   'h3-relay': /^(H3Relay|LabsH3)/,
   'ComfyUI-DBS': /^DBS(Loader|Separate)$/,
+  'ausboss-nodes': /^AUSBOSS_NODES_/,
 };
 
 // Model download locations for files that the source workflow does not annotate
@@ -297,6 +300,12 @@ export const KNOWN_MODELS = {
   'DBS-BSRNN-DnR/config.json': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/config.json' },
   'DBS-TIGER-DnR/model.safetensors': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/model.safetensors' },
   'DBS-TIGER-DnR/config.json': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/config.json' },
+  // owner's SOTA families (2026-10-31): Qwen-Image 2.1. `variants`: the same weights in another precision in the same repo.
+  'qwen_image_2.1_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors', variants: ['qwen_image_2.1_bf16.safetensors'] },
+  'qwen_image_2.1_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors', variants: ['qwen_image_2.1_turbo_bf16.safetensors'] },
+  'qwen3vl_8b_int8_convrot.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors', variants: ['qwen3vl_8b_bf16.safetensors'] },
+  'qwen_image_2.1_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors' },
+  'qwen-image-2.1-outpaint-v2.safetensors': { folder: 'loras', url: 'https://huggingface.co/ausboss/Qwen-Image-2.1-Outpaint-LoRA/resolve/main/qwen-image-2.1-outpaint-v2.safetensors' },
 };
 
 const WAN_NEG_EN =
@@ -2171,6 +2180,109 @@ export const SPEC = [
       'Fuobe Soul\'s edit route (Soul 2.0 image-to-image): the picture scaled to Soul\'s tier (megapixels 1 = 720p, 2 = 1080p) on the 16-pixel grid, VAE-encoded, then the Soul sampler ' +
       '(8 steps, cfg 1, res_multistep, shift 3) at denoise = strength (0.6 like fal\'s z-image/turbo/image-to-image; about 0.17 would be Higgsfield\'s refiner pass, an experiment until the evaluation harness measures it). ' +
       'The look\'s LoRAs are injected after the UNETLoader (LoraLoaderModelOnly), as on z-image-turbo-t2i. The result keeps the picture\'s shape.',
+  },
+
+  // ---- Owner's SOTA image families: Qwen-Image 2.1 (2026-10-31) ------------------------
+  // Core ComfyUI 0.42.0 nodes (TextEncodeQwenImage21, QwenImage21Cache); inpaint and expand also need the AusBoss nodes.
+  // The Qwen 2.1 VAE decodes four channels, so every graph drops the alpha (SplitImageWithAlpha) before saving or stitching.
+  {
+    id: 'qwen-image-21-t2i',
+    title: 'Qwen-Image 2.1 Text to Image',
+    capability: 't2i',
+    handBuilt: 'hand-built/qwen-image-21-t2i.json',
+    bindings: {
+      prompt: [b('4', 'prompt')], width: [b('5', 'width')], height: [b('5', 'height')], seed: [b('6', 'seed')], steps: [b('6', 'steps')],
+    },
+    outputs: [{ node: '9', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 32 },
+    vramGb: 20,
+    license: 'Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only',
+    notes:
+      'The owner\'s image_qwen_image_2_1_t2i-working-great-default.json, its subgraph flattened: int8 model, Qwen3-VL 8B int8 text encoder (type qwen_image), ' +
+      'TextEncodeQwenImage21 (no negative, resolution 1024, no images), EmptyLatentImage, KSampler 25 steps, cfg 1, euler, simple, denoise 1 (as saved). ' +
+      'Removed: the ResolutionSelector (width/height bind the latent, multiples of 32 as the owner\'s note asks, native up to 2048x2048) and the SaveImageAdvanced (SaveImage after SplitImageWithAlpha). ' +
+      'cfg 1: no negative prompt. Proof [O]: the owner\'s saved workflow; not rendered through Fuobe yet.',
+  },
+  {
+    id: 'qwen-image-21-edit',
+    title: 'Qwen-Image 2.1 Image Edit (up to 4 references)',
+    capability: 'edit',
+    handBuilt: 'hand-built/qwen-image-21-edit.json',
+    bindings: {
+      prompt: [b('30', 'prompt')], image: [b('10', 'image')], image2: [b('11', 'image')], image3: [b('12', 'image')], image4: [b('13', 'image')],
+      seed: [b('32', 'seed')], steps: [b('32', 'steps')],
+    },
+    outputs: [{ node: '90', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048 },
+    vramGb: 20,
+    license: 'Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only',
+    notes:
+      'The proven preview graph qwen21-edit-25 (FashDash\'s 25-step camera_q21 stage) with the references wired as the owner\'s image_qwen_image_2_1_image_edit.json / homecenter graph: ' +
+      'each image scaled to 2048 on its long side (lanczos), all of them on one TextEncodeQwenImage21 (images.image_1..4, resolution 0 = each at its own size on the 32 grid, vae linked, no negative), ' +
+      'its latent (image 1\'s size: no custom-size latent, which shifts the edit), QwenImage21Cache auto, KSampler 25 steps, cfg 1, euler, simple. Output follows image 1 (2048 on the long side). ' +
+      'Images 2-4 are optional: the provider drops a reference not given (dropBranch into TextEncodeQwenImage21). Prompt: one plain instruction, then one keep clause pointing at the picture ' +
+      '("Keep ... exactly as in image 1"); refer to references as image 1/2/3/4. Removed: the ComfySwitchNode custom size, compare and note nodes. Proof [P]: 133 preview edits (qwen21-edit-25 and turbo).',
+  },
+  {
+    id: 'qwen-image-21-turbo-edit',
+    title: 'Qwen-Image 2.1 Turbo Image Edit (8 steps, up to 4 references)',
+    capability: 'edit',
+    handBuilt: 'hand-built/qwen-image-21-turbo-edit.json',
+    bindings: {
+      prompt: [b('30', 'prompt')], image: [b('10', 'image')], image2: [b('11', 'image')], image3: [b('12', 'image')], image4: [b('13', 'image')], seed: [b('70', 'noise_seed')],
+    },
+    outputs: [{ node: '90', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048 },
+    vramGb: 20,
+    license: 'Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only',
+    notes:
+      'The owner\'s image_qwen_image_2_1_turbo_image_edit.json as the proven preview graphs qwen21-edit-fast / qwen21-edit-fast-2img run it: turbo int8 model, the fixed 8-step ManualSigmas ' +
+      'schedule, KSamplerSelect euler, CFGGuider cfg 1, RandomNoise, SamplerCustomAdvanced on the encoder\'s latent; references as qwen-image-21-edit (2048 lanczos, resolution 0, up to 4, optional ones dropped). ' +
+      'No steps binding: the sigmas are the schedule. Removed: the prompt enhancer branch (Qwen3.5 9B PE model, off in the owner\'s template), the custom-size switch, compare and notes. ' +
+      'FashDash\'s blind test: as good as 25 steps (dressing 21 vs 22 of 48), weaker only on hard camera turns and product rotations (use qwen-image-21-edit there). Proof [P]: the preview end images.',
+  },
+  {
+    id: 'qwen-image-21-inpaint',
+    title: 'Qwen-Image 2.1 Inpaint (crop around the mask, paste back)',
+    capability: 'inpaint',
+    handBuilt: 'hand-built/qwen-image-21-inpaint.json',
+    bindings: {
+      prompt: [b('22', 'values.a')], image: [b('10', 'image')], mask: [b('11', 'image')], seed: [b('27', 'seed')], steps: [b('27', 'steps')],
+    },
+    outputs: [{ node: '90', kind: 'image' }],
+    vramGb: 20,
+    license: 'Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only; AusBoss nodes MIT',
+    notes:
+      'The AusBoss pack\'s example "Qwen Image 2.1 Inpaint (AusBoss)" (the only Qwen 2.1 inpaint recipe on the owner\'s PC; not one of the owner\'s saved workflows), its two subgraphs flattened: ' +
+      'Crop For Inpaint (context 1.6, blend 8 px, multiple 32, 1.5 MP, bicubic) -> GrowMask 8 on the crop\'s mask -> StringFormat "{a} Keep everything else exactly the same." -> ' +
+      'TextEncodeQwenImage21 with the crop as image 1 (resolution 0) -> VAEEncode of the crop + SetLatentNoiseMask -> QwenImage21Cache -> KSampler 25 steps, cfg 1, euler, simple -> ' +
+      'SplitImageWithAlpha -> Stitch Inpaint (classic, no colour match) back into the full picture. mask = separate uploaded PNG, same size as image, read from the RED channel: white = change ' +
+      '(as flux1-fill-inpaint). Removed: Mask by Touch and its SAM 3.1 model (the mask is uploaded), the speed LoRA (off as saved), the crop/pad loader (LoadImage), compare, timer and notes. ' +
+      'Prompt: say what goes in the painted area like asking a person ("Replace the cup with a glass of orange juice"). Proof [I]: not rendered yet.',
+  },
+  {
+    id: 'qwen-image-21-outpaint',
+    title: 'Qwen-Image 2.1 Expand (outpaint-v2 LoRA, Qwen3-VL scene description)',
+    capability: 'outpaint',
+    handBuilt: 'hand-built/qwen-image-21-outpaint.json',
+    bindings: {
+      prompt: [b('21', 'string')], image: [b('10', 'image'), b('11', 'image')],
+      padLeft: [b('10', 'pad_left'), b('11', 'pad_left')], padTop: [b('10', 'pad_top'), b('11', 'pad_top')],
+      padRight: [b('10', 'pad_right'), b('11', 'pad_right')], padBottom: [b('10', 'pad_bottom'), b('11', 'pad_bottom')],
+      seed: [b('32', 'seed')], steps: [b('32', 'steps')],
+    },
+    outputs: [{ node: '90', kind: 'image' }],
+    limits: { padMultiple: 8 },
+    vramGb: 20,
+    license: 'Qwen Research License Agreement (Qwen-Image 2.1): NON-COMMERCIAL, research and evaluation only; outpaint LoRA by AusBoss under the same licence; AusBoss nodes MIT',
+    notes:
+      'The owner\'s qwenImage21Outpaint_v12.json as the proven preview graph qwen21-expand runs it (FashDash\'s expand stage): Crop + Rotate + Pad puts the photo on a gray (#808080) canvas grown by the pads ' +
+      '(feather 12, scaled to 1 MP on the 32 grid) -> outpaint-v2 LoRA at 1 -> Qwen3-VL 8B (the same text encoder, TextGenerate, the owner\'s instruction, seed fixed) describes the picture, ' +
+      '"Outpaint the image: ... Scene:" leads -> TextEncodeQwenImage21 with the canvas as image 1 -> KSampler 25 steps, cfg 1, euler, simple, no noise mask (it drew a box at the seam) -> ' +
+      'SplitImageWithAlpha -> Stitch Inpaint (blend in, tone match 1) -> scaled to the full-size padded canvas, and the original photo composited back on top (second pad node, feather 48). ' +
+      'Pads are the input photo\'s pixels (multiples of 8); defaults 384/288/384/288 = a 1.5x zoom-out of a 1536x1152 photo. Grow at most about the photo\'s own size per side per run. ' +
+      'prompt = the optional "what goes there" hint (the lead-in "Also include in the prompt:" is added); it must not name the subject, which then appears again in the margin. ' +
+      'Removed: AusBoss Seed/Text/Compare/RunTimer/ShowText/WorkflowNote and its SaveImage (SaveImage). Proof [P]: the preview expand stills.',
   },
 
   // ---- Fuobe DoP (Originals O4): LTX-2.3 camera moves, FPV and transitions with LoRAs ------------

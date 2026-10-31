@@ -667,8 +667,8 @@ export function probeComfySync(timeoutMs = 1500): boolean {
 // ---------------------------------------------------------------------------
 // Building the prompt
 
-/** Loader classes whose input is an uploaded file, and which input holds it. */
-const MEDIA_LOADERS: Record<string, string> = { LoadImage: "image", LoadImageMask: "image", LoadVideo: "file", VHS_LoadVideo: "video", LoadAudio: "audio", VHS_LoadAudioUpload: "audio" };
+/** Loader classes whose input is an uploaded file, and which input holds it (AusBoss's Crop + Rotate + Pad loads the upload itself). */
+const MEDIA_LOADERS: Record<string, string> = { LoadImage: "image", LoadImageMask: "image", LoadVideo: "file", VHS_LoadVideo: "video", LoadAudio: "audio", VHS_LoadAudioUpload: "audio", AUSBOSS_NODES_ImageCropRotatePad: "image" };
 
 // What we learned about each uploaded clip / track from its header (duration, size, fps, audio), by ComfyUI file name.
 declare global {
@@ -725,6 +725,13 @@ const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?:
   // Pixal3D multi-view: the front, then any of the other sides.
   "image-to-3d-trellis2-multiview": { hints: { image: "Add a photo of the front" }, views: { sides: ["front", "left", "back", "right"], into: "Pixal3DMultiViewConditioning" } },
 };
+
+/**
+ * Encoders that take their extra references as optional inputs (Qwen-Image 2.1's and FIBO 2's image list, Krea 2 Edit's
+ * person): a reference left out goes with the nodes only it feeds, and the encoder runs on the ones it was given.
+ * Slots drop from the last, so an encoder's numbered inputs never have a gap.
+ */
+const OPTIONAL_REFERENCE_INPUTS: ReadonlySet<string> = new Set(["TextEncodeQwenImage21", "TextEncodeFibo2", "Krea2EditModelPatch", "Krea2EditGroundedEncode"]);
 
 /** Uploads that are sides of one object (image = the first side, image2 the second…), and the node they all go into. */
 interface ViewSlots {
@@ -1309,8 +1316,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.duration = Math.round((clipLength ?? (Math.max(...tracks) || 600)) * 100) / 100 + 0.5; // the mux trims it to the picture
   }
 
-  // Reference images the user left out: dropped from a FLUX.2 reference chain, else the previous image
-  // again where that's harmless (style boards, multi-reference edits), else a clear "add …" message.
+  // Reference images the user left out: dropped from a FLUX.2 reference chain or from an encoder that takes them as
+  // optional inputs, else the previous image again where that's harmless (style boards, multi-reference edits), else a
+  // clear "add …" message.
   let graph = workflow;
   const left: string[] = [...studioLeft];
   // A side nobody photographed is left out (its cut-out and crop with it); the front is needed.
@@ -1329,7 +1337,8 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   for (const [k, prev] of [["image2", "image"], ["image3", "image2"], ["image4", "image3"]] as const) {
     if (rules.views || !b[k] || values[k] !== undefined || rules.required?.includes(k) || left.includes(k)) continue;
     if (values[prev] === undefined && !left.includes(prev)) continue;
-    const bypassed = b[k]!.length === 1 ? bypassReference(graph, b[k]![0].node) : null;
+    const loader = b[k]!.length === 1 ? b[k]![0].node : undefined;
+    const bypassed = loader ? (bypassReference(graph, loader) ?? dropBranch(graph, loader, OPTIONAL_REFERENCE_INPUTS, manifest.outputs.map((o) => o.node))) : null;
     if (bypassed) {
       graph = bypassed;
       left.push(k);

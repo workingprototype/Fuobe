@@ -661,12 +661,13 @@ export function dropLoadedSound(wf: ComfyWorkflow, loaders: string[], keep: stri
 
 /**
  * An optional upload with no file (a side of a multi-view 3D model nobody photographed): the loader goes, with
- * every node downstream of it, up to the inputs of `into` nodes (Pixal3DMultiViewConditioning's "left"), which
- * are dropped. Null when its branch doesn't end in such an input, or reaches an output node in `keep` (then the
- * upload can't simply be left out).
+ * every node downstream of it, up to the inputs of `into` nodes (Pixal3DMultiViewConditioning's "left"; one class
+ * or a set of them), which are dropped. Null when its branch doesn't end in such an input, or reaches an output node
+ * in `keep` (then the upload can't simply be left out).
  */
-export function dropBranch(wf: ComfyWorkflow, loaderId: string, into: string, keep: string[] = []): ComfyWorkflow | null {
+export function dropBranch(wf: ComfyWorkflow, loaderId: string, into: string | ReadonlySet<string>, keep: string[] = []): ComfyWorkflow | null {
   if (!wf[loaderId]) return null;
+  const isInto = (cls: string) => (typeof into === "string" ? cls === into : into.has(cls));
   const gone = new Set([loaderId]);
   const cut: { id: string; input: string }[] = [];
   for (const queue = [loaderId]; queue.length; ) {
@@ -674,7 +675,7 @@ export function dropBranch(wf: ComfyWorkflow, loaderId: string, into: string, ke
     for (const [cid, n] of Object.entries(wf)) {
       for (const [input, v] of Object.entries(n.inputs)) {
         if (!isLinkValue(v) || v[0] !== id) continue;
-        if (n.class_type === into) cut.push({ id: cid, input });
+        if (isInto(n.class_type)) cut.push({ id: cid, input });
         else if (keep.includes(cid)) return null;
         else if (!gone.has(cid)) {
           gone.add(cid);
