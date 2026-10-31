@@ -288,6 +288,9 @@ describe("cost and mentions", () => {
     expect(costLabel({ demo: false, cost: 0 }, fmt)).toBe("Free");
     expect(costLabel({ demo: false, cost: 0.4 }, fmt)).toBe("≈ $0.40");
     expect(costLabel({ demo: false, cost: null }, fmt)).toBe("");
+    // A price the provider hasn't published (fal's MOSS-Image with LoRAs) is said, never shown as free.
+    expect(costLabel({ demo: false, cost: null, unknown: true }, fmt)).toBe("Price unknown");
+    expect(costLabel({ demo: false, cost: null, unknown: true, compact: true }, fmt)).toBe("Price unknown");
   });
   it("spots @mentions (spellcheck off)", () => {
     expect(hasMention("@Koi_Pond_Night at dusk")).toBe(true);

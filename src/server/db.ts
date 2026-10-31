@@ -611,12 +611,31 @@ declare global {
   var __fuobeDb: Database.Database | undefined;
 }
 
+/**
+ * A data folder that ran PR #15's branch before the owner dropped the old accounts packages on 10-30
+ * (`claude/fuobe-parity-4` up to f7c6d8e, `claude/fuobe-r5-batch-7` up to c9cd489) has places 23 and 24 marked done for
+ * that branch's own migrations: acc-1's identity tables and acc-2's audit-log trigger. In this list those places are
+ * the GPU pre-flight's tables and `assets.account_id`, so such a folder would skip both without a word. A place is
+ * forgotten when this list's work is missing and the dropped package's is there, so the loop below runs it. The dropped
+ * tables stay: nothing reads them, and nothing anyone made is deleted.
+ */
+function forgetDroppedBranchMigrations(db: Database.Database): void {
+  const done = (id: number) => !!db.prepare("SELECT 1 FROM _migrations WHERE id = ?").get(id);
+  const has = (type: "table" | "trigger", name: string) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?").get(type, name);
+  const hasColumn = (table: string, column: string) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
+  const forget = (id: number) => db.prepare("DELETE FROM _migrations WHERE id = ?").run(id);
+  if (done(23) && !has("table", "gpu_snapshots") && hasColumn("users", "auth_user_id")) forget(23);
+  if (done(24) && !hasColumn("assets", "account_id") && has("trigger", "audit_log_no_delete")) forget(24);
+}
+
 function open(): Database.Database {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const db = new Database(path.join(DATA_DIR, "fuobe.db"));
   db.pragma("journal_mode = WAL");
   db.pragma("busy_timeout = 5000");
   db.exec(`CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY)`);
+  forgetDroppedBranchMigrations(db);
   const done = new Set(
     (db.prepare("SELECT id FROM _migrations").all() as { id: number }[]).map((r) => r.id),
   );

@@ -9,12 +9,12 @@ import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@
 import { RowDot } from "@/components/gpu/readiness-chip";
 import { badgeFor, useGpuBadges } from "@/hooks/use-gpu";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useToday } from "@/hooks/use-today";
 import type { Badge as BadgeT } from "@/lib/gpu/types";
 import { type Engine, type ModelDef } from "@/lib/catalog/types";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { bestForStudio, groupModels, toggleIn } from "@/lib/composer";
-import { formatCost } from "@/lib/format";
-import { ISOLATED_NOTE } from "@/lib/model-rows";
+import { ISOLATED_NOTE, pickerPrice } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
 import { EngineSwitch } from "./engine-switch";
 import { ResponsivePanel } from "./responsive-panel";
@@ -56,13 +56,6 @@ export function ModelBadges({ model, max }: { model: ModelDef; max?: number }) {
   );
 }
 
-function priceHint(m: ModelDef): string {
-  if (m.engine === "open") return "Free";
-  if (!m.pricing) return "";
-  const unit = { image: "/image", second: "/sec", video: "/video", request: "/run", megapixel: "/MP", minute: "/min" }[m.pricing.unit];
-  return `${formatCost(m.pricing.usd)}${unit}`;
-}
-
 const STAR_KEY_HINT = "Alt+S";
 
 /**
@@ -83,6 +76,7 @@ function ModelRow({
   selected,
   starred,
   showEngine,
+  today,
   onStar,
   gpu,
   gpuName,
@@ -91,6 +85,8 @@ function ModelRow({
   selected: boolean;
   starred: boolean;
   showEngine: boolean;
+  /** The browser's day: a launch price holds through its last day (null until hydrated: no price shown for one). */
+  today: number | null;
   onStar: () => void;
   /** Its state on the viewer's GPU (the GPU pre-flight). */
   gpu?: BadgeT | null;
@@ -124,7 +120,7 @@ function ModelRow({
           </span>
         )}
       </span>
-      <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{priceHint(m)}</span>
+      <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{pickerPrice(m, today)}</span>
       {/* Pointer only: inside an option it would be a nested control. Keyboard: Alt+S on the highlighted row (starKey). */}
       <button
         type="button"
@@ -194,6 +190,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
   const mobile = useIsMobile();
   const [recent] = useStoredList(RECENT_MODELS);
   const [starred, setStarred] = useStoredList(STARRED_MODELS);
+  const today = useToday();
   const engines = useMemo<Engine[]>(() => (mode === "both" ? ["cloud", "open"] : [mode]), [mode]);
   // "Best" ranks models that do what the studio's default does first (its main operation), not single-purpose tools.
   const best = useMemo(() => {
@@ -254,6 +251,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
                   selected={value?.id === m.id}
                   starred={starred.includes(m.id)}
                   showEngine={!!q || m.engine !== engine}
+                  today={today}
                   onStar={() => setStarred((s) => toggleIn(s, m.id))}
                   gpu={m.engine === "open" ? badgeFor(badges, { modelId: m.id }) : null}
                   gpuName={badges?.gpu}

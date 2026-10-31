@@ -174,6 +174,16 @@ const isAudio = (r: string) => /\.(wav|mp3|ogg|flac|m4a|webm)$/i.test(r);
 /** The photos a training uses: the element's images, up to Soul ID's 80. */
 const photosOf = (el: StudioElement) => el.references.filter((r) => !isAudio(r)).slice(0, SOUL_ID_PHOTOS.max);
 
+/** When the consent line was confirmed for an element's Soul ID training (its latest that recorded one), if ever. */
+export function consentOnFile(elementId: string): number | undefined {
+  const rows = db().prepare(`SELECT meta_json FROM trainings WHERE element_id = ? AND meta_json LIKE '%"consentAt"%' ORDER BY created_at DESC`).all(elementId) as Pick<Row, "meta_json">[];
+  for (const r of rows) {
+    const at = metaOf(r).consentAt;
+    if (typeof at === "number") return at;
+  }
+  return undefined;
+}
+
 export function startTraining(elementId: string, targetId: string, opts: { consent?: boolean } = {}): Training {
   const el = getElement(elementId);
   const target = getTrainingTarget(targetId);

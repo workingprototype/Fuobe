@@ -9,14 +9,16 @@ import type {
   Operation,
   Preset,
   PresetRoute,
-  Pricing,
 } from "./types";
 import { sourceSeconds } from "./clip-windows";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
 import { anglesPrompt, anglesWords, ANGLES_ORIGINAL } from "./open-tools";
-import { numFramesValue, sizeValue } from "./payload";
+import { askedSize, numFramesValue, sizeValue } from "./payload";
 import { characterScale, CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
+import { pricingOn, type PriceClock } from "./promo";
+
+export { pricingAt } from "./promo";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -356,6 +358,7 @@ export function planGeneration(
   if (requires?.images && (req.inputs?.images?.length ?? 0) < requires.images) throw new Error(requires.msg);
   if (requires?.prompt && !prompt) throw new Error(requires.msg);
   if (requires?.mask && !req.inputs?.mask) throw new Error(requires.msg);
+  if (requires?.video && !req.inputs?.video) throw new Error(requires.msg);
   if (requires?.points && !params.points?.length) throw new Error(requires.msg);
   if (op === "bg-remove-video" || op === "depth-video") checkVideoToolOptions(model, op, prompt, params);
   // Remove background on a model that makes both files: the picker's default (the cut-out) unless asked, so the job
@@ -395,6 +398,8 @@ export function planGeneration(
     params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
   }
 
+  params = controlSets(model, params);
+
   const requested = Math.max(1, Math.min(8, params.numOutputs ?? 1));
   const maxPerJob = Math.max(1, model.options.maxOutputs ?? 1);
   const perJobOutputs = Math.min(requested, maxPerJob);
@@ -410,6 +415,24 @@ export function planGeneration(
     ...(notes.length && { notes }),
     ...(soulPlan && { soul: soulPlan }),
   };
+}
+
+/**
+ * A control whose value stands for several settings (ModelOptions.controls[].sets: MOSS-Image's Quality is 50 steps,
+ * CFG 3 and euler on your GPU) writes them into params.extra in its own place; a setting the request gives itself wins.
+ * The request as asked (Reuse) keeps the control's value.
+ */
+export function controlSets(model: ModelDef, params: GenParams): GenParams {
+  const controls = (model.options.controls ?? []).filter((c) => c.sets);
+  if (!controls.length) return params;
+  const extra: Record<string, unknown> = { ...params.extra };
+  for (const c of controls) {
+    const value = extra[c.param] ?? c.default;
+    delete extra[c.param];
+    const chosen = value === undefined || value === null ? undefined : c.sets?.[String(value)];
+    for (const [k, v] of Object.entries(chosen ?? {})) if (!(k in extra)) extra[k] = v;
+  }
+  return { ...params, extra: Object.keys(extra).length ? extra : undefined };
 }
 
 /**
@@ -527,6 +550,8 @@ const NEEDS: Partial<
   "extract-frames": { video: true, msg: "Add the video to take frames from" },
   "images-to-video": { images: 1, msg: "Add the images, in order" },
   overlay: { images: 2, msg: "Add the picture and the overlay to put on it" },
+  // N7-5 (the open engine also needs the browser's render along the path: its model's options.requires.video)
+  "camera-path": { images: 1, msg: "Add the still to film along the path" },
 };
 
 const given = (v: unknown) => (Array.isArray(v) ? v.length > 0 : !!v);
@@ -588,14 +613,6 @@ function missingImages(model: ModelDef, req: Pick<GenerationRequest, "inputs">):
   if ((req.inputs?.images?.length ?? 0) >= min) return null;
   const labels = model.options.imageLabels?.slice(0, min);
   return labels?.length === min ? `Add the ${labels.join(" and the ")}` : `${model.name} needs ${min} images`;
-}
-
-/** The price that holds at `now`: a launch promo to the end of its last day (UTC), then the list price. */
-export function pricingAt(p: Pricing, now = Date.now()): Pricing {
-  if (!p.promo) return p;
-  const { promo, ...list } = p;
-  if (!(now <= Date.parse(`${promo.until}T23:59:59.999Z`))) return list;
-  return { ...list, usd: promo.usd, ...(promo.byResolution ? { byResolution: promo.byResolution } : {}) };
 }
 
 /**
@@ -687,10 +704,30 @@ function sentMegapixels(params: GenParams): number | undefined {
   return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 ? (w * h) / (1024 * 1024) : undefined;
 }
 
-/** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
-export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation, withLoras = false): number | null {
+/**
+ * The megapixels the run's route makes when it sends a size (FieldMap.size: fal's MOSS-Image image_size): the aspect
+ * ratio's size, or the size asked for (a layout's canvas) kept on the route's grid and within its limits, as the
+ * payload sends it. fal's megapixel is 1024 × 1024 pixels. Undefined when the route sends no size.
+ */
+function routeMegapixels(model: ModelDef, params: GenParams, op?: Operation): number | undefined {
+  const size = (op ? model.routes.find((r) => r.op === op) : model.routes[0])?.map?.size;
+  if (!size) return undefined;
+  const asked = size.key ? askedSize(params.extra?.[size.key]) : undefined;
+  const { width, height } = sizeValue(size, params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution, asked);
+  return (width * height) / (1024 * 1024);
+}
+
+/**
+ * Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. A launch price (Pricing.promo) is read
+ * at `now` (./promo): the clock when not given (the server planning a run, the browser after it hydrates); with null (a
+ * page prerendering, the browser before it hydrates) a launch-priced model's price isn't known yet (null).
+ */
+export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation, withLoras = false, now?: PriceClock): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
-  const p = model.pricing;
+  const p = pricingOn(model.pricing, now);
+  if (!p) return null;
+  // A LoRA endpoint with no published price (fal's MOSS-Image /lora): unknown, never free.
+  if (withLoras && p.lorasUnknown) return null;
   const n = params.numOutputs ?? 1;
   const res = params.resolution ?? model.defaults?.resolution;
   // A run with LoRAs goes to the LoRA endpoint, which has its own price.
@@ -704,7 +741,9 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   // Per megapixel of every image made: Soul's sizes are known (about 1 or 2 MP), so is a size sent as fal's image_size
   // {width, height} (Fuobe Mixed Media's frames); other models are taken as 1 MP.
   if (p.unit === "megapixel") {
-    const mp = soulKind(model) ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution) : (sentMegapixels(params) ?? 1);
+    const mp = soulKind(model)
+      ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution)
+      : (routeMegapixels(model, params, op) ?? sentMegapixels(params) ?? 1);
     per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
   }
   if (p.unit === "second") {

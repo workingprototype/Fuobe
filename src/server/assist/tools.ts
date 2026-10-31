@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getModel, modelsFor } from "@/lib/catalog";
 import { offeredModels } from "../model-access";
 import { dualEngine, runsOn } from "@/lib/catalog/engines";
+import { pricingAt } from "@/lib/catalog/promo";
 import { currentModelId } from "@/lib/catalog/replaced";
 import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { type PlannedJob, totalCost } from "@/lib/assist";
@@ -38,6 +39,8 @@ const KINDS = ["image", "video", "audio", "text", "model3d"] as const;
 
 function summarize(m: ModelDef) {
   const o = m.options;
+  // The price of the day asked: a launch price while it lasts (the note says when it ends).
+  const p = m.pricing && pricingAt(m.pricing);
   const local = m.routes.some((r) => r.provider === "llm");
   const configured = m.routes.some((r) => (r.provider === "llm" ? llmBackends(r).length > 0 : provider(r.provider).isConfigured()));
   return {
@@ -56,13 +59,13 @@ function summarize(m: ModelDef) {
     about: m.tagline,
     does: [...new Set(m.routes.map((r) => r.op))].map((op) => `${op} (${OPERATION_LABELS[op]})`),
     price: dualEngine(m)
-      ? `free on your GPU; in the cloud ${m.pricing ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.withLoras ? ` ($${m.pricing.withLoras} with LoRAs)` : ""}` : "priced per run"}`
+      ? `free on your GPU; in the cloud ${p ? `$${p.usd} per ${p.unit}${p.withLoras ? ` ($${p.withLoras} with LoRAs)` : ""}` : "priced per run"}`
       : m.engine === "open"
         ? local
           ? "free (your machine)"
           : "free (your GPU)"
-        : m.pricing
-          ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.note ? ` — ${m.pricing.note}` : ""}`
+        : p
+          ? `$${p.usd} per ${p.unit}${p.note ? ` — ${p.note}` : ""}${p.lorasUnknown ? "; with LoRAs the price is unknown (not published yet)" : ""}`
           : "unknown",
     connected: configured,
     ...(o.aspectRatios && { aspectRatios: o.aspectRatios }),

@@ -642,7 +642,8 @@ describe("LM Studio", () => {
     const [g] = gens.createGenerations({ feature: "ads", modelId: "oss-text-llm", op: "write", prompt: "THINK FOREVER" });
     expect((await settle(g.id)).error).toMatch(/spent its whole reply thinking/);
     lms.close();
-    await expect(ask("hello")).rejects.toThrow(/^Couldn't reach LM Studio at http:\/\/127\.0\.0\.1:\d+ \(ECONNREFUSED\)\. Start LM Studio's local server and load a model/);
+    // Refused, or (the kept-alive connection it just dropped) closed under the call: either way it says how to start it.
+    await expect(ask("hello")).rejects.toThrow(/^Couldn't reach LM Studio at http:\/\/127\.0\.0\.1:\d+ \((ECONNREFUSED|UND_ERR_SOCKET)\)\. Start LM Studio's local server and load a model/);
   });
 
   it("reloads a model loaded with too little context (Settings → Reload) through /api/llm, without keys in the answers", async () => {

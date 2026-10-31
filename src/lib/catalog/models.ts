@@ -1,5 +1,4 @@
 import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
-import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
 import { loraEntry, loraRef } from "./loras";
@@ -51,6 +50,24 @@ const VIDEO_UPSCALE_TIERS = ["720p", "1080p", "1440p", "2160p"];
 const TRYON_LORA = loraEntry("tryon-klein-4b");
 /** The try-on LoRA card's own instruction, for a run with no words. */
 export const TRYON_PROMPT = "a full-body photo of a person. Replace the outfit with the top and bottom as shown in the reference images. The final image is a full body shot.";
+
+/**
+ * MOSS-Image's sampler settings on your GPU (the graph's own defaults are Standard): Standard is Comfy's template
+ * (25 steps, CFG 2.5, er_sde), Quality OpenMOSS's guide (50 steps, CFG 3, euler), Fast Spectrallic's SFT with the
+ * 8-step DMD LoRA merged in (8 steps, CFG 1; a 5.4 GB file of its own; untested on layouts).
+ */
+const MOSS_QUALITY: NonNullable<ModelOptions["controls"]>[number] = {
+  param: "quality",
+  label: "Quality",
+  values: ["standard", "quality", "fast"],
+  default: "standard",
+  labels: { standard: "Standard · 25 steps", quality: "Best · 50 steps", fast: "Fast · 8 steps (extra 5.4 GB file)" },
+  sets: {
+    standard: { steps: 25, cfg: 2.5, sampler: "er_sde", scheduler: "simple" },
+    quality: { steps: 50, cfg: 3, sampler: "euler", scheduler: "simple" },
+    fast: { steps: 8, cfg: 1, sampler: "euler", scheduler: "simple", unet: "moss_image_sft_8stepdmd_int8_convrot.safetensors" },
+  },
+};
 
 type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badges"] };
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
@@ -170,6 +187,27 @@ const open: ModelDef[] = [
     routes: [comfy("t2i", "sdxl-t2i")],
     options: { aspectRatios: IMG_AR, seed: true, negativePrompt: true },
     defaults: { aspectRatio: "1:1" },
+  }),
+  // MOSS-Image (OpenMOSS, Apache-2.0; research #7 §4.6): plain words, or a layout of boxes compiled to its JSON
+  // (src/lib/layout-prompt.ts). The cloud half is `moss-image` on fal.
+  o({
+    id: "oss-moss-image",
+    name: "MOSS-Image",
+    vendor: "OpenMOSS",
+    family: "moss",
+    kind: "image",
+    tagline: "Clean Chinese and English text, follows layout boxes · on your GPU, about 13 GB of files",
+    badges: ["new"],
+    routes: [comfy("t2i", "moss-image-t2i", "MOSS-Image SFT int8, Qwen3.5-9B w4a8, FLUX.2 small decoder; core nodes")],
+    options: {
+      aspectRatios: IMG_AR,
+      resolutions: ["1K", "1.5K"],
+      seed: true,
+      negativePrompt: true,
+      layout: "moss",
+      controls: [MOSS_QUALITY],
+    },
+    defaults: { aspectRatio: "1:1", resolution: "1K" },
   }),
   o({
     id: "oss-qwen-edit",
@@ -1136,6 +1174,27 @@ const open: ModelDef[] = [
     routes: [comfy("separate-audio", "dub-prepare-separate-transcribe", "voice stem, background stem, timed cues, transcript")],
     options: {},
   }),
+  // DBS (docs/research/dbs-separation-7.md): dialogue, music and effects from any soundtrack, small enough for a CPU. The
+  // provider picks the model by the host (DBS-TIGER on CUDA, DBS-BSRNN otherwise) unless one is asked for, and separates
+  // a file with more than 2 channels in mono (ComfyUI saves mono or stereo only). Split soundtrack (src/lib/av/split.ts) runs on it.
+  o({
+    id: "oss-dbs-separate",
+    name: "DBS (dialogue, music, effects)",
+    vendor: "Open source",
+    family: "dbs",
+    kind: "audio",
+    tagline: "Splits a soundtrack into dialogue, music and effects · 23 MB · CPU or GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("separate-audio", "separate-soundtrack-dbs", "voice, music, effects and music & effects (FLAC) + a speed report; ComfyUI-DBS")],
+    options: {
+      promptless: true,
+      controls: [
+        // No default: the host decides (DBS-TIGER on a CUDA GPU, DBS-BSRNN on a CPU, where it runs about 3x faster).
+        { param: "separationModel", label: "Model", values: ["DBS-BSRNN-DnR", "DBS-TIGER-DnR"], labels: { "DBS-BSRNN-DnR": "Fast (DBS-BSRNN)", "DBS-TIGER-DnR": "Best (DBS-TIGER)" } },
+        { param: "channels", label: "Stems", values: ["mono", "each channel"], default: "mono", labels: { mono: "Mono", "each channel": "Stereo stems (about twice as long)" } },
+      ],
+    },
+  }),
   o({
     id: "oss-qwen3-asr",
     name: "Qwen3-ASR",
@@ -1401,6 +1460,27 @@ const open: ModelDef[] = [
       ],
     },
   }),
+  // N7-5: Cinema's "Film this path" on the GPU. The browser renders the 3D scene along the path (Uni3C's render_video);
+  // Wan 2.1 I2V starts from the still and Uni3C keeps its camera on the render. 81 frames at 16 fps, always.
+  o({
+    id: "oss-uni3c-path",
+    name: "Wan 2.1 + Uni3C path",
+    vendor: "Alibaba (Wan, DAMO Uni3C)",
+    family: "wan",
+    kind: "video",
+    tagline: "A still filmed along the camera path you fly in the 3D scene: Uni3C keeps Wan 2.1 on your path · 5 s · ~48 GB GPU · Apache-2.0",
+    badges: ["new"],
+    hidden: true,
+    routes: [comfy("camera-path", "wan21-i2v-uni3c-path", "your browser's render of the path guides Wan 2.1 I2V 720P through core Uni3C")],
+    options: {
+      resolutions: ["480p", "720p"],
+      aspectRatios: ["auto", ...VID_AR],
+      seed: true,
+      maxImages: 1,
+      requires: { images: 1, video: true, msg: "Add the still and the render of the path (Cinema's 3D scene records it when you film a path)" },
+    },
+    defaults: { resolution: "480p", aspectRatio: "auto" },
+  }),
   o({
     id: "oss-tryon-klein",
     name: "FLUX.2 [klein] Try-On",
@@ -1554,11 +1634,12 @@ function withLastFrameExtend(m: ModelDef): ModelDef {
   return { ...m, routes: [...m.routes, { op: "extend", provider: "fal", endpoint: LAST_FRAME_CHAIN, note: "last frame → Kling image-to-video → joined" }] };
 }
 
-/** A launch price while it lasts, the list price after (FLUX 3 Max); read once, when the catalog loads. */
-const withCurrentPrice = (m: ModelDef): ModelDef => (m.pricing?.promo ? { ...m, pricing: pricingAt(m.pricing) } : m);
-
-/** Cloud models (fal and Replicate) and the cloud tools. */
-const cloud: ModelDef[] = [...CLOUD_MODELS.map(withLastFrameExtend).map(withCurrentPrice), ...cloudTools];
+/**
+ * Cloud models (fal and Replicate) and the cloud tools. A launch price (FLUX 3 Max, H3 Max camera controls) stays in
+ * Pricing.promo beside the list price: whoever prices reads the clock (./promo), never the catalog, so the studios'
+ * slices and the pages prerendered at build time carry both and the browser shows the one of the day it is.
+ */
+const cloud: ModelDef[] = [...CLOUD_MODELS.map(withLastFrameExtend), ...cloudTools];
 
 // ---------------------------------------------------------------------------
 // Fuobe Originals: one model on both engines

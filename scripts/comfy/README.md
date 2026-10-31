@@ -12,7 +12,7 @@ Full write-up (what is in the library, validation results, models, quirks for ap
 
 | file | purpose |
 |---|---|
-| `install-comfyui.sh` | reproducible CPU install of ComfyUI + 17 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3; ToSVG (VTracer) in round 4). Licences are information: the non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) is installed too, and `NC_PACKS=0` leaves it out (Settings → Models & licences has a switch per node pack). Round 4 part 4 adds Akatz Labs' GPL-3.0 `h3_character_swap` for Genjutsu's Character swap (`H3_PACK=0` leaves it out; it needs `ffmpeg` and `ffprobe`), and H3 Relay 2.0 with `H3_RELAY=1` (the Relay swap, H3 Person Removal and, since round 4 part 5, the Character Swap Studio's two graphs) |
+| `install-comfyui.sh` | reproducible CPU install of ComfyUI + 18 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3; ToSVG (VTracer) in round 4). Licences are information: the non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) is installed too, and `NC_PACKS=0` leaves it out (Settings → Models & licences has a switch per node pack). Round 4 part 4 adds Akatz Labs' GPL-3.0 `h3_character_swap` for Genjutsu's Character swap (`H3_PACK=0` leaves it out; it needs `ffmpeg` and `ffprobe`), and H3 Relay 2.0 with `H3_RELAY=1` (the Relay swap, H3 Person Removal and, since round 4 part 5, the Character Swap Studio's two graphs). DBS D1 adds ComfyUI-DBS and its 23 MB of weights (`DBS_WEIGHTS=0` skips the weights) |
 | `install-isolated-worker.sh` | a second ComfyUI with its own code copy, base directory, `HOME` and virtualenv for LatentSync 1.6 and ThinkSound (below) |
 | `start-comfyui.sh` / `stop-comfyui.sh` | run ComfyUI in the background on 127.0.0.1:8188 (log: `$COMFYUI_DIR/logs/comfyui.log`) |
 | `export-templates.mjs` | Playwright: opens the ComfyUI frontend, `app.loadGraphData(ui)` → `app.graphToPrompt().output`, writes `build/raw/<key>.api.json` + `.meta.json` (embedded model URLs, missing node types) |
@@ -362,7 +362,7 @@ node validate-workflows.mjs video-character-swap-h3-segment video-mask-h3-relay 
 
 ### Round 5: open tools and Evolution (Originals O11 and O13, 2026-10-29)
 
-Four hand-built entries and one rebuilt one, all `validated: true` (the library: 154 workflows, 149 validated). No new
+Four hand-built entries and one rebuilt one, all `validated: true` (the library then: 154 workflows, 149 validated). No new
 node pack and no new worker; ComfyUI stays at 0.41.0. Fuobe Mixed Media, Fuobe Shorts, Fuobe Marketing Image and
 Fuobe Try-On (O9 and O10) run graphs that were already in the library.
 
@@ -391,6 +391,96 @@ node validate-workflows.mjs qwen-image-edit-2509-angles image-face-mosaic-sam3 v
   rendered anything. Nothing has run on a GPU: not the Lightning LoRA at 6 steps with the angles LoRA, not InfiniteTalk's
   colour correction as `reinhard`, and not the Evolution intensities. `tests/open-tools.test.ts` and
   `tests/evolution-comfy.test.ts` check the provider's bindings on the library files.
+
+## DBS soundtrack separation (DBS D1)
+
+PR #15 adds three hand-built graphs: this one, the fly path's and MOSS-Image's (below), all `validated: true` (the
+library: 158 workflows, 153 validated; the five that aren't are the H3 graphs above, whose node packs the validation
+server doesn't have). One new node pack, ComfyUI-DBS; the other two graphs use core nodes only. None of the three has
+run on a GPU.
+
+One hand-built graph splits a soundtrack into dialogue, music and effects (docs/research/dbs-separation-7.md §4.4, graph A):
+
+```bash
+npm run build -- separate-soundtrack-dbs
+COMFYUI_URL=http://127.0.0.1:<port> COMFYUI_MODELS_DIR=<that ComfyUI>/models node validate-workflows.mjs separate-soundtrack-dbs --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `separate-soundtrack-dbs` | separate-audio | `LoadAudio` (audio, or a video's soundtrack) → `DBSLoader` (`separationModel`: DBS-BSRNN-DnR or DBS-TIGER-DnR) → `DBSSeparate` (`channels`: mono or each channel, `output_sample_rate` input) → stems `voice`, `music`, `effects` and `background` (the original minus the speech, `AudioMerge` subtract) as FLAC, plus the pack's JSON report | yes, on an isolated CPU worker with ComfyUI-DBS and the weights (the shared server does not have the pack); real CPU runs of 6–20 s clips there |
+
+- **Node pack**: ComfyUI-DBS (MIT; vendored DBS code Apache-2.0 with MIT notices) pinned at
+  `f656e53434b5485c148a2866fbd6ddc6b6152ed6` in `install-comfyui.sh`. The Comfy Registry flags its only version (0.1.0) with no
+  public reason; the code was read at this commit. It needs only einops and safetensors, already installed.
+- **Weights** (23 MB): `install-comfyui.sh` downloads `config.json` and `model.safetensors` of JusperLee/DBS-BSRNN-DnR and
+  JusperLee/DBS-TIGER-DnR at pinned revisions into `models/dbs/<model>/` and checks them with `sha256sum -c` (`DBS_WEIGHTS=0`
+  skips it). The manifest lists all four by their path under the folder (`requiredModels`: a CUDA host runs DBS-TIGER, so
+  the Workflows page's install commands fetch both models), which is what `GET /models/dbs` answers, so the Workflows page
+  knows when they are there.
+- **Host pick**: the provider uses DBS-TIGER when `GET /system_stats` says the first device is `cuda` and DBS-BSRNN otherwise
+  (about 3x faster on a CPU: 0.27x real time against 0.09x on a 4-CPU host), unless the run picks one; the other model when
+  `GET /models/dbs` shows the pick isn't on disk, and a model asked for that isn't there is refused in words before the
+  job is queued. `each channel` for stereo stems. ComfyUI saves audio as mono or stereo only (a 5.1 waveform is written as
+  scrambled stereo three times as long), so a file with more than 2 channels is split in `mono` and its background is the
+  music and effects stems added up (the provider rewires node 4 to `AudioMerge` add).
+- **Validation**: the shared validation server doesn't have ComfyUI-DBS, so validate this graph on a ComfyUI that has it
+  (the command above). A run of every id against the shared server records it as `missing_node_type`, not validated,
+  like the H3 entries.
+
+## Fly path (N7-5)
+
+One hand-built graph films a still along a camera path keyframed in Cinema's 3D scene, on core nodes only
+(docs/research/new-models-7.md §3.6):
+
+```bash
+npm run build -- wan21-i2v-uni3c-path
+node validate-workflows.mjs wan21-i2v-uni3c-path --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `wan21-i2v-uni3c-path` | camera-path | `UNETLoader` (Wan 2.1 I2V 14B 720P fp8; `checkpoint` swaps in the 480P fp8 file) → `ModelSamplingSD3` (`shift`) → `ModelPatchLoader` (Uni3C) + `WanUni3CControlnetApply` (`strength`, 0–1) on the browser's render of the path (`video`: `LoadVideo` → `GetVideoComponents`; the node pads or cuts it to the latent's frames and centre-crops it to the size) → umt5 / CLIP vision H / Wan VAE → `WanImageToVideo` (the still as `image`, 81 frames) → `KSampler` (`steps` 30, `cfg` 5, uni_pc; a guess to tune on a GPU) → `VAEDecode` → `CreateVideo` (16 fps) → `SaveVideo` | `/prompt` only (no GPU here); a model-free `LoadVideo` run read the browser's render as 81 frames |
+
+- **Weights**, pinned in `library.spec.mjs`: Kijai/WanVideo_comfy `Wan21_Uni3C_controlnet_fp16.safetensors` @ `8260d429`
+  (1,997,314,376 B, in `models/model_patches`) and Comfy-Org/Wan-2.1 `wan2.1_i2v_720p_14B_fp8_scaled.safetensors` @
+  `123acf1c` (16,401,356,938 B); optional: Kijai/WanVideo_comfy_fp8_scaled's 480P fp8 file @ `4d02bd37` (16,643,349,018 B).
+  The 480P Q8 GGUF Fuobe pins for InfiniteTalk can't load here: core `UNETLoader` reads no GGUF (that needs city96's
+  ComfyUI-GGUF pack). Loading Kijai's file through core `ModelPatchLoader` is inferred from its header keys, not run.
+- **The render** comes from the browser (`src/components/cinema/scene-engine.ts` `recordPath`): 81 frames at 16 fps, black
+  where nothing was seen, VP8 in WebM at exact frame times. Its hole mask is made only when asked for (core's Uni3C node
+  has no mask input; WorldCast, N7-9, will ask).
+- **Licences, as information**: Apache-2.0 (Wan 2.1; Uni3C, whose Kijai repack carries no licence field).
+- **GPU**: Uni3C's own figures are 46–51 GB with offload; Fuobe's older 24 GB note is unverified.
+
+## MOSS-Image (N7-1)
+
+One hand-built graph on core nodes (MOSS-Image is native in the pinned ComfyUI; docs/research/new-models-7.md §4.6):
+
+```bash
+npm run build -- moss-image-t2i
+node validate-workflows.mjs moss-image-t2i --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `moss-image-t2i` | t2i | `UNETLoader` (SFT int8; `unet`) → `CLIPLoader` qwen3.5-9b w4a8, type `moss_image` → `VAELoader` FLUX.2 small → `CLIPTextEncode` ×2 (the prompt: plain words or a compiled layout, verbatim) → `EmptyFlux2LatentImage` (`width` / `height`: the layout's canvas) → `SkipLayerGuidanceDiTSimple` (layer 22, first half) → `KSampler` (`steps`, `cfg`, `sampler`, `scheduler`) → `VAEDecode` → `SaveImage` | `/prompt` only (CPU, zero-byte model stand-ins): no render here |
+
+- **Weights** (13 GB): Comfy-Org/MOSS-Image at `530a4c94f92c35ef6818b1b035a983fe9dcf5f54` (diffusion model 5.41 GB, text encoder
+  7.34 GB, small VAE 0.25 GB), and, for the Fast setting only, Spectrallic's SFT with the 8-step DMD LoRA merged in (5.41 GB,
+  `optionalModels`). All Apache-2.0. The Workflows page's install commands fetch them; nothing is downloaded at build time.
+- **Settings**: Standard is the Comfy template's (25 steps, CFG 2.5, er_sde / simple), Best OpenMOSS's guide (50, 3, euler),
+  Fast the DMD file at 8 steps and CFG 1 (`ModelOptions.controls[].sets` on `oss-moss-image` writes them).
+- **Canvas**: a size the request names (`params.extra.width` / `height`, a layout's canvas) is fitted to the 16-pixel grid
+  and 2048 px a side with its shape kept (`fitCanvas` in `src/lib/comfy.ts`), as fal's `image_size` is, so both engines
+  render one size (2560 × 1000 becomes 2048 × 800 on both).
+- **Licences, as information**: all Apache-2.0, the optional Fast file's too; the small decoder is byte-identical to BFL's
+  Apache-2.0 FLUX.2-small-decoder (the manifest's `license` says so, and Settings → Models & licences shows it).
+- **Not installed on purpose**: LinXce's Comfyui-Moss-LayoutPrompt (its `MOSSImageLayoutPrompt` id collides with core's) and
+  OpenMOSS's loader pack (core's native path is what its own README recommends). Fuobe compiles layouts itself
+  (`src/lib/layout-prompt.ts`).
+- **GPU**: no official VRAM figure (16 GB is a guess with ComfyUI's offloading). comfy-kitchen's int8 / w4a8 kernels need a
+  PyTorch built for CUDA 13 (cu130); otherwise `comfy/quant_ops.py` turns them off with a warning.
 
 ## Adding a workflow
 

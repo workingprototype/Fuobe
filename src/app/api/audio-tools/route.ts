@@ -1,20 +1,23 @@
 import { AudioToolBody, AudioToolError, previewAudioTool, runAudioTool } from "@/server/audio-tools";
 import { priceAs } from "@/server/visitor";
 
-/** Audio → Loop / extend and Join: start a run; `?preview=1` only plans and prices it. */
+/** What a field that doesn't check out means, in words the page shows. */
+const MESSAGES: Record<string, string> = {
+  media: "Add the audio or video to split",
+  video: "Add the video to put the mix on",
+  audio: "Add the audio to loop",
+  duration: "Pick a length up to 10 minutes",
+  crossfade: "Keep the crossfade between 0 and 10 seconds",
+};
+
+/** Audio → Loop / extend, Join and Split soundtrack (and a split's mix put back on its video): start a run; `?preview=1` only plans and prices it. */
 async function post(request: Request) {
-  const parsed = AudioToolBody.safeParse(await request.json().catch(() => null));
+  const raw: unknown = await request.json().catch(() => null);
+  const parsed = AudioToolBody.safeParse(raw);
   if (!parsed.success) {
     const path = parsed.error.issues[0]?.path.join(".") ?? "";
-    const msg = path.startsWith("clips")
-      ? "Add 2 to 10 audio clips to join"
-      : path === "audio"
-        ? "Add the audio to loop"
-        : path === "duration"
-          ? "Pick a length up to 10 minutes"
-          : path === "crossfade"
-            ? "Keep the crossfade between 0 and 10 seconds"
-            : "Check the settings";
+    const remux = (raw as { tool?: unknown } | null)?.tool === "remux";
+    const msg = path.startsWith("clips") ? "Add 2 to 10 audio clips to join" : remux && path === "audio" ? "Export the mix first" : (MESSAGES[path] ?? "Check the settings");
     return Response.json({ error: msg }, { status: 400 });
   }
   try {

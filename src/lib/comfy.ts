@@ -59,15 +59,15 @@ export interface ManifestModel {
 export interface ManifestOutput {
   node: string;
   kind: MediaKind;
-  /** Audio stems of a voice/background separation. */
-  stem?: "voice" | "background";
+  /** Audio stems of a separation: voice / background, and DBS's music and effects. */
+  stem?: "voice" | "background" | "music" | "effects";
   /**
    * What a text, image or 3D output is: timed caption cues, a plain transcript, the detected language, layers, a grid's sheet or tiles…
    * Round 4: OCR "lines" (JSON, boxes 0–1000) and the "frame" the model saw, an EXR sequence's "frames", a whole-"scene" GLB and its
    * "depth" map, a Gaussian "splat", a reference video's style "brief"; a painted eraser's last tracked "mask" (handed to the next
    * window), and a matte graph's "cutout" (transparent video) and "matte" (black and white) videos. A "preview" is the clip shown
    * for an EXR export (the frames ride along zipped). A "master" is a lossless copy a later job continues from (Character Swap
-   * Studio's segment, 16-bit FFV1).
+   * Studio's segment, 16-bit FFV1). A "report" is a node's own account of the run (DBS: model, device, windows, seconds).
    */
   role?:
     | "cues"
@@ -89,7 +89,8 @@ export interface ManifestOutput {
     | "cutout"
     | "matte"
     | "preview"
-    | "master";
+    | "master"
+    | "report";
 }
 
 export interface ManifestWorkflow {
@@ -250,6 +251,25 @@ export function computeDimensions(
   const area = (resolution && RES_AREA[resolution]) || dw * dh;
   const height = Math.sqrt(area / ratio);
   return { width: roundTo(height * ratio, multiple), height: roundTo(height, multiple) };
+}
+
+/**
+ * A canvas the request names (params.extra.width / height: a layout's, Soul's exact sizes) on the workflow's grid and
+ * inside its maxWidth / maxHeight, the shape kept: rounded to the grid, then scaled down whole when a side is past its
+ * limit. The cloud fits the same canvas the same way (payload.ts sizeValue), so 2560 × 1000 is 2048 × 800 on both.
+ */
+export function fitCanvas(width: number, height: number, limits: Record<string, number> | undefined): { width: number; height: number } {
+  const multiple = Number(limits?.dimensionMultiple ?? 16) || 16;
+  const maxW = Number(limits?.maxWidth ?? Infinity);
+  const maxH = Number(limits?.maxHeight ?? Infinity);
+  let w = roundTo(width, multiple);
+  let h = roundTo(height, multiple);
+  const k = Math.min(1, maxW / w, maxH / h);
+  if (k < 1) {
+    w = Math.min(Math.max(multiple, Math.floor(maxW / multiple) * multiple), roundTo(w * k, multiple));
+    h = Math.min(Math.max(multiple, Math.floor(maxH / multiple) * multiple), roundTo(h * k, multiple));
+  }
+  return { width: w, height: h };
 }
 
 /** Frame count for a duration. Wan/Hunyuan want 4n+1, LTX wants 8n+1. */

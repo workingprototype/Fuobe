@@ -1,11 +1,28 @@
 import { readTimeline, timelineTracks } from "@/lib/av/timeline";
+import { toH3MaxTrajectory, type CameraKey } from "@/lib/camera-path";
 import { upscaleFactorFor } from "@/lib/av/upscale";
+import { carriesLayout, LAYOUT_PARAM } from "@/lib/layout-prompt";
 import { loraFields } from "./loras";
 import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MatteOutput, type MediaKind, type Operation, type PixelPoint } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
   if (typeof field === "string") return [field, value];
   return [field.key, field.values && value in field.values ? field.values[value] : value];
+}
+
+/**
+ * A camera path as the route takes it (H3 Max camera-controls): the keyframes within the route's limits, or, for a pure
+ * slide, the endpoint's own truck move in place of them (the field the schema says replaces the trajectory).
+ */
+export function cameraPathFields(f: NonNullable<FieldMap["cameraPath"]>, keys: CameraKey[]): Record<string, unknown> {
+  const cam = toH3MaxTrajectory(keys, { min: f.min, max: f.max, elevation: f.elevation, maxTurns: f.maxTurns });
+  if ("freeCamera" in cam) {
+    if (f.free?.values.includes(cam.freeCamera)) return { [f.free.key]: cam.freeCamera };
+    // No fixed moves on this route: the slide is sent as a still trajectory (the camera holds its pose).
+    const held = toH3MaxTrajectory(keys.map((k) => ({ ...k, truck: 0 })), { min: f.min, max: f.max, elevation: f.elevation, maxTurns: f.maxTurns });
+    return "trajectory" in held ? { [f.key]: held.trajectory } : {};
+  }
+  return { [f.key]: cam.trajectory };
 }
 
 /** "16:9" → 16/9; undefined for "auto" and other names. */
@@ -103,23 +120,50 @@ export function framedLength(f: FieldMap["numFrames"] | undefined, seconds: numb
 
 /**
  * Width and height for an aspect ratio (FieldMap.size): the table's size for the tier and shape when it has one
- * (Fuobe Soul: its first tier when the tier is unknown), else the shape on a `base`×`base` pixel budget; neither
- * side above `max` (Replicate's Z-Image takes 1440).
+ * (Fuobe Soul: its first tier when the tier is unknown), else the shape on a `base`×`base` pixel budget; or the size
+ * the request asks for (`asked`: a layout's canvas) on the route's grid. Neither side above `max` (Replicate's Z-Image
+ * takes 1440) nor below `min` (fal's MOSS-Image takes 512–2048): the shape is scaled to fit, then a side that still
+ * can't keep it is held at the limit.
  */
-export function sizeValue(f: NonNullable<FieldMap["size"]>, aspectRatio: string | undefined, resolution?: string): { width: number; height: number } {
+export function sizeValue(
+  f: NonNullable<FieldMap["size"]>,
+  aspectRatio: string | undefined,
+  resolution?: string,
+  asked?: { width: number; height: number },
+): { width: number; height: number } {
   const base = f.base ?? 1024;
   const ratio = (aspectRatio && ratioOf(aspectRatio)) || 1;
   const round = (v: number) => Math.max(f.multiple, Math.round(v / f.multiple) * f.multiple);
   const tier = f.table && (f.table[resolution ?? ""] ?? Object.values(f.table)[0]);
   const exact = tier && aspectRatio ? tier[aspectRatio] : undefined;
-  let width = exact ? exact[0] : round(base * Math.sqrt(ratio));
-  let height = exact ? exact[1] : round(base / Math.sqrt(ratio));
+  let width = asked ? round(asked.width) : exact ? exact[0] : round(base * Math.sqrt(ratio));
+  let height = asked ? round(asked.height) : exact ? exact[1] : round(base / Math.sqrt(ratio));
   if (f.max !== undefined && Math.max(width, height) > f.max) {
     const k = f.max / Math.max(width, height);
     width = Math.min(f.max, round(width * k));
     height = Math.min(f.max, round(height * k));
   }
+  if (f.min !== undefined && Math.min(width, height) < f.min) {
+    // The smallest side the grid allows at or above the minimum (512 on a 16 grid).
+    const least = Math.ceil(f.min / f.multiple) * f.multiple;
+    const k = least / Math.min(width, height);
+    width = Math.max(least, round(width * k));
+    height = Math.max(least, round(height * k));
+    if (f.max !== undefined) {
+      const most = Math.floor(f.max / f.multiple) * f.multiple;
+      width = Math.min(most, width);
+      height = Math.min(most, height);
+    }
+  }
   return { width, height };
+}
+
+/** A {width, height} the request asks for (params.extra[key]: a layout's canvas), if it gives one. */
+export function askedSize(value: unknown): { width: number; height: number } | undefined {
+  const v = value as { width?: unknown; height?: unknown } | null | undefined;
+  const width = Number(v?.width);
+  const height = Number(v?.height);
+  return v && typeof v === "object" && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? { width, height } : undefined;
 }
 
 /** Path segments that would reach Object.prototype (or a constructor) instead of the payload. */
@@ -358,8 +402,10 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.styleId && input.styleId) out[map.styleId] = input.styleId;
   if (map.numLayers && input.numLayers !== undefined) out[map.numLayers] = input.numLayers;
   if (map.palette && input.palette?.length) out[map.palette.key] = paletteValue(map.palette.format, input.palette);
+  // An object size field the request fills itself (a layout's canvas) is kept on the route's grid and limits.
+  const asked = map.size?.key ? askedSize(input.extra?.[map.size.key]) : undefined;
   if (map.size) {
-    const { width, height } = sizeValue(map.size, input.aspectRatio, input.resolution);
+    const { width, height } = sizeValue(map.size, input.aspectRatio, input.resolution, asked);
     if (map.size.key) out[map.size.key] = { width, height };
     if (map.size.width) out[map.size.width] = width;
     if (map.size.height) out[map.size.height] = height;
@@ -410,6 +456,7 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     out[map.animation.key] = numeric ? n : input.animation;
     if (map.animation.flag) out[map.animation.flag] = true;
   }
+  if (map.cameraPath && input.cameraPath?.length) Object.assign(out, cameraPathFields(map.cameraPath, input.cameraPath));
   if (map.numFrames) {
     const n = numFramesValue(map.numFrames, input);
     if (n !== undefined) out[map.numFrames.key] = n;
@@ -422,8 +469,11 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   // The API's limits on what Fuobe filled in (params.extra below is sent as given).
   for (const [k, r] of Object.entries(map.ranges ?? {})) if (typeof out[k] === "number") out[k] = inRange(out[k] as number, r);
 
-  const ignore = new Set(map.ignore ?? []);
+  // A layout draft rides in params.extra for Reuse and Edit layout; the prompt already carries it, in the model's own form.
+  const ignore = new Set([...(map.ignore ?? []), LAYOUT_PARAM, ...(asked ? [map.size!.key!] : [])]);
   for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) if (!(map.timeline && k === "timeline") && !ignore.has(k)) setPath(out, k, v);
+  // The API's prompt expansion would rewrite a layout's boxes: off whenever the request carries one.
+  if (map.promptExpansion && carriesLayout(input.extra)) out[map.promptExpansion] = false;
   // A background colour given as hex goes out in the palette's shape (Recraft wants {r,g,b}).
   const bg = map.palette?.background;
   if (bg && typeof out[bg] === "string") {
@@ -827,7 +877,8 @@ function hdrOutputs(response: unknown): ExtractedOutput[] {
   return preview ? [{ url: preview.url, kind: "video", contentType: preview.contentType, meta: { preview: "sdr", artifacts: { exr: exr.url } } }] : [];
 }
 
-const STEM_ORDER = ["vocals", "voice", "speech", "target", "drums", "bass", "guitar", "piano", "other", "residual", "accompaniment", "instrumental"];
+// Voice first, then DBS's music and effects, then Demucs's instruments and the backgrounds.
+const STEM_ORDER = ["vocals", "voice", "speech", "target", "music", "sfx", "effects", "drums", "bass", "guitar", "piano", "other", "residual", "accompaniment", "instrumental"];
 
 /** Demucs: {vocals, drums, bass, other, guitar, piano} files; SAM Audio: {target, residual}. Voice first. */
 function stemOutputs(response: unknown): ExtractedOutput[] {

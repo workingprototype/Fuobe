@@ -13,7 +13,7 @@
  *
  * No catalog import (types only), so the composer can use it in the browser.
  */
-import type { Engine, ModelDef, ModelRoute, Operation } from "./types";
+import type { Engine, GenerationRequest, ModelDef, ModelRoute, Operation } from "./types";
 
 /** Kling 4.0 and FLUX 3 Max take up to 10 frames. */
 export const MAX_KEYFRAMES = 10;
@@ -68,6 +68,15 @@ export const chainedWaitMessage = (name: string, op?: Operation) =>
   op === "text-to-3d"
     ? `${name} draws the object first, then builds it in 3D, from words typed in when it starts — give it a typed description, not another step's output`
     : `${name} builds this film from several clips of the images you add when it starts — give it uploaded images and a typed prompt, not another step's output`;
+
+/**
+ * A keyframe film some of whose frames earlier steps make (Turnaround video: the sides the Angles app draws): every
+ * chain slot is a frame with its place among the request's own (ChainSlot.at). The open engine's film can wait for those,
+ * clip by clip; any other chained input is refused as before (chainedWaitMessage).
+ */
+export function framesWait(req: Pick<GenerationRequest, "chain">): boolean {
+  return !!req.chain?.length && req.chain.every((s) => s.slot === "images" && s.at !== undefined && s.at >= 0);
+}
 
 /** What stops Generate in Frames mode before the planner speaks: no start frame, or a model that can't follow frames. */
 export function framesBlocker(model: Pick<ModelDef, "name" | "engine" | "routes" | "options">, count: number): { message: string; slot?: "frames" } | null {

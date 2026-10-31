@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { useSoulFinish } from "@/components/studio/soul-finish";
+import { TurnaroundButton } from "@/components/turnaround/turnaround-dialog";
 import { useSaveElement, useStatus } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
 import {
@@ -32,6 +33,7 @@ import {
   type DirectorSettings,
 } from "@/lib/catalog/cinema";
 import { soulLook } from "@/lib/catalog/soul";
+import { sheetPictures } from "@/lib/catalog/turnaround";
 import { finishedUrl } from "@/lib/soul-post";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
@@ -336,10 +338,42 @@ function SoulCast({ projectId, folderId, engine, context, brief, onOpenChange }:
         <div className="space-y-3 border-t pt-3">
           <p className="text-[12.5px] font-medium">Select an image variant for your cast</p>
           <Results items={results} picked={chosen} onPick={(u) => setPicked((p) => (p.map(current).includes(u) ? [] : [u]))} />
+          <CastTurnaround projectId={projectId} folderId={folderId} engine={engine} name={castName(visible)} results={results} picked={chosen[0]} />
           <SaveElement kind="character" defaultName={castName(visible)} picked={chosen} description={castPrompt(visible, notes)} onSaved={() => onOpenChange(false)} />
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * A Soul Cast result filmed all the way round (build plan N7-6), as a take in the project: the picked variant's sheet (and,
+ * on the open engine, its four cut views), else the first finished one.
+ */
+function CastTurnaround({ projectId, folderId, engine, name, results, picked }: { projectId: string; folderId: string | null; engine: Engine; name: string; results: Generation[]; picked?: string }) {
+  const generate = useCinemaGenerate(projectId);
+  const done = results.filter((g) => g.status === "succeeded");
+  const g = (picked && done.find((x) => x.outputs.some((o) => o.url === picked || o.meta?.original === picked))) || done[0];
+  if (!g) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <p className="min-w-0 flex-1 text-[12px] text-muted-foreground">{picked ? "Film the picked variant all the way round, as a new take." : "Film the first variant all the way round, as a new take."}</p>
+      <TurnaroundButton
+        key={g.id}
+        // The picked variant is the sheet the dialog starts on (a cloud batch is one generation with every variant).
+        pictures={sheetPictures(g, picked)}
+        name={name}
+        engine={engine}
+        fictional
+        features={["cinema-turnaround"]}
+        onRun={async (body) => {
+          // The run's engine is the project's; consent and the character are /api/turnaround's (Soul Cast makes the person).
+          const { views, sheet, route, fill, path, duration, aspectRatio } = body;
+          const turnaround = { views, sheet, route, fill, path, duration, aspectRatio, name };
+          return (await generate.mutateAsync({ input: { engine, mode: "video", action: "turnaround", prompt: "", settings: {}, turnaround }, folderId })).items;
+        }}
+      />
+    </div>
   );
 }
 

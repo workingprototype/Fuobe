@@ -28,6 +28,18 @@ describe("pickOutput: which output of an earlier step a chained slot takes", () 
     expect(pickOutput([voice, bed], { slot: "audio2", stem: "voice" })).toBe(voice);
   });
 
+  it("DBS's music and effects stems answer by name, effects also as sfx; background never takes either", () => {
+    const stem = (s: string): OutputFile => ({ url: `/api/files/${s}.flac`, kind: "audio", contentType: "audio/flac", meta: { stem: s } });
+    const [speech, music, sfx, effects, background] = ["speech", "music", "sfx", "effects", "background"].map(stem);
+    expect(pickOutput([speech, music, sfx], { slot: "audio", stem: "music" })).toBe(music);
+    expect(pickOutput([speech, music, sfx], { slot: "audio", stem: "effects" })).toBe(sfx);
+    expect(pickOutput([speech, music, effects, background], { slot: "audio", stem: "Effects" })).toBe(effects);
+    expect(pickOutput([speech, music, sfx], { slot: "audio2", stem: "background" })).toBeUndefined();
+    expect(pickOutput([speech, music, sfx, background], { slot: "audio2", stem: "background" })).toBe(background);
+    // Without a stem the first audio output: DBS puts the dialogue first.
+    expect(pickOutput([speech, music, sfx, background], { slot: "audio" })).toBe(speech);
+  });
+
   it("other slots are unchanged: a video slot takes a video, an image slot an image, never a stand-in", () => {
     expect(pickOutput([still, clip], { slot: "video" })).toBe(clip);
     expect(pickOutput([voice], { slot: "video" })).toBeUndefined();

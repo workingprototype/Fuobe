@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Generate src/lib/catalog/cloud-models.generated.ts from docs/research/paid-model-apis.json
-(merged with parts 2, 3 and 4: paid-model-apis-2.json, paid-model-apis-3.json, paid-model-apis-4.json).
+(merged with parts 2, 3 and 4: paid-model-apis-2.json, paid-model-apis-3.json, paid-model-apis-4.json, and the
+endpointRecords of research #7, new-models-7.json).
 
 The research file holds verified fal/Replicate input schemas (field names, enums, defaults,
 prices). This script turns a curated list of models (MODELS below) into ModelDef objects with
@@ -34,6 +35,13 @@ for e in RESEARCH_3["endpoints"]:
 # Part 4 (video erase / swap, FPS / HDR / codecs, FFmpeg compose, OCR, 3D scenes, new models): same merge.
 RESEARCH_4 = json.loads((ROOT / "docs/research/paid-model-apis-4.json").read_text())
 for e in RESEARCH_4["endpoints"]:
+    prev = EPS.get((e["provider"], e["endpoint"]))
+    EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
+
+# Research #7 (docs/research/new-models-7.json, endpointRecords in the shape of part 4's endpoints): fal's MOSS-Image and
+# its /lora twin (package N7-1). Same merge.
+NEW_MODELS_7 = json.loads((ROOT / "docs/research/new-models-7.json").read_text(encoding="utf-8"))
+for e in NEW_MODELS_7.get("endpointRecords") or []:
     prev = EPS.get((e["provider"], e["endpoint"]))
     EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
 
@@ -72,8 +80,10 @@ M = []
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
           sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
-          frame_step=None, original=False, sizes=None, keep_shape=False, licence=None, frame_fps=None, frame_multiple=None):
-    """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
+          frame_step=None, original=False, sizes=None, keep_shape=False, licence=None, frame_fps=None, frame_multiple=None,
+          exact_size=False):
+    """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field; a slider's
+    third item is its step, when the generic one is too coarse):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
     formats: {canonical VideoFormat: the API's value} for its output-format field (params.format), checked against the enum.
@@ -95,6 +105,9 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     and the API follows the input image; a route whose own default matches the input (Replicate's match_input_image)
     leaves it out the same way.
     licence: the open weights' licence (ModelLicence) when no hosted LoRA endpoint the model runs on records it.
+    exact_size: the API takes its size as one {width, height} object and rounds it itself ("rounded to multiples of 16
+    between 512 and 2048 pixels": fal's MOSS-Image): FieldMap.size from the aspect ratio with the grid and limits the field's
+    description states, so a layout drawn on that canvas is the picture the API makes.
     A route's options dict may also set max_images (FieldMap.maxImages), note, loraEndpoint (the same model with LoRAs:
     FieldMap.loras comes from its research record) and pin (a Replicate model run by version: the research's version)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
@@ -102,7 +115,7 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
                   ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or [],
                   frame_step=frame_step, original=original, sizes=sizes, keep_shape=keep_shape, licence=licence, frame_fps=frame_fps,
-                  frame_multiple=frame_multiple))
+                  frame_multiple=frame_multiple, exact_size=exact_size))
 
 
 # ----- Image
@@ -156,10 +169,11 @@ model("gpt-image-1-5", "GPT Image 1.5", "OpenAI", "gpt-image", "image",
       "Strong prompt following, text and layout",
       [("t2i", "fal-ai/gpt-image-1.5"), ("edit", "fal-ai/gpt-image-1.5/edit")],
       pricing=("image", 0.13, "high quality"), fixed={"quality": "high"}, defaults={"aspectRatio": "1:1"})
+# FLUX.3, Ideogram 4.5 and Bria FIBO 2 read a Fuobe layout in their own form (src/lib/layout-prompt.ts; research #7 §4.3).
 model("flux-3", "FLUX.3", "Black Forest Labs", "flux", "image",
       "BFL's newest image model with unified generation and editing",
       [("t2i", "blackforestlabs/flux-3/text-to-image"), ("edit", "blackforestlabs/flux-3/edit-image")],
-      badges=["new"], defaults={"aspectRatio": "1:1"})
+      badges=["new"], defaults={"aspectRatio": "1:1"}, options={"layout": "flux3"})
 model("flux-2-pro", "FLUX.2 [pro]", "Black Forest Labs", "flux", "image",
       "Production-grade photorealism with multi-reference editing",
       [("t2i", "fal-ai/flux-2-pro"), ("edit", "fal-ai/flux-2-pro/edit")],
@@ -170,7 +184,7 @@ model("flux-kontext-max", "FLUX.1 Kontext [max]", "Black Forest Labs", "flux", "
       pricing=("image", 0.08), defaults={"aspectRatio": "1:1"})
 model("ideogram-4-5", "Ideogram 4.5", "Ideogram", "ideogram", "image",
       "Best-in-class typography, posters and graphic design",
-      [("t2i", "ideogram/v4.5"), ("edit", "ideogram/v4.5/edit")], defaults={"aspectRatio": "1:1"})
+      [("t2i", "ideogram/v4.5"), ("edit", "ideogram/v4.5/edit")], defaults={"aspectRatio": "1:1"}, options={"layout": "ideogram"})
 model("flux-fill-pro", "FLUX.1 Fill [pro]", "Black Forest Labs", "flux", "image", "Precise inpainting and object replacement with a mask",
       [("inpaint", "fal-ai/flux-pro/v1/fill")], pricing=("megapixel", 0.05), hidden=False)
 model("z-image-inpaint", "Z-Image Turbo Inpaint (hosted)", "Alibaba Tongyi", "z-image", "image", "Cheapest, fastest masked inpainting",
@@ -181,6 +195,18 @@ model("recraft-4-1", "Recraft V4.1", "Recraft", "recraft", "image",
 model("qwen-image-3", "Qwen Image 3", "Alibaba Qwen", "qwen-image", "image",
       "Hosted Qwen with superb bilingual text rendering",
       [("t2i", "alibaba/qwen-image-3/text-to-image"), ("edit", "alibaba/qwen-image-3/edit")], defaults={"aspectRatio": "1:1"})
+# MOSS-Image (research #7 §4.7): OpenMOSS's Apache-2.0 model hosted on fal, $0.05 per megapixel; a run with LoRAs goes to
+# its /lora twin (up to 3, unpublished price). The size goes as image_size {width, height} on fal's 16-pixel grid within
+# 512-2048, so a layout is compiled for the picture fal makes; prompt expansion is off for a layout. PNG, so the words stay sharp.
+MOSS_FAL = next(e for e in NEW_MODELS_7["endpointRecords"] if e["endpoint"] == "fal-ai/moss-image")
+model("moss-image", "MOSS-Image", "OpenMOSS", "moss", "image",
+      "Clean Chinese and English text, and it follows layout boxes",
+      [("t2i", "fal-ai/moss-image", "fal", {"loraEndpoint": "fal-ai/moss-image/lora"})],
+      badges=["new"], defaults={"aspectRatio": "1:1"}, fixed={"output_format": "png"}, exact_size=True, options={"layout": "moss"},
+      sliders=[("num_inference_steps", "Steps"), ("guidance_scale", "Guidance", 0.5)],
+      licence={"licence": re.match(r"[\w.-]+", MOSS_FAL["license"]).group(0), "commercial": True,
+               "note": f"{MOSS_FAL['license']}. fal's safety checker returns a black image when it flags an output",
+               "checked": MOSS_FAL["fetched"]})
 model("wan-2-7-image", "Wan 2.7 Image", "Alibaba Wan", "wan", "image",
       "Wan's image model — cinematic stills that animate well",
       [("t2i", "fal-ai/wan/v2.7/pro/text-to-image"), ("edit", "fal-ai/wan/v2.7/pro/edit")], defaults={"aspectRatio": "16:9"})
@@ -468,7 +494,24 @@ model("minimax-h3", "MiniMax H3", "MiniMax", "hailuo", "video", "Expressive char
 model("minimax-h3-max", "MiniMax H3 Max", "MiniMax", "hailuo", "video", "Top-tier MiniMax with extend",
       [("t2v", "minimax/h3-max/text-to-video"), ("i2v", "minimax/h3-max/image-to-video", "fal", "+flf2v"), ("ref2v", "minimax/h3-max/reference-to-video"),
        ("extend", "minimax/h3-max/extend-video")],
-      badges=["pro"], defaults={"aspectRatio": "16:9"})
+      badges=["pro"], defaults={"aspectRatio": "16:9"},
+      # Build plan N7-6 (Turnaround video): fal bills every H3 Max route per second by resolution (the records' price
+      # text); the flat rate read from the image-to-video record was its 480P launch price. Reference-to-video has no
+      # launch price, so the list rates are used for all of them (image and text to video cost less until 2026-10-31).
+      # Four square references are included; each further one adds about $0.02 (not counted here). 2K is extend's alone
+      # ($0.32/s, its record). No Pricing.promo: it would apply to every route, and reference to video has no launch price.
+      pricing=("second", 0.08, "768P; 480P $0.05, 1080P $0.16, 2K $0.32 (extend) — image and text to video at the launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31; reference to video: 4 square references included, about $0.02 for each one after",
+               {"byResolution": {"480P": 0.05, "768P": 0.08, "1080P": 0.16, "2K": 0.32}}))
+# Build plan N7-5 (Fly path in Cinema's 3D scene): H3 Max following a keyframed camera path from one still. A hidden
+# helper (Cinema's "Film this path" picks it), priced per second by resolution: fal's launch rates until 2026-10-31, then
+# the list rates (Pricing.promo). Prompt expansion stays off so the user's motion words reach the model as written.
+model("minimax-h3-max-camera", "MiniMax H3 Max camera controls", "MiniMax", "hailuo", "video",
+      "A still filmed along a camera path you keyframe: orbits, arcs, dollies and slides that follow the path exactly",
+      [("camera-path", "minimax/h3-max/camera-controls")], hidden=True, ranged_durations=True,
+      defaults={"duration": 5, "resolution": "768P"}, fixed={"prompt_expansion_mode": "disabled"},
+      pricing=("second", 0.08, "768P; 480P $0.05, 1080P $0.16 — launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31",
+               {"byResolution": {"480P": 0.05, "768P": 0.08, "1080P": 0.16},
+                "promo": {"until": "2026-10-31", "usd": 0.052, "byResolution": {"480P": 0.0325, "768P": 0.052, "1080P": 0.104}}}))
 model("hailuo-2-3", "MiniMax Hailuo 2.3", "MiniMax", "hailuo", "video", "Expressive characters and dynamic action",
       [("t2v", "fal-ai/minimax/hailuo-2.3/pro/text-to-video"), ("i2v", "fal-ai/minimax/hailuo-2.3/pro/image-to-video")],
       pricing=("video", 0.49), defaults={"duration": 6}, fixed={"prompt_optimizer": True})
@@ -1204,7 +1247,7 @@ model("grok-imagine-image-2", "Grok Imagine Image 2.0", "xAI", "grok", "image", 
                {"byResolution": {"1k": 0.06, "2k": 0.08}}),
       controls=[("quality", "Quality")], options={"maxImages": 5})
 model("bria-fibo-2", "Bria FIBO 2", "Bria", "bria", "image", "Structured prompts; Bria says it is trained on licensed data only",
-      [("t2i", "bria/fibo-2/generate"), ("edit", "bria/fibo-2/edit")], badges=["new"], defaults={"aspectRatio": "1:1"})
+      [("t2i", "bria/fibo-2/generate"), ("edit", "bria/fibo-2/edit")], badges=["new"], defaults={"aspectRatio": "1:1"}, options={"layout": "vgl"})
 model("ideogram-vector", "Ideogram Vector", "Ideogram", "ideogram", "image", "Editable SVGs from a prompt, or any image traced to SVG",
       [("t2i", "ideogram/vector/text-to-vector"), ("vectorize", "ideogram/vector/image-to-vector")], badges=["new"],
       defaults={"aspectRatio": "1:1"}, pricing=("image", 0.16, "per SVG at medium quality (low $0.13, high $0.20); image to SVG $0.10"),
@@ -1313,12 +1356,13 @@ def time_field(key, spec):
     return {"key": key, "type": t, **({"multiplier": 1000} if key.endswith("_ms") else {})}
 
 
-def add_slider(opts, param, label, spec):
+def add_slider(opts, param, label, spec, step=None):
     if not spec or "minimum" not in spec or "maximum" not in spec or any(s["param"] == param for s in opts.get("sliders", [])):
         return
     lo, hi = spec["minimum"], spec["maximum"]
-    # Narrow ranges (Topaz grain 0-0.1) get a step that still gives them about twenty stops.
-    step = 1 if hi - lo > 4 else 0.05 if hi - lo > 0.2 else round((hi - lo) / 20, 4)
+    # Narrow ranges (Topaz grain 0-0.1) get a step that still gives them about twenty stops; a model line can name its own
+    # (MOSS-Image's guidance in halves, so 2.5, the GPU's Standard CFG, is one of them).
+    step = step or (1 if hi - lo > 4 else 0.05 if hi - lo > 0.2 else round((hi - lo) / 20, 4))
     opts.setdefault("sliders", []).append({"param": param, "label": label, "min": lo, "max": hi, "step": step,
                                            "default": spec.get("default", lo)})
 
@@ -1405,7 +1449,7 @@ def lora_field(provider, ep):
         return None
     item = spec.get("itemSchema") or {}
     f = {"shape": "items", "key": key}
-    mx = summary.get("maxCount") if isinstance(summary.get("maxCount"), int) else num((re.search(r"maximum (\d+)", spec.get("desc") or "") or [None, None])[1])
+    mx = summary.get("maxCount") if isinstance(summary.get("maxCount"), int) else num((re.search(r"maximum (\d+)", spec.get("desc") or "") or [None, None])[1]) or num(spec.get("maxItems"))
     if mx:
         f["max"] = mx
     if spec.get("required") or summary.get("required"):
@@ -1431,7 +1475,7 @@ def enum_of(inputs, key):
 
 # Operations research part 4 added (their numeric fields get FieldMap.ranges).
 ROUND4_OPS = ("remove-object", "video-swap", "video-insert", "keyframes", "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop",
-              "audio-join", "scene-3d", "splat", "text-to-3d", "rig-3d", "extract-frames", "images-to-video", "overlay")
+              "audio-join", "scene-3d", "splat", "text-to-3d", "rig-3d", "extract-frames", "images-to-video", "overlay", "camera-path")
 
 
 def part4_slots(op, kf, inputs, m, opts, fmap):
@@ -1468,6 +1512,8 @@ def part4_slots(op, kf, inputs, m, opts, fmap):
             warn(f"{m['id']}: format values {bad or list(m['formats'].values())} not in its output-format enum")
     if "crossfade" in kf and op in ("audio-loop", "audio-join"):
         fmap["crossfade"] = kf["crossfade"]
+    if "trajectory" in kf and op == "camera-path":
+        camera_path_slot(kf, inputs, m, fmap)
     if "zoom" in kf and op == "still-motion":
         z = {"factor": kf["zoom"]}
         # The furthest it zooms (fal: 2x); a steeper move is sent at that.
@@ -1559,6 +1605,28 @@ def part4_ranges(op, inputs, fmap):
         fmap["ranges"] = ranges
 
 
+def camera_path_slot(kf, inputs, m, fmap):
+    """A camera path (build plan N7-5: H3 Max camera-controls): FieldMap.cameraPath from the trajectory field's schema,
+    keyframes {time, azimuth, elevation, distance} (the item fields must carry those names), their count, the height's
+    limits and the most turns its description allows; plus the endpoint's fixed moves (free_camera_preset) when it has them."""
+    spec = inputs.get(kf["trajectory"]) or {}
+    item = spec.get("itemSchema") or {}
+    if spec.get("type") != "array" or not {"time", "azimuth", "elevation", "distance"} <= set(item):
+        warn(f"{m['id']}: {kf['trajectory']} is not a list of {{time, azimuth, elevation, distance}} keyframes")
+        return
+    el = item["elevation"]
+    turns = re.search(r"at most (\d+) turns", spec.get("desc") or "")
+    f = {"key": kf["trajectory"], "min": int(spec.get("minItems") or 2), "max": int(spec.get("maxItems") or 12),
+         "elevation": [num(el.get("minimum")) if num(el.get("minimum")) is not None else -90, num(el.get("maximum")) if num(el.get("maximum")) is not None else 90],
+         "maxTurns": int(turns[1]) if turns else 32}
+    free = kf.get("freeCamera")
+    values = enum_of(inputs, free) if free else []
+    if values:
+        f["free"] = {"key": free, "values": [v for v in values if isinstance(v, str)]}
+    fmap["cameraPath"] = f
+
+
+
 def build_route(op, ep, provider, m, opts, ropts=None):
     ropts = ropts or {}
     # A Replicate model run by version ("owner/name:<version>") is researched under its name.
@@ -1648,8 +1716,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         enum = (inputs.get(kf["targetLanguage"]) or {}).get("values")
         opts["languages"] = enum or ISO_LANGUAGES
     # The model's own slider/control labels win over the generic voice-setting labels below.
-    for path, label in m.get("sliders") or []:
-        add_slider(opts, path, label, spec_at(inputs, path))
+    for path, label, *step in m.get("sliders") or []:
+        add_slider(opts, path, label, spec_at(inputs, path), step[0] if step else None)
     for path, label, *labels in m.get("controls") or []:
         add_control(opts, path, label, spec_at(inputs, path), (m.get("api_defaults") or {}).get(path), labels[0] if labels else None)
     for k, v in inputs.items():
@@ -1754,6 +1822,19 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     elif ropts.get("keepSize"):
         # The result keeps the input picture's shape (image_size "auto", the API's default).
         kf.pop("aspectRatio", None)
+    elif m.get("exact_size"):
+        # One {width, height} object the API rounds and clamps itself: the aspect ratio's size within the grid and limits
+        # its description states (FieldMap.size.min / max), the same size a layout is compiled for.
+        key = kf.get("aspectRatio") or "image_size"
+        spec = inputs.get(key) or {}
+        takes_object = spec.get("type") == "union" and any(isinstance(v, dict) and v.get("type") == "object" for v in spec.get("variants") or [])
+        lim = re.search(r"multiples? of (\d+) between (\d+) and (\d+)", spec.get("desc") or "")
+        if takes_object and lim:
+            fmap["size"] = {"key": key, "multiple": int(lim.group(1)), "min": int(lim.group(2)), "max": int(lim.group(3))}
+            kf.pop("aspectRatio", None)
+            opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
+        else:
+            warn(f"{m['id']}: {ep} states no size grid and limits for its {key} object")
     part4_slots(op, kf, inputs, m, opts, fmap)
     # Frame rates an upscaler (or FPS Boost) can reach: params.targetFps -> its target_fps field.
     if m.get("fps_targets") and op in ("interpolate", "upscale-video"):
@@ -1889,6 +1970,12 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             warn(f"{m['id']}: default fields {missing} not in {ep} inputs")
         if not fmap["defaults"]:
             del fmap["defaults"]
+    # A model that reads layouts (ModelOptions.layout) turns the API's own prompt expansion off for a layout request
+    # (FieldMap.promptExpansion), which would rewrite the boxes; a plain prompt keeps the API's default.
+    if (m["options"] or {}).get("layout"):
+        pe = kf.get("enhancePrompt") or ("enable_prompt_expansion" if "enable_prompt_expansion" in inputs else None)
+        if pe and (inputs.get(pe) or {}).get("type") == "boolean":
+            fmap["promptExpansion"] = pe
     # LoRAs (O1): the field the route's LoRA endpoint (or the endpoint itself) takes them in, from the research.
     # Read before the required-inputs check below: an endpoint whose LoRAs are required (MiniMax H3's /lora) fills them here.
     lora_ep = ropts.get("loraEndpoint")
@@ -2008,9 +2095,14 @@ for m in M:
     # What a run costs on the route's LoRA endpoint, when its price is in the same unit (fal's /lora variants cost more).
     lora_eps = [r["loraEndpoint"] for r in routes if r.get("loraEndpoint")]
     if pricing and lora_eps and "withLoras" not in pricing:
-        lp = parse_price(EPS.get((routes[0]["provider"], lora_eps[0])) or {})
+        le = EPS.get((routes[0]["provider"], lora_eps[0])) or {}
+        lp = parse_price(le)
         if lp and lp["unit"] == pricing["unit"]:
             pricing["withLoras"] = lp["usd"]
+        elif (le.get("pricing") or {}).get("unit") == "unknown":
+            # No published price (fal's MOSS-Image /lora shows "$0 per compute second"): a run with LoRAs is priced as
+            # unknown, never as free.
+            pricing["lorasUnknown"] = True
     d = {
         "id": m["id"], "name": m["name"], "vendor": m["vendor"], "family": m["family"], "engine": "cloud",
         "kind": m["kind"], "tagline": m["tagline"], "routes": routes, "options": opts,

@@ -3481,6 +3481,156 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "DBSLoader": {
+    "input": {
+      "required": {
+        "model": [
+          "COMBO",
+          {
+            "tooltip": "DBS-TIGER-DnR (1.0M parameters, better: 10.1 dB SI-SDR on DnR v2) or DBS-BSRNN-DnR (4.7M, 9.1 dB, faster on CPU)",
+            "default": "DBS-TIGER-DnR",
+            "multiselect": false,
+            "options": [
+              "DBS-TIGER-DnR",
+              "DBS-BSRNN-DnR"
+            ]
+          }
+        ],
+        "device": [
+          "COMBO",
+          {
+            "tooltip": "auto: ComfyUI's GPU when it is a CUDA device, otherwise the CPU",
+            "default": "auto",
+            "multiselect": false,
+            "options": [
+              "auto",
+              "cpu"
+            ]
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "model",
+        "device"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "DBS_MODEL"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "model"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "DBSLoader",
+    "display_name": "DBS Loader",
+    "description": "Loads a Dynamic Band Splitting separator (DnR v2: music, sound effects, speech) from models/dbs/<model>/ (config.json and model.safetensors).",
+    "python_module": "custom_nodes.ComfyUI-DBS",
+    "category": "loaders/dbs",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "DBSSeparate": {
+    "input": {
+      "required": {
+        "model": [
+          "DBS_MODEL",
+          {}
+        ],
+        "audio": [
+          "AUDIO",
+          {}
+        ],
+        "channels": [
+          "COMBO",
+          {
+            "tooltip": "mono: the channel mean, as the official usage does. each channel: every channel separated on its own (keeps stereo; takes longer)",
+            "default": "mono",
+            "multiselect": false,
+            "options": [
+              "mono",
+              "each channel"
+            ]
+          }
+        ],
+        "output_sample_rate": [
+          "COMBO",
+          {
+            "tooltip": "44100: the model's rate. input: resampled back to the input's rate",
+            "default": "44100",
+            "multiselect": false,
+            "options": [
+              "44100",
+              "input"
+            ]
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "model",
+        "audio",
+        "channels",
+        "output_sample_rate"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "AUDIO",
+      "AUDIO",
+      "AUDIO",
+      "STRING"
+    ],
+    "output_is_list": [
+      false,
+      false,
+      false,
+      false
+    ],
+    "output_name": [
+      "music",
+      "sfx",
+      "speech",
+      "report"
+    ],
+    "output_tooltips": [
+      null,
+      null,
+      null,
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "DBSSeparate",
+    "display_name": "DBS Separate (music / sfx / speech)",
+    "description": "Separates a soundtrack into music, sound effects and speech with the official overlap-add windows (DBS-TIGER 6 s every 3 s, DBS-BSRNN 3 s every 1.5 s). The models work on 44.1 kHz mono; other rates are resampled with ComfyUI's resampler. The three outputs add up to the (mono or per-channel) input.",
+    "python_module": "custom_nodes.ComfyUI-DBS",
+    "category": "audio/dbs",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "DecimateMesh": {
     "input": {
       "required": {
@@ -16640,6 +16790,89 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "SkipLayerGuidanceDiTSimple": {
+    "input": {
+      "required": {
+        "model": [
+          "MODEL",
+          {}
+        ],
+        "double_layers": [
+          "STRING",
+          {
+            "advanced": true,
+            "default": "7, 8, 9",
+            "multiline": false
+          }
+        ],
+        "single_layers": [
+          "STRING",
+          {
+            "advanced": true,
+            "default": "7, 8, 9",
+            "multiline": false
+          }
+        ],
+        "start_percent": [
+          "FLOAT",
+          {
+            "advanced": true,
+            "default": 0,
+            "min": 0,
+            "max": 1,
+            "step": 0.001
+          }
+        ],
+        "end_percent": [
+          "FLOAT",
+          {
+            "advanced": true,
+            "default": 1,
+            "min": 0,
+            "max": 1,
+            "step": 0.001
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "model",
+        "double_layers",
+        "single_layers",
+        "start_percent",
+        "end_percent"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MODEL"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "MODEL"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "SkipLayerGuidanceDiTSimple",
+    "display_name": null,
+    "description": "Simple version of the SkipLayerGuidanceDiT node that only modifies the uncond pass.",
+    "python_module": "comfy_extras.nodes_slg",
+    "category": "advanced/guidance",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": true,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "SolidMask": {
     "input": {
       "required": {
@@ -22955,6 +23188,84 @@
     "search_aliases": null,
     "essentials_category": null,
     "has_intermediate_output": false
+  },
+  "WanUni3CControlnetApply": {
+    "input": {
+      "required": {
+        "model": [
+          "MODEL"
+        ],
+        "model_patch": [
+          "MODEL_PATCH"
+        ],
+        "vae": [
+          "VAE"
+        ],
+        "render_video": [
+          "IMAGE",
+          {
+            "tooltip": "The guidance video rendered from the camera trajectory, most commonly warped point cloud renders of the input image."
+          }
+        ],
+        "strength": [
+          "FLOAT",
+          {
+            "default": 1,
+            "min": -10,
+            "max": 10,
+            "step": 0.01
+          }
+        ],
+        "start_percent": [
+          "FLOAT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 1,
+            "step": 0.001
+          }
+        ],
+        "end_percent": [
+          "FLOAT",
+          {
+            "default": 1,
+            "min": 0,
+            "max": 1,
+            "step": 0.001
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "model",
+        "model_patch",
+        "vae",
+        "render_video",
+        "strength",
+        "start_percent",
+        "end_percent"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MODEL"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "MODEL"
+    ],
+    "name": "WanUni3CControlnetApply",
+    "display_name": "Apply Wan Uni3C ControlNet",
+    "description": "",
+    "python_module": "comfy_extras.nodes_model_patch",
+    "category": "model/patch/wan",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "experimental": true,
+    "search_aliases": []
   },
   "WanVaceToVideo": {
     "input": {

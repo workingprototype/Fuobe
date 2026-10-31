@@ -5,6 +5,7 @@ import { onEngine, runsOn } from "@/lib/catalog/engines";
 import { ENGINE_MODELS } from "@/lib/catalog/faceless";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { findModels, MODEL_KINDS, toModelInfo } from "@/lib/model-list";
+import { rowPrice } from "@/lib/model-rows";
 import { AUDIO_STUDIO, DIALOGUE_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
 import { provider } from "@/server/providers";
 import { llmBackends } from "@/server/providers/llm";
@@ -77,10 +78,11 @@ export async function GET(request: Request) {
     Object.entries(DEFAULTS).map(([k, ids]) => [k, { ...(mode !== "open" && ids.cloud && { cloud: pick(ids.cloud, "cloud") }), ...(mode !== "cloud" && ids.open && { open: pick(ids.open, "open") }) }]),
   );
   const demoMode = visitor ? "off" : getSetting("demoMode");
-  return Response.json({
-    engineMode: mode,
-    demoMode,
-    defaults,
-    items: list.map((m) => ({ ...toModelInfo(m), connected: visitor || connected(m), runs: visitor ? ("real" as const) : runsAs(m, demoMode) })),
+  // The price of the day asked (a launch price while it lasts); the row keeps the launch price and its last day too.
+  const now = Date.now();
+  const items = list.map((m) => {
+    const info = toModelInfo(m);
+    return { ...info, price: rowPrice(info, now), connected: visitor || connected(m), runs: visitor ? ("real" as const) : runsAs(m, demoMode) };
   });
+  return Response.json({ engineMode: mode, demoMode, defaults, items });
 }

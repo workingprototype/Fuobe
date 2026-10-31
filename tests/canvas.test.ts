@@ -28,6 +28,7 @@ import {
   type CanvasNode,
   type CanvasRuns,
 } from "@/lib/catalog/canvas";
+import { estimateCost } from "@/lib/catalog/plan";
 import type { GenerationStatus, Operation } from "@/lib/catalog/types";
 
 const node = (id: string, type: CanvasNode["type"], x: number, y: number, data: CanvasNode["data"] = {}): CanvasNode => ({ id, type, position: { x, y }, data });
@@ -490,5 +491,23 @@ describe("round-4 models on the canvas", () => {
     expect(video).not.toContain("wan-22-vace-inpaint");
     // Rigging needs a 3D model input, which the canvas has no port for.
     expect(modelChoices({ type: "model", data: { mediaKind: "model3d" } }).map((m) => m.id)).not.toContain("meshy-rigging");
+  });
+});
+
+describe("canvas prices with LoRAs", () => {
+  // A node whose run loads LoRAs goes to the route's LoRA endpoint, at its own price (or an unknown one, never free):
+  // the canvas prices it as the composer and the server do (N7-1 review).
+  it("prices Fuobe Soul's look LoRAs at the LoRA endpoint's rate", () => {
+    const g: CanvasGraph = { nodes: [node("s", "model", 0, 0, { modelId: "fuobe-soul", prompt: "a cat on a windowsill" })], edges: [] };
+    const d = describeNode(g, g.nodes[0], { engineMode: "cloud" });
+    expect(d.plan!.loras.length).toBeGreaterThan(0);
+    const p = d.plan!;
+    expect(d.costUsd).toBe(estimateCost(p.model, p.params, p.jobs, p.op, true));
+    expect(d.costUsd).toBeGreaterThan(estimateCost(p.model, p.params, p.jobs, p.op)!);
+  });
+
+  it("leaves a model without LoRAs at its own price", () => {
+    const g: CanvasGraph = { nodes: [node("m", "model", 0, 0, { modelId: "moss-image", prompt: "a neon OPEN sign" })], edges: [] };
+    expect(describeNode(g, g.nodes[0]).costUsd).toBe(0.05);
   });
 });

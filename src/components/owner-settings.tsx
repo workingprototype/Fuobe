@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { signInHref, useViewer } from "@/lib/api";
+import { signInHref, useHydrated, useViewer } from "@/lib/api";
 
 /**
  * The install's settings, for its owner only. A guest (public sign-up) is offered an account, which
  * connects its own GPU here; an account sees Your GPU (AccountGpuSection) and nothing of the install's.
  */
 export function OwnerSettings({ children }: { children: React.ReactNode }) {
+  // The server renders nothing here (it doesn't know the viewer), so hydration must too, even when the browser's
+  // viewer query has already answered (a component outside this page's boundary asked first).
+  const hydrated = useHydrated();
   const v = useViewer().data;
-  if (!v) return null;
+  if (!hydrated || !v) return null;
   if (v.owner) return <>{children}</>;
   if (v.account) return <p className="py-8 text-[13px] text-muted-foreground">The studio&apos;s own settings, keys and tokens are its owner&apos;s.</p>;
   return (

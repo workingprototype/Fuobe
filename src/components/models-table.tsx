@@ -4,12 +4,13 @@ import { Cloud, Cpu, Info, Search } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { memo, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useProgressive } from "@/components/use-progressive";
+import { useToday } from "@/hooks/use-today";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import Link from "next/link";
 import { useEngine, useModelAccess } from "@/lib/api";
 import { offered } from "@/lib/model-access";
 import type { Engine, MediaKind } from "@/lib/catalog/types";
-import { enginesLabel, modelSearchText, type ModelRow } from "@/lib/model-rows";
+import { enginesLabel, modelSearchText, rowPrice, type ModelRow } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Partial<Record<MediaKind, string>> = { image: "Image", video: "Video", audio: "Audio", text: "Text", model3d: "3D" };
@@ -52,7 +53,9 @@ function RouteDetails({ row }: { row: ModelRow }) {
   );
 }
 
-const Row = memo(function Row({ m }: { m: ModelRow }) {
+/** One model; `today` (the browser's day, null while the page prerenders) picks a launch price or the list price. */
+const Row = memo(function Row({ m, today }: { m: ModelRow; today: number | null }) {
+  const price = rowPrice(m, today);
   return (
     <tr className="align-top hover:bg-accent/50">
       <td className="px-3 py-3 sm:px-4">
@@ -78,7 +81,7 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
         </div>
         {m.note && <div className="mt-0.5 text-[11px] text-muted-foreground">{m.note}</div>}
         <div className="mt-1 text-[11px] text-muted-foreground md:hidden">
-          <span className="font-mono text-muted-foreground sm:hidden">{m.price} · </span>
+          {price && <span className="font-mono text-muted-foreground sm:hidden">{price} · </span>}
           {m.ops.join(" · ")}
         </div>
       </td>
@@ -90,7 +93,7 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
         </span>
       </td>
       <td className="hidden px-4 py-3 text-[12px] text-muted-foreground md:table-cell">{m.ops.join(" · ")}</td>
-      <td className="hidden px-4 py-3 font-mono text-[12px] whitespace-nowrap sm:table-cell">{m.price}</td>
+      <td className="hidden px-4 py-3 font-mono text-[12px] whitespace-nowrap sm:table-cell">{price}</td>
       <td className="px-2 py-2.5 text-right">
         <RouteDetails row={m} />
       </td>
@@ -117,6 +120,7 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
   const [kind, setKind] = useState<MediaKind | "all">("all");
   const [q, setQ] = useState("");
   const term = useDeferredValue(q.trim().toLowerCase());
+  const today = useToday();
   // Settings → Models & licences: what is switched off leaves the list (an Original stays for the engine still on).
   const access = useModelAccess();
   const on = useMemo(() => (access ? models.filter((m) => offered(access, m.id)) : models), [models, access]);
@@ -199,7 +203,7 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
           </thead>
           <tbody ref={rows} className="divide-y">
             {list.slice(0, shown).map((m) => (
-              <Row key={m.id} m={m} />
+              <Row key={m.id} m={m} today={today} />
             ))}
           </tbody>
         </table>

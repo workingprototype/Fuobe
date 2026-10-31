@@ -20,8 +20,8 @@ describe("Settings deep links", () => {
 
   it("every \"Settings → …\" the app tells people names a section or field Settings has", () => {
     // Section titles ("Prompt enhancement · Claude or Ollama": the whole, or either side of the "·") and field labels.
-    const titles = [...form.matchAll(/\btitle="([^"]+)"/g)].map((m) => m[1]);
-    const labels = [...form.matchAll(/\blabel="([^"]+)"/g)].map((m) => m[1]);
+    const titles = [...page.matchAll(/\btitle="([^"]+)"/g)].map((m) => m[1]);
+    const labels = [...page.matchAll(/\blabel="([^"]+)"/g)].map((m) => m[1]);
     const norm = (x: string) => x.replace(/&amp;/g, "&").replace(/\s*·\s*/g, " ").toLowerCase();
     const names = [...titles, ...titles.flatMap((t) => t.split("·").map((x) => x.trim())), ...labels].map(norm);
     const places = files(root).flatMap((f) =>
@@ -30,7 +30,8 @@ describe("Settings deep links", () => {
         .split("\n")
         // What people read, not the comments around it.
         .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-        .flatMap((l) => [...l.replace(/&amp;/g, "&").matchAll(/Settings → ([^`"'.,;:()${}<]+)/g)].map((m) => ({ file: path.relative(root, f), place: m[1].trim() }))),
+        // Another app's settings (LM Studio's Developer → Server Settings, Unsloth Studio's avatar → Settings) aren't Fuobe's.
+        .flatMap((l) => [...l.replace(/&amp;/g, "&").matchAll(/(?<!(?:→|Server) )Settings → ([^`"'.,;:()${}<]+)/g)].map((m) => ({ file: path.relative(root, f), place: m[1].trim() }))),
     );
     expect(places.length).toBeGreaterThan(20);
     const unknown = places.filter((p) => p.place && !names.some((n) => norm(p.place) === n || norm(p.place).startsWith(`${n} `)));

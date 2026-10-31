@@ -87,11 +87,11 @@ export function guestRead(pathname: string): GuestRead {
 }
 
 /** The run routes whose `?preview=1` only plans and prices (any other route would ignore the flag and run). */
-const PREVIEWS = [/^\/api\/(generations|audio-tools|dub|katana)$/, /^\/api\/dub\/[^/]+\/voice$/];
+const PREVIEWS = [/^\/api\/(generations|audio-tools|dub|katana|turnaround)$/, /^\/api\/dub\/[^/]+\/voice$/];
 
 /** The estimate routes (named: a dynamic segment called "estimate" on another route must not pass for one). */
 const ESTIMATES =
-  /^\/api\/(ads|ads\/multiplier|assist\/skills\/[^/]+|content-factory|evolution|faceless|genjutsu|influencer|marketing|marketing\/click-to-ad|mixed-media|remove-object|shorts|storyboards)\/estimate$/;
+  /^\/api\/(ads|ads\/multiplier|assist\/skills\/[^/]+|content-factory|evolution|faceless|genjutsu|influencer|marketing|marketing\/click-to-ad|mixed-media|remove-object|shorts|storyboards|turnaround)\/estimate$/;
 
 /** A POST that only plans and prices a run (an estimate route, or ?preview=1 where PREVIEWS honours it): free, and open to guests. */
 export function isPriceCheck(method: string, pathname: string, search: string): boolean {
@@ -107,6 +107,8 @@ export function isPriceCheck(method: string, pathname: string, search: string): 
  * the MCP endpoint…) is refused with "Connect your GPU": it never spends the owner's keys or GPU.
  */
 const LIBRARY_CHANGES: [methods: string, path: RegExp][] = [
+  // Split soundtrack's Export mix: a WAV saved, in parts, as an asset of the owner's Library (no account's upload).
+  ["POST", /^\/api\/audio-tools\/export$/],
   ["POST", /^\/api\/folders$/],
   ["PATCH DELETE", /^\/api\/folders\/[^/]+$/],
   ["PATCH DELETE", /^\/api\/generations\/[^/]+$/],

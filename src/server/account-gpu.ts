@@ -117,6 +117,18 @@ export async function gpuState(id: string, gpu: AccountGpu): Promise<{ online: b
   return check;
 }
 
+/**
+ * The device type ("cuda", "cpu", "mps"…) of an account's ComfyUI as its last status check read it (the start of
+ * /system_stats devices[0].name: "cuda:0 NVIDIA …"), without asking it again; undefined when no check of its saved
+ * address has read one. A price check reads this and never calls the GPU (Split soundtrack's pick and time).
+ */
+export function lastGpuDevice(id: string): string | undefined {
+  const gpu = accountGpu(id);
+  const hit = globalThis.__fuobeAccountGpus?.get(id);
+  if (!gpu || hit?.url !== gpu.url) return undefined;
+  return /^[a-z]+/i.exec(hit.info.device ?? "")?.[0].toLowerCase();
+}
+
 /** What a visitor's status strip shows (GET /api/status): its own GPU, never the install's providers, servers or Demo mode. */
 export interface VisitorView {
   kind: "guest" | "account";

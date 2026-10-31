@@ -40,9 +40,13 @@ export function nodeInstall(node: { name: string; repo: string }): string {
 }
 
 export function installScript(wf: Installable): string {
-  // Optional alternatives (FILM for RIFE) are listed on the card, not installed by default.
+  // Optional alternatives (FILM for RIFE) are listed on the card, not installed by default. A file under a subfolder
+  // (DBS: models/dbs/DBS-BSRNN-DnR/model.safetensors) gets that folder made first.
   const lines = wf.models
     .filter((m) => m.url && m.present !== true && !m.optional)
-    .map((m) => `mkdir -p "$COMFYUI/models/${m.folder}" && wget -c -O "$COMFYUI/models/${m.folder}/${m.file}" "${m.url}"`);
+    .map((m) => {
+      const sub = m.file.includes("/") ? `/${m.file.slice(0, m.file.lastIndexOf("/"))}` : "";
+      return `mkdir -p "$COMFYUI/models/${m.folder}${sub}" && wget -c -O "$COMFYUI/models/${m.folder}/${m.file}" "${m.url}"`;
+    });
   return ["COMFYUI=${COMFYUI:-$HOME/ComfyUI}", ...wf.customNodes.map(nodeInstall), ...lines].join("\n");
 }

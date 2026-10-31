@@ -1147,7 +1147,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "blackforestlabs/flux-3/text-to-image",
         "map": {
           "aspectRatio": "aspect_ratio",
-          "resolution": "resolution"
+          "resolution": "resolution",
+          "promptExpansion": "enable_prompt_expansion"
         }
       },
       {
@@ -1157,7 +1158,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "images": "image_urls",
           "aspectRatio": "aspect_ratio",
-          "resolution": "resolution"
+          "resolution": "resolution",
+          "promptExpansion": "enable_prompt_expansion"
         }
       }
     ],
@@ -1186,7 +1188,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "2k",
         "4k"
       ],
-      "maxImages": 10
+      "maxImages": 10,
+      "layout": "flux3"
     },
     "badges": [
       "new"
@@ -1362,7 +1365,8 @@ export const CLOUD_MODELS: ModelDef[] = [
               "4:5": "portrait_4_3"
             }
           },
-          "resolution": "quality"
+          "resolution": "quality",
+          "promptExpansion": "enable_prompt_expansion"
         }
       },
       {
@@ -1443,7 +1447,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "very_low"
       ],
       "maxOutputs": 4,
-      "maxImages": 4
+      "maxImages": 4,
+      "layout": "ideogram"
     },
     "defaults": {
       "aspectRatio": "1:1"
@@ -1658,6 +1663,100 @@ export const CLOUD_MODELS: ModelDef[] = [
     },
     "defaults": {
       "aspectRatio": "1:1"
+    }
+  },
+  {
+    "id": "moss-image",
+    "name": "MOSS-Image",
+    "vendor": "OpenMOSS",
+    "family": "moss",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Clean Chinese and English text, and it follows layout boxes",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/moss-image",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "size": {
+            "key": "image_size",
+            "multiple": 16,
+            "min": 512,
+            "max": 2048
+          },
+          "fixed": {
+            "output_format": "png"
+          },
+          "promptExpansion": "enable_prompt_expansion",
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/moss-image/lora"
+      }
+    ],
+    "options": {
+      "sliders": [
+        {
+          "param": "num_inference_steps",
+          "label": "Steps",
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "default": 50
+        },
+        {
+          "param": "guidance_scale",
+          "label": "Guidance",
+          "min": 0,
+          "max": 10,
+          "step": 0.5,
+          "default": 3
+        }
+      ],
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "maxOutputs": 4,
+      "layout": "moss"
+    },
+    "badges": [
+      "new"
+    ],
+    "licence": {
+      "licence": "Apache-2.0",
+      "commercial": true,
+      "note": "Apache-2.0 weights (OpenMOSS-Team/MOSS-Image-SFT); hosted under fal's terms. fal's safety checker returns a black image when it flags an output",
+      "checked": "2026-10-29"
+    },
+    "defaults": {
+      "aspectRatio": "1:1"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.05,
+      "lorasUnknown": true
     }
   },
   {
@@ -6307,8 +6406,120 @@ export const CLOUD_MODELS: ModelDef[] = [
     },
     "pricing": {
       "unit": "second",
-      "usd": 0.0325
+      "usd": 0.08,
+      "note": "768P; 480P $0.05, 1080P $0.16, 2K $0.32 (extend) \u2014 image and text to video at the launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31; reference to video: 4 square references included, about $0.02 for each one after",
+      "byResolution": {
+        "480P": 0.05,
+        "768P": 0.08,
+        "1080P": 0.16,
+        "2K": 0.32
+      }
     }
+  },
+  {
+    "id": "minimax-h3-max-camera",
+    "name": "MiniMax H3 Max camera controls",
+    "vendor": "MiniMax",
+    "family": "hailuo",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "A still filmed along a camera path you keyframe: orbits, arcs, dollies and slides that follow the path exactly",
+    "routes": [
+      {
+        "op": "camera-path",
+        "provider": "fal",
+        "endpoint": "minimax/h3-max/camera-controls",
+        "map": {
+          "image": "image_url",
+          "seed": "seed",
+          "cameraPath": {
+            "key": "camera_trajectory",
+            "min": 2,
+            "max": 12,
+            "elevation": [
+              -90,
+              90
+            ],
+            "maxTurns": 32,
+            "free": {
+              "key": "free_camera_preset",
+              "values": [
+                "truck_right",
+                "truck_left",
+                "pedestal_up",
+                "pedestal_down",
+                "dolly_in",
+                "dolly_out",
+                "pan_right",
+                "pan_left",
+                "tilt_up",
+                "tilt_down",
+                "roll_right",
+                "roll_left",
+                "s_curve_forward"
+              ]
+            }
+          },
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          },
+          "ranges": {
+            "duration": {
+              "min": 0.92,
+              "max": 15
+            }
+          },
+          "fixed": {
+            "prompt_expansion_mode": "disabled"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "resolutions": [
+        "480P",
+        "768P",
+        "1080P"
+      ],
+      "durations": [
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        12,
+        15
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "duration": 5,
+      "resolution": "768P"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "768P; 480P $0.05, 1080P $0.16 \u2014 launch price $0.052 (480P $0.0325, 1080P $0.104) until 2026-10-31",
+      "byResolution": {
+        "480P": 0.05,
+        "768P": 0.08,
+        "1080P": 0.16
+      },
+      "promo": {
+        "until": "2026-10-31",
+        "usd": 0.052,
+        "byResolution": {
+          "480P": 0.0325,
+          "768P": 0.052,
+          "1080P": 0.104
+        }
+      }
+    },
+    "hidden": true
   },
   {
     "id": "hailuo-2-3",
@@ -16645,7 +16856,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "16:10",
         "21:9"
       ],
-      "maxImages": 4
+      "maxImages": 4,
+      "layout": "vgl"
     },
     "badges": [
       "new"

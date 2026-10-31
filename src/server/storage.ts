@@ -9,6 +9,7 @@ import { fetchRemote } from "./remote-fetch";
 import { tenant, tenantAccount } from "./tenant";
 import { accountInputLimit } from "./account-files";
 import { assetAccount, fileAccount, generationAccount } from "./account-library";
+import { otherHeaderInfo } from "./media-facts";
 
 export const FILES_DIR = path.join(DATA_DIR, "files");
 
@@ -392,8 +393,12 @@ const OWNER_MOOV_BYTES = 64 * 1024 * 1024;
  *   that is also another's file: it answers like one that is gone, before any cache is looked at.
  * - { info: null }: a file the asker may use whose header says nothing Fuobe reads (WebM…), or, inside a tenant, one
  *   bigger than an upload of its kind may be (never read: the run itself says it is too big).
+ *
+ * `allContainers` (Split soundtrack): a WebM / Matroska or AVI header is read too, from the same first bytes
+ * (media-facts.ts otherHeaderInfo), when the header says nothing else Fuobe reads. Cached apart, so every other caller's
+ * answer for those files stays as it was.
  */
-export function storedMedia(ref: string): { info: MediaInfo | null } | null {
+export function storedMedia(ref: string, opts: { allContainers?: boolean } = {}): { info: MediaInfo | null } | null {
   const rel = filesRel(ref);
   if (rel === null) return null;
   if (tenant() && !ownsRef(ref, rel)) return null;
@@ -408,7 +413,7 @@ export function storedMedia(ref: string): { info: MediaInfo | null } | null {
   if (!st.isFile()) return null;
   if (tenant() && st.size > accountInputLimit(contentTypeFor(rel)).bytes) return { info: null };
   const cache = (globalThis.__fuobeStoredFacts ??= new Map());
-  const key = `${rel}:${st.size}:${st.mtimeMs}`;
+  const key = `${rel}:${st.size}:${st.mtimeMs}${opts.allContainers ? ":all" : ""}`;
   if (cache.has(key)) return { info: cache.get(key) ?? null };
   let info: MediaInfo | null = null;
   try {
@@ -419,6 +424,13 @@ export function storedMedia(ref: string): { info: MediaInfo | null } | null {
         return buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, start));
       };
       info = probeMediaRangesSync(read, st.size, { headBytes: STORED_HEAD_BYTES, maxMoov: tenant() ? TENANT_MOOV_BYTES : OWNER_MOOV_BYTES });
+      if (!info && opts.allContainers) {
+        try {
+          info = otherHeaderInfo(read(0, Math.min(st.size, STORED_HEAD_BYTES)));
+        } catch {
+          info = null;
+        }
+      }
     } finally {
       fs.closeSync(fd);
     }

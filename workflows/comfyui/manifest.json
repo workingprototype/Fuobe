@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-29T10:45:49.726Z",
+  "generatedAt": "2026-10-30T09:34:19.291Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -1197,6 +1197,133 @@
       "vramGb": 8,
       "validated": true,
       "notes": "Lightweight baseline (single 6.9 GB checkpoint). Native 1024x1024 class resolutions. Default negative prompt replaced with a generic one."
+    },
+    {
+      "id": "moss-image-t2i",
+      "title": "MOSS-Image SFT text to image (plain words or a layout of boxes; strong Chinese and English text)",
+      "capability": "t2i",
+      "file": "moss-image-t2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/moss-image-t2i.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "4",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "5",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "6",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "6",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "8",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "8",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "8",
+            "input": "cfg"
+          }
+        ],
+        "sampler": [
+          {
+            "node": "8",
+            "input": "sampler_name"
+          }
+        ],
+        "scheduler": [
+          {
+            "node": "8",
+            "input": "scheduler"
+          }
+        ],
+        "unet": [
+          {
+            "node": "1",
+            "input": "unet_name"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "10",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "10",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 25,
+        "cfg": 2.5,
+        "sampler": "er_sde",
+        "scheduler": "simple",
+        "unet": "moss_image_sft_int8_convrot.safetensors"
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "moss_image_sft_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_sft_int8_convrot.safetensors",
+          "sizeGb": 5.41
+        },
+        {
+          "file": "qwen3.5_9b_w4a8_gptq.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+          "sizeGb": 7.34
+        },
+        {
+          "file": "flux2-vae_small.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/vae/flux2-vae_small.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "moss_image_sft_8stepdmd_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/resolve/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors",
+          "sizeGb": 5.41,
+          "optional": true
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "license": "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
+      "validated": true,
+      "notes": "Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org's template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; width / height are the layout's canvas (multiples of 16, up to 2048). Standard = the template: 25 steps, CFG 2.5, er_sde / simple, skip-layer guidance on layer 22 for the first half; Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic's SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested). vramGb 16 is a guess: there is no official figure; about 13 GB of files (DiT 5.4 + encoder 7.3 + VAE 0.25) and ComfyUI offloads. The int8 / w4a8 files run through comfy-kitchen's kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. Validated by /prompt on the CPU library server only: no render, speed or text accuracy measured here."
     },
     {
       "id": "qwen-image-edit-2509",
@@ -10863,6 +10990,119 @@
       ]
     },
     {
+      "id": "separate-soundtrack-dbs",
+      "title": "Split a soundtrack into dialogue, music and effects (DBS, ComfyUI-DBS)",
+      "capability": "separate-audio",
+      "file": "separate-soundtrack-dbs.json",
+      "source": "hand-built (scripts/comfy/hand-built/separate-soundtrack-dbs.json)",
+      "bindings": {
+        "audio": [
+          {
+            "node": "1",
+            "input": "audio"
+          }
+        ],
+        "separationModel": [
+          {
+            "node": "2",
+            "input": "model"
+          }
+        ],
+        "channels": [
+          {
+            "node": "3",
+            "input": "channels"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "5",
+            "input": "filename_prefix"
+          },
+          {
+            "node": "6",
+            "input": "filename_prefix"
+          },
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          },
+          {
+            "node": "8",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "5",
+          "kind": "audio",
+          "stem": "voice"
+        },
+        {
+          "node": "6",
+          "kind": "audio",
+          "stem": "music"
+        },
+        {
+          "node": "7",
+          "kind": "audio",
+          "stem": "effects"
+        },
+        {
+          "node": "8",
+          "kind": "audio",
+          "stem": "background"
+        },
+        {
+          "node": "9",
+          "kind": "text",
+          "role": "report"
+        }
+      ],
+      "defaults": {
+        "separationModel": "DBS-BSRNN-DnR",
+        "channels": "mono"
+      },
+      "limits": {},
+      "models": [
+        {
+          "file": "DBS-BSRNN-DnR/model.safetensors",
+          "folder": "dbs",
+          "url": "https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/model.safetensors",
+          "sizeGb": 0.02
+        },
+        {
+          "file": "DBS-BSRNN-DnR/config.json",
+          "folder": "dbs",
+          "url": "https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/config.json",
+          "sizeGb": 0
+        },
+        {
+          "file": "DBS-TIGER-DnR/model.safetensors",
+          "folder": "dbs",
+          "url": "https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/model.safetensors",
+          "sizeGb": 0.004
+        },
+        {
+          "file": "DBS-TIGER-DnR/config.json",
+          "folder": "dbs",
+          "url": "https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/config.json",
+          "sizeGb": 0
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-DBS",
+          "repo": "https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/f656e53434b5485c148a2866fbd6ddc6b6152ed6"
+        }
+      ],
+      "vramGb": 0,
+      "license": "DBS weights Apache-2.0 (JusperLee; trained on DnR v2, CC BY 4.0); ComfyUI-DBS code MIT; vendored DBS code Apache-2.0 with MIT notices (BS-RoFormer, MSST, TIGER)",
+      "validated": true,
+      "notes": "CPU OK, about 1.7 GiB on CUDA. audio = an audio file or a video (LoadAudio reads a video's soundtrack without decoding frames). DBSLoader model DBS-BSRNN-DnR (fast: 18.9 MB, 9.07 dB SI-SDR on DnR v2, the CPU default) or DBS-TIGER-DnR (best: 4.1 MB, 10.13 dB, about 3x slower on a CPU, the CUDA default); device auto. Measured on a 4-CPU host (torch 2.14.1+cpu, 10-20 s clips): DBS-BSRNN 0.17-0.33x real time per channel, DBS-TIGER 0.08-0.09x. DBSSeparate channels mono (the mean of the channels, the official usage) or each channel (every channel separated on its own: 2x the time for stereo, 6x for 5.1; the provider forces it for inputs with more than 2 channels, where the subtract below would also take speech out of the LFE and surrounds); output_sample_rate input. Outputs in order: voice (speech), music, effects (sfx), background = original minus speech (AudioMerge subtract: with mono it keeps the original stereo image at mono cost; AudioMerge scales the whole result down when it peaks over 1.0), and the pack's JSON report (model, device, rates, windows, seconds, times real time). Voice + background add up to the source, except on a loud master where AudioMerge had to lower the background to fit under full scale (FLAC holds no more). Voice is first, so a chain without a stem takes the dialogue. Trained on synthetic English mixes (DnR v2): dialogue separates well (15-16 dB), music against effects less so (5.7-7.8 dB). Some FSD50K and FMA clips inside DnR v2 carry their own CC licences, NC variants included; whether that reaches the weights or their outputs is unresolved (recorded as information)."
+    },
+    {
       "id": "captions-qwen3-asr",
       "title": "Transcribe speech into timed caption cues (Qwen3-ASR 0.6B + ForcedAligner)",
       "capability": "transcribe",
@@ -15548,6 +15788,160 @@
       "license": "MIT (VAST-AI/TripoSplat weights); the dino_v3_vit_h image encoder is under the DINOv3 License (royalty-free, commercial use allowed, trade-control limits; the app must show a \"Built with DINOv3\" notice); FLUX.2 VAE Apache-2.0; BiRefNet MIT",
       "validated": true,
       "notes": "Subject or product splat (3D Angles, 3D Jutsu props, a splat alternative to TRELLIS.2 spins). The official template 3d_triposplat_image_to_gaussian_splat (2026-06-02) with the UI-only live-preview patch removed and a 75-frame H.264 orbit (RenderSplat + CreateCameraInfo orbit yaw 35, pitch 30, distance 2.5; role turntable, 25 fps). Subject only: BiRefNet cuts it out first (cutout false = use the image's own alpha). Output 1 (role splat): splatFormat spz (Niantic, gzip, ~10x smaller, base colour), ply (full spherical harmonics) or ksplat, saved by SaveGLB under that extension (meta.format = the extension). Storage: ComfyUI's /view serves all three as application/octet-stream (Python mimetypes knows none), so persistOutput falls back to the extension: storage.ts maps spz / ply to model/x-spz / model/ply (added by catalog-4) and so kind model3d, but ksplat has no mapping and lands as an image .bin; collectOutputs sets only meta.role, so the provider sets meta.format (and a contentType for ksplat). cutout is true by default (manifest defaults). numGaussians up to 1,048,576 (262,144 by default); seed drives both the sampler and the decoder. RenderSplat also takes a look_at camera, so a view picked in the browser can be rendered on the server. 3.78 GB of weights (TripoSplat 0.74, DINOv3 ViT-H 1.68, TripoSplat VAE decoder 0.58, FLUX.2 VAE 0.34, BiRefNet 0.44). VRAM unverified. Validated by /prompt only."
+    },
+    {
+      "id": "wan21-i2v-uni3c-path",
+      "title": "Fly path: a still filmed along a camera path, Wan 2.1 I2V guided by Uni3C on a browser render of the path (core nodes)",
+      "capability": "camera-path",
+      "file": "wan21-i2v-uni3c-path.json",
+      "source": "hand-built (scripts/comfy/hand-built/wan21-i2v-uni3c-path.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "5",
+            "input": "image"
+          }
+        ],
+        "video": [
+          {
+            "node": "7",
+            "input": "file"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "10",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "11",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "12",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "12",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "13",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "13",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "13",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "18",
+            "input": "shift"
+          }
+        ],
+        "strength": [
+          {
+            "node": "9",
+            "input": "strength"
+          }
+        ],
+        "checkpoint": [
+          {
+            "node": "1",
+            "input": "unet_name"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "16",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "16",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 832,
+        "height": 480,
+        "steps": 30,
+        "cfg": 5,
+        "shift": 5,
+        "strength": 1,
+        "frameStep": 4,
+        "fps": 16,
+        "checkpoint": "wan2.1_i2v_720p_14B_fp8_scaled.safetensors"
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "dimensionMultiple": 16,
+        "maxFrames": 81
+      },
+      "models": [
+        {
+          "file": "wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan-2.1/resolve/123acf1cc74bccbb9bfff8ac1ee72edc08c2341d/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+          "sizeGb": 16.4
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "clip_vision_h.safetensors",
+          "folder": "clip_vision",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors",
+          "sizeGb": 1.26
+        },
+        {
+          "file": "Wan21_Uni3C_controlnet_fp16.safetensors",
+          "folder": "model_patches",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/8260d429d19fd7a72304cad059160b95d843913f/Wan21_Uni3C_controlnet_fp16.safetensors",
+          "sizeGb": 2
+        },
+        {
+          "file": "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/4d02bd37ce7d852ae45a4c2841956db727b480b4/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+          "sizeGb": 16.64,
+          "optional": true
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 48,
+      "license": "Apache-2.0 (Wan 2.1 I2V 14B; Uni3C, alibaba-damo-academy/Uni3C — Kijai's repack repo carries no licence field)",
+      "validated": true,
+      "notes": "Cinema 3D scene \"Film this path\" (N7-5): the still is the start image (WanImageToVideo, 81 frames, CLIP vision H) and the browser's render of the MoGe mesh or point cloud along the path (src/components/cinema/scene-engine.ts recordPath: 81 frames, 16 fps, black where nothing was seen) is the `video`, which core WanUni3CControlnetApply encodes with the Wan VAE as Uni3C's render_video (it pads or cuts it to the latent's frame count and resizes it, centre crop, to the output size; it has no hole-mask input, so the render's mask stays in the browser for WorldCast, N7-9). Model path: UNETLoader -> ModelSamplingSD3 (shift 5) -> Uni3C (strength 1, 0-1) -> KSampler (30 steps, cfg 5, uni_pc / simple; Uni3C's own sampler settings are 50 steps at cfg 5 — to confirm on a GPU). Weights: Kijai/WanVideo_comfy Wan21_Uni3C_controlnet_fp16 @ 8260d429 in models/model_patches (its header has every key core ModelPatchLoader's Uni3C branch reads; loading it is inferred, not run) and Wan 2.1 I2V 14B 720P fp8 scaled (Comfy-Org/Wan-2.1 @ 123acf1c), the base Uni3C was trained on. The 480P Q8 GGUF Fuobe pins for InfiniteTalk can't load through a core node (UNETLoader reads no GGUF; that needs city96's ComfyUI-GGUF pack), so the core drop-in to try first on a smaller GPU is the 480P fp8 file the native InfiniteTalk graph uses (`checkpoint`): both are dim 5120, which the Uni3C node checks. VRAM: Uni3C's own figures are 46-51 GB with offload (Fuobe's older 24 GB note is unverified). Validated by /prompt only (no GPU here)."
     },
     {
       "id": "reference-brief-gemma4",

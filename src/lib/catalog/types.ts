@@ -7,6 +7,7 @@
  * (fal, replicate, comfyui, ...). Presets (apps, camera motions, effects) sit on top
  * of models and add prompt templates, fixed inputs and LoRAs.
  */
+import type { CameraKey } from "@/lib/camera-path";
 import type { SignatureRecord } from "./palettes";
 
 export type Engine = "cloud" | "open";
@@ -56,7 +57,7 @@ export type Operation =
   | "captions" // video → the same video with burned-in captions
   | "mux" // video + audio → the video with that soundtrack
   | "image-to-3d" // image → a 3D model (.glb), optionally a turntable video
-  | "separate-audio" // audio or video → voice and background stems
+  | "separate-audio" // audio or video → stems (meta.stem): voice and background; DBS also music and effects
   | "translate" // text → the same text in params.targetLanguage (LLM)
   | "write" // brief → text (LLM: scripts, ad copy, shot lists)
   | "vectorize" // image → the same picture as an SVG
@@ -81,7 +82,9 @@ export type Operation =
   | "images-to-video" // images in order → a video at params.fps
   | "overlay" // image + a second image (logo) → composited (params.position, params.scale)
   // round 5 (O11)
-  | "face-mosaic"; // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
+  | "face-mosaic" // image → the same picture with the faces (or what the prompt names) pixelated: SAM 3.1 mask + mosaic
+  // N7-5
+  | "camera-path"; // image + params.cameraPath (+ inputs.video: the open engine's render along the path) → the camera following the path
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -149,6 +152,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   "images-to-video": "Images to video",
   overlay: "Overlay image",
   "face-mosaic": "Pixelate faces",
+  "camera-path": "Fly path",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -218,6 +222,7 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   "images-to-video": "video",
   overlay: "image",
   "face-mosaic": "image",
+  "camera-path": "video",
 };
 
 /**
@@ -430,7 +435,9 @@ export interface FieldMap {
   numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number; multiple?: number; fromDuration?: boolean };
   /**
    * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
-   * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
+   * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max` nor below `min`
+   * (fal's MOSS-Image takes 512–2048). A size the request asks for (params.extra[key] {width, height}: a layout's
+   * canvas) is kept on the same grid and within the same limits, as the API would.
    */
   size?: {
     width?: string;
@@ -439,6 +446,7 @@ export interface FieldMap {
     key?: string;
     multiple: number;
     max?: number;
+    min?: number;
     base?: number;
     /** Exact sizes per resolution tier and aspect ratio (Fuobe Soul's table); the computed size where it has none. */
     table?: Record<string, Record<string, [number, number]>>;
@@ -451,6 +459,17 @@ export interface FieldMap {
   ranges?: Record<string, { min?: number; max?: number; integer?: boolean }>;
   /** The most images this route's image list takes, when fewer than the model's options.maxImages (another route takes more). */
   maxImages?: number;
+  /**
+   * The API's own prompt expansion switch (fal's enable_prompt_expansion): sent false whenever the request carries a
+   * layout (params.extra.layout), which expansion would rewrite; a plain prompt leaves the API's default.
+   */
+  promptExpansion?: string;
+  /**
+   * A camera path (params.cameraPath, build plan N7-5) as the API's keyframes [{time, azimuth, elevation, distance}]:
+   * `min`–`max` of them, the height kept inside `elevation`, at most `maxTurns` turns of travel. `free`: the API's fixed
+   * moves (H3 Max's free_camera_preset), which a pure slide (Truck left / right) is sent as instead of the keyframes.
+   */
+  cameraPath?: { key: string; min: number; max: number; elevation: [number, number]; maxTurns: number; free?: { key: string; values: string[] } };
   /** An empty prompt is left out rather than sent as "" (APIs that read a missing prompt as "no words": Bria Expand). */
   omitEmptyPrompt?: boolean;
   /** params.extra keys this route has no field for (a model-wide control only its other routes read): left out. */
@@ -534,8 +553,19 @@ export interface ModelOptions {
   languages?: string[];
   /** Numeric settings sent as-is (stability, similarity, speed, exaggeration…). */
   sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
-  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…); `labels` names values that read badly (FLUX Upscale's creativity 0 / 1). */
-  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number; labels?: Record<string, string> }[];
+  /**
+   * Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…); `labels` names values that read badly
+   * (FLUX Upscale's creativity 0 / 1). `sets`: a value that stands for several settings (MOSS-Image's Quality: 50 steps, CFG 3,
+   * euler), which the plan writes into params.extra in its place; a setting the request gives itself wins.
+   */
+  controls?: {
+    param: string;
+    label: string;
+    values: (string | number)[];
+    default?: string | number;
+    labels?: Record<string, string>;
+    sets?: Record<string, Record<string, string | number>>;
+  }[];
   /** Images it needs before it can run (try-on: the person and the garment). */
   minImages?: number;
   /** What each image is, in order ("person photo", "garment"): blockers and slot labels. */
@@ -561,9 +591,10 @@ export interface ModelOptions {
   /**
    * What this model needs beyond its operation's own inputs, checked before a job is created (the
    * composer shows `msg` inline): reference images for a style-reference t2i model, a prompt for a
-   * model whose operation is otherwise promptless, a painted mask or clicked points (video erasers).
+   * model whose operation is otherwise promptless, a painted mask or clicked points (video erasers), a video to follow
+   * (the open Fly path's render).
    */
-  requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; msg: string };
+  requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; video?: boolean; msg: string };
   /** Output formats it can write (params.format: SDR to HDR, export). */
   formats?: VideoFormat[];
   /** Depth maps: the colour maps it draws (params.colormap; see COLORMAPS). Unset = grayscale only. */
@@ -581,7 +612,15 @@ export interface ModelOptions {
   fpsTargets?: number[];
   /** Slow-motion factors it takes (params.slowdown; 1 = the clip's speed). */
   slowdowns?: number[];
+  /**
+   * How it reads a layout (src/lib/layout-prompt.ts): MOSS-Image's JSON boxes, FLUX.3's layout table, Ideogram 4's JSON
+   * prompt or Bria FIBO 2's VGL location words. Unset: the layout goes in as plain sentences.
+   */
+  layout?: LayoutFormat;
 }
+
+/** The layout forms models read (ModelOptions.layout). */
+export type LayoutFormat = "moss" | "flux3" | "ideogram" | "vgl";
 
 export interface Pricing {
   unit: "image" | "second" | "video" | "request" | "megapixel" | "minute";
@@ -591,7 +630,8 @@ export interface Pricing {
   byResolution?: Record<string, number>;
   /**
    * A launch price that runs to the end of `until` (UTC, YYYY-MM-DD); `usd` / `byResolution` are the list
-   * prices after it. The catalog applies whichever holds when it loads (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s).
+   * prices after it (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s). The catalog keeps both: whoever prices picks
+   * the one that holds when it reads its clock (./promo: the server when it plans a run, the browser when it shows one).
    */
   promo?: { until: string; usd: number; byResolution?: Record<string, number> };
   /**
@@ -601,6 +641,8 @@ export interface Pricing {
   factors?: { param: string; values: Record<string, number> }[];
   /** The price per unit when the run carries LoRAs and goes to the route's LoRA endpoint (fal's /lora variants cost more). */
   withLoras?: number;
+  /** The LoRA endpoint publishes no price yet (fal's MOSS-Image /lora): a run with LoRAs is priced as unknown, never as free. */
+  lorasUnknown?: true;
   /** withLoras at each resolution, when it differs (Fuobe Cinema's LTX-2.3 bills per megapixel of video). */
   withLorasByResolution?: Record<string, number>;
   /**
@@ -741,6 +783,8 @@ export interface GenParams {
   scale?: number;
   /** An animation preset for a rigged model (the provider's preset id). */
   animation?: string | number;
+  /** A camera path's keyframes (N7-5, src/lib/camera-path.ts): the cloud route sends them as its trajectory. */
+  cameraPath?: CameraKey[];
   /** Free-form advanced params forwarded to the provider payload. */
   extra?: Record<string, unknown>;
 }
@@ -922,6 +966,11 @@ export interface GenerationRequest {
    * it was before the signature routed it (Reuse restores that). See src/lib/catalog/palettes.ts.
    */
   signature?: SignatureRecord;
+  /**
+   * Server-set: when someone confirmed Soul ID's consent line for the real person this run shows (Turnaround video's
+   * steps, src/server/turnaround.ts; a character trained with it carries its training's time). Stripped from API input.
+   */
+  consentAt?: number;
 }
 
 export interface ChainSlot {
@@ -939,9 +988,16 @@ export interface ChainSlot {
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
   /**
+   * For list slots: the place it takes in the finished list (0-based) among the request's own items, instead of before or
+   * after them. Slots with `at` go in after the others, in order of `at`, so each lands where it says: a keyframe film's
+   * frames that earlier steps make (Turnaround video: the sides the Angles app draws go between the photo's own views).
+   */
+  at?: number;
+  /**
    * Audio slots: take the dependency's output whose `meta.stem` is this (separate-audio makes
-   * "voice" and "background"; "voice" also matches vocals/speech/target, "background" also
-   * accompaniment/instrumental/residual/no_vocals). Without it, the first output of the slot's kind.
+   * "voice" and "background", DBS also "music" and "effects"; "voice" also matches vocals/speech/target,
+   * "background" also accompaniment/instrumental/residual/no_vocals, "effects" also sfx). Without it, the first
+   * output of the slot's kind.
    */
   stem?: string;
   /**

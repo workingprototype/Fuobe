@@ -10,6 +10,7 @@ import { wholeClipProblem, wholeClipTool } from "./av/video-finish";
 import { clipWindowProblem } from "./catalog/clip-windows";
 import { addFrameAt, frameTimes, framesInputs, removeFrameAt, spread, type FrameSupport } from "./catalog/keyframes";
 import { FACE_MOSAIC_MODELS } from "./catalog/open-tools";
+import { pricingOn, type PriceClock } from "./catalog/promo";
 import { soulPostStep } from "./catalog/soul";
 import { COLORMAPS, type Engine, type GenParams, type InputSlot, type MatteOutput, type MediaKind, type ModelDef, type Operation, type Preset, type VideoFormat } from "./catalog/types";
 import { spokenLanguageName } from "./speech-languages";
@@ -749,10 +750,18 @@ export function followEngineParams(params: GenParams, from: GenParams, to: GenPa
  * A step after the run that costs on its own: Fuobe Soul's PixeletedFace look pixelates each picture's faces (SAM 3.1:
  * free on the GPU, fal's per-request price in the cloud), one step per picture.
  */
-export function postStepCost(modelId: string | undefined, look: string | undefined, engine: Engine, pictures: number, getModel: (id: string) => ModelDef | undefined): number {
+export function postStepCost(
+  modelId: string | undefined,
+  look: string | undefined,
+  engine: Engine,
+  pictures: number,
+  getModel: (id: string) => ModelDef | undefined,
+  now?: PriceClock,
+): number {
   if (!modelId || soulPostStep(modelId, look) !== "face-mosaic") return 0;
   const step = getModel(FACE_MOSAIC_MODELS[engine]);
-  return step?.engine === "cloud" && step.pricing?.unit === "request" ? step.pricing.usd * Math.max(1, pictures) : 0;
+  const price = step?.engine === "cloud" && step.pricing ? pricingOn(step.pricing, now) : undefined;
+  return price?.unit === "request" ? price.usd * Math.max(1, pictures) : 0;
 }
 
 /**
@@ -971,11 +980,12 @@ export function toggleIn(list: string[], id: string): string[] {
 // ---------------------------------------------------------------------------
 // Cost hint
 
-export function costLabel(s: { demo: boolean; cost: number | null; compact?: boolean }, format: (usd: number) => string): string {
+export function costLabel(s: { demo: boolean; cost: number | null; compact?: boolean; unknown?: boolean }, format: (usd: number) => string): string {
   if (s.demo) return s.compact ? "Demo" : "Demo · free";
   if (s.cost === 0) return "Free";
   if (s.cost != null) return `≈ ${format(s.cost)}`;
-  return "";
+  // A price the provider hasn't published (fal's MOSS-Image with LoRAs): said, never shown as free.
+  return s.unknown ? "Price unknown" : "";
 }
 
 /** Prompts with an @mention: spellcheck would underline every handle. */

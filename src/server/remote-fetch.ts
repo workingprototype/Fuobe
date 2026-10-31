@@ -444,6 +444,12 @@ export async function fetchPublic(url: string, init: RequestInit = {}, o: Public
           }
           cb(null, chunk);
         },
+        // Let go of (discardBody) or failed with a chunk still on its way: Node 22's Readable.toWeb would put that
+        // chunk into the closed web stream, a "Controller is already closed" nothing catches. Nobody reads it now.
+        destroy(this: Transform, err, cb) {
+          this.removeAllListeners("data");
+          cb(err);
+        },
       });
       const stream = counted;
       res.on("error", (e) => stream.destroy(e));

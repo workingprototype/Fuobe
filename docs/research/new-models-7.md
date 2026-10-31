@@ -484,7 +484,7 @@ All paths verified at `claude/fuobe-parity-4` (`7d7a765`). `git grep -i 'vggt|un
 - Whether the patch embedding was meant to be fine-tuned, and whether Wan's original one costs quality.
 - How a real user gets anchors and aligned anchor cameras ("more flexible anchor acquisition" is the paper's future work); how much quality drops without `anchors_aligned_camera_info.json` or with generated views.
 - Whether Uni3C-style preprocessing output is a valid WorldCast case in practice, and how sensitive WorldCast is to DA3 / MoGe depth scale instead of Depth Pro / VGGT-Omega.
-- Whether Kijai's Uni3C file loads through core `ModelPatchLoader` on Fuobe's pin; whether the Wan 2.1 I2V **480p** Q8 GGUF Fuobe already has works with it (saving the 16.4 GB 720p download); whether a Bruxos Depth Warp output works as Uni3C `render_video`.
+- Whether Kijai's Uni3C file loads through core `ModelPatchLoader` on Fuobe's pin; whether the Wan 2.1 I2V **480p** Q8 GGUF Fuobe already has works with it (saving the 16.4 GB 720p download); whether a Bruxos Depth Warp output works as Uni3C `render_video`. *(Correction, N7-5, 2026-10-29: core's `UNETLoader` reads no GGUF at `fc04da91` — that needs city96's ComfyUI-GGUF pack, which the validation server doesn't have — so the core-only graph pins the 720P fp8 file and takes the 480P fp8 file InfiniteTalk's native graph already uses, `Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors`, as the drop-in to try first; both are dim 5120, which the Uni3C node checks. fal's queue OpenAPI also gives `free_camera_preset`'s 13 values, now in `paid-model-apis-2.json`.)*
 - Whether Meridian's LoRAs load on Fuobe's ComfyUI and on the pruned int8 FL2VA H3, and its VRAM below a B200.
 - H3 Max camera-controls beyond its schema: the azimuth sign, what distance 1.0 means for a given photo, how well a character moves once the frozen-scene default prompt is overridden, and real limits on 360° orbits.
 - The CLACT licence and release date; whether training code and the pose-alignment procedures ship; whether the newer checkpoint keeps the file format; whether Kijai or Comfy-Org will port WorldCast.
@@ -933,7 +933,7 @@ Cloud engine.
 
 Consent. "Fly around this character" on a real person follows Soul ID's consent line (`SOUL_ID_COPY`, `src/lib/catalog/training.ts`); WorldCast's own ethics statement warns about impersonation.
 
-Tests: `viewAzimuth` and the ordering; the plan per engine and per view count (1-5 views, with and without fills); prices; the ref2v payload (`reference_image_urls` <= 12, the prompt names Image N); the keyframe-film request for the open engine.
+Tests: `viewAzimuth` and the ordering; the plan per engine and per view count (1-5 views, with and without fills); prices; the ref2v payload (`reference_image_urls` <= 9, fal's schema; 12 files in all with videos and audio; the prompt names Image N); the keyframe-film request for the open engine.
 
 Browser checks: at 1440 px and 390 px wide, in light and in dark theme: the new controls render, labels and prices fit, nothing scrolls sideways, keyboard focus reaches every new control, and touch dragging works at 390 px. Here: the button on the Character Sheet result, on Soul Cast results and on an element's page; the price or GPU line; progress; the result in the feed.
 
@@ -1000,7 +1000,7 @@ Fuobe prepares the case (permissive models only; the paper's Depth Pro and VGGT-
 - Depth: MoGe 2 (MIT, the 3D scene's `oss-scene-moge`) or Depth Anything 3 metric-large (Apache-2.0, Comfy-Org/Depth-Anything-3 @ 8265be07).
 - Masks: core `SAM3_Detect` with the pinned `sam3.1_multiplex_fp16`.
 - Path: `framePoses` from N7-5's library; `render.mp4` / `render_mask.mp4` from N7-5's recorder (mask 0 = covered, 255 = hole).
-- Anchors: the element's or sheet's views with azimuths in WorldCast's convention (front 0°, right_side about 90°, back about 180°, left_side about 270°, `left_sign` -1); anchor poses on a ring at the subject distance (a guess), or leave `anchors_aligned_camera_info.json` out (the code then skips anchor Plücker rays; quality impact unknown).
+- Anchors: the element's or sheet's views with azimuths in WorldCast's convention (front 0°, right_side about 90°, back about 180°, left_side about 270°, `left_sign` -1; N7-6 converts Fuobe's sides once, in `worldcastAnchor`, `src/lib/catalog/turnaround.ts`); anchor poses on a ring at the subject distance (a guess), or leave `anchors_aligned_camera_info.json` out (the code then skips anchor Plücker rays; quality impact unknown).
 - The `no_padding_black/` crops are not documented: read them from `demo_case/` and `diffsynth/pipelines/worldcast_pipeline.py` L842-869 before building.
 
 Fuobe side.

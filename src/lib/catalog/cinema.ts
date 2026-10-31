@@ -1,3 +1,4 @@
+import { DEFAULT_MOTION, PATH_FPS, PATH_FRAMES, normalizeKeys, toH3MaxTrajectory, type CameraKey } from "@/lib/camera-path";
 import { APERTURE, LENS, anglesNote, poseWords, recomposePrompt, type ScenePose } from "@/lib/scene3d";
 import { getModel, getPreset } from "./index";
 import { DOP_MODEL, LTX25_HOSTED } from "./dop";
@@ -6,6 +7,7 @@ import { localOnly, needsToken, triggerOf } from "./loras";
 import { ANGLES_2511_LORA } from "./open-tools";
 import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
 import { soulRecipe } from "./soul";
+import { planTurnaround, type TurnaroundInput } from "./turnaround";
 import { CAST_LOOK } from "./soul-cards";
 import type { Engine, GenerationRequest, GenParams, LoraRef, ModelDef, Operation } from "./types";
 
@@ -161,6 +163,8 @@ export interface CinemaTakeInfo {
   grid?: { size: GridSize; type: GridType };
   /** A recomposition: the camera of the captured view. */
   camera?: { lens: number; aperture: number; pose: ScenePose };
+  /** A filmed path: its keyframes, length and the move it started from. */
+  path?: { keys: CameraKey[]; duration: number; preset?: string };
 }
 
 /** A generation's membership in a project (and its folder = scene). */
@@ -195,7 +199,7 @@ export interface DirectorMessage {
 }
 
 export type CinemaMode = "video" | "image";
-export type CinemaAction = "generate" | "extend-forward" | "extend-backward" | "edit" | "grid" | "cast" | "location" | "location-view" | "scene" | "recompose";
+export type CinemaAction = "generate" | "extend-forward" | "extend-backward" | "edit" | "grid" | "cast" | "location" | "location-view" | "scene" | "recompose" | "path" | "turnaround";
 export type GridSize = "2x2" | "3x3" | "4x4";
 export type GridType = "freeform" | "zooms" | "shots" | "next_shots" | "prev_shots";
 export type CastValues = Record<string, string | number | string[] | undefined>;
@@ -229,6 +233,21 @@ export interface CinemaGenerateInput {
   view?: string;
   /** "recompose": the view captured in the 3D scene (an uploaded PNG) and the camera it was taken with. */
   capture?: SceneCapture;
+  /** "path": the camera path keyframed in the 3D scene (and, on the open engine, the browser's render along it). */
+  path?: ScenePath;
+  /** "turnaround": a 360° turnaround of a Soul Cast result (build plan N7-6: src/lib/catalog/turnaround.ts). */
+  turnaround?: Omit<TurnaroundInput, "engine" | "feature" | "stepFeature">;
+}
+
+export interface ScenePath {
+  /** The keyframes (src/lib/camera-path.ts); the first is the still's own camera. */
+  keys: CameraKey[];
+  /** Seconds (the cloud takes 1–15; the open engine always makes 81 frames at 16 fps). */
+  duration?: number;
+  /** The open engine: the browser's render of the scene along the path (an uploaded video), Uni3C's guide. */
+  render?: string;
+  /** The move it started from (a preset id), kept on the take. */
+  preset?: string;
 }
 
 /**
@@ -1196,12 +1215,20 @@ export function withPlaceholders(step: CinemaStep): GenerationRequest {
   const req = step.request;
   if (!req.chain?.length) return req;
   const inputs = { ...req.inputs };
+  // Images with a place (ChainSlot.at: a film's frames that earlier steps make) go in after the others, as the runner puts them.
+  const placed = req.chain.filter((c) => c.slot === "images" && c.at !== undefined && c.at >= 0).sort((a, b) => a.at! - b.at!);
   for (const c of req.chain) {
+    if (placed.includes(c)) continue;
     if (c.slot === "images") inputs.images = c.position === "first" ? [PLACEHOLDER.image, ...(inputs.images ?? [])] : [...(inputs.images ?? []), PLACEHOLDER.image];
     else if (c.slot === "videos") inputs.videos = [...(inputs.videos ?? []), PLACEHOLDER.video];
     else if (c.slot === "endImage") inputs.endImage = PLACEHOLDER.image;
     else if (c.slot === "video") inputs.video = PLACEHOLDER.video;
     else if (c.slot === "audio" || c.slot === "voiceAudio") inputs[c.slot] = PLACEHOLDER.audio;
+  }
+  for (const c of placed) {
+    const list = [...(inputs.images ?? [])];
+    list.splice(Math.min(c.at!, list.length), 0, PLACEHOLDER.image);
+    inputs.images = list;
   }
   return { ...req, inputs };
 }
@@ -1346,6 +1373,8 @@ const FEATURES: Partial<Record<CinemaAction, string>> = {
   "location-view": "cinema-location",
   scene: "cinema-scene",
   recompose: "cinema-recompose",
+  path: "cinema-path",
+  turnaround: "cinema-turnaround",
 };
 const feature = (action: CinemaAction, mode: CinemaMode) => FEATURES[action] ?? (mode === "image" ? "cinema-image" : "cinema");
 
@@ -1948,6 +1977,78 @@ function planRecompose(input: CinemaGenerateInput): CinemaPlan {
   return finish(model, [{ key: "main", request }], notes, blocker);
 }
 
+// ---------------------------------------------------------------------------
+// Fly path (build plan N7-5; new-models-7.md §3.3, §3.6, §3.7): film the still along a camera path keyframed in its 3D scene
+
+/** What films a path: H3 Max camera-controls on fal; Wan 2.1 I2V guided by Uni3C on your GPU, from the browser's render. */
+export const PATH_MODELS: Record<Engine, string> = { cloud: "minimax-h3-max-camera", open: "oss-uni3c-path" };
+/** The cloud's lengths (H3 Max takes 0.92–15 s; the open engine is always about 5 s). */
+export const PATH_DURATIONS = [3, 5, 8, 10, 15];
+/** The open engine's blocker until the browser has recorded and uploaded the render (the viewer does that on Film). */
+export const PATH_RENDER_FIRST = "Record the path first";
+
+/**
+ * Film the still along a path. Cloud: H3 Max camera-controls gets the still as its first frame and the keyframes as its
+ * camera_trajectory (a pure slide as its own truck move), prompt expansion off, and motion words that let the subject move
+ * (its default prompt freezes the scene). Open: the still is Wan 2.1's start image and the browser's render of the 3D scene
+ * along the path guides the camera through Uni3C; 81 frames at 16 fps.
+ */
+function planPath(input: CinemaGenerateInput): CinemaPlan {
+  const open = input.engine === "open";
+  const model = getModel(PATH_MODELS[input.engine])!;
+  const src = input.source?.kind === "image" ? input.source.url : undefined;
+  const path = input.path;
+  const keys = normalizeKeys(path?.keys ?? []);
+  const moving = keys.length > 1;
+  const prompt = tidy(input.prompt) || DEFAULT_MOTION;
+  const notes: string[] = [];
+  const offered = model.options.resolutions ?? [];
+  const resolution = offered.find((r) => r.toLowerCase() === input.resolution?.toLowerCase()) ?? model.defaults?.resolution;
+  let request: GenerationRequest;
+  if (open) {
+    const seconds = Math.round((PATH_FRAMES / PATH_FPS) * 10) / 10;
+    notes.push(
+      `Your browser renders the 3D scene along the path, then Wan 2.1 starts from the still and Uni3C keeps its camera on that render — ${PATH_FRAMES} frames at ${PATH_FPS} fps (${seconds} s) on your GPU, which needs about 48 GB`,
+    );
+    if (path?.duration && Math.abs(path.duration - seconds) > 0.5) notes.push(`The open engine always films about ${seconds} s, so the path is spread over that`);
+    const params: GenParams = { numOutputs: 1, aspectRatio: "auto", ...(resolution ? { resolution } : {}), cameraPath: keys };
+    request = { feature: "cinema-path", modelId: model.id, op: "camera-path", prompt, inputs: src && path?.render ? { images: [src], video: path.render } : undefined, params };
+  } else {
+    const range = model.routes[0]?.map?.ranges?.duration;
+    const duration = Math.min(range?.max ?? 15, Math.max(Math.max(1, range?.min ?? 1), Math.round((path?.duration ?? 5) * 10) / 10));
+    if (moving) {
+      const cam = toH3MaxTrajectory(keys);
+      notes.push("trajectory" in cam ? `H3 Max follows your ${cam.trajectory.length} keyframes from the still, with prompt expansion off so your motion words reach it as written` : cam.notes[0]);
+      if ("trajectory" in cam) notes.push(...cam.notes);
+    }
+    const params: GenParams = { numOutputs: 1, duration, ...(resolution ? { resolution } : {}), cameraPath: keys };
+    request = { feature: "cinema-path", modelId: model.id, op: "camera-path", prompt, inputs: src ? { images: [src] } : undefined, params };
+  }
+  const blocker = !src ? "Pick the scene's still" : !moving ? "Add a keyframe or pick a move first" : open && !path?.render ? PATH_RENDER_FIRST : undefined;
+  const step: CinemaStep = { key: "main", request };
+  if (!blocker) return finish(model, [step], notes);
+  // Priced before it can run (the price depends on the length and the quality only), so Film shows what it will cost
+  // while the path is still being made: priced with stand-ins for the still and the render, then blocked.
+  const stand: GenerationRequest = { ...request, inputs: { images: [PLACEHOLDER.image], ...(open ? { video: PLACEHOLDER.video } : {}) } };
+  return { ...finish(model, [{ key: "main", request: stand }], notes), steps: [step], blocker };
+}
+
+/** What a filmed path's take remembers: the keys it was planned with (from the photo's pose) and the clip's real length. */
+export function pathTake(input: Pick<CinemaGenerateInput, "engine" | "path">, plan: CinemaPlan): CinemaTakeInfo["path"] {
+  const params = plan.steps[0]?.request.params;
+  const duration = input.engine === "open" ? PATH_FRAMES / PATH_FPS : (params?.duration ?? 5);
+  return { keys: params?.cameraPath ?? normalizeKeys(input.path?.keys ?? []), duration, ...(input.path?.preset ? { preset: input.path.preset } : {}) };
+}
+
+// ---------------------------------------------------------------------------
+// Turnaround (build plan N7-6): a Soul Cast result filmed all the way round, as a new take in the project
+
+/** The turnaround's own steps (src/lib/catalog/turnaround.ts), filed as Cinema takes and priced as Cinema prices them. */
+function planTurnaroundTake(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
+  const plan = planTurnaround({ ...input.turnaround, engine: input.engine, feature: "cinema-turnaround", stepFeature: "cinema-turnaround" }, { has: ctx.has });
+  return finish(plan.model, plan.steps, plan.notes, plan.blocker);
+}
+
 /** Everything a Generate press would run, priced, without running it (the browser shows it live). */
 export function planCinema(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const i = { ...input, settings: input.settings ?? {}, prompt: input.prompt ?? "" };
@@ -1968,6 +2069,10 @@ export function planCinema(input: CinemaGenerateInput, ctx: CinemaContext): Cine
       return planScene(i);
     case "recompose":
       return planRecompose(i);
+    case "path":
+      return planPath(i);
+    case "turnaround":
+      return planTurnaroundTake(i, ctx);
     default:
       return i.mode === "image" ? planStill(i) : planVideo(i, ctx);
   }

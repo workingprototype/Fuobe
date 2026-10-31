@@ -106,6 +106,17 @@
 //   audioCfg                              (MultiTalkWav2VecEmbeds audio guidance)
 //   threshold, mosaicScale                (face mosaic: SAM3_Detect threshold; the mosaic's scale, 0.04 = blocks of 25 px)
 //   prompt*                               (face mosaic: what SAM 3.1 pixelates, "face" when the run gives no words)
+// Keys added with DBS soundtrack separation (docs/research/dbs-separation-7.md §4). * = the provider fills it:
+//   separationModel*                      (DBSLoader model: DBS-BSRNN-DnR (fast) | DBS-TIGER-DnR (best); params.extra.separationModel,
+//                                          else the host's pick: TIGER when /system_stats says the device is cuda, BSRNN on a CPU)
+//   channels*                             (DBSSeparate channels: mono | each channel; params.extra.channels, "mono" for inputs with
+//                                          more than 2 channels, which ComfyUI can't save, with node 4 rewired to music + effects)
+// Keys added with MOSS-Image (docs/research/new-models-7.md §4.6). Model settings (params.extra; MOSS-Image's Quality control writes them):
+//   sampler, scheduler                    (KSampler sampler_name / scheduler)
+//   unet                                  (UNETLoader file: the Fast tier's drop-in 8-step DMD file, listed in optionalModels)
+// Entry field requiredModels: files a loader reads by a name with no extension (DBSLoader's model folder), listed in the
+// manifest like any model (KNOWN_MODELS keys are the path under the folder, e.g. 'DBS-BSRNN-DnR/model.safetensors'), so the
+// Workflows page's presence check and its install commands cover them.
 
 import fs from 'node:fs';
 
@@ -138,6 +149,8 @@ export const CUSTOM_NODE_REPOS = {
   // validation server (entries list them with `packs`); install-comfyui.sh pins both.
   h3_character_swap: 'https://github.com/akatz-labs/h3-character-swap-tool/tree/0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b/worker_nodes/h3_character_swap',
   'h3-relay': 'https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220',
+  // DBS soundtrack separation (docs/research/dbs-separation-7.md §4): pinned in install-comfyui.sh, not on the validation server.
+  'ComfyUI-DBS': 'https://github.com/hiroki-abe-58/ComfyUI-DBS/tree/f656e53434b5485c148a2866fbd6ddc6b6152ed6',
 };
 
 // Node classes of the packs entries list in `packs` (packs the validation server doesn't have installed): the build
@@ -145,6 +158,7 @@ export const CUSTOM_NODE_REPOS = {
 export const PACK_CLASSES = {
   h3_character_swap: /^H3CharacterSwap/,
   'h3-relay': /^(H3Relay|LabsH3)/,
+  'ComfyUI-DBS': /^DBS(Loader|Separate)$/,
 };
 
 // Model download locations for files that the source workflow does not annotate
@@ -205,6 +219,12 @@ export const KNOWN_MODELS = {
   'H3-Person-Remover-V1.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA/resolve/fe136b3dc93aea993b9f194d48ea9859fdc2de14/H3-Person-Remover-V1.safetensors' },
   'depth_anything_3_mono_large.safetensors': { folder: 'geometry_estimation', url: 'https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors' },
   // comfyui-oss-3 additions (docs/research/comfyui-oss-3.json, sizes from the Hugging Face tree API)
+  // MOSS-Image (research #7 §4.4): Comfy-Org's int8 / w4a8 set (the Comfy template's) at a pinned commit, and Spectrallic's SFT with the
+  // 8-step DMD LoRA merged in, a drop-in UNET for the Fast tier (Apache-2.0 throughout; the small VAE is byte-identical to BFL's FLUX.2-small-decoder).
+  'moss_image_sft_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/diffusion_models/moss_image_sft_int8_convrot.safetensors' },
+  'qwen3.5_9b_w4a8_gptq.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors' },
+  'flux2-vae_small.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/vae/flux2-vae_small.safetensors' },
+  'moss_image_sft_8stepdmd_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/resolve/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors' },
   'z_image_turbo_bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
   'qwen_3_4b.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors' },
   'ae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors' },
@@ -264,6 +284,19 @@ export const KNOWN_MODELS = {
   // round 4 (r4/video-finish): the chunked SeedVR2 graph is hand-built, so its files are named here (same files as the template).
   'seedvr2_3b_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors' },
   'seedvr2_ema_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors' },
+  // N7-5 (Fly path, docs/research/new-models-7.md §3.4 / §3.6): Uni3C's ControlNet for core ModelPatchLoader and the Wan 2.1 I2V
+  // 720P it was trained on, at the revisions the research read (1,997,314,376 B and 16,401,356,938 B); the 480P fp8 file
+  // InfiniteTalk's native graph already uses is the drop-in to try on a smaller GPU (`checkpoint`), pinned at the commit
+  // that uploaded it (16,643,349,018 B, SHA-256 2ff92228…; InfiniteTalk's own entry keeps its template's URL).
+  'Wan21_Uni3C_controlnet_fp16.safetensors': { folder: 'model_patches', url: 'https://huggingface.co/Kijai/WanVideo_comfy/resolve/8260d429d19fd7a72304cad059160b95d843913f/Wan21_Uni3C_controlnet_fp16.safetensors' },
+  'wan2.1_i2v_720p_14B_fp8_scaled.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Wan-2.1/resolve/123acf1cc74bccbb9bfff8ac1ee72edc08c2341d/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors' },
+  'Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/4d02bd37ce7d852ae45a4c2841956db727b480b4/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors' },
+  // DBS (docs/research/dbs-separation-7.md §3.1): DBSLoader reads models/dbs/<model>/{config.json, model.safetensors}, so the
+  // keys are paths under the folder (what GET /models/dbs lists). Pinned revisions; install-comfyui.sh checks the SHA-256.
+  'DBS-BSRNN-DnR/model.safetensors': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/model.safetensors' },
+  'DBS-BSRNN-DnR/config.json': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-BSRNN-DnR/resolve/5af343f57f106fbb95efe8a60f1a3999eeb0aef8/config.json' },
+  'DBS-TIGER-DnR/model.safetensors': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/model.safetensors' },
+  'DBS-TIGER-DnR/config.json': { folder: 'dbs', url: 'https://huggingface.co/JusperLee/DBS-TIGER-DnR/resolve/22da7d4cd3ea63f9365181008bff1c0d2ab6fb2b/config.json' },
 };
 
 const WAN_NEG_EN =
@@ -626,6 +659,35 @@ export const SPEC = [
     limits: { maxWidth: 1536, maxHeight: 1536, dimensionMultiple: 8 },
     vramGb: 8,
     notes: 'Lightweight baseline (single 6.9 GB checkpoint). Native 1024x1024 class resolutions. Default negative prompt replaced with a generic one.',
+  },
+  // ---- MOSS-Image (research #7 §4.6, package N7-1): plain words or a layout's JSON boxes ------------------------
+  {
+    id: 'moss-image-t2i',
+    title: 'MOSS-Image SFT text to image (plain words or a layout of boxes; strong Chinese and English text)',
+    capability: 't2i',
+    handBuilt: 'hand-built/moss-image-t2i.json',
+    bindings: {
+      prompt: [b('4', 'text')], negativePrompt: [b('5', 'text')], width: [b('6', 'width')], height: [b('6', 'height')],
+      seed: [b('8', 'seed')], steps: [b('8', 'steps')], cfg: [b('8', 'cfg')], sampler: [b('8', 'sampler_name')], scheduler: [b('8', 'scheduler')],
+      unet: [b('1', 'unet_name')],
+    },
+    outputs: [{ node: '10', kind: 'image' }],
+    defaults: { sampler: 'er_sde', scheduler: 'simple', unet: 'moss_image_sft_int8_convrot.safetensors' },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    optionalModels: ['moss_image_sft_8stepdmd_int8_convrot.safetensors'],
+    vramGb: 16,
+    // §4.5: each file's licence, the optional Fast file's too (Spectrallic's card is Apache-2.0).
+    license:
+      "Apache-2.0 (MOSS-Image SFT, Qwen3.5-9B, FLUX.2 small decoder, byte-identical to BFL's Apache-2.0 FLUX.2-small-decoder; " +
+      "Fast: Spectrallic's MOSS-Image SFT 8-step DMD int8 file, Apache-2.0)",
+    notes:
+      'Core nodes only (MOSS-Image is native in the pinned ComfyUI): Comfy-Org\'s template image_moss_image_t2i_bboxes without its subgraph, TextGenerate upsampler and box nodes. ' +
+      'The prompt is plain words or a compiled layout (src/lib/layout-prompt.ts compileMoss: summary + items with pixel boxes from the canvas centre, y before x), which reaches the model verbatim; ' +
+      'width / height are the layout\'s canvas (multiples of 16, up to 2048). Standard = the template: 25 steps, CFG 2.5, er_sde / simple, skip-layer guidance on layer 22 for the first half; ' +
+      'Quality = USERGUIDE: 50 steps, CFG 3, euler; Fast = Spectrallic\'s SFT with the 8-step DMD LoRA merged (unet), 8 steps, CFG 1 (whether it keeps layouts is untested). ' +
+      'vramGb 16 is a guess: there is no official figure; about 13 GB of files (DiT 5.4 + encoder 7.3 + VAE 0.25) and ComfyUI offloads. ' +
+      'The int8 / w4a8 files run through comfy-kitchen\'s kernels, which need a PyTorch built for CUDA 13 (cu130): comfy/quant_ops.py turns its CUDA backend off otherwise, logs a warning and (a guess) falls back to a slower path. ' +
+      'Validated by /prompt on the CPU library server only: no render, speed or text accuracy measured here.',
   },
   {
     id: 'qwen-image-edit-2509',
@@ -2364,6 +2426,42 @@ export const SPEC = [
       'Outputs in order: voice stem, background stem (music + effects), cue lines ("start-end: text", seconds), plain transcript, detected language (PreviewAny, folded into the text outputs\' meta). ' +
       'ASR runs on the separated vocals. 52 languages auto-detected (30 selectable).',
   },
+  // DBS soundtrack separation (docs/research/dbs-separation-7.md §4.4, graph A): the one graph behind Split soundtrack (and
+  // Remove dialogue, Clean up dialogue, "Original sound" later). ComfyUI-DBS is not on the validation server: checked
+  // statically there (core nodes) and validated + run on an isolated worker with the pack and the weights.
+  {
+    id: 'separate-soundtrack-dbs',
+    title: 'Split a soundtrack into dialogue, music and effects (DBS, ComfyUI-DBS)',
+    capability: 'separate-audio',
+    handBuilt: 'hand-built/separate-soundtrack-dbs.json',
+    packs: ['ComfyUI-DBS'],
+    // Both models are required (23 MB together): a CUDA host runs DBS-TIGER unless asked otherwise, so the Workflows page's
+    // install commands fetch it and its presence check names it when it's missing.
+    requiredModels: ['DBS-BSRNN-DnR/model.safetensors', 'DBS-BSRNN-DnR/config.json', 'DBS-TIGER-DnR/model.safetensors', 'DBS-TIGER-DnR/config.json'],
+    bindings: { audio: [b('1', 'audio')], separationModel: [b('2', 'model')], channels: [b('3', 'channels')] },
+    outputs: [
+      { node: '5', kind: 'audio', stem: 'voice' },
+      { node: '6', kind: 'audio', stem: 'music' },
+      { node: '7', kind: 'audio', stem: 'effects' },
+      { node: '8', kind: 'audio', stem: 'background' },
+      { node: '9', kind: 'text', role: 'report' },
+    ],
+    defaults: { separationModel: 'DBS-BSRNN-DnR', channels: 'mono' },
+    vramGb: 0,
+    license: 'DBS weights Apache-2.0 (JusperLee; trained on DnR v2, CC BY 4.0); ComfyUI-DBS code MIT; vendored DBS code Apache-2.0 with MIT notices (BS-RoFormer, MSST, TIGER)',
+    notes:
+      'CPU OK, about 1.7 GiB on CUDA. audio = an audio file or a video (LoadAudio reads a video\'s soundtrack without decoding frames). ' +
+      'DBSLoader model DBS-BSRNN-DnR (fast: 18.9 MB, 9.07 dB SI-SDR on DnR v2, the CPU default) or DBS-TIGER-DnR (best: 4.1 MB, 10.13 dB, about 3x slower on a CPU, the CUDA default); device auto. ' +
+      'Measured on a 4-CPU host (torch 2.14.1+cpu, 10-20 s clips): DBS-BSRNN 0.17-0.33x real time per channel, DBS-TIGER 0.08-0.09x. ' +
+      'DBSSeparate channels mono (the mean of the channels, the official usage) or each channel (stereo stems: every channel separated on its own, 2x the time); output_sample_rate input. ' +
+      'ComfyUI saves audio as mono or stereo only (a 5.1 waveform comes out as scrambled stereo three times as long), so the provider splits a file with more than 2 channels in mono ' +
+      'and makes its background from music + effects (node 4 rewired to AudioMerge add) rather than the original minus the speech. ' +
+      'Outputs in order: voice (speech), music, effects (sfx), background = original minus speech (AudioMerge subtract: with mono it keeps the original stereo image at mono cost; ' +
+      'AudioMerge scales the whole result down when it peaks over 1.0), and the pack\'s JSON report (model, device, rates, windows, seconds, times real time). ' +
+      'Voice + background add up to the source, except on a loud master where AudioMerge had to lower the background to fit under full scale (FLAC holds no more). ' +
+      'Voice is first, so a chain without a stem takes the dialogue. Trained on synthetic English mixes (DnR v2): dialogue separates well (15-16 dB), music against effects less so (5.7-7.8 dB). ' +
+      'Some FSD50K and FMA clips inside DnR v2 carry their own CC licences, NC variants included; whether that reaches the weights or their outputs is unresolved (recorded as information).',
+  },
   {
     id: 'captions-qwen3-asr',
     title: 'Transcribe speech into timed caption cues (Qwen3-ASR 0.6B + ForcedAligner)',
@@ -3322,6 +3420,35 @@ export const SPEC = [
       'cutout is true by default (manifest defaults). ' +
       'numGaussians up to 1,048,576 (262,144 by default); seed drives both the sampler and the decoder. RenderSplat also takes a look_at camera, so a view picked in the browser can be rendered on the server. ' +
       '3.78 GB of weights (TripoSplat 0.74, DINOv3 ViT-H 1.68, TripoSplat VAE decoder 0.58, FLUX.2 VAE 0.34, BiRefNet 0.44). VRAM unverified. Validated by /prompt only.',
+  },
+  {
+    // N7-5: Cinema's "Film this path" on the open engine (docs/research/new-models-7.md §3.6, the wan21-i2v-uni3c-path table).
+    id: 'wan21-i2v-uni3c-path',
+    title: 'Fly path: a still filmed along a camera path, Wan 2.1 I2V guided by Uni3C on a browser render of the path (core nodes)',
+    capability: 'camera-path',
+    handBuilt: 'hand-built/wan21-i2v-uni3c-path.json',
+    bindings: {
+      image: [b('5', 'image')], video: [b('7', 'file')], prompt: [b('10', 'text')], negativePrompt: [b('11', 'text')],
+      width: [b('12', 'width')], height: [b('12', 'height')], seed: [b('13', 'seed')], steps: [b('13', 'steps')], cfg: [b('13', 'cfg')],
+      shift: [b('18', 'shift')], strength: [b('9', 'strength')], checkpoint: [b('1', 'unet_name')], filenamePrefix: [b('16', 'filename_prefix')],
+    },
+    outputs: [{ node: '16', kind: 'video' }],
+    defaults: { fps: 16, checkpoint: 'wan2.1_i2v_720p_14B_fp8_scaled.safetensors' },
+    limits: { maxWidth: 1280, maxHeight: 1280, dimensionMultiple: 16, maxFrames: 81, frameStep: 4 },
+    vramGb: 48,
+    optionalModels: ['Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors'],
+    license: 'Apache-2.0 (Wan 2.1 I2V 14B; Uni3C, alibaba-damo-academy/Uni3C — Kijai\'s repack repo carries no licence field)',
+    notes:
+      'Cinema 3D scene "Film this path" (N7-5): the still is the start image (WanImageToVideo, 81 frames, CLIP vision H) and the browser\'s render of the MoGe mesh or ' +
+      'point cloud along the path (src/components/cinema/scene-engine.ts recordPath: 81 frames, 16 fps, black where nothing was seen) is the `video`, which core ' +
+      'WanUni3CControlnetApply encodes with the Wan VAE as Uni3C\'s render_video (it pads or cuts it to the latent\'s frame count and resizes it, centre crop, to the ' +
+      'output size; it has no hole-mask input, so the render\'s mask stays in the browser for WorldCast, N7-9). Model path: UNETLoader -> ModelSamplingSD3 (shift 5) -> ' +
+      'Uni3C (strength 1, 0-1) -> KSampler (30 steps, cfg 5, uni_pc / simple; Uni3C\'s own sampler settings are 50 steps at cfg 5 — to confirm on a GPU). ' +
+      'Weights: Kijai/WanVideo_comfy Wan21_Uni3C_controlnet_fp16 @ 8260d429 in models/model_patches (its header has every key core ModelPatchLoader\'s Uni3C branch ' +
+      'reads; loading it is inferred, not run) and Wan 2.1 I2V 14B 720P fp8 scaled (Comfy-Org/Wan-2.1 @ 123acf1c), the base Uni3C was trained on. The 480P Q8 GGUF ' +
+      'Fuobe pins for InfiniteTalk can\'t load through a core node (UNETLoader reads no GGUF; that needs city96\'s ComfyUI-GGUF pack), so the core drop-in to try ' +
+      'first on a smaller GPU is the 480P fp8 file the native InfiniteTalk graph uses (`checkpoint`): both are dim 5120, which the Uni3C node checks. ' +
+      'VRAM: Uni3C\'s own figures are 46-51 GB with offload (Fuobe\'s older 24 GB note is unverified). Validated by /prompt only (no GPU here).',
   },
 
   // ---- Content Factory: read a reference video ---------------------------------------------

@@ -11,7 +11,7 @@ import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
-import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
+import { chainedWaitMessage, framesWait, keyframeChain } from "@/lib/catalog/keyframes";
 import { clipWindowProblem } from "@/lib/catalog/clip-windows";
 import { avatarSeconds, clipEditSeconds, estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
@@ -730,7 +730,8 @@ export function previewChained(req: GenerationRequest, deps: number) {
   // A waiting step always runs as one job (createGenerations doesn't batch dependents).
   const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
   // Refused before anything starts, as createGenerations refuses it.
-  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name, p.op));
+  // A keyframe film waits for frames earlier steps make (framesWait): its clips are created then, each waiting for its own.
+  if (routesFor(p.model, p.op).some((r) => r.chained) && !(p.op === "keyframes" && framesWait(req))) throw new Error(chainedWaitMessage(p.model.name, p.op));
   const jobs = Math.max(1, p.jobs);
   return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
@@ -787,7 +788,10 @@ export function createGenerations(given: GenerationRequest, opts: CreateOptions 
   }
   // Frames mode on an open model: one start/end-frame clip per pair of frames, then joined.
   const filmRoute = shotModel && keyframeChain(shotModel);
-  if (!opts.dependsOn && filmRoute && inferOperation(shotModel, original) === "keyframes") return createKeyframeFilm(original, shotModel, filmRoute);
+  // Its frames can come from earlier steps (framesWait): each clip then waits for the frames it starts and ends on.
+  if (filmRoute && inferOperation(shotModel, original) === "keyframes" && (!opts.dependsOn || framesWait(original))) {
+    return createKeyframeFilm(original, shotModel, filmRoute, { batchId: opts.batchId, dependsOn: opts.dependsOn });
+  }
   // Text to 3D on the open engine: a still first, then the 3D model of it. The operation is read as the planner
   // reads it (Assist, MCP and API clients usually leave op out).
   const stillTo3d = !opts.dependsOn && shotModel && inferOperation(shotModel, original) === "text-to-3d" ? routesFor(shotModel, "text-to-3d").find((r) => r.chained) : undefined;
@@ -880,10 +884,12 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   prompt: "text",
 };
 
-/** Names providers give the same stem (ComfyUI: voice/background; Demucs: vocals…; SAM Audio: target/residual). */
+/** Names providers give the same stem (ComfyUI: voice/background, DBS also music/effects; Demucs: vocals…; SAM Audio: target/residual). */
 const STEM_ALIASES: Record<string, string[]> = {
   voice: ["voice", "vocals", "speech", "target"],
   background: ["background", "accompaniment", "instrumental", "residual", "no_vocals"],
+  music: ["music"],
+  effects: ["effects", "sfx"],
 };
 
 /**
@@ -951,6 +957,9 @@ export async function chainValue(o: OutputFile | undefined, s: ChainSlot, op?: G
     .catch(() => undefined);
 }
 
+/** A list slot with its own place in the list (ChainSlot.at). */
+const placed = (s: ChainSlot) => s.at !== undefined && s.at >= 0;
+
 /**
  * Put the dependencies' outputs into the request's inputs, slot by slot (lists keep dependency order).
  * A "prompt" slot gets the dependency's text: it fills "{text}" in the prompt, or becomes the prompt.
@@ -960,10 +969,16 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
   let prompt = req.prompt;
   const slots = slotsFor(req, urls.length);
   for (const k of ["images", "videos", "audios"] as const) {
-    const at = (pos: "first" | "last") => slots.flatMap((s, i) => (s.slot === k && (s.position ?? "last") === pos ? [urls[i]] : []));
+    const at = (pos: "first" | "last") => slots.flatMap((s, i) => (s.slot === k && !placed(s) && (s.position ?? "last") === pos ? [urls[i]] : []));
     const first = at("first");
     const last = at("last");
-    if (first.length || last.length) inputs[k] = [...first, ...(inputs[k] ?? []), ...last];
+    // Slots with a place go in last, in order of it, so each lands where it says (a film's frames made by earlier steps).
+    const inserts = slots.flatMap((s, i) => (s.slot === k && placed(s) ? [{ at: s.at!, url: urls[i] }] : [])).sort((a, b) => a.at - b.at);
+    if (first.length || last.length || inserts.length) {
+      const list = [...first, ...(inputs[k] ?? []), ...last];
+      for (const x of inserts) list.splice(Math.min(x.at, list.length), 0, x.url);
+      inputs[k] = list;
+    }
   }
   slots.forEach((s, i) => {
     if (s.slot === "prompt") prompt = prompt?.includes("{text}") ? prompt.replaceAll("{text}", urls[i]) : urls[i];
@@ -988,8 +1003,10 @@ export function unfilledRequest(req: GenerationRequest, deps: number): Generatio
   const slots = filledSlots({ ...rest, chainSkipped }, deps);
   const inputs = { ...rest.inputs };
   for (const k of ["images", "videos", "audios"] as const) {
-    const count = (pos: "first" | "last") => slots.filter((s) => s.slot === k && (s.position ?? "last") === pos).length;
-    const list = inputs[k] ?? [];
+    const count = (pos: "first" | "last") => slots.filter((s) => s.slot === k && !placed(s) && (s.position ?? "last") === pos).length;
+    const list = [...(inputs[k] ?? [])];
+    // Placed items come out first, the last placed first, as they went in.
+    for (const at of slots.filter((s) => s.slot === k && placed(s)).map((s) => s.at!).sort((a, b) => b - a)) if (at < list.length) list.splice(at, 1);
     const own = list.slice(count("first"), list.length - count("last"));
     if (own.length) inputs[k] = own;
     else delete inputs[k];

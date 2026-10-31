@@ -1,0 +1,993 @@
+{
+ "asOf": "2026-10-30",
+ "scope": "Idol (Speridlabs), single image to 3D Gaussian splat: what it is, the claims checked (~2 s, low VRAM, quality, consumer GPUs, native ComfyUI), weights and licences as information, the ComfyUI-Idol pack, the core-node graph Fuobe would build, hosted routes (none), comparison with Fuobe's 3D models, placements and a 9-package build plan. Read-only research: nothing installed, nothing run, no paid call.",
+ "doc": "docs/research/idol-9.md",
+ "fuobe": {
+  "branch": "claude/fuobe-parity-4",
+  "commit": "231e6346cadbea2822373a5b803e627a5914e199"
+ },
+ "verdict": {
+  "asGoodAsClaimed": "No. The architecture claims hold (it is TripoSplat retrained and runs on ComfyUI's stock TripoSplat nodes), but '~2 s' is not supported by any published number (fastest 3.4 s on a B300 via the compiled SDK; 14-46 s on consumer GPUs; ~22-26 s on an RTX 5090 in ComfyUI), 'low VRAM' means a 7.2 GB vendor peak (8 GB class, same as TripoSplat), and the quality lead over TripoSplat is vendor-only and small (+0.014 SSIM, +0.002 IoU, +0.038 DINOv2). Raw outputs carry a haze of near-transparent Gaussians.",
+  "worthAdding": "Yes, cheaply: a second open splat model in Image to 3D -> Splat, built from a copy of Fuobe's existing core TripoSplat graph, 1.32 GB of new Apache-2.0 weights, no custom nodes required. Not a headline feature and not 'instant 3D'; choose the default between TripoSplat and Idol with a blind A/B (idol-3). No cloud route."
+ },
+ "idol": {
+  "name": "Idol",
+  "by": "Speridlabs (Alejandro Cañada, Chema Garabito)",
+  "projectPage": "https://speridlabs.com/research/idol",
+  "hf": {
+   "repo": "speridlabs/idol",
+   "revision": "2731c2291fc65a797c5cb627a5e5526fc1490902",
+   "created": "2026-10-28T15:55:17Z",
+   "lastModified": "2026-10-29T18:17:36Z",
+   "licence": "apache-2.0",
+   "gated": false
+  },
+  "sdk": {
+   "repo": "https://github.com/speridlabs/idol-sdk",
+   "commit": "4702a7f00850e34b6e83a2170cc123c3e9570744",
+   "licence": "Apache-2.0",
+   "commits": 1,
+   "tags": 0
+  },
+  "paper": null,
+  "architecturePaper": "TripoSplat, arXiv:2605.16355 (Yan, Cao, Wang, Liang, Guo; 2026-05-08)",
+  "bibtex": "@misc{canada2026idol}, 'Idol: Single Image to 3D Gaussian Splats' (project page only)",
+  "input": "one RGB picture of one object (render, generated image or photo); no multi-view",
+  "preprocess": "short side to 1024; BiRefNet unless real alpha; alpha eroded 1 px (3x3 min filter); square crop of margin x bbox; 1024x1024 on black (idol/preprocess.py L13-37)",
+  "cropModes": {
+   "synthetic": 1.2,
+   "real": 1.7,
+   "default": "synthetic",
+   "comfyCoreEquivalent": "TripoSplatPreprocessImage = synthetic (fixed 1.2, nodes_triposplat.py L25-59)"
+  },
+  "output": "one 3DGS splat, default 262,144 Gaussians (32,768-1,048,576 documented; ComfyUI clamps, the SDK only floors to a multiple of 32), .ply 17 float32 per Gaussian, degree-0 SH, y-up; plus a predicted input camera",
+  "bytesPerGaussianPly": 68,
+  "plySizesMb": {
+   "32768": 2.2,
+   "262144": 17.8,
+   "1048576": 71.3
+  },
+  "projectPageSizesMb": {
+   "32768": 0.4,
+   "262144": 3.2,
+   "1048576": 12.2,
+   "note": "not .ply; guess a compressed web format such as .spz"
+  },
+  "noMesh": true,
+  "method": {
+   "conditioning": "DINOv3 ViT-H+/16 tokens (1280, layer-normed) + FLUX.2 VAE latent tokens (128, 2x2-packed)",
+   "denoiser": "rectified-flow DiT LatentSeqMMFlowModel, 24 blocks, width 1024, 16 heads, 370.6M params; 8192 tokens x 16 + 5-value camera token",
+   "sampler": "Euler, 50 steps, linspace(1,0) shifted t' = 3t/(1+2t); CFG (1+w)cond - w*uncond, w 3.0, zero negative = ComfyUI cfg 4.0; shift 3 = ComfyUI TripoSplat's built-in shift",
+   "decoders": "octree 50.8M (max level 8) + Gaussian 237.3M (32 Gaussians per anchor)",
+   "params": {
+    "idolNetworks": "0.66B (658.7M)",
+    "fullRequest": "about 1.8B with BiRefNet 220.7M, DINOv3 840.6M, FLUX.2 VAE 84.1M"
+   }
+  },
+  "relationToTripoSplat": {
+   "architecture": "identical: 559 denoiser tensors and 388 decoder tensors with the same names, shapes, dtypes, offsets (HTTP range reads of the headers)",
+   "weights": "different: denoiser matrices cosine 0.02-0.26 vs TripoSplat, norm gains 0.95, decoders 0.47-0.90 (first <=32 KB of sampled tensors); guess: initialised from TripoSplat and trained further",
+   "comfyui": "loads through the TripoSplat classes (model_detection.py L832, sd.py L1093-1094); pos_pe recomputed (Sobol seed 123); TripoSplat first in ComfyUI v0.23.0; v0.43.1 TripoSplat code identical to 0.41.0",
+   "consequence": "same per-step cost as TripoSplat in Fuobe's ComfyUI path"
+  },
+  "haze": "about half the Gaussians have opacity under 0.05 (pack README; also in the SDK's own .ply); core ComfyUI can threshold renders (RenderSplat opacity_threshold) and meshes (SplatToMesh min_opacity) but cannot prune a saved splat; IdolPruneSplat can",
+  "space": "speridlabs/idol (ZeroGPU A10G, optimize off, demo/model.py L12-14)"
+ },
+ "claims": [
+  {
+   "claim": "Generates in ~2 s (card and SDK README: 'can run in under 2 seconds')",
+   "verdict": "unconfirmed",
+   "evidence": "No settings given. Vendor GPU table at 50 steps / 262,144: B300 3.4, B200 3.6, H200 6.6, H100 6.7, RTX 5090 14.1, A100 16.3, L40S 16.6, RTX 4090 19.1, RTX 3080 46.2, L4 54.6 s. Project page headline 3.4 s. SDK optimize path (compile, batched CFG, cuDNN, TF32; ~1.7x) on by default. ComfyUI on RTX 5090 ~18 s sampling + 4-8 s decode (pack author)."
+  },
+  {
+   "claim": "Works with low VRAM (7.2 GB; 'under 8 GB')",
+   "verdict": "partly",
+   "evidence": "Vendor-measured, GPU not stated; 3.7-4.4 GB of weights; RTX 3080 10 GB in their table; ComfyUI decode estimate +0.23 GB at 262,144 (computed). 8 GB class like TripoSplat (Fuobe manifest vramGb 8)."
+  },
+  {
+   "claim": "Runs on consumer GPUs",
+   "verdict": "partly",
+   "evidence": "RTX 5090 14.1 s, 4090 19.1 s, 3080 46.2 s (vendor, SDK); ~22-26 s on RTX 5090 in ComfyUI (pack author)."
+  },
+  {
+   "claim": "Better quality than TripoSplat, TRELLIS and LGM",
+   "verdict": "unconfirmed",
+   "evidence": "Vendor table only. Idol SSIM 0.726 / LPIPS 0.213 / IoU 0.862 / DINOv2 0.781 / CLIP 0.885 / sharpness 0.81 / PSNR 12.25; TripoSplat 0.712 / 0.225 / 0.860 / 0.743 / 0.868 / 1.03 / 11.76; TRELLIS (unversioned) 0.716 / 0.235 / 0.845 / 0.754 / 0.868 / 0.97 / 11.89; LGM best PSNR 12.46. No paper, no named test set, no TRELLIS.2 or Hunyuan3D."
+  },
+  {
+   "claim": "Up to 1,048,576 Gaussians",
+   "verdict": "partly",
+   "evidence": "ComfyUI clamps to 32,768-1,048,576; the SDK enforces no range. 262,144 matches the octree's point density; more is denser, not more detailed."
+  },
+  {
+   "claim": "Idol is TripoSplat retrained, so it runs natively in ComfyUI",
+   "verdict": "confirmed",
+   "evidence": "Identical tensor tables; same ComfyUI classes; shift and pos_pe match; weights differ. Parity numbers (3e-6 / 1e-4-3e-3) are the pack author's, not rerun."
+  },
+  {
+   "claim": "Faster than TripoSplat (6.8 s vs 9.9 s on H100)",
+   "verdict": "partly",
+   "evidence": "Vendor numbers; same network size, so the gap is the compiled SDK. In Fuobe both run the same ComfyUI code; Fuobe's TripoSplat graph uses 20 dpmpp_2m steps, Idol's reference 50 Euler."
+  },
+  {
+   "claim": "ComfyUI-Idol needs no requirements",
+   "verdict": "confirmed",
+   "evidence": "dependencies = []; imports comfy.utils, comfy_api.latest, torch, logging, math, typing_extensions; no network/subprocess/eval/pickle/torch.load. README's 'ComfyUI 0.22 or newer' is wrong: TripoSplat landed in v0.23.0."
+  },
+  {
+   "claim": "Needs an NVIDIA GPU with CUDA",
+   "verdict": "partly",
+   "evidence": "SDK falls back to CPU (pipeline.py L54), never MPS; ComfyUI TripoSplat supports fp32; no CPU/Apple timing; idol-sdk issues #1 and #2 unanswered. Guess: tens of minutes per object on CPU."
+  },
+  {
+   "claim": "nynxz/Idol fp16 files are a faithful conversion of speridlabs/idol",
+   "verdict": "partly",
+   "evidence": "6 denoiser tensors cosine 1.000000 (max diff 1.5e-5 to 4.9e-4); 4 decoder tensors within 2.6e-5 to 4.9e-5; all 388 decoder keys; only pos_pe dropped. Prefixes of 10 tensors only."
+  }
+ ],
+ "weights": [
+  {
+   "repo": "nynxz/Idol",
+   "revision": "c718f2b1b95b353edd07d17e845719fc10880a44",
+   "file": "diffusion_models/idol_fp16.safetensors",
+   "bytes": 741107210,
+   "sizeMb": 741.11,
+   "sha256": "cf452146f78e23a0d34be8f9f79bcde642b9a40ef493046c8e9d5f79096f6dd0",
+   "comfyFolder": "diffusion_models",
+   "url": "https://huggingface.co/nynxz/Idol/resolve/c718f2b1b95b353edd07d17e845719fc10880a44/diffusion_models/idol_fp16.safetensors",
+   "licence": "Apache-2.0",
+   "gated": false,
+   "role": "new: Idol denoiser, fp16, pos_pe dropped (third-party conversion, spot-checked)"
+  },
+  {
+   "repo": "nynxz/Idol",
+   "revision": "c718f2b1b95b353edd07d17e845719fc10880a44",
+   "file": "vae/idol_decoder_fp16.safetensors",
+   "bytes": 576148658,
+   "sizeMb": 576.15,
+   "sha256": "c511d99eb668ec4b06d883cb6e43770bc35e3864e16e7058e8d6211ba5c509aa",
+   "comfyFolder": "vae",
+   "url": "https://huggingface.co/nynxz/Idol/resolve/c718f2b1b95b353edd07d17e845719fc10880a44/vae/idol_decoder_fp16.safetensors",
+   "licence": "Apache-2.0",
+   "gated": false,
+   "role": "new: octree + Gaussian decoders merged (octree./gs.), 388 tensors"
+  },
+  {
+   "repo": "VAST-AI/TripoSplat",
+   "revision": "56a96e603204ec410c4da60c13ea4fa09a2169a9",
+   "file": "clip_vision/dino_v3_vit_h.safetensors",
+   "bytes": 1681247696,
+   "sizeMb": 1681.25,
+   "sha256": "a29ef35101a16966972a0d50732a6f3a608ff7cfffb2afa9bbe9007cb842cc53",
+   "comfyFolder": "clip_vision",
+   "licence": "DINOv3 License (Meta's weights; the repo card says MIT)",
+   "gated": false,
+   "role": "shared with TripoSplat; already in KNOWN_MODELS (library.spec.mjs L273)"
+  },
+  {
+   "repo": "Comfy-Org/Flux-2-Dev (renamed from Comfy-Org/flux2-dev; the old URL answers 307); same file in VAST-AI/TripoSplat vae/",
+   "revision": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7",
+   "file": "split_files/vae/flux2-vae.safetensors",
+   "bytes": 336213556,
+   "sizeMb": 336.21,
+   "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5",
+   "comfyFolder": "vae",
+   "licence": "Apache-2.0 (BFL flux2 README L111); the Comfy-Org repo card names the FLUX.1 [dev] non-commercial licence for the repo",
+   "gated": false,
+   "role": "shared; KNOWN_MODELS L230 (URL drift)"
+  },
+  {
+   "repo": "Comfy-Org/BiRefNet",
+   "revision": "884af709e9b795d89dafbf97f29c8d6a2386f5c6",
+   "file": "background_removal/birefnet.safetensors",
+   "bytes": 444473596,
+   "sizeMb": 444.47,
+   "sha256": "9ab37426bf4de0567af6b5d21b16151357149139362e6e8992021b8ce356a154",
+   "comfyFolder": "background_removal",
+   "licence": "MIT",
+   "gated": false,
+   "role": "shared; KNOWN_MODELS L168"
+  },
+  {
+   "repo": "speridlabs/idol",
+   "revision": "2731c2291fc65a797c5cb627a5e5526fc1490902",
+   "file": "denoiser.safetensors",
+   "bytes": 1482258308,
+   "sizeMb": 1482.26,
+   "sha256": "ded2cacf671bf3978ebc62729087abdbd318ef4752e6805b4c9fc8ffa51fe716",
+   "licence": "Apache-2.0",
+   "gated": false,
+   "role": "source (F32, 560 tensors incl. pos_pe); SDK or convert.py"
+  },
+  {
+   "repo": "speridlabs/idol",
+   "revision": "2731c2291fc65a797c5cb627a5e5526fc1490902",
+   "file": "decoder.safetensors",
+   "bytes": 203171696,
+   "sizeMb": 203.17,
+   "sha256": "9da4d7676bfcadb1c3fdfbff796e6257dadf82d26ec05be7717c79b2b13a1c4e",
+   "licence": "Apache-2.0",
+   "gated": false,
+   "role": "source octree decoder (F32, 60 tensors)"
+  },
+  {
+   "repo": "speridlabs/idol",
+   "revision": "2731c2291fc65a797c5cb627a5e5526fc1490902",
+   "file": "decoder_gs.safetensors",
+   "bytes": 949083036,
+   "sizeMb": 949.08,
+   "sha256": "3087eb8ee5763206a53e4078acf2a1bf382dab5147d407ec13a2cf39c04cc544",
+   "licence": "Apache-2.0",
+   "gated": false,
+   "role": "source Gaussian decoder (F32, 328 tensors)"
+  },
+  {
+   "repo": "speridlabs/idol",
+   "revision": "2731c2291fc65a797c5cb627a5e5526fc1490902",
+   "file": "birefnet.safetensors",
+   "bytes": 444466856,
+   "sizeMb": 444.47,
+   "sha256": "44bbc97b041f879975d0d6d538b8e66a25eb04d1f49aab40697544cdd97eaa8e",
+   "licence": "Apache-2.0 repo tag; BiRefNet itself MIT",
+   "gated": false,
+   "role": "BiRefNet without training heads (the stock Comfy-Org file is used instead)"
+  },
+  {
+   "repo": "speridlabs/idol",
+   "revision": "2731c2291fc65a797c5cb627a5e5526fc1490902",
+   "file": "config.json",
+   "bytes": 1335,
+   "sizeMb": 0.001,
+   "licence": "Apache-2.0",
+   "gated": false,
+   "role": "architecture constants (match convert.py L31-36)"
+  },
+  {
+   "repo": "facebook/dinov3-vith16plus-pretrain-lvd1689m",
+   "revision": "c807c9eeea853df70aec4069e6f56b28ddc82acc",
+   "file": "(SDK route only, transformers AutoModel)",
+   "licence": "DINOv3 License",
+   "gated": "yes, manual approval",
+   "role": "not needed on the ComfyUI route"
+  },
+  {
+   "repo": "black-forest-labs/FLUX.2-dev",
+   "revision": "26afe3a78bb242c0a8bb181dcc8937bb16e5c66c",
+   "file": "vae/diffusion_pytorch_model.safetensors (SDK route only)",
+   "bytes": 336213556,
+   "licence": "repo: FLUX non-commercial; the autoencoder: Apache-2.0",
+   "gated": "yes, auto",
+   "role": "not needed on the ComfyUI route"
+  },
+  {
+   "repo": "VAST-AI/TripoSplat (comparison)",
+   "revision": "56a96e603204ec410c4da60c13ea4fa09a2169a9",
+   "file": "diffusion_models/triposplat_fp16.safetensors (741,106,994 B) + vae/triposplat_vae_decoder_fp16.safetensors (576,148,442 B)",
+   "sizeMb": 1317.26,
+   "licence": "MIT",
+   "gated": false,
+   "role": "Fuobe's open splat today"
+  }
+ ],
+ "newWeightsBytes": 1317255868,
+ "licences": [
+  {
+   "item": "Idol weights (speridlabs/idol @ 2731c229)",
+   "licence": "Apache-2.0",
+   "class": "commercial",
+   "notes": "not gated; no non-commercial or territory terms",
+   "source": "HF API cardData.license; README front matter"
+  },
+  {
+   "item": "nynxz/Idol converted files",
+   "licence": "Apache-2.0",
+   "class": "commercial",
+   "notes": "base_model speridlabs/idol; not gated",
+   "source": "card @ c718f2b1"
+  },
+  {
+   "item": "TripoSplat (architecture; likely Idol's starting weights)",
+   "licence": "MIT",
+   "class": "commercial",
+   "notes": "MIT notice should travel with substantial portions; neither Idol's card nor idol-sdk carries one; show 'TripoSplat (MIT, VAST-AI-Research)' attribution (information)",
+   "source": "TripoSplat GitHub README L62; HF card"
+  },
+  {
+   "item": "idol-sdk code",
+   "licence": "Apache-2.0",
+   "class": "commercial",
+   "notes": "dit.py adapted from diffusers transformer_wan.py (Apache-2.0)",
+   "source": "LICENSE, pyproject @ 4702a7f"
+  },
+  {
+   "item": "ComfyUI-Idol pack",
+   "licence": "Apache-2.0",
+   "class": "commercial",
+   "notes": "NOTICE: ports idol-sdk preprocess.py and camera.py; no model code",
+   "source": "LICENSE, NOTICE @ 4d3a4f6"
+  },
+  {
+   "item": "DINOv3 ViT-H+/16",
+   "licence": "DINOv3 License",
+   "class": "conditions",
+   "notes": "royalty-free, commercial use allowed, trade-control limits, 'Built with DINOv3' notice; Fuobe already shows it for TripoSplat",
+   "source": "manifest image-to-splat-triposplat; model3d.ts L67; licences.ts KNOWN"
+  },
+  {
+   "item": "FLUX.2 VAE",
+   "licence": "Apache-2.0",
+   "class": "commercial",
+   "notes": "the FLUX.2-dev repo as a whole is non-commercial; the autoencoder is Apache-2.0; same sha256 in every copy",
+   "source": "github.com/black-forest-labs/flux2 README L111"
+  },
+  {
+   "item": "BiRefNet",
+   "licence": "MIT",
+   "class": "commercial",
+   "notes": "",
+   "source": "Comfy-Org/BiRefNet card"
+  }
+ ],
+ "licencesForFuobe": {
+  "workflowLicenceText": "Apache-2.0 (speridlabs/idol weights; the ComfyUI files are nynxz/Idol's conversion, Apache-2.0); Idol is VAST-AI-Research's TripoSplat architecture (MIT, code and weights); the dino_v3_vit_h image encoder is under the DINOv3 License (royalty-free, commercial use allowed, trade-control limits; the app must show a \"Built with DINOv3\" notice); FLUX.2 VAE Apache-2.0; BiRefNet MIT",
+  "nodePackRow": "pack('ComfyUI-Idol', 'https://github.com/Nynxz/ComfyUI-Idol/tree/4d3a4f671028f0e062d9f004cda1a2dd73360d35', { name: 'Apache-2.0', class: 'commercial', note: 'Idol's crop modes, predicted camera and splat pruning; Apache-2.0 code, no model code' }) — only with idol-2",
+  "notices": [
+   "Built with DINOv3"
+  ],
+  "default": "information only; nothing gated"
+ },
+ "pack": {
+  "name": "ComfyUI-Idol",
+  "url": "https://github.com/Nynxz/ComfyUI-Idol",
+  "commit": "4d3a4f671028f0e062d9f004cda1a2dd73360d35",
+  "commitDate": "2026-10-30T07:44:55+10:00",
+  "commitMessage": "README: the halo is in the reference SDK's output too",
+  "version": "0.1.0",
+  "publisherId": "nynxz",
+  "licence": "Apache-2.0",
+  "registry": "not listed (api.comfy.org/nodes/comfyui-idol 404; search 'idol' 0)",
+  "requiresPython": ">=3.10",
+  "comfyApi": "V3 (comfy_api.latest ComfyExtension; __init__.py L11-23)",
+  "minComfyUI": "v0.23.0 (TripoSplat); README says 0.22, which is wrong",
+  "dependencies": {
+   "requirements": [],
+   "compiled": "none",
+   "network": "none at run time",
+   "riskScan": "no subprocess, os.system, eval, exec, pickle or torch.load in idol/*.py or __init__.py",
+   "apisUsed": [
+    "comfy_api/latest/_io.py BackgroundRemoval L619",
+    "Splat L688",
+    "Load3DCamera L803",
+    "DynamicCombo L1231",
+    "search_aliases L1855",
+    "advanced= L164ff",
+    "geometry_types.py SPLAT counts L18-35",
+    "comfy/bg_removal_model.py encode_image L44"
+   ],
+   "manualOnly": [
+    "scripts/convert.py (torch, safetensors, huggingface_hub)",
+    "tests/parity.py",
+    "tests/e2e.py"
+   ]
+  },
+  "nodeClasses": [
+   "IdolPreprocessImage",
+   "IdolCamera",
+   "IdolPruneSplat"
+  ],
+  "nodes": [
+   {
+    "class": "IdolPreprocessImage",
+    "displayName": "Idol Preprocess Image",
+    "category": "3d/idol",
+    "source": "idol/nodes.py L17-74",
+    "inputs": [
+     {
+      "name": "image",
+      "type": "IMAGE"
+     },
+     {
+      "name": "mode",
+      "type": "DynamicCombo",
+      "options": [
+       "synthetic (1.2)",
+       "real (1.7)",
+       "custom (crop_margin FLOAT 1.0-4.0, default 1.2)"
+      ],
+      "apiForm": "\"mode\": \"real\" or \"mode\": \"custom\", \"mode.crop_margin\": 1.5"
+     },
+     {
+      "name": "mask",
+      "type": "MASK",
+      "optional": true,
+      "note": "1 = object"
+     },
+     {
+      "name": "bg_removal_model",
+      "type": "BACKGROUND_REMOVAL",
+      "optional": true,
+      "note": "used when no mask; raises if both missing (L59-63)"
+     },
+     {
+      "name": "erode_radius",
+      "type": "INT",
+      "range": "0-16",
+      "default": 1,
+      "advanced": true
+     },
+     {
+      "name": "size",
+      "type": "INT",
+      "range": "256-4096 step 16",
+      "default": 1024,
+      "advanced": true
+     }
+    ],
+    "outputs": [
+     {
+      "name": "image",
+      "type": "IMAGE"
+     },
+     {
+      "name": "mask",
+      "type": "MASK"
+     }
+    ],
+    "note": "BiRefNet runs at the original resolution here, after a 1024 resize in the SDK"
+   },
+   {
+    "class": "IdolCamera",
+    "displayName": "Idol Camera",
+    "category": "3d/idol",
+    "source": "idol/nodes.py L77-111",
+    "inputs": [
+     {
+      "name": "samples",
+      "type": "LATENT",
+      "note": "KSampler output of a TripoSplatConditioning graph (reads the camera token)"
+     }
+    ],
+    "outputs": [
+     {
+      "name": "camera_info",
+      "type": "LOAD3D_CAMERA"
+     },
+     {
+      "name": "yaw",
+      "type": "FLOAT"
+     },
+     {
+      "name": "pitch",
+      "type": "FLOAT"
+     },
+     {
+      "name": "distance",
+      "type": "FLOAT"
+     },
+     {
+      "name": "fov",
+      "type": "FLOAT"
+     }
+    ],
+    "note": "batch uses item 0; orthographic -> distance 1000"
+   },
+   {
+    "class": "IdolPruneSplat",
+    "displayName": "Idol Prune Splat",
+    "category": "3d/idol",
+    "source": "idol/nodes.py L114-156",
+    "inputs": [
+     {
+      "name": "splat",
+      "type": "SPLAT"
+     },
+     {
+      "name": "min_opacity",
+      "type": "FLOAT",
+      "range": "0-1",
+      "default": 0.05
+     },
+     {
+      "name": "max_scale",
+      "type": "FLOAT",
+      "range": "0-1",
+      "default": 0,
+      "advanced": true,
+      "note": "0 = off"
+     }
+    ],
+    "outputs": [
+     {
+      "name": "splat",
+      "type": "SPLAT",
+      "note": "padded batch with per-item counts"
+     },
+     {
+      "name": "count",
+      "type": "INT",
+      "note": "first item only (L156)"
+     }
+    ]
+   }
+  ],
+  "exampleWorkflow": "example_workflows/idol_image_to_splat.json (22 nodes): LoadImage -> LoadBackgroundRemovalModel -> IdolPreprocessImage (synthetic, 1, 1024) -> CLIPVisionLoader dino_v3_vit_h + VAELoader flux2-vae -> TripoSplatConditioning -> UNETLoader idol_fp16 -> KSampler (seed 42, 50, cfg 4.0, euler/simple) + TripoSplatSamplingPreview -> VAELoader idol_decoder_fp16 -> VAEDecodeTripoSplat 262144 -> IdolPruneSplat 0.05/0 -> SplatToFile3D ply -> SaveGaussianSplat; IdolCamera -> RenderSplat (input view); RenderSplat 72 frames -> CreateVideo 24 fps -> SaveVideo",
+  "liveServer": "GET /object_info/<Idol class> returns {} on 127.0.0.1:8188: not installed (and not installed by this research)",
+  "maturity": "3 commits on 2026-10-30 within 24 minutes (b471ad1, 9c21eeb, 4d3a4f6), each with an AI co-author trailer; 19 stars, 1 fork, no tags, no CI, not in the Registry; no bugs found on reading",
+  "fuobeUse": "optional (idol-2): pruning saved splats and Idol's exact crop; the model itself runs on core nodes"
+ },
+ "graphs": [
+  {
+   "id": "image-to-splat-idol",
+   "capability": "splat",
+   "handBuilt": "hand-built/image-to-splat-idol.json",
+   "base": "copy of hand-built/image-to-splat-triposplat.json (same node ids)",
+   "customNodes": [],
+   "changes": [
+    "88:16 UNETLoader unet_name idol_fp16.safetensors",
+    "88:11 VAELoader vae_name idol_decoder_fp16.safetensors",
+    "88:6 KSampler steps 50, cfg 4.0, sampler_name euler, scheduler simple",
+    "88:101 ImageScale {image [88:2,0], lanczos, 720, 720, crop disabled} (new)",
+    "88:102 EmptyImage {1024, 1024, 1, color 0} (new)",
+    "88:103 ImageCompositeMasked {destination [88:102,0], source [88:101,0], x 152, y 152, resize_source false} (new)",
+    "88:104 ComfySwitchNode {switch <- photoCrop, on_false [88:2,0], on_true [88:103,0]} (new; lazy inputs)",
+    "88:24 TripoSplatConditioning image [88:104,0]",
+    "75 RenderSplat opacity_threshold 0.05"
+   ],
+   "bindings": {
+    "image": [
+     "99.image"
+    ],
+    "cutout": [
+     "88:35.switch"
+    ],
+    "photoCrop": [
+     "88:104.switch"
+    ],
+    "numGaussians": [
+     "88:55.num_gaussians"
+    ],
+    "steps": [
+     "88:6.steps"
+    ],
+    "cfg": [
+     "88:6.cfg"
+    ],
+    "sampler": [
+     "88:6.sampler_name"
+    ],
+    "seed": [
+     "88:6.seed",
+     "88:55.seed"
+    ],
+    "splatFormat": [
+     "92.format"
+    ],
+    "orbitFrames": [
+     "75.frames"
+    ],
+    "filenamePrefix": [
+     "51.filename_prefix",
+     "42.filename_prefix"
+    ]
+   },
+   "newBindingKeys": [
+    "sampler",
+    "photoCrop"
+   ],
+   "outputs": [
+    {
+     "node": "51",
+     "kind": "model3d",
+     "role": "splat"
+    },
+    {
+     "node": "42",
+     "kind": "video",
+     "role": "turntable"
+    }
+   ],
+   "defaults": {
+    "steps": 50,
+    "cfg": 4.0,
+    "sampler": "euler",
+    "numGaussians": 262144,
+    "orbitFrames": 75,
+    "splatFormat": "spz",
+    "cutout": true,
+    "photoCrop": false
+   },
+   "presets": {
+    "best": {
+     "steps": 50,
+     "sampler": "euler",
+     "cfg": 4,
+     "numGaussians": 262144
+    },
+    "quick": {
+     "steps": 20,
+     "sampler": "dpmpp_2m",
+     "cfg": 4,
+     "numGaussians": 65536,
+     "note": "pack README trade-off; quality unmeasured"
+    }
+   },
+   "limits": {
+    "maxGaussians": 1048576
+   },
+   "models": [
+    "idol_fp16.safetensors (diffusion_models, 0.74)",
+    "idol_decoder_fp16.safetensors (vae, 0.58)",
+    "dino_v3_vit_h.safetensors (clip_vision, 1.68)",
+    "flux2-vae.safetensors (vae, 0.34)",
+    "birefnet.safetensors (background_removal, 0.44)"
+   ],
+   "vramGb": 8,
+   "notes": "Photo crop is my analysis: the 1.2 crop scaled to 720 and centred on black 1024 puts the object at 600 px vs Idol real's 602 px; check against IdolPreprocessImage before shipping. The saved splat keeps the haze. Validated by /prompt only (to be done in idol-1)."
+  },
+  {
+   "id": "image-to-splat-idol-clean",
+   "capability": "splat",
+   "packs": [
+    "ComfyUI-Idol"
+   ],
+   "base": "image-to-splat-idol",
+   "changes": [
+    "IdolPreprocessImage {mode <- cropMode (synthetic|real), mask [88:35,0], erode_radius 1, size 1024} replaces 88:2 and 88:101-104",
+    "IdolPruneSplat {min_opacity <- minOpacity 0.05, max_scale <- maxScale 0} after 88:55, feeding 92 and 75",
+    "optional IdolCamera -> RenderSplat (1 frame) -> SaveImage role poster"
+   ],
+   "newBindingKeys": [
+    "cropMode",
+    "minOpacity",
+    "maxScale"
+   ],
+   "selection": "provider prefers it when GET /object_info/IdolPruneSplat lists the class; else image-to-splat-idol"
+  },
+  {
+   "id": "image-to-mesh-idol",
+   "capability": "image-to-3d",
+   "base": "image-to-splat-idol",
+   "changes": [
+    "core SplatToMesh (resolution 384, min_opacity 0.02) -> SaveGLB"
+   ],
+   "package": "idol-7"
+  },
+  {
+   "id": "image-to-views-idol",
+   "capability": "views",
+   "packs": [
+    "ComfyUI-Idol"
+   ],
+   "base": "image-to-splat-idol-clean",
+   "changes": [
+    "IdolCamera -> RenderSplat frames 4 (90 degrees apart from the input view, nodes_gaussian_splat.py L1004-1006) -> four images"
+   ],
+   "package": "idol-8"
+  }
+ ],
+ "hosted": [
+  {
+   "provider": "fal.ai",
+   "endpoint": null,
+   "result": "not hosted: queue OpenAPI 404 for fal-ai/idol, speridlabs/idol, fal-ai/idol/image-to-3d, fal-ai/speridlabs-idol; full paged scan of api.fal.ai/v1/models (1,447 models, 2026-10-30) finds only tripo3d/triposplat for splat/gaussian (a different model)",
+   "price": null,
+   "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/idol; https://api.fal.ai/v1/models"
+  },
+  {
+   "provider": "Replicate",
+   "endpoint": null,
+   "result": "not hosted: replicate.com/speridlabs/idol, /nynxz/idol, /speridlabs 404; not in the 3D models collection; API check inconclusive (401 without a token)",
+   "price": null,
+   "source": "https://replicate.com/speridlabs/idol; https://replicate.com/collections/3d-models"
+  },
+  {
+   "provider": "Hugging Face (does not count under the owner's rule)",
+   "endpoint": "Space speridlabs/idol (ZeroGPU A10G, compile off) and duplicate cpuai/Idol-Image-to-3D; Inference Providers mapping {}",
+   "result": "free demo within quota, no API product",
+   "price": "free within ZeroGPU quota",
+   "source": "https://huggingface.co/api/spaces/speridlabs/idol"
+  }
+ ],
+ "hostedSummary": {
+  "idolHosted": false,
+  "cloudRoute": "none; open engine only, no substitute",
+  "existingCloudSplat": "triposplat (fal tripo3d/triposplat, <= 262,144 Gaussians, $0.05; cloud-models.generated.ts L15265-15307) stays as it is and is never labelled Idol"
+ },
+ "fuobeToday": {
+  "summary": "Image to 3D has a Splat mode with cloud TripoSplat (fal) and open TripoSplat (core ComfyUI graph image-to-splat-triposplat). Fuobe cannot draw splats; it shows an orbit video and offers a download.",
+  "studio": "src/components/model3d/model3d-studio.tsx; src/lib/av/model3d.ts MODEL3D_MODES L13-21, MODELS_3D L29-59 (splat L55-58), CLOUD_NOTICES L67, model3dRequest L131, splatFormatOf L197, model3dView L211; hard-coded TripoSplat hint model3d-studio.tsx L314-320",
+  "openModel": "oss-triposplat (src/lib/catalog/models.ts L1380): comfy('splat', 'image-to-splat-triposplat'), numGaussians slider 32,768-1,048,576",
+  "manifest": "workflows/comfyui/manifest.json L15453: ComfyUI 0.41.0 fc04da91; defaults steps 20, cfg 3, 262,144, 75 orbit frames, spz, cutout; vramGb 8 'VRAM unverified. Validated by /prompt only.'; 3.78 GB of weights",
+  "handBuiltGraph": "scripts/comfy/hand-built/image-to-splat-triposplat.json: 99 LoadImage, 88:35 cut-out switch, 88:2 TripoSplatPreprocessImage, 88:24 TripoSplatConditioning, 88:16 UNETLoader, 88:6 KSampler (20, 3, dpmpp_2m/simple), 88:11 VAELoader, 88:55 VAEDecodeTripoSplat, 92 SplatToFile3D spz, 51 SaveGLB, 79 CreateCameraInfo, 75 RenderSplat (opacity_threshold 0), 41 CreateVideo, 42 SaveVideo",
+  "library": "scripts/comfy/library.spec.mjs CUSTOM_NODE_REPOS L124, PACK_CLASSES L156, KNOWN_MODELS L164 (birefnet L168, flux2-vae L230, dino_v3_vit_h L273, TripoSplat L274-275), entry L3349; BINDING_KEYS scripts/comfy/build-library.mjs L98-135",
+  "viewers": "GLB via @google/model-viewer 4.3.1 (package.json L35); three 0.183.2 (L56) for Cinema; no splat renderer (result-media.tsx L248, model-card.tsx L177)",
+  "canvas": "canvas.ts KIND_OP model3d -> image-to-3d (L404); splat takes images (L516); modelChoices L434; sliders on nodes (canvas/nodes.tsx L627)",
+  "outputActions": "image next steps animate, upscale, edit (output-actions.ts L169-170); model3d 'View in 3D' (L146); no 3D action on images",
+  "nameClash": "apps.ts L1486 'Idol' K-pop video app (higgsfield-inventory.md L414)",
+  "licences": "src/lib/licences.ts: rows from manifest licence strings + NODE_PACKS (L406); DINOv3 License in KNOWN (L270)",
+  "eval": "scripts/eval: kinds image | video | audio; no 3D suite",
+  "localComfyUI": "127.0.0.1:8188 v0.41.0, CPU, 14.3 GB RAM; every stock TripoSplat and splat node; model folders empty; Idol classes not installed"
+ },
+ "comparison": [
+  {
+   "model": "Idol 3D (open, proposed)",
+   "output": "splat (.spz/.ply) + orbit video",
+   "newWeightsGb": 1.32,
+   "gpu": "7.2 GB vendor peak; 8 GB listed",
+   "speed": "6.8 s H100, 14.1 s RTX 5090, 46.2 s RTX 3080 (SDK, vendor); ~22-26 s RTX 5090 in ComfyUI (pack author)",
+   "settings": "50 euler cfg 4 (Best); 20 dpmpp_2m (Quick)",
+   "quality": "vendor: SSIM 0.726, LPIPS 0.213, IoU 0.862, DINOv2 0.781",
+   "licence": "Apache-2.0 (+ TripoSplat MIT attribution, DINOv3 notice)"
+  },
+  {
+   "model": "TripoSplat (open, today)",
+   "output": "the same",
+   "newWeightsGb": 3.78,
+   "gpu": "8 GB listed, unverified",
+   "speed": "9.9 s H100 (Speridlabs' table); same per-step cost as Idol in ComfyUI",
+   "settings": "20 dpmpp_2m cfg 3",
+   "quality": "vendor: 0.712 / 0.225 / 0.860 / 0.743",
+   "licence": "MIT (+ DINOv3 notice)"
+  },
+  {
+   "model": "TripoSplat (cloud, today)",
+   "output": ".ply splat <= 262,144",
+   "gpu": "hosted",
+   "speed": "hosted",
+   "price": "$0.05",
+   "licence": "fal terms (+ DINOv3 notice)"
+  },
+  {
+   "model": "TRELLIS.2 (open)",
+   "output": "textured PBR .glb + turntable",
+   "gpu": "16 GB",
+   "quality": "no shared benchmark",
+   "licence": "MIT"
+  },
+  {
+   "model": "Hunyuan3D 2.1 (open)",
+   "output": "shape-only .glb",
+   "gpu": "10 GB",
+   "quality": "no shared benchmark",
+   "licence": "Tencent Hunyuan 3D 2.1 Community License (leaves out the EU, UK, South Korea)"
+  }
+ ],
+ "placements": [
+  {
+   "where": "Image to 3D -> Splat, open list next to TripoSplat (src/lib/av/model3d.ts MODELS_3D.splat.open L57; ModelDef oss-idol after models.ts L1380)",
+   "userStory": "As a creator with an 8-12 GB GPU I pick 'Idol 3D' in Splat mode; Quick look gives a first orbit, Best gives the reference splat to download",
+   "openEngine": "image-to-splat-idol on oss-idol",
+   "cloudEngine": "none; cloud TripoSplat stays, labelled TripoSplat",
+   "why": "the page and mode exist; one more model in a list users already open",
+   "priority": "P0",
+   "package": "idol-1"
+  },
+  {
+   "where": "The same graph with the ComfyUI-Idol pack pinned at 4d3a4f6",
+   "userStory": "my product photo is framed the way Idol expects and the splat I download has no hazy halo",
+   "openEngine": "image-to-splat-idol-clean (IdolPreprocessImage, IdolPruneSplat, IdolCamera)",
+   "cloudEngine": "none",
+   "why": "the haze is the biggest visible flaw; core ComfyUI cannot prune saved splats",
+   "priority": "P1",
+   "package": "idol-2"
+  },
+  {
+   "where": "scripts/eval splat suite",
+   "userStory": "the team picks the default open splat model from a blind A/B, not the vendor's table",
+   "openEngine": "Idol Best / Quick vs TripoSplat",
+   "cloudEngine": "none for Idol (cloud TripoSplat may be a labelled reference)",
+   "why": "the quality claim is vendor-only",
+   "priority": "P1",
+   "package": "idol-3"
+  },
+  {
+   "where": "model-card.tsx, studio/result-media.tsx, Library 3D tab",
+   "userStory": "I drag to orbit and zoom the splat on the result card instead of downloading it to SuperSplat",
+   "openEngine": "three.js splat viewer for .spz/.ply/.ksplat with an opacity cut-off",
+   "cloudEngine": "the same viewer draws cloud TripoSplat's .ply (existing model)",
+   "why": "Fuobe says it doesn't draw splats yet; helps TripoSplat too",
+   "priority": "P1",
+   "package": "idol-4"
+  },
+  {
+   "where": "Image results -> 'Make it 3D (quick)' (src/lib/output-actions.ts case image)",
+   "userStory": "I just generated a product image; one click opens Splat mode with Idol Quick and my picture",
+   "openEngine": "oss-idol Quick, synthetic crop",
+   "cloudEngine": "hidden on cloud-only installs; no substitute",
+   "why": "puts 3D where pictures are made",
+   "priority": "P1",
+   "package": "idol-5"
+  },
+  {
+   "where": "Idol result card -> 'Build the final with TRELLIS.2'",
+   "userStory": "I check the sides with a quick splat before spending a 16 GB TRELLIS.2 run",
+   "openEngine": "oss-trellis2 on the same picture",
+   "cloudEngine": "the user's normal Image to 3D choice (fal trellis-2) as an ordinary run, not an Idol substitute",
+   "why": "cheap draft before an expensive final",
+   "priority": "P2",
+   "package": "idol-6"
+  },
+  {
+   "where": "Image to 3D -> From an image: 'Idol 3D quick mesh'",
+   "userStory": "a rough vertex-coloured mesh from one picture that I can rig",
+   "openEngine": "Idol -> core SplatToMesh -> SaveGLB",
+   "cloudEngine": "none",
+   "why": "a riggable rough mesh; quality unknown (eval first)",
+   "priority": "P2",
+   "package": "idol-7"
+  },
+  {
+   "where": "From several images and Elements: 'Make the other sides from the front'",
+   "userStory": "from one picture I get consistent side and back views to use as references",
+   "openEngine": "Idol + IdolCamera -> RenderSplat frames 4",
+   "cloudEngine": "none",
+   "why": "angles without prompting each one; quality unknown (eval first)",
+   "priority": "P2",
+   "package": "idol-8"
+  },
+  {
+   "where": "Cinema Studio 3D scene (scene-viewer.tsx 'object' layout L633)",
+   "userStory": "I drop a prop made from a picture into my scene and film the path",
+   "openEngine": "Idol splat rendered in the scene",
+   "cloudEngine": "none",
+   "why": "props for the MoGe scene; needs the viewer first",
+   "priority": "P2",
+   "package": "idol-9"
+  }
+ ],
+ "plan": {
+  "order": [
+   "idol-1",
+   "idol-2",
+   "idol-3",
+   "idol-4",
+   "idol-5",
+   "idol-6",
+   "idol-7",
+   "idol-8",
+   "idol-9"
+  ],
+  "common": "Open engine only: Idol is not hosted on fal or Replicate (idol-9.md §6), so no package adds a cloud half and none routes Idol to fal tripo3d/triposplat or any other substitute; the Splat mode's existing cloud TripoSplat stays as it is and is never labelled Idol. Name the model 'Idol 3D' everywhere (apps.ts L1486 already ships an 'Idol' K-pop video app). Never promise seconds: label settings by steps and Gaussians. Tests; a browser check at 1440 px and 390 px in light and dark with no horizontal scroll; pnpm typecheck, pnpm lint, the targeted tests and the full vitest run; a commit per step. The shared CPU ComfyUI at 127.0.0.1:8188 is the validation server: never install packs or weights on it.",
+  "packages": [
+   {
+    "key": "idol-1",
+    "title": "Idol 3D in Image to 3D -> Splat (open engine, core TripoSplat nodes, Best / Quick look, photo crop)",
+    "priority": "P0",
+    "dependsOn": [],
+    "effort": "medium",
+    "brief": "GOAL. Add Speridlabs' Idol as a second open-engine model in Image to 3D -> Splat, named 'Idol 3D', running on Fuobe's existing core TripoSplat graph with Idol's two weight files and Idol's reference sampler settings. Read docs/research/idol-9.md §2 (in and out; §2.3 same architecture as TripoSplat; §2.4 the haze), §3 (the claims: never promise seconds), §4 (weights and licences), §5.4-5.5 (the graph), §7, §8 and §9 idol-1.\n\nWEIGHTS. In scripts/comfy/library.spec.mjs KNOWN_MODELS, after the TripoSplat rows (L273-275), add two rows pinned to nynxz/Idol @ c718f2b1b95b353edd07d17e845719fc10880a44:\n- 'idol_fp16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/nynxz/Idol/resolve/c718f2b1b95b353edd07d17e845719fc10880a44/diffusion_models/idol_fp16.safetensors' } (741,107,210 B, sha256 cf452146f78e23a0d34be8f9f79bcde642b9a40ef493046c8e9d5f79096f6dd0)\n- 'idol_decoder_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/nynxz/Idol/resolve/c718f2b1b95b353edd07d17e845719fc10880a44/vae/idol_decoder_fp16.safetensors' } (576,148,658 B, sha256 c511d99eb668ec4b06d883cb6e43770bc35e3864e16e7058e8d6211ba5c509aa)\nwith a comment: a third-party conversion (ComfyUI-Idol scripts/convert.py at 4d3a4f6) of speridlabs/idol @ 2731c229 (Apache-2.0): pos_pe dropped (ComfyUI recomputes it), cast to fp16, the two decoders merged under octree./gs.; spot-checked faithful on 10 tensor prefixes (§3, §4.1). dino_v3_vit_h (L273), flux2-vae (L230) and birefnet (L168) are already there and shared with TripoSplat: only 1.32 GB is new. Optional in the same package: move 'flux2-vae.safetensors' from Comfy-Org/flux2-dev to the renamed Comfy-Org/Flux-2-Dev (the old URL is a 307 redirect; same sha256 d64f3a68...), rebuild, and check that only URL strings change in workflows/comfyui/manifest.json.\n\nGRAPH. New scripts/comfy/hand-built/image-to-splat-idol.json: a copy of hand-built/image-to-splat-triposplat.json with the same node ids and these changes (§5.5):\n- 88:16 UNETLoader unet_name 'idol_fp16.safetensors' (weight_dtype default).\n- 88:11 VAELoader vae_name 'idol_decoder_fp16.safetensors'.\n- 88:6 KSampler steps 50, cfg 4.0, sampler_name 'euler', scheduler 'simple', denoise 1. Idol's CFG weight 3 in its (1+w)cond - w*uncond form is ComfyUI cfg 4; its rescale_t 3 is TripoSplat's built-in shift 3 (comfy/supported_models.py L1677-1679), so no ModelSamplingSD3 node.\n- Photo crop branch (core nodes, my analysis): 88:101 ImageScale {image [88:2,0], upscale_method 'lanczos', width 720, height 720, crop 'disabled'}; 88:102 EmptyImage {width 1024, height 1024, batch_size 1, color 0}; 88:103 ImageCompositeMasked {destination [88:102,0], source [88:101,0], x 152, y 152, resize_source false}; 88:104 ComfySwitchNode {switch false, on_false [88:2,0], on_true [88:103,0]}; 88:24 TripoSplatConditioning image [88:104,0] (was [88:2,0]). TripoSplatPreprocessImage (88:2) is Idol's 'synthetic' 1.2 crop; scaled to 720 and centred on black 1024 the object spans 600 px, Idol's 'real' 1.7 crop gives 602 px. ComfySwitchNode inputs are lazy (comfy_extras/nodes_logic.py L98-111), so the untaken branch does not run.\n- 75 RenderSplat opacity_threshold 0.05 (was 0): the orbit video drops the near-transparent haze (§2.4). The saved file still has it; idol-2 prunes it.\n- 88:96 (a ComfySwitchNode whose two inputs are the same UNETLoader) may stay as it is.\n- Everything else as in the TripoSplat file: 99 LoadImage, the cut-out switch 88:35 (BiRefNet 88:85:81/82 or the PNG's own alpha via 88:95), 88:7 CLIPVisionLoader dino_v3_vit_h, 88:8 VAELoader flux2-vae, 88:55 VAEDecodeTripoSplat, 92 SplatToFile3D (spz), 51 SaveGLB 'fuobe/splat', 79 CreateCameraInfo orbit 35/30/2.5, 41 CreateVideo 25 fps h264, 42 SaveVideo 'fuobe/splat-orbit'.\n\nSPEC ENTRY. In scripts/comfy/library.spec.mjs right after image-to-splat-triposplat (L3349-3372): id 'image-to-splat-idol', title 'Image to a Gaussian splat of one object (Idol on the TripoSplat core nodes) + an orbit video', capability 'splat', handBuilt 'hand-built/image-to-splat-idol.json', bindings = TripoSplat's (image 99.image; cutout 88:35.switch; numGaussians 88:55.num_gaussians; steps and cfg 88:6; seed 88:6.seed and 88:55.seed; splatFormat 92.format; orbitFrames 75.frames; filenamePrefix 51 and 42) plus sampler: [b('88:6','sampler_name')] and photoCrop: [b('88:104','switch')]; outputs [{node '51', kind 'model3d', role 'splat'}, {node '42', kind 'video', role 'turntable'}]; defaults { splatFormat: 'spz', cutout: true, photoCrop: false }; limits { maxGaussians: 1048576 }; vramGb 8; license: 'Apache-2.0 (speridlabs/idol weights; the ComfyUI files are nynxz/Idol's conversion, Apache-2.0); Idol is VAST-AI-Research's TripoSplat architecture (MIT, code and weights); the dino_v3_vit_h image encoder is under the DINOv3 License (royalty-free, commercial use allowed, trade-control limits; the app must show a \"Built with DINOv3\" notice); FLUX.2 VAE Apache-2.0; BiRefNet MIT' (keep the DINOv3 wording identical to TripoSplat's so licenceInfo, src/lib/licences.ts L296ff, finds the notice); notes: the reference settings and where they come from, the Quick preset, the photo crop and how it was derived, 'about half the Gaussians are near-transparent: RenderSplat thresholds 0.05; the saved file is not pruned without the ComfyUI-Idol pack', 1.32 GB new weights (idol_fp16 0.74, idol_decoder_fp16 0.58) + the shared 2.46 GB, 'VRAM: vendor peak 7.2 GB in the SDK; unmeasured in ComfyUI. Validated by /prompt only.' Add 'sampler' and 'photoCrop' to BINDING_KEYS in scripts/comfy/build-library.mjs (L98-135, with a comment naming idol-9) and to the spec header's binding list. Run the builder, then validate-workflows.mjs against the shared server (core classes only; the validator makes zero-byte placeholders for the missing weights). Commit workflows/comfyui/manifest.json, the workflow file and scripts/comfy/validation-state.json; add a row to scripts/comfy/README.md's table next to image-to-splat-triposplat (L167).\n\nMODEL. ModelDef in src/lib/catalog/models.ts right after oss-triposplat (L1380): id 'oss-idol', name 'Idol 3D', vendor 'Speridlabs', family 'idol' (family is a free string, types.ts L646), kind 'model3d', tagline 'A Gaussian splat (.spz) of one object from one picture, plus an orbit video · TripoSplat's architecture, retrained · 8 GB GPU · Apache-2.0 · Built with DINOv3', badges ['new'], routes [comfy('splat', 'image-to-splat-idol', 'Idol on the TripoSplat core nodes -> .spz + a 3 s orbit')], options { seed: true, maxImages: 1, sliders: [{ param: 'numGaussians', label: 'Gaussians', min: 32768, max: 1048576, step: 32768, default: 262144 }, { param: 'steps', label: 'Steps', min: 10, max: 50, step: 1, default: 50 }] }.\n\nSTUDIO. src/lib/av/model3d.ts:\n- MODELS_3D.splat.open (L57): add { id: 'oss-idol', note: 'Idol 3D · one object from one picture + an orbit video · 8 GB GPU · Apache-2.0' } AFTER oss-triposplat; TripoSplat stays the default until idol-3 reports.\n- Export IDOL_PRESETS = { best: { steps: 50, sampler: 'euler', cfg: 4, numGaussians: 262144 }, quick: { steps: 20, sampler: 'dpmpp_2m', cfg: 4, numGaussians: 65536 } } with a comment (best = Idol's reference; quick = the pack README's 'faster trade-off' and 'fast preview', quality unmeasured, idol-9.md §11).\n- Model3dInput (L91-101) gets quality?: 'quick' | 'best' and photoCrop?: boolean. model3dRequest (L131) case 'splat': for modelId 'oss-idol' only, params: { extra: { ...IDOL_PRESETS[quality ?? 'best'], photoCrop: !!photoCrop } }; TripoSplat requests stay byte-identical.\nsrc/components/model3d/model3d-studio.tsx:\n- When the picked model is oss-idol (open engine, Splat mode) show a two-option segmented control 'Best' / 'Quick look' (hints: '50 steps · 262,144 Gaussians' / '20 steps · 65,536 Gaussians') and a switch 'It's a photo (looser crop)'. Default the switch on for a picture uploaded or dropped here and off for one handed over from a Fuobe result (a later ?image= link, idol-5). Keep them in the per-mode state like the model pick.\n- Replace the hard-coded TripoSplat hint (L314-320) with model-aware copy: Idol: 'Idol cuts the object out, builds the splat and renders an orbit video on your GPU. One object per picture.'; TripoSplat keeps its two lines. No seconds anywhere.\n- The licence line already comes from the manifest (Model3dInfo.licence): check it reads Apache-2.0 ... Built with DINOv3.\n- On the cloud engine nothing changes: the cloud Splat list has only TripoSplat.\n\nELSEWHERE (no separate package).\n- ⌘K: ALL_MODELS_3D picks it up; ?model=oss-idol lands on Splat, open engine (modeOf).\n- Canvas: modelChoices (src/lib/catalog/canvas.ts L434-441) lists model3d models; make sure a 3D model node offers 'Idol 3D' with its sliders (canvas/nodes.tsx L627) and that a chain from it into a video slot picks the orbit video (pickOutput by kind, src/server/generations.ts L823-836).\n- Assist and MCP: add 'splat' to the operation lists in src/server/assist/tools.ts L93 and L254 so 'make a 3D splat of this' can name the op.\n- Settings -> Models & licences: the row comes from the manifest licence string (no code change); confirm the DINOv3 notice and the TripoSplat MIT attribution show.\n- Demo mode: the mock provider's splat answer (src/server/providers/mock.ts L313-314) already covers op 'splat'.\n\nTESTS.\n- tests/model3d.test.ts (next to the TripoSplat block at L316-341): oss-idol routes to image-to-splat-idol; prepareWorkflow binds image (99), numGaussians (88:55), steps / cfg / sampler (88:6), seed on both 88:6 and 88:55, photoCrop (88:104.switch), keeps cutout true and spz; collectOutputs names the .spz meta {role 'splat', format 'spz'} and the turntable; model3dRequest gives the Best extras by default and the Quick extras when asked, and leaves TripoSplat's request unchanged; MODELS_3D.splat.open order (TripoSplat first); modeOf('oss-idol').\n- tests/idol.test.ts (or tests/comfy-library-4.test.ts): the manifest entry (capability splat, defaults, limits, customNodes [], vramGb 8, models = idol_fp16 0.74, idol_decoder_fp16 0.58, dino_v3_vit_h 1.68, flux2-vae 0.34, birefnet 0.44 with the pinned nynxz URLs), RenderSplat 75 opacity_threshold 0.05, the photo crop nodes and the switch wiring, KSampler 50 / 4.0 / euler; licence notices ['Built with DINOv3'] (tests/licences.test.ts L49 pattern); 'Idol 3D' is unique among model and app names.\n- Then pnpm typecheck, pnpm lint, the targeted tests and the full vitest.\n\nMUST NOT BREAK. image-to-splat-triposplat (graph, bindings, defaults, manifest entry and its tests at tests/model3d.test.ts L316-341, tests/comfy-library-4.test.ts L44, L109, L164, L325, tests/licences.test.ts L49); the cloud triposplat model and its CLOUD_NOTICES; the 'Idol' K-pop app (apps.ts L1486); every other workflow's validation state; BINDING_KEYS users.\n\nBROWSER. /image-to-3d?mode=splat in demo mode at 1440 and 390 px, light and dark: pick Idol 3D on the open engine, switch Best / Quick look and the photo switch, read the price-or-blocker line and the licence line, run once (demo media), no horizontal scroll, controls labelled. The cloud engine shows only TripoSplat.\n\nVERIFY HERE. Build and /prompt-validate on the shared CPU server (nothing to install; core nodes only). Optional and worth it: on an isolated worker (scripts/comfy/install-isolated-worker.sh pattern, its own ISO_DIR, port and venv; never 8188) clone ComfyUI-Idol at 4d3a4f671028f0e062d9f004cda1a2dd73360d35 (no Python dependencies) and compare, on a few transparent PNGs with the mask taken from the alpha (Load Image -> Invert Mask; no weights needed), the output of this graph's photo branch (88:104 on) with IdolPreprocessImage mode 'real': record the PSNR in the doc. If they differ visibly (guess threshold: PSNR under 35 dB), ship without the photo switch and leave photos to idol-2. No GPU on this machine: no timing, VRAM or quality claims.\n\nCLOUD RULE. None. Idol is not on fal or Replicate (§6). Do not add a cloud half, do not map oss-idol to tripo3d/triposplat, do not show Idol on the cloud engine."
+   },
+   {
+    "key": "idol-2",
+    "title": "Clean splat files and Idol's own crop with the ComfyUI-Idol pack (Prune Splat, Preprocess Image, Camera), core fallback",
+    "priority": "P1",
+    "dependsOn": [
+     "idol-1"
+    ],
+    "effort": "small",
+    "brief": "GOAL. Splat files without Idol's haze, and Idol's own crop modes, through the ComfyUI-Idol pack, falling back to idol-1's core graph where the pack is missing. Read idol-9.md §2.4, §5.1-5.3, §5.6, §5.7 and §9 idol-2. Builds on idol-1.\n\nPIN AND RECORD.\n- scripts/comfy/library.spec.mjs CUSTOM_NODE_REPOS (L124-152): 'ComfyUI-Idol': 'https://github.com/Nynxz/ComfyUI-Idol/tree/4d3a4f671028f0e062d9f004cda1a2dd73360d35'; PACK_CLASSES (L156-160): 'ComfyUI-Idol': /^Idol(PreprocessImage|Camera|PruneSplat)$/.\n- scripts/comfy/install-comfyui.sh NODES (L15-38): [ComfyUI-Idol]=\"https://github.com/Nynxz/ComfyUI-Idol 4d3a4f671028f0e062d9f004cda1a2dd73360d35\", with a comment: Apache-2.0, no Python dependencies, no model code, read at this commit (3 AI-assisted commits on 2026-10-30, not in the Comfy Registry; idol-9.md §5.2). It goes in the main ComfyUI, not the isolated worker.\n- src/lib/licences.ts NODE_PACKS (after the ComfyUI-DBS row, ~L436): pack('ComfyUI-Idol', 'https://github.com/Nynxz/ComfyUI-Idol/tree/4d3a4f671028f0e062d9f004cda1a2dd73360d35', { name: 'Apache-2.0', class: 'commercial', url: SPDX('Apache-2.0'), note: 'Idol's crop modes, predicted camera and splat pruning; Apache-2.0 code, no model code; ports idol-sdk's preprocess and camera code (Apache-2.0)' }).\n\nGRAPH. scripts/comfy/hand-built/image-to-splat-idol-clean.json from image-to-splat-idol.json:\n- Replace 88:2 and the photo crop branch (88:101-104) with IdolPreprocessImage {image [99,0], mode <- binding cropMode ('synthetic' default | 'real'; API JSON writes the DynamicCombo as \"mode\": \"real\", like CreateCameraInfo's mode / mode.yaw in the TripoSplat file), mask [88:35,0] (keep Fuobe's cut-out switch: BiRefNet's mask or the PNG's alpha), erode_radius 1, size 1024}; TripoSplatConditioning takes its image output.\n- IdolPruneSplat after 88:55: {splat [88:55,0], min_opacity <- binding minOpacity (default 0.05), max_scale <- binding maxScale (default 0)}; its splat output feeds 92 SplatToFile3D and 75 RenderSplat. Its count output may go to a PreviewAny so the job can report how many Gaussians were kept (provider sets meta.kept).\n- Optional: IdolCamera {samples [88:6,0]} -> RenderSplat {frames 1, 1024x1024, background '#000000', camera_info from IdolCamera, splat from the prune} -> SaveImage 'fuobe/splat-input-view' as an output with role 'poster' (model3dView already reads a poster image, model3d.ts L211-239).\nSpec entry 'image-to-splat-idol-clean' with packs: ['ComfyUI-Idol'], the bindings above plus idol-1's, the same outputs (+ the poster), customNodes from the pack, the licence string of idol-1 plus 'ComfyUI-Idol nodes Apache-2.0'. Add 'cropMode', 'minOpacity', 'maxScale' to BINDING_KEYS.\n\nPROVIDER. In src/server/providers/comfyui.ts, where endpoints are swapped by what the server has (L776-787 pattern), switch 'image-to-splat-idol' to 'image-to-splat-idol-clean' when GET /object_info/IdolPruneSplat on that worker returns the class (cache it like comfyDevice / comfyDbsModels, refreshed on failure). Map params.extra.photoCrop true -> cropMode 'real', false -> 'synthetic'. Without the pack the core graph runs; set meta.pruned false so the card can say 'not cleaned: install ComfyUI-Idol for cleaner files'.\n\nUI. The studio's 'It's a photo' switch keeps its meaning. Add an advanced 'Trim spikes' toggle (maxScale 0.05). On the result card, 'Cleaned: N Gaussians kept' when the job reports it, and the input-view still as the poster.\n\nTESTS. Spec entry with packs and PACK_CLASSES; build-library expects the classes; the provider picks the clean graph when object_info lists IdolPruneSplat and the core graph when it does not; bindings for cropMode / minOpacity / maxScale; photoCrop -> cropMode mapping; the licence row (NODE_PACKS) and the workflow licence; install-comfyui.sh has the pin (a grep test like the DBS one if present).\n\nMUST NOT BREAK. idol-1's core graph (the fallback) and its tests; image-to-splat-triposplat (do not add pruning to TripoSplat until idol-3 shows it has the same haze); the shared validation server (the pack is not installed there: the entry is checked through PACK_CLASSES).\n\nVERIFY HERE. Install the pack only on an isolated worker; /prompt-validate image-to-splat-idol-clean there (zero-byte placeholders for weights); run IdolPreprocessImage alone on CPU on transparent PNGs. No splat runs (no weights, no GPU). ComfyUI minimum is v0.23.0 (the pack README's 0.22 is wrong); Fuobe runs 0.41.0.\n\nCLOUD RULE. None (Idol is not hosted)."
+   },
+   {
+    "key": "idol-3",
+    "title": "Splat A/B in the evaluation harness: Idol Best / Quick against TripoSplat, to choose Splat mode's default",
+    "priority": "P1",
+    "dependsOn": [
+     "idol-1"
+    ],
+    "effort": "medium",
+    "brief": "GOAL. Decide with numbers, not the vendor's table, which open splat model is Splat mode's default (TripoSplat today or Idol 3D), what Idol's Quick preset should be, and whether the photo crop helps photos. Read idol-9.md §3 (the vendor-only quality claim), §7.2 and §9 idol-3, and scripts/eval/README.md (the promote rule: a person changes a default in a reviewed commit). Builds on idol-1 (and idol-2 if merged).\n\nSUITE. scripts/eval/cases/splat.json (validated by case.schema.json): suite 'splat', title 'Splat · one object from one picture', kind 'video' (the orbit video is the main output: scripts/eval/lib/review.mjs L19 and covers.mjs L66 pick the first image or video that is not a mask, so the turntable is scored and shown; the .spz is kept as a file), targets open { models: ['oss-idol', 'oss-triposplat'] } and demo. Variants:\n- 'idol-best': oss-idol, extra { steps 50, sampler 'euler', cfg 4, numGaussians 262144 }\n- 'idol-quick': oss-idol, extra { steps 20, sampler 'dpmpp_2m', cfg 4, numGaussians 65536 }\n- 'triposplat-today': oss-triposplat with its manifest defaults (20 dpmpp_2m, cfg 3)\n- 'triposplat-50': oss-triposplat at 50 euler, cfg 4 (separates the weights from the settings; needs 'sampler' bound in TripoSplat's entry too, or skip this variant)\n- 'idol-photo-crop' on the photo cases: idol-best with photoCrop true (and cropMode 'real' when idol-2 is merged)\nCases (inputs under local/splat/, never committed; demoInputs from fixtures/): 8-12 single objects: generated product renders (bottle, sneaker, headphones), product photos (photo crop on), a figurine, a stylised character, a realistic person, thin parts (chair, plant), glass or chrome. references = the input picture.\nMetrics: 'style' with --style-model dinov2 (orbit frames against the input picture; DINOv2 is Apache-2.0), 'temporal' (orbit smoothness), 'aesthetic'; the harness's timing and memory telemetry; the blind A/B review page (pnpm eval:review) for the turntables. Optional: a 'splat' metric that reads the .ply / .spz and reports the share of Gaussians under opacity 0.05 (to answer whether TripoSplat has Idol's haze); only if cheap.\n\nOUTPUT. A short results section appended to idol-9.md (§3 and §7.2 updated with measured numbers, GPU named) and a recommendation; the default change itself (MODELS_3D.splat.open order in src/lib/av/model3d.ts L57, IDOL_PRESETS) goes in a separate reviewed commit by a person.\n\nTESTS. pnpm eval:validate (schema), a demo dry run (pnpm eval:run --suite splat --engine demo --dry-run) and a demo run; any new metric gets pytest fixtures like the others (scripts/eval/metrics).\n\nMUST NOT BREAK. Other suites, the case schema's existing kinds (image, video, audio), the promote rule.\n\nVERIFY HERE. Schema and demo runs only. GPU runs need a machine with an 8-16 GB GPU and the weights; record the GPU, driver and ComfyUI version with the numbers.\n\nCLOUD RULE. No Idol on the cloud. A 'triposplat-cloud' reference variant on fal tripo3d/triposplat is allowed (it is the existing cloud model, priced under the harness's spend cap), clearly labelled TripoSplat."
+   },
+   {
+    "key": "idol-4",
+    "title": "Look around splats in Fuobe: a three.js splat viewer on result cards, the studio panel and the Library",
+    "priority": "P1",
+    "dependsOn": [],
+    "effort": "medium",
+    "brief": "GOAL. Let people look around a Gaussian splat inside Fuobe instead of watching a fixed orbit video or downloading to SuperSplat. Helps Idol 3D and both TripoSplat routes. Read idol-9.md §2.1 (formats), §2.4 (the haze), §7.1 (viewers today) and §9 idol-4. Does not depend on idol-1.\n\nWHERE. src/components/model3d/model-card.tsx (the splat note at L177 and the download row), src/components/studio/result-media.tsx (the splat panel at L248), the Library's 3D tab (src/components/library-view.tsx L58 -> the same viewer component), and the viewer that 'View in 3D' opens (src/lib/output-actions.ts L146). Formats from splatFormatOf (src/lib/av/model3d.ts L197): spz, ply, ksplat.\n\nLIBRARY. A three.js Gaussian-splat renderer (three 0.183.2 is already a dependency, package.json L56). Candidates: Spark (@sparkjsdev/spark) or GaussianSplats3D (@mkkellogg/gaussian-splats-3d). The choice is a guess: check licence, an exact version at least two weeks old, .spz support (Niantic, gzip), .ply with degree-0 SH, WebGL2, phone frame time on a 262,144-Gaussian splat, bundle size; load it with a dynamic import so no other page pays for it. Record the decision and the numbers in idol-9.md.\n\nUI. A SplatViewer component: drag to orbit, pinch / wheel to zoom, reset view, background light / dark / grey, an opacity cut-off slider (default 0.05 for Idol 3D results, 0 for TripoSplat until idol-3 says otherwise; label 'Hide faint haze'), 'Save a still' (canvas capture -> upload -> Library image, like Cinema's capture), keyboard access and labels. The orbit video stays as the poster while loading and as the fallback (no WebGL2, prefers-reduced-motion, files over a size limit). Replace 'Fuobe doesn't draw splats yet' with the viewer; keep the download buttons.\n\nTESTS. Unit: format detection and the viewer-or-GLB choice; the cut-off default per model; a parser test for a tiny .ply fixture if the library exposes one. e2e: open a demo splat at 1440 and 390 px, light and dark; no horizontal scroll; the viewer does not load on pages without a splat (bundle check).\n\nMUST NOT BREAK. The GLB path through @google/model-viewer (model-card.tsx L48, L115), Cinema's three.js scene viewer (src/components/cinema/scene-viewer.tsx), turntable recording for cloud GLBs (src/components/model3d/turntable.ts), share pages.\n\nVERIFY HERE. Demo-mode browser checks (the demo splat is a GLB, mock.ts L313-314: add a tiny real .spz / .ply sample to the demo assets for the viewer). No GPU needed.\n\nCLOUD RULE. The same viewer draws cloud TripoSplat's .ply (an existing hosted model). There is no Idol cloud route."
+   },
+   {
+    "key": "idol-5",
+    "title": "'Make it 3D (quick)' on image results (open engine only)",
+    "priority": "P1",
+    "dependsOn": [
+     "idol-1"
+    ],
+    "effort": "small",
+    "brief": "GOAL. One click from a generated picture to a turning 3D preview of its object, on the user's GPU. Read idol-9.md §3 (speed: tens of seconds, not 2 s), §8 and §9 idol-5. Builds on idol-1.\n\nACTION. In src/lib/output-actions.ts, case 'image' (L91-106): link('make-3d', 'Make it 3D (quick)', `/image-to-3d?mode=splat&model=oss-idol&quality=quick&image=${q(o.url)}`) as a menu action (add 'make-3d' to OutputActionId, L31ff). Show it only when a new ActionContext field openEngine (L63-70) is true; the callers (feed tiles, the viewer, the Library) pass it from the engine mode (open or both) and whether ComfyUI is connected (the hook the studios use, useEngine in src/lib/api). NEXT_STEPS.image (L169-170: animate, upscale, edit) stays unchanged; swap a chip only after usage data.\n\nSTUDIO. src/components/model3d/model3d-studio.tsx UrlModel (L67-80) learns ?image= (fills the photo slot with that file, marks it as 'from a Fuobe result' so the photo switch starts off: the 'synthetic' crop suits generated images) and ?quality=quick|best. Optional one-click run: the one-time go=<token> hand-off Home's Start uses (src/lib/composer.ts L816-826, src/components/studio/studio-context.tsx L167), re-implemented for this page; without it the user presses 'Make the splat' once.\n\nRESULT. Lands in /image-to-3d's feed and the Library (feature image-to-3d) like any Splat job, with the source picture linked (model3dView.photo). Copy under the action or in the studio: 'Turns this picture into a 3D splat on your GPU and renders a turning preview. Takes tens of seconds on a consumer GPU.'\n\nTESTS. outputActions: the action appears for images only with openEngine, with the right href; it never appears for videos, audio or 3D; NEXT_STEPS.image unchanged. Studio URL parsing (model, mode, quality, image). e2e: from a demo image result to the prefilled studio at 1440 and 390 px, light and dark.\n\nMUST NOT BREAK. The existing image actions and their order; Home's go=<token> flow; ?model= links from ⌘K.\n\nVERIFY HERE. Demo mode only.\n\nCLOUD RULE. Hidden on cloud-only installs: Idol is not hosted and there is no substitute recipe. The Image to 3D page stays reachable from the sidebar as before."
+   },
+   {
+    "key": "idol-6",
+    "title": "Draft then final: 'Build the final with TRELLIS.2' on Idol results",
+    "priority": "P2",
+    "dependsOn": [
+     "idol-1"
+    ],
+    "effort": "small",
+    "brief": "GOAL. Use a quick Idol splat as a draft and build the textured final with TRELLIS.2 on the same picture. Read idol-9.md §7.2 and §9 idol-6. Builds on idol-1.\n\nWHERE. src/components/model3d/model-card.tsx: on a finished open-engine Idol 3D result (request.modelId 'oss-idol'), a button 'Build the final with TRELLIS.2' linking to /image-to-3d?mode=image&model=oss-trellis2&image=<model3dView(g).photo> (needs idol-5's ?image= support, or add it here). Under it: 'A textured, riggable .glb · 16 GB GPU' (the oss-trellis2 note, model3d.ts L39). Hidden when oss-trellis2 is switched off in Settings -> Models & licences (offered(), as the studio's picker does).\n\nTESTS. The button shows only on oss-idol results with a source picture; the href; it respects model access.\n\nMUST NOT BREAK. Other cards; Rig & animate; Animate the spin.\n\nVERIFY HERE. Demo mode.\n\nCLOUD RULE. No Idol draft on the cloud. The final may run on the user's chosen engine's existing TRELLIS.2 (fal trellis-2 on the cloud) as an ordinary Image to 3D run; it is not an Idol substitute."
+   },
+   {
+    "key": "idol-7",
+    "title": "Idol 3D quick mesh: splat -> core SplatToMesh -> .glb in From an image",
+    "priority": "P2",
+    "dependsOn": [
+     "idol-1"
+    ],
+    "effort": "medium",
+    "brief": "GOAL. A rough, riggable mesh from one picture: Idol's splat turned into a vertex-coloured .glb with core ComfyUI. Read idol-9.md §2.1 (no mesh), §2.4 (min_opacity), §8 and §9 idol-7. Builds on idol-1.\n\nGRAPH. scripts/comfy/hand-built/image-to-mesh-idol.json: idol-1's graph, then core SplatToMesh ('Extract Mesh from Splat', comfy_extras/nodes_gaussian_splat.py L1533-1580; resolution 384, min_opacity 0.02 by default, which drops the haze) -> SaveGLB 'fuobe/idol-mesh' (output role mesh), keeping the orbit video. Bindings: idol-1's plus 'meshResolution' (SplatToMesh.resolution) if exposed. Spec entry capability 'image-to-3d', vramGb 8, the same licence string.\n\nMODEL AND UI. ModelDef 'oss-idol-mesh', name 'Idol 3D quick mesh', kind 'model3d', route comfy('image-to-3d', 'image-to-mesh-idol'), tagline 'A rough vertex-coloured .glb from one picture, no textures · 8 GB GPU · Apache-2.0 · Built with DINOv3'. In MODELS_3D.image.open after oss-hunyuan3d-21, note 'Rough mesh, vertex colours, no textures · 8 GB GPU'. The .glb opens in model-viewer and can go to Rig & animate (cloud Meshy rigging, as for any GLB today).\n\nEVAL FIRST. Add 3-4 cases to idol-3's suite (or a 'mesh' variant) and look at the meshes before shipping; mesh quality from Idol splats is unknown (§11).\n\nLATER. Hi3D could refine the geometry, but it is CUDA only, validated on a 96 GB H20, has no ComfyUI support and returns geometry without colour (/home/user/ext/hi3d/README.md L60, L119). Not in this package.\n\nTESTS. Spec entry, bindings, the route, MODELS_3D order, collectOutputs (GLB as model3d, not a splat), licence row.\n\nMUST NOT BREAK. oss-trellis2 and oss-hunyuan3d-21 stay first in From an image; the splat routes.\n\nVERIFY HERE. Build and /prompt-validate on the shared server. No GPU runs.\n\nCLOUD RULE. None (Idol is not hosted)."
+   },
+   {
+    "key": "idol-8",
+    "title": "Fill the other sides from one picture (IdolCamera + RenderSplat, four views)",
+    "priority": "P2",
+    "dependsOn": [
+     "idol-1",
+     "idol-2"
+    ],
+    "effort": "medium",
+    "brief": "GOAL. Side and back views of an object from one picture, consistent with each other, for the places that need several angles. Read idol-9.md §5.1 (IdolCamera), §8 and §9 idol-8. Needs idol-2's pack (IdolCamera) and idol-1.\n\nGRAPH. scripts/comfy/hand-built/image-to-views-idol.json (packs ['ComfyUI-Idol']): the clean Idol graph -> IdolCamera {samples [88:6,0]} -> RenderSplat {splat (pruned), camera_info from IdolCamera, frames 4, width / height 1024, opacity_threshold 0.05, background white or the studio's grey} -> SaveImage x1 batch of four (RenderSplat with frames > 1 orbits a full turn from camera_info, 360/n degrees apart: comfy_extras/nodes_gaussian_splat.py L1004-1006; a negative frames value turns the other way). Outputs: four images with meta.index 0-3 (front = the input view). Match the orbit direction to Fuobe's side names (front, left, back, right; SIDES_HINT in src/lib/av/model3d.ts L80-88: 'facing its front, walk round to your right for its left side'): pick the sign of frames so index 1 is the object's left; test it with an asymmetric object.\n\nPLACES.\n- Image to 3D -> From several images: with only the front filled, a button 'Make the other sides from the front (Idol 3D)' runs the graph and fills the left, back and right slots for oss-trellis2-multi (VIEW_SIDES order).\n- Elements (character and product references): 'Add side and back views'.\nBoth open engine only; say the views are renders of a 3D guess and may be soft.\n\nEVAL FIRST. Faces and characters are the risky case (20 of Idol's 94 demo presets are figurines; realistic people are untested). Add cases to idol-3's suite and look at the sheets before shipping.\n\nTESTS. Spec entry with packs, bindings, the side mapping (index -> side), the multi-view slot filling, the chain into oss-trellis2-multi.\n\nMUST NOT BREAK. From several images when the user brings real photos; Elements' existing uploads.\n\nVERIFY HERE. Isolated worker /prompt validation; no GPU runs.\n\nCLOUD RULE. None (Idol is not hosted)."
+   },
+   {
+    "key": "idol-9",
+    "title": "Idol props in Cinema Studio's 3D scene",
+    "priority": "P2",
+    "dependsOn": [
+     "idol-1",
+     "idol-4"
+    ],
+    "effort": "large",
+    "brief": "GOAL. Put an object made from a picture into Cinema Studio's 3D scene as a prop, frame it with the virtual camera and film the path. Read idol-9.md §7.1 and §9 idol-9. Needs idol-1 and idol-4's splat renderer.\n\nWHERE. src/components/cinema/scene-viewer.tsx (the 'object' layout labelled '3D model' at L633), scene-engine.ts, scene-path.tsx, scene-actions.tsx. An 'Add a prop' action: pick a picture or an existing Idol 3D / TripoSplat result from the Library; run oss-idol (open engine) if it is a picture; load the splat into the scene with idol-4's renderer (as a three.js object in the same scene graph, sorted with the MoGe mesh); move, scale and turn handles; Idol's predicted camera (IdolCamera, idol-2) can set the first orientation. The prop must appear in the browser render that the open Fly path feeds to Uni3C (scene-engine.ts recordPath), so filming includes it.\n\nTESTS. Scene state round trip with a prop; transforms; the recorded path includes the prop (a pixel test on a frame); e2e at 1440 and 390 px.\n\nMUST NOT BREAK. The MoGe scene, the camera path, Film this path (N7-5), recompose.\n\nVERIFY HERE. Demo mode with a sample splat.\n\nCLOUD RULE. None for Idol (not hosted); a cloud TripoSplat .ply from the Library can be placed too, since it is an existing model's file."
+   }
+  ]
+ },
+ "risks": [
+  "The '~2 s' expectation will not hold: fastest published 3.4 s on a B300 via the compiled SDK; consumer cards 14-46 s; ~22-26 s on an RTX 5090 in ComfyUI. Label presets by steps and Gaussians.",
+  "Same network cost as TripoSplat in ComfyUI; Idol's edge is vendor-reported quality only. A/B before making it the default.",
+  "Name clash with the 'Idol' K-pop video app (apps.ts L1486): call the model 'Idol 3D'.",
+  "Core-only graph leaves the haze in downloads (no core prune node); idol-2 or idol-4's viewer cut-off fixes what users see.",
+  "Brand-new single-maintainer, AI-assisted pack (3 commits in 24 minutes, no tags, no Registry); idol-sdk has 1 commit. Pin 4d3a4f6.",
+  "Third-party converted weights (nynxz/Idol) checked on 10 tensor prefixes only. Pin c718f2b1 and the two sha256, or convert from speridlabs/idol @ 2731c229.",
+  "Pack README states the wrong ComfyUI minimum (0.22; really 0.23.0).",
+  "Thin provenance: no paper, undisclosed training data, self-run benchmark; weights look started from TripoSplat (MIT) without the MIT notice. Show TripoSplat attribution.",
+  "DINOv3 terms carry over ('Built with DINOv3', trade-control limits).",
+  "The SDK route needs gated repos (DINOv3 manual approval; FLUX.2-dev repo terms); use the ComfyUI route.",
+  "flux2-vae URL works only through HF's rename redirect.",
+  "Scope: one object, background removed; not a scene model. The core photo crop is unverified analysis.",
+  "No splat viewer until idol-4; 'look around' is an orbit video meanwhile.",
+  "VRAM: 7.2 GB vendor peak rules out 6 GB GPUs; 8 GB borderline and unmeasured in ComfyUI.",
+  "CPU and Apple: possible in fp32 through ComfyUI but likely tens of minutes per object (guess).",
+  "ComfyUI API drift: the pack depends on comfy_api.latest types and the TripoSplat code (unchanged 0.41.0 -> 0.43.1); the core-only graph is the safer base."
+ ],
+ "unknowns": [
+  "Which settings give 'under 2 seconds'.",
+  "Real VRAM peak and run time in ComfyUI on 8-12 GB GPUs; effect of ComfyUI offloading; the GPU of the 7.2 GB measurement.",
+  "CPU and Apple MPS run time through ComfyUI.",
+  "Training data, and how Idol's weights relate to TripoSplat's (guess from 10 tensor prefixes).",
+  "Independent quality vs TripoSplat, TRELLIS.2 and Hunyuan3D 2.1 (photos, people, characters, thin parts, glass); the 'TRELLIS' version in the vendor table.",
+  "Whether TripoSplat's splats have the same haze.",
+  "Quality of the Quick preset (20 dpmpp_2m, 65,536).",
+  "Whether the core photo crop matches IdolPreprocessImage 'real' closely enough.",
+  "Full-file fidelity of nynxz/Idol; ComfyUI-vs-SDK parity not rerun.",
+  "Whether the fp32 denoiser loads straight into UNETLoader, and whether TorchCompileModel works (pack claims).",
+  "The format of the project page's 0.4 / 3.2 / 12.2 MB sizes.",
+  "Quality of SplatToMesh meshes and RenderSplat side views of Idol splats.",
+  "Whether Speridlabs, fal or Replicate will host Idol; plans beyond v0.1.",
+  "Which three.js splat renderer and version Fuobe should adopt."
+ ],
+ "sources": [
+  "https://huggingface.co/speridlabs/idol (README, config.json @ 2731c2291fc65a797c5cb627a5e5526fc1490902); https://huggingface.co/api/models/speridlabs/idol and /tree/main?recursive=true",
+  "https://huggingface.co/api/models/nynxz/Idol and /tree/c718f2b1b95b353edd07d17e845719fc10880a44?recursive=true (paths, sizes, sha256 re-checked 2026-10-30)",
+  "https://speridlabs.com/research/idol",
+  "https://github.com/speridlabs/idol-sdk @ 4702a7f00850e34b6e83a2170cc123c3e9570744 (clone /home/user/ext/idol-sdk): README.md, LICENSE, pyproject.toml, idol/pipeline.py L35-153, preprocess.py L6-37, sampler.py L43-70, gaussian.py L106-128, camera.py L7-18, conditioning.py L15-91, sample.py L11-53, models/layers.py L12-27, demo/model.py L7-14, demo/examples/presets.json; issues #1, #2",
+  "https://github.com/Nynxz/ComfyUI-Idol @ 4d3a4f671028f0e062d9f004cda1a2dd73360d35 (clone /home/user/ext/ComfyUI-Idol): README.md, NOTICE, LICENSE, pyproject.toml, __init__.py, idol/nodes.py, idol/camera.py, idol/preprocess.py, scripts/convert.py, tests/*.py, example_workflows/idol_image_to_splat.json; https://api.comfy.org/nodes/comfyui-idol (404)",
+  "Safetensors headers and tensor prefixes by HTTP range requests: speridlabs/idol @ 2731c229, nynxz/Idol @ c718f2b1, VAST-AI/TripoSplat @ 56a96e60",
+  "https://huggingface.co/VAST-AI/TripoSplat; https://raw.githubusercontent.com/VAST-AI-Research/TripoSplat/main/README.md L62; https://arxiv.org/abs/2605.16355",
+  "https://raw.githubusercontent.com/black-forest-labs/flux2/main/README.md L111; https://huggingface.co/api/models/Comfy-Org/Flux-2-Dev; https://huggingface.co/api/models/Comfy-Org/BiRefNet; https://huggingface.co/api/models/facebook/dinov3-vith16plus-pretrain-lvd1689m; https://huggingface.co/api/models/black-forest-labs/FLUX.2-dev",
+  "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/idol (404, re-checked 2026-10-30) and the other ids; https://api.fal.ai/v1/models paged scan",
+  "https://replicate.com/speridlabs/idol, /nynxz/idol, /speridlabs (404); https://replicate.com/collections/3d-models",
+  "https://huggingface.co/api/spaces/speridlabs/idol; https://huggingface.co/api/models/speridlabs/idol?expand[]=inferenceProviderMapping",
+  "Live ComfyUI 127.0.0.1:8188 read-only GETs: /system_stats, /object_info/<class>, /models/<folder>",
+  "/home/user/ComfyUI @ fc04da91: comfy_extras/nodes_triposplat.py, nodes_gaussian_splat.py, nodes_logic.py L88-116, nodes_mask.py L12-104, nodes.py L1892-1904 and L1988-2002, comfy/supported_models.py L1669-1691, model_detection.py L832, sd.py L1093-1101, ldm/triposplat/model.py L257, comfy_api/latest/_io.py, geometry_types.py, bg_removal_model.py; /home/user/ext/comfyui-v0.43.1",
+  "Fuobe @ claude/fuobe-parity-4 (231e6346): see the Sources section of idol-9.md for files and lines",
+  "/home/user/ext/hi3d/README.md L5-17, L60, L119"
+ ]
+}
