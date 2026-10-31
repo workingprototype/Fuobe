@@ -569,9 +569,20 @@ export class LoginGuard {
   private failures = new Map<string, { n: number; first: number; until: number }>();
   private recent: number[] = [];
 
+  /**
+   * `shared`: keys that stand for every visitor at once (no trusted proxy), which are slowed down past their budget,
+   * never locked. By default the shared key itself.
+   */
   constructor(
     private readonly o = { perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, throttleMs: 4_000, maxClients: 5000 },
+    private readonly shared: (key: string) => boolean = (key) => key === LoginGuard.DIRECT,
   ) {}
+
+  /** This key's misses in its window (0 once the window has passed). */
+  misses(key: string, now = Date.now()): number {
+    const f = this.failures.get(key);
+    return f && now - f.first <= this.o.windowMs ? f.n : 0;
+  }
 
   /**
    * Who is signing in: the last X-Forwarded-For hop when a trusted proxy sets it, else one shared key. An IPv6 address
@@ -590,7 +601,7 @@ export class LoginGuard {
     this.recent = this.recent.filter((t) => now - t < this.o.windowMs);
     const f = this.failures.get(key);
     const own = f && f.until > now ? f.until - now : 0;
-    const shared = key === LoginGuard.DIRECT && !!f && now - f.first <= this.o.windowMs && f.n >= this.o.perClient;
+    const shared = this.shared(key) && !!f && now - f.first <= this.o.windowMs && f.n >= this.o.perClient;
     const last = this.recent.at(-1);
     const throttle = (shared || this.recent.length >= this.o.global) && last !== undefined ? Math.max(0, last + this.o.throttleMs - now) : 0;
     return Math.max(own, throttle);
@@ -603,7 +614,7 @@ export class LoginGuard {
     const n = fresh ? 1 : f.n + 1;
     this.failures.delete(key);
     // The shared key is throttled (blockedFor), never locked.
-    const locks = key !== LoginGuard.DIRECT && n >= this.o.perClient;
+    const locks = !this.shared(key) && n >= this.o.perClient;
     this.failures.set(key, { n, first: fresh ? now : f.first, until: locks ? now + this.o.lockMs : 0 });
     // Forget old entries; never let the map grow without bound.
     for (const [k, v] of this.failures) {

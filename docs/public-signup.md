@@ -46,9 +46,12 @@ it names, and only of the asker's own files: a guest owns none.
   hash of the password (the same scheme as the install password), and the creation time.
 - Sign-up and log-in attempts are rate limited per visitor (set `FUOBE_TRUST_PROXY=1` behind a
   reverse proxy, so that each visitor gets their own limit; an IPv6 address counts by its /64).
-  An email gets 10 log-ins a minute, right or wrong, and after 10 wrong passwords in 15 minutes
-  it is locked for 15 minutes, from any address. Account log-ins and the install password have
-  separate limits, so guessing at one never slows down the other.
+  A visitor gets 30 account log-ins a minute, right or wrong, and 10 a minute for one email. After
+  5 wrong passwords for one email, that visitor is locked out of it for 15 minutes. After 10 wrong
+  passwords for one email from any number of addresses, the email is locked for 15 minutes, but
+  only for the addresses that got it wrong twice or more. The person whose account it is still
+  gets in from anywhere else, so nobody can lock a chosen account out. Account log-ins and the
+  install password have separate limits, so guessing at one never slows down the other.
 
 An account is signed in, but it sees the owner's studio as a guest does:
 

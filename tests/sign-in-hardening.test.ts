@@ -72,13 +72,21 @@ describe("M-1: after sign-in, only pages on this site", () => {
 });
 
 describe("M-2: password checks are counted and never hold up the server", () => {
-  it("counts a right password too: an email gets 10 log-ins a minute, from any address", async () => {
-    for (let i = 0; i < 10; i++) expect((await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }))).status, `log-in ${i}`).toBe(200);
-    const r = await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }));
+  it("counts a right password too: one address gets 10 log-ins a minute to one email", async () => {
+    const from = nextIp();
+    for (let i = 0; i < 10; i++) expect((await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }, from))).status, `log-in ${i}`).toBe(200);
+    const r = await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }, from));
     expect(r.status).toBe(429);
     expect(r.headers.get("retry-after")).toBeTruthy();
-    // Another email is not affected.
-    expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: "other password" }))).status).toBe(200);
+    // Another email, and the same email from another address, are not affected.
+    expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: "other password" }, from))).status).toBe(200);
+    expect((await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }))).status).toBe(200);
+  });
+
+  it("one address gets 30 account log-ins a minute in all", async () => {
+    const from = nextIp();
+    for (let i = 0; i < 30; i++) await login.POST(post("/api/auth/login", { email: i % 2 ? "member@example.com" : "other@example.com", password: i % 2 ? "member password" : "other password" }, from));
+    expect((await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }, from))).status).toBe(429);
   });
 
   it("checks a password without the synchronous scrypt", async () => {
@@ -111,6 +119,34 @@ describe("M-2: password checks are counted and never hold up the server", () => 
   });
 });
 
+describe("guests can't grow the rate limiter's memory", () => {
+  it("a log-in refused by the visitor's own budget, or with a made-up email, adds no key", async () => {
+    const { rateKeyCount } = await import("@/server/rate");
+    const from = nextIp();
+    for (let i = 0; i < 30; i++) await login.POST(post("/api/auth/login", { email: `spent${i}@example.com`, password: "wrong password" }, from));
+    const before = rateKeyCount();
+    for (let i = 0; i < 50; i++) expect((await login.POST(post("/api/auth/login", { email: `random${i}-${"a".repeat(200)}@example.com`, password: "x" }, from))).status).toBe(429);
+    expect(rateKeyCount()).toBe(before);
+    // Text that isn't an email address: no key for it, only the visitor's own.
+    const other = nextIp();
+    expect((await login.POST(post("/api/auth/login", { email: "z".repeat(250), password: "x" }, other))).status).toBe(401);
+    expect(rateKeyCount()).toBe(before + 1);
+  });
+
+  it("drops a key once its window has passed, and never keeps more than its cap", async () => {
+    const { hit, rateKeyCount, MAX_RATE_KEYS } = await import("@/server/rate");
+    const t = Date.now();
+    for (let i = 0; i < 1000; i++) hit(`short:${i}`, 5, 1000, t);
+    expect(rateKeyCount()).toBe(1000);
+    hit("later", 5, 1000, t + 10_000);
+    expect(rateKeyCount()).toBe(1);
+    for (let i = 0; i < MAX_RATE_KEYS + 50; i++) hit(`long:${i}`, 5, 60 * 60_000, t + 20_000);
+    expect(rateKeyCount()).toBeLessThanOrEqual(MAX_RATE_KEYS);
+    // The newest keys are the ones kept.
+    expect(hit(`long:${MAX_RATE_KEYS + 49}`, 1, 60 * 60_000, t + 20_001).ok).toBe(false);
+  });
+});
+
 describe("M-4: one visitor's wrong guesses don't lock everyone out", () => {
   it("treats an IPv6 /64 as one visitor, and an IPv4-mapped address as IPv4", () => {
     const key = (xff: string) => auth.LoginGuard.clientKey(new Headers({ "x-forwarded-for": xff }), true);
@@ -131,10 +167,44 @@ describe("M-4: one visitor's wrong guesses don't lock everyone out", () => {
     expect((await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }))).status).toBe(200);
   });
 
-  it("locks one email after 10 wrong passwords from any number of addresses, and only that email", async () => {
-    for (let i = 0; i < 10; i++) expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: `wrong ${i}` }))).status).toBe(401);
-    expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: "other password" }))).status).toBe(429);
-    expect((await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }))).status).toBe(200);
+  it("after 10 wrong passwords to one email from many addresses, only the addresses that got it wrong are locked out of it", async () => {
+    const guesser = nextIp();
+    for (let i = 0; i < 2; i++) expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: `wrong ${i}` }, guesser))).status).toBe(401);
+    for (let i = 2; i < 10; i++) expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: `wrong ${i}` }))).status).toBe(401);
+    // An address that guessed wrong twice: locked out of this email, even with the right password.
+    const r = await login.POST(post("/api/auth/login", { email: "other@example.com", password: "other password" }, guesser));
+    expect(r.status).toBe(429);
+    expect(Number(r.headers.get("retry-after"))).toBeGreaterThan(60);
+    // The person whose account it is, from any other address: in at once, so nobody can lock them out on purpose.
+    expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: "other password" }))).status).toBe(200);
+    expect((await login.POST(post("/api/auth/login", { email: "member@example.com", password: "member password" }, guesser))).status).toBe(200);
+  });
+
+  it("an address gets 2 tries at an email many addresses got wrong", async () => {
+    for (let i = 0; i < 10; i++) await login.POST(post("/api/auth/login", { email: "other@example.com", password: `wrong ${i}` }));
+    const late = nextIp();
+    expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: "wrong again" }, late))).status).toBe(401);
+    expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: "wrong once more" }, late))).status).toBe(401);
+    expect((await login.POST(post("/api/auth/login", { email: "other@example.com", password: "other password" }, late))).status).toBe(429);
+  });
+
+  it("counts owner guesses sent all at once before any is checked (a Settings password's check takes a while)", async () => {
+    const from = nextIp();
+    const answers = await Promise.all(Array.from({ length: 40 }, (_, i) => login.POST(post("/api/auth/login", { password: `wrong ${i}` }, from))));
+    const statuses = answers.map((r) => r.status);
+    expect(statuses.filter((s) => s === 401).length).toBeLessThanOrEqual(5);
+    expect(statuses.filter((s) => s === 429).length).toBeGreaterThanOrEqual(35);
+  });
+
+  it("checks at most a few owner passwords at once", async () => {
+    const { enter } = await import("@/server/rate");
+    const held = [enter("owner-login", 2), enter("owner-login", 2)];
+    try {
+      expect((await login.POST(post("/api/auth/login", { password: "install password" }))).status).toBe(429);
+    } finally {
+      for (const release of held) release?.();
+    }
+    expect((await login.POST(post("/api/auth/login", { password: "install password" }))).status).toBe(200);
   });
 
   it("counts only sign-ups that could make an account: empty bodies don't slow sign-up for everyone", async () => {
