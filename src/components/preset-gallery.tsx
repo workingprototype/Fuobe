@@ -11,7 +11,7 @@ import { useProgressive } from "@/components/use-progressive";
 import { CardChip, badgeKey, parseBadgeKey } from "@/components/gpu/readiness-chip";
 import { useGpuBadges } from "@/hooks/use-gpu";
 import { useEngineMode, useViewer } from "@/lib/api";
-import { interleaveByCategory, previewFlip, searchText, type PresetCardData } from "@/lib/preset-cards";
+import { interleaveByCategory, matchesSearch, previewFlip, searchText, type PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
 /** A tiny label shown on hover/focus (CSS only: a gallery has hundreds of these). */
@@ -216,7 +216,7 @@ export function PresetGallery({
       cat === "All" && !query
         ? mixed.filter((p) => runsOn === "all" || p[runsOn])
         : index
-            .filter(([p, text]) => (cat === "All" || p.category === cat) && (!query || text.includes(query)) && (runsOn === "all" || p[runsOn]))
+            .filter(([p, text]) => (cat === "All" || p.category === cat) && (!query || matchesSearch(text, query)) && (runsOn === "all" || p[runsOn]))
             .map(([p]) => p),
     [index, mixed, cat, query, runsOn],
   );
@@ -263,9 +263,10 @@ export function PresetGallery({
             <RunsOnControl value={runsOn} onChange={setRunsOn} locked={locked} owner={!!viewer?.owner} />
           </div>
         </div>
-        {visitor && badges && !badges.connected && !badges.off && (
-          <p className="text-[13px] text-muted-foreground">
-            <Link href="/connect" className="font-medium text-brand-text underline-offset-2 hover:underline">
+        {/* Its line is kept (unseen) until the viewer and its chips are known, so the strip and grid don't move when it comes. */}
+        {(!viewer || (visitor && (!badges || (!badges.connected && !badges.off)))) && (
+          <p className={cn("text-[13px] text-muted-foreground", !(visitor && badges) && "invisible", !viewer && "[html[data-viewer='owner']_&]:hidden")} aria-hidden={!(visitor && badges) || undefined}>
+            <Link href="/connect" tabIndex={visitor && badges ? undefined : -1} className="font-medium text-brand-text underline-offset-2 hover:underline">
               Connect your GPU
             </Link>{" "}
             to see what runs on it.
@@ -275,13 +276,15 @@ export function PresetGallery({
           ref={strip}
           role="group"
           aria-label="Categories"
-          className="fade-x scrollbar-none -mx-1 flex snap-x scroll-px-1 gap-1 overflow-x-auto px-1"
+          // From sm up every category shows (wrapped): a mouse can't scroll a row whose scrollbar is hidden.
+          className="fade-x scrollbar-none -mx-1 flex snap-x scroll-px-1 gap-1 overflow-x-auto px-1 sm:flex-wrap sm:overflow-visible"
         >
           {cats.map((c) => (
             <button
               key={c}
               type="button"
               aria-pressed={cat === c}
+              onFocus={(e) => e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
               onClick={(e) => {
                 setCat(c);
                 e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });

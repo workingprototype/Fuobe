@@ -122,15 +122,15 @@ describe("the proxy: PR #15's routes as main treats their kind", () => {
     }
   });
 
-  it("gives an account the price checks, Connect your GPU for the runs, and library for the Export mix", async () => {
+  it("gives an account the price checks, own-gpu-tool for the runs (a GPU wouldn't run them), and library for the Export mix", async () => {
     process.env.FUOBE_PUBLIC_SIGNUP = "1";
     const cookie = auth.createSession(newAccount().id).value;
     for (const p of ["/api/turnaround/estimate", "/api/turnaround?preview=1", "/api/audio-tools?preview=1"]) expect(passed(proxy(req(p, { method: "POST", cookie }))), p).toBe(true);
     for (const p of ["/api/turnaround", "/api/audio-tools"]) {
       const r = proxy(req(p, { method: "POST", cookie }));
       expect(r.status, p).toBe(403);
-      expect(r.headers.get(access.CONNECT_GPU_HEADER), p).toBe("1");
-      expect((await r.json()).code, p).toBe("connect-gpu");
+      expect(r.headers.get(access.CONNECT_GPU_HEADER), p).toBeNull();
+      expect((await r.json()).code, p).toBe("own-gpu-tool");
     }
     // The mix is saved to the owner's Library: a library change, whatever the GPU.
     const save = proxy(req("/api/audio-tools/export?offset=0", { method: "POST", cookie }));

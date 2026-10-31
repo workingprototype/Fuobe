@@ -104,6 +104,34 @@ export const CHANNEL_IDEAS = [
   "Channel with songs for kids",
 ];
 
+/** The examples for each genre (CHANNEL_IDEAS sorted by genre, with a few more where a genre had one or none). */
+export const GENRE_IDEAS: Record<FacelessGenre, string[]> = {
+  education: [
+    "Channel about survival in the wild",
+    "Channel about how everyday things are made",
+    "Channel explaining space in five minutes",
+    "Channel about the science of sleep and the body",
+  ],
+  history: [
+    "Channel about the rise and fall of empires",
+    "Channel about ancient civilizations",
+    "Channel with daily history facts",
+    "Channel about famous heists and scams",
+  ],
+  kids: [
+    "Channel with songs for kids",
+    "Channel about animals for curious kids",
+    "Channel with bedtime stories about friendly dragons",
+    "Channel about how things work, for kids",
+  ],
+  storytelling: [
+    "Channel retelling myths and legends",
+    "Channel with true mysteries that were never solved",
+    "Channel about famous heists and scams",
+    "Channel with short ghost stories by the campfire",
+  ],
+};
+
 export interface VisualStyle {
   id: string;
   name: string;

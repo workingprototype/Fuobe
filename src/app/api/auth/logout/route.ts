@@ -1,7 +1,10 @@
 import { cookies } from "next/headers";
-import { SESSION_COOKIE } from "@/server/auth";
+import { endSession, SESSION_COOKIE } from "@/server/auth";
 
+/** Sign out: this session ends on the server too (a copy of its cookie stops working), and the browser forgets it. */
 export async function POST() {
-  (await cookies()).delete(SESSION_COOKIE);
+  const jar = await cookies();
+  endSession(jar.get(SESSION_COOKIE)?.value);
+  jar.delete(SESSION_COOKIE);
   return Response.json({ ok: true });
 }

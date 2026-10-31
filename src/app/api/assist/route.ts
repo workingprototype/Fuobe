@@ -1,5 +1,6 @@
 import { after, connection } from "next/server";
 import { z } from "zod";
+import { isGuest } from "@/lib/guest-access";
 import { addMessage, availability, createThread, listThreads, resolveAgent, resolveMode, run } from "@/server/assist/agent";
 import { AssistMessage, ModeChoice } from "@/server/assist/schemas";
 
@@ -10,12 +11,15 @@ const Create = AssistMessage.extend({
   mode: ModeChoice.optional(),
 });
 
-/** Chats (all, `?project=<id>`, or `?project=none` for chats outside projects; `?q=` searches), with what can run. */
+/**
+ * Chats (all, `?project=<id>`, or `?project=none` for chats outside projects; `?q=` searches), with what can run.
+ * A guest's or an account's list (GUEST_HEADER) is empty: the chats are the owner's.
+ */
 export async function GET(request: Request) {
   await connection();
   const sp = new URL(request.url).searchParams;
   const project = sp.get("project");
-  const threads = listThreads({ project: project === "none" ? null : (project ?? undefined), q: sp.get("q") ?? undefined });
+  const threads = isGuest(request) ? [] : listThreads({ project: project === "none" ? null : (project ?? undefined), q: sp.get("q") ?? undefined });
   const [agent, can] = await Promise.all([resolveAgent(), availability()]);
   return Response.json({ threads, agent, availability: can });
 }

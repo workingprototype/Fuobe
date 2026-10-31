@@ -186,8 +186,11 @@ export function startLine(s: ConnectionState, quote: StartQuote | undefined, eng
  */
 export const FIRST_RUN_KEY = "fuobe:first-run";
 
-/** Runs while Home's HTML is parsed: `<html data-first-run="0">` when the guide was put away here before. */
-export const FIRST_RUN_SCRIPT = `(function(){try{if(localStorage.getItem("${FIRST_RUN_KEY}")==="0")document.documentElement.setAttribute("data-first-run","0")}catch(e){}})()`;
+/**
+ * Runs while Home's HTML is parsed: `<html data-first-run="1">` when the guide showed here last time (the shell shows it
+ * then), "0" when it was put away.
+ */
+export const FIRST_RUN_SCRIPT = `(function(){try{var v=localStorage.getItem("${FIRST_RUN_KEY}");if(v==="0"||v==="1")document.documentElement.setAttribute("data-first-run",v)}catch(e){}})()`;
 
 export const ENGINE_MODE_LABEL: Record<EngineModeName, string> = { both: "Open source + paid", open: "Open source only", cloud: "Paid APIs only" };
 

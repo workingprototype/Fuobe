@@ -123,15 +123,17 @@ describe("proxy with public sign-up on", () => {
     const list = proxy(req("/api/generations?limit=40"));
     expect(list.status).toBe(200);
     expect(await list.json()).toEqual({ items: [] });
-    for (const p of ["/api/files/outputs/a.png", "/api/settings", "/api/auth/tokens", "/api/generations/abc", "/api/layers/abc", "/api/uploads", "/api/assist"]) {
+    for (const p of ["/api/files/outputs/a.png", "/api/settings", "/api/auth/tokens", "/api/generations/abc", "/api/layers/abc", "/api/uploads", "/api/assist/t1"]) {
       const r = proxy(req(p));
       expect(r.status, p).toBe(401);
       expect(r.headers.get(access.GUEST_HEADER), p).toBe("1");
     }
     // Catalogs mixed with the owner's items: the route is told it's a guest.
-    const moodboards = proxy(req("/api/moodboards"));
-    expect(passed(moodboards)).toBe(true);
-    expect(moodboards.headers.get(`x-middleware-request-${access.GUEST_HEADER}`)).toBe("1");
+    for (const p of ["/api/moodboards", "/api/assist"]) {
+      const r = proxy(req(p));
+      expect(passed(r), p).toBe(true);
+      expect(r.headers.get(`x-middleware-request-${access.GUEST_HEADER}`), p).toBe("1");
+    }
   });
 
   it("refuses a guest's every change with a 401 the client turns into the sign-up prompt", async () => {
@@ -208,11 +210,16 @@ describe("proxy with public sign-up off (today's behaviour)", () => {
 });
 
 describe("accounts never run on the owner's keys or GPU", () => {
-  it("refuses an account's runs and AI helpers with Connect your GPU", async () => {
+  it("refuses an account's runs with Connect your GPU, and the tools a GPU wouldn't unlock with own-gpu-tool", async () => {
     process.env.FUOBE_PUBLIC_SIGNUP = "1";
     const cookie = auth.createSession(auth.createAccount("gpu@example.com", "long enough").id).value;
+    // The studios' generations run on its own GPU: connect one.
+    const run = proxy(req("/api/generations", { method: "POST", cookie }));
+    expect(run.status).toBe(403);
+    expect(run.headers.get(access.CONNECT_GPU_HEADER)).toBe("1");
+    expect((await run.json()).code).toBe("connect-gpu");
+    // Everything else wouldn't run on it even once connected: said first, with no Connect your GPU card.
     for (const p of [
-      "/api/generations",
       "/api/canvases/c1/run",
       "/api/cinema/projects/p1/generate",
       "/api/layers/l1/jobs",
@@ -230,8 +237,8 @@ describe("accounts never run on the owner's keys or GPU", () => {
     ]) {
       const r = proxy(req(p, { method: "POST", cookie }));
       expect(r.status, p).toBe(403);
-      expect(r.headers.get(access.CONNECT_GPU_HEADER), p).toBe("1");
-      expect((await r.json()).code).toBe("connect-gpu");
+      expect(r.headers.get(access.CONNECT_GPU_HEADER), p).toBeNull();
+      expect((await r.json()).code, p).toBe("own-gpu-tool");
     }
     // Owner-only routes say so (not "connect your GPU").
     expect(proxy(req("/api/mcp", { method: "POST", cookie })).headers.get(access.CONNECT_GPU_HEADER)).toBeNull();
@@ -264,7 +271,7 @@ describe("accounts never see or change the owner's library", () => {
     canvases: { lists: ["/api/canvases"], records: ["/api/canvases/c1"], changes: [["POST", "/api/canvases"], ["PATCH", "/api/canvases/c1"], ["DELETE", "/api/canvases/c1"], ["POST", "/api/canvases/c1/duplicate"]] },
     cinema: { lists: ["/api/cinema/projects"], records: ["/api/cinema/projects/p1", "/api/cinema/projects/p1/items"], changes: [["POST", "/api/cinema/projects"], ["PATCH", "/api/cinema/projects/p1"], ["DELETE", "/api/cinema/projects/p1"]] },
     storyboards: { lists: [], records: ["/api/storyboards"], changes: [["POST", "/api/storyboards"]] },
-    assist: { lists: ["/api/assist/projects"], records: ["/api/assist", "/api/assist/t1", "/api/assist/memory"], changes: [["PATCH", "/api/assist/t1"], ["DELETE", "/api/assist/t1"], ["POST", "/api/assist/projects"]] },
+    assist: { lists: ["/api/assist/projects"], records: ["/api/assist/t1", "/api/assist/memory"], changes: [["PATCH", "/api/assist/t1"], ["DELETE", "/api/assist/t1"], ["POST", "/api/assist/projects"]] },
     brands: { lists: ["/api/brands", "/api/products"], records: ["/api/brands/b1"], changes: [["POST", "/api/brands"], ["DELETE", "/api/brands/b1"], ["POST", "/api/products"]] },
   };
 
@@ -311,6 +318,19 @@ describe("accounts never see or change the owner's library", () => {
     expect(access.isPriceCheck("POST", "/api/canvases/c1/run", "?preview=1")).toBe(false);
     expect(access.isPriceCheck("POST", "/api/shorts/sessions/s1/segments/estimate", "")).toBe(false);
     expect(access.isPriceCheck("GET", "/api/shorts/estimate", "")).toBe(false);
+    // AI Influencer, Photodump, Fashion Factory and Character Sheet price on load: a visitor's page never opens a card for it.
+    for (const p of ["/api/influencer", "/api/photodump", "/api/photodump/fashion", "/api/photodump/character"]) {
+      expect(access.isPriceCheck("POST", p, "?preview=1"), p).toBe(true);
+      expect(access.isPriceCheck("POST", p, ""), p).toBe(false);
+    }
+  });
+
+  it("lets a guest's and an account's price check on AI Influencer through", () => {
+    process.env.FUOBE_PUBLIC_SIGNUP = "1";
+    const cookie = auth.createSession(auth.createAccount("influencer@example.com", "long enough").id).value;
+    expect(passed(proxy(req("/api/influencer?preview=1", { method: "POST" })))).toBe(true);
+    expect(passed(proxy(req("/api/influencer?preview=1", { method: "POST", cookie })))).toBe(true);
+    expect(proxy(req("/api/influencer", { method: "POST" })).status).toBe(401);
   });
 });
 

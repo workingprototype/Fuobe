@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
-import { CONNECT_GPU_HEADER, CONNECT_GPU_MESSAGE } from "@/lib/guest-access";
+import { CONNECT_GPU_HEADER, CONNECT_GPU_UPLOAD_MESSAGE } from "@/lib/guest-access";
 import { imageSize } from "@/lib/image-size";
 import { sniffMedia, type SniffKind } from "@/lib/sniff";
 import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "@/server/account-files";
@@ -156,7 +156,7 @@ async function ownerUpload(request: Request): Promise<Response> {
 // An account
 
 async function accountUpload(request: Request, account: Account): Promise<Response> {
-  if (!accountGpu(account.id)) return json(403, { error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { [CONNECT_GPU_HEADER]: "1" });
+  if (!accountGpu(account.id)) return json(403, { error: CONNECT_GPU_UPLOAD_MESSAGE, code: "connect-gpu" }, { [CONNECT_GPU_HEADER]: "1" });
   if (!diskHasRoom()) return json(503, { error: ACCOUNT_MESSAGES.diskLow });
   // A fair share: 60 an hour, 300 a day, 2 at once.
   const hour = hit(`up:h:${account.id}`, ACCOUNT_LIMITS.uploadsPerHour, 60 * 60_000);

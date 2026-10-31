@@ -196,7 +196,7 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
 
   return (
     <PageShell wide>
-      <PageHeader title="Build your AI avatar" description="Create a consistent AI character for your videos — from reference or define your character's look from scratch.">
+      <PageHeader title="Character Sheet" description="Build your AI avatar: a consistent character for your videos, from a reference or defined from scratch.">
         <EngineSwitch value={engine} onChange={setEngine} />
       </PageHeader>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

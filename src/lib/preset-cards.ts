@@ -466,6 +466,17 @@ export function interleaveByCategory<T extends { category: string }>(items: T[])
 /** Lower-cased text a gallery search matches against. */
 export const searchText = (c: Pick<PresetCardData, "name" | "description" | "category">) => `${c.name} ${c.description} ${c.category}`.toLowerCase();
 
+/** A search word without a plain English ending (explosions → explosion, remover and removing → remov), so other forms match. */
+const stem = (w: string) => (w.length > 4 ? w.replace(/(?:ing|es|er|s)$/, "") : w);
+
+/**
+ * Whether a gallery's search text (searchText) matches what was typed: every word, in any order, in any of its simple
+ * forms ("explosions", "removing background"). The query is lower-cased already.
+ */
+export function matchesSearch(text: string, query: string): boolean {
+  return query.split(/\s+/).every((w) => !w || text.includes(stem(w)));
+}
+
 const lowerFirst = (s: string) => (/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s);
 const article = (s: string) => (/^(a|an|the|your|my)\s/i.test(s) ? s : `${/^[aeiou]/i.test(s) ? "an" : "a"} ${s}`);
 

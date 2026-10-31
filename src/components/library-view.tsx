@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useShares, useUploads, type Asset, type FeedFilter } from "@/lib/api";
+import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useIsVisitor, useLibrary, useLibraryFacets, useShares, useStatus, useUploads, type Asset, type FeedFilter } from "@/lib/api";
 import type { Generation, MediaKind, ReviewStatus } from "@/lib/catalog/types";
 import { keyCombo, useModKey } from "@/lib/keys";
 import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, toggleAll, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
@@ -230,6 +230,10 @@ function Inner() {
   const folderId = sp.get("folder") ?? undefined;
   const trash = tab.id === "trash";
   const uploadsTab = tab.id === "uploads";
+  // A guest or an account sees its own runs only; an account without a GPU can't add files yet.
+  const visitor = useIsVisitor();
+  const seen = useStatus().data?.viewer;
+  const noGpu = seen?.kind === "account" && !seen.gpu.connected;
   // Library → Shared: the share links, not results (no search, selection or filters there).
   const sharedTab = tab.id === "shared";
   const [q, setQ] = useState("");
@@ -493,6 +497,15 @@ function Inner() {
     }
     if (folder) return <Empty title="This folder is empty">Drag cards onto it, or select some and choose Move to folder.</Empty>;
     if (tab.id === "favorites") return <Empty title="Nothing liked yet">Mark the ones you like with the heart to keep them here.</Empty>;
+    if (uploadsTab && noGpu)
+      return (
+        <Empty title="No uploads yet">
+          <Link href="/connect" className="text-brand-text underline underline-offset-2">
+            Connect your GPU
+          </Link>{" "}
+          to add your own files.
+        </Empty>
+      );
     if (uploadsTab) return <Empty title="No uploads yet">Files you add to a studio show up here.</Empty>;
     return (
       <Empty title="Your creations will appear here">
@@ -517,7 +530,7 @@ function Inner() {
         ) : (
           <div className="min-w-0">
             <h1 className="font-heading text-[34px] leading-tight">Library</h1>
-            <p className="mt-1 max-w-2xl text-[15px] text-muted-foreground">Everything you make, across cloud and open-source runs.</p>
+            <p className="mt-1 max-w-2xl text-[15px] text-muted-foreground">{visitor ? "What you make on your own GPU." : "Everything you make, across cloud and open-source runs."}</p>
           </div>
         )}
         <div className={cn("flex w-full items-center gap-2 sm:w-auto", sharedTab && "hidden")}>

@@ -27,7 +27,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useFolderActions } from "@/lib/api";
+import { useFolderActions, useIsVisitor } from "@/lib/api";
 import { childFolders, DEFAULT_FOLDER_COLOR, FOLDER_COLORS, folderMoveError, folderPath, folderSwatch, folderTree, MAX_FOLDER_DEPTH, type Folder } from "@/lib/library";
 import { cn } from "@/lib/utils";
 import { toastError } from "@/lib/refusals";
@@ -390,6 +390,8 @@ function FolderCard({ folder, all, onOpen, onDropIds, steps }: { folder: Folder;
 /** The folders inside `parent` (the library root with null), pinned first, and a New folder tile. `steps`: Show steps is on. */
 export function FolderStrip({ all, parent, onOpen, onMove, steps }: { all: Folder[]; parent: Folder | null; onOpen: (f: Folder) => void; onMove: (ids: string[], f: Folder) => void; steps?: boolean }) {
   const [creating, setCreating] = useState(false);
+  // Folders are the studio's library, its owner's: a guest or an account isn't offered one the server would refuse.
+  const visitor = useIsVisitor();
   const kids = childFolders(all, parent?.id ?? null);
   return (
     <div className="scrollbar-none -mx-1 flex gap-2 overflow-x-auto px-1 py-1" role="list" aria-label={parent ? `Folders in ${parent.name}` : "Folders"}>
@@ -398,7 +400,7 @@ export function FolderStrip({ all, parent, onOpen, onMove, steps }: { all: Folde
           <FolderCard folder={f} all={all} onOpen={() => onOpen(f)} onDropIds={(ids) => onMove(ids, f)} steps={steps} />
         </div>
       ))}
-      {roomInside(all, parent) && (
+      {roomInside(all, parent) && !visitor && (
         <div role="listitem" className="flex shrink-0">
           <button
             onClick={() => setCreating(true)}

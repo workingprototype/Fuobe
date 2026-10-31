@@ -12,7 +12,7 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: PageProps<"/apps/[id]">): Promise<Metadata> {
   const { id } = await params;
   const preset = getPreset(id);
-  return { title: preset?.type === "app" ? preset.name : "Not found" };
+  return preset?.type === "app" ? { title: preset.name, description: `${preset.description}. A one-click Fuobe app on open-source models.` } : { title: "Not found" };
 }
 
 async function AppStudio({ params }: { params: PageProps<"/apps/[id]">["params"] }) {

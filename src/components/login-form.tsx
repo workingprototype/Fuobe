@@ -1,13 +1,14 @@
 "use client";
 
-import { Loader2, Lock, Sparkles } from "lucide-react";
+import { Eye, EyeOff, Loader2, Lock, LogOut, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useViewer } from "@/lib/api";
+import { announceAuthChange, signOut, useViewer } from "@/lib/api";
 import { safeNext } from "@/lib/safe-redirect";
+import { cn } from "@/lib/utils";
 
 /** "signup" and "login" are accounts (public sign-up); "owner" is the install password. */
 type Mode = "signup" | "login" | "owner";
@@ -23,6 +24,8 @@ const COPY: Record<Mode, { title: string; lead: string; button: string }> = {
 
 export function LoginForm() {
   const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const viewer = useViewer();
   const open = !!viewer.data?.publicSignup;
   const [chosen, setChosen] = useState<Mode | null>(null);
@@ -30,12 +33,28 @@ export function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The email is taken (409): offer to log in with it instead.
+  const [taken, setTaken] = useState(false);
+  const [shown, setShown] = useState(false);
   const [busy, setBusy] = useState(false);
   const next = safeNext(params.get("next"), typeof window === "undefined" ? "http://localhost" : window.location.origin);
 
+  // Sign up and log in have their own tab title (the page's metadata says "Sign in" for both).
+  useEffect(() => {
+    if (!viewer.isPending) document.title = `${mode === "signup" ? "Sign up" : mode === "login" ? "Log in" : "Sign in"} · Fuobe`;
+  }, [mode, viewer.isPending]);
+
+  /** The other form; the URL says which (?signup=1), so a reload or a shared link opens the same one. */
   const choose = (m: Mode) => {
     setChosen(m);
     setError(null);
+    setTaken(false);
+    if (m === "owner") return;
+    const q = new URLSearchParams(params.toString());
+    if (m === "signup") q.set("signup", "1");
+    else q.delete("signup");
+    const s = q.toString();
+    router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -52,10 +71,12 @@ export function LoginForm() {
       const q = new URLSearchParams({ welcome: "1" });
       if (after !== "/" && !after.startsWith("/connect")) q.set("next", after);
       const dest = mode === "signup" ? new URL(`/connect?${q}`, window.location.origin).toString() : after;
+      announceAuthChange();
       window.location.assign(dest);
       return;
     }
     setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't sign in");
+    setTaken(mode === "signup" && res.status === 409);
     setBusy(false);
   };
 
@@ -63,6 +84,26 @@ export function LoginForm() {
     return (
       <div className="grid h-72 w-full max-w-sm place-items-center rounded-2xl border bg-background shadow-soft">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // Already signed in as an account: say so, rather than a form that would sign in again.
+  const account = viewer.data?.signedIn && !viewer.data.owner ? viewer.data.account : undefined;
+  if (account && params.get("owner") !== "1") {
+    return (
+      <div className="w-full max-w-sm animate-fade-up rounded-2xl border bg-background p-7 shadow-soft">
+        <div className="mb-5 grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground">
+          <Sparkles className="size-5" />
+        </div>
+        <h1 className="font-heading text-[28px] leading-tight">You&apos;re signed in</h1>
+        <p className="mt-1 text-[13px] break-words text-muted-foreground">As {account.email}.</p>
+        <Button asChild className="mt-5 h-11 w-full">
+          <Link href={next}>Continue</Link>
+        </Button>
+        <Button variant="ghost" className="mt-2 h-10 w-full text-muted-foreground" onClick={() => void signOut()}>
+          <LogOut /> Sign out
+        </Button>
       </div>
     );
   }
@@ -79,6 +120,9 @@ export function LoginForm() {
       {mode !== "owner" && (
         <Input
           type="email"
+          id="login-email"
+          name="email"
+          aria-label="Email"
           autoFocus
           autoComplete="email"
           placeholder="Email"
@@ -88,21 +132,54 @@ export function LoginForm() {
           aria-invalid={!!error}
         />
       )}
-      <Input
-        type="password"
-        autoFocus={mode === "owner"}
-        autoComplete={mode === "signup" ? "new-password" : "current-password"}
-        placeholder={mode === "signup" ? "Password (at least 8 characters)" : "Password"}
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        className={mode === "owner" ? "mt-5 h-11" : "mt-2.5 h-11"}
-        aria-invalid={!!error || short}
-      />
-      {error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
+      <div className={cn("relative", mode === "owner" ? "mt-5" : "mt-2.5")}>
+        <Input
+          type={shown ? "text" : "password"}
+          id="login-password"
+          name="password"
+          aria-label="Password"
+          autoFocus={mode === "owner"}
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
+          placeholder={mode === "signup" ? "Password (at least 8 characters)" : "Password"}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="h-11 pr-11"
+          aria-invalid={!!error || short}
+          aria-describedby={short ? "pw-hint" : undefined}
+        />
+        <button
+          type="button"
+          onClick={() => setShown((s) => !s)}
+          aria-label="Show password"
+          aria-pressed={shown}
+          className="absolute top-1/2 right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {shown ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </button>
+      </div>
+      {short && (
+        <p id="pw-hint" className="mt-2 text-[13px] text-destructive">
+          Use at least 8 characters ({8 - password.length} more)
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-[13px] text-destructive">
+          {taken ? error.replace(/\s*Log in instead\.?$/, "") : error}
+          {taken && (
+            <>
+              {" "}
+              <button type="button" className="font-medium text-foreground underline underline-offset-4" onClick={() => choose("login")}>
+                Log in instead
+              </button>
+            </>
+          )}
+        </p>
+      )}
       <Button type="submit" className="mt-4 h-11 w-full" disabled={!password || (mode !== "owner" && !email) || (mode === "signup" && password.length < 8) || busy}>
         {busy && <Loader2 className="animate-spin" />} {copy.button}
       </Button>
       {mode === "signup" && <p className="mt-3 text-center text-[12px] text-muted-foreground">The studio&apos;s owner can see what you upload and make here.</p>}
+      {mode === "login" && <p className="mt-3 text-center text-[12px] text-muted-foreground">Forgot your password? There&apos;s no email reset yet: create a new account.</p>}
       {open && (
         <div className="mt-4 space-y-1.5 text-center text-[13px] text-muted-foreground">
           {mode === "signup" ? (

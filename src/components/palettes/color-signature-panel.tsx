@@ -226,14 +226,16 @@ export function ColorSignaturePanel({
                 </div>
               )}
             </section>
-            <section>
-              <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">Cinema palettes</p>
-              <div className="grid grid-cols-2 gap-2">
-                {builtins.map((p) => (
-                  <PaletteCard key={p.id} palette={p} selected={value?.id === p.id} onSelect={() => onPick(value?.id === p.id ? undefined : toPalettePick(p, value?.lock))} />
-                ))}
-              </div>
-            </section>
+            {builtins.length > 0 && (
+              <section>
+                <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">Cinema palettes</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {builtins.map((p) => (
+                    <PaletteCard key={p.id} palette={p} selected={value?.id === p.id} onSelect={() => onPick(value?.id === p.id ? undefined : toPalettePick(p, value?.lock))} />
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         </>
       )}

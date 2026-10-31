@@ -32,12 +32,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
+import { Skeleton } from "@/components/ui/skeleton";
 import { CommandPalette, CommandPaletteProvider, useCommandPalette } from "@/components/command-palette";
 import { IntentLink } from "@/components/intent-link";
 import { JobNotifications } from "@/components/job-notifications";
 import { NAV, type NavGroupDef } from "@/components/nav-items";
 import { SkillBuilderProvider } from "@/components/skills/skill-builder-provider";
-import { CONNECT_GPU_EVENT, signInHref, useEngineMode, useIsGuest, useStatus, useViewer, type StatusInfo } from "@/lib/api";
+import { CONNECT_GPU_EVENT, signInHref, useEngineMode, useStatus, useViewer, type StatusInfo } from "@/lib/api";
 import { useModKey } from "@/lib/keys";
 import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, NEW_CREATION_HREF, parseClosed, scrollFades, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -366,21 +367,54 @@ function SearchRow() {
   );
 }
 
-/** Public sign-up, signed out: "Sign up" and "Log in", coming back to this page (under Suspense: it reads the path). */
-function GuestRow() {
-  const guest = useIsGuest();
+const VIEWER_KEY = "fuobe:viewer";
+
+/**
+ * Runs while the HTML is parsed: `<html data-viewer="owner">` in a browser where the owner was signed in last time, so
+ * the row kept for "Sign up / Log in" (or an account's menu) isn't drawn and then taken away on every page load.
+ */
+const VIEWER_SCRIPT = `(function(){try{var v=localStorage.getItem("${VIEWER_KEY}");if(v)document.documentElement.setAttribute("data-viewer",v)}catch(e){}})()`;
+
+/** The row's place while the viewer isn't known (in the server's shell too: ViewerRow reads the query, so it's the fallback there). */
+function ViewerRowPlaceholder() {
+  return (
+    <>
+      <script type={typeof window === "undefined" ? "text/javascript" : "text/plain"} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: VIEWER_SCRIPT }} />
+      <SidebarMenuItem aria-hidden className="mt-1 h-8 group-data-[collapsible=icon]:h-[70px] [html[data-viewer='owner']_&]:hidden [html[data-viewer='account']_&]:hidden" />
+    </>
+  );
+}
+
+/**
+ * Public sign-up, signed out: "Sign up" and "Log in", coming back to this page with its query (a preset picked…). Until
+ * the viewer is known the row keeps its height, so the menu under it doesn't move when it comes (except in a browser the
+ * owner or an account used last: they get no row here). Under Suspense: it reads the path.
+ */
+function ViewerRow() {
+  const viewer = useViewer().data;
   const pathname = usePathname();
-  if (!guest) return null;
+  const search = useSearchParams().toString();
+  const here = search ? `${pathname}?${search}` : pathname;
+  const kind = !viewer ? undefined : viewer.owner ? "owner" : viewer.account ? "account" : viewer.publicSignup ? "guest" : "owner";
+  useEffect(() => {
+    if (!kind) return;
+    try {
+      localStorage.setItem(VIEWER_KEY, kind);
+    } catch {}
+    document.documentElement.setAttribute("data-viewer", kind);
+  }, [kind]);
+  if (!kind) return <ViewerRowPlaceholder />;
+  if (kind !== "guest") return null;
   return (
     <SidebarMenuItem className="mt-1 flex gap-1.5 group-data-[collapsible=icon]:flex-col">
       <SidebarMenuButton asChild tooltip="Sign up free" className="h-8 flex-1 justify-center bg-primary text-[13px] text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground">
-        <a href={signInHref("signup", pathname)}>
+        <a href={signInHref("signup", here)}>
           <UserPlus />
           <span>Sign up</span>
         </a>
       </SidebarMenuButton>
       <SidebarMenuButton asChild tooltip="Log in" className="h-8 flex-1 justify-center border border-sidebar-border text-[13px]">
-        <a href={signInHref("login", pathname)}>
+        <a href={signInHref("login", here)}>
           <LogIn />
           <span>Log in</span>
         </a>
@@ -535,8 +569,8 @@ export function AppSidebar() {
               )}
             </div>
             <SidebarMenu>
-              <Suspense fallback={null}>
-                <GuestRow />
+              <Suspense fallback={<ViewerRowPlaceholder />}>
+                <ViewerRow />
               </Suspense>
               <SearchRow />
               <SidebarMenuItem>
@@ -575,6 +609,11 @@ export function AppSidebar() {
           <SidebarFooter className="gap-1 border-t border-sidebar-border" onClick={closeOnLink}>
             {status?.viewer ? (
               <YourGpuChip viewer={status.viewer} />
+            ) : !status ? (
+              // Not known yet: no "add key / offline" the install may not have, for a visitor who never sees them.
+              <div aria-hidden className="flex h-[30px] items-center px-2 group-data-[collapsible=icon]:hidden">
+                <Skeleton className="h-3 w-2/3" />
+              </div>
             ) : (
             <IntentLink
               href="/settings"

@@ -281,7 +281,7 @@ export function PhotodumpView() {
           <div className="sticky bottom-3 z-10 flex items-center justify-between gap-3 rounded-2xl border bg-background/95 p-3 shadow-normal backdrop-blur">
             <p className="min-w-0 truncate text-[13px]">{pack ? <><span className="font-medium">{pack.name}</span> · {pack.count} photos</> : <span className="text-muted-foreground">Pick a pack to continue</span>}</p>
             <Button disabled={!pack} onClick={() => go(1)}>
-              Use this preset <ArrowRight />
+              Use this pack <ArrowRight />
             </Button>
           </div>
           {runs.length > 0 && (

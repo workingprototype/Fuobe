@@ -24,7 +24,9 @@ import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { SketchEditor, type Stroke } from "@/components/studio/sketch-editor";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
 import { openInStudio } from "@/components/swap-studio/hooks";
-import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
+import { SelfHostNote } from "@/components/self-host-note";
+import { useEdgeFade } from "@/components/studio/use-edge-fade";
+import { useEngine, useGenerations, useIsVisitor, useModelAccess } from "@/lib/api";
 import { CHARACTER_SWAP, cutsInPart, cutWarning, partWords, seedProblem, type CharacterOptions, type CharacterQuality } from "@/lib/catalog/character-swap";
 import {
   chooseMaker,
@@ -36,6 +38,7 @@ import {
   makerLicence,
   makerOffered,
   makersFor,
+  qualityFor,
   MODE_TARGETS,
   OPEN_TARGET_PROBLEM,
   resolutionWords,
@@ -61,7 +64,9 @@ import { LookPicker, type LookSource } from "./look-picker";
 import { SetupCode } from "./setup-code";
 import { useClipCuts } from "./use-cuts";
 
-const LIMITS = `MP4, MOV or WebM · ${GENJUTSU.minSeconds}–${GENJUTSU.maxSeconds} s are used · ${GENJUTSU.maxBytes / 1024 / 1024} MB`;
+/** The upload box's line: the mode's own window (Character swap: 5–15 s of one shot). */
+const limits = (character: boolean) =>
+  `MP4, MOV or WebM · ${character ? `${CHARACTER_SWAP.minSeconds}–${CHARACTER_SWAP.maxSeconds}` : `${GENJUTSU.minSeconds}–${GENJUTSU.maxSeconds}`} s are used · ${GENJUTSU.maxBytes / 1024 / 1024} MB`;
 
 interface Paint {
   mask: string;
@@ -96,6 +101,8 @@ const seedOf = (s: string): number | undefined => (s.trim() === "" ? undefined :
  */
 export function GenjutsuStudio() {
   const [engine, setEngine, engineMode] = useEngine();
+  // Genjutsu doesn't run on an account's own GPU yet (only the studios' generations do): said here, not after Generate.
+  const visitor = useIsVisitor();
   const access = useModelAccess();
   const [mode, setModeState] = useState<GenjutsuMode>("motion");
   const source = useSourceClip(GENJUTSU.maxBytes);
@@ -481,7 +488,7 @@ export function GenjutsuStudio() {
         {!clip ? (
           <ClipDrop
             accept={GENJUTSU.accept}
-            limits={LIMITS}
+            limits={limits(mode === "character")}
             onFile={(f) => {
               const err = source.pick(f);
               if (err) toast.error(err);
@@ -700,12 +707,12 @@ export function GenjutsuStudio() {
               )}
               {maker && options.length <= 1 && (
                 <p className="text-[12px] text-muted-foreground">
-                  <SourceBadge source={maker.source} /> <span className="font-medium text-foreground">{maker.label}</span> · {maker.note} · {makerLicence(maker)}
+                  <SourceBadge source={maker.source} /> <span className="font-medium text-foreground">{maker.label}</span> · {maker.note} · {makerLicence(maker, !/your GPU|on fal/.test(maker.note ?? ""))}
                 </p>
               )}
 
               {maker?.pair && (
-                <Field label="Quality" hint={(maker.tier ?? tier) === "standard" ? "Lite — the cheaper, faster tier" : "The full Original"}>
+                <Field label="Quality" hint={(maker.tier ?? tier) === "standard" ? "Standard: the cheaper, faster tier" : "High: the full Original"}>
                   <Segmented
                     label="Quality"
                     value={maker.tier ?? tier}
@@ -720,7 +727,13 @@ export function GenjutsuStudio() {
 
               {(!isCharacter || !maker?.h3) && (
                 <Field label="Resolution" hint={maker ? upFirst(resolutionWords(maker, quality)) : undefined}>
-                  <Segmented label="Resolution" value={quality} onChange={setQuality} options={GENJUTSU.qualities.map((q) => ({ value: q, label: q }))} />
+                  {/* What renders is what shows as picked: a model that stops at 480p shows 480p, not the 720p asked for. */}
+                  <Segmented
+                    label="Resolution"
+                    value={(maker && GENJUTSU.qualities.find((q) => q === qualityFor(maker, quality))) || quality}
+                    onChange={setQuality}
+                    options={GENJUTSU.qualities.map((q) => ({ value: q, label: q }))}
+                  />
                 </Field>
               )}
 
@@ -743,10 +756,11 @@ export function GenjutsuStudio() {
                       </>
                     )}
                   </div>
-                  <Button className="rounded-full" onClick={() => start()} disabled={!!blocker || runMutation.isPending}>
+                  <Button className="rounded-full" onClick={() => start()} disabled={!!blocker || runMutation.isPending || visitor}>
                     {runMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />} Generate
                   </Button>
                 </div>
+                {visitor && <SelfHostNote>Genjutsu runs on a self-hosted Fuobe for now.</SelfHostNote>}
                 {est && est.notes.length > 0 && !blocker && (
                   <ul className="space-y-1 text-[12px] leading-snug text-muted-foreground">
                     {est.notes.map((n) => (
@@ -867,9 +881,16 @@ function frameHint(mode: GenjutsuMode, target: GenjutsuTarget | undefined, point
 
 /** The four modes as tabs under the header (the selected one is in the URL as ?mode=). */
 function ModeTabsRow({ mode, onMode }: { mode: GenjutsuMode; onMode: (m: GenjutsuMode) => void }) {
+  const [row, fade] = useEdgeFade<HTMLDivElement>();
+  // The selected tab stays in view on a phone, where the row scrolls (only the row: the page stays put).
+  useEffect(() => {
+    const r = row.current;
+    const on = r?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (r && on) r.scrollTo({ left: Math.max(0, on.offsetLeft - (r.clientWidth - on.offsetWidth) / 2) });
+  }, [mode, row]);
   return (
     <div className="border-b">
-      <div role="tablist" aria-label="Genjutsu modes" onKeyDown={tabKeys} className="scrollbar-none flex gap-1 overflow-x-auto px-3 sm:px-6">
+      <div ref={row} style={fade} role="tablist" aria-label="Genjutsu modes" onKeyDown={tabKeys} className="scrollbar-none flex gap-1 overflow-x-auto px-3 sm:px-6">
         {GENJUTSU_MODES.map((m) => {
           const on = m.id === mode;
           return (

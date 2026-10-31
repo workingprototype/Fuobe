@@ -1086,6 +1086,37 @@ export function useIsGuest(): boolean {
   return !!v && v.publicSignup && !v.signedIn;
 }
 
+/** A signed-in account (public sign-up), not the studio's owner. */
+export function useIsAccount(): boolean {
+  const v = useViewer().data;
+  return !!v?.account && !v.owner;
+}
+
+/** This browser's tabs hear on it that who is signed in changed (src/app/providers.tsx asks again). */
+export const AUTH_CHANNEL = "fuobe-auth";
+
+/** Tells this browser's other tabs that someone signed in or out, so they don't go on as the one before. */
+export function announceAuthChange(): void {
+  try {
+    const c = new BroadcastChannel(AUTH_CHANNEL);
+    c.postMessage("changed");
+    c.close();
+  } catch {}
+}
+
+/** Signing out: the server forgets the session, the other tabs hear of it, and the page starts again signed out. */
+export async function signOut(): Promise<void> {
+  await fetch("/api/auth/logout", { method: "POST" });
+  announceAuthChange();
+  window.location.reload();
+}
+
+/** A guest or an account, once known: the studio's library, projects and settings are its owner's, not theirs. */
+export function useIsVisitor(): boolean {
+  const v = useViewer().data;
+  return !!v && !v.owner;
+}
+
 /** "Sign up" / "Log in" with a way back here. */
 export function signInHref(mode: "signup" | "login", next?: string): string {
   const p = new URLSearchParams();

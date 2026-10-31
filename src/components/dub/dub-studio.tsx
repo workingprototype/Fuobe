@@ -32,7 +32,7 @@ const ONE_SHOT: Record<OneShotModel, { name: string; note: string }> = {
 };
 
 const ROUTE_LINE = {
-  open: "Open source: MelBand RoFormer splits the voice from the music and Qwen3-ASR times it → your local LLM translates → you review → Chatterbox speaks each line in the cloned voice, at its time → InfiniteTalk re-syncs the lips → mixed back over the music.",
+  open: "Open source: MelBand RoFormer splits the voice from the music and Qwen3-ASR times it → an AI translates each line → you review → Chatterbox speaks each line in the cloned voice, at its time → InfiniteTalk re-syncs the lips → mixed back over the music.",
   cloud: "Cloud: ElevenLabs isolates the voice and Demucs lifts out the music and effects → Scribe v2 times the voice → Claude (or a local model) translates → you review → ElevenLabs speaks each line at its time and Chatterbox turns it into the speaker's voice → Sync Lipsync 3 → mixed back over the music and effects.",
 };
 
@@ -90,7 +90,7 @@ export function DubStudio({ tabs }: { tabs?: React.ReactNode }) {
 }
 
 function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
-  const [engine] = useEngine();
+  const [engine, , engineMode] = useEngine();
   const { create } = useDubActions();
   const [video, setVideo] = useState<SlotValue | null>(null);
   const [duration, setDuration] = useState<number | undefined>(undefined);
@@ -144,15 +144,18 @@ function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
         />
         <Panel title="How">
           <div role="radiogroup" aria-label="How to dub" className="grid gap-2 sm:grid-cols-2">
-            <ModeCard on={!oneShot} icon={<Languages className="size-4" />} title="Review the script first" onClick={() => setMode("steps")} note="Transcribe and translate, edit every line, then voice it. Cloud and open source." />
-            <ModeCard
-              on={oneShot}
-              disabled={engine === "open"}
-              icon={<Wand2 className="size-4" />}
-              title="One shot"
-              onClick={() => setMode("oneshot")}
-              note={engine === "open" ? "Cloud only — switch the engine to Cloud" : "HeyGen or ElevenLabs dub the whole video in one go."}
-            />
+            <ModeCard on={!oneShot} icon={<Languages className="size-4" />} title="Review the script first" onClick={() => setMode("steps")} note={engineMode === "open" ? "Transcribe and translate, edit every line, then voice it." : "Transcribe and translate, edit every line, then voice it. Cloud and open source."} />
+            {/* One shot is cloud only: an open-source-only studio doesn't offer it (nobody here can switch the engine). */}
+            {engineMode !== "open" && (
+              <ModeCard
+                on={oneShot}
+                disabled={engine === "open"}
+                icon={<Wand2 className="size-4" />}
+                title="One shot"
+                onClick={() => setMode("oneshot")}
+                note={engine === "open" ? "Cloud only — switch the engine to Cloud" : "HeyGen or ElevenLabs dub the whole video in one go."}
+              />
+            )}
           </div>
           {oneShot && (
             <div className="mt-3 flex flex-col gap-1.5 sm:flex-row sm:items-center">

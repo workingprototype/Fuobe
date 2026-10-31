@@ -13,7 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { fileToSlot } from "@/components/studio/media-slot";
-import { useEngine } from "@/lib/api";
+import { SelfHostNote } from "@/components/self-host-note";
+import { useEngine, useIsVisitor } from "@/lib/api";
 import {
   ANIMATION_MODES,
   AUTO_SECONDS,
@@ -58,7 +59,7 @@ type Draft =
   | Exclude<ExplainerSource, { kind: "image" }>;
 
 const STEPS = [
-  { icon: Sparkles, title: "Choose Preset", text: "One of 22 looks: whiteboard, pixel art, paper diorama…" },
+  { icon: Sparkles, title: "Choose a style", text: "One of 22 looks: whiteboard, pixel art, paper diorama…" },
   { icon: Paperclip, title: "Attach a file or just prompt", text: "Images, a PDF, Word or text document, or a link — or only a topic." },
   { icon: Download, title: "Download your result", text: "A narrated, subtitled video; fix any scene in the timeline." },
 ];
@@ -146,6 +147,10 @@ function LinkPopover({ engine, disabled, onAdd }: { engine: EpisodeSettings["eng
 export function ExplainerStudio({ picker }: { picker: PickerData }) {
   const router = useRouter();
   const [engine, setEngine] = useEngine();
+  // An explainer doesn't run on an account's own GPU yet (only the studios' generations do): said here, not after Generate.
+  const visitor = useIsVisitor();
+  // The estimate's problem (no narrator voice yet…) is a hint until Generate is pressed.
+  const [tried, setTried] = useState(false);
   const genre = genreInfo("education");
   const [draft, setDraft] = useState<EpisodeSettings>(() => ({ ...defaultSettings("cloud", genre, { explainer: true }), auto: true }));
   const [prompt, setPrompt] = useState("");
@@ -234,6 +239,8 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
   };
 
   const generate = () => {
+    if (visitor) return;
+    setTried(true);
     if (!prompt.trim() && !sources.length) return void toast("Add a prompt, or attach a file or link", { id: "faceless-blocker" });
     if (manualBad) return void toast("Duration must be Auto or a whole number of seconds between 15 and 600", { id: "faceless-blocker" });
     if (sources.some((s) => s.kind === "image" && s.uploading)) return void toast("Uploading…", { id: "faceless-blocker" });
@@ -370,7 +377,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
                     <Settings2 className="size-4" />
                   </button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[min(92vw,340px)] space-y-4 p-3" align="end" collisionPadding={12}>
+                <PopoverContent className="w-[min(92vw,340px)] space-y-4 p-3" align="start" collisionPadding={12}>
                   <div className="space-y-2">
                     <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Animation</p>
                     <Segmented label="Animation" value={settings.animation} options={ANIMATION_MODES.map((m) => ({ value: m.id, label: m.label }))} onChange={(animation) => set({ animation, resolution: undefined })} />
@@ -386,11 +393,12 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-3">
-              <EstimateLine data={estimate.data} loading={estimate.isFetching} engine={engine} className="min-w-0 flex-1" />
-              <Button onClick={generate} disabled={create.isPending} className="rounded-full">
+              <EstimateLine data={estimate.data} loading={estimate.isFetching} engine={engine} className="min-w-0 flex-1" quiet={!tried} />
+              <Button onClick={generate} disabled={create.isPending || visitor} className="rounded-full">
                 {create.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} Generate
               </Button>
             </div>
+            {visitor && <SelfHostNote className="mt-2">Explainer videos run on a self-hosted Fuobe for now.</SelfHostNote>}
           </div>
 
           <ol className="mt-6 grid gap-2 sm:grid-cols-3 lg:grid-cols-1" aria-label="How it works">

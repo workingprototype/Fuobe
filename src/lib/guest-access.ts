@@ -24,7 +24,7 @@ export const GUEST_RUN_MESSAGE = "Create a free account to run this.";
 const GUEST_READS = new Set(["/api/status", "/api/models", "/api/search-index", "/api/comfyui", "/api/settings/models", "/api/gpu/requirements"]);
 
 /** Catalogs mixed with the owner's own items: the route leaves the owner's part out for a guest (GUEST_HEADER). */
-const GUEST_FILTERED = new Set(["/api/moodboards", "/api/palettes", "/api/assist/skills"]);
+const GUEST_FILTERED = new Set(["/api/moodboards", "/api/palettes", "/api/assist", "/api/assist/skills"]);
 
 /** The owner's lists ({ items }): a guest gets them empty. */
 const EMPTY_LISTS = [
@@ -86,8 +86,11 @@ export function guestRead(pathname: string): GuestRead {
   return { kind: "closed" };
 }
 
-/** The run routes whose `?preview=1` only plans and prices (any other route would ignore the flag and run). */
-const PREVIEWS = [/^\/api\/(generations|audio-tools|dub|katana|turnaround)$/, /^\/api\/dub\/[^/]+\/voice$/];
+/**
+ * The run routes whose `?preview=1` only plans and prices (any other route would ignore the flag and run). AI
+ * Influencer, Fashion Factory and Character Sheet price on load, with synchronous price functions.
+ */
+const PREVIEWS = [/^\/api\/(generations|audio-tools|dub|katana|turnaround|influencer|photodump|photodump\/fashion|photodump\/character)$/, /^\/api\/dub\/[^/]+\/voice$/];
 
 /** The estimate routes (named: a dynamic segment called "estimate" on another route must not pass for one). */
 const ESTIMATES =
@@ -195,6 +198,8 @@ export const OWN_GPU_TOOL_MESSAGE = "This tool doesn't run on your own GPU yet. 
 /** Set on an account's refused run: the client shows "Connect your GPU to run this". */
 export const CONNECT_GPU_HEADER = "x-fuobe-connect-gpu";
 export const CONNECT_GPU_MESSAGE = "Connect your GPU to run this. Free accounts run on their own ComfyUI.";
+/** An account's upload without a GPU: its files are kept for runs on its own ComfyUI. */
+export const CONNECT_GPU_UPLOAD_MESSAGE = "Connect your GPU to add your own files. A free account uses them on its own ComfyUI.";
 
 /** Install-wide settings, keys and tokens: changes are the owner's (403 for an account). */
 const OWNER_WRITES = new Set(["/api/settings", "/api/settings/models", "/api/loras", "/api/llm", "/api/providers/test", "/api/auth/public"]);

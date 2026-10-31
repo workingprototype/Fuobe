@@ -174,7 +174,7 @@ function MentionImages({ value, onChange, onMention, max }: { value: string[]; o
 /** Ad Multiplier: a reference ad (4–30 s) → new versions: recreated from a prompt, or with a new hook / CTA. */
 export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) {
   const qc = useQueryClient();
-  const { engine, setEngine } = useMarketingEngine();
+  const { engine, setEngine, mode: engineMode } = useMarketingEngine();
   const access = useModelAccess();
   const [video, setVideo] = useState<SlotValue | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
@@ -494,7 +494,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
           />
         </div>
         <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-muted-foreground">
-          <Sparkles className="size-3" /> Cloud: Kling O3 edit, Happy Horse edit, Gemini Omni Flash · Open source: Fuobe Genjutsu (Wan Animate), Wan 2.2 clips joined around your ad
+          <Sparkles className="size-3" /> {engineMode === "open" ? "" : "Cloud: Kling O3 edit, Happy Horse edit, Gemini Omni Flash · "}Open source: Fuobe Genjutsu (Wan Animate), Wan 2.2 clips joined around your ad
         </p>
       </div>
     </div>

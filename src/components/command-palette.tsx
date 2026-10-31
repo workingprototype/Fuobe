@@ -1,8 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clapperboard, Cpu, Film, GraduationCap, KeyRound, Layers, LayoutGrid, Loader2, Play, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, UserRound, Wand2, type LucideIcon } from "lucide-react";
+import { AudioLines, Bell, Clapperboard, Code, Cpu, Film, GraduationCap, Image as ImageIcon, KeyRound, Layers, LayoutGrid, Loader2, LogIn, Play, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, SunMoon, UserPlus, UserRound, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSkills } from "@/components/assist/hooks";
 import { NAV } from "@/components/nav-items";
@@ -10,7 +11,8 @@ import { MediaThumb } from "@/components/studio/result-media";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Kbd } from "@/components/ui/kbd";
 import { Command as CommandPrimitive } from "cmdk";
-import { useEngineMode, useGenerations, useModelAccess, useViewer, type ViewerInfo } from "@/lib/api";
+import { signInHref, useEngineMode, useGenerations, useIsGuest, useModelAccess, useViewer, type ViewerInfo } from "@/lib/api";
+import { FUOBE_REPO } from "@/lib/connections";
 import type { Generation } from "@/lib/catalog/types";
 import { indexEntries, KIND_LABELS, rankPalette, skillEntries, type PaletteEntry, type PaletteIndex, type PaletteKind } from "@/lib/command-search";
 import { useModKey } from "@/lib/keys";
@@ -107,10 +109,24 @@ export function settingEntries(viewer: Pick<ViewerInfo, "owner" | "account"> | u
   return viewer?.account ? ACCOUNT_SETTINGS : GUEST_SETTINGS;
 }
 
+/** Things to do rather than pages to open (Go to): the theme, the source, and for a guest, signing up or in. */
+const THEME_HREF = "action:theme";
+const ACTIONS: (PaletteEntry & { icon: LucideIcon })[] = [
+  { key: "action:theme", kind: "page", label: "Toggle dark mode", hint: "Theme", href: THEME_HREF, keywords: "dark light theme night mode appearance", icon: SunMoon },
+  { key: "action:github", kind: "page", label: "Source on GitHub", hint: "Open source", href: FUOBE_REPO, keywords: "github code repo repository open source download install self host", icon: Code },
+];
+const GUEST_ACTIONS: (PaletteEntry & { icon: LucideIcon })[] = [
+  { key: "action:signup", kind: "page", label: "Sign up free", hint: "Account", href: signInHref("signup"), keywords: "sign up register create account join", icon: UserPlus },
+  { key: "action:login", kind: "page", label: "Log in", hint: "Account", href: signInHref("login"), keywords: "log in login sign in account", icon: LogIn },
+];
 // Icons as elements made once (a component picked during render would remount on every keystroke).
 const iconEl = (Icon: LucideIcon) => <Icon className="text-muted-foreground" />;
-const ICONS = new Map<string, React.ReactNode>([...PAGES, ...SETTING_ENTRIES, ...ACCOUNT_SETTINGS, ...GUEST_SETTINGS].map((e) => [e.key, iconEl(e.icon)]));
+const ICONS = new Map<string, React.ReactNode>([...PAGES, ...SETTING_ENTRIES, ...ACCOUNT_SETTINGS, ...GUEST_SETTINGS, ...ACTIONS, ...GUEST_ACTIONS].map((e) => [e.key, iconEl(e.icon)]));
 const KIND_ICONS: Partial<Record<PaletteKind, React.ReactNode>> = { app: iconEl(LayoutGrid), motion: iconEl(Film), effect: iconEl(Wand2), model: iconEl(Clapperboard), skill: iconEl(Play) };
+/** A model's icon by the studio it opens in: a voice or music model isn't a clapperboard. */
+const MODEL_ICONS = { audio: iconEl(AudioLines), image: iconEl(ImageIcon) };
+const modelIcon = (href: string) =>
+  /^\/audio\b/.test(href) ? MODEL_ICONS.audio : /^\/(image|edit|inpaint|outpaint|upscale\/image|image-to-3d)\b/.test(href) ? MODEL_ICONS.image : undefined;
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -125,7 +141,7 @@ function useDebounced<T>(value: T, ms: number): T {
 function Row({ entry, onPick }: { entry: PaletteEntry; onPick: (e: PaletteEntry) => void }) {
   return (
     <CommandItem value={entry.key} onSelect={() => onPick(entry)} className="h-9 gap-2.5 text-[14px]">
-      {ICONS.get(entry.key) ?? KIND_ICONS[entry.kind] ?? KIND_ICONS.app}
+      {ICONS.get(entry.key) ?? (entry.kind === "model" ? modelIcon(entry.href) : undefined) ?? KIND_ICONS[entry.kind] ?? KIND_ICONS.app}
       <span className="min-w-0 truncate">{entry.label}</span>
       {entry.hint && <span data-slot="command-shortcut" className="ml-auto shrink-0 truncate pl-2 text-[12px] text-muted-foreground max-sm:max-w-[40%]">{entry.hint}</span>}
     </CommandItem>
@@ -183,9 +199,10 @@ function PaletteBody({ onPick, onOpenRecent, onClose }: { onPick: (e: PaletteEnt
   const recent = useGenerations({ q: dq || undefined, limit: 5, statuses: ["succeeded"] }, { keepPrevious: true });
   // Skills that run by themselves: "Run <skill>…" opens its Run form.
   const skills = useSkills();
+  const guest = useIsGuest();
   const entries = useMemo(
-    () => [...PAGES, ...settings, ...skillEntries(skills.data ?? []), ...(index.data ? indexEntries(index.data, mode, access) : [])],
-    [index.data, mode, access, skills.data, settings],
+    () => [...PAGES, ...ACTIONS, ...(guest ? GUEST_ACTIONS : []), ...settings, ...skillEntries(skills.data ?? []), ...(index.data ? indexEntries(index.data, mode, access) : [])],
+    [index.data, mode, access, skills.data, settings, guest],
   );
   const groups = useMemo(() => rankPalette(entries, query), [entries, query]);
   const recentItems = (recent.data ?? []).filter((g) => g.outputs[0]);
@@ -296,13 +313,16 @@ export function CommandPalette() {
 
   // Set when the palette closes onto something else (a page, the viewer): focus stays with that.
   const leaving = useRef(false);
+  const { resolvedTheme, setTheme } = useTheme();
   const pick = useCallback(
     (e: PaletteEntry) => {
-      leaving.current = true;
       setOpen(false);
+      if (e.href === THEME_HREF) return setTheme(resolvedTheme === "dark" ? "light" : "dark");
+      if (/^https?:/.test(e.href)) return void window.open(e.href, "_blank", "noopener,noreferrer");
+      leaving.current = true;
       router.push(e.href);
     },
-    [router, setOpen],
+    [router, setOpen, resolvedTheme, setTheme],
   );
   const openRecent = useCallback(
     (g: Generation) => {

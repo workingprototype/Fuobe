@@ -26,7 +26,10 @@ export function MediaDrop({
   compact,
   player,
   preview = true,
+  local,
 }: {
+  /** The file stays in this browser (a blob: URL, nothing uploaded): for tools that only read it here (Virality). */
+  local?: boolean;
   /** The preview <video>, for tools that drive it (Trim plays the selection in it). */
   player?: React.Ref<HTMLVideoElement>;
   kind: "video" | "image";
@@ -52,6 +55,10 @@ export function MediaDrop({
     if (!f) return;
     if (kindOfFile(f) !== kind) return void toast(wrongKindMessage(kind));
     onFile?.(f);
+    if (local) {
+      const url = URL.createObjectURL(f);
+      return void onChange({ ref: url, preview: url, kind, name: f.name });
+    }
     void fileToSlot(f, onChange, kind);
   };
   const Icon = kind === "video" ? FileVideo : ImagePlus;

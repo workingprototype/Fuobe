@@ -503,11 +503,13 @@ describe("the sign-in proxy", () => {
       expect(proxy(req(`http://localhost:3000/api/files/${rel}`)).status).toBe(401);
       expect(proxy(req("http://localhost:3000/api/shares")).status).toBe(401);
       expect(proxy(req(`http://localhost:3000/api/shares/${S.share.id}`, { method: "POST", headers: { origin: "http://localhost:3000" } })).status).toBe(401);
-      for (const p of [`/s/${S.token}/other`, `/s/${S.token}/f/../../library`, "/s/gone", "/library", `/s/${S.token}x`]) {
+      for (const p of ["/library"]) {
         const r = proxy(req(`http://localhost:3000${p}`));
         expect(r.status, p).toBe(307);
         expect(r.headers.get("location"), p).toMatch(/\/login/);
       }
+      // Any other /s/ link is no share: the "link unavailable" 404, which shows nothing either.
+      for (const p of [`/s/${S.token}/other`, `/s/${S.token}/f/../../library`, "/s/gone", `/s/${S.token}x`]) expect(gone(proxy(req(`http://localhost:3000${p}`))), p).toBe(true);
       // A share path written to (a server action, a form post) is not opened.
       expect(passed(proxy(req(`http://localhost:3000/s/${S.token}`, { method: "POST", headers: { origin: "http://localhost:3000" } })))).toBe(false);
 

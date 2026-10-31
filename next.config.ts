@@ -38,14 +38,8 @@ const nextConfig: NextConfig = {
       { source: "/apps/:id(app-click-to-ad|app-link-to-video-ad)", destination: "/marketing/click-to-ad", permanent: false },
       // The Virality Predictor app became the /virality page (its frame step is the Hook Frame app).
       { source: "/apps/app-virality-predictor", destination: "/virality", permanent: true },
-      // Studio hubs have one path per mode (src/lib/hubs.ts): old `?mode=` links, and a clip handed
-      // to Upscale or Audio without a mode, open that mode's own page (prerendered with the right studio).
-      ...["audio", "video-tools", "upscale"].map((hub) => ({
-        source: `/${hub}`,
-        has: [{ type: "query" as const, key: "mode", value: "(?<mode>[a-z0-9-]+)" }],
-        destination: `/${hub}/:mode`,
-        permanent: false,
-      })),
+      // Studio hubs have one path per mode (src/lib/hubs.ts). Old `?mode=` links go to it in src/proxy.ts (hubModeLink),
+      // which drops the mode from the query; a clip handed to Upscale or Audio without a mode opens Sound for video / Video.
       ...["audio", "upscale"].map((hub) => ({
         source: `/${hub}`,
         has: [{ type: "query" as const, key: "video" }],

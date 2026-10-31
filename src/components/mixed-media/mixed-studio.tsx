@@ -56,9 +56,12 @@ const HOW = [
   { step: "Customize settings", text: "Each preset has its own colours, materials and intensity. Save them per preset; they stay in this browser." },
   {
     step: "Generate & preview",
-    text: "Make one preview frame first to check the look, then render the whole video, frame by frame at the rate you pick. Smooth draws only the first frame in the look and carries it through the clip; on the cloud, Fast restyles it in one video-to-video pass.",
+    text: "Make one preview frame first to check the look, then render the whole video, frame by frame at the rate you pick. Smooth draws only the first frame in the look and carries it through the clip.",
   },
 ];
+
+/** What the cloud adds to "How it works", said only where the install offers the cloud. */
+const HOW_CLOUD = " On the cloud, Fast restyles it in one video-to-video pass.";
 
 const MODE_OPTIONS: { value: MixedMode; label: string; title: string }[] = [
   { value: "frames", label: "Per frame", title: "Every frame drawn again in the look — the mixed-media flicker" },
@@ -69,7 +72,7 @@ const MODE_OPTIONS: { value: MixedMode; label: string; title: string }[] = [
 /** Mixed Media: pick a look, add a ≤10 s clip, tune the settings, preview one frame, render. */
 export function MixedStudio({ models, frameModels }: { models: Record<Engine, RestyleModelInfo[]>; frameModels: Record<Engine, RestyleModelInfo[]> }) {
   const [tab, setTab] = useState<Tab>("presets");
-  const [engine, setEngine] = useEngine();
+  const [engine, setEngine, engineMode] = useEngine();
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
     // eslint-disable-next-line react-hooks/set-state-in-effect -- read once after hydration
@@ -110,7 +113,7 @@ export function MixedStudio({ models, frameModels }: { models: Record<Engine, Re
         {tab === "history" ? (
           <MixedHistory onStart={() => pick("presets")} />
         ) : tab === "how" ? (
-          <How onStart={() => pick("presets")} />
+          <How onStart={() => pick("presets")} cloud={engineMode !== "open"} />
         ) : (
           <>
             <div className="mx-auto max-w-[720px] pt-8 pb-6 text-center sm:pt-12">
@@ -128,7 +131,7 @@ export function MixedStudio({ models, frameModels }: { models: Record<Engine, Re
   );
 }
 
-function How({ onStart }: { onStart: () => void }) {
+function How({ onStart, cloud }: { onStart: () => void; cloud: boolean }) {
   return (
     <div className="mx-auto max-w-[920px] pt-10">
       <h2 className="text-center font-heading text-[34px] leading-tight">How it works</h2>
@@ -137,7 +140,10 @@ function How({ onStart }: { onStart: () => void }) {
           <li key={h.step} className="rounded-2xl border bg-background p-5">
             <span className="grid size-7 place-items-center rounded-full bg-primary text-[13px] font-semibold text-primary-foreground">{i + 1}</span>
             <p className="mt-3 text-[15px] font-semibold">{h.step}</p>
-            <p className="mt-1 text-[14px] text-muted-foreground">{h.text}</p>
+            <p className="mt-1 text-[14px] text-muted-foreground">
+              {h.text}
+              {cloud && i === HOW.length - 1 && HOW_CLOUD}
+            </p>
           </li>
         ))}
       </ol>
@@ -145,15 +151,16 @@ function How({ onStart }: { onStart: () => void }) {
         <p className="font-medium text-foreground">Cost</p>
         <p className="mt-1">
           A render is counted in frames: seconds × frame rate, rounded down (10 s at 8 FPS = 80 frames; at most 10 s × 24 FPS = 240). Fuobe Mixed Media draws every
-          frame again in the look — Z-Image Turbo following the frame&apos;s own outlines, with the look&apos;s LoRA and one seed — free on your GPU, or on the cloud
-          at about a cent a frame. Nano Banana 2 and Seedream 5.0 Flash redraw frames too, priced per frame. Smooth draws only the first frame in the look, then Wan 2.2
-          Fun VACE carries it through the clip by depth, priced per second. Fast restyles the clip in one video-to-video pass, priced by the model. The estimate shows
-          before you generate.
+          frame again in the look — Z-Image Turbo following the frame&apos;s own outlines, with the look&apos;s LoRA and one seed — free on your GPU
+          {cloud ? ", or on the cloud at about a cent a frame. Nano Banana 2 and Seedream 5.0 Flash redraw frames too, priced per frame." : "."} Smooth draws only the
+          first frame in the look, then Wan 2.2 Fun VACE carries it through the clip by depth{cloud ? ", priced per second. Fast restyles the clip in one video-to-video pass, priced by the model" : ""}.
+          The estimate shows before you generate.
         </p>
         <p className="mt-2">
-          Over {FRAME_LIMITS.perClip} frames, the frames go back together as clips and are joined. Nano Banana 2 and Seedream redraw frames in runs of {FRAME_LIMITS.lane}{" "}
-          side by side, each frame matching the one before it and each run starting from your preview frame, so their look can shift slightly every {FRAME_LIMITS.lane}{" "}
-          frames. If a frame fails, the frames still waiting stop, and Try again redraws only the frames that didn’t finish.
+          Over {FRAME_LIMITS.perClip} frames, the frames go back together as clips and are joined.
+          {cloud &&
+            ` Nano Banana 2 and Seedream redraw frames in runs of ${FRAME_LIMITS.lane} side by side, each frame matching the one before it and each run starting from your preview frame, so their look can shift slightly every ${FRAME_LIMITS.lane} frames.`}{" "}
+          If a frame fails, the frames still waiting stop, and Try again redraws only the frames that didn’t finish.
         </p>
       </div>
       <div className="mt-6 text-center">

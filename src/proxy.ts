@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { APPS } from "@/lib/catalog/apps";
+import { modeHref, type HubKind } from "@/lib/hubs";
 import { recordForPath, unknownHubMode } from "@/lib/record-pages";
 import { countsAsView, SHARE_VIEW_HEADER, shareRoute } from "@/lib/share";
 import {
@@ -44,8 +45,7 @@ const APP_IDS = new Set(APPS.map((a) => a.id));
 function pass(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const app = /^\/apps\/([^/]+)\/?$/.exec(pathname)?.[1];
-  if (app && !APP_IDS.has(safeDecode(app))) return notFound(request, { href: "/apps", label: "Browse apps" });
-  if (unknownHubMode(pathname)) return notFound(request);
+  if ((app && !APP_IDS.has(safeDecode(app))) || unknownHubMode(pathname)) return notFound(request);
   const record = recordForPath(pathname);
   if (record && !recordExists(record)) return notFound(request);
   return NextResponse.next();
@@ -56,37 +56,65 @@ function pass(request: NextRequest): NextResponse {
  * proxy's request address from its own name for the server ("localhost") and the forwarded protocol, and the address
  * it routes by from the host it listens on (`next start -H 127.0.0.1`): when they differ, a rewrite to the app's own
  * 404 page goes out as a request to another server, which fails over HTTPS and answered 500. Plain HTTP (a local
- * install) keeps the rewrite to the app's own pages. It wears the studio's colours and type (Inter and Instrument
- * Serif where installed, else the same fallbacks the app uses), with a way back: the section's own page (an unknown app:
- * the apps), then Home.
+ * install) keeps the rewrite to the app's own pages. It looks like the app's own 404 (NotFoundState in
+ * src/components/empty-state.tsx): the Fuobe mark, the serif heading, the brand button, and the theme the visitor
+ * chose (next-themes' "theme" key, read before the first paint).
  */
-type PageLink = { href: string; label: string };
-function plain404(title: string, text: string, links: PageLink[]): NextResponse {
-  const nav = links.map((l, i) => `<a href="${l.href}"${i < links.length - 1 ? ' class="alt"' : ""}>${l.label}</a>`).join("");
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title} · Fuobe</title><style>
-:root{color-scheme:light dark;--bg:#ffffff;--fg:#1e1e1f;--muted:#6e6e71;--line:#e4e4e7;--btn:#5d4bdb;--btn-fg:#ffffff}
-@media (prefers-color-scheme:dark){:root{--bg:#121213;--fg:#fafafb;--muted:#a9a9ab;--line:#2e2e31;--btn:#6a5ee7;--btn-fg:#ffffff}}
-body{margin:0;min-height:100svh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;text-align:center}
-main{max-width:460px;padding:24px 16px 10vh}.brand{margin-bottom:18px;font:22px/1 "Instrument Serif",ui-serif,Georgia,serif}
-h1{margin:0;font:400 40px/1.15 "Instrument Serif",ui-serif,Georgia,serif;text-wrap:balance}p{margin:10px 0 0;color:var(--muted);text-wrap:pretty}
-nav{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:22px}nav a{padding:9px 16px;border-radius:999px;background:var(--btn);color:var(--btn-fg);text-decoration:none;font-weight:500}
-nav a.alt{background:transparent;color:var(--fg);box-shadow:inset 0 0 0 1px var(--line)}
-</style></head><body><main><div class="brand">Fuobe</div><h1>${title}</h1><p>${text}</p>${nav && `<nav>${nav}</nav>`}</main></body></html>`;
+function plain404(title: string, text: string, back?: { href: string; label: string }, home = back ? "Home" : "Back to Home"): NextResponse {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title} · Fuobe</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><script>try{var t=localStorage.getItem("theme");if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.className="dark"}catch(e){}</script><style>
+:root{color-scheme:light;--bg:#fff;--fg:#1e1e1f;--muted:#6e6e71;--line:#e8e8e9;--brand:#5d4bdb;--faint:#efedfc}
+.dark{color-scheme:dark;--bg:#121213;--fg:#fafafb;--muted:#a9a9ab;--line:rgba(255,255,255,.14);--brand:#6a5ee7;--faint:#25223d}
+body{margin:0;min-height:100svh;display:flex;flex-direction:column;background:var(--bg);color:var(--fg);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:16px}header a{display:inline-flex;align-items:center;gap:8px;color:inherit;text-decoration:none;font-weight:600;font-size:16px}
+main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;width:100%;max-width:520px;margin:0 auto;padding:24px 24px 12vh;text-align:center}
+h1{margin:20px 0 0;font:400 34px/1.15 "Instrument Serif",ui-serif,Georgia,"Times New Roman",serif;text-wrap:balance}
+p{margin:8px 0 0;color:var(--muted);text-wrap:pretty}nav{margin-top:28px;display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
+nav a{display:inline-flex;align-items:center;height:36px;padding:0 16px;border-radius:999px;text-decoration:none;font-weight:500;font-size:14px}
+.go{background:var(--brand);color:#fff}.back{border:1px solid var(--line);color:var(--fg)}a:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.mark{display:grid;place-items:center;width:48px;height:48px;border-radius:16px;background:var(--faint);color:var(--brand)}
+</style></head><body><header><a href="/">${LOGO}<span>Fuobe</span></a></header><main><span class="mark" aria-hidden="true">${COMPASS}</span><h1>${title}</h1><p>${text}</p><nav>${back ? `<a class="back" href="${back.href}">${back.label}</a>` : ""}<a class="go" href="/">${home}</a></nav></main></body></html>`;
   return new NextResponse(html, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
+/** The Fuobe mark (src/app/icon.svg) and the 404's compass (lucide's Compass, as NotFoundState shows). */
+const LOGO =
+  '<svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#5d4bdb"/><g transform="translate(5.5 5.5) scale(0.875)" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m12.296 3.464 3.02 3.956"/><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m6.18 5.276 3.1 3.899"/></g></svg>';
+const COMPASS =
+  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/></svg>';
+
 const behindHttps = (request: NextRequest) => request.nextUrl.protocol === "https:";
 
-const HOME: PageLink = { href: "/", label: "Back to Home" };
+/** A dead link's section: the way back to it, and what is missing when the link names a stored item. */
+const SECTIONS: { prefix: string; label: string; missing?: string }[] = [
+  { prefix: "/apps", label: "Browse apps", missing: "This app isn’t here" },
+  { prefix: "/canvas", label: "Back to Canvas", missing: "This canvas isn’t here" },
+  { prefix: "/cinema", label: "Back to Cinema", missing: "This project isn’t here" },
+  { prefix: "/shorts", label: "Back to Shorts", missing: "This session isn’t here" },
+  { prefix: "/ads", label: "Back to Ads", missing: "This brand isn’t here" },
+  { prefix: "/elements", label: "All elements", missing: "This element isn’t here" },
+  { prefix: "/faceless", label: "Back to Faceless", missing: "This channel isn’t here" },
+  { prefix: "/explainer", label: "Back to Explainer", missing: "This explainer isn’t here" },
+  { prefix: "/content-factory", label: "Back to Content Factory", missing: "This series isn’t here" },
+  { prefix: "/character-swap", label: "Back to Character Swap", missing: "This project isn’t here" },
+  { prefix: "/layers", label: "Back to Layers", missing: "This project isn’t here" },
+  { prefix: "/assist", label: "Back to Assist", missing: "This project isn’t here" },
+  { prefix: "/audio", label: "Back to Audio" },
+  { prefix: "/video-tools", label: "Back to Video tools" },
+  { prefix: "/upscale", label: "Back to Upscale" },
+];
 
-const notFound = (request: NextRequest, section?: PageLink) =>
-  behindHttps(request)
-    ? plain404("Nothing here", "The page you’re looking for moved, or never existed.", section ? [section, HOME] : [HOME])
-    : NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+const notFound = (request: NextRequest) => {
+  if (!behindHttps(request)) return NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+  const s = SECTIONS.find((x) => request.nextUrl.pathname.startsWith(`${x.prefix}/`));
+  const back = s && { href: s.prefix, label: s.label };
+  return s?.missing
+    ? plain404(s.missing, "It’s private, or it was deleted, or it never existed.", back)
+    : plain404("Nothing here", "The page you’re looking for moved, or never existed.", back);
+};
 
 const shareGone = (request: NextRequest) =>
   behindHttps(request)
-    ? plain404("This link isn’t available", "It may have expired or been turned off, or what it shared was removed. Ask the person who sent it for a new link.", [])
+    ? plain404("This link isn’t available", "It may have expired or been turned off, or what it shared was removed. Ask the person who sent it for a new link.", undefined, "Make your own with Fuobe")
     : NextResponse.rewrite(new URL("/s/gone", request.url), { status: 404 });
 
 /** Share pages and their files: never indexed, and the token never leaks to another site in a Referer. */
@@ -177,9 +205,10 @@ function account(request: NextRequest, who: Account): NextResponse {
   if (isPriceCheck(request.method, pathname, search)) return priceCheck(request, `account:${who.id}`);
   if (accountMayChange(request.method, pathname, search)) return pass(request);
   if (isLibraryChange(request.method, pathname)) return NextResponse.json({ error: LIBRARY_MESSAGE, code: "library" }, { status: 403 });
+  // A tool its own GPU wouldn't run says so first: "Connect your GPU" only for what a GPU unlocks.
+  if (!ownGpuRun(request.method, pathname)) return NextResponse.json({ error: OWN_GPU_TOOL_MESSAGE, code: "own-gpu-tool" }, { status: 403 });
   if (!who.gpu) return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
-  if (ownGpuRun(request.method, pathname)) return pass(request);
-  return NextResponse.json({ error: OWN_GPU_TOOL_MESSAGE, code: "own-gpu-tool" }, { status: 403 });
+  return pass(request);
 }
 
 const tooMany = (seconds: number) =>
@@ -222,6 +251,19 @@ function openShare(request: NextRequest, token: string, file: boolean): NextResp
   return res;
 }
 
+/**
+ * An old `/audio?mode=music` link (any case: ?mode=Music too): that mode's own page, without the mode in its query.
+ * An unknown mode lands on the hub's 404 (unknownHubMode).
+ */
+function hubModeLink(request: NextRequest): URL | null {
+  const kind = /^\/(audio|video-tools|upscale)\/?$/.exec(request.nextUrl.pathname)?.[1] as HubKind | undefined;
+  const mode = kind && request.nextUrl.searchParams.get("mode")?.trim().toLowerCase();
+  if (!kind || !mode || !/^[a-z0-9-]+$/.test(mode)) return null;
+  const url = new URL(modeHref(kind, mode), request.url);
+  for (const [k, v] of request.nextUrl.searchParams) if (k !== "mode") url.searchParams.append(k, v);
+  return url;
+}
+
 function safeDecode(s: string): string {
   try {
     return decodeURIComponent(s);
@@ -246,8 +288,17 @@ export function proxy(request: NextRequest) {
   }
   const { pathname, search } = request.nextUrl;
   // Share links are read-only and public, password or not: exactly a share's page and its files.
-  const share = (request.method === "GET" || request.method === "HEAD") && shareRoute(pathname);
+  const read = request.method === "GET" || request.method === "HEAD";
+  const share = read && shareRoute(pathname);
   if (share) return openShare(request, share.token, !!share.file);
+  // Any other /s/ link is no share: the same "link unavailable" 404 as an unknown token.
+  if (read && pathname.startsWith("/s/")) {
+    const res = shareGone(request);
+    for (const [k, v] of Object.entries(SHARE_HEADERS)) res.headers.set(k, v);
+    return res;
+  }
+  const hub = read && hubModeLink(request);
+  if (hub) return NextResponse.redirect(hub);
   if (!authEnabled()) return pass(request);
   if (OPEN.has(pathname)) return NextResponse.next();
   const open = publicSignup(request.headers.get("host") ?? request.nextUrl.host);
