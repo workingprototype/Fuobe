@@ -386,7 +386,7 @@ function ViewerRowPlaceholder() {
   return (
     <>
       <script type={typeof window === "undefined" ? "text/javascript" : "text/plain"} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: VIEWER_SCRIPT }} />
-      <SidebarMenuItem aria-hidden className="mt-1 h-8 group-data-[collapsible=icon]:h-[70px] [html[data-viewer='owner']_&]:hidden [html[data-viewer='account']_&]:hidden" />
+      <SidebarMenuItem aria-hidden className="mt-1 mb-2 h-8 group-data-[collapsible=icon]:h-[70px] [html[data-viewer='owner']_&]:hidden [html[data-viewer='account']_&]:hidden" />
     </>
   );
 }
@@ -412,7 +412,7 @@ function ViewerRow() {
   if (!kind) return <ViewerRowPlaceholder />;
   if (kind !== "guest") return null;
   return (
-    <SidebarMenuItem className="mt-1 flex gap-1.5 group-data-[collapsible=icon]:flex-col">
+    <SidebarMenuItem className="mt-1 mb-2 flex gap-1.5 group-data-[collapsible=icon]:flex-col">
       <SidebarMenuButton asChild tooltip="Sign up free" className="h-8 flex-1 justify-center bg-primary text-[13px] text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground">
         <a href={signInHref("signup", here)}>
           <UserPlus />
