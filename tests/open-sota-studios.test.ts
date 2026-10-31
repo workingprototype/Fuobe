@@ -212,6 +212,9 @@ describe("what the composer offers for Qwen-Image 2.1's and FIBO 2's edits", () 
       expect([shape.aspect, shape.resolution], op).toEqual([null, null]);
     }
     expect(settingsShape(q, "t2i", "image", true)).toMatchObject({ aspect: q.options.aspectRatios, resolution: ["1K", "1.5K", "2K"] });
+    // Before the operation is known (Inpaint with no prompt yet): the studio's operations decide.
+    expect(settingsShape(q, undefined, "image", true, {}, INPAINT_STUDIO.ops)).toMatchObject({ aspect: null, resolution: null });
+    expect(settingsShape(q, undefined, "image", true, {}, IMAGE_STUDIO.ops).aspect).toEqual(q.options.aspectRatios);
     expect(settingsShape(getModel("oss-fibo2-dev")!, "edit", "image", true).aspect).toBeNull();
     // Krea 2 Edit's graph takes a size: its chips stay.
     expect(settingsShape(getModel("oss-krea2-edit")!, "edit", "image", true).aspect).toContain("auto");

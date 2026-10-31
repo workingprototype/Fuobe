@@ -75,8 +75,10 @@ export function settingsShape(
   const single = op ? SINGLE_TAKE.has(op) : studioOps.length > 0 && studioOps.every((x) => SINGLE_TAKE.has(x));
   // The operation, or the studio's only one before anything is attached (Video tools → Depth map).
   const is = (x: Operation) => op === x || (!op && studioOps.length > 0 && studioOps.every((y) => y === x));
-  // A graph that takes no size (ModelRoute.unsized: Qwen-Image 2.1's edit follows image 1) has none to pick for this operation.
-  const routes = op ? (model?.routes ?? []).filter((r) => r.op === op) : [];
+  // A graph that takes no size (ModelRoute.unsized: Qwen-Image 2.1's edit follows image 1) has none to pick for this
+  // operation, or for any of the studio's while the operation isn't known yet (Inpaint before a prompt).
+  const ops = op ? [op] : studioOps;
+  const routes = (model?.routes ?? []).filter((r) => ops.includes(r.op));
   const sized = !routes.length || routes.some((r) => !r.unsized);
   return {
     aspect: !sized || op === "i2v" || op === "flf2v" ? null : many(o.aspectRatios),
