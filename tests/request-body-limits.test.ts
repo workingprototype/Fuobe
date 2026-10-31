@@ -20,6 +20,7 @@ const skillsUpload = await import("@/app/api/assist/skills/upload/route");
 const sources = await import("@/app/api/assist/projects/[projectId]/sources/route");
 const explainerDoc = await import("@/app/api/explainer/document/route");
 const generations = await import("@/app/api/generations/route");
+const mixExport = await import("@/app/api/audio-tools/export/route");
 
 let owner = "";
 let account = "";
@@ -49,6 +50,8 @@ const BIG = [
   { name: "skill upload", path: "/api/assist/skills/upload", call: (r: Request) => skillsUpload.POST(r) },
   { name: "Assist sources", path: "/api/assist/projects/p1/sources", call: (r: Request) => sources.POST(r, { params: Promise.resolve({ projectId: "p1" }) } as never) },
   { name: "explainer document", path: "/api/explainer/document", call: (r: Request) => explainerDoc.POST(r) },
+  // PR #15: Split soundtrack's mix export takes its WAV as the body, in parts of 16 MB (a library change: the owner's).
+  { name: "mix export", path: "/api/audio-tools/export", call: (r: Request) => mixExport.POST(r) },
 ];
 
 function form(pathname: string, init: { cookie?: string; headers?: Record<string, string> } = {}) {
@@ -67,7 +70,7 @@ describe("M-3: the proxy holds at most a few MB of any request body", () => {
   it("leaves out only the routes that take a file in a form", () => {
     const matches = (p: string) => new RegExp(`^${config.matcher[0]}$`).test(p);
     for (const r of BIG) expect(matches(r.path), r.path).toBe(false);
-    for (const p of ["/api/generations", "/api/generations/g1", "/api/generations/g1/cancel", "/api/layers", "/api/layers/abc", "/api/assist/skills", "/api/assist/projects/p1", "/api/assist/projects/p1/sources/s1", "/api/explainer"]) {
+    for (const p of ["/api/generations", "/api/generations/g1", "/api/generations/g1/cancel", "/api/layers", "/api/layers/abc", "/api/assist/skills", "/api/assist/projects/p1", "/api/assist/projects/p1/sources/s1", "/api/explainer", "/api/audio-tools"]) {
       expect(matches(p), p).toBe(true);
     }
   });

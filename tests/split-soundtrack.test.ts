@@ -21,6 +21,7 @@ import {
   installedDbs,
   missingDbs,
   MIX_MAX_BYTES,
+  MIX_PART_BYTES,
   mixerBudget,
   mixerBytes,
   mixerProblem,
@@ -63,6 +64,7 @@ const { getAsset, saveFile, scratchDir, storedMedia } = await import("@/server/s
 const gens = await import("@/server/generations");
 const route = await import("@/app/api/audio-tools/route");
 const exportRoute = await import("@/app/api/audio-tools/export/route");
+const { PART_MAX } = await import("@/server/mix-export");
 
 beforeAll(() => setSetting("demoMode", "auto"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -583,5 +585,35 @@ describe("POST /api/audio-tools/export (a mix sent in parts)", () => {
     const huge = mixPart(plan, 0, 10);
     new DataView(huge.buffer).setUint32(4, MIX_MAX_BYTES, true);
     expect((await send("offset=0", huge)).status).toBe(413);
+  });
+
+  it("takes a whole 16 MB part, sent without a length, and never reads past a part", async () => {
+    // The sign-in proxy holds 4 MB of a body at most (next.config.ts): this route skips it and reads the part itself.
+    const plan = mixPlan([{ channels: [new Float32Array(MIX_PART_BYTES / 2)], gain: 1 }], 48000);
+    const part = mixPart(plan, 0, plan.frames);
+    expect(part.length).toBe(MIX_PART_BYTES + 44);
+    const stream = (bytes: Uint8Array, chunk = 1024 ** 2) => {
+      let at = 0;
+      let pulled = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (at >= bytes.length) return c.close();
+          const next = bytes.subarray(at, at + chunk);
+          at += next.length;
+          pulled += next.length;
+          c.enqueue(next);
+        },
+      });
+      return { body, pulled: () => pulled };
+    };
+    const whole = stream(part);
+    const req = (q: string, body: ReadableStream<Uint8Array>) => new Request(`http://x/api/audio-tools/export?${q}`, { method: "POST", body, duplex: "half" } as RequestInit);
+    const res = await exportRoute.POST(req("offset=0&last=1&name=Big", whole.body));
+    expect(res.status).toBe(201);
+    expect(fs.statSync(path.join(dir, "files", getAsset((await res.json()).id)!.relPath)).size).toBe(part.length);
+    // A body past a part's limit stops being read soon after it.
+    const over = stream(new Uint8Array(PART_MAX * 3));
+    expect((await exportRoute.POST(req("offset=0", over.body))).status).toBe(413);
+    expect(over.pulled()).toBeLessThanOrEqual(PART_MAX + 2 * 1024 ** 2);
   });
 });

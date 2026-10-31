@@ -7,10 +7,11 @@ import { adoptFile, scratchDir, type Asset } from "./storage";
 
 /**
  * Split soundtrack's Export mix (and "Put back on the video", which exports first): the browser writes the mix as a
- * 16-bit WAV and sends it here in parts of MIX_PART_BYTES, which the sign-in proxy passes whole (it buffers at most
- * 210 MB of a body) and the server appends to a scratch file without holding the mix in memory. The first part starts
- * with the WAV header, which says how big the file will be (at most MIX_MAX_BYTES); the last one turns the file into an
- * upload in the Library. A 5.1 film clip's mix outgrows the 200 MB upload cap after about six minutes; this doesn't.
+ * 16-bit WAV and sends it here in parts of MIX_PART_BYTES, which skip the sign-in proxy (it holds at most 4 MB of a
+ * body; the route runs its checks and reads no more than PART_MAX) and the server appends to a scratch file without
+ * holding the mix in memory. The first part starts with the WAV header, which says how big the file will be (at most
+ * MIX_MAX_BYTES); the last one turns the file into an upload in the Library. A 5.1 film clip's mix outgrows the 200 MB
+ * upload cap after about six minutes; this doesn't.
  */
 
 export class MixExportError extends Error {

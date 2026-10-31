@@ -8,9 +8,10 @@ const nextConfig: NextConfig = {
   experimental: {
     // The sign-in proxy holds every request body it sees in memory, up to this size, even one it refuses: a small limit
     // keeps many open requests from filling the server's memory. The routes that take a file in a form (uploads, a Soul
-    // finish, a Layers render, a skill, an Assist source, an explainer document) skip the proxy and check the asker
-    // themselves (src/proxy.ts matcher). Everything else sends JSON: Evolution's 2 MB frame is the largest. A body over
-    // the limit reaches the route cut short, with no error (POST /api/generations then says it is too large).
+    // finish, a Layers render, a skill, an Assist source, an explainer document) and Split soundtrack's mix export (16 MB
+    // parts) skip the proxy and check the asker themselves (src/proxy.ts matcher). Everything else sends JSON: Evolution's
+    // 2 MB frame is the largest. A body over the limit reaches the route cut short, with no error (POST /api/generations
+    // then says it is too large).
     proxyClientMaxBodySize: "4mb",
   },
   async headers() {
