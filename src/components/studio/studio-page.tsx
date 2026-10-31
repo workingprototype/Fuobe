@@ -526,7 +526,7 @@ function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: Draft
   };
   // The composer swaps an untouched default for the engine's own when the engine is read after hydration: a
   // hand-off still applies over that swap.
-  const follow = (base: Draft, current: Draft) => followEngineDefault(base, current, config.defaultModels, engine);
+  const follow = (base: Draft, current: Draft) => followEngineDefault(base, current, config.defaultModels, engine, config.uncaptioned);
   const buildRef = useRef(build);
   const adoptRef = useRef(adopt);
   const followRef = useRef(follow);

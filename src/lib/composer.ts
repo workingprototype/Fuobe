@@ -800,12 +800,20 @@ export function prestepCost(preset: Pick<Preset, "type" | "open" | "cloud" | "pr
 /**
  * The draft a hand-off compares with, after the page's own model swap: the engine is read after hydration (or
  * switched while the page loads), and the composer swaps an untouched draft's studio default for that engine's
- * default. That swap isn't the person's pick, so the base follows it and the hand-off's model (?model=) still
- * applies; without this, a link opened on the open engine kept the open default (Z-Image Turbo).
+ * default (or that default's stand-in where the server writes no caption: `standIns`, the studio's uncaptioned). That
+ * swap isn't the person's pick, so the base follows it and the hand-off's model (?model=) still applies; without this, a
+ * link opened on the open engine kept the open default (Z-Image Turbo), or the stand-in (Qwen-Image 2.1).
  */
-export function followEngineDefault<D extends DraftShape>(base: D, current: D, defaults: Partial<Record<Engine, string>>, engine: Engine): D {
+export function followEngineDefault<D extends DraftShape>(
+  base: D,
+  current: D,
+  defaults: Partial<Record<Engine, string>>,
+  engine: Engine,
+  standIns: Partial<Record<Engine, string>> = {},
+): D {
   const own = Object.values(defaults).filter(Boolean);
-  if (current.modelId === base.modelId || !own.includes(base.modelId) || current.modelId !== defaults[engine]) return base;
+  const swapped = current.modelId === defaults[engine] || (!!standIns[engine] && current.modelId === standIns[engine]);
+  if (current.modelId === base.modelId || !own.includes(base.modelId) || !swapped) return base;
   return { ...base, modelId: current.modelId, params: current.params };
 }
 
