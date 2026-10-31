@@ -84,10 +84,10 @@ export function browserLocal(site = SITE): RunnerDeps["local"] & { urls: string[
 
 export const sha256 = async (data: ArrayBuffer) => Buffer.from(await crypto.subtle.digest("SHA-256", data)).toString("hex");
 
-/** A tab on this computer for `cookie`, its ComfyUI on `port`. */
-export function tab(routes: ComputerRoutes, cookie: string, port: number, o: { device?: string; clientId?: string } = {}) {
+/** A tab on this computer for `cookie`, its ComfyUI on `port` (`local`: how it reaches it, when not as a browser does). */
+export function tab(routes: ComputerRoutes, cookie: string, port: number, o: { device?: string; clientId?: string; local?: RunnerDeps["local"] } = {}) {
   const api = apiAs(routes, cookie);
-  const local = browserLocal();
+  const local = o.local ?? browserLocal();
   const runner = new ComputerRunner(
     { api, local, socket: (url) => new WebSocket(url) as never, sha256, origin: SITE, sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 50))) },
     { device: o.device ?? "device-test-1", port, clientId: o.clientId ?? "client-test-1" },

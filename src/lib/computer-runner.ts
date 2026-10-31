@@ -245,13 +245,16 @@ export class ComputerRunner {
   async beat(takeover = false): Promise<BeatAnswer | null> {
     if (!this.alive) return null;
     const t = this.now();
-    // Facts every minute; the LoRA names every 5 minutes.
-    const loras = t - this.factsWithLoras > 5 * 60_000;
-    const facts = t - this.factsSentAt > 60_000 ? await this.facts(loras) : null;
+    // A look at ComfyUI here every beat (only a computer whose ComfyUI answers takes the jobs); its facts go to the
+    // server every minute, the LoRA names every 5 minutes.
+    const due = t - this.factsSentAt > 60_000;
+    const loras = due && t - this.factsWithLoras > 5 * 60_000;
+    const read = await this.facts(loras);
+    const facts = due ? read : null;
     if (facts) {
       this.factsSentAt = t;
       if (loras) this.factsWithLoras = t;
-    } else if (this.view.comfy !== "ok") await this.facts(false);
+    }
     const running = this.view.jobs
       .filter((j) => j.phase !== "done" && j.phase !== "failed")
       .map((j) => {
@@ -262,7 +265,7 @@ export class ComputerRunner {
     const res = await this.deps.api("/api/gpu/computer/beat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device: this.o.device, port: this.o.port, ...(facts && { facts }), running, ...(stopped.length && { stopped }), ...(takeover && { takeover: true }) }),
+      body: JSON.stringify({ device: this.o.device, port: this.o.port, ready: !!read, ...(facts && { facts }), running, ...(stopped.length && { stopped }), ...(takeover && { takeover: true }) }),
     });
     if (res.ok) for (const s of stopped) this.stoppedDone.delete(s);
     if (res.status === 401) {

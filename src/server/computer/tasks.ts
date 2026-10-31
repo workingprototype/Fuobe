@@ -279,18 +279,22 @@ export interface BeatInput {
   takeover?: boolean;
   /** Tasks whose prompts this computer took off its ComfyUI, as the server asked. */
   stopped?: string[];
+  /** False: this computer's ComfyUI doesn't answer (a phone, a laptop without one, or ComfyUI restarting). */
+  ready?: boolean;
 }
 
 /**
  * A computer's beat: it takes or renews the runner's place when that is free, lapsed, its own, or taken over; it keeps
- * the tasks it works on alive; and it hears which of its prompts to stop.
+ * the tasks it works on alive; and it hears which of its prompts to stop. A computer whose ComfyUI doesn't answer only
+ * keeps a place it has (its ComfyUI restarting), so a phone or a laptop without ComfyUI never takes the jobs.
  */
 export function beat(principal: Principal, b: BeatInput, now = Date.now()): BeatAnswer {
   if (!DEVICE_ID.test(b.device)) throw new RelayError(400, "Bad device");
   const d = rdb();
   sweepPrincipal(principal);
   const cur = runnerOf(principal);
-  const free = !cur || cur.device === b.device || cur.lease_until < now || b.takeover === true;
+  const elsewhere = !!cur && cur.device !== b.device && cur.lease_until >= now;
+  const free = b.ready === false ? cur?.device === b.device : !elsewhere || b.takeover === true;
   const port = Number.isInteger(b.port) && b.port! > 0 && b.port! < 65536 ? b.port! : null;
   if (free) {
     const facts = b.facts !== undefined ? cleanFacts(b.facts, json<ComputerFacts>(cur?.facts_json ?? null, {})) : json<ComputerFacts>(cur?.device === b.device ? cur.facts_json : null, {});
@@ -314,7 +318,7 @@ export function beat(principal: Principal, b: BeatInput, now = Date.now()): Beat
     d.prepare("SELECT id, prompt_id, prefix FROM relay_tasks WHERE principal = ? AND device = ? AND stop = 1").all(principal, b.device) as { id: string; prompt_id: string; prefix: string | null }[]
   ).map((s) => ({ task: s.id, promptId: s.prompt_id, ...(s.prefix && { prefix: s.prefix }) }));
   const waiting = (d.prepare("SELECT COUNT(*) AS n FROM relay_tasks WHERE principal = ? AND state = 'waiting'").get(principal) as { n: number }).n;
-  return { runner: free, heldElsewhere: !free, waiting, stops };
+  return { runner: free, heldElsewhere: !free && elsewhere, waiting, stops };
 }
 
 function noteProgress(id: string, r: Record<string, unknown>, now: number) {

@@ -237,6 +237,28 @@ describe("a run on the ComfyUI on the person's own computer", () => {
     expect(fake.posts() - posts).toBe(1);
   });
 
+  it("a tab with no ComfyUI to reach (a phone, a laptop without one) never takes the jobs from the computer that has one", async () => {
+    const phone = tab(routes, cookie, fake.port, { device: "device-phone-1", local: async () => Promise.reject(new TypeError("Failed to fetch")) });
+    const pic = await uploadPng();
+    const [id] = await run({ feature: "app", modelId: "oss-qwen-edit", presetId: "app-headshot-generator", prompt: "", inputs: { images: [pic.url] } });
+    await handedOver(id);
+    expect(await phone.runner.beat()).toMatchObject({ runner: false, heldElsewhere: false, waiting: 1 });
+    expect(phone.runner.view.comfy).toBe("down");
+    expect(await phone.runner.claimAndRun()).toBe(false);
+    // The computer with ComfyUI takes them, and the phone hears that another computer runs them.
+    const desk = tab(routes, cookie, fake.port, { device: "device-desk-1" });
+    expect(await desk.runner.beat()).toMatchObject({ runner: true });
+    expect(await phone.runner.beat()).toMatchObject({ runner: false, heldElsewhere: true });
+    expect(await phone.runner.beat(true)).toMatchObject({ runner: false });
+    await work(desk);
+    const g = await settle(id);
+    expect(g?.status, g?.error ?? "").toBe("succeeded");
+    // A runner whose ComfyUI restarts keeps its place meanwhile.
+    fake.opts.cors = "off";
+    expect(await desk.runner.beat()).toMatchObject({ runner: true });
+    fake.opts.cors = "http://localhost:3000";
+  });
+
   it("sends a job again once when ComfyUI restarts and loses it, and fails it kindly the second time", async () => {
     const t = tab(routes, cookie, fake.port);
     await t.runner.beat();
