@@ -671,6 +671,13 @@ interface ViewSlots {
 const IMAGE_SLOTS = ["image", "image2", "image3", "image4"] as const;
 
 /**
+ * Encoders whose reference inputs are each optional (autogrow images.image_N, a second person): a reference the
+ * run doesn't have is left out of them instead of asked for. Images fill image, image2… in order, so only the last
+ * slots are ever left out and the encoder's inputs have no gaps.
+ */
+const OPTIONAL_REFERENCE_INPUTS: ReadonlySet<string> = new Set(["TextEncodeQwenImage21", "TextEncodeFibo2", "Krea2EditModelPatch", "Krea2EditGroundedEncode"]);
+
+/**
  * Which slot each photo of a multi-view 3D model goes to: params.extra.views names the side of each photo
  * ("front", "left"…), in the order of the images; without names they are the sides in order.
  */
@@ -1220,8 +1227,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.duration = Math.round((clipLength ?? (Math.max(...tracks) || 600)) * 100) / 100 + 0.5; // the mux trims it to the picture
   }
 
-  // Reference images the user left out: dropped from a FLUX.2 reference chain, else the previous image
-  // again where that's harmless (style boards, multi-reference edits), else a clear "add …" message.
+  // Reference images the user left out: dropped from a FLUX.2 reference chain or from an encoder that takes any
+  // number of them, else the previous image again where that's harmless (style boards, multi-reference edits),
+  // else a clear "add …" message.
   let graph = workflow;
   const left: string[] = [...studioLeft];
   // A side nobody photographed is left out (its cut-out and crop with it); the front is needed.
@@ -1240,9 +1248,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   for (const [k, prev] of [["image2", "image"], ["image3", "image2"], ["image4", "image3"]] as const) {
     if (rules.views || !b[k] || values[k] !== undefined || rules.required?.includes(k) || left.includes(k)) continue;
     if (values[prev] === undefined && !left.includes(prev)) continue;
-    const bypassed = b[k]!.length === 1 ? bypassReference(graph, b[k]![0].node) : null;
-    if (bypassed) {
-      graph = bypassed;
+    const loader = b[k]!.length === 1 ? b[k]![0].node : undefined;
+    const without = loader ? (bypassReference(graph, loader) ?? dropBranch(graph, loader, OPTIONAL_REFERENCE_INPUTS, manifest.outputs.map((o) => o.node))) : null;
+    if (without) {
+      graph = without;
       left.push(k);
     } else if ((rules.reuse || manifest.capability === "style-reference") && values[prev] !== undefined) values[k] = values[prev];
   }

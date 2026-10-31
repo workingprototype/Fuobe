@@ -56,6 +56,34 @@ type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badge
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
 
 const open: ModelDef[] = [
+  // ---- FIBO 2 (Bria FIBO 2.0): the owner's workflows, among the first picks for text to image and edits
+  o({
+    id: "oss-fibo2-dev",
+    name: "FIBO 2 Dev",
+    vendor: "Bria",
+    family: "bria",
+    kind: "image",
+    tagline: "Structured JSON prompts for exact control; edits with up to 4 references · 24 GB GPU · non-commercial weights",
+    badges: ["new", "top"],
+    routes: [
+      comfy("t2i", "fibo2-dev-t2i", "Qwen3.5 writes Bria's structured JSON prompt; 30 steps"),
+      comfy("edit", "fibo2-dev-edit", "30 steps, up to 4 references"),
+    ],
+    options: { aspectRatios: IMG_AR, resolutions: ["1K"], maxImages: 4, seed: true, negativePrompt: true },
+    defaults: { aspectRatio: "1:1", resolution: "1K" },
+  }),
+  o({
+    id: "oss-fibo2-edit-turbo",
+    name: "FIBO 2 Edit Turbo",
+    vendor: "Bria",
+    family: "bria",
+    kind: "image",
+    tagline: "4-step edits with up to 4 references · 16 GB GPU · non-commercial weights",
+    badges: ["new", "top", "fast"],
+    routes: [comfy("edit", "fibo2-edit-turbo-edit", "4 steps, up to 4 references")],
+    options: { maxImages: 4, seed: true },
+  }),
+
   // ---------------- Image
   o({
     id: "oss-z-image-turbo",
