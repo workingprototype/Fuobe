@@ -219,6 +219,18 @@ export function offeredDefault(id: string | undefined, engine: Engine): string |
 }
 
 /**
+ * A default someone can run (`ready`: an account's own keys reach one of its providers), else the first model that is on,
+ * does the same job on this engine and is ready, else the default itself (its run then asks for the key it needs).
+ */
+export function reachableDefault(id: string | undefined, engine: Engine, ready: (m: ModelDef) => boolean): string | undefined {
+  const own = id ? MODELS.find((m) => m.id === id) : undefined;
+  if (!own || ready(own)) return id;
+  const ops = new Set(onEngine(own, engine).routes.map((r) => r.op));
+  const next = MODELS.find((m) => !m.hidden && m.id !== id && m.kind === own.kind && isOffered(m.id, engine) && ready(m) && onEngine(offeredModel(m)!, engine).routes.some((r) => ops.has(r.op) && providerEngine(r.provider) === engine));
+  return next?.id ?? id;
+}
+
+/**
  * The summary the browser filters its pickers with (undefined while everything is on). A model whose recipe LoRA is
  * switched off counts as off there too (isOffered).
  */

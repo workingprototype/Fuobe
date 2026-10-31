@@ -113,7 +113,7 @@ describe("an account's fair share", () => {
     expect(r.status).toBe(201);
     const body = await r.json();
     expect(body.items.length).toBe(4);
-    expect(body.notes).toContain("Runs on your GPU make up to 4 at a time.");
+    expect(body.notes).toContain("Account runs make up to 4 at a time.");
   });
 
   it("never reached the install's ComfyUI", () => {

@@ -61,6 +61,13 @@ describe("nothing else reads the studio's fal.ai or Replicate key", () => {
     expect(code(sources.find((s) => s.file === "server/providers/replicate.ts")!.text)).toMatch(/cloudKey\("replicate"\)/);
   });
 
+  it("sends a run to its provider only through adapterFor, which checks it runs as the run's own account", () => {
+    const gen = code(sources.find((s) => s.file === "server/generations.ts")!.text);
+    expect(gen).not.toMatch(/\bprovider\([^)]*\)\s*\.\s*(submit|poll|cancel|prepareFile)\b/);
+    expect(gen).not.toMatch(/PROVIDERS\[[^\]]*\]\s*\.\s*(submit|poll|cancel|prepareFile)\b/);
+    expect(gen.match(/adapterFor\(/g)!.length).toBeGreaterThanOrEqual(4);
+  });
+
   it("calls the fal.ai and Replicate adapters directly only from training (the owner's)", () => {
     expect(offenders(/\b(falProvider|replicateProvider|falFetch)\b/, ["server/providers/fal.ts", "server/providers/replicate.ts", "server/providers/index.ts", "server/training.ts"])).toEqual([]);
   });

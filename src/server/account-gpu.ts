@@ -1,8 +1,11 @@
 import "server-only";
 import dns from "node:dns/promises";
 import net from "node:net";
+import { isCloudProvider, type CloudProvider } from "@/lib/your-keys";
+import { accountEngineMode, accountProviders, paidAllowed } from "./account-keys";
 import { accountGpu, type Account, type AccountGpu } from "./auth";
 import { runnerFacts } from "./computer/tasks";
+import { offeredSummary } from "./model-access";
 import { PROVIDERS } from "./providers";
 import { blockedForAccounts, fetchPublic, isLoopbackGpu } from "./remote-fetch";
 import { isInstallHost, REFUSED_ADDRESS } from "./gpu/hosts";
@@ -143,28 +146,40 @@ export interface VisitorView {
   kind: "guest" | "account";
   /** `mode` "computer": the ComfyUI on the person's own computer, which their Fuobe tab runs. */
   gpu: { connected: boolean; mode?: "link" | "computer"; online?: boolean; comfy?: "down" | "no-setting"; device?: string; vramBytes?: number };
+  /** The providers it has its own key for that this server can open ("Your keys"): never a key. */
+  keys: CloudProvider[];
+  /** The studio lets accounts run paid models on their own keys (it isn't open-source only). */
+  paidAllowed: boolean;
 }
 
 /**
  * GET /api/status for a guest or an account: ComfyUI is its own GPU (taken as there until it has one,
- * so the studios offer Generate and the run asks it to connect one), the open engine, no Demo mode,
- * and nothing of the install's own servers, keys or addresses.
+ * so the studios offer Generate and the run asks it to connect one), fal.ai and Replicate are its own
+ * keys, the engine mode they allow (account-keys.ts), no Demo mode, and nothing of the install's own
+ * servers, keys or addresses.
  */
 export async function visitorStatus(account: Account | null) {
   const gpu = account ? accountGpu(account.id) : null;
   const live = account && gpu ? await gpuState(account.id, gpu) : null;
+  const keys = account ? accountProviders(account.id) : [];
   const viewer: VisitorView = {
     kind: account ? "account" : "guest",
     gpu: gpu
       ? { connected: true, mode: gpu.mode === "computer" ? "computer" : "link", online: !!live?.online, ...(live?.comfy && { comfy: live.comfy }), ...(live?.device && { device: live.device }), ...(live?.vramBytes && { vramBytes: live.vramBytes }) }
       : { connected: false },
+    keys,
+    paidAllowed: paidAllowed(),
   };
+  const configured = (id: string) => (id === "comfyui" ? (gpu ? !!live?.online : true) : isCloudProvider(id) && keys.includes(id));
+  const access = keys.length ? offeredSummary() : undefined;
   return {
-    providers: Object.fromEntries(Object.values(PROVIDERS).map((p) => [p.id, { label: p.id === "comfyui" ? "Your GPU" : p.label, configured: p.id === "comfyui" ? (gpu ? !!live?.online : true) : false }])),
+    providers: Object.fromEntries(Object.values(PROVIDERS).map((p) => [p.id, { label: p.id === "comfyui" ? "Your GPU" : p.label, configured: configured(p.id) }])),
     demoMode: "off",
-    engineMode: "open",
+    engineMode: account ? accountEngineMode(account.id) : "open",
     cloudProvider: "auto",
     onboarded: true,
+    // Settings → Models & licences: the paid models the owner switched off stay out of its pickers too.
+    ...(access && { access }),
     viewer,
   };
 }

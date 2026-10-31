@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { RETENTION_MS, runAccountDeletedHooks } from "./account-files";
 import { clearAccountLoras } from "./account-loras";
-import { readAccountIds } from "./auth";
+import { deleteAccount, readAccountIds, setAccountDisabled } from "./auth";
 import { db } from "./db";
 import { deleteForever } from "./library";
 import { deleteAsset, scratchDir } from "./storage";
@@ -42,6 +42,18 @@ export async function purgeAccount(id: string): Promise<{ runs: number; files: n
   clearAccountLoras(id);
   await runAccountDeletedHooks(id);
   return { runs, files: files.length };
+}
+
+/**
+ * Delete an account (by itself, or by the owner). In this order: it is switched off (signed out, no new runs); its jobs
+ * still going are stopped, those on its own fal.ai or Replicate key with that key, which is why the record is still
+ * there; its runs and files go; then its record, with its GPU and its keys. If stopping fails it stays switched off and
+ * listed, and can be deleted again.
+ */
+export async function removeAccount(id: string): Promise<void> {
+  setAccountDisabled(id, true);
+  await purgeAccount(id);
+  deleteAccount(id);
 }
 
 /** One sweep (see the header). `now` for tests. */

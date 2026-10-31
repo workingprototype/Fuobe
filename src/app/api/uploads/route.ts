@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import { CONNECT_GPU_HEADER, CONNECT_GPU_UPLOAD_MESSAGE } from "@/lib/guest-access";
+import { accountProviders } from "@/server/account-keys";
 import { imageSize } from "@/lib/image-size";
 import { sniffMedia, type SniffKind } from "@/lib/sniff";
 import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "@/server/account-files";
@@ -17,7 +18,8 @@ import { adoptFile, contentTypeFor, saveFile, scratchDir } from "@/server/storag
  * proxy's checks here.
  *
  * - The owner: up to 200 MB, the types below.
- * - An account (public sign-up): only with its own ComfyUI connected; a picture up to 25 MB and 40 megapixels, a
+ * - An account (public sign-up): only with its own ComfyUI connected or its own fal.ai or Replicate key (something to
+ *   run its files on); a picture up to 25 MB and 40 megapixels, a
  *   sound up to 50 MB, a clip up to 95 MB; its uploads up to 1 GB and all its files up to 3 GB; 60 uploads an hour,
  *   300 a day, 2 at once. The stored type is read from the file's first bytes, never taken from the client.
  */
@@ -156,7 +158,7 @@ async function ownerUpload(request: Request): Promise<Response> {
 // An account
 
 async function accountUpload(request: Request, account: Account): Promise<Response> {
-  if (!accountGpu(account.id)) return json(403, { error: CONNECT_GPU_UPLOAD_MESSAGE, code: "connect-gpu" }, { [CONNECT_GPU_HEADER]: "1" });
+  if (!accountGpu(account.id) && !accountProviders(account.id).length) return json(403, { error: CONNECT_GPU_UPLOAD_MESSAGE, code: "connect-gpu" }, { [CONNECT_GPU_HEADER]: "1" });
   if (!diskHasRoom()) return json(503, { error: ACCOUNT_MESSAGES.diskLow });
   // A fair share: 60 an hour, 300 a day, 2 at once.
   const hour = hit(`up:h:${account.id}`, ACCOUNT_LIMITS.uploadsPerHour, 60 * 60_000);

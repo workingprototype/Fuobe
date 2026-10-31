@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { AccountError, deleteAccount, isOwnerRequest, listAccounts, sessionCookieOf, setAccountDisabled } from "@/server/auth";
-import { purgeAccount } from "@/server/account-sweep";
+import { AccountError, isOwnerRequest, listAccounts, sessionCookieOf, setAccountDisabled } from "@/server/auth";
+import { removeAccount } from "@/server/account-sweep";
 
 async function owner(request: Request): Promise<Response | null> {
   return isOwnerRequest(request, sessionCookieOf(request)) ? null : Response.json({ error: "Only the studio's owner manages accounts" }, { status: 403 });
@@ -31,12 +31,11 @@ export async function DELETE(request: Request, ctx: RouteContext<"/api/admin/acc
   const denied = await owner(request);
   if (denied) return denied;
   const { id } = await ctx.params;
+  // Switched off at once, its running jobs stopped (on its own keys), then its runs, files and record go.
   try {
-    deleteAccount(id);
+    await removeAccount(id);
   } catch (e) {
     return failed(e);
   }
-  // Its runs and files go with it (running ones are stopped first).
-  await purgeAccount(id);
   return new Response(null, { status: 204 });
 }

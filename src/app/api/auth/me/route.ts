@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { z } from "zod";
-import { accountGpu, authEnabled, deleteAccount, publicSignup, SESSION_COOKIE, sessionCookieOf, sessionViewer, validToken, verifyAccount } from "@/server/auth";
+import { accountGpu, authEnabled, publicSignup, SESSION_COOKIE, sessionCookieOf, sessionViewer, validToken, verifyAccount } from "@/server/auth";
 import { runnerFacts } from "@/server/computer/tasks";
 import { getSetting } from "@/server/settings";
-import { purgeAccount } from "@/server/account-sweep";
+import { removeAccount } from "@/server/account-sweep";
 import { hit } from "@/server/rate";
 
 /** Who is looking: the owner, an account, or a guest; and whether sign-up is open. Open to everyone. */
@@ -43,9 +43,8 @@ export async function DELETE(request: Request) {
   const rate = hit(`delete-me:${session.account.id}`, 5, 60_000);
   if (!rate.ok) return Response.json({ error: "Too many tries. Wait a minute, then try again." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterS) } });
   if (!(await verifyAccount(session.account.email, parsed.data.password))) return Response.json({ error: "Wrong password" }, { status: 403 });
-  deleteAccount(session.account.id);
+  // Switched off at once, its running jobs stopped (on its own keys), then its runs, files and record go.
+  await removeAccount(session.account.id);
   jar.delete(SESSION_COOKIE);
-  // Its runs and files go with it (running ones are stopped first).
-  await purgeAccount(session.account.id);
   return new Response(null, { status: 204 });
 }

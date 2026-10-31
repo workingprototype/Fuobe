@@ -90,7 +90,9 @@ describe("inside an account's work, only its own files", () => {
     asA(() => expect(llmTextBackend()).toBeNull());
     const civitai = [{ file: "look.safetensors", url: "https://civitai.com/api/download/models/1" }];
     expect(withoutUnreachableCivitai(civitai, "fal").loras).toEqual([]);
-    asA(() => expect(withoutUnreachableCivitai(civitai, "fal").loras).toEqual(civitai));
+    // On the account's own fal.ai key a civitai file is left out (copying it needs the studio's civitai key); its GPU checks its own.
+    asA(() => expect(withoutUnreachableCivitai(civitai, "fal")).toEqual({ loras: [], notes: [expect.stringMatching(/civitai, so runs on your key leave it out/)] }));
+    asA(() => expect(withoutUnreachableCivitai(civitai, "comfyui").loras).toEqual(civitai));
     await asA(async () => expect(ensureLorasOnComfy(civitai, [])).rejects.toThrow(/never downloaded/));
   });
 });

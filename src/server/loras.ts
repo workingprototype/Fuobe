@@ -364,6 +364,15 @@ export async function prepareCloudLoras(
   for (const l of loras) {
     const entry = libraryEntry(l);
     const name = loraName(l);
+    // An account's run on its own key: only LoRAs the provider fetches from a public address. Nothing is downloaded or
+    // copied for it (that would use the studio's civitai key and its copies), so a civitai file or a trained one is
+    // refused (withoutUnreachableCivitai leaves civitai files out first).
+    if (tenant()) {
+      const at = cloudPath(l);
+      if (!at || localOnly(l)) throw new LoraError(`${name} can't be sent to ${host} with your key: it runs on your GPU`);
+      out.push(l);
+      continue;
+    }
     // Only while the admin keeps GPU-only LoRAs on the GPU (fitLoras has left it out of a cloud run already).
     if (localOnly(l)) throw new LoraError(`${name} is licensed for your GPU only, and Settings → Models & licences keeps such LoRAs off the cloud`);
     if (l.own && !l.hostedUrl) {
@@ -573,7 +582,17 @@ export function filesInLoraFolder(): { files: Set<string>; problem?: string } {
  */
 export function withoutUnreachableCivitai(loras: LoraRef[], target: MirrorTarget): { loras: LoraRef[]; notes: string[] } {
   // An account's run: the install's civitai key and LoRA folder say nothing about its ComfyUI (account-loras.ts checks that).
-  if (tenant()) return { loras, notes: [] };
+  // On its own fal.ai or Replicate key, a civitai file isn't copied for it (that needs the studio's civitai key): it's left out.
+  if (tenant()) {
+    const civitai = target === "comfyui" ? [] : loras.filter((l) => !l.hostedUrl && needsToken(l.url));
+    if (!civitai.length) return { loras, notes: [] };
+    const names = civitai.map(loraName);
+    const list = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+    return {
+      loras: loras.filter((l) => !civitai.includes(l)),
+      notes: [`${list} ${names.length > 1 ? "download" : "downloads"} from civitai, so runs on your key leave ${names.length > 1 ? "them" : "it"} out`],
+    };
+  }
   const civitai = loras.filter((l) => !l.hostedUrl && needsToken(l.url) && (target === "comfyui" || !localOnly(l)));
   if (!civitai.length || civitaiKey()) return { loras, notes: [] };
   const folder = target === "comfyui" && getSetting("comfyLorasDir") ? filesInLoraFolder().files : null;

@@ -10,7 +10,7 @@ import {
   accountOwnRead,
   ASSIST_OWNER_MESSAGE,
   CONNECT_GPU_HEADER,
-  CONNECT_GPU_MESSAGE,
+  CONNECT_GPU_OR_KEY_MESSAGE,
   GUEST_HEADER,
   GUEST_LIBRARY_MESSAGE,
   GUEST_RUN_MESSAGE,
@@ -23,7 +23,7 @@ import {
   ownerOnly,
   ownGpuRun,
 } from "@/lib/guest-access";
-import { authEnabled, crossSite, hostAllowed, LoginGuard, publicSignup, sessionCookieOf, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
+import { authEnabled, crossSite, hasCloudKey, hostAllowed, LoginGuard, publicSignup, sessionCookieOf, sessionViewer, validSession, validToken, type Account, type Viewer } from "@/server/auth";
 import { fileAccount, generationAccount } from "@/server/account-library";
 import { hit } from "@/server/rate";
 import { recordExists } from "@/server/records";
@@ -191,8 +191,9 @@ function readAsGuest(request: NextRequest, isAccount: boolean): NextResponse {
  * owner's library or projects (hidden, and every change to them refused). Its own runs are its own
  * (accountGeneration, accountOwnRead: only what it made). Install-wide settings, keys and tokens are
  * the owner's, and it never runs on the owner's cloud keys or GPU: with its own ComfyUI connected
- * ("Your GPU") the studios' generations run there, and anything else that would reach a model is
- * refused ("Connect your GPU" until it has one). Assist is the owner's (isAssistChange): a GPU doesn't change that.
+ * ("Your GPU") or its own fal.ai or Replicate key ("Your keys") the studios' generations run there,
+ * and anything else that would reach a model is refused ("Connect your GPU" until it has one).
+ * Assist is the owner's (isAssistChange): a GPU or a key doesn't change that.
  */
 const notYours = () => NextResponse.json({ error: ACCOUNT_LIBRARY_MESSAGE }, { status: 403, headers: { "Cache-Control": "no-store" } });
 
@@ -212,9 +213,10 @@ function account(request: NextRequest, who: Account): NextResponse {
   if (accountMayChange(request.method, pathname, search)) return pass(request);
   if (isAssistChange(request.method, pathname)) return assistOwner();
   if (isLibraryChange(request.method, pathname)) return NextResponse.json({ error: LIBRARY_MESSAGE, code: "library" }, { status: 403 });
-  // A tool its own GPU wouldn't run says so first: "Connect your GPU" only for what a GPU unlocks.
+  // A tool its own GPU or key wouldn't run says so first: "Connect your GPU" only for what a GPU or a key unlocks.
   if (!ownGpuRun(request.method, pathname)) return NextResponse.json({ error: OWN_GPU_TOOL_MESSAGE, code: "own-gpu-tool" }, { status: 403 });
-  if (!who.gpu) return NextResponse.json({ error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
+  // Neither its own GPU nor its own key: nothing it could run on. (Which one a run needs, the route says.)
+  if (!who.gpu && !hasCloudKey(who)) return NextResponse.json({ error: CONNECT_GPU_OR_KEY_MESSAGE, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
   return pass(request);
 }
 

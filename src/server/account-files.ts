@@ -79,7 +79,7 @@ export const ACCOUNT_MESSAGES = {
   runRate: "That's a lot of runs this hour. Try again later.",
   finishRate: "That's a lot of finished pictures this hour. Try again later.",
   finishBusy: "Your last pictures are still being saved. Try again in a moment.",
-  outputsCapped: "Runs on your GPU make up to 4 at a time.",
+  outputsCapped: "Account runs make up to 4 at a time.",
   bodyTooBig: "That request is too large.",
   gpuChecks: "Too many checks. Wait a minute.",
   probeRate: "Too many clip checks at once. Wait a moment, then try again.",

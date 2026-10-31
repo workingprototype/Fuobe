@@ -161,11 +161,11 @@ export function accountGeneration(method: string, pathname: string): string | un
 
 /**
  * A read of an account's own things, which the route (or the proxy, by accountGeneration) scopes to it:
- * the list of its runs, a stored file (the proxy checks whose it is), its GPU.
+ * the list of its runs, a stored file (the proxy checks whose it is), its GPU, its keys (never a key: their last 4).
  */
 export function accountOwnRead(pathname: string): boolean {
   if (ACCOUNT_LISTS.has(pathname)) return true;
-  return pathname === "/api/generations" || pathname === "/api/account/gpu" || GPU_READS.has(pathname) || COMPUTER_READ.test(pathname);
+  return pathname === "/api/generations" || pathname === "/api/account/gpu" || pathname === "/api/account/keys" || GPU_READS.has(pathname) || COMPUTER_READ.test(pathname);
 }
 
 /** The Library's counts and its Uploads (its stored files): each route answers an account with its own only. */
@@ -186,13 +186,14 @@ const COMPUTER_CHANGES: [method: string, path: RegExp][] = [
 const GPU_READS = new Set(["/api/gpu/readiness", "/api/gpu/badges", "/api/gpu/plan"]);
 
 /**
- * A change an account may send: signing out, its own GPU and its check, price checks (reads go by guestRead, as a
- * guest's), an upload (the route checks it: src/app/api/uploads, which the proxy's matcher leaves out) and a look at its
- * own clip's header (the route reads only its own files).
+ * A change an account may send: signing out, its own GPU and its check, its own fal.ai and Replicate keys, price checks
+ * (reads go by guestRead, as a guest's), an upload (the route checks it: src/app/api/uploads, which the proxy's matcher
+ * leaves out) and a look at its own clip's header (the route reads only its own files).
  */
 export function accountMayChange(method: string, pathname: string, search: string): boolean {
   if (method === "POST" && pathname === "/api/auth/logout") return true;
   if ((method === "PUT" || method === "DELETE") && pathname === "/api/account/gpu") return true;
+  if ((method === "PUT" || method === "DELETE") && /^\/api\/account\/keys\/(fal|replicate)$/.test(pathname)) return true;
   // GPU pre-flight: checking its own ComfyUI (reads only; the routes check the target and the request themselves).
   if ((method === "POST" && pathname === "/api/gpu/check") || (method === "PUT" && pathname === "/api/gpu/inventory")) return true;
   // Running its own jobs on its own computer.
@@ -224,10 +225,10 @@ export const ACCOUNT_LIBRARY_MESSAGE = "This studio's library is its owner's. Fr
 export const LIBRARY_MESSAGE = "Free accounts can't save to this studio's library yet.";
 
 /**
- * Runs an account may start once it has connected its own ComfyUI ("Your GPU"): the studios' generations, camera
- * motions, effects and apps, which the route sends to that ComfyUI only, with only its own uploaded files
- * (src/app/api/generations/route.ts, generations.ts accountRun). Other tools plan with the install's AI helpers or
- * its own ComfyUI, so they stay refused.
+ * Runs an account may start once it has connected its own ComfyUI ("Your GPU") or added its own fal.ai or Replicate key
+ * ("Your keys"): the studios' generations, camera motions, effects and apps, which the route sends to that ComfyUI or
+ * that key only, with only its own uploaded files (src/app/api/generations/route.ts, generations.ts accountRun). Other
+ * tools plan with the install's AI helpers or its own ComfyUI, so they stay refused.
  */
 export function ownGpuRun(method: string, pathname: string): boolean {
   return method === "POST" && pathname === "/api/generations";
@@ -238,8 +239,10 @@ export const OWN_GPU_TOOL_MESSAGE = "This tool doesn't run on your own GPU yet. 
 /** Set on an account's refused run: the client shows "Connect your GPU to run this". */
 export const CONNECT_GPU_HEADER = "x-fuobe-connect-gpu";
 export const CONNECT_GPU_MESSAGE = "Connect your GPU to run this. Free accounts run on their own ComfyUI.";
-/** An account's upload without a GPU: its files are kept for runs on its own ComfyUI. */
+/** An account's upload with neither a GPU nor a key of its own: its files are kept for runs on its own ComfyUI or key. */
 export const CONNECT_GPU_UPLOAD_MESSAGE = "Connect your GPU to add your own files. A free account uses them on its own ComfyUI.";
+/** An account with neither its own GPU nor its own key (the proxy's answer to a run). */
+export const CONNECT_GPU_OR_KEY_MESSAGE = "Connect your GPU, or add your own fal.ai or Replicate key, to run this.";
 
 /** Install-wide settings, keys and tokens: changes are the owner's (403 for an account). */
 const OWNER_WRITES = new Set(["/api/settings", "/api/settings/models", "/api/loras", "/api/llm", "/api/providers/test", "/api/auth/public"]);

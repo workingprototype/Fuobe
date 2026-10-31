@@ -55,7 +55,10 @@ import { enhancePrompt, enhanceSoulWords, ideogramCaption } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider, PROVIDERS, RETIRED_PROVIDER_ERROR } from "./providers";
 import { comfyLoraFiles, computerScope, onOwnGpu, outputFetch, outsideOwnGpu, OWN_OUTPUT_LIMITS, ownGpu, probeComfy, relayFile, type OwnGpu } from "./providers/comfyui";
-import { accountGpu, gpuLink, type AccountGpu } from "./auth";
+import { accountById, accountGpu, gpuLink, type AccountGpu } from "./auth";
+import { accountEngineMode, accountKey, paidAllowed } from "./account-keys";
+import { addKeyMessage, isCloudProvider, keyRemovedMessage, type CloudProvider } from "@/lib/your-keys";
+import type { ProviderAdapter } from "./providers/types";
 import { CONNECT_GPU_MESSAGE, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { outsideTenant, runAsTenant, tenant, tenantAccount } from "./tenant";
 import { generationAccount } from "./account-library";
@@ -499,6 +502,9 @@ export function chooseRoute(candidates: ModelRoute[], images = 0, loras: LoraRef
     throw new Error(`This model takes up to ${short.map!.maxImages} images on ${provider(short.provider).label} — remove some${others.length ? `, or connect ${others.join(" or ")} for more` : ""}`);
   }
   if (demo === "off") {
+    // An account's paid model with no key of its own for any of the model's providers: "Add your key" (fal.ai first).
+    const cloud = tenantAccount() ? routes.map((r) => r.provider).find(isCloudProvider) : undefined;
+    if (cloud) throw new AccountRunError(paidAllowed() ? { error: addKeyMessage(cloud), code: "add-key", provider: cloud } : { error: OPEN_ONLY_RUN, code: "open-only" });
     if (routes.every((r) => r.provider === "llm")) throw new Error(llmMissing(routes[0]));
     const names = [...new Set(routes.map((r) => provider(r.provider).label))].join(" or ");
     throw new Error(`Connect ${names} in Settings to run this model`);
@@ -625,6 +631,9 @@ function prepare(original: GenerationRequest) {
   const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, mentionElements()).request, model).request, model) : worded;
   let plan = sizedMixedFrame(planGeneration(req, lookup, getPreset), req);
   if (mode !== "both" && plan.model.engine !== mode) {
+    // An account on the open engine has no key of its own that opens (Your keys), or the studio is open-source only.
+    const cloud = mode === "open" && tenantAccount() ? plan.model.routes.map((r) => r.provider).find(isCloudProvider) : undefined;
+    if (cloud) throw new AccountRunError(paidAllowed() ? { error: addKeyMessage(cloud), code: "add-key", provider: cloud } : { error: OPEN_ONLY_RUN, code: "open-only" });
     throw new Error(
       mode === "open"
         ? `${plan.model.name} is a paid cloud model, but this install is set to open source only (Settings → Engine mode)`
@@ -764,8 +773,9 @@ const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (J
 
 /**
  * Public sign-up: inside an account's run (accountRun) every request it makes, and every step its chains queue, is
- * stamped as the account's own, on the open engine. A request stamped for another account, a step that waits for
- * someone else's run, a run on an account's GPU outside its account, and a guest's run are refused.
+ * stamped as the account's own: on the open engine, or the engine it asked for while it may use paid models on its own
+ * keys (account-keys.ts accountEngineMode). A request stamped for another account, a step that waits for someone
+ * else's run, a run on an account's GPU outside its account, and a guest's run are refused.
  */
 function stampTenant(asked: GenerationRequest, opts: CreateOptions): GenerationRequest {
   if (tenant()?.kind === "guest") throw new Error(GUEST_RUN_MESSAGE);
@@ -777,7 +787,7 @@ function stampTenant(asked: GenerationRequest, opts: CreateOptions): GenerationR
   if (asked.account && asked.account !== who) throw new Error("That run belongs to another account.");
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   if (deps.some((d) => generationAccount(d) !== who)) throw new Error("An earlier step of this run isn't yours.");
-  return { ...asked, account: who, engine: "open" };
+  return { ...asked, account: who, engine: accountEngineMode(who) === "open" ? "open" : asked.engine };
 }
 
 export function createGenerations(given: GenerationRequest, opts: CreateOptions = {}): Generation[] {
@@ -1179,11 +1189,11 @@ async function advanceDependents(): Promise<void> {
     }
     submitting().add(r.id);
     let handedOff = false;
-    // An account's step reads its inputs, and is planned, as its run was: as that account, on its own ComfyUI.
-    const own = stored.account ? accountRun(stored.account, "comfyui") : undefined;
-    const asRun = <T,>(fn: () => T): T => (own && "run" in own ? own.run(fn) : fn());
+    // An account's step reads its inputs, and is planned, as its run was: as that account, on its own ComfyUI and its own
+    // keys. submit() then checks the step's own provider (its GPU, or its key for that provider).
+    const account = stored.account;
+    const asRun = <T,>(fn: () => T): T => (account ? asAccount(account, fn) : fn());
     try {
-      if (own && "error" in own) throw new Error(own.error);
       // The planned op (r.op), not request.op: a translate whose op was inferred still gets the cue list.
       const values = await asRun(() => Promise.all(outputs.map((o, i) => chainValue(pickOutput(o, slots[i]), slots[i], r.op))));
       const missing = values.findIndex((u) => !u);
@@ -1249,22 +1259,63 @@ function recordSubmission(id: string, at: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// Public sign-up: an account's runs go to its own ComfyUI ("Your GPU"), never the install's providers
+// Public sign-up: an account's runs go to its own ComfyUI ("Your GPU") or its own fal.ai or Replicate key ("Your
+// keys"), never the install's providers
 
 export const OWN_GPU_ONLY = "Free accounts run only on their own ComfyUI: pick an open-source model.";
+export const OPEN_ONLY_RUN = "This studio runs open-source models only, so paid models don't run here. Pick an open-source model.";
+export const SWITCHED_OFF_RUN = "This account is switched off, so its runs stopped.";
 
 /**
- * How an account's job reaches a provider: inside onOwnGpu (its own ComfyUI, the open engine, no demo
- * outputs), or not at all: no GPU connected, or a provider other than ComfyUI (the install's cloud
- * keys, its local LLM). An unreachable GPU fails the job; it never falls back to the install's.
+ * Everything an account's work runs inside: as the account (tenant.ts: only its own files and runs), on its own ComfyUI
+ * (none yet: an address that reaches nothing), with its own fal.ai and Replicate keys (provider-keys.ts), its engine
+ * mode, fal.ai before Replicate among the keys it has, and no demo outputs.
  */
-export function accountRun(accountId: string, providerId: string): { run: <T>(fn: () => T) => T } | { error: string } {
-  const gpu = accountGpu(accountId);
-  if (!gpu) return { error: CONNECT_GPU_MESSAGE };
-  if (providerId !== "comfyui") return { error: OWN_GPU_ONLY };
-  // As the account (tenant.ts: only its own files and runs), on its own ComfyUI, the open engine, no demo outputs.
-  const own = ownGpuOf(accountId, gpu);
-  return { run: (fn) => runAsTenant({ kind: "account", id: accountId }, () => onOwnGpu(own, () => withCandidates({ engineMode: "open", demoMode: "off" }, fn))) };
+export function asAccount<T>(id: string, fn: () => T): T {
+  const mode = accountEngineMode(id);
+  const gpu = accountGpu(id);
+  return runAsTenant({ kind: "account", id }, () =>
+    onOwnGpu(gpu ? ownGpuOf(id, gpu) : { url: "" }, () => withCandidates({ engineMode: mode, demoMode: "off", cloudProvider: "auto" }, fn)),
+  );
+}
+
+export type AccountRunRefusal = { error: string; code: "connect-gpu" | "add-key" | "own-gpu-tool" | "open-only" | "switched-off"; provider?: CloudProvider };
+
+/**
+ * How an account's job reaches a provider, inside asAccount, or not at all. ComfyUI needs its own GPU; fal.ai and
+ * Replicate need its own key for that provider. Anything else (the install's local LLM, demo outputs) is refused. A
+ * "submit" also needs a live account and a studio that isn't open-source only; a "poll" or "cancel" works for a
+ * switched-off account too, so a job going on its key finishes or stops, never runs on. An unreachable GPU or a refused
+ * key fails the job: it never falls back to the install's.
+ */
+export function accountRun(accountId: string, providerId: string, purpose: "submit" | "poll" | "cancel" = "submit"): { run: <T>(fn: () => T) => T } | AccountRunRefusal {
+  const run = <T,>(fn: () => T): T => asAccount(accountId, fn);
+  if (providerId === "comfyui") return accountGpu(accountId) ? { run } : { error: CONNECT_GPU_MESSAGE, code: "connect-gpu" };
+  if (!isCloudProvider(providerId)) return { error: OWN_GPU_ONLY, code: "own-gpu-tool" };
+  const p = providerId;
+  if (purpose === "submit") {
+    const a = accountById(accountId);
+    if (!a || a.disabled) return { error: SWITCHED_OFF_RUN, code: "switched-off" };
+    if (!paidAllowed()) return { error: OPEN_ONLY_RUN, code: "open-only" };
+  }
+  if (accountKey(accountId, p) === null) return { error: purpose === "submit" ? addKeyMessage(p) : keyRemovedMessage(p), code: "add-key", provider: p };
+  return { run };
+}
+
+/** The account's answer to "who may run this": the route turns it into a 403 the client acts on (Connect your GPU, Add your key). */
+export class AccountRunError extends Error {
+  constructor(readonly refusal: AccountRunRefusal) {
+    super(refusal.error);
+  }
+}
+
+/**
+ * The adapter for a run's provider, only inside its own account's work (none: the owner's). A run that lost its scope
+ * fails here: it never falls into the owner's keys (provider-keys.ts).
+ */
+export function adapterFor(providerId: ProviderId, account: string | undefined): ProviderAdapter {
+  if ((tenantAccount() ?? undefined) !== (account ?? undefined)) throw new Error("This run isn't in its account's scope");
+  return provider(providerId);
 }
 
 /** Where an account's ComfyUI is, as the provider takes it: a link, or the person's own computer (its tab runs the jobs). */
@@ -1323,17 +1374,21 @@ export function asVisitor<T>(gpu: AccountGpu | null, fn: () => T, accountId?: st
   );
 }
 
+/** A row whose request can't be read: whose it is is unknown, so it is never taken for the owner's (accountOf). */
+const UNREADABLE = "\u0000unreadable";
+
+/** The account a row's run is for; undefined: the owner's. A request that can't be read counts as nobody's (UNREADABLE). */
 const accountOf = (r: Pick<Row, "request_json">): string | undefined => {
   try {
     return (JSON.parse(r.request_json) as GenerationRequest).account;
   } catch {
-    return undefined;
+    return UNREADABLE;
   }
 };
 
 function submit(id: string, route: ModelRoute, providerId: ProviderId, plan: ReturnType<typeof planGeneration>, req: GenerationRequest, index: number): Promise<void> {
   if (!req.account) return submitNow(id, route, providerId, plan, req, index);
-  const own = accountRun(req.account, providerId);
+  const own = accountRun(req.account, providerId, "submit");
   if ("error" in own) {
     update(id, { status: "failed", error: own.error, completed_at: Date.now(), message: null });
     return Promise.resolve();
@@ -1349,11 +1404,12 @@ async function submitNow(
   req: GenerationRequest,
   index: number,
 ): Promise<void> {
-  const adapter = provider(providerId);
   submitting().add(id);
   /** Why the run failed, once it has: its files still waiting to be sent are not sent. */
   let failed: { error: unknown } | undefined;
   try {
+    // An account's run on its own ComfyUI and keys only (asAccount): outside it, nothing is sent.
+    const adapter = adapterFor(providerId, req.account);
     // An account's run on its own ComfyUI: every LoRA it adds must be there first (nothing is sent before this check).
     if (req.account && providerId === "comfyui") {
       const fix = await checkAccountLoras([...plan.loras, ...graphLoras(route.endpoint, plan.params.extra)], route.endpoint, route);
@@ -1614,7 +1670,12 @@ async function pollGuarded(r: Row): Promise<void> {
   polling.add(r.id);
   try {
     const account = accountOf(r);
-    const own = account ? accountRun(account, r.provider) : undefined;
+    // Whose run it is can't be read: never polled as the owner's (with the owner's keys).
+    if (account === UNREADABLE) {
+      update(r.id, { status: "failed", error: "This run's details can't be read, so it was stopped.", completed_at: Date.now(), message: null });
+      return;
+    }
+    const own = account ? accountRun(account, r.provider, "poll") : undefined;
     if (own && "error" in own) update(r.id, { status: "failed", error: own.error, completed_at: Date.now(), message: null });
     else if (own) await own.run(() => pollOne(r));
     else await pollOne(r);
@@ -1716,14 +1777,15 @@ async function pollOne(r: Row): Promise<void> {
   // Poll first: a job that finished while the server was asleep or down is collected, not timed out.
   let res: PollResult | undefined;
   let pollError: unknown;
+  const account = accountOf(r);
   try {
-    res = await provider(r.provider).poll(ctx);
+    res = await adapterFor(r.provider, account).poll(ctx);
   } catch (e) {
     pollError = e;
   }
-  // An account's job waits at most 30 minutes in its own ComfyUI's queue.
-  const account = accountOf(r);
+  // An account's job waits at most 30 minutes in its own ComfyUI's queue (or its provider's).
   const queueMs = account ? ACCOUNT_LIMITS.queueMs : QUEUE_TIMEOUT_MS;
+  const where = r.provider === "comfyui" ? "your ComfyUI" : provider(r.provider).label;
   if (!res || res.state === "queued" || res.state === "running") {
     // A job on someone's own computer reached their ComfyUI later than it was handed over (it waited for their tab): its
     // queue clock starts then.
@@ -1736,7 +1798,7 @@ async function pollOne(r: Row): Promise<void> {
     const overdue = run.started_at ? now - run.started_at > TIMEOUT_MS : !startsNow && now - run.submitted_at > queueMs;
     if (overdue) {
       // Stop the provider's job too, so it doesn't keep rendering (or billing) for nothing.
-      await provider(r.provider)
+      await adapterFor(r.provider, account)
         .cancel?.(ctx)
         .catch(() => {});
       update(r.id, {
@@ -1746,7 +1808,7 @@ async function pollOne(r: Row): Promise<void> {
           : res?.state === "queued" && res.timeoutError
             ? res.timeoutError
             : account
-            ? `Timed out waiting ${queueMs / 60_000} minutes in your ComfyUI's queue`
+              ? `Timed out waiting ${queueMs / 60_000} minutes in ${where}'s queue`
             : `Timed out waiting ${QUEUE_TIMEOUT_MS / 3_600_000} hours in the provider's queue`,
         completed_at: now,
         message: null,
@@ -1788,7 +1850,7 @@ async function pollOne(r: Row): Promise<void> {
       } catch (e) {
         if (account) {
           for (const kept of outputs) if (kept.assetId) deleteAsset(kept.assetId);
-          const why = e instanceof AccountFilesFull ? e.message : `Couldn't save a result from your ComfyUI: ${(e as Error).message}`;
+          const why = e instanceof AccountFilesFull ? e.message : `Couldn't save a result from ${where}: ${(e as Error).message}`;
           update(r.id, { status: "failed", error: why, completed_at: Date.now(), message: null });
           return;
         }
@@ -1834,7 +1896,7 @@ async function pollOne(r: Row): Promise<void> {
     status: "succeeded",
     outputs_json: JSON.stringify(outputs),
     progress: 1,
-    message: dropped ? `Kept the first ${ACCOUNT_LIMITS.outputsPerJob} results (your ComfyUI made ${ACCOUNT_LIMITS.outputsPerJob + dropped})` : null,
+    message: dropped ? `Kept the first ${ACCOUNT_LIMITS.outputsPerJob} results (${where} made ${ACCOUNT_LIMITS.outputsPerJob + dropped})` : null,
     completed_at: Date.now(),
   });
 }
@@ -2167,8 +2229,12 @@ export async function cancelGeneration(id: string): Promise<void> {
   // Without an external id the job is still being handed over: submit() cancels it as soon as it lands.
   if (r.external_id && model) {
     const account = accountOf(r);
-    const own = account ? accountRun(account, r.provider) : undefined;
-    const cancel = () => Promise.resolve(provider(r.provider).cancel?.(pollContext(r, model))).catch(() => {});
+    // An account's job is stopped with its own key, also when the account is switched off or about to be deleted.
+    const own = account ? accountRun(account, r.provider, "cancel") : undefined;
+    const cancel = () =>
+      Promise.resolve()
+        .then(() => adapterFor(r.provider, account).cancel?.(pollContext(r, model)))
+        .catch(() => {});
     if (!own) await cancel();
     else if ("run" in own) await own.run(cancel);
   }

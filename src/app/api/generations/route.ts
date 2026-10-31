@@ -1,12 +1,14 @@
 import { connection } from "next/server";
 import { CONNECT_GPU_HEADER, GUEST_RUN_MESSAGE, OWN_GPU_TOOL_MESSAGE } from "@/lib/guest-access";
 import { missingFilesMessage } from "@/lib/missing-files";
-import { accountGpu, requestViewer } from "@/server/auth";
+import { ADD_KEY_HEADER } from "@/lib/your-keys";
+import { requestViewer } from "@/server/auth";
+import { accountEngineMode } from "@/server/account-keys";
 import { OPERATION_LABELS } from "@/lib/catalog/types";
 import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "@/server/account-files";
 import { accountInputProblem } from "@/server/account-inputs";
 import { db } from "@/server/db";
-import { accountLoraFix, accountRun, asVisitor, createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
+import { accountLoraFix, accountRun, AccountRunError, asAccount, asVisitor, createGenerations, listGenerations, outputKind, previewGeneration, type AccountRunRefusal } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
 import { hit, unhit } from "@/server/rate";
 import { GenerationRequestSchema } from "@/server/request-schema";
@@ -71,15 +73,19 @@ export async function POST(request: Request) {
   // A retired model id (an older script, a saved CLI or MCP call) runs on the model that replaced it, and the notes say
   // so: previewGeneration and createGenerations move it (generations.ts currentRequest, replaced.ts).
   const asked = parsed.data as Parameters<typeof createGenerations>[0];
-  // Public sign-up: an account runs on its own ComfyUI only (the open engine), never the install's providers.
-  let req = account ? { ...asked, account: account.id, engine: "open" as const } : { ...asked, account: undefined };
-  const own = account ? accountRun(account.id, "comfyui") : undefined;
-  if (own && "error" in own && !preview) {
-    return Response.json({ error: own.error, code: "connect-gpu" }, { status: 403, headers: { [CONNECT_GPU_HEADER]: "1" } });
-  }
-  const onOwn = <T,>(fn: () => T): T => (own && "run" in own ? own.run(fn) : fn());
-  // A visitor's price check: priced as it would run, as that visitor, on its own GPU (none yet: the open engine, no demo).
-  const priced = <T,>(fn: () => T): T => (viewer.kind === "owner" ? fn() : asVisitor(account ? accountGpu(account.id) : null, fn, account?.id));
+  // Public sign-up: an account runs on its own ComfyUI or its own fal.ai or Replicate key, never the install's providers.
+  // Without a key of its own it stays on the open engine; with one, the engine it asked for.
+  let req = account ? { ...asked, account: account.id, engine: accountEngineMode(account.id) === "open" ? ("open" as const) : asked.engine } : { ...asked, account: undefined };
+  const onOwn = <T,>(fn: () => T): T => (account ? asAccount(account.id, fn) : fn());
+  // A visitor's price check: priced as it would run, as that visitor (an account: its own GPU and keys; a guest: the open
+  // engine, no demo).
+  const priced = <T,>(fn: () => T): T => (viewer.kind === "owner" ? fn() : account ? asAccount(account.id, fn) : asVisitor(null, fn));
+  /** An account's run that can't go where it was planned: Connect your GPU, Add your key (the client opens either). */
+  const refused = (r: AccountRunRefusal) => {
+    if (account) unhit(`run:${account.id}`);
+    const headers: Record<string, string> = r.code === "connect-gpu" ? { [CONNECT_GPU_HEADER]: "1" } : r.code === "add-key" && r.provider ? { [ADD_KEY_HEADER]: r.provider } : {};
+    return refuse(403, r.error, { code: r.code, ...(r.provider && { provider: r.provider }) }, headers);
+  };
   const notes: string[] = [];
   if (account && !preview) {
     // Room on the server, room in the account's files, and a fair share of runs.
@@ -111,8 +117,15 @@ export async function POST(request: Request) {
       let planned: ReturnType<typeof previewGeneration> | null = null;
       try {
         planned = onOwn(() => previewGeneration(req));
-      } catch {
-        // createGenerations says what's wrong with the request.
+      } catch (e) {
+        // A paid model the account has no key for (or a studio that is open-source only).
+        if (e instanceof AccountRunError) return refused(e.refusal);
+        // Otherwise createGenerations says what's wrong with the request.
+      }
+      if (account && planned) {
+        // Where the run goes decides what the account needs: its GPU for ComfyUI, its own key for fal.ai or Replicate.
+        const own = accountRun(account.id, planned.route.provider, "submit");
+        if ("error" in own) return refused(own);
       }
       if (planned) {
         // A 3D model from someone else's ComfyUI is finished on this server (decimate, web GLB, turntable): accounts
@@ -150,7 +163,10 @@ export async function POST(request: Request) {
     const all = [...new Set([...notes, ...items.flatMap((g) => g.notes ?? [])])];
     return Response.json({ items, ...(all.length && { notes: all }), ...(gpuWarning && { gpuWarning }) }, { status: 201 });
   } catch (e) {
-    if (account) unhit(`run:${account.id}`);
-    return Response.json({ error: (e as Error).message }, { status: 422 });
+    const refusal = e instanceof AccountRunError ? e.refusal : undefined;
+    // A price check of a paid model the account has no key for says so, without opening "Add your key".
+    if (refusal && !preview) return refused(refusal);
+    if (account && !preview) unhit(`run:${account.id}`);
+    return Response.json({ error: (e as Error).message, ...(refusal && { code: refusal.code, ...(refusal.provider && { provider: refusal.provider }) }) }, { status: 422 });
   }
 }

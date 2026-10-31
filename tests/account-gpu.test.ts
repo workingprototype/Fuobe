@@ -67,12 +67,17 @@ describe("Your GPU: where an account's runs go", () => {
     id = auth.createAccount("gpu-runs@example.com", "long enough").id;
   });
 
-  it("refuses an account without a GPU, and any provider but ComfyUI", () => {
+  it("refuses an account without a GPU, fal.ai and Replicate without its own key, and any other provider", () => {
     const none = accountRun(id, "comfyui");
     expect("error" in none && none.error).toMatch(/Connect your GPU/);
     auth.setAccountGpu(id, { url: "https://gpu.example", token: "secret" });
     expect(auth.accountGpu(id)).toEqual({ url: "https://gpu.example", token: "secret" });
-    for (const p of ["fal", "replicate", "llm", "mock"]) {
+    // fal.ai and Replicate now run on the account's own key (Your keys): without one, "Add your key", never the studio's.
+    for (const p of ["fal", "replicate"]) {
+      const r = accountRun(id, p);
+      expect("error" in r && r, p).toMatchObject({ code: "add-key", provider: p, error: expect.stringMatching(/^Add your (fal\.ai|Replicate) key/) });
+    }
+    for (const p of ["llm", "mock"]) {
       const r = accountRun(id, p);
       expect("error" in r && r.error, p).toBe(OWN_GPU_ONLY);
     }
@@ -160,7 +165,8 @@ describe("the status strip", () => {
     const a = auth.createAccount("strip@example.com", "long enough");
     auth.setAccountGpu(a.id, { url: "http://127.0.0.1:8188" });
     const acct = await visitorStatus(auth.accountById(a.id)!);
-    expect(acct.viewer).toEqual({ kind: "account", gpu: { connected: true, mode: "link", online: false } });
+    // (keys: the providers it added its own key for, none here; paidAllowed: the studio isn't open-source only.)
+    expect(acct.viewer).toEqual({ kind: "account", gpu: { connected: true, mode: "link", online: false }, keys: [], paidAllowed: true });
     expect(acct.providers.comfyui.configured).toBe(false);
     expect(JSON.stringify(acct)).not.toContain("owner-comfy.test");
   });
