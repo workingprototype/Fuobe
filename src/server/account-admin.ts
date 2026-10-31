@@ -20,7 +20,7 @@ export interface AccountStats {
   runs: number;
   runsDay: number;
   runsWeek: number;
-  /** Queued or running now. */
+  /** Runs going now (queued or running), as the account's run limit counts them: a batch or a chain is one run. */
   running: number;
   /** Failed in the last 7 days (a run the account canceled isn't counted). */
   failedWeek: number;
@@ -42,18 +42,21 @@ export interface AccountTotals {
 
 export type AccountListing = AccountInfo & AccountStats;
 
-/** Every account's runs in one pass over generations_account (a range search: only accounts' entries). */
-export const STATS_SQL = `SELECT json_extract(g.request_json, '$.account') AS account, COUNT(*) AS runs,
-  SUM(g.created_at >= @day) AS runsDay, SUM(g.created_at >= @week) AS runsWeek,
-  SUM(g.status IN ('queued', 'running')) AS running, SUM(g.status = 'failed' AND g.created_at >= @week) AS failedWeek,
-  MAX(g.created_at) AS lastRunAt
-  FROM generations g WHERE json_extract(g.request_json, '$.account') > '' AND NOT ${HELPER_SQL}
-  GROUP BY json_extract(g.request_json, '$.account')`;
+/**
+ * Every account's runs in one pass over generations_account (a range search: only accounts' entries). Helper steps
+ * count only in `running`, which counts as POST /api/generations does (activeRuns): one per batch or chain.
+ */
+export const STATS_SQL = `SELECT account, SUM(NOT step) AS runs, SUM(NOT step AND created_at >= @day) AS runsDay,
+  SUM(NOT step AND created_at >= @week) AS runsWeek, COUNT(DISTINCT CASE WHEN status IN ('queued', 'running') THEN COALESCE(batch_id, id) END) AS running,
+  SUM(NOT step AND status = 'failed' AND created_at >= @week) AS failedWeek, MAX(CASE WHEN NOT step THEN created_at END) AS lastRunAt
+  FROM (SELECT json_extract(g.request_json, '$.account') AS account, ${HELPER_SQL} AS step, g.id, g.batch_id, g.status, g.created_at
+    FROM generations g WHERE json_extract(g.request_json, '$.account') > '')
+  GROUP BY account`;
 
 /** What each account's files weigh (what accountUsage counts), over assets_account. */
 export const SPACE_SQL = "SELECT account_id AS account, SUM(size) AS bytes FROM assets WHERE account_id > '' GROUP BY account_id";
 
-type StatsRow = { account: string; runs: number; runsDay: number; runsWeek: number; running: number; failedWeek: number; lastRunAt: number };
+type StatsRow = { account: string; runs: number; runsDay: number; runsWeek: number; running: number; failedWeek: number; lastRunAt: number | null };
 
 /** Each account with its numbers, and the totals over every account's runs and files on this server. */
 export function accountsWithStats(items: AccountInfo[] = listAccounts(), now = Date.now()): { items: AccountListing[]; totals: AccountTotals } {
@@ -73,7 +76,7 @@ export function accountsWithStats(items: AccountInfo[] = listAccounts(), now = D
         runsWeek: Number(r?.runsWeek ?? 0),
         running: Number(r?.running ?? 0),
         failedWeek: Number(r?.failedWeek ?? 0),
-        lastRunAt: r ? Number(r.lastRunAt) : null,
+        lastRunAt: r?.lastRunAt != null ? Number(r.lastRunAt) : null,
         bytes: bytesOf.get(a.id) ?? 0,
         capBytes: accountTotalBytes(a.id, a.createdAt),
       };

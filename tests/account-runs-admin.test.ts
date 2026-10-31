@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type { AccountListing, AccountRun, AccountTotals } from "@/server/account-admin";
+import type { ListOptions } from "@/server/generations";
 import { TINY_PNG } from "./helpers/fake-comfy-runner";
 
 // Route handlers are called directly, outside a Next request: connection() has nothing to wait for.
@@ -44,16 +45,27 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
 let seq = 0;
-/** A run as the runner stores it: `account`'s (or the owner's), made `ago` ms before now (or `at`). */
-function run(account?: string, o: { status?: string; kind?: string; feature?: string; ago?: number; at?: number; error?: string } = {}): string {
+/** A run as the runner stores it: `account`'s (or the owner's), made `ago` ms before now (or `at`), in `batch` when given. */
+function run(account?: string, o: { status?: string; kind?: string; feature?: string; ago?: number; at?: number; error?: string; batch?: string } = {}): string {
   const id = `run-${String(++seq).padStart(4, "0")}`;
   const at = o.at ?? Date.now() - (o.ago ?? 0);
   const feature = o.feature ?? "image";
   db()
     .prepare(
-      "INSERT INTO generations (id, feature, model_id, engine, provider, op, kind, status, request_json, outputs_json, error, created_at, updated_at) VALUES (?, ?, 'm', 'open', 'comfyui', ?, ?, ?, ?, '[]', ?, ?, ?)",
+      "INSERT INTO generations (id, batch_id, feature, model_id, engine, provider, op, kind, status, request_json, outputs_json, error, created_at, updated_at) VALUES (?, ?, ?, 'm', 'open', 'comfyui', ?, ?, ?, ?, '[]', ?, ?, ?)",
     )
-    .run(id, feature, o.kind === "video" ? "t2v" : "t2i", o.kind ?? "image", o.status ?? "succeeded", JSON.stringify({ feature, modelId: "m", prompt: "a fox", ...(account && { account }) }), o.error ?? null, at, at);
+    .run(
+      id,
+      o.batch ?? null,
+      feature,
+      o.kind === "video" ? "t2v" : "t2i",
+      o.kind ?? "image",
+      o.status ?? "succeeded",
+      JSON.stringify({ feature, modelId: "m", prompt: "a fox", ...(account && { account }) }),
+      o.error ?? null,
+      at,
+      at,
+    );
   return id;
 }
 
@@ -187,11 +199,21 @@ describe("Settings → Accounts: what accounts make", () => {
   it("reads its numbers and lists through the indexes", () => {
     expect(plan(admin.STATS_SQL, { day: 0, week: 0 })).toMatch(/SEARCH g USING INDEX generations_account/);
     expect(plan(admin.SPACE_SQL)).toMatch(/USING INDEX assets_account/);
-    // One account's: a search of its entries. Every account's: newest first along generations_created until the page is
-    // full (the limit is bound, so SQLite plans for any size), or a search of the accounts' entries when it reckons that cheaper.
+    // One account's: a search of its entries. Every account's: a search of the accounts' entries too, whatever the
+    // filters. Along generations_created or generations_status it would read the owner's runs as well, until the page
+    // is full: all of them when accounts' runs are few, or none match (3D: accounts can't make it).
     expect(listPlan(() => admin.listAccountRuns({ account: A, before: Date.now(), beforeId: "x" }))).toMatch(/SEARCH g USING INDEX generations_account/);
-    expect(listPlan(() => admin.listAccountRuns({ accounts: true }))).toMatch(/^(SEARCH|SCAN) g USING INDEX generations_(account|created)\b/);
-    expect(listPlan(() => admin.listAccountRuns({ accounts: true, statuses: ["failed"] }))).toMatch(/^SEARCH g USING INDEX generations_(status|account)\b/);
+    const filters: ListOptions[] = [{}, { statuses: ["succeeded"] }, { statuses: ["queued", "running"] }, { kind: "model3d" }, { statuses: ["failed"], kind: "audio" }, { before: Date.now(), beforeId: "x" }];
+    for (const o of filters) expect(listPlan(() => admin.listAccountRuns({ accounts: true, ...o })), JSON.stringify(o)).toMatch(/^SEARCH g USING INDEX generations_account\b/);
+    // db.ts goes on without the index when it can't make it: the list still answers, the slow way.
+    const every = admin.listAccountRuns({ accounts: true, limit: 100 }).items.map((g) => g.id);
+    db().exec("DROP INDEX generations_account");
+    try {
+      expect(admin.listAccountRuns({ accounts: true, limit: 100 }).items.map((g) => g.id)).toEqual(every);
+    } finally {
+      db().exec("CREATE INDEX IF NOT EXISTS generations_account ON generations(json_extract(request_json, '$.account'), created_at DESC)");
+    }
+    expect(every.length).toBeGreaterThan(0);
   });
 
   it("pages newest first, and no run is skipped or repeated", async () => {
@@ -347,5 +369,28 @@ describe("Settings → Accounts: what accounts make", () => {
     expect(storageSize(2 ** 30)).toBe("1 GB");
     expect(storageSize(1.25 * 2 ** 30)).toBe("1.3 GB");
     expect(storageSize(3 * 2 ** 30)).toBe("3 GB");
+  });
+
+  // Synchronous: the runner (started above) can't fail these queued runs before they are counted.
+  it("counts a batch or a chain going as one run, as the account's run limit does", () => {
+    const D = auth.createAccount("dee@example.com", "long enough").id;
+    const E = auth.createAccount("eve@example.com", "long enough").id;
+    // Four pictures in one batch; a film whose four shots (chain steps) and join share a batch; a chain whose only job
+    // going is a step; and a run of its own.
+    for (let i = 0; i < 4; i++) run(D, { status: i ? "queued" : "running", batch: "pictures", ago: 10 * 60_000 });
+    for (let i = 0; i < 4; i++) run(D, { feature: "video-step", kind: "video", status: i ? "queued" : "running", batch: "film", ago: 5 * 60_000 });
+    const join = run(D, { feature: "video", kind: "video", status: "queued", batch: "film", ago: 5 * 60_000 });
+    run(D, { feature: "upscale-step", status: "running", batch: "chain" });
+    run(D, { status: "failed", error: "Out of memory", ago: HOUR });
+    // Only a helper step: no run to show, and no last run.
+    run(E, { feature: "upscale-step", ago: HOUR });
+
+    const going = (db().prepare("SELECT COUNT(DISTINCT COALESCE(batch_id, id)) AS n FROM generations WHERE status IN ('queued', 'running') AND json_extract(request_json, '$.account') = ?").get(D) as { n: number }).n;
+    const { items } = admin.accountsWithStats();
+    const of = (id: string) => items.find((a) => a.id === id)!;
+    expect(going).toBe(3);
+    expect(of(D)).toMatchObject({ runs: 6, runsDay: 6, runsWeek: 6, running: going, failedWeek: 1 });
+    expect(of(D).lastRunAt).toBe(gens.getGeneration(join)!.createdAt);
+    expect(of(E)).toMatchObject({ runs: 0, running: 0, lastRunAt: null });
   });
 });

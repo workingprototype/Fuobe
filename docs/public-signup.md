@@ -73,24 +73,31 @@ An account is signed in, but it sees the owner's studio as a guest does:
   owner can see them, open their files and delete them ([Managing accounts](#managing-accounts));
   the sign-up form says so. An account's delete is for good (it has no Trash), so its space comes
   back at once. The live-updates stream isn't sent to accounts: their studios poll instead.
-- **Its own uploads are its own.** Only the account that uploaded a file can open it or use it in a
-  run. See [Uploads](#uploads).
+- **Its own uploads are its own.** Only the account that uploaded a file can use it in a run, and
+  no other account can open it. The studio's owner can open it too: a clip made from an uploaded
+  picture shows that picture as its poster in the owner's view of accounts' runs. The sign-up form
+  says the owner sees what an account uploads and makes. See [Uploads](#uploads).
 
 ## Managing accounts
 
-The owner sees everyone who signed up in **Settings → Accounts**: email, when the account was
-created, its last log-in, whether its own GPU is connected, its runs (all time, in the last 7 days,
-running now, failed in the last 7 days), when it last ran, and the space its files take against its
-limit (1 GB in its first 7 days, then 3 GB). A line above the list gives the runs of every account
-in the last 24 hours and 7 days, the runs going now, and the space all accounts' files take against
-their share of the disk. The owner can switch an account off (it is signed out at once and can't
-log in) or delete it, and export the list as CSV.
+The owner sees everyone who signed up in **Settings → Accounts**, the last section of Settings (the
+**Accounts** chip at the top of Settings and the link under Public sign-up lead there): email,
+whether its own GPU is connected, its runs (all time, in the last 7 days, running now, failed in the
+last 7 days), when it last ran, and the space its files take against its limit (1 GB in its first 7
+days, then 3 GB). On wide screens the list also shows when the account was created and its last
+log-in (the CSV always has them). Running now counts as the run limit does: a batch or a chain
+going is one run. A line above the list gives the runs of every account in the last 24 hours and 7
+days, the runs going now, and the space all accounts' files take against their share of the disk.
+The owner can switch an account off (it is signed out at once and can't log in) or delete it, and
+export the list as CSV.
 
 **Accounts' runs** (`/settings/runs`, from the list) shows what accounts made, newest first: one
 account's or every account's, each labelled with its email, filtered by account, status (finished,
-running, failed) and kind. Each run shows its result (a clip plays on hover or a tap), the app,
-preset or studio and the model, the prompt, its status with the error of a failed run, and when it
-ran. The owner can delete a run with its files, which gives the account its space back at once, or
+running, failed) and kind. The filters are in the address (`?account=<id>&status=failed&kind=video`),
+so a reload or a shared link keeps them. Each run shows its result (a clip plays on hover, a tap, or
+Enter; the count on a run with several files steps through them, and its menu opens each one), the
+app, preset or studio and the model, the prompt, its status with the error of a failed run, and when
+it ran. The owner can delete a run with its files, which gives the account its space back at once, or
 switch the account off from there. The owner's own runs are never listed there, and accounts' runs
 never appear in the owner's Library, its counts or the live feed.
 

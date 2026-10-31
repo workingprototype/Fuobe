@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Images, Loader2, Trash2, UserX, UserCheck } from "lucide-react";
 import Link from "next/link";
+import { useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useViewer } from "@/lib/api";
@@ -88,13 +89,61 @@ export function OffBadge({ className }: { className?: string }) {
   return <span className={cn("rounded-sm bg-muted px-1 py-0.5 text-[10px] font-normal text-muted-foreground", className)}>off</span>;
 }
 
-const runsHref = (id: string) => `/settings/runs?account=${encodeURIComponent(id)}`;
+/** The runs page for one account (else every account's), with its status and kind filters ("all" and unset are left out). */
+export function runsHref({ account, status, kind }: { account?: string; status?: string; kind?: string } = {}): string {
+  const q = new URLSearchParams();
+  if (account) q.set("account", account);
+  if (status && status !== "all") q.set("status", status);
+  if (kind && kind !== "all") q.set("kind", kind);
+  const s = q.toString();
+  return s ? `/settings/runs?${s}` : "/settings/runs";
+}
+
+/** Settings' strip (the owner, once someone has signed up): how many, and the way down to Accounts, the last section. */
+export function AccountsChip() {
+  const owner = useViewer().data?.owner;
+  const q = useAdminAccounts(!!owner);
+  if (!q.data?.total) return null;
+  return (
+    <a href="#accounts" className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] whitespace-nowrap transition-colors hover:bg-accent">
+      <span className="text-muted-foreground">Accounts</span>
+      <span className="font-medium">{q.data.total}</span>
+      {q.data.totals.running > 0 && <span className="text-muted-foreground">· {q.data.totals.running} running</span>}
+    </a>
+  );
+}
+
+const OWNER_MOVES = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+
+/**
+ * /settings#accounts (the runs page's "← Settings", a bookmark) arrives before this list and the sections
+ * above it have loaded, so the browser finds no anchor, or one that moves down as they grow: go to it once the list is
+ * here, and stay on it while the page above grows, until the owner scrolls or 10 seconds pass.
+ */
+function useAccountsAnchor(ready: boolean) {
+  useEffect(() => {
+    if (!ready || window.location.hash !== "#accounts") return;
+    const go = () => document.getElementById("accounts")?.scrollIntoView({ block: "start" });
+    const ro = new ResizeObserver(go);
+    const stop = () => {
+      ro.disconnect();
+      clearTimeout(timer);
+      for (const e of OWNER_MOVES) window.removeEventListener(e, stop);
+    };
+    const timer = setTimeout(stop, 10_000);
+    go();
+    ro.observe(document.body);
+    for (const e of OWNER_MOVES) window.addEventListener(e, stop, { passive: true });
+    return stop;
+  }, [ready]);
+}
 
 /** Settings → Accounts (the owner only): who signed up (public sign-up), what each made and the space it takes, with switch-off, delete and a CSV export. */
 export function AccountsAdmin() {
   const owner = useViewer().data?.owner;
   const q = useAdminAccounts(!!owner);
   const act = useAdminAction();
+  useAccountsAnchor(!!q.data);
   if (!owner || (!q.data && !q.isError)) return null;
   const total = q.data?.total ?? 0;
   return (
@@ -155,26 +204,27 @@ export function AccountsAdmin() {
                     <th className="px-3 py-2 font-medium">Last run</th>
                     <th className="px-3 py-2 font-medium">Space</th>
                     <th className="px-3 py-2 font-medium">GPU</th>
-                    <th className="px-3 py-2 font-medium max-sm:hidden">Created</th>
-                    <th className="px-3 py-2 font-medium max-sm:hidden">Last login</th>
-                    <th className="px-3 py-2" />
+                    <th className="px-3 py-2 font-medium max-2xl:hidden">Created</th>
+                    <th className="px-3 py-2 font-medium max-2xl:hidden">Last login</th>
+                    {/* The actions stay in view when the table is wider than its box (a long email, a phone); what's under them fades out. */}
+                    <th className="sticky right-0 bg-background bg-linear-to-r from-muted/50 to-muted/50 px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {q.data.items.map((a) => (
                     <tr key={a.id} className={a.disabled ? "text-muted-foreground" : undefined}>
-                      <td className="max-w-56 truncate px-3 py-2 font-medium">
+                      <td className="max-w-40 truncate px-3 py-2 font-medium 2xl:max-w-56" title={a.email}>
                         {a.email}
                         {a.disabled && <OffBadge className="ml-1.5" />}
                       </td>
                       <td className="px-3 py-2">
-                        <Link href={runsHref(a.id)} className="font-medium tabular-nums underline-offset-2 hover:underline">
+                        <Link href={runsHref({ account: a.id })} className="font-medium tabular-nums underline-offset-2 hover:underline">
                           {a.runs}
                         </Link>
-                        <div className="text-[11px] whitespace-nowrap text-muted-foreground">
-                          {a.runsWeek} in 7 days
-                          {a.failedWeek > 0 && <span className="text-destructive"> · {a.failedWeek} failed</span>}
-                          {a.running > 0 && ` · ${a.running} running`}
+                        <div className="text-[11px] text-muted-foreground">
+                          <span className="whitespace-nowrap">{a.runsWeek} in 7 days</span>
+                          {a.failedWeek > 0 && <span className="whitespace-nowrap text-destructive"> · {a.failedWeek} failed</span>}
+                          {a.running > 0 && <span className="whitespace-nowrap"> · {a.running} running</span>}
                         </div>
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">{a.lastRunAt ? timeAgo(a.lastRunAt) : "—"}</td>
@@ -182,11 +232,11 @@ export function AccountsAdmin() {
                         {storageSize(a.bytes)} of {storageSize(a.capBytes)}
                       </td>
                       <td className="px-3 py-2">{a.gpu ? "Connected" : "—"}</td>
-                      <td className="px-3 py-2 whitespace-nowrap max-sm:hidden">{timeAgo(a.createdAt)}</td>
-                      <td className="px-3 py-2 whitespace-nowrap max-sm:hidden">{a.lastLoginAt ? timeAgo(a.lastLoginAt) : "—"}</td>
-                      <td className="px-2 py-1 text-right whitespace-nowrap">
+                      <td className="px-3 py-2 whitespace-nowrap max-2xl:hidden">{timeAgo(a.createdAt)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap max-2xl:hidden">{a.lastLoginAt ? timeAgo(a.lastLoginAt) : "—"}</td>
+                      <td className="sticky right-0 bg-background px-2 py-1 text-right whitespace-nowrap before:pointer-events-none before:absolute before:inset-y-0 before:right-full before:w-4 before:bg-linear-to-l before:from-background">
                         <Button asChild size="icon" variant="ghost" className="size-7 text-muted-foreground">
-                          <Link href={runsHref(a.id)} aria-label={`Runs by ${a.email}`} title="Runs">
+                          <Link href={runsHref({ account: a.id })} aria-label={`Runs by ${a.email}`} title="Runs">
                             <Images className="size-3.5" />
                           </Link>
                         </Button>

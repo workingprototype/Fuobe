@@ -301,7 +301,11 @@ function PublicSignup() {
         Guests can browse every page read-only (not your library), and anyone can sign up with an email and a password. Accounts never use your cloud keys or GPU, and
         can&apos;t change settings, keys or tokens.
         {p.fromEnv !== null && " Set by FUOBE_PUBLIC_SIGNUP on the server."}
-        {p.active && !(p.fromEnv ?? p.setting) && " On for this address (fuobe.com)."}
+        {p.active && !(p.fromEnv ?? p.setting) && " On for this address (fuobe.com)."}{" "}
+        <a href="#accounts" className="text-brand-text underline underline-offset-2">
+          See who signed up and what they make
+        </a>
+        .
       </p>
     </div>
   );

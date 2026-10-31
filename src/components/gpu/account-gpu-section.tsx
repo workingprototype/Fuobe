@@ -16,7 +16,7 @@ export function AccountGpuSection() {
           Your GPU
         </h2>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          Signed in as {account.email}. Connect your own ComfyUI to run open-source models. The studio&apos;s owner can see what you make here.
+          Signed in as {account.email}. Connect your own ComfyUI to run open-source models. The studio&apos;s owner can see what you upload and make here.
         </p>
         <Button
           size="sm"
