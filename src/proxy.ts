@@ -155,16 +155,18 @@ function priceCheck(request: NextRequest, who: string): NextResponse {
 
 /**
  * A guest (public sign-up on, signed out): every page and the catalog reads, the owner's lists
- * empty, the rest of the library 401, and every change 401 (the client offers to sign up).
+ * empty, the rest of the library 401, and every change 401 (the client offers to sign up), but
+ * Assist's: signing up wouldn't let it use Assist, so it gets the account's answer (assistOwner).
  */
 function guest(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
   if (request.method === "GET" || request.method === "HEAD") return readAsGuest(request, false);
   if (isPriceCheck(request.method, pathname, search)) return priceCheck(request, `guest:${LoginGuard.clientKey(request.headers)}`);
+  if (isAssistChange(request.method, pathname)) return assistOwner();
   return NextResponse.json({ error: GUEST_RUN_MESSAGE }, { status: 401, headers: guestHeaders });
 }
 
-/** Any change to Assist by an account: one answer, which the Assist pages also show (a GPU doesn't change it). */
+/** Any change to Assist by a visitor (a guest, or an account with or without a GPU): one answer, which the Assist pages also show. */
 const assistOwner = () => NextResponse.json({ error: ASSIST_OWNER_MESSAGE, code: "assist-owner" }, { status: 403, headers: { "Cache-Control": "no-store" } });
 
 /**

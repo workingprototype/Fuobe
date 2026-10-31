@@ -106,7 +106,7 @@ describe("Assist is the owner's", () => {
     ["POST", "/api/assist/schedules"],
   ];
 
-  it("gives an account, with or without its own GPU, one answer to every change", async () => {
+  it("gives a guest and an account, with or without its own GPU, one answer to every change", async () => {
     for (const cookie of [account, gpuAccount]) {
       for (const [method, p] of changes) {
         const r = proxy(req(p, { method, cookie }));
@@ -117,11 +117,12 @@ describe("Assist is the owner's", () => {
         expect(await r.json(), who).toEqual({ error: access.ASSIST_OWNER_MESSAGE, code: "assist-owner" });
       }
     }
-    // A guest's change is a 401, as everywhere (the client offers to sign up).
+    // A guest gets the same answer, not the 401 that offers to sign up: an account couldn't use Assist either.
     for (const [method, p] of changes) {
       const r = proxy(req(p, { method }));
-      expect(r.status, `${method} ${p}`).toBe(401);
-      expect(r.headers.get(access.GUEST_HEADER)).toBe("1");
+      expect(r.status, `${method} ${p}`).toBe(403);
+      expect(r.headers.get(access.GUEST_HEADER), `${method} ${p}`).toBeNull();
+      expect(await r.json(), `${method} ${p}`).toEqual({ error: access.ASSIST_OWNER_MESSAGE, code: "assist-owner" });
     }
   });
 

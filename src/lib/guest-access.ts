@@ -212,7 +212,8 @@ export function isAssistChange(method: string, pathname: string): boolean {
 /**
  * Assist plans with the install's own AI helpers and keeps the owner's chats, memory and projects, so an account gets
  * this one answer to any change there (code "assist-owner"; price checks still go through), with or without its own
- * GPU. A guest's change is a 401, as everywhere. The Assist pages say the same to both (src/components/assist/visitor-note.tsx).
+ * GPU. A guest gets it too, not the 401 that offers to sign up: an account couldn't use Assist either. The Assist
+ * pages say the same to both (src/components/assist/visitor-note.tsx).
  */
 export const ASSIST_OWNER_MESSAGE = "Assist runs on the studio owner's AI, so only the owner can use it here. Fuobe is open source: run it yourself for your own chats, skills, memory and schedules.";
 

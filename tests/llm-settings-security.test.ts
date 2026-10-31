@@ -132,7 +132,8 @@ describe("only the owner", () => {
       ["POST", "/api/assist"],
     ]) {
       expect(proxy(req(p, m, account)).status, `account ${m} ${p}`).toBe(403);
-      expect(proxy(req(p, m)).status, `guest ${m} ${p}`).toBe(401);
+      // A guest is offered to sign up (401), but not for Assist: an account can't use it either (403, as an account's).
+      expect(proxy(req(p, m)).status, `guest ${m} ${p}`).toBe(p === "/api/assist" ? 403 : 401);
     }
     const owner = auth.createSession().value;
     expect(proxy(req("/api/llm", "GET", owner)).headers.get("x-middleware-next")).toBe("1");
