@@ -30,6 +30,7 @@ import { markRefusalShown, responseError } from "./refusals";
 import { postFile } from "./upload";
 import type { ShareCreated, ShareInfo, ShareListItem, SharePatch, ShareRequest } from "./share";
 import type { AccessSummary } from "./model-access";
+import { ADD_KEY_HEADER, isCloudProvider, type CloudProvider } from "./your-keys";
 
 export interface Asset {
   id: string;
@@ -837,9 +838,15 @@ export interface StatusInfo {
   access?: AccessSummary;
   /**
    * Public sign-up: a guest or an account is looking. Then everything else here is its own view
-   * (its own GPU as ComfyUI, the open engine, no Demo mode), never the install's (src/server/account-gpu.ts).
+   * (its own GPU as ComfyUI, its own fal.ai and Replicate keys, no Demo mode), never the install's
+   * (src/server/account-gpu.ts). `keys`: the providers it has its own key for (src/lib/your-keys.ts).
    */
-  viewer?: { kind: "guest" | "account"; gpu: { connected: boolean; mode?: "computer" | "link"; online?: boolean; comfy?: "down" | "no-setting"; device?: string; vramBytes?: number } };
+  viewer?: {
+    kind: "guest" | "account";
+    gpu: { connected: boolean; mode?: "computer" | "link"; online?: boolean; comfy?: "down" | "no-setting"; device?: string; vramBytes?: number };
+    keys?: CloudProvider[];
+    paidAllowed?: boolean;
+  };
 }
 
 /** A connection test's answer (POST /api/providers/test). */
@@ -999,6 +1006,14 @@ export function useEngine(): [Engine, (e: Engine) => void, EngineMode] {
   return [mode === "both" ? engine : mode, set, mode];
 }
 
+/** Remember the engine the studios start on, before the mode allows it (an account that just added its own key: Cloud). */
+export function preferEngine(e: Engine): void {
+  try {
+    localStorage.setItem(ENGINE_KEY, e);
+  } catch {}
+  listeners.forEach((l) => l());
+}
+
 // ---------------------------------------------------------------------------
 // Assist
 
@@ -1152,6 +1167,8 @@ export const CONNECT_GPU_EVENT = "fuobe:connect-gpu";
 export const COMPUTER_KICK_EVENT = "fuobe:computer-kick";
 /** The guided fix (src/components/gpu/guided-fix.tsx): { ref, plan? }. */
 export const GPU_SETUP_EVENT = "fuobe:gpu-setup";
+/** "Add your key" (src/components/keys/your-keys.tsx): { provider, modelId? }. */
+export const ADD_KEY_EVENT = "fuobe:add-key";
 
 /** A card GuestPrompt shows for a refusal: "Create a free account" (coming back to `here` after) or "Connect your GPU". */
 export type RefusalCard = { kind: "guest"; here: string } | { kind: "gpu" };
@@ -1193,6 +1210,12 @@ export function watchGuestRefusals(): void {
     // A run started here, on the ComfyUI on this computer: the tab that runs it asks for it at once.
     if (res.status === 201 && (init?.method ?? "").toUpperCase() === "POST" && new URL(input instanceof Request ? input.url : String(input), window.location.href).pathname === "/api/generations") {
       window.dispatchEvent(new Event(COMPUTER_KICK_EVENT));
+    }
+    // An account's paid run without its own key for that provider (x-fuobe-add-key: fal | replicate): "Add your key".
+    const addKey = res.status === 403 ? res.headers.get(ADD_KEY_HEADER) : null;
+    if (isCloudProvider(addKey) && refusalCard("gpu", window.location)) {
+      markRefusalShown(res);
+      window.dispatchEvent(new CustomEvent(ADD_KEY_EVENT, { detail: { provider: addKey } }));
     }
     // A run the GPU pre-flight stopped (something missing on the viewer's ComfyUI): the guided fix opens with its plan.
     if (res.status === 409 && res.headers.get("x-fuobe-gpu-setup") === "1") {

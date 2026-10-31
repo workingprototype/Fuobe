@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { GuestPrompt } from "@/components/guest-prompt";
+import { AddKeyPrompt } from "@/components/keys/your-keys";
 import { AUTH_CHANNEL } from "@/lib/api";
 
 /** The GPU pre-flight's guided fix: loaded after the page, listening for "fuobe:gpu-setup". */
@@ -42,6 +43,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           {children}
           <Toaster position="top-center" gap={8} offset={29} />
           <GuestPrompt />
+          <AddKeyPrompt />
           <GuidedFixHost />
           <ComputerRunnerHost />
         </TooltipProvider>

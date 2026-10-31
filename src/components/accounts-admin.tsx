@@ -19,6 +19,8 @@ export interface AccountRow {
   lastLoginAt: number | null;
   disabled: boolean;
   gpu: boolean;
+  /** The providers it added its own key for (Your keys): never a key. */
+  keys?: ("fal" | "replicate")[];
   /** Runs: all time, the last 24 hours and 7 days, going now, failed in the last 7 days. */
   runs: number;
   runsDay: number;
@@ -159,7 +161,8 @@ export function AccountsAdmin() {
               {total} {total === 1 ? "person has" : "people have"} signed up (Settings → Security → Public sign-up).{" "}
             </>
           )}
-          Accounts never see your library or use your keys and GPU. What they make stays out of your library: see it here.
+          Accounts never see your library or use your keys and GPU: they run on their own GPU or their own fal.ai or Replicate key. What they make stays out of your
+          library: see it here.
         </p>
       </div>
       {!q.data ? (
@@ -205,6 +208,7 @@ export function AccountsAdmin() {
                     <th className="px-3 py-2 font-medium">Last run</th>
                     <th className="px-3 py-2 font-medium">Space</th>
                     <th className="px-3 py-2 font-medium">GPU</th>
+                    <th className="px-3 py-2 font-medium">Keys</th>
                     <th className="px-3 py-2 font-medium max-2xl:hidden">Created</th>
                     <th className="px-3 py-2 font-medium max-2xl:hidden">Last login</th>
                     {/* The actions stay in view when the table is wider than its box (a long email, a phone); what's under them fades out. */}
@@ -233,6 +237,9 @@ export function AccountsAdmin() {
                         {storageSize(a.bytes)} of {storageSize(a.capBytes)}
                       </td>
                       <td className="px-3 py-2">{a.gpu ? "Connected" : "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap" title="Runs paid models on its own key. Fuobe never shows the key.">
+                        {a.keys?.length ? a.keys.map((k) => (k === "fal" ? "fal.ai" : "Replicate")).join(", ") : "None"}
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap max-2xl:hidden">{timeAgo(a.createdAt)}</td>
                       <td className="px-3 py-2 whitespace-nowrap max-2xl:hidden">{a.lastLoginAt ? timeAgo(a.lastLoginAt) : "—"}</td>
                       <td className="sticky right-0 bg-background px-2 py-1 text-right whitespace-nowrap before:pointer-events-none before:absolute before:inset-y-0 before:right-full before:w-4 before:bg-linear-to-l before:from-background">

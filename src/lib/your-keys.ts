@@ -52,3 +52,68 @@ export const keyRemovedMessage = (p: CloudProvider) => `Your ${CLOUD_KEY[p].labe
 /** The owner (or anyone not signed in as an account) on /api/account/keys. */
 export const NOT_ACCOUNT_KEYS = "Your keys are for accounts. The studio's own keys are in Settings → Paid API configuration.";
 export const OPEN_ONLY_MESSAGE = "This studio runs open-source models only right now, so your keys aren't used.";
+
+// ---------------------------------------------------------------------------
+// What the studios say to an account about its keys (pure: tests/your-keys-ui.test.ts)
+
+/** The part of /api/status these read (StatusInfo in src/lib/api.ts). */
+export interface KeyStatus {
+  viewer?: { kind: "guest" | "account"; gpu?: { connected: boolean }; keys?: CloudProvider[]; paidAllowed?: boolean };
+}
+type Routed = { engine: string; routes: { provider: string }[] };
+
+const viewerKeys = (s: KeyStatus | undefined): CloudProvider[] | null => (s?.viewer?.kind === "account" ? (s.viewer.keys ?? []) : null);
+
+/**
+ * A paid model an account can't run yet: the providers that serve it (fal.ai first), any of whose keys would do. Null
+ * for the owner and guests, an open model, or a paid model the account has a key for.
+ */
+export function needsKey(m: Routed | undefined, s: KeyStatus | undefined): CloudProvider[] | null {
+  const keys = viewerKeys(s);
+  if (!m || !keys || m.engine === "open") return null;
+  const served = CLOUD_PROVIDERS.filter((p) => m.routes.some((r) => r.provider === p));
+  return served.length && !served.some((p) => keys.includes(p)) ? served : null;
+}
+
+/** The provider an account's run of a paid model is billed through: the first that serves it and has its key. */
+export function paidThrough(m: Routed | undefined, s: KeyStatus | undefined): CloudProvider | null {
+  const keys = viewerKeys(s);
+  if (!m || !keys || m.engine === "open") return null;
+  return CLOUD_PROVIDERS.find((p) => keys.includes(p) && m.routes.some((r) => r.provider === p)) ?? null;
+}
+
+/** "Add your fal.ai key": the words on a paid model an account can't run yet. */
+export const addKeyLabel = (p: CloudProvider) => `Add your ${CLOUD_KEY[p].label} key`;
+
+/** "your fal.ai account": who pays for an account's paid run. */
+export const billedTo = (p: CloudProvider) => `your ${CLOUD_KEY[p].label} account`;
+
+/** "fal.ai and Replicate" */
+const names = (ps: readonly CloudProvider[]) => ps.map((p) => CLOUD_KEY[p].label).join(" and ");
+
+/**
+ * The engine switch for an account: locked on open source (and why, and where to change that), or the words for its two
+ * sides. Null for the owner and guests (the switch follows Settings → Engine mode).
+ */
+export function accountEngine(s: KeyStatus | undefined): { locked: { text: string; tip: string; href: string } } | { tips: { cloud: string; open: string } } | null {
+  const v = s?.viewer;
+  if (v?.kind !== "account") return null;
+  if (v.paidAllowed === false) return { locked: { text: "Open source only", tip: "This studio runs open-source models only.", href: "/settings#your-gpu" } };
+  const keys = v.keys ?? [];
+  if (!keys.length) {
+    return { locked: { text: "Open source only", tip: "Your runs use your own GPU. Add a fal.ai or Replicate key in Settings → Your keys to use paid models.", href: "/settings#your-keys" } };
+  }
+  return {
+    tips: {
+      cloud: `Paid models, billed to your ${names(keys)} ${keys.length > 1 ? "accounts" : "account"}`,
+      open: v.gpu?.connected ? "Open models on your own GPU" : "Open models on your own GPU. Connect it first",
+    },
+  };
+}
+
+/** The first model of a list an account can run (the studio's default when it can): where a studio starts it. */
+export function startingModel<M extends Routed & { id: string }>(defaultId: string | undefined, models: readonly M[], s: KeyStatus | undefined): string | undefined {
+  const own = models.find((m) => m.id === defaultId);
+  if (!own || !needsKey(own, s)) return defaultId;
+  return models.find((m) => m.engine === own.engine && !needsKey(m, s))?.id ?? defaultId;
+}

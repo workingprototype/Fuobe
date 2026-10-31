@@ -4,7 +4,8 @@ import { Cloud, Cpu, Lock } from "lucide-react";
 import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Engine } from "@/lib/catalog/types";
-import { useEngineMode, useViewer } from "@/lib/api";
+import { useEngineMode, useStatus, useViewer } from "@/lib/api";
+import { accountEngine } from "@/lib/your-keys";
 import { cn } from "@/lib/utils";
 import { radioKeys, radioTab } from "./radio-keys";
 
@@ -32,10 +33,13 @@ export function EngineSwitch({
   const mode = useEngineMode();
   // Only the owner can change the engine mode (Settings): anyone else gets a plain badge, not a link to a page they can't use.
   const owner = useViewer().data?.owner === true;
+  // An account (public sign-up): locked on open source until it adds its own key, and why; with one, who pays.
+  const account = accountEngine(useStatus().data);
+  const locked = account && "locked" in account ? account.locked : null;
   const idx = OPTIONS.findIndex((o) => o.value === value);
-  if (mode !== "both") {
-    const o = OPTIONS.find((x) => x.value === mode)!;
-    const text = mode === "open" ? "Open source only" : "Cloud only";
+  if (mode !== "both" || locked) {
+    const o = OPTIONS.find((x) => x.value === (locked ? "open" : mode))!;
+    const text = locked?.text ?? (mode === "open" ? "Open source only" : "Cloud only");
     const cls = cn(
       "inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors",
       size === "sm" ? "h-8" : "h-8 sm:h-9",
@@ -46,6 +50,20 @@ export function EngineSwitch({
         <span className={cn(compact && "hidden sm:inline")}>{text}</span>
       </>
     );
+    // An account opens Your keys (or Your GPU) from here: the way to paid models is its own key.
+    if (locked) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Link href={locked.href} aria-label={`${text}. ${locked.tip}`} className={cn(cls, "hover:text-foreground")}>
+              {body}
+              <Lock className="size-3 opacity-60" />
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-72">{locked.tip}</TooltipContent>
+        </Tooltip>
+      );
+    }
     return owner ? (
       <Tooltip>
         <TooltipTrigger asChild>
@@ -103,7 +121,7 @@ export function EngineSwitch({
           <TooltipContent>
             {/* One span: the tooltip lays its children out in a row. */}
             <span>
-              <span className="font-medium">{o.label}</span> · {o.tip}
+              <span className="font-medium">{o.label}</span> · {account && "tips" in account ? account.tips[o.value] : o.tip}
             </span>
           </TooltipContent>
         </Tooltip>

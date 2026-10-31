@@ -9,7 +9,8 @@ import type { FindReason } from "@/components/gpu/computer-runner";
 import { takeGpuRetry } from "@/hooks/use-gpu";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CONNECT_GPU_EVENT, GUEST_PROMPT_EVENT, refusalCard, signInHref, watchGuestRefusals, type RefusalCard } from "@/lib/api";
+import { CONNECT_GPU_EVENT, GUEST_PROMPT_EVENT, refusalCard, signInHref, useStatus, watchGuestRefusals, type RefusalCard } from "@/lib/api";
+import { CLOUD_KEY } from "@/lib/your-keys";
 
 /**
  * The cards a public studio shows when something is refused (watchGuestRefusals): "Create a free
@@ -31,6 +32,7 @@ export function GuestPrompt() {
     setOpen(false);
     setRetry(null);
   }, []);
+  const viewer = useStatus().data?.viewer;
   useEffect(() => {
     watchGuestRefusals();
     const show = (kind: RefusalCard["kind"]) => {
@@ -70,6 +72,22 @@ export function GuestPrompt() {
                 </div>
                 <DialogTitle>{TITLES[reason ?? "run"]}</DialogTitle>
                 <DialogDescription>Fuobe runs this on the ComfyUI on your computer. It&apos;s free and private.</DialogDescription>
+                {/* Paid models run on the account's own key instead (Your keys), when the studio allows them. */}
+                {viewer?.kind === "account" && viewer.paidAllowed !== false && (
+                  <p className="text-[13px] text-muted-foreground">
+                    {viewer.keys?.length ? (
+                      `Or switch to Cloud to use your ${viewer.keys.map((k) => CLOUD_KEY[k].label).join(" or ")} key.`
+                    ) : (
+                      <>
+                        Or{" "}
+                        <Link href="/settings#your-keys" onClick={close} className="text-brand-text underline underline-offset-4">
+                          add your own fal.ai or Replicate key
+                        </Link>{" "}
+                        to use paid models.
+                      </>
+                    )}
+                  </p>
+                )}
               </DialogHeader>
               <ConnectChoice
                 fromRun={!!retry}

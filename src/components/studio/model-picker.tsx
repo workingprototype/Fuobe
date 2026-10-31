@@ -2,7 +2,8 @@
 
 import { ChevronDown, Cloud, Cpu, SearchX, Server, Star } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { KEY_ADDED_EVENT, openAddKey } from "@/components/keys/your-keys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -16,6 +17,7 @@ import { useEngineMode, useStatus } from "@/lib/api";
 import { groupModels, studioBest, toggleIn } from "@/lib/composer";
 import { ISOLATED_NOTE, pickerPrice } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
+import { addKeyLabel, billedTo, CLOUD_KEY, needsKey, type CloudProvider } from "@/lib/your-keys";
 import { EngineSwitch } from "./engine-switch";
 import { ResponsivePanel } from "./responsive-panel";
 import { RECENT_MODELS, STARRED_MODELS, useStoredList } from "./stored-list";
@@ -80,6 +82,7 @@ function ModelRow({
   onStar,
   gpu,
   gpuName,
+  needs,
 }: {
   m: ModelDef;
   selected: boolean;
@@ -91,11 +94,13 @@ function ModelRow({
   /** Its state on the viewer's GPU (the GPU pre-flight). */
   gpu?: BadgeT | null;
   gpuName?: string;
+  /** An account's paid model it has no key for yet: dimmed, "Add your fal.ai key" in place of the price. */
+  needs?: CloudProvider[] | null;
 }) {
   return (
     <>
       <VendorMark vendor={m.vendor} engine={m.engine} />
-      <span className="min-w-0 flex-1">
+      <span className={cn("min-w-0 flex-1", needs && "opacity-60")}>
         <span className="flex items-center gap-1.5">
           <span className={cn("truncate text-[13px] font-medium", selected && "text-brand-text")}>
             {m.name}
@@ -120,7 +125,11 @@ function ModelRow({
           </span>
         )}
       </span>
-      <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{pickerPrice(m, today)}</span>
+      {needs ? (
+        <span className="shrink-0 text-right text-[11px] font-medium text-brand-text">{addKeyLabel(needs[0])}</span>
+      ) : (
+        <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{pickerPrice(m, today)}</span>
+      )}
       {/* Pointer only: inside an option it would be a nested control. Keyboard: Alt+S on the highlighted row (starKey). */}
       <button
         type="button"
@@ -162,7 +171,19 @@ interface PickerProps {
  */
 export function ModelPicker(props: PickerProps) {
   const [open, setOpen] = useState(false);
-  const { value } = props;
+  const { value, models, onChange } = props;
+  // The model a dimmed row was chosen for: picked once its key is saved (by this picker only).
+  const waiting = useRef<string | null>(null);
+  useEffect(() => {
+    const added = (e: Event) => {
+      const id = (e as CustomEvent<{ modelId?: string }>).detail?.modelId;
+      const m = id && id === waiting.current ? models.find((x) => x.id === id) : undefined;
+      waiting.current = null;
+      if (m) onChange(m);
+    };
+    window.addEventListener(KEY_ADDED_EVENT, added);
+    return () => window.removeEventListener(KEY_ADDED_EVENT, added);
+  }, [models, onChange]);
   return (
     <ResponsivePanel
       open={open}
@@ -178,13 +199,31 @@ export function ModelPicker(props: PickerProps) {
         </Button>
       }
     >
-      <PickerList {...props} onPicked={() => setOpen(false)} />
+      <PickerList
+        {...props}
+        onPicked={() => setOpen(false)}
+        onNeedsKey={(m, p) => {
+          waiting.current = m.id;
+          setOpen(false);
+          openAddKey(p, m.id);
+        }}
+      />
     </ResponsivePanel>
   );
 }
 
 /** The searchable list (mounted by the popover / sheet only while it shows). */
-function PickerList({ models, value, onChange, engine, onEngineChange, defaultModels, ops, onPicked }: PickerProps & { onPicked: () => void }) {
+function PickerList({
+  models,
+  value,
+  onChange,
+  engine,
+  onEngineChange,
+  defaultModels,
+  ops,
+  onPicked,
+  onNeedsKey,
+}: PickerProps & { onPicked: () => void; onNeedsKey?: (m: ModelDef, p: CloudProvider) => void }) {
   const [q, setQ] = useState("");
   const status = useStatus().data;
   const badges = useGpuBadges().data;
@@ -203,7 +242,12 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
   const otherEngine = engine === "cloud" ? "open" : "cloud";
   const noneForEngine = !q && !models.some((m) => m.engine === engine);
 
+  // An account (public sign-up): paid models it has no key for are dimmed; choosing one asks for the key first.
+  const keys = status?.viewer?.kind === "account" ? (status.viewer.keys ?? []) : null;
+  const payer = keys?.length && engine === "cloud" ? keys : null;
   const pick = (m: ModelDef) => {
+    const needs = needsKey(m, status);
+    if (needs && onNeedsKey) return onNeedsKey(m, needs[0]);
     onChange(m);
     onPicked();
   };
@@ -218,7 +262,19 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
       </div>
       <div className="flex items-baseline gap-x-2 px-3 pb-1.5 leading-snug text-[11px] text-muted-foreground sm:px-3.5">
         <span className="shrink-0 whitespace-nowrap tabular-nums">{q ? `${count} result${count === 1 ? "" : "s"}` : `${count} ${engine === "open" ? "open-source" : "cloud"} model${count === 1 ? "" : "s"}`}</span>
-        {demo && (
+        {keys && engine === "cloud" && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="min-w-0">
+              {payer ? `Paid models are billed to ${payer.length > 1 ? "your fal.ai and Replicate accounts" : billedTo(payer[0])}` : "Add a fal.ai or Replicate key to run paid models"}
+              {" · "}
+              <Link href="/settings#your-keys" className="text-brand-text underline underline-offset-2">
+                {payer ? "Your keys" : "Add a key"}
+              </Link>
+            </span>
+          </>
+        )}
+        {demo && !keys && (
           <>
             <span aria-hidden>·</span>
             <span className="min-w-0">
@@ -242,6 +298,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
                 value={`${g.id}:${m.id}`}
                 onSelect={() => pick(m)}
                 data-checked={value?.id === m.id}
+                aria-label={needsKey(m, status) ? `${m.name} needs your ${CLOUD_KEY[needsKey(m, status)![0]].label} key` : undefined}
                 className={cn("gap-2.5 rounded-lg px-2 py-1.5 [&>svg:last-child]:hidden", value?.id === m.id && "bg-brand-faint data-selected:bg-brand-faint-hover")}
               >
                 <ModelRow
@@ -253,6 +310,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
                   onStar={() => setStarred((s) => toggleIn(s, m.id))}
                   gpu={m.engine === "open" ? badgeFor(badges, { modelId: m.id }) : null}
                   gpuName={badges?.gpu}
+                  needs={needsKey(m, status)}
                 />
               </CommandItem>
             ))}

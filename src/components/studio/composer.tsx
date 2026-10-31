@@ -68,6 +68,7 @@ import {
 } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { toastError } from "@/lib/refusals";
+import { addKeyLabel, billedTo, CLOUD_KEY, needsKey, paidThrough, startingModel } from "@/lib/your-keys";
 import { cn } from "@/lib/utils";
 import { badgeFor, badgeText, openGpuSetup, setGpuRetry, useGpuBadges } from "@/hooks/use-gpu";
 import { AttachMenu } from "./attach-menu";
@@ -364,6 +365,16 @@ export function Composer({ docked }: { docked: boolean }) {
     toast(`${offModel.name} is turned off in Settings → Models & licences, so this uses ${m.name}`, { id: "model-access" });
   }, [offModel, fallback, lockedModel, catalog, setDraft]);
 
+  // An account (Your keys) starts on a paid model it can run: the studio's untouched default when it has that key, else
+  // the first of the list it can run. Quietly: nothing it picked changed (a model it picked is never swapped).
+  const keyStart =
+    model && model.id === config.defaultModels[engine] && needsKey(model, status) ? startingModel(model.id, models.filter((m) => m.engine === engine && catalog.offered(m.id, engine)), status) : undefined;
+  useEffect(() => {
+    const m = keyStart && model && keyStart !== model.id && !lockedModel ? catalog.getModel(keyStart) : undefined;
+    if (!m || !model) return;
+    setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
+  }, [keyStart, model, lockedModel, catalog, setDraft]);
+
   // A camera motion or effect runs on its Original on this engine (Fuobe DoP): picking one moves the composer there,
   // with the move's own settings (Focus Change: 6 s, silent). Another video model can be picked after it; it takes
   // the move's words. A move whose cloud route is a partner model's words leaves the person's model as it is.
@@ -633,6 +644,10 @@ export function Composer({ docked }: { docked: boolean }) {
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
   // On the open engine every run is free on the GPU: said even before the run can be planned (no voice sample, no clip yet).
   const costText = costLabel({ demo, cost: cost ?? (engine === "open" && model ? 0 : null), unknown: loraPriceUnknown }, formatCost);
+  // An account's paid run is billed to its own provider account (Your keys), or still needs that key.
+  const payer = paidThrough(model, status);
+  const missingKey = needsKey(model, status)?.[0];
+  const payerText = payer && cost ? ` · ${billedTo(payer)}` : missingKey ? ` · ${addKeyLabel(missingKey).toLowerCase()}` : "";
 
   // Attachments: only when something is attached, a required slot is still empty, or none of a "one of these" group is filled (U8).
   const kinds = [...attach.kinds];
@@ -1106,17 +1121,24 @@ export function Composer({ docked }: { docked: boolean }) {
             <TooltipTrigger asChild>
               <span className="shrink-0 text-[12px] font-medium text-muted-foreground tabular-nums">
                 <span className="sm:hidden">{costLabel({ demo, cost, compact: true, unknown: loraPriceUnknown }, formatCost)}</span>
-                <span className="hidden sm:inline">{costText}</span>
+                <span className="hidden sm:inline">
+                  {costText}
+                  {payerText}
+                </span>
               </span>
             </TooltipTrigger>
-            <TooltipContent>
+            <TooltipContent className="max-w-72">
               {demo
                 ? "Demo mode: no key connected for this model, so outputs are free placeholders"
                 : cost === 0
                   ? "Runs on your own GPU"
-                  : cost === null
-                    ? "The provider publishes no price for this model with LoRAs yet: it bills your key at its own rate"
-                    : "Estimated cost, billed by the provider to your key"}
+                  : missingKey
+                    ? `Runs on ${CLOUD_KEY[missingKey].label}, billed to your own ${CLOUD_KEY[missingKey].label} account. Add your key in Settings → Your keys.`
+                    : cost === null
+                      ? "The provider publishes no price for this model with LoRAs yet: it bills your key at its own rate"
+                      : payer
+                        ? `Estimated cost, billed to ${billedTo(payer)}. ${CLOUD_KEY[payer].label}'s bill is the final word.`
+                        : "Estimated cost, billed by the provider to your key"}
             </TooltipContent>
           </Tooltip>
         )}
