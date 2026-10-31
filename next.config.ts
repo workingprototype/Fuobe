@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
   // `pnpm typecheck` still checks every change before it's pushed; local builds keep the check.
   typescript: { ignoreBuildErrors: process.env.FUOBE_SKIP_BUILD_TYPECHECK === "1" },
   experimental: {
+    // A deploy can set FUOBE_BUILD_CPUS (e.g. 1) to build with fewer workers: each one loads the whole server bundle, and
+    // on a small server three of them pushed the build past its memory cap until it crawled.
+    ...(Number(process.env.FUOBE_BUILD_CPUS) > 0 && { cpus: Number(process.env.FUOBE_BUILD_CPUS) }),
     // The sign-in proxy holds every request body it sees in memory, up to this size, even one it refuses: a small limit
     // keeps many open requests from filling the server's memory. The routes that take a file in a form (uploads, a Soul
     // finish, a Layers render, a skill, an Assist source, an explainer document) and Split soundtrack's mix export (16 MB
