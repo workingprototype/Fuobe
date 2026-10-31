@@ -12,6 +12,7 @@ import { uploadFile } from "@/lib/api";
 import { insertSlash, pickSlash, slashQuery, slashSkills, type SkillSummary } from "@/lib/assist";
 import type { MediaKind } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { SkillIcon } from "./skill-icon";
 
@@ -103,7 +104,7 @@ export function AssistComposer({
           setTimeout(() => release(blob), 1500);
         })
         .catch((e) => {
-          toast.error((e as Error).message);
+          toastError(e);
           setFiles((xs) => xs.filter((x) => x.id !== id));
           release(blob);
         });

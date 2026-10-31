@@ -13,6 +13,7 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { uploadFile } from "@/lib/api";
 import { clipExtension, clipNeedsPreview, clipProblem, jobState, MODE_LABELS, pageClip, secondsLabel, SWAP_STUDIO, type GenSummary, type StudioEstimate, type SwapClip, type SwapProject, type SwapShot } from "@/lib/catalog/swap-studio";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { decisionsHref, useAddClip, usePrepareClip, useSwapEdit, useSwapEstimate, useSwapProject, type EditInput } from "./hooks";
 import { GenChip, JobError, Note, priceText, SavedText } from "./parts";
 import { AnchorsStage } from "./stage-anchors";
@@ -261,7 +262,7 @@ function CharacterPanel({ project, edit }: { project: SwapProject; edit: StagePr
       const a = await uploadFile(file);
       await edit({ type: "character", image: a.url });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }

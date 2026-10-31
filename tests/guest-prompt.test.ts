@@ -9,7 +9,7 @@ vi.mock("sonner", () => ({ toast: Object.assign(() => {}, { error: (m: string) =
 import { fileToSlot, type SlotValue } from "@/components/studio/media-slot";
 import { assetUsage, CONNECT_GPU_EVENT, enhance, GUEST_PROMPT_EVENT, refusalCard, signInHref, watchGuestRefusals } from "@/lib/api";
 import { CONNECT_GPU_HEADER, CONNECT_GPU_MESSAGE, GUEST_HEADER, GUEST_LIBRARY_MESSAGE, GUEST_RUN_MESSAGE } from "@/lib/guest-access";
-import { refusalShown } from "@/lib/refusals";
+import { refusalShown, toastError } from "@/lib/refusals";
 
 const answer = (status: number, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
@@ -97,6 +97,17 @@ describe("a guest's refused run", () => {
     expect(refusalShown(new Error("Request failed (500)"))).toBe(false);
     expect(refusalShown(null)).toBe(false);
     expect(refusalShown("text")).toBe(false);
+  });
+
+  it("a studio's error toast stays quiet for it, and says any other failure", async () => {
+    page("/storyboard");
+    server = () => guestRefusal();
+    toastError(await enhance("a red coat", "image", "t2i").catch((err: unknown) => err));
+    expect(events).toEqual([GUEST_PROMPT_EVENT]);
+    expect(toasts.error).toEqual([]);
+    toastError(new Error("Couldn't start the film"));
+    toastError(new Error(""), "Upload failed");
+    expect(toasts.error).toEqual(["Couldn't start the film", "Upload failed"]);
   });
 });
 

@@ -19,6 +19,7 @@ import { uploadFile, useHydrated } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import type { LayerProject } from "@/lib/layers";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { loadImage, sizeOf } from "./render";
 import { useLayerActions, useLayerProjects } from "./use-layers";
 
@@ -85,7 +86,7 @@ function useOpenImage(onLeft?: () => void) {
         const asset = await uploadFile(file);
         await open(asset.url, { name: file.name.replace(/\.[^.]+$/, "").slice(0, 80) });
       } catch (e) {
-        toast.error((e as Error).message);
+        toastError(e);
         setBusy(null);
       }
     },

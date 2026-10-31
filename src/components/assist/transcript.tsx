@@ -11,6 +11,7 @@ import { memoryCardLine, planRunnable, type AssistItem, type AssistThread, type 
 import type { Generation } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { PlanJobs } from "./plan-jobs";
 import { SkillIcon } from "./skill-icon";
 
@@ -173,7 +174,7 @@ export function GenerationCards({ ids, all, storyboard, onOpen }: { ids: string[
       });
     }
     if (g.status === "failed" || g.status === "canceled") {
-      return [<FailedTile key={g.id} g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />];
+      return [<FailedTile key={g.id} g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toastError(e) })} />];
     }
     return Array.from({ length: Math.max(1, g.request.params?.numOutputs ?? 1) }, (_, i) => <PendingTile key={`${g.id}-${i}`} g={g} ratio={ratio} />);
   });

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { uploadFile } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import type { SlotValue } from "./media-slot";
 
 /** Decode any recording the browser made and re-encode it as 16-bit mono WAV — every voice API takes WAV. */
@@ -77,7 +78,7 @@ export function VoiceRecorder({ onRecorded, max = 60, className }: { onRecorded:
         const asset = await uploadFile(file);
         onRecorded({ ref: asset.url, preview: asset.url, kind: "audio", name: "Recording" });
       } catch (e) {
-        toast.error((e as Error).message || "Couldn't save the recording");
+        toastError(e, "Couldn't save the recording");
       } finally {
         setState("idle");
       }

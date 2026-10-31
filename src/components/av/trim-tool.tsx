@@ -11,6 +11,7 @@ import { useCreateGeneration, useEngine, useGenerations } from "@/lib/api";
 import { formatCueTime, parseCueTime } from "@/lib/av/cue-edit";
 import { probeBlob, probeUrl } from "@/lib/media-probe";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { MediaDrop } from "./media-drop";
 import { useDraft } from "./use-draft";
 import { Panel, ToolHero, ToolShell } from "./tool-shell";
@@ -80,7 +81,7 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
         params: { startTime: Math.round(range.startTime * 100) / 100, endTime: Math.round(range.endTime * 100) / 100 },
         title: `Trim · ${formatCueTime(range.startTime)}–${formatCueTime(range.endTime)}`,
       },
-      { onSuccess: () => toast.success("Trimming"), onError: (e) => toast.error((e as Error).message) },
+      { onSuccess: () => toast.success("Trimming"), onError: (e) => toastError(e) },
     );
   };
   const typed = !!unread && unread.length == null;

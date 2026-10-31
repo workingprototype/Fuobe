@@ -12,6 +12,7 @@ import { LibraryGrid } from "@/components/studio/media-slot";
 import { uploadFile, useEngine, useStatus } from "@/lib/api";
 import type { RGB } from "@/lib/catalog/palettes";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useMoodboardActions } from "./hooks";
 import { loadImage, pixelsOf, renderCollages } from "./images";
 import { colorFeature, COPY, imageProblem, moodboardError, MOODBOARD_LIMITS, representativeOrder, suggestMoodboardName, type Moodboard } from "./logic";
@@ -93,7 +94,7 @@ export function CreateMoodboardDialog({ open, onOpenChange, onCreated }: { open:
     } catch (e) {
       keys.current.delete(src.key);
       setItems((xs) => xs.filter((x) => x.id !== id));
-      toast.error((e as Error).message || "Upload failed");
+      toastError(e, "Upload failed");
     }
   };
   const addFiles = (files: Iterable<File>) => {

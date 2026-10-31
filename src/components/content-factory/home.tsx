@@ -30,6 +30,7 @@ import {
 } from "@/lib/catalog/content-factory";
 import { GENRES, type EpisodeAspect, type FacelessGenre, type NarratorVoice, type PickerData } from "@/lib/catalog/faceless";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { ApiError, discardDraft, useCreateSeries, useGenerateSeries, useRereadSeries, useSeries, useSeriesEstimate, useSeriesList, useUpdateSeries, type SeriesAsk } from "./hooks";
 import { BriefCard, ClaudeDialog, PresetGrid, ReferenceCard, SeriesPriceLine } from "./parts";
 
@@ -163,7 +164,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
       const asset = await uploadFile(f);
       await startSeries({ kind: "upload", url: asset.url, title: f.name });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setUploading(false);
     }

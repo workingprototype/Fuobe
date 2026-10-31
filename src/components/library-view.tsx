@@ -46,6 +46,7 @@ import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, toggleAll,
 import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { isExpired } from "@/lib/share";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 
 type TabId = "all" | "images" | "videos" | "audio" | "text" | "3d" | "favorites" | "uploads" | "shared" | "trash";
 
@@ -356,7 +357,7 @@ function Inner() {
         const { selected } = latest.current;
         return list.every((id) => selected.has(id)) ? [...selected] : list;
       },
-      retry: (g) => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) }),
+      retry: (g) => create.mutate(g.request, { onError: (e) => toastError(e) }),
       runner: { onOpen: (g, index) => setOpen({ id: g.id, index }) },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
