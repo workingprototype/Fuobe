@@ -44,7 +44,8 @@ const APP_IDS = new Set(APPS.map((a) => a.id));
 function pass(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const app = /^\/apps\/([^/]+)\/?$/.exec(pathname)?.[1];
-  if ((app && !APP_IDS.has(safeDecode(app))) || unknownHubMode(pathname)) return notFound(request);
+  if (app && !APP_IDS.has(safeDecode(app))) return notFound(request, { href: "/apps", label: "Browse apps" });
+  if (unknownHubMode(pathname)) return notFound(request);
   const record = recordForPath(pathname);
   if (record && !recordExists(record)) return notFound(request);
   return NextResponse.next();
@@ -55,29 +56,37 @@ function pass(request: NextRequest): NextResponse {
  * proxy's request address from its own name for the server ("localhost") and the forwarded protocol, and the address
  * it routes by from the host it listens on (`next start -H 127.0.0.1`): when they differ, a rewrite to the app's own
  * 404 page goes out as a request to another server, which fails over HTTPS and answered 500. Plain HTTP (a local
- * install) keeps the rewrite to the app's own pages.
+ * install) keeps the rewrite to the app's own pages. It wears the studio's colours and type (Inter and Instrument
+ * Serif where installed, else the same fallbacks the app uses), with a way back: the section's own page (an unknown app:
+ * the apps), then Home.
  */
-function plain404(title: string, text: string, home: boolean): NextResponse {
+type PageLink = { href: string; label: string };
+function plain404(title: string, text: string, links: PageLink[]): NextResponse {
+  const nav = links.map((l, i) => `<a href="${l.href}"${i < links.length - 1 ? ' class="alt"' : ""}>${l.label}</a>`).join("");
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title} · Fuobe</title><style>
-:root{color-scheme:light dark;--bg:#fafafa;--fg:#111113;--muted:#6b6b73;--btn:#111113;--btn-fg:#fafafa}
-@media (prefers-color-scheme:dark){:root{--bg:#0b0b0c;--fg:#ededef;--muted:#9a9aa2;--btn:#ededef;--btn-fg:#0b0b0c}}
-body{margin:0;min-height:100svh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center}
-main{max-width:460px;padding:24px 16px 10vh}h1{margin:0;font-size:30px;line-height:1.2;font-weight:600;text-wrap:balance}
-p{margin:10px 0 0;color:var(--muted);text-wrap:pretty}a{display:inline-block;margin-top:22px;padding:9px 16px;border-radius:10px;background:var(--btn);color:var(--btn-fg);text-decoration:none;font-weight:500}
-</style></head><body><main><h1>${title}</h1><p>${text}</p>${home ? '<a href="/">Back to Home</a>' : ""}</main></body></html>`;
+:root{color-scheme:light dark;--bg:#ffffff;--fg:#1e1e1f;--muted:#6e6e71;--line:#e4e4e7;--btn:#5d4bdb;--btn-fg:#ffffff}
+@media (prefers-color-scheme:dark){:root{--bg:#121213;--fg:#fafafb;--muted:#a9a9ab;--line:#2e2e31;--btn:#6a5ee7;--btn-fg:#ffffff}}
+body{margin:0;min-height:100svh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;text-align:center}
+main{max-width:460px;padding:24px 16px 10vh}.brand{margin-bottom:18px;font:22px/1 "Instrument Serif",ui-serif,Georgia,serif}
+h1{margin:0;font:400 40px/1.15 "Instrument Serif",ui-serif,Georgia,serif;text-wrap:balance}p{margin:10px 0 0;color:var(--muted);text-wrap:pretty}
+nav{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:22px}nav a{padding:9px 16px;border-radius:999px;background:var(--btn);color:var(--btn-fg);text-decoration:none;font-weight:500}
+nav a.alt{background:transparent;color:var(--fg);box-shadow:inset 0 0 0 1px var(--line)}
+</style></head><body><main><div class="brand">Fuobe</div><h1>${title}</h1><p>${text}</p>${nav && `<nav>${nav}</nav>`}</main></body></html>`;
   return new NextResponse(html, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
 const behindHttps = (request: NextRequest) => request.nextUrl.protocol === "https:";
 
-const notFound = (request: NextRequest) =>
+const HOME: PageLink = { href: "/", label: "Back to Home" };
+
+const notFound = (request: NextRequest, section?: PageLink) =>
   behindHttps(request)
-    ? plain404("Nothing here", "The page you’re looking for moved, or never existed. Everything you made is still in your library.", true)
+    ? plain404("Nothing here", "The page you’re looking for moved, or never existed.", section ? [section, HOME] : [HOME])
     : NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
 
 const shareGone = (request: NextRequest) =>
   behindHttps(request)
-    ? plain404("This link isn’t available", "It may have expired or been turned off, or what it shared was removed. Ask the person who sent it for a new link.", false)
+    ? plain404("This link isn’t available", "It may have expired or been turned off, or what it shared was removed. Ask the person who sent it for a new link.", [])
     : NextResponse.rewrite(new URL("/s/gone", request.url), { status: 404 });
 
 /** Share pages and their files: never indexed, and the token never leaks to another site in a Referer. */
@@ -138,7 +147,8 @@ function readAsGuest(request: NextRequest, isAccount: boolean): NextResponse {
     return NextResponse.next({ request: { headers } });
   }
   if (read.kind === "empty") return NextResponse.json(read.body, { headers: guestHeaders });
-  if (read.kind === "none") return NextResponse.json({ error: "Not for guests" }, { status: 404, headers: guestHeaders });
+  // No content, not a 404: the browser logs no error, and the client looks again in 5 minutes (streamResponse).
+  if (read.kind === "none") return new NextResponse(null, { status: 204, headers: guestHeaders });
   if (isAccount) return NextResponse.json({ error: ACCOUNT_LIBRARY_MESSAGE }, { status: 403, headers: { "Cache-Control": "no-store" } });
   return NextResponse.json({ error: GUEST_LIBRARY_MESSAGE }, { status: 401, headers: guestHeaders });
 }

@@ -12,7 +12,7 @@ import { HeaderPill } from "@/components/gpu/readiness-chip";
 import { badgeFor, openGpuSetup, useGpuBadges } from "@/hooks/use-gpu";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
-import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
+import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutStart, withPreset } from "@/lib/composer";
 import { positionsFrom } from "@/lib/catalog/keyframes";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
 import { currentModelId, migrateRequest } from "@/lib/catalog/replaced";
@@ -26,7 +26,7 @@ import { Composer } from "./composer";
 import { EngineSwitch } from "./engine-switch";
 import { Feed } from "./feed";
 import type { SlotValue } from "./media-slot";
-import { StartRequestCtx, StudioProvider, useStudio, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
+import { PresetUrlCtx, StartRequestCtx, StudioProvider, usePresetUrl, useStudio, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
 
 function kindOfUrl(url: string): MediaKind {
   if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video";
@@ -196,6 +196,7 @@ const PresetHeader = dynamic(() => import("@/components/preset-header").then((m)
 function ActivePresetHeader() {
   const { config, draft, setDraft } = useStudio();
   const catalog = useCatalog();
+  const presetUrl = usePresetUrl();
   const preset = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
   if (!preset) return null;
   return (
@@ -203,7 +204,14 @@ function ActivePresetHeader() {
       preset={preset}
       className="mb-3"
       modelName={(id) => catalog.getModel(id)?.name}
-      onClear={config.preset ? undefined : () => setDraft({ presetId: undefined, mix: undefined, presetStrength: undefined })}
+      onClear={
+        config.preset
+          ? undefined
+          : () => {
+              presetUrl(undefined);
+              setDraft({ presetId: undefined, mix: undefined, presetStrength: undefined });
+            }
+      }
     />
   );
 }
@@ -328,7 +336,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
             <Feed items={items} onReuse={reuse} />
           </div>
         ) : (
-          <div className="flex flex-col items-center pt-[16vh] text-center">
+          <div className="flex flex-col items-center pt-6 text-center sm:pt-[16vh]">
             <h2 className="font-heading text-display text-balance">{config.hero}</h2>
             {config.subtitle && <p className="mt-2 max-w-xl text-[13px] text-muted-foreground">{config.subtitle}</p>}
             {config.related && (
@@ -346,7 +354,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
         className={cn(
           hasItems
             ? "sticky bottom-0 z-20 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pt-8 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6"
-            : "px-3 pt-10 sm:px-6",
+            : "px-3 pt-6 sm:px-6 sm:pt-10",
         )}
       >
           {hasItems && offscreen.count > 0 && (
@@ -429,6 +437,7 @@ function HandoffSync({
   build,
   adopt,
   follow,
+  ownRef,
   ready,
   onNavigate,
   onStart,
@@ -439,6 +448,8 @@ function HandoffSync({
   adopt: React.RefObject<(key: string) => void>;
   /** The base after the composer's own engine swap (followEngineDefault). */
   follow: React.RefObject<(base: Draft, current: Draft) => Draft>;
+  /** Set here: takes an address the studio wrote itself (a picked or cleared preset) as applied, so it isn't a navigation. */
+  ownRef: React.RefObject<(key: string) => void>;
   ready: boolean;
   onNavigate: (key: string) => void;
   onStart: () => void;
@@ -447,6 +458,9 @@ function HandoffSync({
   const [url, setUrl] = useState<{ key: string; start: string | null } | null>(null);
   const applied = useRef({ key: startKey, ready, base: start, seen: false });
   const started = useRef(false);
+  useLayoutEffect(() => {
+    ownRef.current = (key) => void (applied.current.key = key);
+  }, [ownRef]);
   const onParams = useCallback((key: string, start: string | null) => setUrl((u) => (u?.key === key && u.start === start ? u : { key, start })), []);
   useLayoutEffect(() => {
     if (url === null) return;
@@ -526,11 +540,22 @@ function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: Draft
     setStart((s) => ({ key, epoch: s.epoch + 1 }));
     adoptRef.current(key);
   }, []);
+  // The picked camera motion or effect goes into the address (a reload or a shared link opens on it). HandoffSync
+  // takes that address as applied first: it isn't a hand-off, so the draft isn't rebuilt.
+  const ownRef = useRef<(key: string) => void>(() => {});
+  const presetUrl = useCallback((id: string | undefined) => {
+    const href = withPreset(window.location.href, id);
+    if (href === window.location.href) return;
+    ownRef.current(handoffKey(new URL(href).searchParams));
+    window.history.replaceState(null, "", href);
+  }, []);
   return (
     <ComposerBridgeCtx.Provider value={bridge}>
-      <StudioProvider key={start.epoch} config={config} initial={initial}>
-        <StudioSession header={header} tabs={tabs} sync={{ startKey: start.key, start: initial, build: buildRef, adopt: adoptRef, follow: followRef, ready: catalog.ready, onNavigate }} />
-      </StudioProvider>
+      <PresetUrlCtx.Provider value={presetUrl}>
+        <StudioProvider key={start.epoch} config={config} initial={initial}>
+          <StudioSession header={header} tabs={tabs} sync={{ startKey: start.key, start: initial, build: buildRef, adopt: adoptRef, follow: followRef, ownRef, ready: catalog.ready, onNavigate }} />
+        </StudioProvider>
+      </PresetUrlCtx.Provider>
     </ComposerBridgeCtx.Provider>
   );
 }

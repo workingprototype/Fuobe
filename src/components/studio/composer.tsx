@@ -83,7 +83,7 @@ import { SettingsChip } from "./settings-panel";
 import { ShotsEditor } from "./shots-editor";
 import { SketchTools } from "./sketch-tools";
 import { RECENT_MODELS, useStoredList } from "./stored-list";
-import { useStartRequest, useStudio, type Draft } from "./studio-context";
+import { usePresetUrl, useStartRequest, useStudio, type Draft } from "./studio-context";
 import { useEdgeFade } from "./use-edge-fade";
 import { useSignature } from "../palettes/use-signature";
 
@@ -213,6 +213,7 @@ function slotButton(root: HTMLElement | null, key: string) {
 export function Composer({ docked }: { docked: boolean }) {
   const { config, draft: typed, setDraft, setSlot } = useStudio();
   const catalog = useCatalog();
+  const presetUrl = usePresetUrl();
   const [engine, setEngine, engineMode] = useEngine();
   const create = useCreateGeneration();
   const [enhancing, setEnhancing] = useState(false);
@@ -331,6 +332,7 @@ export function Composer({ docked }: { docked: boolean }) {
   // with the move's own settings (Focus Change: 6 s, silent). Another video model can be picked after it; it takes
   // the move's words. A move whose cloud route is a partner model's words leaves the person's model as it is.
   const pickPreset = (id?: string) => {
+    presetUrl(id);
     if (!id) return setDraft({ presetId: undefined, mix: undefined, presetStrength: undefined });
     const picked = catalog.getPreset(id);
     const want = presetOriginal(picked, engine);
@@ -351,6 +353,15 @@ export function Composer({ docked }: { docked: boolean }) {
     const route = presetParams(preset, engine);
     if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
   }, [preset, engine, model, config.defaultModels, catalog, setDraft]);
+  // A link to a camera motion or effect Fuobe doesn't have (?preset=nope): once every preset is known, the composer
+  // drops it and says so, so the chip doesn't wait on it and a plain prompt runs.
+  const unknownPreset = catalog.complete && !!draft.presetId && !takesLook && !preset;
+  useEffect(() => {
+    if (!unknownPreset) return;
+    setDraft({ presetId: config.preset?.id, mix: undefined, presetStrength: undefined });
+    presetUrl(undefined);
+    toast("That camera motion or effect isn't available. Pick another one.", { id: "unknown-preset" });
+  }, [unknownPreset, config.preset, presetUrl, setDraft]);
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
   const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
@@ -944,10 +955,10 @@ export function Composer({ docked }: { docked: boolean }) {
         </div>
       ) : null}
 
-      {/* Toolbar: one row; it scrolls (with faded edges) when it doesn't fit. */}
+      {/* Toolbar: one row on phones (it scrolls, with faded edges, when it does not fit); from sm up it wraps, so every chip shows. */}
       <div className="flex items-center gap-2">
         {/* Phones (below sm): "+", Settings (icon), the model (it shrinks to fit) and @; the other chips are in the settings sheet. */}
-        <div ref={chipRow} style={fade} data-composer-toolbar className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1">
+        <div ref={chipRow} style={fade} data-composer-toolbar className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1 sm:flex-wrap sm:overflow-x-visible">
           {kinds.length > 0 && <AttachMenu kinds={kinds} onFiles={attach.attachFiles} onPick={attach.attach} />}
           {collapsed && showAttachments && attached.length > 0 && (
             <button

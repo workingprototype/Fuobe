@@ -43,6 +43,8 @@ const TWO_STEP =
 const NO_AUDIO = "Kling 2.5 / Wan 2.2 output is silent — add sound with the Audio → Video to audio tool";
 
 type AppSpec = {
+  /** Kept when an app is renamed, so links, previews and saved runs still find it (default: from the name). */
+  id?: string;
   name: string;
   category: string;
   description: string;
@@ -70,7 +72,7 @@ function app(a: AppSpec): Preset {
   const cloud = a.cloud === null ? null : { modelId: EDIT_CLOUD, op: "edit" as const, ...a.cloud };
   const open = a.open === null ? null : { modelId: EDIT_OPEN, op: "edit" as const, ...a.open };
   return {
-    id: `app-${slug(a.name)}`,
+    id: a.id ?? `app-${slug(a.name)}`,
     type: "app",
     name: a.name,
     category: a.category,
@@ -1772,7 +1774,9 @@ export const APPS: Preset[] = [
       "Rework this opening frame into a scroll-stopping hook thumbnail: stronger contrast and color, clearer focal point on the face or product, a more expressive moment and bold composition. Keep the same people, product and setting; add no text.",
   }),
   app({
-    name: "Similarity Score",
+    // Named for what it does: it takes out logos and recognizable IP (Fuobe has no detector to score similarity).
+    id: "app-similarity-score",
+    name: "IP Cleanup",
     category: "Utility",
     description: "Clean up logos and recognizable IP before posting",
     icon: "ShieldCheck",

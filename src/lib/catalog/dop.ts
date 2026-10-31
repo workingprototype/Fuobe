@@ -184,12 +184,13 @@ export function dopPreset(p: Preset): Preset {
   let open: PresetRoute;
   let openSays: string;
   if (wan.length) {
+    // A Wan 2.1 LoRA runs on Wan 2.2 too (its strength is checked on a GPU run); the Details popover just names it.
     open = route(DOP_MODEL, wan);
-    const wan21 = all.some((l) => l.family === "wan" && l.base.startsWith("wan2.1"));
-    openSays = `Wan 2.2 with ${names(wan)}${wan21 ? " (a Wan 2.1 LoRA on Wan 2.2: its strength is checked on a GPU run)" : ""}`;
+    openSays = `Wan 2.2 with ${names(wan)}`;
   } else if (ltx.length) {
+    // An LTX-2 LoRA runs on LTX-2.3 too (not verified yet); the Details popover just names it.
     open = route(DOP_LTX_MODEL, ltx);
-    openSays = `LTX-2.3 with ${names(ltx)}${all.some((l) => l.base.startsWith("ltx-2-19b")) ? " (an LTX-2 LoRA on LTX-2.3: unverified)" : ""}`;
+    openSays = `LTX-2.3 with ${names(ltx)}`;
   } else if (ltx25.length && op === "i2v") {
     open = { ...route(LTX25_OPEN, ltx25), params: { duration: 5, resolution: "720p" } };
     openSays = `LTX-2.5 with ${names(ltx25)}`;
@@ -242,8 +243,10 @@ export function dopPreset(p: Preset): Preset {
     cloud = route(DOP_MODEL, []);
     cloudSays = "Wan 2.2 on the preset's words";
   } else {
+    // The partner route stays until the evaluation harness measures Fuobe DoP on these words (fal has no LTX-2.5 LoRA
+    // endpoint, so an LTX-2.5 LoRA stays on the GPU).
     cloud = { ...p.cloud, partner: true };
-    cloudSays = `the preset's words on a partner model until the evaluation harness measures Fuobe DoP on them${ltx25.length ? " (fal has no LTX-2.5 LoRA endpoint)" : ""}`;
+    cloudSays = "the preset's words on a partner model";
   }
 
   const local = [...wan, ...ltx].filter(gpuOnlyLicence);

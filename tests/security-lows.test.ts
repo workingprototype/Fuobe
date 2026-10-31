@@ -197,6 +197,11 @@ describe("L-2: an unknown record or link answers 404 behind an HTTPS reverse pro
       expect(r.headers.get("content-type")).toMatch(/text\/html/);
       expect(await r.text()).toMatch(/Nothing here/);
     }
+    // An unknown app points at the apps, then Home; a guest isn't told about a library they don't have.
+    const app = await at("https://fuobe.example/apps/does-not-exist").text();
+    expect(app).toMatch(/<a href="\/apps" class="alt">Browse apps<\/a><a href="\/">Back to Home<\/a>/);
+    expect(app).not.toMatch(/library/);
+    expect(await at("https://fuobe.example/canvas/nope-nope-nope").text()).not.toMatch(/Browse apps/);
     const share = at(`https://fuobe.example/s/${"A".repeat(44)}`);
     expect(share.status).toBe(404);
     expect(share.headers.get("x-middleware-rewrite")).toBeNull();

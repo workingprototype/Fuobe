@@ -141,8 +141,8 @@ describe("an account's own runs", () => {
     ]) {
       expect(at(url, method).status, `${method} ${url}`).toBe(403);
     }
-    // The live stream carries everyone's events: not for an account (it polls).
-    expect(at("/api/generations/stream").status).toBe(404);
+    // The live stream carries everyone's events: not for an account (it polls; no content, so no error in the console).
+    expect(at("/api/generations/stream").status).toBe(204);
   });
 });
 

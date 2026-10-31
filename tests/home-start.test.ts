@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { blockerFor, claimStartToken, firstMissingSlot, handoffKey, issueStartToken, startStep, withoutStart } from "@/lib/composer";
+import { blockerFor, claimStartToken, firstMissingSlot, handoffKey, issueStartToken, startStep, withoutStart, withPreset } from "@/lib/composer";
 import { startLine, type ConnectionState } from "@/lib/connections";
 import { startQuotes } from "@/lib/starter-prices";
 import { EDIT_STUDIO, IMAGE_STUDIO } from "@/lib/studios";
@@ -13,6 +13,13 @@ describe("the start flag", () => {
     expect(withoutStart("/video?go=1")).toBe("/video");
     // It isn't part of the hand-off, so dropping it never rebuilds the draft.
     expect(handoffKey("prompt=a+fox&go=1")).toBe(handoffKey("prompt=a+fox"));
+  });
+
+  it("follows the picked camera motion or effect in the address, and drops it once cleared", () => {
+    expect(withPreset("/video?preset=motion-fpv-drone", "motion-zoom-in")).toBe("/video?preset=motion-zoom-in");
+    expect(withPreset("https://fuobe.com/video?prompt=sky&preset=motion-bullet-time#x", undefined)).toBe("https://fuobe.com/video?prompt=sky#x");
+    expect(withPreset("/video", "effect-hair-style")).toBe("/video?preset=effect-hair-style");
+    expect(withPreset("/video?preset=nope", undefined)).toBe("/video");
   });
 
   it("waits while things load, runs when nothing blocks, else explains what's missing", () => {

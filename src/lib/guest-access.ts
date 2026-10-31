@@ -71,7 +71,7 @@ export type GuestRead =
   | { kind: "filtered" }
   /** Answer this body (the owner's list, empty). */
   | { kind: "empty"; body: unknown }
-  /** No such endpoint for a guest (404: the live-updates stream, so the client looks again much later). */
+  /** No such endpoint for a guest (204, no content: the live-updates stream, so the client looks again much later). */
   | { kind: "none" }
   /** The owner's data: 401. */
   | { kind: "closed" };

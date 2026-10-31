@@ -319,6 +319,26 @@ describe("studio catalog slice", () => {
   });
 });
 
+describe("an app page's hero", () => {
+  it("says what you get: how it differs from Higgsfield stays in Details, a missing engine is said", () => {
+    for (const id of ["app-similarity-score", "app-angles", "app-rap-god", "app-video-background-remover", "app-gtai", "app-shots", "app-clipcut"]) {
+      const p = getPreset(id)!;
+      expect(appStudio(p).subtitle ?? "", id).not.toMatch(/Higgsfield|Approximation|silent|LoRA/);
+    }
+    const cloudOnly = getPreset("app-similarity-score")!;
+    expect(appStudio({ ...cloudOnly, open: null }).subtitle).toBe("Cloud only for now");
+    expect(appStudio({ ...cloudOnly, cloud: null }).subtitle).toBe("Open source only for now");
+  });
+
+  it("names IP Cleanup for what it does, on its old address", () => {
+    expect(getPreset("app-similarity-score")!.name).toBe("IP Cleanup");
+  });
+
+  it("points the silent clip apps at Video to audio", () => {
+    for (const id of ["app-asmr-classic", "app-rap-god"]) expect(appStudio(getPreset(id)!).related, id).toEqual({ href: "/audio/video", label: "Add sound to your clip" });
+  });
+});
+
 describe("Audio → Transcribe", () => {
   it("lists the transcribers of both engines, each with its spoken languages, and asks for a recording or a video", () => {
     const ids = studioCatalog(TRANSCRIBE_STUDIO).models.map((m) => m.id);

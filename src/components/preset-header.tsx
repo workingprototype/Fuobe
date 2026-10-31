@@ -55,7 +55,7 @@ export function PresetHeader({
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-heading text-[19px] leading-snug">{preset.name}</p>
-        <p className="line-clamp-2 text-[13px] text-muted-foreground">{presetHowTo(preset)}</p>
+        <p className="line-clamp-2 text-[13px] text-muted-foreground max-sm:line-clamp-3">{presetHowTo(preset)}</p>
       </div>
       {gpu && <HeaderPill badge={gpu} gpu={badges?.gpu} compact onOpen={() => openGpuSetup({ ref: `preset:${preset.id}`, name: preset.name })} />}
       <Popover>
