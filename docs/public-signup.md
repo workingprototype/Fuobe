@@ -75,19 +75,45 @@ An account is signed in, but it sees the owner's studio as a guest does:
   to run this" card.
 - **Its own runs are its own.** The runs an account starts on its GPU appear in its own lists
   (`GET /api/generations`), and it can open, cancel and delete them and download their files. They
-  stay out of the owner's lists, and no other account can open them. An account's delete is for
-  good (it has no Trash), so its space comes back at once. The live-updates stream isn't sent to
-  accounts: their studios poll instead.
-- **Its own uploads are its own.** Only the account that uploaded a file can open it or use it in a
-  run. See [Uploads](#uploads).
+  stay out of the owner's Library and live feed, and no other account can open them. The studio's
+  owner can see them, open their files and delete them ([Managing accounts](#managing-accounts));
+  the sign-up form says so. An account's delete is for good (it has no Trash), so its space comes
+  back at once. The live-updates stream isn't sent to accounts: their studios poll instead.
+- **Its own uploads are its own.** Only the account that uploaded a file can use it in a run, and
+  no other account can open it. The studio's owner can open it too: a clip made from an uploaded
+  picture shows that picture as its poster in the owner's view of accounts' runs. The sign-up form
+  says the owner sees what an account uploads and makes. See [Uploads](#uploads).
 
 ## Managing accounts
 
-The owner sees everyone who signed up in **Settings → Accounts**: email, when the account was
-created, its last log-in, whether its own GPU is connected, and the total. The owner can switch an
-account off (it is signed out at once and can't log in) or delete it, and export the list as CSV.
-The API is `GET /api/admin/accounts` (`?format=csv` for the file), `PATCH /api/admin/accounts/<id>`
-with `{ "disabled": true | false }`, and `DELETE /api/admin/accounts/<id>`, for the owner only.
+The owner sees everyone who signed up in **Settings → Accounts**, the last section of Settings (the
+**Accounts** chip at the top of Settings and the link under Public sign-up lead there): email,
+whether its own GPU is connected, its runs (all time, in the last 7 days, running now, failed in the
+last 7 days), when it last ran, and the space its files take against its limit (1 GB in its first 7
+days, then 3 GB). On wide screens the list also shows when the account was created and its last
+log-in (the CSV always has them). Running now counts as the run limit does: a batch or a chain
+going is one run. A line above the list gives the runs of every account in the last 24 hours and 7
+days, the runs going now, and the space all accounts' files take against their share of the disk.
+The owner can switch an account off (it is signed out at once and can't log in) or delete it, and
+export the list as CSV.
+
+**Accounts' runs** (`/settings/runs`, from the list) shows what accounts made, newest first: one
+account's or every account's, each labelled with its email, filtered by account, status (finished,
+running, failed) and kind. The filters are in the address (`?account=<id>&status=failed&kind=video`),
+so a reload or a shared link keeps them. Each run shows its result (a clip plays on hover, a tap, or
+Enter; the count on a run with several files steps through them, and its menu opens each one), the
+app, preset or studio and the model, the prompt, its status with the error of a failed run, and when
+it ran. The owner can delete a run with its files, which gives the account its space back at once, or
+switch the account off from there. The owner's own runs are never listed there, and accounts' runs
+never appear in the owner's Library, its counts or the live feed.
+
+The API, for the owner only (guests get 401, accounts 403): `GET /api/admin/accounts` (each account
+with `runs`, `runsDay`, `runsWeek`, `running`, `failedWeek`, `lastRunAt`, `bytes` and `capBytes`,
+and `totals`; `?format=csv` for the file), `PATCH /api/admin/accounts/<id>` with
+`{ "disabled": true | false }`, `DELETE /api/admin/accounts/<id>`, `GET /api/admin/generations`
+(`?account=<id>`, `status=finished|running|failed`, `kind=image|video|audio|model3d|text`,
+`before=<createdAt>:<id>` from the last page's `next`, `limit` up to 100) and
+`DELETE /api/admin/generations/<id>` (an account's run only).
 
 An account can delete itself: `DELETE /api/auth/me` with `{ "password" }`. When an account is
 deleted (by itself or by the owner), its runs are stopped and removed, and its uploads and results
@@ -198,5 +224,7 @@ The rules are in `src/lib/guest-access.ts` (which paths guests and accounts may 
 `src/server/providers/comfyui.ts` and `accountRun` in `src/server/generations.ts`; what an account's
 work may read is `src/server/tenant.ts`. Uploads are `src/app/api/uploads/route.ts` (which makes the
 proxy's checks itself, `src/server/direct-gate.ts`), the limits are in `src/server/account-files.ts`
-and the clean-up in `src/server/account-sweep.ts`. The tests are in `tests/public-signup.test.ts`,
-`tests/accounts-admin.test.ts`, `tests/account-gpu.test.ts` and the `tests/account-*.test.ts` files.
+and the clean-up in `src/server/account-sweep.ts`. The owner's view of what accounts make is
+`src/server/account-admin.ts`. The tests are in `tests/public-signup.test.ts`,
+`tests/accounts-admin.test.ts`, `tests/account-runs-admin.test.ts`, `tests/account-gpu.test.ts` and
+the `tests/account-*.test.ts` files.

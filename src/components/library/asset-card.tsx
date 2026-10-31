@@ -41,7 +41,7 @@ const LIST_MENU ="grid size-8 shrink-0 place-items-center rounded-lg text-muted-
 
 const idsOf = (e: LibraryEntry) => (e.type === "single" ? [e.g.id] : e.items.map((g) => g.id));
 
-function StatusCover({ g }: { g: Generation }) {
+export function StatusCover({ g }: { g: Generation }) {
   if (g.status === "queued" || g.status === "running") {
     const pct = g.progress != null ? Math.round(g.progress * 100) : null;
     return (

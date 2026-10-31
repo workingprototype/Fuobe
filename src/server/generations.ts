@@ -113,7 +113,8 @@ interface Row {
 
 /** Trash and folder columns, joined onto every library read. */
 const LIBRARY_COLUMNS = "g.*, t.deleted_at AS deleted_at, fi.folder_id AS folder_id";
-const LIBRARY_JOIN = "generations g LEFT JOIN generation_trash t ON t.generation_id = g.id LEFT JOIN folder_items fi ON fi.generation_id = g.id";
+const LIBRARY_JOINS = "LEFT JOIN generation_trash t ON t.generation_id = g.id LEFT JOIN folder_items fi ON fi.generation_id = g.id";
+const LIBRARY_JOIN = `generations g ${LIBRARY_JOINS}`;
 
 export function toGeneration(r: Row): Generation {
   const request = JSON.parse(r.request_json) as GenerationRequest;
@@ -244,6 +245,8 @@ export interface ListOptions {
    * own: they stay out of the owner's lists).
    */
   account?: string;
+  /** Every account's runs, never the owner's: the owner's view of what accounts make (src/server/account-admin.ts). */
+  accounts?: boolean;
   /** Date range on createdAt: since ≤ t < until. */
   since?: number;
   until?: number;
@@ -261,6 +264,8 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
   };
   const oneOf = (col: string, values: unknown[]) => add(`${col} IN (${values.map(() => "?").join(", ")})`, ...values);
   if (o.account) add("json_extract(g.request_json, '$.account') = ?", o.account);
+  // A range rather than IS NOT NULL: SQLite can search the generations_account index for a range (it scans it whole for IS NOT NULL).
+  else if (o.accounts) add("json_extract(g.request_json, '$.account') > ''");
   else add("json_extract(g.request_json, '$.account') IS NULL");
   if (o.batchId) add("g.batch_id = ?", o.batchId);
   if (o.feature) add("g.feature = ?", o.feature);
@@ -293,9 +298,17 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
   const q = o.q?.trim();
   // The user's own words (request.prompt) and what the model got (prompt, with suffixes and templates).
   if (q) add("(g.prompt LIKE ? OR json_extract(g.request_json, '$.prompt') LIKE ?)", `%${q}%`, `%${q}%`);
-  const sql = `SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE ${where.join(" AND ")} ORDER BY ${col} DESC, g.id DESC LIMIT ?`;
+  // Every account's runs: from the accounts' entries in generations_account, then sorted (they go after 30 days, so they
+  // stay few). Left to its own plan, SQLite walks every run newest first (or every run of a status), the owner's too,
+  // until the page is full: the whole table when accounts' runs are few or none match. Without the index (db.ts goes
+  // on when it can't make it), the plain plan.
+  const from = !o.account && o.accounts && accountIndexed() ? `generations g INDEXED BY generations_account ${LIBRARY_JOINS}` : LIBRARY_JOIN;
+  const sql = `SELECT ${LIBRARY_COLUMNS} FROM ${from} WHERE ${where.join(" AND ")} ORDER BY ${col} DESC, g.id DESC LIMIT ?`;
   return (db().prepare(sql).all(...args, Math.max(1, Math.min(o.limit ?? 60, 200))) as Row[]).map(toGeneration);
 }
+
+/** Whether the runs-by-account index exists (db.ts makes it outside the migrations, and goes on without it on a failure). */
+const accountIndexed = () => !!db().prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'generations_account'").get();
 
 export function setFavorite(id: string, favorite: boolean): void {
   update(id, { favorite: favorite ? 1 : 0 });

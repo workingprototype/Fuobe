@@ -3,7 +3,7 @@
 //
 // 1. Phone: the sidebar drawer closes when a link in it is tapped (nav item, New creation, footer),
 //    and its Search row opens the ⌘K palette.
-// 2. A first visit folds Studios and Engine, with Library right after Create; a collapsed group
+// 2. A first visit shows Studios and folds Engine, with Library right after Create; a collapsed group
 //    still shows the page you're on.
 // 3. Landmarks: "Skip to content" is the first Tab stop, one <main>, the sidebar is <nav "Main">.
 // 4. ⌘K / Ctrl+K opens the palette; a typo still finds a page and Enter opens it; Esc gives focus
@@ -51,10 +51,10 @@ try {
   {
     const ctx = await browser.newContext(DESKTOP);
     const page = await ctx.newPage();
-    step("a first visit folds Studios and Engine, and Library follows Create");
+    step("a first visit shows Studios, folds Engine, and Library follows Create");
     await openRoute(page, `${app}/image`);
     const groups = await page.locator("[data-nav-group]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-nav-group"), e.getAttribute("data-open")]));
-    assert.deepEqual(groups, [["create", "true"], ["library", "true"], ["studios", "false"], ["engine", "false"]]);
+    assert.deepEqual(groups, [["create", "true"], ["library", "true"], ["studios", "true"], ["engine", "false"]]);
 
     step("Skip to content is the first Tab stop; one <main>; the sidebar is a navigation landmark");
     await page.keyboard.press("Tab");

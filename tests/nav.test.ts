@@ -45,23 +45,24 @@ describe("remembered sidebar state", () => {
     expect(parseClosed("[]")).toEqual([]);
   });
 
-  it("folds Studios and Engine until the user chooses (nothing stored, or nothing readable)", () => {
-    expect(parseClosed(null)).toEqual(["studios", "engine"]);
-    expect(parseClosed(undefined)).toEqual(["studios", "engine"]);
-    expect(parseClosed("not json")).toEqual(["studios", "engine"]);
-    expect(parseClosed('{"a":1}')).toEqual(["studios", "engine"]);
+  it("folds Engine, and shows Studios, until the user chooses (nothing stored, or nothing readable)", () => {
+    expect(parseClosed(null)).toEqual(["engine"]);
+    expect(parseClosed(undefined)).toEqual(["engine"]);
+    expect(parseClosed("not json")).toEqual(["engine"]);
+    expect(parseClosed('{"a":1}')).toEqual(["engine"]);
     // A fresh copy each time: a caller adding to it can't change the defaults.
     parseClosed(null).push("create");
-    expect(parseClosed(null)).toEqual(["studios", "engine"]);
+    expect(parseClosed(null)).toEqual(["engine"]);
   });
 
   it("only folds groups that can fold, and keeps Create and Library in view", () => {
     const foldable = NAV.filter((g) => g.collapsible).map((g) => groupId(g.label));
     for (const id of DEFAULT_NAV_CLOSED) expect(foldable).toContain(id);
     expect(NAV.map((g) => g.label).slice(0, 2)).toEqual(["Create", "Library"]);
-    // The always-open part of the sidebar is short: Create and Library hold 15 rows, not 46.
-    const open = NAV.filter((g) => !DEFAULT_NAV_CLOSED.includes(groupId(g.label))).flatMap((g) => g.items);
-    expect(open.length).toBeLessThanOrEqual(15);
+    // The part that can't fold stays short: Create and Library hold 15 rows; Studios below them can be folded away.
+    const always = NAV.filter((g) => !g.collapsible).flatMap((g) => g.items);
+    expect(always.length).toBeLessThanOrEqual(15);
+    expect(DEFAULT_NAV_CLOSED).not.toContain("studios");
   });
 
   it("prefetches only the rows most visits go to next", () => {

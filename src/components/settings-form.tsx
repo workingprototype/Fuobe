@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AccountsChip } from "@/components/accounts-admin";
 import { ConnectField, useSettings, type PublicSetting } from "@/components/connect-field";
 import { GetStarted } from "@/components/get-started";
 import { LoraSettings } from "@/components/lora-settings";
@@ -152,7 +153,7 @@ function ChoiceField({
 
 /**
  * What's connected, at a glance and always in view: one chip per connection (green when it works,
- * each a link to its field) and the engine mode. Also opens the setup guide again.
+ * each a link to its field), the engine mode and, for the owner, the accounts. Also opens the setup guide again.
  */
 function StatusStrip({ status, onGuide, guideOpen }: { status?: StatusInfo; onGuide: () => void; guideOpen: boolean }) {
   return (
@@ -178,6 +179,7 @@ function StatusStrip({ status, onGuide, guideOpen }: { status?: StatusInfo; onGu
               <span className="text-muted-foreground">Engine</span>
               <span className="font-medium">{ENGINE_MODE_LABEL[status.engineMode]}</span>
             </a>
+            <AccountsChip />
             {!guideOpen && (
               <button type="button" onClick={onGuide} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap text-brand-text hover:bg-brand-faint">
                 Setup guide

@@ -102,6 +102,7 @@ export function LoginForm() {
       <Button type="submit" className="mt-4 h-11 w-full" disabled={!password || (mode !== "owner" && !email) || (mode === "signup" && password.length < 8) || busy}>
         {busy && <Loader2 className="animate-spin" />} {copy.button}
       </Button>
+      {mode === "signup" && <p className="mt-3 text-center text-[12px] text-muted-foreground">The studio&apos;s owner can see what you upload and make here.</p>}
       {open && (
         <div className="mt-4 space-y-1.5 text-center text-[13px] text-muted-foreground">
           {mode === "signup" ? (
