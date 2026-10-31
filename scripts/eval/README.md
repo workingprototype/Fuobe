@@ -212,9 +212,14 @@ scripts/eval/local/
   angles/subject.png                  # a person or a product in a scene
   evolution/walk.mp4                  # 4–30 s of someone walking, your own footage
   evolution/ref-1.png … ref-3.png     # characters, places or a style you own (never Higgsfield previews)
+  turnaround/front.png, right.png     # one consenting person or a made-up character, full body on a plain background;
+  turnaround/back.png, left.png       #   right and left are their own (facing them, their right side is on your left)
+  turnaround/sheet.png                # a turnaround sheet of the same character
 ```
 
-The `popcorn` suite needs no inputs of its own: its boards start from words.
+The `popcorn` suite needs no inputs of its own: its boards start from words. The `turnaround` suite's cases with
+views send Soul ID's consent line for a real person (`"consent": true` in `cases/turnaround.json`), so use pictures of
+someone who agreed, or of a made-up character.
 
 **Training needs consent.** `soul-id.json` ships with `"consent": false`, so a character's training
 refuses to start. Copy the file to `local/soul-id.json`. In your copy, set `"consent": true` only

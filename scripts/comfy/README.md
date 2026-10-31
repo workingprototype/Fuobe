@@ -362,7 +362,7 @@ node validate-workflows.mjs video-character-swap-h3-segment video-mask-h3-relay 
 
 ### Round 5: open tools and Evolution (Originals O11 and O13, 2026-10-29)
 
-Four hand-built entries and one rebuilt one, all `validated: true` (the library: 154 workflows, 149 validated). No new
+Four hand-built entries and one rebuilt one, all `validated: true` (the library then: 154 workflows, 149 validated). No new
 node pack and no new worker; ComfyUI stays at 0.41.0. Fuobe Mixed Media, Fuobe Shorts, Fuobe Marketing Image and
 Fuobe Try-On (O9 and O10) run graphs that were already in the library.
 
@@ -394,6 +394,11 @@ node validate-workflows.mjs qwen-image-edit-2509-angles image-face-mosaic-sam3 v
 
 ## DBS soundtrack separation (DBS D1)
 
+PR #15 adds three hand-built graphs: this one, the fly path's and MOSS-Image's (below), all `validated: true` (the
+library: 158 workflows, 153 validated; the five that aren't are the H3 graphs above, whose node packs the validation
+server doesn't have). One new node pack, ComfyUI-DBS; the other two graphs use core nodes only. None of the three has
+run on a GPU.
+
 One hand-built graph splits a soundtrack into dialogue, music and effects (docs/research/dbs-separation-7.md §4.4, graph A):
 
 ```bash
@@ -419,6 +424,9 @@ COMFYUI_URL=http://127.0.0.1:<port> COMFYUI_MODELS_DIR=<that ComfyUI>/models nod
   job is queued. `each channel` for stereo stems. ComfyUI saves audio as mono or stereo only (a 5.1 waveform is written as
   scrambled stereo three times as long), so a file with more than 2 channels is split in `mono` and its background is the
   music and effects stems added up (the provider rewires node 4 to `AudioMerge` add).
+- **Validation**: the shared validation server doesn't have ComfyUI-DBS, so validate this graph on a ComfyUI that has it
+  (the command above). A run of every id against the shared server records it as `missing_node_type`, not validated,
+  like the H3 entries.
 
 ## Fly path (N7-5)
 

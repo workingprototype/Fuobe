@@ -30,7 +30,9 @@ it (files, uploads, projects, settings values, tokens) answer 401 "Sign up to se
 Every change a guest sends (generate, upload, save a setting, create a project…) answers 401. The
 studio shows a "Create a free account to run this" card with **Sign up** and **Log in**. Price
 checks (the estimate routes, and `?preview=1` on the run routes that support it) stay open, so the
-studios can show prices.
+studios can show prices. They don't reveal the owner's library: the turnaround video's price check
+(`/api/turnaround/estimate`, or `/api/turnaround?preview=1`) answers 404 "Character not found" for
+any character a visitor names, whether it exists or not.
 
 ## Accounts
 
@@ -51,7 +53,9 @@ An account is signed in, but it sees the owner's studio as a guest does:
   owner's results, files, uploads, folders, shares, projects (Layers, Cinema, Canvas, storyboards,
   elements…) and Assist threads are hidden: the lists come back empty, and other reads answer 403.
   Every change to them (create, rename, move, share, delete) answers 403 with `code: "library"`.
-  Accounts have their own uploads and runs (below), but no projects yet.
+  So does Split soundtrack's **Export mix** (`POST /api/audio-tools/export`), which saves into the
+  owner's Library, with or without a GPU. Accounts have their own uploads and runs (below), but no
+  projects yet.
 - **Settings, keys and tokens are the owner's.** Changing settings or model switches, the password,
   API tokens, Public sign-up, LoRA downloads, Assist connectors and the MCP endpoint answer 403 for
   an account.
@@ -117,7 +121,9 @@ cloudflared tunnel --url http://localhost:8188   # or: ngrok http 8188
   the studio's local LLM is refused; "Enhance prompt" uses Fuobe's offline wording. Other tools
   (Canvas, Cinema, Shorts, Assist, Marketing…) answer 403 with `code: "own-gpu-tool"`, because they
   plan with the studio's own AI helpers or keep projects of their own. Image to 3D and text to 3D
-  answer the same for now: a 3D model is finished on the server.
+  answer the same for now: a 3D model is finished on the server. So do the Audio hub's Split
+  soundtrack (`POST /api/audio-tools`) and the turnaround video (`POST /api/turnaround`), though
+  their price checks work, priced for the account's own GPU.
 - **Files a run takes.** A run on your GPU takes only files you uploaded here, or your own results.
   A link or a `data:` URI answers 400 with `code: "input-not-allowed"`, someone else's file 403
   (`input-not-yours`), and a file that has expired 404 (`input-gone`, "That file has expired.
