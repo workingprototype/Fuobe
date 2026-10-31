@@ -132,7 +132,7 @@ function KitBrand({ brand }: { brand: BrandKit }) {
 /** Click to Ad: product link → product kit → style → a 9:16 ad of up to 12 s with voiceover and captions. */
 export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
   const qc = useQueryClient();
-  const { engine, setEngine } = useMarketingEngine();
+  const { engine, setEngine, mode: engineMode } = useMarketingEngine();
   const products = useProducts();
   const { update } = useProductActions();
   // The link is read by AddFromLink's own mutation: follow it by its key.
@@ -453,7 +453,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
           />
         </div>
         <p className="flex items-center justify-center gap-1.5 pt-4 text-[12px] text-muted-foreground">
-          <Sparkles className="size-3" /> Cloud: Seedance 2.5 shots or an OmniHuman presenter, ElevenLabs voice, Auto Subtitle · Open source: Wan 2.2, InfiniteTalk, Chatterbox (your voice sample), caption burn-in
+          <Sparkles className="size-3" /> {engineMode === "open" ? "" : "Cloud: Seedance 2.5 shots or an OmniHuman presenter, ElevenLabs voice, Auto Subtitle · "}Open source: Wan 2.2, InfiniteTalk, Chatterbox (your voice sample), caption burn-in
         </p>
       </div>
     </div>

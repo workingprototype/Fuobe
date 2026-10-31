@@ -44,7 +44,8 @@ export interface Asset {
 
 async function json<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw responseError(res, body.error ?? `Request failed (${res.status})`);
+  // With its status, so a refusal or a missing thing isn't retried (src/app/providers.tsx).
+  if (!res.ok) throw responseError(res, Object.assign(new Error(body.error ?? `Request failed (${res.status})`), { status: res.status }));
   return body;
 }
 
@@ -1084,6 +1085,52 @@ export function useViewer() {
 export function useIsGuest(): boolean {
   const v = useViewer().data;
   return !!v && v.publicSignup && !v.signedIn;
+}
+
+/** A signed-in account (public sign-up), not the studio's owner. */
+export function useIsAccount(): boolean {
+  const v = useViewer().data;
+  return !!v?.account && !v.owner;
+}
+
+/** This browser's tabs hear on it that who is signed in changed (src/app/providers.tsx asks again). */
+export const AUTH_CHANNEL = "fuobe-auth";
+
+/** Tells this browser's other tabs that someone signed in or out, so they don't go on as the one before. */
+export function announceAuthChange(): void {
+  try {
+    const c = new BroadcastChannel(AUTH_CHANNEL);
+    c.postMessage("changed");
+    c.close();
+  } catch {}
+}
+
+/** Signing out: the server forgets the session, the other tabs hear of it, and the page starts again signed out. */
+export async function signOut(): Promise<void> {
+  await fetch("/api/auth/logout", { method: "POST" });
+  announceAuthChange();
+  window.location.reload();
+}
+
+/**
+ * A guest or an account, once known: the studio's library, projects and settings are its owner's, not theirs. False
+ * until the page has hydrated: another Suspense boundary may have filled the cache first, and the first render must
+ * match the server's HTML.
+ */
+export function useIsVisitor(): boolean {
+  const v = useViewer().data;
+  const hydrated = useHydrated();
+  return hydrated && !!v && !v.owner;
+}
+
+/**
+ * The studio's owner, once known (and after hydration, as useIsVisitor): what only the owner can do (Assist's Create
+ * and Schedule, the Library's folders, shares and Trash) shows from then on, so a visitor never sees it flash in and out.
+ */
+export function useIsOwner(): boolean {
+  const v = useViewer().data;
+  const hydrated = useHydrated();
+  return hydrated && !!v?.owner;
 }
 
 /** "Sign up" / "Log in" with a way back here. */

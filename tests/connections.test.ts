@@ -105,7 +105,7 @@ describe("first-run guide and status strip", () => {
     expect(nothingConnected(state(["replicate"], "cloud"))).toBe(false);
   });
 
-  it("hides Home's shell guide before the first paint only where this browser put it away", () => {
+  it("shows Home's shell guide before the first paint only where this browser showed it last time", () => {
     const run = (stored: string | null | Error) => {
       const attrs: Record<string, string> = {};
       const localStorage = {
@@ -119,9 +119,10 @@ describe("first-run guide and status strip", () => {
       return attrs["data-first-run"];
     };
     expect(run("0")).toBe("0");
-    // A first visit, or a guide still wanted: the shell keeps it, so it doesn't push the page down later.
+    // A guide still wanted: the shell shows it, so it doesn't push the page down later.
+    expect(run("1")).toBe("1");
+    // A first visit (a public studio's visitor never gets the guide): the shell leaves it out.
     expect(run(null)).toBeUndefined();
-    expect(run("1")).toBeUndefined();
     // Storage blocked (a private window): nothing breaks.
     expect(run(new Error("denied"))).toBeUndefined();
   });

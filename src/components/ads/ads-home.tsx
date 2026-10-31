@@ -9,6 +9,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BrandStart } from "@/components/brand/brand-dialog";
+import { SelfHostNote } from "@/components/self-host-note";
+import { useIsVisitor } from "@/lib/api";
 import { ResearchLabel } from "@/components/brand/research-progress";
 import type { BrandKit } from "@/lib/catalog/marketing";
 import { timeAgo } from "@/lib/format";
@@ -99,6 +101,8 @@ export function AdsHome() {
   const { engine, setEngine } = useMarketingEngine();
   const brands = useBrands();
   const [deleting, setDeleting] = useState<BrandKit | null>(null);
+  // A brand is saved to the studio's library, which is its owner's: a guest or an account is told so, not given the form.
+  const visitor = useIsVisitor();
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
       <MarketingHeader title="Ads Studio" active="ads" engine={engine} onEngine={setEngine} />
@@ -107,7 +111,11 @@ export function AdsHome() {
           <h2 className="font-heading text-display text-balance">Create performing static ads</h2>
           <p className="mx-auto mt-2 max-w-lg text-[15px] text-muted-foreground">Enter your website. Your logo, colours, brand voice and selling points load on their own — then on-brand ads for every product, in 1:1, 4:5 and 9:16, with headlines and CTAs.</p>
           <div className="mx-auto mt-6 max-w-[620px] rounded-[20px] border bg-background p-3 text-left shadow-soft sm:rounded-composer sm:p-4">
-            <BrandStart onDone={(b) => router.push(`/ads/${b.id}`)} />
+            {visitor ? (
+              <SelfHostNote className="p-1 text-[14px]">Brand kits aren&apos;t on free accounts yet. Free accounts can use the Image, Video and Audio studios, camera motions, effects and apps.</SelfHostNote>
+            ) : (
+              <BrandStart onDone={(b) => router.push(`/ads/${b.id}`)} />
+            )}
           </div>
         </section>
 
@@ -133,8 +141,8 @@ export function AdsHome() {
               <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-brand-faint text-brand-text">
                 <Target className="size-5" />
               </div>
-              <p className="mt-4 text-[15px] font-medium">No brand kit added yet</p>
-              <p className="mt-1 text-[13px] text-muted-foreground">Paste a link or create one manually to get started.</p>
+              <p className="mt-4 text-[15px] font-medium">No brands yet</p>
+              {!visitor && <p className="mt-1 text-[13px] text-muted-foreground">Paste a link or create one manually to get started.</p>}
             </div>
           )}
         </section>

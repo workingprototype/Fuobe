@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useIsOwner } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { guessCategory, MEMORY_CATEGORIES, MEMORY_HINTS, MEMORY_MAX_CHARS, parseMemoryImport, type AssistMemory, type AssistProject, type MemoryCategory, type MemoryScope } from "@/lib/assist";
 import { timeAgo } from "@/lib/format";
@@ -30,6 +31,7 @@ import { toastError } from "@/lib/refusals";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useMemories, useMemoryActions, useProjects } from "./hooks";
 import { ProjectDot, RailButton } from "./shell";
+import { AssistVisitorNote } from "./visitor-note";
 
 /** Where memories live: personal, or one project's. */
 type Place = { scope: "personal" } | { scope: "project"; projectId: string } | { scope: "all" };
@@ -50,6 +52,8 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
   const memories = useMemories({ scope: place.scope, projectId: place.scope === "project" ? place.projectId : null });
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  // A guest or an account (public sign-up): Assist's memory is the owner's, so no Add or Import.
+  const owner = useIsOwner();
   const list = (memories.data ?? []).filter((m) => category === "all" || m.category === category);
   const counts = useMemo(() => {
     const c = new Map<string, number>();
@@ -65,19 +69,22 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
           <SidebarTrigger className="md:hidden" />
           <RailButton />
           <h1 className="font-heading text-[22px] leading-none">Memory</h1>
-          <div className="ml-auto flex items-center gap-1.5">
-            <Button variant="outline" size="sm" onClick={() => setImporting(true)} aria-label="Import memories">
-              <Import /> <span className="hidden sm:inline">Import</span>
-            </Button>
-            <Button size="sm" onClick={() => setAdding(true)}>
-              <Plus /> <span className="hidden sm:inline">Add a memory</span>
-              <span className="sm:hidden">Add</span>
-            </Button>
-          </div>
+          {owner && (
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button variant="outline" size="sm" onClick={() => setImporting(true)} aria-label="Import memories">
+                <Import /> <span className="hidden sm:inline">Import</span>
+              </Button>
+              <Button size="sm" onClick={() => setAdding(true)}>
+                <Plus /> <span className="hidden sm:inline">Add a memory</span>
+                <span className="sm:hidden">Add</span>
+              </Button>
+            </div>
+          )}
         </header>
       )}
       <div className={cn("w-full max-w-[900px] min-w-0 flex-1 px-3 pb-16 sm:px-6", projectId ? "pt-2" : "pt-4 md:pt-8")}>
         {!projectId && <p className="max-w-2xl text-[15px] text-pretty text-muted-foreground">Learning from every chat. Assist follows these in every reply, and saves new ones when you tell it something worth keeping{" "}— it asks first while Ask first is on.</p>}
+        {!projectId && <AssistVisitorNote className="mt-4 max-w-2xl" />}
         {projectId && (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-[13px] text-muted-foreground">Only this project&apos;s chats see these.</p>
@@ -154,14 +161,16 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
                 <EmptyTitle className="font-heading text-[22px] font-normal">{category === "all" ? "Nothing remembered yet" : `No ${category.toLowerCase()} memories`}</EmptyTitle>
                 <EmptyDescription>Tell Assist “remember that I always want 9:16” in a chat, add one here, or bring over what another assistant knows about you.</EmptyDescription>
               </EmptyHeader>
-              <EmptyContent className="flex-row justify-center">
-                <Button variant="outline" onClick={() => setImporting(true)}>
-                  <Import /> Import
-                </Button>
-                <Button onClick={() => setAdding(true)}>
-                  <Plus /> Add a memory
-                </Button>
-              </EmptyContent>
+              {owner && (
+                <EmptyContent className="flex-row justify-center">
+                  <Button variant="outline" onClick={() => setImporting(true)}>
+                    <Import /> Import
+                  </Button>
+                  <Button onClick={() => setAdding(true)}>
+                    <Plus /> Add a memory
+                  </Button>
+                </EmptyContent>
+              )}
             </Empty>
           )}
         </div>

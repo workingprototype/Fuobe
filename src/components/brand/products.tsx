@@ -8,7 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MAX_SELLING_POINTS, type Product } from "@/lib/catalog/marketing";
 import { cn } from "@/lib/utils";
-import { toastError } from "@/lib/refusals";
+import { refusalShown, toastError } from "@/lib/refusals";
+import { normalizeWebsite } from "@/lib/website";
 import { useProductActions, type ProductInput } from "@/components/marketing/hooks";
 import { areaCls, FieldRow, inputCls, TagInput } from "./fields";
 import { ImageList } from "./image-list";
@@ -118,14 +119,10 @@ export function AddFromLink({ brandId, onAdded, limit = 3, withBrand, className,
   const [url, setUrl] = useState("");
   const [slow, setSlow] = useState(false);
   const go = () => {
-    if (!url.trim()) return void toast("Use a valid product link.");
-    const host = (() => {
-      try {
-        return new URL(/^https?:/i.test(url) ? url : `https://${url}`).hostname;
-      } catch {
-        return url;
-      }
-    })();
+    // The server's own rule (it would refuse the link anyway), before the "Reading…" and the kit animation start.
+    const link = normalizeWebsite(url);
+    if (!link) return void toast("Use a valid product link.");
+    const host = new URL(link).hostname;
     setSlow(false);
     const t = setTimeout(() => setSlow(true), 12_000);
     const id = toast.loading(`Reading ${host}`);
@@ -139,7 +136,8 @@ export function AddFromLink({ brandId, onAdded, limit = 3, withBrand, className,
           setUrl("");
           onAdded?.(r.duplicate ? [r.duplicate] : r.products, { brand: r.brand });
         },
-        onError: (e) => toast.error(`${(e as Error).message}`, { id, description: "Try again, or add it by hand." }),
+        // A refusal that opened its own card (sign up, connect your GPU): the card alone, no "try again" toast on top.
+        onError: (e) => (refusalShown(e) ? toast.dismiss(id) : toast.error((e as Error).message, { id, description: "Try again, or add it by hand." })),
         onSettled: () => clearTimeout(t),
       },
     );

@@ -335,7 +335,7 @@ export function AudioLoopTool({ tabs }: { tabs?: React.ReactNode }) {
       {!clip && (
         <ToolHero
           title="Make it as long as you need"
-          subtitle="Loop a music bed, ambience or a beat to any length up to 10 minutes. Smooth crossfaded seams on your ComfyUI (free, runs on CPU); whole repeats on the cloud, for under a cent."
+          subtitle={`Loop a music bed, ambience or a beat to any length up to 10 minutes. Smooth crossfaded seams on your ComfyUI (free, runs on CPU)${mode === "open" ? "." : "; whole repeats on the cloud, for under a cent."}`}
         />
       )}
       <div className={cn("mx-auto max-w-[820px] space-y-3", clip ? "pt-4" : "mt-8")}>
@@ -425,7 +425,7 @@ export function AudioJoinTool({ tabs }: { tabs?: React.ReactNode }) {
       {!clips.length && (
         <ToolHero
           title="Join clips into one track"
-          subtitle={`Up to ${JOIN_MAX_CLIPS} clips, in the order you set. Crossfaded on your ComfyUI (free, runs on CPU); end to end on the cloud, for under a cent.`}
+          subtitle={`Up to ${JOIN_MAX_CLIPS} clips, in the order you set. Crossfaded on your ComfyUI (free, runs on CPU)${mode === "open" ? "." : "; end to end on the cloud, for under a cent."}`}
         />
       )}
       <div className={cn("mx-auto max-w-[820px] space-y-3", clips.length ? "pt-4" : "mt-8")}>

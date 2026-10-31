@@ -24,6 +24,7 @@ import {
   presetRouteLines,
   previewFlip,
   searchText,
+  matchesSearch,
   type CameraMove,
   type MoveSpec,
   type PreviewLayer,
@@ -253,6 +254,10 @@ describe("slim card DTOs", () => {
 
   it("searches name, description and category", () => {
     expect(searchText({ name: "Crash Zoom In", description: "A sudden zoom", category: "Push & Pull" })).toBe("crash zoom in a sudden zoom push & pull");
+    // Every word, in any order and in its plain forms.
+    const t = searchText({ name: "Remove Background", description: "A clean cut-out with one explosion", category: "Edit" });
+    for (const q of ["remover", "removing", "explosions", "background remove", "explosion", "edit"]) expect(matchesSearch(t, q), q).toBe(true);
+    for (const q of ["fire", "remove fire"]) expect(matchesSearch(t, q), q).toBe(false);
   });
 });
 

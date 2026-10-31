@@ -163,7 +163,8 @@ export function ClipBar({ clip, onRemove }: { clip: SourceClip; onRemove: () => 
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-medium">{clip.name}</p>
-        <p className="truncate text-[11px] text-muted-foreground" aria-live="polite">
+        {/* An error is read whole (two lines), not cut off like the size line. */}
+        <p className={cn("text-[11px]", clip.error ? "line-clamp-2 text-destructive" : "truncate text-muted-foreground")} aria-live="polite">
           {clip.error
             ? clip.error
             : clip.uploading

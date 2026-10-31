@@ -320,6 +320,7 @@ export async function startSchedule(id: string, o: { now?: number; model?: Model
       title: `${r.title} · ${formatWhen(now, r.tz)}`,
       projectId: r.project_id,
       mode: m.mode,
+      provider: m.provider,
       model: m.model,
       effort: m.effort,
       scheduleId: r.id,

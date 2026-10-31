@@ -11,10 +11,14 @@ const Body = z.object({
   thumb: z.string().startsWith("/api/files/").max(500).nullable().optional(),
 });
 
-/** Your colour signatures and the 50 built-in palettes, plus which models take a palette natively. */
+/**
+ * Your colour signatures and the 50 built-in palettes, plus which models take a palette natively. A guest or an account
+ * (GUEST_HEADER) gets the built-in ones only: the signatures are the owner's.
+ */
 export async function GET(request: Request) {
   await connection();
-  return Response.json({ items: isGuest(request) ? [] : listPalettes(), caps: signatureCaps() });
+  const items = listPalettes();
+  return Response.json({ items: isGuest(request) ? items.filter((p) => p.source === "builtin") : items, caps: signatureCaps() });
 }
 
 export async function POST(request: Request) {

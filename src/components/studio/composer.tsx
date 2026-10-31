@@ -222,6 +222,25 @@ export function Composer({ docked }: { docked: boolean }) {
   const [focused, setFocused] = useState(false);
   const promptRef = useRef<PromptInputHandle>(null);
   const root = useRef<HTMLDivElement>(null);
+  // The words typed are kept for this tab, per page (a hub's mode has its own): a visit to other modes and back finds
+  // them again, as a studio the router keeps mounted does. A prompt from the link (?prompt=) wins.
+  const draftKey = useRef<string | null>(null);
+  useEffect(() => {
+    draftKey.current = `fuobe:draft:${window.location.pathname}`;
+    try {
+      const kept = sessionStorage.getItem(draftKey.current);
+      if (kept && !typed.prompt) setDraft({ prompt: kept });
+    } catch {}
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!draftKey.current) return;
+    try {
+      if (typed.prompt) sessionStorage.setItem(draftKey.current, typed.prompt);
+      else sessionStorage.removeItem(draftKey.current);
+    } catch {}
+  }, [typed.prompt]);
   // Connection status can arrive before this Suspense subtree hydrates: render the server's view (no status) until then.
   const hydrated = useHydrated();
   const liveStatus = useStatus().data;
@@ -610,7 +629,8 @@ export function Composer({ docked }: { docked: boolean }) {
   const alternative = config.comfyOnly?.alternative;
   const alternativeHref = alternative && `${alternative.href}${video?.startsWith("/api/files/") ? `&video=${encodeURIComponent(video)}` : ""}`;
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
-  const costText = costLabel({ demo, cost, unknown: loraPriceUnknown }, formatCost);
+  // On the open engine every run is free on the GPU: said even before the run can be planned (no voice sample, no clip yet).
+  const costText = costLabel({ demo, cost: cost ?? (engine === "open" && model ? 0 : null), unknown: loraPriceUnknown }, formatCost);
 
   // Attachments: only when something is attached, a required slot is still empty, or none of a "one of these" group is filled (U8).
   const kinds = [...attach.kinds];

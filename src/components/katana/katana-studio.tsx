@@ -254,8 +254,9 @@ export function KatanaStudio() {
                 Model
               </Label>
               <Select value={m.id} onValueChange={setModelId}>
-                <SelectTrigger id="katana-model" className="h-9 w-full rounded-full sm:w-72">
-                  <SelectValue />
+                <SelectTrigger id="katana-model" className="h-9 w-full rounded-full sm:w-auto sm:min-w-0 sm:flex-1">
+                  {/* The name alone here: the menu says each model's seconds. */}
+                  <SelectValue>{m.label}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {motionModels.map((x) => (

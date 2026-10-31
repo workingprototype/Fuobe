@@ -9,9 +9,6 @@ import { libraryEntry, needsToken } from "@/lib/catalog/loras";
 import { ANGLES_2511_LORA } from "@/lib/catalog/open-tools";
 import { STUDIO_WORKFLOWS } from "@/lib/catalog/swap-studio-plan";
 import { FILL_MODELS } from "@/lib/catalog/turnaround";
-
-/** The open engine's Join clips (a turnaround's quarter turns become one film). */
-const JOIN_CLIPS_MODEL = "oss-join-clips";
 import type { LoraRef, ModelDef, Operation } from "@/lib/catalog/types";
 import type { LoraNeed } from "@/lib/gpu/readiness";
 import { basename } from "@/lib/gpu/requirements";
@@ -19,6 +16,9 @@ import type { StudioGroup, ToolRef } from "@/lib/gpu/types";
 import * as S from "@/lib/studios";
 import type { StudioConfig } from "@/components/studio/studio-context";
 import { loadIndex } from "./index-file";
+
+/** The open engine's Join clips (a turnaround's quarter turns become one film). */
+const JOIN_CLIPS_MODEL = "oss-join-clips";
 
 /**
  * From the tools people pick (a model's operation, a preset, a studio's open default) to the workflows and

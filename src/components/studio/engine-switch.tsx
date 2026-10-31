@@ -4,7 +4,7 @@ import { Cloud, Cpu, Lock } from "lucide-react";
 import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Engine } from "@/lib/catalog/types";
-import { useEngineMode } from "@/lib/api";
+import { useEngineMode, useViewer } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { radioKeys, radioTab } from "./radio-keys";
 
@@ -30,27 +30,40 @@ export function EngineSwitch({
   compact?: boolean;
 }) {
   const mode = useEngineMode();
+  // Only the owner can change the engine mode (Settings): anyone else gets a plain badge, not a link to a page they can't use.
+  const owner = useViewer().data?.owner === true;
   const idx = OPTIONS.findIndex((o) => o.value === value);
   if (mode !== "both") {
     const o = OPTIONS.find((x) => x.value === mode)!;
     const text = mode === "open" ? "Open source only" : "Cloud only";
-    return (
+    const cls = cn(
+      "inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors",
+      size === "sm" ? "h-8" : "h-8 sm:h-9",
+    );
+    const body = (
+      <>
+        <o.icon className="size-3.5" />
+        <span className={cn(compact && "hidden sm:inline")}>{text}</span>
+      </>
+    );
+    return owner ? (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Link
-            href="/settings"
-            aria-label={`${text} — change in Settings`}
-            className={cn(
-              "inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
-              size === "sm" ? "h-8" : "h-8 sm:h-9",
-            )}
-          >
-            <o.icon className="size-3.5" />
-            <span className={cn(compact && "hidden sm:inline")}>{text}</span>
+          <Link href="/settings" aria-label={`${text} — change in Settings`} className={cn(cls, "hover:text-foreground")}>
+            {body}
             <Lock className="size-3 opacity-60" />
           </Link>
         </TooltipTrigger>
         <TooltipContent>{text} · locked in Settings → Engine mode</TooltipContent>
+      </Tooltip>
+    ) : (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className={cls}>
+            {body}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{mode === "open" ? "This studio runs open-source models, free on your own GPU" : "This studio runs paid cloud models"}</TooltipContent>
       </Tooltip>
     );
   }

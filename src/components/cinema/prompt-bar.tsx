@@ -68,7 +68,7 @@ import { formatCost } from "@/lib/format";
 import { modKey } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import { toastError } from "@/lib/refusals";
-import { MoveChips, MovePicker } from "./camera-moves";
+import { MoveChips, MovePicker, prefetchMoves } from "./camera-moves";
 import { CameraChip, EmotionChip, FilmSetupChip, LightingChip, PaletteChip } from "./director-panel";
 import { directorPicks, draftToInput, type BarAction, type CinemaDraft, type RefItem } from "./draft";
 import { useCinemaGenerate } from "./hooks";
@@ -428,7 +428,9 @@ export function PromptBar(props: PromptBarProps) {
   }, []);
 
   const onPrompt = (v: string) => {
-    // Typing "#" opens the camera-move picker (the # itself doesn't stay in the prompt).
+    // Typing "#" opens the camera-move picker (the # itself doesn't stay in the prompt): its list loads while a
+    // video prompt is typed, so the search box is there for what's typed after the "#".
+    if (video) prefetchMoves();
     const el = document.activeElement as HTMLTextAreaElement | null;
     const caret = el?.tagName === "TEXTAREA" ? (el.selectionStart ?? v.length) : v.length;
     if (video && v.length === draft.prompt.length + 1 && v[caret - 1] === "#" && (caret === 1 || /\s/.test(v[caret - 2]))) {

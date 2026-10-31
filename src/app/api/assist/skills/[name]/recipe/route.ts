@@ -1,12 +1,17 @@
 import { connection } from "next/server";
+import { isGuest } from "@/lib/guest-access";
 import { recipeFailure } from "@/server/recipe-routes";
 import { recipeView, saveRecipe } from "@/server/recipes";
+import { getSkill } from "@/server/skills";
 
 /** A skill's recipe with where it runs and what was checked (engines, ready, needs a re-check). */
-export async function GET(_req: Request, ctx: RouteContext<"/api/assist/skills/[name]/recipe">) {
+export async function GET(request: Request, ctx: RouteContext<"/api/assist/skills/[name]/recipe">) {
   await connection();
+  const { name } = await ctx.params;
+  // A guest or an account (public sign-up) sees the built-in skills' recipes, not the owner's own.
+  if (isGuest(request) && getSkill(name)?.source !== "builtin") return Response.json({ error: "No such skill" }, { status: 404 });
   try {
-    return Response.json(recipeView((await ctx.params).name));
+    return Response.json(recipeView(name));
   } catch (e) {
     return recipeFailure(e);
   }

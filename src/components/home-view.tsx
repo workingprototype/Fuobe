@@ -27,7 +27,7 @@ import { HadItemsScript, useHadItems } from "@/components/use-had-items";
 import { CardPending, IntentLink } from "@/components/intent-link";
 import { PresetCard } from "@/components/preset-gallery";
 import { MediaThumb } from "@/components/studio/result-media";
-import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
+import { CONNECT_GPU_EVENT, signInHref, useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
 import { issueStartToken, START_PARAM } from "@/lib/composer";
@@ -198,11 +198,13 @@ export function HomeView({
   const statusData = useStatus().data;
   const status = hydrated ? statusData : undefined;
   const nothingConnected = !!status && noConnection(status);
-  // Until something is connected (or it's put away): three ways to start, under the composer. It's
-  // in the static shell too (no status yet), so it doesn't push the page down when the status
-  // arrives; FirstRunScript hides it before the first paint in a browser that has put it away.
+  // Until something is connected (or it's put away): three ways to start, under the composer. The
+  // static shell (no status yet) shows it only in a browser where it showed last time
+  // (FirstRunScript), so a visitor to a public studio, who never gets it, doesn't see it come and go.
   const firstRun = showFirstRun(status);
   const guide = !status || firstRun;
+  // A guest or an account (public sign-up) runs open-source models on its own GPU, whatever the install's engines.
+  const visitor = status?.viewer;
   useEffect(() => {
     if (!status) return;
     try {
@@ -221,6 +223,7 @@ export function HomeView({
   };
   // What Start will run, and what it costs, before it's pressed (or why it's a demo, and the engine that would run it).
   const runsFor = status ? startLine(status, quotes?.[mode.id], engine, mode.id as "image" | "video" | "edit") : null;
+  const openModel = quotes?.[mode.id]?.open?.name;
   const focusComposer = () => requestAnimationFrame(() => box.current?.focus());
   const startOver = useCallback(() => {
     setPrompt("");
@@ -235,7 +238,8 @@ export function HomeView({
       <div className="flex flex-col items-center pt-[8vh] text-center">
         <h1 className="font-heading text-display text-balance sm:text-[44px]">What will you create today?</h1>
         <p className="mt-2 text-[15px] text-muted-foreground">
-          {engineMode === "open"
+          {/* Before the status: the words a public studio's visitors get (the owner's own install corrects them in a moment). */}
+          {!status || visitor || engineMode === "open"
             ? "Fully open-source models running on your own ComfyUI."
             : engineMode === "cloud"
               ? "Frontier paid models through your own API keys."
@@ -286,10 +290,29 @@ export function HomeView({
             </div>
           </div>
         </div>
-        {runsFor && (
-          <p className="mt-2 text-[12px] text-muted-foreground">
-            {runsFor.text}
-            {runsFor.other && (
+        {/* Its line's height is kept from the first paint, so the tools under it don't move when it fills in. */}
+        {visitor && openModel && !visitor.gpu.connected ? (
+          <p className="mt-2 min-h-[18px] text-[12px] text-muted-foreground">
+            {visitor.kind === "guest" ? (
+              <>
+                <a href={signInHref("signup")} className="text-brand-text underline underline-offset-2 hover:no-underline">
+                  Sign up free
+                </a>{" "}
+                to run {openModel} on your own GPU
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => window.dispatchEvent(new Event(CONNECT_GPU_EVENT))} className="text-brand-text underline underline-offset-2 hover:no-underline">
+                  Connect your GPU
+                </button>{" "}
+                to run {openModel} · Free
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="mt-2 min-h-[18px] text-[12px] text-muted-foreground">
+            {runsFor?.text}
+            {runsFor?.other && (
               <>
                 {" · "}
                 <button type="button" onClick={() => setEngine(runsFor.other!)} className="text-brand-text underline underline-offset-2 hover:no-underline">
@@ -303,7 +326,7 @@ export function HomeView({
           <>
             <FirstRunScript />
             <GetStarted
-              className={cn("mt-6 max-w-[960px]", !status && "[html[data-first-run='0']_&]:hidden")}
+              className={cn("mt-6 max-w-[960px]", !status && "hidden [html[data-first-run='1']_&]:block")}
               status={status}
               prices={prices}
               onDemo={focusComposer}

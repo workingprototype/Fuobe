@@ -23,7 +23,7 @@ import { toastError } from "@/lib/refusals";
 import { useStoredReducer } from "./stored";
 import { TemplatePreview } from "./template-preview";
 
-const LABELS = ["Select presets", "Character", "Generation", "Clothing", "Photoset"];
+const LABELS = ["Select a template", "Character", "Generation", "Clothing", "Photoset"];
 const BANNER_KEY = "fuobe.fashion.banner";
 /**
  * The outfit and photoset models' names (FASHION_MODELS has each step's per engine): Fuobe Try-On (the Original, FLUX.2
@@ -153,8 +153,7 @@ export function FashionView() {
           <button type="button" onClick={hideBanner} aria-label="Hide" className="absolute top-3 right-3 grid size-7 place-items-center rounded-full hover:bg-accent">
             <X className="size-4" />
           </button>
-          <p className="font-heading text-[26px] leading-tight">Fashion factory</p>
-          <p className="mt-1 max-w-xl text-[14px] text-muted-foreground">Easily create branded photoshoots by combining your product with a consistent character, delivering unique and professional visuals every time.</p>
+          <p className="max-w-xl pr-8 text-[14px] text-muted-foreground">Easily create branded photoshoots by combining your product with a consistent character, delivering unique and professional visuals every time.</p>
           <Button className="mt-3" size="sm" onClick={hideBanner}>
             Select template
           </Button>
@@ -166,9 +165,9 @@ export function FashionView() {
       </div>
 
       {s.step === "template" && (
-        <section aria-label="Select presets" className="space-y-4">
+        <section aria-label="Select a template" className="space-y-4">
           <div>
-            <h2 className="font-heading text-[26px] leading-tight">Select presets</h2>
+            <h2 className="font-heading text-[26px] leading-tight">Select a template</h2>
             <p className="text-[14px] text-muted-foreground">Choose a template or aesthetic for the photo set</p>
           </div>
           <div role="radiogroup" aria-label="Templates" className="grid grid-cols-2 gap-3 lg:grid-cols-3">

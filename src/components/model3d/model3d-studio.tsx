@@ -2,7 +2,7 @@
 
 import { Box, Loader2, PersonStanding } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { FailedTile, PendingTile } from "@/components/studio/feed";
 import { MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { MediaDrop } from "@/components/av/media-drop";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
-import { useCreateGeneration, useEngine, useGenerations, useModelAccess } from "@/lib/api";
+import { useCreateGeneration, useEngine, useGenerations, useHydrated, useModelAccess, useStatus } from "@/lib/api";
 import {
   MAX_3D_PROMPT,
   MODEL3D_FEATURE,
@@ -128,6 +128,16 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
   const create = useCreateGeneration();
   const results = useGenerations({ features: [MODEL3D_FEATURE, "app:app-image-to-3d"], limit: 24 });
   const [mode, setMode] = useState<Model3dMode>("image");
+  const router = useRouter();
+  // A mode picked here goes in the URL (?mode=), so a reload or a shared link opens it again (UrlModel reads it).
+  const pickMode = (m: Model3dMode) => {
+    setMode(m);
+    router.replace(m === "image" ? "/image-to-3d" : `/image-to-3d?mode=${m}`, { scroll: false });
+  };
+  // The engine is known once the install's engine mode is: no price asked for a cloud model an open-only install refuses.
+  const statusKnown = !!useStatus().data;
+  const hydrated = useHydrated();
+  const engineKnown = statusKnown && hydrated;
   const [photo, setPhoto] = useState<SlotValue | null>(null);
   const [views, setViews] = useState<Partial<Record<ViewSide, SlotValue | null>>>({});
   const [text, setText] = useState("");
@@ -155,7 +165,7 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
   const priced: GenerationRequest | null = modelId
     ? model3dRequest({ ...input, photo: input.photo ?? PLACEHOLDER, views: { front: PLACEHOLDER, left: PLACEHOLDER, ...sides }, prompt: input.prompt?.trim() || "an object" })
     : null;
-  const preview = useRunPreview(priced);
+  const preview = useRunPreview(engineKnown ? priced : null);
   const price = priceLine(preview.data);
   const cloudAllowed = engineMode !== "open";
   const go = () => {
@@ -174,7 +184,7 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
         <UrlModel onModel={fromUrl} onMode={setMode} onRig={showRigHint} />
       </Suspense>
       <ToolHero title="Your product, in 3D" subtitle={HINTS[mode]} />
-      <ModePicker mode={mode} onChange={setMode} />
+      <ModePicker mode={mode} onChange={pickMode} />
       {rigHint && (
         <p role="status" className="mx-auto mt-4 max-w-[880px] rounded-2xl border bg-brand-faint px-4 py-3 text-[13px] text-brand-text">
           <PersonStanding className="mr-1.5 inline size-4 align-[-3px]" aria-hidden />

@@ -1,22 +1,49 @@
 "use client";
 
 import { Ban, Film, Loader2, Shuffle } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import type { Preset } from "@/lib/catalog/types";
+import { presetCover } from "@/lib/preset-covers";
 import { cn } from "@/lib/utils";
+import { CoverScrollBox, CoverTile, usePickerPlayback } from "@/components/cover-tile";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { loadFullCatalog, useCatalog } from "./catalog";
 import { Chip, ClearableChip } from "./chip";
 
 /**
- * Camera-motion / effect picker and Mix. Loaded as its own chunk (with the preset icons), and
- * the preset lists come from the full catalog chunk, fetched on first hover or open.
+ * Camera-motion / effect picker and Mix. Loaded as its own chunk (with the preset icons and the slim
+ * covers map), and the preset lists come from the full catalog chunk, fetched on first hover or open.
+ * A preset shows its real cover, as in the galleries, else its drawn tile.
  */
 
-function PresetGrid({ list, value, onPick, noneLabel }: { list: Preset[] | null; value?: string; onPick: (id: string | undefined) => void; noneLabel: string }) {
+const tileClass = "group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent";
+
+function PresetTile({ preset: p, picked, onPick }: { preset: Preset; picked: boolean; onPick: () => void }) {
+  const { playing, handlers } = usePickerPlayback(p.id, { picked });
+  const PI = PRESET_ICONS[p.look.icon] ?? Film;
+  return (
+    <button type="button" aria-pressed={picked} onClick={onPick} {...handlers} className={cn(tileClass, picked && "ring-2")}>
+      <CoverTile
+        cover={presetCover(p.id)}
+        playing={playing}
+        picked={picked}
+        className="aspect-video w-full rounded-md"
+        fallback={
+          <span className="absolute inset-0 grid place-items-center text-white" style={{ background: `linear-gradient(135deg, ${p.look.from}, ${p.look.to})` }}>
+            <PI className="size-5 transition-transform duration-300 group-hover:scale-125" />
+          </span>
+        }
+      />
+      <span className="w-full truncate px-0.5 text-[12px] font-medium">{p.name}</span>
+    </button>
+  );
+}
+
+export function PresetGrid({ list, value, onPick, noneLabel }: { list: Preset[] | null; value?: string; onPick: (id: string | undefined) => void; noneLabel: string }) {
   const [cat, setCat] = useState<string>("All");
+  const box = useRef<HTMLDivElement>(null);
   if (!list)
     return (
       <div className="grid h-40 place-items-center" role="status" aria-label="Loading presets">
@@ -39,35 +66,30 @@ function PresetGrid({ list, value, onPick, noneLabel }: { list: Preset[] | null;
           </button>
         ))}
       </div>
-      <div className="grid max-h-72 grid-cols-3 gap-1.5 overflow-y-auto">
-        {cat === "All" && (
-          <button type="button" aria-pressed={!value} onClick={() => onPick(undefined)} className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", !value && "ring-2")}>
-            <span className="grid aspect-video w-full place-items-center rounded-md bg-muted text-muted-foreground">
-              <Ban className="size-5" />
-            </span>
-            <span className="truncate px-0.5 text-[12px] font-medium">{noneLabel}</span>
-          </button>
-        )}
-        {list
-          .filter((p) => cat === "All" || p.category === cat)
-          .map((p) => {
-            const PI = PRESET_ICONS[p.look.icon] ?? Film;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                aria-pressed={value === p.id}
-                onClick={() => onPick(p.id)}
-                className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", value === p.id && "ring-2")}
-              >
-                <span className="grid aspect-video w-full place-items-center rounded-md text-white" style={{ background: `linear-gradient(135deg, ${p.look.from}, ${p.look.to})` }}>
-                  <PI className="size-5 transition-transform duration-300 group-hover:scale-125" />
-                </span>
-                <span className="truncate px-0.5 text-[12px] font-medium">{p.name}</span>
-              </button>
-            );
-          })}
-      </div>
+      <CoverScrollBox value={box}>
+        <div ref={box} className="grid max-h-72 grid-cols-3 gap-1.5 overflow-y-auto">
+          {cat === "All" && (
+            <button type="button" aria-pressed={!value} onClick={() => onPick(undefined)} className={cn(tileClass, !value && "ring-2")}>
+              <CoverTile
+                cover={undefined}
+                picked={!value}
+                className="aspect-video w-full rounded-md"
+                fallback={
+                  <span className="absolute inset-0 grid place-items-center text-muted-foreground">
+                    <Ban className="size-5" />
+                  </span>
+                }
+              />
+              <span className="w-full truncate px-0.5 text-[12px] font-medium">{noneLabel}</span>
+            </button>
+          )}
+          {list
+            .filter((p) => cat === "All" || p.category === cat)
+            .map((p) => (
+              <PresetTile key={p.id} preset={p} picked={value === p.id} onPick={() => onPick(p.id)} />
+            ))}
+        </div>
+      </CoverScrollBox>
     </>
   );
 }
@@ -79,7 +101,9 @@ export function PresetChip({ type, value, onChange }: { type: "motion" | "effect
   const catalog = useCatalog();
   const list = catalog.presets?.[type] ?? null;
   const selected = value ? catalog.getPreset(value) : undefined;
-  const Icon = selected ? (PRESET_ICONS[selected.look.icon] ?? Film) : value && !catalog.complete ? Loader2 : Film;
+  // The picked preset's poster in place of its icon, as the Look chip shows its look.
+  const cover = selected && presetCover(selected.id);
+  const Icon = cover ? undefined : selected ? (PRESET_ICONS[selected.look.icon] ?? Film) : value && !catalog.complete ? Loader2 : Film;
   const noun = type === "motion" ? "camera motion" : "effect";
   return (
     <ClearableChip active={!!value} onClear={() => onChange(undefined)} clearLabel={`Clear ${selected?.name ?? noun}`}>
@@ -92,6 +116,7 @@ export function PresetChip({ type, value, onChange }: { type: "motion" | "effect
       >
         <PopoverTrigger asChild>
           <Chip icon={Icon} active={!!value} onPointerEnter={prefetch} onFocus={prefetch} className={cn(value && !selected && "[&>svg]:animate-spin")}>
+            {cover && <CoverTile cover={cover} className="size-4 rounded-full" />}
             {selected?.name ?? (value ? "Loading…" : type === "motion" ? "Camera motion" : "Effect")}
           </Chip>
         </PopoverTrigger>
@@ -128,6 +153,7 @@ export function MixChip({
   const [open, setOpen] = useState(false);
   const catalog = useCatalog();
   const second = mix ? catalog.getPreset(mix.presetId) : undefined;
+  const cover = second && presetCover(second.id);
   const mixable = catalog.presets ? [...catalog.presets.motion, ...catalog.presets.effect].filter((p) => p.id !== primary.id && !p.inputs.some((i) => i.key === "endImage")) : null;
   return (
     <ClearableChip active={!!mix} onClear={() => onChange({ mix: undefined })} clearLabel="Remove the mix">
@@ -139,7 +165,8 @@ export function MixChip({
         }}
       >
         <PopoverTrigger asChild>
-          <Chip icon={Shuffle} active={!!mix} onPointerEnter={prefetch} onFocus={prefetch}>
+          <Chip icon={cover ? undefined : Shuffle} active={!!mix} onPointerEnter={prefetch} onFocus={prefetch}>
+            {cover && <CoverTile cover={cover} className="size-4 rounded-full" />}
             {second ? `+ ${second.name}` : "Mix"}
           </Chip>
         </PopoverTrigger>

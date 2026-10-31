@@ -15,7 +15,9 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { Segmented, usd } from "@/components/faceless/controls";
 import { NarratorChip } from "@/components/faceless/narrator";
 import { StyleArt } from "@/components/faceless/style-art";
-import { uploadFile, useEngine, useHydrated } from "@/lib/api";
+import { SelfHostNote } from "@/components/self-host-note";
+import { useEdgeFade } from "@/components/studio/use-edge-fade";
+import { uploadFile, useEngine, useHydrated, useIsVisitor } from "@/lib/api";
 import {
   ANIMATION_STYLES,
   CF_LENGTHS,
@@ -83,6 +85,11 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
   const [uploading, setUploading] = useState(false);
   const [claudeOpen, setClaudeOpen] = useState(false);
   const [example, setExample] = useState(0);
+  // The estimate's problem (no narrator voice yet…) is a hint until Generate is pressed.
+  const [tried, setTried] = useState(false);
+  // A series doesn't run on an account's own GPU yet (only the studios' generations do): said here, not after Generate.
+  const visitor = useIsVisitor();
+  const [exampleRow, exampleFade] = useEdgeFade<HTMLDivElement>();
   const file = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const ids = { prompt: useId(), link: useId(), voice: useId() };
@@ -181,7 +188,8 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
   // One run at a time: a second Enter (or click) before the first request has re-rendered would plan, make and bill it twice.
   const submitting = useRef(false);
   const submit = async () => {
-    if (submitting.current) return;
+    if (submitting.current || visitor) return;
+    setTried(true);
     if (blocker) {
       toast(blocker, { id: "cf-blocker" });
       if (!prompt.trim()) promptRef.current?.focus();
@@ -342,7 +350,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
               placeholder={`${examples[example % examples.length]}…`}
               className="mt-1 w-full resize-none bg-transparent px-1 text-body leading-relaxed outline-none [field-sizing:content] placeholder:text-subtle-foreground"
             />
-            <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+            <div ref={exampleRow} style={exampleFade} className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
               {examples.slice(0, 5).map((ex) => (
                 <button key={ex} type="button" onClick={() => setPrompt(ex)} className="h-7 shrink-0 rounded-full bg-secondary px-2.5 text-[12px] text-secondary-foreground hover:bg-accent">
                   {ex}
@@ -428,15 +436,20 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
                   Review scripts first
                 </label>
               )}
-              <Button onClick={() => void submit()} disabled={busy} className="ml-auto h-9 rounded-full px-4">
+              <Button onClick={() => void submit()} disabled={busy || visitor} className="ml-auto h-9 rounded-full px-4">
                 {busy ? <Loader2 className="animate-spin" /> : mode === "here" ? <ArrowRight /> : <Bot />}
                 {busy ? "Planning your episodes…" : mode === "here" ? (episodes > 1 ? `Generate ${episodes} episodes` : "Generate") : "Get the prompt"}
               </Button>
             </div>
-            {mode === "here" && est?.error && (
-              <p role="alert" className="mt-2 text-[12px] text-destructive">
-                {est.error}
-              </p>
+            {visitor ? (
+              <SelfHostNote className="mt-2">Content Factory runs on a self-hosted Fuobe for now.</SelfHostNote>
+            ) : (
+              mode === "here" &&
+              est?.error && (
+                <p role={tried ? "alert" : undefined} className={cn("mt-2 text-[12px]", tried ? "text-destructive" : "text-muted-foreground")}>
+                  {est.error}
+                </p>
+              )
             )}
             {blocker && prompt.trim() && (
               <p className="mt-2 text-[12px] text-muted-foreground" aria-live="polite">

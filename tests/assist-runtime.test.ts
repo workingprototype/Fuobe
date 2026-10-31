@@ -82,7 +82,7 @@ describe("offline planner (U18)", () => {
     expect(said.text).not.toContain(agent.OFFLINE_NOTE);
     const at = v.thread.items.findIndex((i) => i.role === "approval");
     expect(v.thread.items[at + 1]).toMatchObject({ role: "notice", tone: "info", text: agent.OFFLINE_NOTE });
-    expect(agent.OFFLINE_NOTE).toBe("Offline planner — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for better plans.");
+    expect(agent.OFFLINE_NOTE).toBe("Offline planner — connect a model in Settings → AI helper (Anthropic, OpenAI, Google, OpenRouter… or a local model) for better plans.");
     const card = v.thread.items.find((i) => i.role === "approval") as { jobs: { kind: string; op: string; error?: string }[] };
     expect(card.jobs.map((j) => [j.kind, j.op, j.error])).toEqual([
       ["image", "t2i", undefined],

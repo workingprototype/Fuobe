@@ -40,7 +40,8 @@ export function ControlsChip({
         <p className="text-[12px] text-muted-foreground">Leave one on Auto and the model decides.</p>
         <div className="grid grid-cols-2 gap-2">
           {controls.map((c) => (
-            <label key={c.param} className="space-y-1">
+            // A control alone on its row (MOSS-Image's one Quality) takes both columns, so its value reads in full.
+            <label key={c.param} className="space-y-1 odd:last:col-span-2">
               <span className="text-[12px] text-muted-foreground">{c.label}</span>
               <Select value={values[c.param] === undefined ? "__auto" : String(values[c.param])} onValueChange={(v) => onChange(c.param, v === "__auto" ? undefined : typeof c.values[0] === "number" ? Number(v) : v)}>
                 <SelectTrigger size="sm" className="w-full" aria-label={c.label}>

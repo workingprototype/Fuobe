@@ -27,6 +27,46 @@ export const SETTINGS = {
   openaiKey: { key: "openai.key", env: "OPENAI_API_KEY", secret: true },
   googleKey: { key: "google.key", env: "GEMINI_API_KEY", secret: true },
   anthropicKey: { key: "anthropic.key", env: "ANTHROPIC_API_KEY", secret: true },
+  /*
+   * Assist's hosted LLM providers (src/lib/catalog/llm-providers.ts): a key each, the region where the
+   * provider has several official hosts, and the tick for a free plan Fuobe can't see from the key.
+   * A key is read only from a name meant for that API: never one other tools set for something else
+   * (HF_TOKEN is for downloads, GOOGLE_API_KEY for other Google Cloud APIs), which would connect a paid
+   * provider the owner never added.
+   */
+  xaiKey: { key: "xai.key", env: "XAI_API_KEY", secret: true },
+  /** Meta's docs name no environment variable for Model API keys. */
+  metaKey: { key: "meta.key", env: "FUOBE_META_API_KEY", secret: true },
+  mistralKey: { key: "mistral.key", env: "MISTRAL_API_KEY", secret: true },
+  cohereKey: { key: "cohere.key", env: ["CO_API_KEY", "COHERE_API_KEY"], secret: true },
+  deepseekKey: { key: "deepseek.key", env: "DEEPSEEK_API_KEY", secret: true },
+  moonshotKey: { key: "moonshot.key", env: "MOONSHOT_API_KEY", secret: true },
+  zaiKey: { key: "zai.key", env: ["ZAI_API_KEY", "ZHIPUAI_API_KEY"], secret: true },
+  qwenKey: { key: "qwen.key", env: "DASHSCOPE_API_KEY", secret: true },
+  minimaxKey: { key: "minimax.key", env: "MINIMAX_API_KEY", secret: true },
+  openrouterKey: { key: "openrouter.key", env: "OPENROUTER_API_KEY", secret: true },
+  groqKey: { key: "groq.key", env: "GROQ_API_KEY", secret: true },
+  cerebrasKey: { key: "cerebras.key", env: "CEREBRAS_API_KEY", secret: true },
+  togetherKey: { key: "together.key", env: "TOGETHER_API_KEY", secret: true },
+  fireworksKey: { key: "fireworks.key", env: "FIREWORKS_API_KEY", secret: true },
+  huggingfaceToken: { key: "huggingface.token", env: "FUOBE_HF_TOKEN", secret: true },
+  openaiRegion: { key: "openai.region", default: "global", options: ["global", "us", "eu"] },
+  xaiRegion: { key: "xai.region", default: "global", options: ["global", "us"] },
+  moonshotRegion: { key: "moonshot.region", default: "international", options: ["international", "china"] },
+  zaiRegion: { key: "zai.region", default: "international", options: ["international", "china"] },
+  minimaxRegion: { key: "minimax.region", default: "international", options: ["international", "china"] },
+  togetherRegion: { key: "together.region", default: "global", options: ["global", "us"] },
+  qwenRegion: { key: "qwen.region", default: "singapore", options: ["singapore", "virginia", "beijing", "hongkong", "tokyo"] },
+  /** Model Studio's workspace id: part of the official host name, never a URL. */
+  qwenWorkspace: { key: "qwen.workspace", env: "DASHSCOPE_WORKSPACE_ID" },
+  googleFreeTier: { key: "google.freeTier", default: "0", options: ["0", "1"] },
+  mistralFreePlan: { key: "mistral.freePlan", default: "0", options: ["0", "1"] },
+  cohereTrialKey: { key: "cohere.trialKey", default: "0", options: ["0", "1"] },
+  groqFreePlan: { key: "groq.freePlan", default: "0", options: ["0", "1"] },
+  /** Settings → AI helper → "Smart plans with": "auto", or "provider|model". */
+  smartPlan: { key: "assist.smartPlan", default: "auto" },
+  /** Settings → AI helper → "Free uses": the best free model, or the local one first. */
+  freeOrder: { key: "assist.freeOrder", default: "best", options: ["best", "local"] },
   comfyUrl: { key: "comfyui.url", env: "COMFYUI_URL", default: "http://127.0.0.1:8188" },
   comfyToken: { key: "comfyui.token", env: "COMFYUI_TOKEN", secret: true },
   /** A second ComfyUI for workflows whose node packs can't share the main install (LatentSync 1.6, ThinkSound; scripts/comfy/README.md). */
@@ -137,6 +177,13 @@ export function validateSetting(name: SettingName, value: string): void {
   }
   if (name === "llmContext" && value !== "" && parseContext(value) === null) {
     throw new Error("llmContext must be a number of tokens of at least 2048 (such as 16384 or 16k), or 0 to leave it to the server");
+  }
+  // It becomes part of a host name: letters, digits and hyphens only.
+  if (name === "qwenWorkspace" && value !== "" && !/^[a-z0-9-]{1,64}$/.test(value)) {
+    throw new Error("qwenWorkspace must be the workspace id from Model Studio (lowercase letters, digits and hyphens)");
+  }
+  if (name === "smartPlan" && value !== "" && value !== "auto" && !/^[a-z0-9-]{2,32}\|[\w.:/@+-]{1,200}$/.test(value)) {
+    throw new Error("smartPlan must be auto, or a provider and model as provider|model");
   }
 }
 

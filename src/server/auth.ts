@@ -69,6 +69,8 @@ interface AuthFile {
   accounts?: Account[];
   /** Settings → Security: guests may browse and anyone may sign up (FUOBE_PUBLIC_SIGNUP overrides it). */
   publicSignup?: boolean;
+  /** Session cookies signed out (endSession), by their SHA-256, until they would have expired anyway. */
+  signedOut?: { hash: string; exp: number }[];
   /** In memory only: the file is there but can't be read or parsed. Sign-in stays on, nobody is signed in, nothing is written. */
   unreadable?: true;
 }
@@ -239,9 +241,26 @@ export function sessionViewer(value: string | undefined): Viewer | null {
   const d = read();
   if (!d.secret || !mac || !liveExpiry(exp)) return null;
   if (!same(Buffer.from(mac), Buffer.from(sign(keyFor(d, parts.length === 2), parts.slice(0, -1).join("."))))) return null;
+  // Signed out with Sign out: a copy of the cookie (another tab's, a stolen one) is refused too.
+  if (d.signedOut?.length && d.signedOut.some((s) => s.hash === cookieHash(value))) return null;
   if (parts.length === 2) return { kind: "owner" };
   const account = d.accounts?.find((a) => a.id === parts[1]);
   return account && !account.disabled ? { kind: "account", account } : null;
+}
+
+const cookieHash = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
+
+/**
+ * Sign out: the server stops taking this session cookie (deleting it from the browser alone would leave a copy working
+ * until it expires). Kept until the cookie would have expired anyway, so the list stays short.
+ */
+export function endSession(value: string | undefined): void {
+  if (!value || !sessionViewer(value)) return;
+  const d = read();
+  const now = Date.now();
+  const signedOut = (d.signedOut ?? []).filter((s) => s.exp > now);
+  signedOut.push({ hash: cookieHash(value), exp: Number(value.split(".")[0]) });
+  write({ ...d, signedOut });
 }
 
 /**

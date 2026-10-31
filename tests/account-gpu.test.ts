@@ -129,6 +129,8 @@ describe("an account's own runs", () => {
     expect(passed(at("/api/generations"))).toBe(true);
     expect(passed(at("/api/generations/a-run"))).toBe(true);
     expect(passed(at("/api/generations/a-run", "DELETE"))).toBe(true);
+    // A like, a pin or a review status of its own run.
+    expect(passed(at("/api/generations/a-run", "PATCH"))).toBe(true);
     expect(passed(at("/api/generations/a-run/cancel", "POST"))).toBe(true);
     expect(passed(at("/api/files/outputs/a-run.png"))).toBe(true);
     for (const [url, method] of [
@@ -136,7 +138,7 @@ describe("an account's own runs", () => {
       ["/api/generations/owner-run", "DELETE"],
       ["/api/generations/b-run", "GET"],
       ["/api/generations/b-run/cancel", "POST"],
-      ["/api/generations/a-run", "PATCH"],
+      ["/api/generations/b-run", "PATCH"],
       ["/api/files/outputs/owner.png", "GET"],
     ]) {
       expect(at(url, method).status, `${method} ${url}`).toBe(403);

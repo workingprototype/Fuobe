@@ -603,12 +603,15 @@ const WEIGHTS: Record<string, string> = {
   "oss-vace-insert": "Wan 2.1 VACE weights: Apache-2.0",
 };
 
-/** A model's licence in one line, as information for the picker (the admin decides what runs, in Settings). */
-export function makerLicence(m: Maker): string {
+/**
+ * A model's licence in one line, as information for the picker (the admin decides what runs, in Settings), with where
+ * it runs unless the line it goes in already says (`where` false).
+ */
+export function makerLicence(m: Maker, where = true): string {
   if (m.h3 || m.id === "h3-max-recast") return characterLicenceLine(m.engine, m.id);
   if (m.source === "partner") return "Closed model: pay per use, under its provider's terms";
-  const where = m.engine === "open" ? "free on your GPU" : "on fal, pay per use";
-  return WEIGHTS[m.id] ? `${WEIGHTS[m.id]} · ${where}` : `Open weights · ${where}`;
+  const weights = WEIGHTS[m.id] ?? "Open weights";
+  return where ? `${weights} · ${m.engine === "open" ? "free on your GPU" : "on fal, pay per use"}` : weights;
 }
 
 /**

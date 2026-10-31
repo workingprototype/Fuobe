@@ -4,14 +4,17 @@ import { PresetGallery } from "@/components/preset-gallery";
 import { EFFECTS } from "@/lib/catalog";
 import { toPresetCard } from "@/lib/preset-card-data";
 
-export const metadata: Metadata = { title: "Effects" };
+export const metadata: Metadata = {
+  title: "Effects",
+  description: "Explosions, transformations and viral VFX from one photo, made with open-source models on your own GPU.",
+};
 
 export default function Page() {
   return (
     <PageShell>
       <PageHeader
         title="Effects"
-        description="Explosions, transformations and viral VFX from a single photo. Fuobe DoP runs each with its effect LoRA where one is cleared, free on your GPU or hosted in the cloud; colour looks are graded in your browser."
+        description="Explosions, transformations and viral VFX from one photo. Runs free on your GPU or in the cloud; color looks apply instantly in your browser."
       />
       <PresetGallery presets={EFFECTS.map(toPresetCard)} href="/video?preset={id}" noun="effects" />
     </PageShell>

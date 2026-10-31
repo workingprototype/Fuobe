@@ -216,10 +216,10 @@ export function getAsset(id: string): Asset | null {
 }
 
 /** Newest first; page with `before` (+ `beforeId`): the last asset of the previous page. Derived renders only when asked for. */
-export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number; before?: number; beforeId?: string }): Asset[] {
-  // The owner's files: an account's uploads and results are its own (public sign-up).
-  const where: string[] = ["account_id IS NULL"];
-  const args: unknown[] = [];
+export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number; before?: number; beforeId?: string; accountId?: string | null }): Asset[] {
+  // The owner's files, or with `accountId` that account's own (public sign-up: its uploads and results are its own).
+  const where: string[] = [opts.accountId ? "account_id = ?" : "account_id IS NULL"];
+  const args: unknown[] = opts.accountId ? [opts.accountId] : [];
   if (opts.source) {
     where.push("source = ?");
     args.push(opts.source);

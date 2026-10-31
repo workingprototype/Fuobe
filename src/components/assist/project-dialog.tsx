@@ -31,7 +31,7 @@ export function ProjectDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(90svh,760px)] gap-0 overflow-hidden p-0 sm:max-w-[560px]">
+      <DialogContent className="flex max-h-[min(90svh,760px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[560px]">
         {/* Remount per opening so the form starts from the project as it is now. */}
         {open && <Form project={project} onDone={(p) => (onOpenChange(false), p && onSaved?.(p))} />}
       </DialogContent>

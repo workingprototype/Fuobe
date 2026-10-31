@@ -18,7 +18,7 @@ import { finishGaveUp, useSoulFinish } from "@/components/studio/soul-finish";
 import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { fileToSlot, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { Viewer } from "@/components/studio/viewer";
-import { useCreateGeneration, useEngine, useGenerationActions, useGenerations } from "@/lib/api";
+import { useCreateGeneration, useEngine, useGenerationActions, useGenerations, useIsVisitor, useStatus } from "@/lib/api";
 import { MAX_FRAMES, STORYBOARD_ASPECTS, STORYBOARD_LOOK_MODEL, STORYBOARD_PARTNER_IDS, storyboardModels, type StoryboardPartner } from "@/lib/catalog/storyboard";
 import { lookCard } from "@/lib/catalog/soul-cards";
 import type { Engine, Generation } from "@/lib/catalog/types";
@@ -272,6 +272,10 @@ function Board({
 export function StoryboardView({ modelNames = {} }: { /** Display names of the storyboard models, from the server. */ modelNames?: Record<string, string> }) {
   const qc = useQueryClient();
   const [engine, setEngine] = useEngine();
+  // The engine is known once the install's engine mode is: no price asked for a cloud board an open-only install refuses.
+  const statusReady = !!useStatus().data;
+  // A storyboard doesn't run on an account's own GPU yet (only the studios' generations do), nor for a guest who signs up.
+  const visitor = useIsVisitor();
   const [mode, setMode] = useState<"auto" | "manual">("auto");
   const [story, setStory] = useState("");
   const [count, setCount] = useState(4);
@@ -336,6 +340,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
     placeholderData: keepPreviousData,
     retry: false,
     staleTime: 30_000,
+    enabled: statusReady && (JSON.parse(priceKey) as { engine?: string }).engine === engine,
   });
   const est = estimate.data && !estimate.isError ? estimate.data : undefined;
   const submit = useMutation({
@@ -483,7 +488,9 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
               {engine === "cloud" && <PartnerPill value={partner} onChange={setPartner} names={modelNames} />}
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 <span className="text-right text-[12px] leading-tight tabular-nums text-muted-foreground" aria-live="polite">
-                  {estimate.isError ? (
+                  {visitor ? (
+                    <span className="block font-semibold text-foreground">Not on free accounts yet</span>
+                  ) : estimate.isError ? (
                     <span className="text-destructive">{(estimate.error as Error).message}</span>
                   ) : (
                     <>
@@ -492,14 +499,18 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
                     </>
                   )}
                 </span>
-                <Button size="icon" className="size-10 shrink-0 rounded-full" disabled={!ready || submit.isPending || estimate.isError} onClick={() => submit.mutate()} aria-label="Generate storyboard">
+                <Button size="icon" className="size-10 shrink-0 rounded-full" disabled={!ready || submit.isPending || estimate.isError || visitor} onClick={() => submit.mutate()} aria-label="Generate storyboard">
                   {submit.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
                 </Button>
               </div>
             </div>
             <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
               <Sparkles className="mt-px size-3 shrink-0" />
-              {mode === "auto" ? "Your story is split into frames by the prompt LLM (Settings → AI helper), or a shot list when none is set." : "One prompt per frame. References keep the cast consistent."}
+              {mode === "auto"
+                ? visitor
+                  ? "Fuobe splits your story into frames."
+                  : "Your story is split into frames by the prompt LLM (Settings → AI helper), or a shot list when none is set."
+                : "One prompt per frame. References keep the cast consistent."}
               {lookName && ` Every frame gets the ${lookName} look's grade${aspect === "21:9" ? ", made at 16:9 and cropped to 21:9" : ""}.`}
             </p>
           </div>

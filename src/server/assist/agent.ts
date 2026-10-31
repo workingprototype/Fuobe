@@ -27,10 +27,16 @@ import {
   type AssistThreadView,
   type SkillMeta,
 } from "@/lib/assist";
+import { freePick, manualGroups, smartPick, toOption, choices, type Choice, type ConnectedProvider, type World } from "@/lib/assist-models";
+import { getLlmModel, getLlmProvider, LLM_REGISTRY_CHECKED } from "@/lib/catalog/llm-providers";
 import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { activeLocal, aiHelper, chatLocal, emptyReply, localLabel, localProblem, localSoon, pinnedKind, toChatMessages, type Ready } from "../llm";
+import { chatHosted, connectedHosted, endpointFor, freePlanOn, freeSpent, isRejected, markFreeSpent, openRouterKey } from "../llm/hosted";
+import { FreeLimitError } from "../llm/hosted-errors";
+import { toHostedMessages } from "../llm/hosted-messages";
+import type { Replay } from "../llm/types";
 import { offeredDefault } from "../model-access";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
@@ -63,14 +69,21 @@ export interface ModelRequest {
   messages: MessageParam[];
   tools: Anthropic.Beta.BetaTool[];
   ctx: ToolContext;
-  /** The chat's model choice (Manual mode): a Claude model id or a local model's name, and the effort. */
-  settings?: { model?: string | null; effort?: AssistEffort | null };
+  /** The chat's model: a Claude model id, a hosted provider and its model, or a local model's name; and the effort. */
+  settings?: { model?: string | null; effort?: AssistEffort | null; provider?: string | null };
+  /** The chat's id (hosted providers that cache by conversation get a hash of it). */
+  threadId?: string;
   /** Skills loaded in the chat (the offline planner uses their hints). */
   skills?: SkillMeta[];
   /** Custom MCP connectors (Settings → Assist): Claude gets them through the MCP connector; other agents can't use them. */
   connectors?: Connector[];
 }
-export type ModelCall = (req: ModelRequest) => Promise<Anthropic.Beta.BetaMessage>;
+/** A reply: Claude's shape, plus what a hosted provider needs back on this turn and a one-time notice about the chat's price. */
+export type ModelReply = Anthropic.Beta.BetaMessage & { replay?: Replay; priceNote?: string };
+export type ModelCall = (req: ModelRequest) => Promise<ModelReply>;
+
+/** A stored turn: Claude's shape, with a hosted provider's replay data on its own assistant turns. */
+type Stored = MessageParam & { replay?: Replay };
 
 const MAX_STEPS = 16;
 const MAX_IMAGE_BYTES = 3_500_000;
@@ -108,6 +121,7 @@ interface StateRow {
   mode: AssistMode | null;
   model: string | null;
   effort: AssistEffort | null;
+  provider: string | null;
   skills_json: string;
   context: string | null;
   sent_json: string | null;
@@ -123,6 +137,8 @@ interface Ext {
   mode: AssistMode | null;
   model: string | null;
   effort: AssistEffort | null;
+  /** A hosted model's provider (null: Claude, a local model or the offline planner). */
+  provider: string | null;
   skills: string[];
   /** The chat's frozen context block (null until the first model call). */
   context: string | null;
@@ -156,6 +172,7 @@ function loadExt(id: string): Ext {
     mode: r?.mode ?? null,
     model: r?.model ?? null,
     effort: r?.effort ?? null,
+    provider: r?.provider ?? null,
     skills: r ? (JSON.parse(r.skills_json) as string[]) : [],
     context: r?.context ?? null,
     sent: r?.sent_json ? (JSON.parse(r.sent_json) as Record<string, string>) : null,
@@ -173,6 +190,7 @@ function withExt(t: AssistThread, e: Ext): AssistThread {
     mode: e.mode ?? (t.agent === "claude" ? "smart" : "free"),
     model: e.model,
     effort: e.effort,
+    provider: e.provider,
     skills: e.skills,
     ...(e.scheduleId && { scheduleId: e.scheduleId }),
     ...(e.capUsd !== null && { capUsd: e.capUsd, spentUsd: e.spentUsd }),
@@ -238,9 +256,9 @@ function save(s: State): void {
       });
     db()
       .prepare(
-        `INSERT INTO assist_thread_state (thread_id, project_id, mode, model, effort, skills_json, context, sent_json, schedule_id, cap_usd, spent_usd, connectors)
-         VALUES (@thread_id, @project_id, @mode, @model, @effort, @skills_json, @context, @sent_json, @schedule_id, @cap_usd, @spent_usd, @connectors)
-         ON CONFLICT(thread_id) DO UPDATE SET project_id = @project_id, mode = @mode, model = @model, effort = @effort,
+        `INSERT INTO assist_thread_state (thread_id, project_id, mode, model, effort, provider, skills_json, context, sent_json, schedule_id, cap_usd, spent_usd, connectors)
+         VALUES (@thread_id, @project_id, @mode, @model, @effort, @provider, @skills_json, @context, @sent_json, @schedule_id, @cap_usd, @spent_usd, @connectors)
+         ON CONFLICT(thread_id) DO UPDATE SET project_id = @project_id, mode = @mode, model = @model, effort = @effort, provider = @provider,
            skills_json = @skills_json, context = @context, sent_json = @sent_json, schedule_id = @schedule_id, cap_usd = @cap_usd, spent_usd = @spent_usd,
            connectors = @connectors`,
       )
@@ -250,6 +268,7 @@ function save(s: State): void {
         mode: s.ext.mode,
         model: s.ext.model,
         effort: s.ext.effort,
+        provider: s.ext.provider,
         skills_json: JSON.stringify(s.ext.skills),
         context: s.ext.context,
         sent_json: s.ext.sent ? JSON.stringify(s.ext.sent) : null,
@@ -353,12 +372,7 @@ export async function updateThread(id: string, patch: ThreadPatch): Promise<Assi
   }
   if (patch.mode) {
     if (s.thread.status === "running" || runs.has(id)) throw new AssistBusyError("Wait for this reply to finish, then switch");
-    const r = await resolveMode(patch.mode);
-    s.thread.agent = r.agent;
-    s.ext.mode = r.mode;
-    s.ext.model = r.model;
-    s.ext.effort = r.effort;
-    if (r.note) push(s, { role: "notice", tone: "info", text: r.note });
+    applyMode(s, await resolveMode(patch.mode));
     connectorNote(s);
   }
   save(s);
@@ -376,17 +390,11 @@ function localDownNote(): string {
 }
 
 /**
- * Which LLM drives new chats by default: Claude when a key is set (on open-source-only installs only when
- * picked explicitly), else a local model that answers (Ollama, LM Studio, Unsloth Studio…), else the offline planner.
+ * Which LLM drives new chats by default: the agent of the default mode (resolveMode with no choice): Smart's
+ * planner when that is a paid model, else Free's pick, else the offline planner.
  */
 export async function resolveAgent(): Promise<AssistThread["agent"]> {
-  const choice = aiHelper();
-  const key = !!getSetting("anthropicKey");
-  if (choice === "none") return "offline";
-  if (choice === "anthropic") return key ? "claude" : "offline";
-  if (choice === "local") return "local";
-  if (key && engineMode() !== "open") return "claude";
-  return (await localSoon()) ? "local" : "offline";
+  return (await resolveMode()).agent;
 }
 
 const claudeAllowed = () => !!getSetting("anthropicKey") && (engineMode() !== "open" || aiHelper() === "anthropic");
@@ -399,21 +407,65 @@ function localInfo(ready: Ready | null): AssistLocal {
   return { kind: server.kind, label: server.label, ok: true, models: models.slice(0, 50), model: status.model };
 }
 
+/** How long the panel waits for OpenRouter's key check (an older answer is used meanwhile). */
+const KEY_WAIT_MS = 1500;
+
+/**
+ * What the owner has connected, for the model picks (src/lib/assist-models.ts): the providers with a key (Anthropic's,
+ * the hosted ones'), the local server that answers, and Settings. No call is made to a paid API.
+ */
+async function world(ready?: Ready | null): Promise<World> {
+  const local = ready === undefined ? await localSoon() : ready;
+  const providers: ConnectedProvider[] = [];
+  if (getSetting("anthropicKey")) providers.push({ id: "anthropic" });
+  for (const ep of connectedHosted()) {
+    const c: ConnectedProvider = { id: ep.provider.id, ...(ep.cny && { cny: true }), ...(freePlanOn(ep.provider) && { freeTick: true }), ...(isRejected(ep) && { rejected: true }) };
+    if (ep.provider.id === "openrouter") {
+      const k = await openRouterKey(false, KEY_WAIT_MS);
+      if (k) Object.assign(c, { freeTier: k.freeTier, freeLeft: k.left, freeLimit: k.limit });
+    }
+    providers.push(c);
+  }
+  const info = local ? localInfo(local) : null;
+  return {
+    providers,
+    local: info ? { kind: info.kind ?? "custom", label: info.label, ok: info.ok, model: info.model, models: info.models.map((id) => ({ id })) } : null,
+    openOnly: engineMode() === "open",
+    helper: aiHelper(),
+    smartPlan: getSetting("smartPlan") || "auto",
+    freeOrder: getSetting("freeOrder") === "local" ? "local" : "best",
+    today: new Date().toISOString().slice(0, 10),
+    checker: false,
+    spent: freeSpent(),
+  };
+}
+
 export async function availability(): Promise<AssistAvailability> {
   const ready = await localSoon();
-  const aiOff = aiHelper() === "none";
-  const claude = claudeAllowed();
+  const w = await world(ready);
+  const aiOff = w.helper === "none";
+  const smart = smartPick(w);
+  const free = freePick(w);
+  const manual = manualGroups(w);
+  const opt = (c: Choice | null) => (c ? toOption(c) : null);
   return {
-    claude,
+    claude: claudeAllowed(),
     local: localInfo(ready),
     aiOff,
-    defaultMode: !aiOff && claude && aiHelper() !== "local" ? "smart" : "free",
+    defaultMode: !aiOff && smart.plan && !smart.plan.free && w.helper !== "local" ? "smart" : "free",
+    smart: { plan: opt(smart.plan), check: opt(smart.check), text: smart.text },
+    free: { pick: opt(free.pick), text: free.text, ...(free.pick?.caveat && { caveat: free.pick.caveat }) },
+    manual: { groups: manual.groups.map((g) => ({ ...g, models: g.models.map(toOption) })), missing: manual.missing },
+    openOnly: w.openOnly,
+    checked: LLM_REGISTRY_CHECKED,
   };
 }
 
 export interface ResolvedMode {
   mode: AssistMode;
   agent: AssistAgent;
+  /** A hosted model's provider (null otherwise). */
+  provider: string | null;
   model: string | null;
   effort: AssistEffort | null;
   /** Why the chat didn't get what was asked (no key, AI helper off…). */
@@ -423,37 +475,89 @@ export interface ResolvedMode {
 /** A local model's name: Ollama's "qwen3:8b", LM Studio's "qwen/qwen3-8b@q4_k_m", Unsloth's "unsloth/Qwen3-8B-GGUF:Q4_K_M". */
 const LOCAL_NAME = /^[\w.:/@+-]{1,200}$/;
 
+/** A pick as the chat stores it. The local model stays the server's default (null), so a model swapped on the server is used. */
+function fromChoice(mode: AssistMode, c: Choice, effort: AssistEffort | null | undefined, note?: string): ResolvedMode {
+  if (c.local) return { mode, agent: "local", provider: null, model: null, effort: null, ...(note && { note }) };
+  const e = effort && c.efforts.includes(effort) ? effort : c.efforts.includes(DEFAULT_EFFORT) ? DEFAULT_EFFORT : (c.efforts[0] ?? null);
+  return { mode, agent: c.agent, provider: c.agent === "hosted" ? c.provider : null, model: c.model, effort: e, ...(note && { note }) };
+}
+
 /**
- * Supercomputer's modes on Fuobe's agents: Smart = Claude Opus 5.5; Free = a local model (Ollama,
- * LM Studio, Unsloth Studio…; the offline planner when none answers); Manual = the model and effort
- * you pick. Without a choice, the default from Settings (resolveAgent).
+ * Supercomputer's modes on Fuobe's agents: Smart = the best model the owner has connected (Claude, OpenAI, Gemini,
+ * DeepSeek, OpenRouter… or the local model; src/lib/assist-models.ts); Free = free models only (OpenRouter's free
+ * models, Z.ai's free GLM Flash, free plans the owner ticked, the local model; the offline planner when none);
+ * Manual = the model and effort you pick, when it can run here. Without a choice, the default mode.
  */
 export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<ResolvedMode> {
-  const free = async (note?: string): Promise<ResolvedMode> =>
-    (await localSoon()) ? { mode: "free", agent: "local", model: null, effort: null, note } : { mode: "free", agent: "offline", model: null, effort: null, note };
   if (aiHelper() === "none") {
-    return { mode: choice?.mode ?? "free", agent: "offline", model: null, effort: null, ...(choice?.mode && choice.mode !== "free" && { note: "The AI helper is off in Settings, so this chat uses the offline planner." }) };
+    return {
+      mode: choice?.mode ?? "free",
+      agent: "offline",
+      provider: null,
+      model: null,
+      effort: null,
+      ...(choice?.mode && choice.mode !== "free" && { note: "The AI helper is off in Settings, so this chat uses the offline planner." }),
+    };
   }
-  if (!choice?.mode) {
-    const agent = await resolveAgent();
-    return { mode: agent === "claude" ? "smart" : "free", agent, model: null, effort: null };
-  }
-  const noKey = "Smart and Claude need an Anthropic API key (Settings → AI helper) — using Free instead.";
-  if (choice.mode === "smart") return claudeAllowed() ? { mode: "smart", agent: "claude", model: DEFAULT_CLAUDE_MODEL, effort: DEFAULT_EFFORT } : free(noKey);
+  const w = await world();
+  const free = (note?: string): ResolvedMode => {
+    const f = freePick(w);
+    return f.pick ? fromChoice("free", f.pick, null, note) : { mode: "free", agent: "offline", provider: null, model: null, effort: null, ...(note && { note }) };
+  };
+  const smart = smartPick(w);
+  if (!choice?.mode) return smart.plan && !smart.plan.free && w.helper !== "local" ? fromChoice("smart", smart.plan, DEFAULT_EFFORT) : free();
+  if (choice.mode === "smart") return smart.plan ? fromChoice("smart", smart.plan, DEFAULT_EFFORT) : free(`${smart.text} Using Free instead.`);
   if (choice.mode === "free") return free();
   // Manual
   const agent = normalizeAgent(choice.agent) ?? "claude";
-  if (agent === "claude") {
-    if (!getSetting("anthropicKey")) return free(noKey);
-    const model = CLAUDE_MODELS.some((m) => m.id === choice.model) ? choice.model! : DEFAULT_CLAUDE_MODEL;
+  if (agent === "claude" || agent === "hosted") {
+    const provider = agent === "claude" ? "anthropic" : (choice.provider ?? "");
+    const model = agent === "claude" && !CLAUDE_MODELS.some((m) => m.id === choice.model) ? DEFAULT_CLAUDE_MODEL : choice.model;
+    const c = choices(w).find((x) => x.provider === provider && x.model === model && !x.local);
+    const label = getLlmProvider(provider)?.label ?? "That provider";
+    if (!c) return free(agent === "claude" ? "Claude needs an Anthropic API key (Settings → AI helper) — using Free instead." : `${label} isn't connected (Settings → AI helper) — using Free instead.`);
+    if (c.disabled) return free(`${c.name} can't run here: ${c.disabled.replace(/\.$/, "")} — using Free instead.`);
     const effort = ASSIST_EFFORTS.some((e) => e.id === choice.effort) ? choice.effort! : DEFAULT_EFFORT;
-    return { mode: "manual", agent: "claude", model, effort };
+    return { ...fromChoice("manual", c, effort), ...(agent === "claude" && { effort }) };
   }
   if (agent === "local") {
     const model = choice.model && LOCAL_NAME.test(choice.model) ? choice.model : null;
-    return { mode: "manual", agent: "local", model, effort: null, ...(!(await localSoon()) && { note: localDownNote() }) };
+    return { mode: "manual", agent: "local", provider: null, model, effort: null, ...(!(await localSoon()) && { note: localDownNote() }) };
   }
-  return { mode: "manual", agent: "offline", model: null, effort: null };
+  return { mode: "manual", agent: "offline", provider: null, model: null, effort: null };
+}
+
+/** The chat takes a resolved mode (and says why it isn't what was asked, when it isn't). */
+function applyMode(s: State, r: ResolvedMode): void {
+  s.thread.agent = r.agent;
+  s.ext.mode = r.mode;
+  s.ext.provider = r.provider;
+  s.ext.model = r.model;
+  s.ext.effort = r.effort;
+  if (r.note) push(s, { role: "notice", tone: "info", text: r.note });
+}
+
+/** What a chat's model is called in a notice: "GPT-6.1 Sol (OpenAI)", "qwen3.8:27b (Ollama)", "the offline planner". */
+function modelName(agent: AssistAgent, provider: string | null, model: string | null): string {
+  if (agent === "offline") return "the offline planner";
+  if (agent === "local") return model ? `${model} (${localLabel()})` : `the local model (${localLabel()})`;
+  if (agent === "claude") return CLAUDE_MODELS.find((m) => m.id === (model ?? DEFAULT_CLAUDE_MODEL))?.label ?? "Claude";
+  return `${getLlmModel(provider, model)?.name ?? model} (${getLlmProvider(provider)?.short ?? provider})`;
+}
+
+/**
+ * Smart and Free keep the model they picked; when its provider's key is gone (or a hosted model can't run here any
+ * more), the next message picks again and says so. Manual keeps the model the person picked.
+ */
+async function repick(s: State): Promise<void> {
+  if (s.ext.mode === "manual" || s.thread.agent !== "hosted") return;
+  const c = choices(await world()).find((x) => x.provider === s.ext.provider && x.model === s.ext.model && !x.local);
+  if (c && !c.disabled) return;
+  const was = getLlmProvider(s.ext.provider)?.short ?? "Its provider";
+  const mode = s.ext.mode ?? "smart";
+  const r = await resolveMode({ mode });
+  applyMode(s, { ...r, note: undefined });
+  push(s, { role: "notice", tone: "info", text: `${mode === "free" ? "Free" : "Smart"} now uses ${modelName(r.agent, r.provider, r.model)} (${c ? `${c.name} can't run here now` : `${was}'s key was removed`}).` });
 }
 
 /** The connectors Claude gets in this chat: none on other agents, or in a scheduled run that leaves them off. */
@@ -464,7 +568,8 @@ function connectorNote(s: State): void {
   if (s.thread.agent === "claude" || !s.ext.connectors || s.thread.items.some((i) => i.role === "notice" && i.text.startsWith(CONNECTOR_NOTE))) return;
   const names = activeConnectors().map((c) => c.name);
   if (!names.length) return;
-  push(s, { role: "notice", tone: "info", text: `${CONNECTOR_NOTE} (${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}); this chat runs on ${s.thread.agent === "local" ? "a local model" : "the offline planner"}, so it can't use them.` });
+  const on = s.thread.agent === "local" ? "a local model" : s.thread.agent === "hosted" ? modelName("hosted", s.ext.provider, s.ext.model) : "the offline planner";
+  push(s, { role: "notice", tone: "info", text: `${CONNECTOR_NOTE} (${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}); this chat runs on ${on}, so it can't use them.` });
 }
 const CONNECTOR_NOTE = "Connectors work in Claude chats";
 
@@ -476,6 +581,8 @@ export function createThread(opts: {
   title?: string;
   projectId?: string | null;
   mode?: AssistMode | null;
+  /** A hosted model's provider. */
+  provider?: string | null;
   model?: string | null;
   effort?: AssistEffort | null;
   /** A scheduled run: the task that started it, and auto-run's cost cap for it. */
@@ -497,6 +604,7 @@ export function createThread(opts: {
       mode: opts.mode ?? null,
       model: opts.model ?? null,
       effort: opts.effort ?? null,
+      provider: opts.provider ?? null,
       skills: [],
       context: null,
       sent: null,
@@ -624,7 +732,7 @@ export const claude: ModelCall = async ({ system, messages, tools, settings, con
   // deleted mid-chat changes `tools` (and a deleted one's history is rewritten below), so Claude's
   // earlier thinking in that chat is dropped (drop_block) and re-done — a cost, not an error.
   const mcp = mcpParams(connectors ?? []);
-  const history = withoutMissingServers(messages, new Set(mcp?.mcp_servers.map((m) => m.name)));
+  const history = withoutMissingServers(forAnthropic(messages), new Set(mcp?.mcp_servers.map((m) => m.name)));
   // Streamed, so long thinking at high effort never runs into an HTTP timeout; only the final
   // message is used (the UI shows the reply once it's complete).
   const stream = client.beta.messages.stream({
@@ -649,6 +757,53 @@ export const claude: ModelCall = async ({ system, messages, tools, settings, con
   return stream.finalMessage();
 };
 
+/** The history without the replay data hosted providers keep on their turns: Anthropic refuses fields it doesn't know. */
+export function forAnthropic(messages: Stored[]): MessageParam[] {
+  return messages.map((m) => {
+    if (!("replay" in m)) return m;
+    const rest = { ...m };
+    delete rest.replay;
+    return rest;
+  });
+}
+
+/** Claude's reply shape for a model that answered through another wire. */
+function reply(r: { text: string; toolCalls: { id: string; name: string; input: unknown }[]; stop: "end" | "tool_use" | "length"; model: string }, id: string): Anthropic.Beta.BetaMessage {
+  const content: Anthropic.Beta.BetaContentBlock[] = [];
+  if (r.text) content.push({ type: "text", text: r.text, citations: null } as Anthropic.Beta.BetaTextBlock);
+  for (const c of r.toolCalls) content.push({ type: "tool_use", id: c.id, name: c.name, input: c.input } as unknown as Anthropic.Beta.BetaToolUseBlock);
+  const stop: Anthropic.Beta.BetaStopReason = r.toolCalls.length ? "tool_use" : r.stop === "length" ? "max_tokens" : "end_turn";
+  if (!content.length) content.push({ type: "text", text: "…", citations: null } as Anthropic.Beta.BetaTextBlock);
+  return { id, type: "message", role: "assistant", model: r.model, content, stop_reason: stop, stop_sequence: null, stop_details: null, usage: null } as unknown as Anthropic.Beta.BetaMessage;
+}
+
+/**
+ * A hosted model on the owner's key (OpenAI, Gemini, xAI, DeepSeek, Kimi, GLM, Qwen, OpenRouter…; src/server/llm/hosted.ts),
+ * answering in Claude's shape. The history goes out shaped for that provider (hosted-messages.ts), with what it needs back
+ * on its own turns (`replay`), and the reply's replay comes back for step() to keep on the stored turn.
+ */
+export const hosted: ModelCall = async ({ system, messages, tools, settings, threadId }) => {
+  const id = settings?.provider ?? "";
+  const p = getLlmProvider(id);
+  const ep = endpointFor(id);
+  if (!p || !ep) throw new Error(`${p?.label ?? "That provider"} isn't connected any more — add its key in Settings → AI helper, or pick another mode.`);
+  const model = p.models.find((m) => m.id === settings?.model);
+  if (!model) throw new Error(`${p.label} has no model ${settings?.model ?? "set"} in Fuobe's list — pick another in Manual.`);
+  const r = await chatHosted(ep, model, {
+    messages: toHostedMessages(system, (await hydrate(messages as MessageParam[])) as Stored[], { provider: p, model }),
+    tools: tools.map((t) => ({ name: t.name, description: t.description, parameters: t.input_schema })),
+    effort: settings?.effort ?? DEFAULT_EFFORT,
+    ...(threadId && { threadKey: threadId }),
+  });
+  if (!r.text && !r.toolCalls.length && r.stop === "length") throw new Error(`${model.name} spent its whole reply thinking and ran out of room. Try a lower effort, or another model.`);
+  const over = model.longContext && (r.usage?.input ?? 0) > model.longContext.above;
+  return {
+    ...reply(r, `msg_${p.id}_${nanoid(8)}`),
+    replay: r.replay,
+    ...(over && { priceNote: `This chat is now long enough to cost more on ${model.name}: ${model.longContext!.text.charAt(0).toLowerCase()}${model.longContext!.text.slice(1)}. A new chat costs less.` }),
+  };
+};
+
 /**
  * A local model through its server's tool calling (Ollama, LM Studio, Unsloth Studio or another
  * OpenAI-compatible server; qwen3, llama3.x, mistral, gemma…), answering in the same shape as Claude.
@@ -669,12 +824,7 @@ export const local: ModelCall = async ({ system, messages, tools, settings }) =>
   });
   // A thinking model that ran out of room says so, rather than "the reply was cut short".
   if (!r.text && !r.toolCalls.length && r.stop === "length") throw emptyReply(server, r);
-  const content: Anthropic.Beta.BetaContentBlock[] = [];
-  if (r.text) content.push({ type: "text", text: r.text, citations: null } as Anthropic.Beta.BetaTextBlock);
-  for (const c of r.toolCalls) content.push({ type: "tool_use", id: c.id, name: c.name, input: c.input } as unknown as Anthropic.Beta.BetaToolUseBlock);
-  const stop: Anthropic.Beta.BetaStopReason = r.toolCalls.length ? "tool_use" : r.stop === "length" ? "max_tokens" : "end_turn";
-  if (!content.length) content.push({ type: "text", text: "…", citations: null } as Anthropic.Beta.BetaTextBlock);
-  return { id: `msg_local_${nanoid(8)}`, type: "message", role: "assistant", model: r.model, content, stop_reason: stop, stop_sequence: null, stop_details: null, usage: null } as unknown as Anthropic.Beta.BetaMessage;
+  return reply(r, `msg_local_${nanoid(8)}`);
 };
 
 /** A rule-based planner with the same shape as a model reply, for installs without an LLM. */
@@ -730,7 +880,7 @@ export const offline: ModelCall = async ({ messages, ctx, skills }) => {
 };
 
 /** Under every offline plan: the rule-based planner is a fallback, not the assistant. */
-export const OFFLINE_NOTE = "Offline planner — connect Claude or a local model (Ollama, LM Studio or Unsloth Studio) in Settings for better plans.";
+export const OFFLINE_NOTE = "Offline planner — connect a model in Settings → AI helper (Anthropic, OpenAI, Google, OpenRouter… or a local model) for better plans.";
 
 /** What to offer next, by what was just started. */
 const FOLLOW_UP: Record<MediaKind, string> = {
@@ -1143,7 +1293,8 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     messages: update ? [...s.messages, update] : s.messages,
     tools: apiTools(),
     ctx,
-    settings: { model: s.ext.model, effort: s.ext.effort },
+    settings: { model: s.ext.model, effort: s.ext.effort, provider: s.ext.provider },
+    threadId: s.thread.id,
     skills: active,
     ...(connectors.length && { connectors }),
   });
@@ -1162,7 +1313,9 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     s.messages.push(update);
     s.ext.sent = sent;
   }
-  s.messages.push({ role: "assistant", content: res.content });
+  // A hosted provider's replay data stays on its turn (it goes back only to that provider; forAnthropic strips it).
+  s.messages.push({ role: "assistant", content: res.content, ...(res.replay && { replay: res.replay }) } as MessageParam);
+  if (res.priceNote && !s.thread.items.some((i) => i.role === "notice" && i.text === res.priceNote)) push(s, { role: "notice", tone: "info", text: res.priceNote });
   connectorItems(s, res.content);
   const text = res.content
     .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
@@ -1242,7 +1395,23 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
   return "continue";
 }
 
-const MODELS: Record<AssistThread["agent"], ModelCall> = { claude, local, offline };
+const MODELS: Record<AssistThread["agent"], ModelCall> = { claude, hosted, local, offline };
+
+/**
+ * A free model's limit ran out mid-chat (Free, or a Smart pick that was free): the chat moves to the next free choice
+ * (never a paid one) and says so. A limit shared by all of a provider's free models (OpenRouter's) skips them all.
+ * True when the step should be tried again.
+ */
+async function nextFree(s: State, e: FreeLimitError): Promise<boolean> {
+  markFreeSpent(e.provider, e.span);
+  const was = modelName(s.thread.agent, s.ext.provider, s.ext.model);
+  const r = await resolveMode({ mode: "free" });
+  applyMode(s, { ...r, mode: s.ext.mode === "manual" ? "free" : (s.ext.mode ?? "free"), note: undefined });
+  const p = getLlmProvider(e.provider)?.short ?? e.provider;
+  const when = e.span === "day" ? "for today" : "for the moment";
+  push(s, { role: "notice", tone: "info", text: `${p}'s free requests are used up ${when}, so this chat goes on with ${modelName(r.agent, r.provider, r.model)} instead of ${was}.` });
+  return r.agent !== "offline";
+}
 
 /**
  * Run the agent until it ends its turn or waits for approval. Call it right after addMessage or
@@ -1254,14 +1423,24 @@ export async function run(id: string, model?: ModelCall): Promise<void> {
   try {
     const s = load(id);
     if (!s) return;
-    const call = model ?? MODELS[s.thread.agent];
+    if (!model) await repick(s).catch(() => {});
+    let call = model ?? MODELS[s.thread.agent];
     s.thread.status = "running";
     save(s);
+    let moved = false;
     for (let i = 0; i < MAX_STEPS; i++) {
       let next: "continue" | "stop";
       try {
         next = await step(s, call);
       } catch (e) {
+        // A free limit that ran out: once per run, the chat moves to the next free model and the step is tried again.
+        if (e instanceof FreeLimitError && !model && !moved && (await nextFree(s, e))) {
+          moved = true;
+          call = MODELS[s.thread.agent];
+          save(s);
+          i--;
+          continue;
+        }
         push(s, { role: "notice", tone: "error", text: errorText(e) });
         next = "stop";
       }

@@ -190,16 +190,26 @@ describe("L-2: an unknown record or link answers 404 behind an HTTPS reverse pro
     const { NextRequest } = await import("next/server");
     process.env.FUOBE_PUBLIC_SIGNUP = "1";
     const at = (url: string) => proxy(new NextRequest(url, { headers: { host: "fuobe.example", "x-forwarded-proto": "https" } }));
-    for (const p of ["/apps/does-not-exist", "/canvas/nope-nope-nope"]) {
+    for (const [p, title, back] of [
+      ["/apps/does-not-exist", "This app isn’t here", "/apps"],
+      ["/canvas/nope-nope-nope", "This canvas isn’t here", "/canvas"],
+      ["/upscale/nope", "Nothing here", "/upscale"],
+    ]) {
       const r = at(`https://fuobe.example${p}`);
       expect(r.status, p).toBe(404);
       expect(r.headers.get("x-middleware-rewrite"), p).toBeNull();
       expect(r.headers.get("content-type")).toMatch(/text\/html/);
-      expect(await r.text()).toMatch(/Nothing here/);
+      const html = await r.text();
+      // Branded: the site's mark and fonts, the visitor's theme, a way back to the section; nothing about a library.
+      expect(html, p).toContain(`<h1>${title}</h1>`);
+      expect(html, p).toContain(`href="${back}"`);
+      expect(html, p).toMatch(/Instrument Serif/);
+      expect(html, p).toMatch(/localStorage\.getItem\("theme"\)/);
+      expect(html, p).not.toMatch(/library/);
     }
     // An unknown app points at the apps, then Home; a guest isn't told about a library they don't have.
     const app = await at("https://fuobe.example/apps/does-not-exist").text();
-    expect(app).toMatch(/<a href="\/apps" class="alt">Browse apps<\/a><a href="\/">Back to Home<\/a>/);
+    expect(app).toMatch(/<a class="back" href="\/apps">Browse apps<\/a><a class="go" href="\/">Home<\/a>/);
     expect(app).not.toMatch(/library/);
     expect(await at("https://fuobe.example/canvas/nope-nope-nope").text()).not.toMatch(/Browse apps/);
     const share = at(`https://fuobe.example/s/${"A".repeat(44)}`);
@@ -207,6 +217,18 @@ describe("L-2: an unknown record or link answers 404 behind an HTTPS reverse pro
     expect(share.headers.get("x-middleware-rewrite")).toBeNull();
     expect(share.headers.get("x-robots-tag")).toMatch(/noindex/);
     expect(await share.text()).toMatch(/This link isn.t available/);
+    // A link that can't be a share (a wrong length) is the same 404, not a page with a 200.
+    for (const p of ["/s/badtoken", `/s/${"A".repeat(43)}`, "/s/gone"]) {
+      const r = at(`https://fuobe.example${p}`);
+      expect(r.status, p).toBe(404);
+      expect(r.headers.get("x-robots-tag"), p).toMatch(/noindex/);
+      expect(await r.text(), p).toMatch(/Make your own with Fuobe/);
+    }
+    // Old ?mode= links open the mode's own page (any case), without the mode in the query.
+    const mode = at("https://fuobe.example/audio?mode=Music&x=1");
+    expect(mode.status).toBe(307);
+    expect(new URL(mode.headers.get("location")!, "https://fuobe.example").pathname).toBe("/audio/music");
+    expect(new URL(mode.headers.get("location")!, "https://fuobe.example").search).toBe("?x=1");
     // A plain-HTTP install keeps the rewrite to the app's own 404 pages.
     expect(proxy(new NextRequest("http://localhost:3000/apps/does-not-exist")).headers.get("x-middleware-rewrite")).toMatch(/_fuobe-not-found$/);
   });

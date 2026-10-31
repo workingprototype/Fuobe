@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { PageShell } from "@/components/page-shell";
-import { useEngine } from "@/lib/api";
+import { SelfHostNote } from "@/components/self-host-note";
+import { useEngine, useIsVisitor } from "@/lib/api";
 // Types only: the catalog (models, templates) stays on the server; the page passes slim template cards.
 import type { CanvasNodeType, CanvasSummary, Outline } from "@/lib/catalog/canvas";
 import type { Engine } from "@/lib/catalog/types";
@@ -150,7 +151,8 @@ const GROUP_NOTES: Record<string, string> = {
   "Effects 2.0 chains": "A photo, an image edit that sets the scene, then Fuobe DoP animates it with the effect. Open weights on both engines: free on your GPU.",
 };
 
-function TemplateCard({ t, engine, onUse, busy }: { t: TemplateCardData; engine: Engine; onUse: () => void; busy: boolean }) {
+/** onUse: none for a guest or an account (a canvas is saved to the owner's library: the page says so once). */
+function TemplateCard({ t, engine, onUse, busy }: { t: TemplateCardData; engine: Engine; onUse?: () => void; busy: boolean }) {
   const { outline, models } = t.byEngine[engine];
   return (
     <article className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card">
@@ -169,9 +171,11 @@ function TemplateCard({ t, engine, onUse, busy }: { t: TemplateCardData; engine:
           {engine === "open" ? <Cpu className="mt-px size-3.5 shrink-0" /> : <Cloud className="mt-px size-3.5 shrink-0" />}
           <span className="line-clamp-2">{models.join(" · ")}</span>
         </p>
-        <Button size="sm" className="mt-auto w-fit rounded-full" onClick={onUse} disabled={busy}>
-          {busy ? <Loader2 className="animate-spin" /> : <Plus />} Use template
-        </Button>
+        {onUse && (
+          <Button size="sm" className="mt-auto w-fit rounded-full" onClick={onUse} disabled={busy}>
+            {busy ? <Loader2 className="animate-spin" /> : <Plus />} Use template
+          </Button>
+        )}
       </div>
     </article>
   );
@@ -189,6 +193,8 @@ function ListInner({ templates }: { templates: TemplateCardData[] }) {
   const [renaming, setRenaming] = useState<CanvasSummary | null>(null);
   const [draft, setDraft] = useState("");
   const [deleting, setDeleting] = useState<CanvasSummary | null>(null);
+  // A canvas is saved to the studio's library, which is its owner's: a guest or an account can look, not start one.
+  const visitor = useIsVisitor();
 
   const items = (canvases.data ?? []).filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()));
   const setTab = (t: "mine" | "templates") => router.replace(t === "templates" ? "/canvas?tab=templates" : "/canvas", { scroll: false });
@@ -211,9 +217,13 @@ function ListInner({ templates }: { templates: TemplateCardData[] }) {
           <h1 className="font-heading text-[34px] leading-tight">Canvas</h1>
           <p className="mt-1 max-w-xl text-[15px] text-muted-foreground">Make images, videos and ideas in one place: wire prompts, files and models together, then run them in order or side by side.</p>
         </div>
-        <Button className="w-fit rounded-full" onClick={() => void start("new", {})} disabled={!!creating}>
-          {creating === "new" ? <Loader2 className="animate-spin" /> : <Plus />} New canvas
-        </Button>
+        {visitor ? (
+          <SelfHostNote className="max-w-xs sm:text-right">Canvas editing is coming to free accounts.</SelfHostNote>
+        ) : (
+          <Button className="w-fit rounded-full" onClick={() => void start("new", {})} disabled={!!creating}>
+            {creating === "new" ? <Loader2 className="animate-spin" /> : <Plus />} New canvas
+          </Button>
+        )}
       </div>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -278,9 +288,11 @@ function ListInner({ templates }: { templates: TemplateCardData[] }) {
               <EmptyDescription>Build a workflow once — prompt → image → video, three models side by side — and run it again whenever you like.</EmptyDescription>
             </EmptyHeader>
             <EmptyContent className="flex-row justify-center">
-              <Button className="rounded-full" onClick={() => void start("new", {})} disabled={!!creating}>
-                <Plus /> New canvas
-              </Button>
+              {!visitor && (
+                <Button className="rounded-full" onClick={() => void start("new", {})} disabled={!!creating}>
+                  <Plus /> New canvas
+                </Button>
+              )}
               <Button variant="secondary" className="rounded-full" onClick={() => setTab("templates")}>
                 Browse templates
               </Button>
@@ -303,7 +315,7 @@ function ListInner({ templates }: { templates: TemplateCardData[] }) {
                 {templates
                   .filter((t) => (t.group ?? "") === group)
                   .map((t) => (
-                    <TemplateCard key={t.id} t={t} engine={engine} busy={creating === t.id} onUse={() => void start(t.id, { templateId: t.id, engine })} />
+                    <TemplateCard key={t.id} t={t} engine={engine} busy={creating === t.id} onUse={visitor ? undefined : () => void start(t.id, { templateId: t.id, engine })} />
                   ))}
               </div>
             </section>

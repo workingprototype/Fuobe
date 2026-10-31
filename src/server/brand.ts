@@ -19,6 +19,7 @@ import { db } from "./db";
 import { llmText } from "./enhance";
 import { fetchRemote } from "./remote-fetch";
 import { saveFile } from "./storage";
+import { normalizeWebsite } from "@/lib/website";
 
 /**
  * Brand kits and products, shared by Marketing Studio, Ads Studio and Click to Ad.
@@ -929,18 +930,8 @@ function storedKit(id: string): StoredKit | null {
   return r ? { ...emptyKit(r.name), ...parse<StoredKit>(r.kit_json, emptyKit(r.name)) } : null;
 }
 
-/** Normalise a website the user typed ("acme.com" → "https://acme.com/"); null when it isn't one. */
-export function normalizeWebsite(input: string): string | null {
-  const s = input.trim();
-  if (!s || /\s/.test(s)) return null;
-  try {
-    const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`);
-    if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".") || u.hostname.endsWith(".")) return null;
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
+// The browser checks a link with the same rule before it sends one (src/lib/website.ts).
+export { normalizeWebsite };
 
 /** Start a brand from a website: the row exists at once, the research runs in the background. */
 export function createBrandFromWebsite(website: string): { brand: BrandKit; run: Promise<void> } {

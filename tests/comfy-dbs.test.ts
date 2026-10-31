@@ -131,6 +131,14 @@ describe("the library spec", async () => {
     expect(build.BINDING_KEYS.has("channels")).toBe(true);
   });
 
+  it("gives Workflows the spec's note: a file with more than 2 channels is split in mono, its background from music + effects", () => {
+    const e = spec.SPEC.find((s: { id: string }) => s.id === "separate-soundtrack-dbs");
+    expect(entry.notes).toBe(e?.notes);
+    expect(entry.notes).toMatch(/the provider splits a file with more than 2 channels in mono and makes its background from music \+ effects \(node 4 rewired to AudioMerge add\)/);
+    // Not the rule before it: every channel separated on its own.
+    expect(entry.notes).not.toMatch(/forces it for inputs with more than 2 channels|6x for 5\.1/);
+  });
+
   it("rounds sizes to two decimals, three only where two would read 0, so no other entry's size moves", () => {
     // film_net_fp16 (68,882,302 bytes) stays 0.07, as tests/video-finish.test.ts expects after a full rebuild.
     expect(build.gb(68_882_302)).toBe(0.07);

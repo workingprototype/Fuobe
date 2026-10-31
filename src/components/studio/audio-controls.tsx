@@ -262,7 +262,7 @@ export function DialogueEditor({ model, lines, onChange }: { model: ModelDef; li
             value={l.text}
             onChange={(e) => set(i, { text: e.target.value })}
             rows={1}
-            placeholder={i % 2 ? "…and the reply. Try audio tags like [laughs] or [whispers]" : "What does the first speaker say?"}
+            placeholder={i % 2 ? "…and the reply." : "What does the first speaker say?"}
             className="field-sizing-content max-h-32 min-h-8 flex-1 resize-none bg-transparent py-1 text-[14px] leading-snug outline-none placeholder:text-subtle-foreground"
           />
           <button

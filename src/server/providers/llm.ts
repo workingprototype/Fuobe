@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { getModel } from "@/lib/catalog";
 import { cueText, parseCues, toSrt, type Cue } from "@/lib/cues";
 import type { GenInput, ModelRoute, Operation } from "@/lib/catalog/types";
+import { HOSTED_PROVIDERS, testHosted } from "../llm/hosted";
 import { aiHelper, chatLocal, checkLocal, emptyReply, LOCAL_LABELS, localLabel, localProblem, localReady, localServers, localWhat, pinnedKind, probeLocal, type JsonSpec, type LocalKind, type Ready } from "../llm";
 import { engineMode, getSetting } from "../settings";
 import { toDataUri } from "../storage";
@@ -390,6 +391,11 @@ const LOCAL_FOCUS: Partial<Record<string, LocalKind>> = {
   llmKey: "custom",
 };
 
+/** A hosted provider's key, region and workspace settings: Save & test checks that provider (Assist's models). */
+const HOSTED_FOCUS: Partial<Record<string, string>> = Object.fromEntries(
+  HOSTED_PROVIDERS.flatMap((p) => [p.keySetting, p.regionSetting, p.workspaceSetting].flatMap((s) => (s ? [[s, p.id]] : []))),
+);
+
 /** "Ollama, LM Studio or Unsloth Studio", or the server Settings pins. */
 const localNames = () => {
   const pinned = pinnedKind();
@@ -469,6 +475,8 @@ export const llmProvider: ProviderAdapter = {
     }
     const kind = opts?.focus ? LOCAL_FOCUS[opts.focus] : undefined;
     if (kind) return checkLocal(kind);
+    const hosted = opts?.focus ? HOSTED_FOCUS[opts.focus] : undefined;
+    if (hosted) return testHosted(hosted);
     if (aiHelper() === "none") return { ok: false, detail: "Text steps are off (AI helper: Offline rewriter)" };
     await probeLocal(true);
     const b = llmBackends({ endpoint: "auto" });

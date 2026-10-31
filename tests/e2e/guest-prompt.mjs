@@ -2,8 +2,9 @@
 // to run this" opens alone (no error toast, no trip to the sign-in page). Its Log in and Sign up free open the sign-in
 // page with the card closed, Back closes it too, and a wrong password on the sign-in page is the form's own error.
 // The same in the studios with their own fetch helpers: a guest presses New canvas in Canvas and sends a message in Assist.
-// Then an account without its GPU: "Connect your GPU" opens alone, its form inside it, and closes when the page changes;
-// alone again on a message in Assist, and none on New canvas, whose refusal ("Free accounts can't save…") is its toast.
+// Then an account without its GPU: "Connect your GPU" opens alone, its form inside it, and closes when the page changes.
+// None on a message in Assist (it's the owner's: "Assist runs on the studio owner's AI…" is its toast), and none on New
+// canvas, whose refusal ("Free accounts can't save…") is its toast.
 // Usage: node tests/e2e/guest-prompt.mjs [appUrl] [--shots <dir>]   (the app with a password and FUOBE_PUBLIC_SIGNUP=1).
 // Signs up one throwaway account. Exits 1 on a failed check.
 import fs from "node:fs";
@@ -184,15 +185,16 @@ try {
     s = await seen(page);
     check("Back closes it", s.cards.length === 0, JSON.stringify(s.cards));
 
-    // A message in Assist (its own fetch helper): Connect your GPU again, alone.
+    // A message in Assist (its own fetch helper): Assist is the owner's, and a GPU wouldn't change that, so no card.
     const sent = await sendInAssist(page);
-    check("the account's message in Assist is refused until it connects a GPU (403)", sent.status() === 403 && sent.headers()["x-fuobe-connect-gpu"] === "1", String(sent.status()));
-    await page.getByRole("dialog").waitFor();
+    check("the account's message in Assist is refused (403, Assist is the owner's)", sent.status() === 403 && !sent.headers()["x-fuobe-connect-gpu"], String(sent.status()));
+    await page.locator("[data-sonner-toast][data-type=error]").first().waitFor();
     await settled(page);
     s = await seen(page);
     await shot(page, "8-account-assist-send");
-    check("Assist: one card opens: Connect your GPU", s.cards.length === 1 && s.cards[0] === GPU_CARD, JSON.stringify(s.cards));
-    check("Assist: no error toast on top of it", s.errors.length === 0, JSON.stringify(s.errors));
+    check("Assist: its own error toast, with no card", s.cards.length === 0 && s.errors.length === 1 && /owner/.test(s.errors[0]), JSON.stringify(s));
+    // Gone before New canvas, so its toast is counted alone.
+    await page.locator("[data-sonner-toast][data-type=error]").first().waitFor({ state: "detached", timeout: 20_000 });
 
     // New canvas: a refusal with no card of its own, so its toast is the one thing shown.
     const made = await newCanvas(page);

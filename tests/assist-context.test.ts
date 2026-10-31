@@ -181,9 +181,9 @@ describe("a chat's context", () => {
 });
 
 describe("modes", () => {
-  it("falls back from Smart and Manual Claude to Free without a key, with a note", async () => {
+  it("falls back from Smart and Manual Claude to Free with nothing connected, with a note", async () => {
     setSetting("anthropicKey", "");
-    expect(await agent.resolveMode({ mode: "smart" })).toMatchObject({ mode: "free", agent: "offline", note: expect.stringMatching(/Anthropic API key/) });
+    expect(await agent.resolveMode({ mode: "smart" })).toMatchObject({ mode: "free", agent: "offline", note: expect.stringMatching(/Smart needs a model: add a key in Settings \(Anthropic, OpenAI, Google, OpenRouter…\)/) });
     expect(await agent.resolveMode({ mode: "manual", agent: "claude", model: "claude-haiku-5-5" })).toMatchObject({ agent: "offline", note: expect.any(String) });
     expect(await agent.resolveMode({ mode: "manual", agent: "offline" })).toMatchObject({ mode: "manual", agent: "offline" });
     expect(await agent.resolveMode({ mode: "manual", agent: "local", model: "llama3.2:3b" })).toMatchObject({

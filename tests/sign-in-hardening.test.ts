@@ -212,3 +212,30 @@ describe("M-4: one visitor's wrong guesses don't lock everyone out", () => {
     expect((await signup.POST(post("/api/auth/signup", { email: "newcomer@example.com", password: "newcomer password" }))).status).toBe(201);
   });
 });
+
+describe("Sign out ends the session on the server", () => {
+  it("refuses a copy of a signed-out cookie, the account's and the owner's, and keeps other sessions", async () => {
+    const logout = await import("@/app/api/auth/logout/route");
+    const account = auth.createAccount("leaving@example.com", "leaving password");
+    const copy = auth.createSession(account.id).value;
+    // Another browser's sign-in, a moment later (a cookie is its expiry, its account and their signature).
+    await new Promise((r) => setTimeout(r, 5));
+    const other = auth.createSession(account.id).value;
+    expect(other).not.toBe(copy);
+    const owner = auth.createSession().value;
+    expect(auth.sessionViewer(copy)?.kind).toBe("account");
+    for (const cookie of [copy, owner]) {
+      jar.get.mockReturnValueOnce({ value: cookie });
+      expect((await logout.POST()).status).toBe(200);
+      expect(auth.sessionViewer(cookie)).toBeNull();
+    }
+    expect(jar.delete).toHaveBeenCalledWith(auth.SESSION_COOKIE);
+    // Another browser's session of the same account isn't signed out.
+    expect(auth.sessionViewer(other)?.kind).toBe("account");
+    // Signing out again (or with no cookie) changes nothing.
+    jar.get.mockReturnValueOnce({ value: copy });
+    expect((await logout.POST()).status).toBe(200);
+    jar.get.mockReturnValueOnce(undefined);
+    expect((await logout.POST()).status).toBe(200);
+  });
+});
