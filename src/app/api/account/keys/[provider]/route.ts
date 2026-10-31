@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { isCloudProvider, NOT_ACCOUNT_KEYS, type CloudProvider } from "@/lib/your-keys";
 import { accountKeyInfo, cleanKey, removeAccountKey, saveAccountKey } from "@/server/account-keys";
-import { accountKeyRecord, requestAccount } from "@/server/auth";
+import { accountKeyRecord, LoginGuard, requestAccount } from "@/server/auth";
 import { hit, unhit } from "@/server/rate";
 import { SecretBoxError } from "@/server/secret-box";
 import { checkKey, runsGoingMessage, runsOnKey, stopRunsOnKey } from "@/server/your-keys";
@@ -15,9 +15,34 @@ import { checkKey, runsGoingMessage, runsOnKey, stopRunsOnKey } from "@/server/y
 const NO_STORE = { "Cache-Control": "no-store" };
 const answer = (status: number, body: Record<string, unknown>, headers: Record<string, string> = {}) => Response.json(body, { status, headers: { ...NO_STORE, ...headers } });
 
-/** Checks a minute: per account, and for every account together (the server is no key checker for stolen keys). */
+/**
+ * Checks a minute: per account, per address (behind a trusted proxy: one person with many accounts), and for every
+ * account together (the server is no key checker for stolen keys). Only a check that reaches the provider counts.
+ */
 const CHECKS_PER_MINUTE = 10;
+const CHECKS_PER_MINUTE_ADDRESS = 20;
 const CHECKS_PER_MINUTE_ALL = 120;
+
+/** Count a check in every bucket, or in none: one that's full gives the others their count back. */
+function countCheck(id: string, headers: Headers): { ok: true } | { ok: false; retryAfterS: number } {
+  const client = LoginGuard.clientKey(headers);
+  const buckets: [string, number][] = [
+    [`keys:${id}`, CHECKS_PER_MINUTE],
+    // Without a trusted proxy every visitor shares one address: the per-account and global counts do the work.
+    ...(client === LoginGuard.DIRECT ? [] : ([[`keys:ip:${client}`, CHECKS_PER_MINUTE_ADDRESS]] as [string, number][])),
+    ["keys:all", CHECKS_PER_MINUTE_ALL],
+  ];
+  const counted: string[] = [];
+  for (const [key, limit] of buckets) {
+    const h = hit(key, limit, 60_000);
+    if (!h.ok) {
+      for (const k of counted) unhit(k);
+      return { ok: false, retryAfterS: h.retryAfterS };
+    }
+    counted.push(key);
+  }
+  return { ok: true };
+}
 
 const Body = z.object({ key: z.string().max(400), stopRuns: z.boolean().optional() });
 
@@ -34,25 +59,22 @@ export async function PUT(request: Request, ctx: RouteContext<"/api/account/keys
   const w = await who(request, ctx);
   if ("refused" in w) return w.refused;
   const { id, provider } = w;
-  const mine = hit(`keys:${id}`, CHECKS_PER_MINUTE, 60_000);
-  const all = mine.ok ? hit("keys:all", CHECKS_PER_MINUTE_ALL, 60_000) : mine;
-  if (!all.ok) {
-    if (mine.ok) unhit(`keys:${id}`);
-    return answer(429, { error: "Too many checks. Wait a minute." }, { "Retry-After": String(all.retryAfterS) });
-  }
   const parsed = Body.safeParse(await request.json().catch(() => null));
   const key = parsed.success ? cleanKey(parsed.data.key) : null;
   if (!parsed.success || !key) return answer(400, { error: "Paste the whole key, without spaces." });
+  const counted = countCheck(id, request.headers);
+  if (!counted.ok) return answer(429, { error: "Too many checks. Wait a minute." }, { "Retry-After": String(counted.retryAfterS) });
   const check = await checkKey(provider, key);
   if (!check.ok) return answer(check.status, { error: check.error });
-  if (new URL(request.url).searchParams.get("test") === "1") return answer(200, { provider, ok: true, detail: check.detail });
+  const said = { detail: check.detail, ...(check.note && { note: check.note }) };
+  if (new URL(request.url).searchParams.get("test") === "1") return answer(200, { provider, ok: true, ...said });
   // Replacing a key runs are going on: they stop first, with the key they were sent with.
   const going = accountKeyRecord(id, provider) ? runsOnKey(id, provider) : [];
   if (going.length && !parsed.data.stopRuns) return answer(409, { code: "runs-going", count: going.length, error: runsGoingMessage(going.length, true) });
   if (going.length) await stopRunsOnKey(id, provider);
   try {
     const info = saveAccountKey(id, provider, key);
-    return answer(200, { provider, ...info, detail: check.detail });
+    return answer(200, { provider, ...info, ...said });
   } catch (e) {
     if (e instanceof SecretBoxError) return answer(503, { error: e.message });
     throw e;

@@ -12,6 +12,7 @@ import { keysSeen, startFakeFal, startFakeReplicate, type FakeCloud } from "./he
  * stops them with the old key.
  */
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
+vi.mock("next/headers", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/headers")>()), cookies: async () => ({ delete: () => {}, get: () => undefined }) }));
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-keys-routes-"));
 process.env.FUOBE_DATA_DIR = dir;
@@ -151,6 +152,8 @@ describe("adding a key", () => {
       keys: { fal: { last4: "3f9a", addedAt: expect.any(Number), readable: true }, replicate: { last4: "5c21", addedAt: expect.any(Number), readable: true } },
       engineMode: "both",
       paidAllowed: true,
+      // A new account keeps 1 GB in its first week: the line says so (never "3 GB" alone).
+      limits: "4 runs at once, 60 an hour, up to 4 pictures a run, 1 GB of files in your first week, then 3 GB",
     });
   });
 
@@ -248,5 +251,140 @@ describe("replacing and removing a key with runs going on it", () => {
     const again = await generationsRoute.POST(req("/api/generations", "POST", { feature: "image", modelId: "nano-banana-2", engine: "cloud", prompt: "x" }));
     expect(again.status).toBe(403);
     expect(again.headers.get("x-fuobe-add-key")).toBe("fal");
+  });
+});
+
+describe("a key that works on an empty balance", () => {
+  it("is saved, with a note to top it up (fal.ai's 403 lock, Replicate's 402), never 'copy it again'", async () => {
+    const id = auth.createAccount("routes-broke@example.com", "long enough").id;
+    const who = `${auth.SESSION_COOKIE}=${auth.createSession(id).value}`;
+    fal.keys["broke-key-id-5555:broke-key-secret-6a7b"] = "broke";
+    rep.keys["r8_brokeToken8c9d"] = "broke";
+    const f = await put("fal", { key: "broke-key-id-5555:broke-key-secret-6a7b" }, "", who);
+    expect(f.status).toBe(200);
+    expect(await f.json()).toMatchObject({
+      provider: "fal",
+      last4: "6a7b",
+      note: "Your fal.ai key works, but your fal.ai balance is empty. Top it up on fal.ai before you run.",
+    });
+    const r = await put("replicate", { key: "r8_brokeToken8c9d" }, "", who);
+    expect(r.status).toBe(200);
+    expect((await r.json()).note).toBe("Your Replicate key works, but your Replicate balance is empty. Top it up on Replicate before you run.");
+    const test = await put("fal", { key: "broke-key-id-5555:broke-key-secret-6a7b" }, "?test=1", who);
+    expect(await test.json()).toMatchObject({ ok: true, note: expect.stringMatching(/balance is empty/) });
+    const saved = (await keysRoute.GET(req("/api/account/keys", "GET", undefined, who)).then((x) => x.json())).keys;
+    expect(saved.fal).toMatchObject({ last4: "6a7b", readable: true });
+    expect(saved.replicate).toMatchObject({ last4: "8c9d", readable: true });
+  });
+});
+
+describe("the check budget", () => {
+  it("counts only checks that reach the provider: accounts sending junk never block another account's key", async () => {
+    resetRates();
+    const junkers = Array.from({ length: 13 }, (_, i) => `${auth.SESSION_COOKIE}=${auth.createSession(auth.createAccount(`junk-${i}@example.com`, "long enough").id).value}`);
+    for (const who of junkers) for (let i = 0; i < 10; i++) expect((await put("fal", { key: "x" }, "", who)).status).toBe(400);
+    expect(fal.log).toEqual([]);
+    const r = await put("fal", { key: GOOD_FAL }, "?test=1");
+    expect(r.status).toBe(200);
+  });
+
+  it("behind a trusted proxy, one address with many accounts can't use up every account's checks", async () => {
+    resetRates();
+    process.env.FUOBE_TRUST_PROXY = "1";
+    try {
+      const from = (ip: string, who: string) =>
+        keyRoute.PUT(
+          new Request("http://localhost:3000/api/account/keys/fal?test=1", { method: "PUT", headers: { cookie: who, host: "localhost:3000", "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify({ key: BAD_FAL }) }),
+          ctx("fal"),
+        );
+      const many = Array.from({ length: 3 }, (_, i) => `${auth.SESSION_COOKIE}=${auth.createSession(auth.createAccount(`one-address-${i}@example.com`, "long enough").id).value}`);
+      const answers: number[] = [];
+      for (const who of many) for (let i = 0; i < 10; i++) answers.push((await from("203.0.113.7", who)).status);
+      expect(answers.filter((s) => s === 422)).toHaveLength(20);
+      expect(answers.filter((s) => s === 429)).toHaveLength(10);
+      // Someone else, from another address, still gets their check.
+      const other = await keyRoute.PUT(
+        new Request("http://localhost:3000/api/account/keys/fal?test=1", { method: "PUT", headers: { cookie, host: "localhost:3000", "content-type": "application/json", "x-forwarded-for": "198.51.100.4" }, body: JSON.stringify({ key: GOOD_FAL }) }),
+        ctx("fal"),
+      );
+      expect(other.status).toBe(200);
+    } finally {
+      delete process.env.FUOBE_TRUST_PROXY;
+    }
+  });
+});
+
+describe("a run still being handed over when its key goes", () => {
+  const until = async (ok: () => boolean) => {
+    for (let i = 0; i < 300 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
+  };
+  /** An account with a fal.ai key, and a paid run whose submit fal.ai holds (it has no external id yet). */
+  const heldRun = async (email: string, k: string) => {
+    const id = auth.createAccount(email, "long enough").id;
+    const who = `${auth.SESSION_COOKIE}=${auth.createSession(id).value}`;
+    fal.keys[k] = "good";
+    expect((await put("fal", { key: k }, "", who)).status).toBe(200);
+    fal.pollsToFinish = Infinity;
+    fal.log.length = 0;
+    fal.canceled.length = 0;
+    let release!: () => void;
+    fal.holdSubmits = new Promise<void>((r) => (release = r));
+    const r = await generationsRoute.POST(req("/api/generations", "POST", { feature: "image", modelId: "nano-banana-pro", engine: "cloud", prompt: "a quiet harbour" }, who));
+    expect(r.status).toBe(201);
+    const run = (await r.json()).items[0].id as string;
+    await until(() => fal.log.some((x) => x.method === "POST" && !x.path.startsWith("/storage")));
+    expect(db().prepare("SELECT external_id FROM generations WHERE id = ?").pluck().get(run)).toBeNull();
+    return { id, who, run, release };
+  };
+  const statusOf = (id: string) => db().prepare("SELECT status FROM generations WHERE id = ?").pluck().get(id);
+  const cancelAuth = () => fal.log.filter((x) => x.path.endsWith("/cancel")).map((x) => x.authorization);
+
+  it("removing it stops the job at fal.ai, with that key, when the submit lands", async () => {
+    const k = "held-key-id-1111:held-key-secret-a1a1";
+    const { id, who, run, release } = await heldRun("held-remove@example.com", k);
+    const pending = keyRoute.DELETE(req("/api/account/keys/fal", "DELETE", { stopRuns: true }, who), ctx("fal"));
+    await until(() => statusOf(run) === "canceled");
+    // The key stays until the hand-over is over.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(auth.accountKeyRecord(id, "fal")).not.toBeNull();
+    release();
+    fal.holdSubmits = null;
+    expect((await pending).status).toBe(200);
+    expect(fal.canceled).toHaveLength(1);
+    expect(cancelAuth()).toEqual([`Key ${k}`]);
+    expect(auth.accountKeyRecord(id, "fal")).toBeNull();
+  });
+
+  it("replacing it stops the job with the old key, never the new one", async () => {
+    const k = "held-key-id-2222:held-key-secret-b2b2";
+    const next = "held-key-id-3333:held-key-secret-c3c3";
+    fal.keys[next] = "good";
+    const { id, who, run, release } = await heldRun("held-replace@example.com", k);
+    const pending = put("fal", { key: next, stopRuns: true }, "", who);
+    await until(() => statusOf(run) === "canceled");
+    release();
+    fal.holdSubmits = null;
+    const r = await pending;
+    expect(r.status).toBe(200);
+    expect((await r.json()).last4).toBe("c3c3");
+    expect(fal.canceled).toHaveLength(1);
+    expect(cancelAuth()).toEqual([`Key ${k}`]);
+    expect(keysSeen(fal.log.filter((x) => x.path.endsWith("/cancel") || (x.method === "POST" && !x.path.startsWith("/storage"))))).toEqual([`Key ${k}`]);
+    expect(auth.accountKeyRecord(id, "fal")?.last4).toBe("c3c3");
+  });
+
+  it("deleting the account stops the job with its key before the account and its keys go", async () => {
+    const k = "held-key-id-4444:held-key-secret-d4d4";
+    const { id, who, run, release } = await heldRun("held-delete@example.com", k);
+    const pending = meRoute.DELETE(req("/api/auth/me", "DELETE", { password: "long enough" }, who));
+    await until(() => statusOf(run) === undefined);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(auth.accountById(id)).toBeDefined();
+    release();
+    fal.holdSubmits = null;
+    expect((await pending).status).toBe(204);
+    expect(fal.canceled).toHaveLength(1);
+    expect(cancelAuth()).toEqual([`Key ${k}`]);
+    expect(auth.accountById(id)).toBeUndefined();
   });
 });

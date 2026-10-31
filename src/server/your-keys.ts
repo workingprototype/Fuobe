@@ -1,8 +1,8 @@
 import "server-only";
 import { settingProblem } from "@/lib/connections";
-import { CLOUD_KEY, type CloudProvider } from "@/lib/your-keys";
+import { CLOUD_KEY, emptyBalanceNote, type CloudProvider } from "@/lib/your-keys";
 import { db } from "./db";
-import { cancelGeneration } from "./generations";
+import { cancelGeneration, handOversDone } from "./generations";
 import { testFalKey, type KeyCheck } from "./providers/fal";
 import { testReplicateKey } from "./providers/replicate";
 
@@ -11,11 +11,15 @@ import { testReplicateKey } from "./providers/replicate";
  * removes or replaces. The key itself is only ever sent to its provider; nothing here logs it or answers with it.
  */
 
-/** A key checked with its provider before it is saved: a free call that runs nothing, with the typed key only. */
-export async function checkKey(p: CloudProvider, key: string): Promise<{ ok: true; detail: string } | { ok: false; error: string; status: number }> {
+/**
+ * A key checked with its provider before it is saved: a free call that runs nothing, with the typed key only. A key that
+ * works on a provider account with no balance left is saved too, with a note that says to top it up.
+ */
+export async function checkKey(p: CloudProvider, key: string): Promise<{ ok: true; detail: string; note?: string } | { ok: false; error: string; status: number }> {
   const { label } = CLOUD_KEY[p];
   const check: KeyCheck = p === "fal" ? await testFalKey(key) : await testReplicateKey(key);
   if (check.ok) return { ok: true, detail: check.detail };
+  if (check.reason === "balance") return { ok: true, detail: "Key accepted", note: emptyBalanceNote(p) };
   if (check.reason === "rejected") {
     const hint = settingProblem(CLOUD_KEY[p].setting, key);
     return { ok: false, status: 422, error: `${label} didn't accept this key. Copy it again from ${label}'s API keys page.${hint ? ` (${hint}.)` : ""}` };
@@ -32,10 +36,14 @@ export function runsOnKey(accountId: string, p: CloudProvider): string[] {
     .all(p, accountId) as string[];
 }
 
-/** Stop the account's runs on a provider, at the provider, with the key still saved (before it is removed or replaced). */
+/**
+ * Stop the account's runs on a provider, at the provider, with the key still saved (before it is removed or replaced).
+ * A run still being handed over is stopped there when its submit lands: that waits too.
+ */
 export async function stopRunsOnKey(accountId: string, p: CloudProvider): Promise<number> {
   const ids = runsOnKey(accountId, p);
   for (const id of ids) await cancelGeneration(id);
+  if (!(await handOversDone(ids))) console.warn(`[fuobe] Your keys: a run was still being handed to ${CLOUD_KEY[p].label} after a minute; the key changes anyway`);
   return ids.length;
 }
 

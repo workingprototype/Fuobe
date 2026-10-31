@@ -40,6 +40,8 @@ export interface YourKeys {
   engineMode: "open" | "both";
   /** The studio lets accounts use paid models with their own keys (it isn't open-source only). */
   paidAllowed: boolean;
+  /** The account limits its paid runs still count against, as it has them now: "4 runs at once, … 1 GB of files in your first week, then 3 GB". */
+  limits: string;
 }
 
 /** Set on an account's refused run (its value: fal or replicate): the client opens "Add your key". */
@@ -48,6 +50,9 @@ export const ADD_KEY_HEADER = "x-fuobe-add-key";
 export const addKeyMessage = (p: CloudProvider) => `Add your ${CLOUD_KEY[p].label} key to run this. Runs on ${CLOUD_KEY[p].label} are billed to your own ${CLOUD_KEY[p].label} account.`;
 export const keyRejectedMessage = (p: CloudProvider) => `${CLOUD_KEY[p].label} didn't accept your key. Check it in Settings → Your keys.`;
 export const balanceMessage = (p: CloudProvider) => `Your ${CLOUD_KEY[p].label} balance has run out. Top it up on ${CLOUD_KEY[p].label}, then run again.`;
+/** A key saved that works, on a provider account with nothing on it yet. */
+export const emptyBalanceNote = (p: CloudProvider) =>
+  `Your ${CLOUD_KEY[p].label} key works, but your ${CLOUD_KEY[p].label} balance is empty. Top it up on ${CLOUD_KEY[p].label} before you run.`;
 export const keyRemovedMessage = (p: CloudProvider) => `Your ${CLOUD_KEY[p].label} key was removed, so this run stopped.`;
 /** The owner (or anyone not signed in as an account) on /api/account/keys. */
 export const NOT_ACCOUNT_KEYS = "Your keys are for accounts. The studio's own keys are in Settings → Paid API configuration.";
@@ -93,15 +98,20 @@ const names = (ps: readonly CloudProvider[]) => ps.map((p) => CLOUD_KEY[p].label
 
 /**
  * The engine switch for an account: locked on open source (and why, and where to change that), or the words for its two
- * sides. Null for the owner and guests (the switch follows Settings → Engine mode).
+ * sides. Null for the owner and guests (the switch follows Settings → Engine mode). `addKey`: locked only for want of a
+ * key, so the switch opens "Add your key" (and says "Add key" where a phone has no room for the rest).
  */
-export function accountEngine(s: KeyStatus | undefined): { locked: { text: string; tip: string; href: string } } | { tips: { cloud: string; open: string } } | null {
+export function accountEngine(
+  s: KeyStatus | undefined,
+): { locked: { text: string; tip: string; href: string; addKey?: true } } | { tips: { cloud: string; open: string } } | null {
   const v = s?.viewer;
   if (v?.kind !== "account") return null;
   if (v.paidAllowed === false) return { locked: { text: "Open source only", tip: "This studio runs open-source models only.", href: "/settings#your-gpu" } };
   const keys = v.keys ?? [];
   if (!keys.length) {
-    return { locked: { text: "Open source only", tip: "Your runs use your own GPU. Add a fal.ai or Replicate key in Settings → Your keys to use paid models.", href: "/settings#your-keys" } };
+    return {
+      locked: { text: "Open source only", tip: "Your runs use your own GPU. Add a fal.ai or Replicate key to use paid models.", href: "/settings#your-keys", addKey: true },
+    };
   }
   return {
     tips: {

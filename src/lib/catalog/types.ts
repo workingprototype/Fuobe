@@ -1133,6 +1133,8 @@ export interface Generation {
    * "Fix it", which opens the GPU pre-flight's guided fix.
    */
   fix?: GenerationFix | null;
+  /** Failed or stopped before its paid provider took the job (no external id): the card says "Not billed", not its price. */
+  notBilled?: true;
   /**
    * What the run leaves out or changes, said when it is created (LoRAs a cloud run can't carry, a clip length
    * the API rounds). Only on the answer that creates it; not stored.

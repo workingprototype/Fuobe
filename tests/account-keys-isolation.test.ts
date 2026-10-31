@@ -446,3 +446,45 @@ describe("routing for an account", () => {
     }
   });
 });
+
+describe("a run its provider never took", () => {
+  it("says it was not billed (an empty balance at submit); a run fal.ai took keeps its price", async () => {
+    const id = auth.createAccount("not-billed@example.com", "long enough").id;
+    fal.keys["acct-fal-broke"] = "broke";
+    keys.saveAccountKey(id, "fal", "acct-fal-broke");
+    const cookie = `${auth.SESSION_COOKIE}=${auth.createSession(id).value}`;
+    const g = await run(cookie, { modelId: "nano-banana-pro", engine: "cloud" });
+    const failed = await settle(g.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.error).toBe("Your fal.ai balance has run out. Top it up on fal.ai, then run again.");
+    const shown = gens.getGeneration(g.id)!;
+    expect(shown.costUsd).toBeGreaterThan(0);
+    expect(shown.notBilled).toBe(true);
+    const ok = await run(cookies.A, { modelId: "nano-banana-pro", engine: "cloud" });
+    expect((await settle(ok.id)).status).toBe("succeeded");
+    expect(gens.getGeneration(ok.id)!.notBilled).toBeUndefined();
+  });
+});
+
+describe("deleting an account while its run is being handed over", () => {
+  it("stops the job at fal.ai with its key when the submit lands, then the account and its key go", async () => {
+    const id = auth.createAccount("gone-handover@example.com", "long enough").id;
+    keys.saveAccountKey(id, "fal", "acct-fal-E");
+    const cookie = `${auth.SESSION_COOKIE}=${auth.createSession(id).value}`;
+    fal.pollsToFinish = Infinity;
+    fal.canceled.length = 0;
+    let release!: () => void;
+    fal.holdSubmits = new Promise((r) => (release = r));
+    const g = await run(cookie, { modelId: "nano-banana-pro", engine: "cloud" });
+    while (!fal.log.some((r) => r.method === "POST" && !r.path.startsWith("/storage"))) await new Promise((r) => setTimeout(r, 5));
+    const pending = adminAccountRoute.DELETE(new Request(`http://localhost:3000/api/admin/accounts/${id}`, { method: "DELETE", headers: { cookie: ownerCookie() } }), { params: Promise.resolve({ id }) });
+    for (let i = 0; i < 200 && db().prepare("SELECT 1 FROM generations WHERE id = ?").get(g.id); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(auth.accountById(id)).toBeDefined();
+    release();
+    expect((await pending).status).toBe(204);
+    expect(fal.canceled).toHaveLength(1);
+    expect(fal.log.find((r) => r.path.endsWith("/cancel"))?.authorization).toBe("Key acct-fal-E");
+    expect(keysSeen(fal.log)).toEqual(["Key acct-fal-E"]);
+    expect(auth.accountById(id)).toBeUndefined();
+  });
+});

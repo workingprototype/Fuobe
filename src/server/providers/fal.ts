@@ -2,7 +2,7 @@ import "server-only";
 import { createFalClient } from "@fal-ai/client";
 import { loraEndpointFor, routeLoraField } from "@/lib/catalog/loras";
 import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
-import { accountKeyError, cloudKey, missingKeyError, originOf, redactKey, standIn } from "../provider-keys";
+import { accountKeyError, balanceRefusal, cloudKey, missingKeyError, originOf, redactKey, standIn } from "../provider-keys";
 import { tenant } from "../tenant";
 import { ProviderError, type ProviderAdapter } from "./types";
 
@@ -174,12 +174,16 @@ export const falProvider: ProviderAdapter = {
   },
 };
 
-/** What a key check found: accepted, refused by the provider, the provider out of reach, or an answer that says nothing. */
-export type KeyCheck = { ok: true; detail: string } | { ok: false; detail: string; reason: "rejected" | "unreachable" | "odd"; status?: number };
+/**
+ * What a key check found: accepted, refused by the provider, a key that works on an account with no balance left, the
+ * provider out of reach, or an answer that says nothing.
+ */
+export type KeyCheck = { ok: true; detail: string } | { ok: false; detail: string; reason: "rejected" | "balance" | "unreachable" | "odd"; status?: number };
 
 /**
  * Check a fal.ai key, and only that key (Settings' "Save & test", an account's Your keys): the status of a request that
- * doesn't exist. Free, and nothing runs: 401/403 means a bad key, 404/422 a key that works.
+ * doesn't exist. Free, and nothing runs: 401/403 means a bad key (or, saying so, an empty balance), 404/422 a key that
+ * works.
  */
 export async function testFalKey(k: string): Promise<KeyCheck> {
   if (!k) return { ok: false, detail: "No key set", reason: "rejected" };
@@ -192,7 +196,11 @@ export async function testFalKey(k: string): Promise<KeyCheck> {
   } catch (e) {
     return { ok: false, detail: redactKey(`Can't reach fal.ai (${(e as Error).message})`, k), reason: "unreachable" };
   }
-  if (res.status === 401 || res.status === 403) return { ok: false, detail: `Key rejected (${res.status})`, reason: "rejected", status: res.status };
+  if (res.status === 401 || res.status === 402 || res.status === 403) {
+    const text = await res.text().catch(() => "");
+    if (balanceRefusal(res.status, text)) return { ok: false, detail: "Key works, but the fal.ai balance is empty: top it up on fal.ai", reason: "balance", status: res.status };
+    return { ok: false, detail: `Key rejected (${res.status})`, reason: "rejected", status: res.status };
+  }
   if (res.ok || [400, 404, 422].includes(res.status)) return { ok: true, detail: "Key accepted" };
   // A proxy or an outage (405, 407, 5xx) says nothing about the key: don't call it accepted.
   return { ok: false, detail: `Couldn't check the key: fal.ai answered ${res.status}. Try again in a moment`, reason: "odd", status: res.status };

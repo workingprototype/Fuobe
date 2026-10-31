@@ -53,7 +53,7 @@ describe("which paid models an account can run", () => {
 describe("the engine switch for an account", () => {
   it("is locked on open source without a key, pointing at Your keys", () => {
     expect(accountEngine(account([]))).toEqual({
-      locked: { text: "Open source only", tip: "Your runs use your own GPU. Add a fal.ai or Replicate key in Settings → Your keys to use paid models.", href: "/settings#your-keys" },
+      locked: { text: "Open source only", tip: "Your runs use your own GPU. Add a fal.ai or Replicate key to use paid models.", href: "/settings#your-keys", addKey: true },
     });
   });
 

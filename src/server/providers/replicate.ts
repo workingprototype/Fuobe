@@ -1,7 +1,7 @@
 import "server-only";
 import { loraEndpointFor } from "@/lib/catalog/loras";
 import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
-import { accountKeyError, cloudKey, missingKeyError, originOf, redactKey, standIn } from "../provider-keys";
+import { accountKeyError, balanceRefusal, cloudKey, missingKeyError, originOf, redactKey, standIn } from "../provider-keys";
 import { toDataUri } from "../storage";
 import { tenant } from "../tenant";
 import type { KeyCheck } from "./fal";
@@ -128,5 +128,7 @@ export async function testReplicateKey(t: string): Promise<KeyCheck> {
   } catch {}
   if (res.ok) return { ok: true, detail: `Signed in as ${body.username ?? "unknown"}` };
   const said = redactKey(`replicate ${res.status}: ${body.detail ?? body.title ?? text.slice(0, 300)}`, t);
-  return { ok: false, detail: said, reason: res.status === 401 || res.status === 403 ? "rejected" : "odd", status: res.status };
+  // No credit left (402): the token works.
+  const reason = balanceRefusal(res.status, text) ? "balance" : res.status === 401 || res.status === 403 ? "rejected" : "odd";
+  return { ok: false, detail: said, reason, status: res.status };
 }

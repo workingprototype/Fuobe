@@ -41,13 +41,19 @@ export function redactKey(text: string, key: string): string {
 const BALANCE = /exhausted balance|insufficient (credit|balance|funds)|out of credit|top up your balance|payment required/i;
 
 /**
+ * A refusal that is about the provider account's balance, not the key: 402, or fal.ai's 403 "User is locked. Reason:
+ * Exhausted balance". The key itself works.
+ */
+export const balanceRefusal = (status: number, text: string): boolean => status === 402 || ((status === 401 || status === 403) && BALANCE.test(text));
+
+/**
  * An account's run refused by its provider, said the way to fix it: its key (Settings → Your keys, which then says the
  * provider stopped accepting it) or its balance. Undefined for the owner's runs and for any other error.
  */
 export function accountKeyError(p: CloudProvider, status: number, text: string, used: string): ProviderError | undefined {
   const account = tenantAccount();
   if (!account) return undefined;
-  if (status === 402 || ((status === 401 || status === 403) && BALANCE.test(text))) return new ProviderError(balanceMessage(p), status);
+  if (balanceRefusal(status, text)) return new ProviderError(balanceMessage(p), status);
   if (status === 401 || status === 403) {
     if (status === 401) markKeyRejected(account, p, used);
     return new ProviderError(keyRejectedMessage(p), status);

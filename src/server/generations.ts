@@ -166,6 +166,8 @@ export function toGeneration(r: Row): Generation {
     pinnedAt: r.pinned_at ?? null,
     review: isReviewStatus(r.review) ? r.review : null,
     ...(r.status === "failed" && r.fix_json && { fix: parseFix(r.fix_json) }),
+    // Failed or stopped before a paid provider took the job (a refused key, an empty balance): nothing was billed.
+    ...((r.status === "failed" || r.status === "canceled") && !r.external_id && (r.provider === "fal" || r.provider === "replicate") && { notBilled: true as const }),
   };
 }
 
@@ -1045,6 +1047,20 @@ declare global {
 const submitting = (): Set<string> => (globalThis.__fuobeSubmitting ??= new Set<string>());
 
 /**
+ * Wait (at most `ms`) until none of these runs is still being handed to its provider. A run cancelled during its
+ * hand-over is stopped there as soon as its submit lands (submitNow), with the key it was sent with: removing or
+ * replacing that key, or deleting the account, waits for this first. False when one is still going at the end.
+ */
+export async function handOversDone(ids: readonly string[], ms = 60_000): Promise<boolean> {
+  const end = Date.now() + ms;
+  while (ids.some((id) => submitting().has(id))) {
+    if (Date.now() >= end) return false;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return true;
+}
+
+/**
  * A chain runs all for real or all as a demo (a demo join of paid clips, or a paid step fed a demo
  * placeholder, helps nobody). Returns the error for a step that can't match its dependencies, and
  * whether it should run as a demo because they did.
@@ -1390,6 +1406,8 @@ function submit(id: string, route: ModelRoute, providerId: ProviderId, plan: Ret
   const own = accountRun(req.account, providerId, "submit");
   if ("error" in own) {
     update(id, { status: "failed", error: own.error, completed_at: Date.now(), message: null });
+    // A chained step advanceDependents marked as being handed over isn't any more.
+    submitting().delete(id);
     return Promise.resolve();
   }
   return own.run(() => submitNow(id, route, providerId, plan, req, index));
@@ -2225,7 +2243,8 @@ export async function cancelGeneration(id: string): Promise<void> {
     return;
   }
   const model = getModel(r.model_id);
-  // Without an external id the job is still being handed over: submit() cancels it as soon as it lands.
+  // Without an external id the job is still being handed over: submit() cancels it as soon as it lands, with the key it
+  // was sent with (removing that key, or deleting the account, waits for it: handOversDone).
   if (r.external_id && model) {
     const account = accountOf(r);
     // An account's job is stopped with its own key, also when the account is switched off or about to be deleted.
