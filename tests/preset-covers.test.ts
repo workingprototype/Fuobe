@@ -8,6 +8,7 @@ import { toPresetCard } from "@/lib/preset-card-data";
 import { isCover } from "@/lib/preset-cards";
 import { presetCover, thumbOf } from "@/lib/preset-covers";
 import { PRESET_COVERS } from "@/lib/preset-covers.generated";
+import { PRESET_PEAKS } from "@/lib/preset-peaks.generated";
 import { PRESET_PREVIEWS } from "@/lib/preset-previews.generated";
 
 /*
@@ -39,8 +40,9 @@ describe("the preset covers manifest", () => {
     }
   });
 
-  it("leaves no cover file in public/previews that no entry names (with its poster's small copy for the pickers)", () => {
+  it("leaves no cover file in public/previews that no entry names (with its poster's small copy for the pickers, and its clip's peak frame for Home)", () => {
     const named = new Set(entries.flatMap(([, e]) => [e.poster, thumbOf(e.poster), e.video].filter(Boolean)));
+    for (const id of Object.keys(PRESET_PEAKS)) named.add(`/previews/presets/peak/${id}.jpg`);
     const dir = path.join(root, "public", "previews");
     const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((f) => /\.(jpg|mp4)$/.test(f)) : [];
     const orphans = files.map((f) => `/previews/${f.replaceAll("\\", "/")}`).filter((u) => !named.has(u));
