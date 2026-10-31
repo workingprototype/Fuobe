@@ -3,7 +3,6 @@
 import { AppWindow, ArrowUpRight, Brain, Captions, Check, CircleAlert, Clapperboard, Film, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Plug, Scissors, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { useCreateGeneration } from "@/lib/api";
@@ -62,7 +61,7 @@ export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistIte
     try {
       await onAnswer(ok);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(null);
     }

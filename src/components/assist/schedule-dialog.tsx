@@ -33,6 +33,7 @@ import {
 } from "@/lib/assist-schedule";
 import type { Engine } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useChats, useConnectors, useProjects, useScheduleActions, type ScheduleRuleInput } from "./hooks";
 import { ModePicker } from "./mode-picker";
 import { ProjectDot } from "./project-dot";
@@ -152,7 +153,7 @@ function Form({ schedule, seed, onDone }: { schedule?: ScheduleView; seed?: Sche
       toast.success(schedule ? "Schedule saved" : "Scheduled", { description: s.nextRunAt ? `Next run ${formatWhen(s.nextRunAt, s.tz)}` : undefined, duration: 2500 });
       onDone();
     } catch (err) {
-      toast.error((err as Error).message);
+      toastError(err);
     } finally {
       setBusy(false);
     }

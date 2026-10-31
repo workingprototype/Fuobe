@@ -26,6 +26,7 @@ import { copyText } from "@/lib/clipboard";
 import { guessCategory, MEMORY_CATEGORIES, MEMORY_HINTS, MEMORY_MAX_CHARS, parseMemoryImport, type AssistMemory, type AssistProject, type MemoryCategory, type MemoryScope } from "@/lib/assist";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useMemories, useMemoryActions, useProjects } from "./hooks";
 import { ProjectDot, RailButton } from "./shell";
@@ -184,7 +185,7 @@ function MemoryRow({ m, project }: { m: AssistMemory; project?: AssistProject })
       await actions.update(m.id, { text, category });
       setEditing(false);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }
@@ -240,7 +241,7 @@ function MemoryRow({ m, project }: { m: AssistMemory; project?: AssistProject })
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => void actions.remove(m.id).catch((e) => toast.error((e as Error).message))}>
+            <AlertDialogAction variant="destructive" onClick={() => void actions.remove(m.id).catch((e) => toastError(e))}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -317,7 +318,7 @@ function AddForm({ place, projects, onDone }: { place: Place; projects: AssistPr
       toast.success("Remembered", { duration: 1500 });
       onDone();
     } catch (err) {
-      toast.error((err as Error).message);
+      toastError(err);
     } finally {
       setBusy(false);
     }
@@ -387,7 +388,7 @@ function ImportForm({ place, projects, onDone }: { place: Place; projects: Assis
       toast.success(`Imported ${r.added} memor${r.added === 1 ? "y" : "ies"}`, { description: r.skipped ? `${r.skipped} were already there` : undefined });
       onDone();
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }

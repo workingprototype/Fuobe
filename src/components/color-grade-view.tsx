@@ -13,7 +13,7 @@ import { uploadFile } from "@/lib/api";
 import { applyPreset, CONTROLS, describeGrade, FRAGMENT, isNeutral, NEUTRAL, PRESETS, uniforms, VERTEX, type Grade } from "@/lib/grade";
 import { cn } from "@/lib/utils";
 import { loseContext as loseGlContext, releaseVideo } from "@/lib/media-release";
-import { toastError } from "@/lib/refusals";
+import { responseError, toastError } from "@/lib/refusals";
 
 type Source = HTMLImageElement | HTMLVideoElement;
 
@@ -172,7 +172,7 @@ function Grader() {
       },
       (e) => {
         if (cancelled) return;
-        toast.error((e as Error).message);
+        toastError(e);
         // Back to the empty stage (upload slots, sample photo) instead of a spinner that never ends.
         setSource(null);
         setInput(null);
@@ -218,7 +218,7 @@ function Grader() {
     try {
       renderer.current ??= new GradeRenderer(canvas.current);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
       return;
     }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -278,7 +278,7 @@ function Grader() {
         output: { url: asset.url, kind, contentType: asset.contentType },
       }),
     });
-    if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? "Couldn't save");
+    if (!res.ok) throw responseError(res, ((await res.json()) as { error?: string }).error ?? "Couldn't save");
     setSaved(asset.url);
     toast.success("Saved to your library");
   };

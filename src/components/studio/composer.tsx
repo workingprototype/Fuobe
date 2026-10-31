@@ -511,7 +511,7 @@ export function Composer({ docked }: { docked: boolean }) {
     // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
     const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx, targetFor(draft.modelId)));
     // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
-    if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
+    if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toastError(e) });
     // If the server's pre-flight stops it (409 gpu-setup), the guided fix that opens can try again, or run it anyway.
     setGpuRetry(
       () => submitRef.current(),

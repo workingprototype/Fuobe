@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { GenerationRequest } from "@/lib/catalog/types";
+import { responseError } from "@/lib/refusals";
 
 /** What /api/generations?preview=1 says a request would run as (the parts the page shows). */
 export interface RunPreview {
@@ -35,7 +36,7 @@ export function useRunPreview(req: GenerationRequest | null) {
     queryFn: async () => {
       const res = await fetch("/api/generations?preview=1", { method: "POST", headers: { "Content-Type": "application/json" }, body: body! });
       const j = (await res.json().catch(() => ({}))) as RunPreview & { error?: string };
-      if (!res.ok) throw new Error(j.error ?? `Request failed (${res.status})`);
+      if (!res.ok) throw responseError(res, j.error ?? `Request failed (${res.status})`);
       return j;
     },
   });

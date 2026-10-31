@@ -11,6 +11,7 @@ import { saveSettings, useEngineMode, type StatusInfo } from "@/lib/api";
 import { copyWithToast } from "@/lib/clipboard";
 import { COMFY_INSTALL_COMMAND, COMFY_INSTALL_DOCS, FAL_KEYS_URL, nothingConnected } from "@/lib/connections";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 
 /**
  * "What do you want to do?" — Liner's first-run question, as one tap to the right place. Image and
@@ -94,7 +95,7 @@ export function GetStarted({
       onHide?.();
       return true;
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
       return false;
     } finally {
       setHiding(false);

@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { checkConnectorUrl, MAX_CONNECTOR_NAME, MAX_CONNECTORS, parseToolList, type ConnectorView } from "@/lib/assist-connectors";
+import { toastError } from "@/lib/refusals";
 import { useConnectorActions, useConnectors } from "./hooks";
 
 /**
@@ -113,7 +114,7 @@ function Row({ c, onEdit }: { c: ConnectorView; onEdit: () => void }) {
       <div className="flex shrink-0 items-center gap-0.5">
         <Switch
           checked={c.enabled}
-          onCheckedChange={(on) => void actions.update(c.id, { enabled: on }).catch((e) => toast.error((e as Error).message))}
+          onCheckedChange={(on) => void actions.update(c.id, { enabled: on }).catch((e) => toastError(e))}
           aria-label={c.enabled ? `Switch off ${c.name}` : `Switch on ${c.name}`}
         />
         <Button size="icon" variant="ghost" className="size-8 text-muted-foreground" aria-label={`Edit ${c.name}`} onClick={onEdit}>
@@ -131,7 +132,7 @@ function Row({ c, onEdit }: { c: ConnectorView; onEdit: () => void }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => void actions.remove(c.id).catch((e) => toast.error((e as Error).message))}>
+            <AlertDialogAction variant="destructive" onClick={() => void actions.remove(c.id).catch((e) => toastError(e))}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -177,7 +178,7 @@ function ConnectorForm({ connector, onDone }: { connector?: ConnectorView; onDon
       }
       onDone();
     } catch (err) {
-      toast.error((err as Error).message);
+      toastError(err);
     } finally {
       setBusy(false);
     }

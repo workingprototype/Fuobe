@@ -122,7 +122,7 @@ export function CreateMoodboardDialog({ open, onOpenChange, onCreated }: { open:
       onCreated?.(m);
       setOpen(false);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }

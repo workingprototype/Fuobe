@@ -40,6 +40,7 @@ import {
   type InfluencerState,
 } from "@/lib/influencer";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { CATEGORY_ICON, LockButton, OptionTiles, pickRule, TierPanel } from "./option-panel";
 
 const STARTS: [InfluencerStart, string][] = [
@@ -190,7 +191,7 @@ export function InfluencerBuilder() {
     if (!body) return toast("Wait for the uploads to finish");
     run.mutate(body, {
       onSuccess: (r) => setIds((xs) => [...r.items.map((g) => g.id), ...xs]),
-      onError: (e) => toast.error((e as Error).message || "Couldn't start the sheet"),
+      onError: (e) => toastError(e, "Couldn't start the sheet"),
     });
   };
 

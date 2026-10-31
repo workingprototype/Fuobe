@@ -11,10 +11,12 @@ export function markRefusalShown(res: Response): void {
   shown.add(res);
 }
 
-/** The error for a failed response: marked when its refusal shows its own card. */
-export function responseError(res: Response, message: string): Error {
-  const e = new Error(message);
-  return shown.has(res) ? Object.assign(e, { refusalShown: true }) : e;
+/** The error for a failed response (`e`, or an Error with that message): marked when its refusal shows its own card. */
+export function responseError(res: Response, message: string): Error;
+export function responseError<E extends Error>(res: Response, e: E): E;
+export function responseError(res: Response, e: string | Error): Error {
+  const err = typeof e === "string" ? new Error(e) : e;
+  return shown.has(res) ? Object.assign(err, { refusalShown: true }) : err;
 }
 
 /** The refusal behind this error shows its own card already: no toast on top of it. */

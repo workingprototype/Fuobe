@@ -32,6 +32,7 @@ import { ELEMENT_KINDS, elementKindInfo, handleFor, MAX_ELEMENT_PHOTOS, type Ele
 import { isLegacySoulId, SOUL_ID_PHOTOS } from "@/lib/catalog/training";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 
 const TIPS: Record<ElementKind, string> = {
   character: `3+ clear photos of one person (${SOUL_ID_PHOTOS.recommended}+ to train a Soul ID, up to ${SOUL_ID_PHOTOS.max}): different angles, at least one full-body, no sunglasses, filters or group shots.`,
@@ -136,7 +137,7 @@ function ElementForm({ onOpenChange, element, defaultKind = "character", onSaved
           onOpenChange(false);
           onSaved?.(el);
         },
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
 
@@ -337,7 +338,7 @@ function ElementCard({ el }: { el: StudioElement }) {
               onClick={() =>
                 del.mutate(el.id, {
                   onSuccess: () => toast(`Deleted ${el.name}`),
-                  onError: (e) => toast.error((e as Error).message),
+                  onError: (e) => toastError(e),
                 })
               }
             >

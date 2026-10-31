@@ -17,6 +17,7 @@ import { customPack, DEFAULT_ASPECT, MAX_PACK_REFS, MAX_SELFIE_MB, PACKS, PHOTOD
 import type { Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { PackCover } from "./covers";
 import { useRun, useRunPreview, usePackActions, useUserPacks } from "./hooks";
 import { DownloadAll, ResultsGrid, runState } from "./results";
@@ -107,7 +108,7 @@ function CreatePack({ open, onOpenChange, onCreated }: { open: boolean; onOpenCh
                     onOpenChange(false);
                     onCreated(p.id);
                   },
-                  onError: (e) => toast.error((e as Error).message),
+                  onError: (e) => toastError(e),
                 },
               )
             }
@@ -208,7 +209,7 @@ export function PhotodumpView() {
         setBatchId(res.batchId ?? res.items[0]?.batchId ?? undefined);
         go(2);
       },
-      onError: (e) => toast.error((e as Error).message || "Cannot start photodump generation, please try again"),
+      onError: (e) => toastError(e, "Cannot start photodump generation, please try again"),
     });
   };
 

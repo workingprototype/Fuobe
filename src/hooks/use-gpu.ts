@@ -5,6 +5,7 @@ import { useCallback, useRef, useState } from "react";
 import { GPU_SETUP_EVENT } from "@/lib/api";
 import { BADGE_STATE } from "@/lib/gpu/readiness";
 import type { Badge, BadgeMap, CheckLine, FixPlan, GpuProblem, ReadinessReport, Readiness } from "@/lib/gpu/types";
+import { responseError } from "@/lib/refusals";
 
 /**
  * The GPU pre-flight in the browser: the readiness board, the badge map and a tool's fix plan (react-query keys
@@ -123,7 +124,7 @@ export async function runGpuCheck(onLine: (l: CheckLine) => void): Promise<Readi
   const res = await fetch("/api/gpu/check", { method: "POST" });
   if (!res.ok || !res.body) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; wait?: number };
-    throw Object.assign(new Error(body.error ?? `The check didn't start (${res.status})`), { status: res.status, wait: body.wait });
+    throw Object.assign(responseError(res, body.error ?? `The check didn't start (${res.status})`), { status: res.status, wait: body.wait });
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

@@ -33,6 +33,7 @@ import type { Generation, PixelPoint } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { FrameStage, frameFromBlob, type Frame } from "./frame-stage";
 import { useRemovalActions, useRemovalEstimate, type RemovalBody } from "./hooks";
 import { VideoCompare } from "./video-compare";
@@ -219,7 +220,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
         setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before: clip!.preview, start: range!.startTime, ratio });
         toast("Removing it", { description: "Follow it below — it lands in your Library too." });
       })
-      .catch((e: Error) => toast.error(e.message));
+      .catch((e: Error) => toastError(e));
   };
 
   const canPreview = !!body && est?.previewUsd != null;
@@ -228,7 +229,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
     const of = { exact: est.previewExact, eraser: est.modelName };
     void previewGuard(JSON.stringify(body), (requestId) => actions.preview.mutateAsync({ ...body, requestId }))
       .then((g) => g && setPreviewOf({ id: g.id, ...of }))
-      .catch((e: Error) => toast.error(e.message));
+      .catch((e: Error) => toastError(e));
   };
   const preview = useGeneration(previewOf?.id ?? null).data;
 

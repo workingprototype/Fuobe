@@ -27,6 +27,7 @@ import type { Generation } from "@/lib/catalog/types";
 import { formatCost, ratioValue, timeAgo } from "@/lib/format";
 import { downloadHref, downloadName } from "@/lib/library";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useShortsActions, useShortsSession, useSubmitGuard, type ShortsSessionView as View } from "./hooks";
 import { Steps } from "./ui";
 
@@ -120,13 +121,13 @@ function Session({ s }: { s: View }) {
     if (!canStitch || actions.stitch.isPending) return;
     void stitchGuard(`stitch:${s.segments.map((g) => g.primary).join(",")}`, (requestId) => actions.stitch.mutateAsync({ requestId }))
       .then((v) => v && toast("Stitching your short"))
-      .catch((e: Error) => toast.error(e.message));
+      .catch((e: Error) => toastError(e));
   };
   const regenerate = (i: number) => {
     if (actions.regenerate.isPending) return;
     void takeGuard(`take:${i}:${s.segments[i].takes.length}`, (requestId) => actions.regenerate.mutateAsync({ index: i, requestId }))
       .then((v) => v && toast(`New take of segment ${i + 1} on the way`))
-      .catch((e: Error) => toast.error(e.message));
+      .catch((e: Error) => toastError(e));
   };
 
   return (
@@ -244,7 +245,7 @@ function Session({ s }: { s: View }) {
                 onRegenerate={() => regenerate(i)}
                 regenerating={actions.regenerate.isPending && actions.regenerate.variables?.index === i}
                 busy={actions.regenerate.isPending}
-                onPrimary={(gid) => actions.primary.mutate({ index: i, generationId: gid }, { onError: (e) => toast.error((e as Error).message) })}
+                onPrimary={(gid) => actions.primary.mutate({ index: i, generationId: gid }, { onError: (e) => toastError(e) })}
               />
             ))}
           </div>
@@ -267,7 +268,7 @@ function Session({ s }: { s: View }) {
                     toast("Moved to Trash");
                     router.push("/shorts?tab=history");
                   },
-                  onError: (e) => toast.error((e as Error).message),
+                  onError: (e) => toastError(e),
                 })
               }
             >

@@ -13,6 +13,7 @@ import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { uploadFile } from "@/lib/api";
 import { HOOK_SECONDS, hookSignals, hookSummary, SILENCE_DB, TRIBE_WORKER, VIRALITY_PARITY, type HookSignal, type SignalId, type Verdict } from "@/lib/av/virality";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { measureHook, type HookMeasure } from "./measure";
 
 type Run =
@@ -250,7 +251,7 @@ function NextSteps({ clip, measure, byId }: { clip: SlotValue; measure: HookMeas
       const asset = await uploadFile(new File([blob], `${(clip.name ?? "video").replace(/\.[^.]+$/, "")} opening frame.jpg`, { type: "image/jpeg" }));
       router.push(`${HOOK_FRAME_APP}?${new URLSearchParams({ image: asset.url })}`);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
       setBusy(false);
     }
   };

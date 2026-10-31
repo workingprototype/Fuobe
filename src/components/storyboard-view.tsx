@@ -330,7 +330,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
     queryFn: async () => {
       const res = await fetch("/api/storyboards/estimate", { method: "POST", headers: { "Content-Type": "application/json" }, body: priceKey });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error);
+      if (!res.ok) throw responseError(res, body.error);
       return body as BoardEstimate;
     },
     placeholderData: keepPreviousData,

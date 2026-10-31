@@ -89,7 +89,7 @@ export function CustomPresetDialog({
       onSaved(p);
       onOpenChange(false);
     };
-    const fail = (e: Error) => toast.error(e.message);
+    const fail = (e: Error) => toastError(e);
     if (preset) actions.update.mutate({ id: preset.id, ...body }, { onSuccess: done, onError: fail });
     else actions.create.mutate(body, { onSuccess: done, onError: fail });
   };
@@ -199,7 +199,7 @@ export function CustomPresetDialog({
                     toast("Preset deleted");
                     onOpenChange(false);
                   },
-                  onError: (e) => toast.error((e as Error).message),
+                  onError: (e) => toastError(e),
                 })
               }
             >

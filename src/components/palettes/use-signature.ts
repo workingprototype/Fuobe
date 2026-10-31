@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { applySignature, withSignatureWords, type Signature, type SignedRequest } from "@/lib/catalog/palettes";
 import type { Generation, GenerationRequest } from "@/lib/catalog/types";
+import { responseError } from "@/lib/refusals";
 import { useCatalog } from "@/components/studio/catalog";
 import { usePalettes } from "./hooks";
 
@@ -30,7 +31,7 @@ export function useSignature(enabled: boolean, signature: Signature | undefined)
     mutationFn: async (b: { request: GenerationRequest; colors: string[] }) => {
       const res = await fetch("/api/palettes/lock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
       const body = (await res.json().catch(() => ({}))) as { items?: Generation[]; error?: string };
-      if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+      if (!res.ok) throw responseError(res, body.error ?? `Request failed (${res.status})`);
       return body.items ?? [];
     },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["generations"] }),

@@ -196,7 +196,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
       writeDraft(null);
       router.push(`/content-factory/${id}`);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       submitting.current = false;
     }
@@ -241,7 +241,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
                   analysis={view.analysis}
                   styleId={view.brief?.styleId ?? "colorful-3d"}
                   onClear={() => choosePreset(DEFAULT_PRESET)}
-                  onReread={() => reread.mutate({ id: view.id, engine }, { onError: (e) => toast.error((e as Error).message) })}
+                  onReread={() => reread.mutate({ id: view.id, engine }, { onError: (e) => toastError(e) })}
                   rereading={reread.isPending}
                 />
               ) : seriesId && series.isLoading ? (
@@ -457,7 +457,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
                   const id = seriesId ?? (await startSeries({ kind: "preset", presetId })).id;
                   await updateBrief.mutateAsync({ id, brief: b });
                 } catch (e) {
-                  toast.error((e as Error).message);
+                  toastError(e);
                 }
               }}
             />

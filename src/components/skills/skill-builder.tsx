@@ -17,6 +17,7 @@ import { SKILL_LIMITS, SKILL_NAME_RE } from "@/lib/assist";
 import { formatCost } from "@/lib/format";
 import { isMediaType, recipeProblems, RECIPE_LIMITS, type ParamType } from "@/lib/recipe";
 import { buildRecipe, paramIdFrom, skillBody, slugify, type DraftCandidate, type DraftRefusal, type DraftStep, type Naming, type SkillDraft, type Slot } from "@/lib/recipe-builder";
+import { refusalShown } from "@/lib/refusals";
 import { cn } from "@/lib/utils";
 
 /**
@@ -159,6 +160,7 @@ function Review({ draft, refusals, ids, onClose, onSaved, header }: { draft: Ski
       onSaved(view.name);
     } catch (e) {
       const f = e as Error & { problems?: string[] };
+      if (refusalShown(f)) return;
       setProblems(f.problems ?? [f.message]);
       toast.error(f.message);
     } finally {

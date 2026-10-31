@@ -12,6 +12,7 @@ import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useEngine } from "@/lib/api";
 import { CHANNEL_IDEAS, GENRES, MAX_IDEA, MAX_SCRIPT, wordCount, youtubeKind, YOUTUBE_ERROR, type FacelessGenre } from "@/lib/catalog/faceless";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { ChannelCard, EmptyChannels } from "./cards";
 import { useChannels, useCreateChannel } from "./hooks";
 
@@ -59,7 +60,7 @@ export function FacelessHome() {
           }
           router.push(`/faceless/${c.id}/new`);
         },
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   };

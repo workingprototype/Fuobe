@@ -23,6 +23,7 @@ import { formatCueTime } from "@/lib/av/cue-edit";
 import { detectCutIndices, KATANA_LIMITS, katanaProgress, katanaStage, motionModel, MOTION_MODELS, nearestAspect, planSegments, refineCut, refineTimes, type KatanaJobView, type Segment } from "@/lib/av/katana";
 import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useKatanaActions, useKatanaJobs, useKatanaPreview, type KatanaBody } from "./hooks";
 
 type SplitMode = "fixed" | "scenes";
@@ -132,7 +133,7 @@ export function KatanaStudio() {
       toast(found.length ? `${found.length} cut${found.length === 1 ? "" : "s"} found` : "No hard cuts — it'll be split evenly");
     } catch (e) {
       if (!cuts) setMode("fixed");
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setScanning(null);
     }
@@ -142,7 +143,7 @@ export function KatanaStudio() {
     if (blocker || !body) return void toast(blocker ?? "Not ready yet", { id: "katana-blocker" });
     start.mutate(body, {
       onSuccess: (j) => toast.success(`Katana started · ${j.segments.length} segment${j.segments.length === 1 ? "" : "s"}`),
-      onError: (e) => toast.error((e as Error).message),
+      onError: (e) => toastError(e),
     });
   };
 
@@ -336,7 +337,7 @@ function Runs({ jobs, loading }: { jobs?: KatanaJobView[]; loading: boolean }) {
   const again = (id: string, all: boolean) =>
     retry.mutate(
       { id, all },
-      { onSuccess: (j) => toast.success(all ? `Started again · ${j.segments.length} segment${j.segments.length === 1 ? "" : "s"}` : "Retrying the failed steps"), onError: (e) => toast.error((e as Error).message) },
+      { onSuccess: (j) => toast.success(all ? `Started again · ${j.segments.length} segment${j.segments.length === 1 ? "" : "s"}` : "Retrying the failed steps"), onError: (e) => toastError(e) },
     );
   if (loading)
     return (
@@ -394,7 +395,7 @@ function Runs({ jobs, loading }: { jobs?: KatanaJobView[]; loading: boolean }) {
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel>Keep it</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => remove.mutate(j.id, { onSuccess: () => toast("Removed — its clips stay in your Library"), onError: (e) => toast.error((e as Error).message) })}>Remove</AlertDialogAction>
+                          <AlertDialogAction onClick={() => remove.mutate(j.id, { onSuccess: () => toast("Removed — its clips stay in your Library"), onError: (e) => toastError(e) })}>Remove</AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>

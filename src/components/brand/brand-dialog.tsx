@@ -11,6 +11,7 @@ import { kmeans, samplePixels } from "@/components/cinema/color-math";
 import { chipBase, chipIdle, chipOn } from "@/components/studio/chip";
 import { BRAND_EXAMPLES, type BrandKit } from "@/lib/catalog/marketing";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useBrand, useBrandActions, useBrands, useCreateBrand } from "@/components/marketing/hooks";
 import { BrandSummary } from "./brand-kit-form";
 import { areaCls, inputCls } from "./fields";
@@ -48,12 +49,12 @@ export function BrandStart({ onDone, compact }: { onDone: (b: BrandKit) => void;
   const [images, setImages] = useState<string[]>([]);
   const submitSite = () => {
     if (!site.trim()) return void toast("Add a website or social link.");
-    create.mutate({ website: site.trim() }, { onSuccess: onDone, onError: (e) => toast.error((e as Error).message) });
+    create.mutate({ website: site.trim() }, { onSuccess: onDone, onError: (e) => toastError(e) });
   };
   const submitManual = async () => {
     if (!desc.trim() && !images.length) return void toast("Add a description or upload images");
     const colors = images.length ? await paletteFromImages(images) : undefined;
-    create.mutate({ description: desc.trim(), images, colors: colors?.length ? colors : undefined }, { onSuccess: onDone, onError: (e) => toast.error((e as Error).message) });
+    create.mutate({ description: desc.trim(), images, colors: colors?.length ? colors : undefined }, { onSuccess: onDone, onError: (e) => toastError(e) });
   };
   return mode === "site" ? (
     <div className="space-y-3">

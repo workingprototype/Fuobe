@@ -68,7 +68,7 @@ export function AnchorMaker({ id, project, clip, shotId, segment, estimate }: Pi
         disabled={make.isPending || !project.character.image}
         title={!project.character.image ? "Add a picture of your character first" : picked?.note}
         onClick={() =>
-          make.mutate({ clipId: clip.id, shotId, ...(segment ? { segmentId: segment.id } : {}), modelId }, { onSuccess: () => toast(`Making a ${which} with ${picked?.label ?? "the image model"}`), onError: (e) => toast.error((e as Error).message) })
+          make.mutate({ clipId: clip.id, shotId, ...(segment ? { segmentId: segment.id } : {}), modelId }, { onSuccess: () => toast(`Making a ${which} with ${picked?.label ?? "the image model"}`), onError: (e) => toastError(e) })
         }
       >
         {make.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} Make {which}

@@ -5,8 +5,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const toasts = vi.hoisted(() => ({ error: [] as string[] }));
 vi.mock("sonner", () => ({ toast: Object.assign(() => {}, { error: (m: string) => void toasts.error.push(m) }) }));
+// The studios' hooks, called outside React: a mutation is its mutationFn, and the query client does nothing.
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQueryClient: () => new Proxy({}, { get: () => () => undefined }),
+  useMutation: (o: { mutationFn: (v: unknown) => Promise<unknown> }) => ({ mutateAsync: o.mutationFn }),
+}));
+vi.mock("react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react")>()),
+  useCallback: <T,>(f: T) => f,
+  useMemo: <T,>(f: () => T) => f(),
+}));
 
+import { useChatActions } from "@/components/assist/hooks";
+import { useCanvasActions } from "@/components/canvas/use-canvas";
+import { useCreateProject } from "@/components/cinema/hooks";
+import { ApiError, useCreateSeries } from "@/components/content-factory/hooks";
+import { useDubActions } from "@/components/dub/hooks";
+import { readDocument } from "@/components/faceless/hooks";
+import { uploadDerived } from "@/components/layers/render";
+import { LayersRequestError, useLayerActions } from "@/components/layers/use-layers";
+import { useCreateBrand } from "@/components/marketing/hooks";
+import { useMoodboardActions } from "@/components/moodboards/hooks";
+import { usePaletteActions } from "@/components/palettes/hooks";
+import { send as shortsSend } from "@/components/shorts/hooks";
 import { fileToSlot, type SlotValue } from "@/components/studio/media-slot";
+import { useCreateSwapProject } from "@/components/swap-studio/hooks";
+import { runGpuCheck } from "@/hooks/use-gpu";
 import { assetUsage, CONNECT_GPU_EVENT, enhance, GUEST_PROMPT_EVENT, refusalCard, signInHref, watchGuestRefusals } from "@/lib/api";
 import { CONNECT_GPU_HEADER, CONNECT_GPU_MESSAGE, GUEST_HEADER, GUEST_LIBRARY_MESSAGE, GUEST_RUN_MESSAGE } from "@/lib/guest-access";
 import { refusalShown, toastError } from "@/lib/refusals";
@@ -108,6 +133,82 @@ describe("a guest's refused run", () => {
     toastError(new Error("Couldn't start the film"));
     toastError(new Error(""), "Upload failed");
     expect(toasts.error).toEqual(["Couldn't start the film", "Upload failed"]);
+  });
+});
+
+describe("each studio's own fetch helper", () => {
+  // The first thing a guest tries in each studio: the error its helper throws says the card shows it already.
+  const runs: [string, () => Promise<unknown>][] = [
+    ["Assist: send a message", () => useChatActions().start({ text: "a red coat", engine: "cloud", autoApprove: false })],
+    ["Canvas: New canvas", () => useCanvasActions().create({ name: "Untitled canvas" })],
+    ["Cinema: Create project", () => useCreateProject().mutateAsync({ name: "Untitled project" })],
+    ["Content Factory: a series", () => useCreateSeries().mutateAsync({ reference: null, engine: "cloud" })],
+    ["Dub: a video", () => useDubActions().create.mutateAsync({ engine: "cloud", mode: "oneshot", video: "/api/files/clip.mp4", targets: ["es"] })],
+    ["Explainer: read a document", () => readDocument(new File(["A red coat"], "notes.txt", { type: "text/plain" }), "cloud")],
+    ["Layers: a project", () => useLayerActions().create({ source: "/api/files/photo.png", width: 640, height: 480 })],
+    ["Layers: a picture for the model", () => uploadDerived(new Blob([new Uint8Array([1])], { type: "image/png" }), "mask")],
+    ["Marketing: a brand", () => useCreateBrand().mutateAsync({ description: "A red coat label" })],
+    ["Moodboards: a board", () => useMoodboardActions().create.mutateAsync({ name: "Coats", images: [], collages: [], engine: "cloud" })],
+    ["Palettes: a palette", () => usePaletteActions().create.mutateAsync({ name: "Coats", colors: ["#aa2222"], source: "manual" })],
+    ["Shorts and Genjutsu: a run", () => shortsSend("/api/genjutsu", "POST", {})],
+    ["Swap Studio: a project", () => useCreateSwapProject().mutateAsync({ engine: "cloud" })],
+    ["Your GPU: the check", () => runGpuCheck(() => {})],
+  ];
+
+  it.each(runs)("%s: a guest's 401 opens the card, and its error is marked", async (_, run) => {
+    page("/studio");
+    server = () => guestRefusal();
+    const e = await run().catch((err: unknown) => err);
+    expect(events).toEqual([GUEST_PROMPT_EVENT]);
+    expect((e as Error).message).toBe(GUEST_RUN_MESSAGE);
+    expect(refusalShown(e)).toBe(true);
+    toastError(e);
+    expect(toasts.error).toEqual([]);
+  });
+
+  it("an account without its GPU: Connect your GPU marks it the same way", async () => {
+    page("/canvas/abc");
+    server = () => answer(403, { error: CONNECT_GPU_MESSAGE, code: "connect-gpu" }, { [CONNECT_GPU_HEADER]: "1" });
+    const e = await useCanvasActions()
+      .create({ name: "Untitled canvas" })
+      .catch((err: unknown) => err);
+    expect(events).toEqual([CONNECT_GPU_EVENT]);
+    expect(refusalShown(e)).toBe(true);
+  });
+
+  it("keeps each helper's own error: its class, status and body", async () => {
+    page("/studio");
+    server = () => guestRefusal();
+    const assist = (await useChatActions()
+      .start({ text: "a red coat", engine: "cloud", autoApprove: false })
+      .catch((err: unknown) => err)) as Error & { status?: number };
+    expect(assist.status).toBe(401);
+    const canvas = (await useCanvasActions()
+      .create({})
+      .catch((err: unknown) => err)) as Error & { status?: number; body?: { error?: string } };
+    expect([canvas.status, canvas.body?.error]).toEqual([401, GUEST_RUN_MESSAGE]);
+    const series = await useCreateSeries()
+      .mutateAsync({ reference: null, engine: "cloud" })
+      .catch((err: unknown) => err);
+    expect(series).toBeInstanceOf(ApiError);
+    expect(refusalShown(series)).toBe(true);
+    const layers = await useLayerActions()
+      .create({ source: "/api/files/photo.png", width: 640, height: 480 })
+      .catch((err: unknown) => err);
+    expect(layers).toBeInstanceOf(LayersRequestError);
+    expect((layers as LayersRequestError).status).toBe(401);
+  });
+
+  it("any other failure is never marked, so its toast still shows", async () => {
+    page("/canvas");
+    server = () => answer(500, { error: "The canvas couldn't be saved" });
+    const e = await useCanvasActions()
+      .create({ name: "Untitled canvas" })
+      .catch((err: unknown) => err);
+    expect(events).toEqual([]);
+    expect(refusalShown(e)).toBe(false);
+    toastError(e);
+    expect(toasts.error).toEqual(["The canvas couldn't be saved"]);
   });
 });
 

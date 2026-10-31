@@ -1,7 +1,9 @@
 // A refused change shows one card, in the browser. A guest uploads a picture in Color Grading: "Create a free account
 // to run this" opens alone (no error toast, no trip to the sign-in page). Its Log in and Sign up free open the sign-in
 // page with the card closed, Back closes it too, and a wrong password on the sign-in page is the form's own error.
-// Then an account without its GPU: "Connect your GPU" opens alone, its form inside it, and closes when the page changes.
+// The same in the studios with their own fetch helpers: a guest presses New canvas in Canvas and sends a message in Assist.
+// Then an account without its GPU: "Connect your GPU" opens alone, its form inside it, and closes when the page changes;
+// alone again on a message in Assist, and none on New canvas, whose refusal ("Free accounts can't save…") is its toast.
 // Usage: node tests/e2e/guest-prompt.mjs [appUrl] [--shots <dir>]   (the app with a password and FUOBE_PUBLIC_SIGNUP=1).
 // Signs up one throwaway account. Exits 1 on a failed check.
 import fs from "node:fs";
@@ -39,6 +41,24 @@ const seen = async (page) => ({
   path: new URL(page.url()).pathname,
 });
 const settled = (page) => page.waitForTimeout(1500);
+
+/** Press New canvas in Canvas, and wait for the server's answer. */
+async function newCanvas(page) {
+  await openRoute(page, `${app}/canvas`);
+  const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/canvases" && r.request().method() === "POST");
+  await page.getByRole("button", { name: "New canvas" }).first().click();
+  return answered;
+}
+
+/** Send a message in Assist, and wait for the server's answer. */
+async function sendInAssist(page) {
+  await openRoute(page, `${app}/assist`);
+  const box = page.locator("textarea").first();
+  await box.fill("Plan a three-shot teaser for a summer coat");
+  const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/assist" && r.request().method() === "POST");
+  await box.press("Enter");
+  return answered;
+}
 
 /** Upload a picture through Color Grading's Image tile, and wait for the server's answer. */
 async function uploadPicture(page) {
@@ -112,6 +132,30 @@ try {
   }
 
   // ---------------------------------------------------------------------------
+  // A guest in Canvas and Assist: each studio's own fetch helper, the same one card.
+  {
+    const { context, page } = await contextFor();
+    const res = await newCanvas(page);
+    check("the guest's New canvas is refused (401, marked for the card)", res.status() === 401 && res.headers()["x-fuobe-guest"] === "1", String(res.status()));
+    await page.getByRole("dialog").waitFor();
+    await settled(page);
+    let s = await seen(page);
+    await shot(page, "6-guest-new-canvas");
+    check("Canvas: one card opens: Create a free account", s.cards.length === 1 && s.cards[0] === GUEST_CARD, JSON.stringify(s.cards));
+    check("Canvas: no error toast on top of it", s.errors.length === 0, JSON.stringify(s.errors));
+
+    const sent = await sendInAssist(page);
+    check("the guest's message in Assist is refused (401)", sent.status() === 401, String(sent.status()));
+    await page.getByRole("dialog").waitFor();
+    await settled(page);
+    s = await seen(page);
+    await shot(page, "7-guest-assist-send");
+    check("Assist: one card opens: Create a free account", s.cards.length === 1 && s.cards[0] === GUEST_CARD, JSON.stringify(s.cards));
+    check("Assist: no error toast on top of it", s.errors.length === 0, JSON.stringify(s.errors));
+    await context.close();
+  }
+
+  // ---------------------------------------------------------------------------
   // An account without its GPU: "Connect your GPU", alone, closed when the page changes.
   {
     const { context, page } = await contextFor();
@@ -139,6 +183,25 @@ try {
     await settled(page);
     s = await seen(page);
     check("Back closes it", s.cards.length === 0, JSON.stringify(s.cards));
+
+    // A message in Assist (its own fetch helper): Connect your GPU again, alone.
+    const sent = await sendInAssist(page);
+    check("the account's message in Assist is refused until it connects a GPU (403)", sent.status() === 403 && sent.headers()["x-fuobe-connect-gpu"] === "1", String(sent.status()));
+    await page.getByRole("dialog").waitFor();
+    await settled(page);
+    s = await seen(page);
+    await shot(page, "8-account-assist-send");
+    check("Assist: one card opens: Connect your GPU", s.cards.length === 1 && s.cards[0] === GPU_CARD, JSON.stringify(s.cards));
+    check("Assist: no error toast on top of it", s.errors.length === 0, JSON.stringify(s.errors));
+
+    // New canvas: a refusal with no card of its own, so its toast is the one thing shown.
+    const made = await newCanvas(page);
+    check("the account's New canvas is refused (403, no card for it)", made.status() === 403 && !made.headers()["x-fuobe-connect-gpu"], String(made.status()));
+    await page.locator("[data-sonner-toast][data-type=error]").first().waitFor();
+    await settled(page);
+    s = await seen(page);
+    await shot(page, "9-account-new-canvas");
+    check("Canvas: its own error toast, with no card", s.cards.length === 0 && s.errors.length === 1, JSON.stringify(s));
     await context.close();
   }
 } finally {

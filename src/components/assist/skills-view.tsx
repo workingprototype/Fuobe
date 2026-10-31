@@ -30,6 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { SKILL_LIMITS, SKILL_NAME_RE, skillSlug, type Skill, type SkillSummary } from "@/lib/assist";
 import { cn } from "@/lib/utils";
+import { refusalShown, toastError } from "@/lib/refusals";
 import { radioKeys } from "@/components/studio/radio-keys";
 import { useRecipe, useRecipeActions, useSkill, useSkillActions, useSkills, type RecipeFailure, type SkillForm } from "./hooks";
 import { RunSkillDialog } from "./run-skill-dialog";
@@ -89,7 +90,7 @@ function Skills() {
     } catch (e) {
       const err = e as Error & { status?: number };
       if (err.status === 409 && /You already have/.test(err.message)) setConflict(f);
-      else toast.error(err.message, { duration: 8000 });
+      else if (!refusalShown(err)) toast.error(err.message, { duration: 8000 });
     } finally {
       setUploading(false);
     }
@@ -142,14 +143,14 @@ function Skills() {
             </div>
           </div>
           <TabsContent value="builtin">
-            <SkillGrid loading={skills.isLoading} list={filter(builtin)} onOpen={open} onToggle={(s, v) => void actions.toggle(s.name, v).catch((e) => toast.error((e as Error).message))} empty={<NoMatch onClear={() => setQuery("")} />} />
+            <SkillGrid loading={skills.isLoading} list={filter(builtin)} onOpen={open} onToggle={(s, v) => void actions.toggle(s.name, v).catch((e) => toastError(e))} empty={<NoMatch onClear={() => setQuery("")} />} />
           </TabsContent>
           <TabsContent value="user">
             <SkillGrid
               loading={skills.isLoading}
               list={filter(own)}
               onOpen={open}
-              onToggle={(s, v) => void actions.toggle(s.name, v).catch((e) => toast.error((e as Error).message))}
+              onToggle={(s, v) => void actions.toggle(s.name, v).catch((e) => toastError(e))}
               empty={
                 q ? (
                   <NoMatch onClear={() => setQuery("")} />
@@ -284,7 +285,7 @@ function RecipeStatus({ skill }: { skill: Skill }) {
       else toast.error("The check didn't pass", { description: r.engines.flatMap((e) => [...e.plan.errors, ...(e.dryRun?.problems ?? [])])[0] });
     } catch (e) {
       const f = e as RecipeFailure;
-      toast.error(f.message, { description: f.problems?.slice(1).join("; ") || undefined });
+      if (!refusalShown(f)) toast.error(f.message, { description: f.problems?.slice(1).join("; ") || undefined });
     } finally {
       setBusy(false);
     }
@@ -399,7 +400,7 @@ function SkillDetail({ name, onClose, onEdit, onRun }: { name: string | null; on
                       toast.success(`Copied as /${c.name}`, { duration: 2000 });
                       onEdit(c);
                     } catch (e) {
-                      toast.error((e as Error).message);
+                      toastError(e);
                     }
                   }}
                 >
@@ -447,7 +448,7 @@ function SkillDetail({ name, onClose, onEdit, onRun }: { name: string | null; on
                         toast("Skill deleted", { duration: 1500 });
                         onClose();
                       } catch (e) {
-                        toast.error((e as Error).message);
+                        toastError(e);
                       }
                     }}
                   >

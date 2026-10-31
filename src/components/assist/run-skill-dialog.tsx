@@ -23,6 +23,7 @@ import { formatCost } from "@/lib/format";
 import { checkValues, isMediaType, parseRows, RECIPE_LIMITS, type RecipeEstimate, type RecipeParam, type RecipeView } from "@/lib/recipe";
 import { DEMO_NOTE } from "@/lib/recipe-builder";
 import { cn } from "@/lib/utils";
+import { refusalShown, toastError } from "@/lib/refusals";
 import { useRecipe, useRecipeActions, useSkillActions, type RecipeFailure } from "./hooks";
 import { PlanJobs } from "./plan-jobs";
 import { SkillIcon } from "./skill-icon";
@@ -142,6 +143,7 @@ function Loaded({ view, onClose, examples, intro }: { view: RecipeView; onClose:
       if (next.length && !next.includes(engine)) setEngine(next[0]);
     } catch (e) {
       const f = e as RecipeFailure;
+      if (refusalShown(f)) return;
       setProblems(f.problems ?? [f.message]);
       toast.error(f.message);
     } finally {
@@ -155,7 +157,7 @@ function Loaded({ view, onClose, examples, intro }: { view: RecipeView; onClose:
       await skillActions.toggle(name, true);
       await qc.invalidateQueries({ queryKey: ["assist-recipe", name] });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(null);
     }
@@ -180,6 +182,7 @@ function Loaded({ view, onClose, examples, intro }: { view: RecipeView; onClose:
       onClose();
     } catch (e) {
       const f = e as RecipeFailure;
+      if (refusalShown(f)) return;
       setProblems(f.problems ?? [f.message]);
       toast.error(f.message);
     } finally {

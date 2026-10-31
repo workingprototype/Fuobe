@@ -13,6 +13,7 @@ import { ResearchLabel } from "@/components/brand/research-progress";
 import type { BrandKit } from "@/lib/catalog/marketing";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useBrandActions, useBrands } from "@/components/marketing/hooks";
 import { MarketingHeader, useMarketingEngine } from "@/components/marketing/shell";
 
@@ -80,7 +81,7 @@ function DeleteBrand({ brand, onClose }: { brand: BrandKit | null; onClose: () =
             onClick={() =>
               actions.remove.mutate(undefined, {
                 onSuccess: () => toast("Brand deleted", { duration: 1500 }),
-                onError: (e) => toast.error((e as Error).message),
+                onError: (e) => toastError(e),
               })
             }
           >

@@ -3,7 +3,6 @@
 import { ArrowUp, AudioLines, Loader2, Paperclip, Slash, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
@@ -143,7 +142,7 @@ export function AssistComposer({
       setText("");
       setFiles([]);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setSending(false);
     }

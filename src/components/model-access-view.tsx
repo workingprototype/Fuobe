@@ -11,6 +11,7 @@ import { useProgressive } from "@/components/use-progressive";
 import { kindLabel, LICENCE_CLASSES, CLASS_LABEL, type LicenceClass, type LicenceInfo } from "@/lib/licences";
 import { allOn, applyChange, type AccessChange, type AccessList, type LoraInfo, type ModelAccess, type ModelEntry, type PackInfo } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
+import { responseError } from "@/lib/refusals";
 
 /** Settings → Models & licences: every model, LoRA and node pack with its licence, and the switches. */
 
@@ -208,7 +209,7 @@ export function ModelAccessView() {
     mutationFn: async (changes: AccessChange[]) => {
       const res = await fetch("/api/settings/models", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ changes }) });
       const body = (await res.json().catch(() => ({}))) as Partial<AccessList> & { error?: string };
-      if (!res.ok || !body.access) throw new Error(body.error ?? `The switch didn't save (${res.status})`);
+      if (!res.ok || !body.access) throw responseError(res, body.error ?? `The switch didn't save (${res.status})`);
       return body as AccessList;
     },
     // The switch moves at once; the server's answer brings what else changed (models now off, counts).

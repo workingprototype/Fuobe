@@ -8,6 +8,7 @@ import { ComfyFinder, gib, isLocalAddress } from "@/components/gpu/comfy-finder"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { responseError, toastError } from "@/lib/refusals";
 
 interface GpuState {
   gpu: { url: string; hasToken: boolean } | null;
@@ -25,7 +26,7 @@ async function call<T>(method: string, body?: unknown, test = false): Promise<T>
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const j = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(j.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw responseError(res, j.error ?? `Request failed (${res.status})`);
   return j;
 }
 
@@ -70,7 +71,7 @@ export function YourGpu() {
       qc.setQueryData(["account-gpu"], await call<GpuState>("DELETE"));
       setInfo(null);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(null);
     }

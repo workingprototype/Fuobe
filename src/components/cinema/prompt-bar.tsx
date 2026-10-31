@@ -406,7 +406,7 @@ export function PromptBar(props: PromptBarProps) {
           // The scene was deleted meanwhile: say where the take went.
           if (folderId && r.folderId === null) toast(r.plan.notes[0] ?? "That scene was deleted, so the take is in Home", { duration: 4000 });
         },
-        onError: (e) => toast.error((e as Error).message),
+        onError: (e) => toastError(e),
       },
     );
   };

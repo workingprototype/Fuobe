@@ -102,7 +102,7 @@ export function SwapWorkbench({ id }: { id: string }) {
     try {
       return await editMutation.mutateAsync(e);
     } catch (err) {
-      toast.error((err as Error).message);
+      toastError(err);
       return undefined;
     }
   };
@@ -337,7 +337,7 @@ function ClipsPanel({
       const p = await add.mutateAsync({ url: up.url, name: file.name, bytes: file.size, playable, ...facts });
       onSelect(p.clips.at(-1)!.id);
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setUpload(null);
     }
@@ -435,7 +435,7 @@ function ClipHeader({ id, project, clip, gens }: StageProps) {
           <span className="text-[12px] text-muted-foreground">24 fps copy</span>
           <GenChip genId={clip.normalized?.genId} gens={gens} />
           {(!clip.normalized?.genId || norm.status === "failed" || norm.status === "canceled" || norm.status === "missing") && (
-            <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-[12px]" disabled={prepare.isPending} onClick={() => prepare.mutate({ clipId: clip.id }, { onError: (e) => toast.error((e as Error).message) })}>
+            <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-[12px]" disabled={prepare.isPending} onClick={() => prepare.mutate({ clipId: clip.id }, { onError: (e) => toastError(e) })}>
               <RotateCcw className="size-3.5" /> Prepare at 24 fps
             </Button>
           )}
@@ -446,7 +446,7 @@ function ClipHeader({ id, project, clip, gens }: StageProps) {
           <span className="text-[12px] text-muted-foreground">Browser copy</span>
           <GenChip genId={clip.preview?.genId} gens={gens} />
           {(!clip.preview?.genId || copy.status === "failed" || copy.status === "canceled" || copy.status === "missing") && (
-            <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-[12px]" disabled={prepare.isPending} onClick={() => prepare.mutate({ clipId: clip.id }, { onError: (e) => toast.error((e as Error).message) })}>
+            <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-[12px]" disabled={prepare.isPending} onClick={() => prepare.mutate({ clipId: clip.id }, { onError: (e) => toastError(e) })}>
               <RotateCcw className="size-3.5" /> Make a browser copy
             </Button>
           )}

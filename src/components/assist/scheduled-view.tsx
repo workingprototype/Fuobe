@@ -25,6 +25,7 @@ import { useNow } from "@/components/studio/use-now";
 import { describeRule, formatWhen, untilText, zoneLabel, type ScheduleResult, type ScheduleView } from "@/lib/assist-schedule";
 import { formatCost, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useProjects, useScheduleActions, useSchedules } from "./hooks";
 import { ScheduleDialog } from "./schedule-dialog";
 import { ProjectDot, RailButton } from "./shell";
@@ -129,7 +130,7 @@ function TaskRow({ s, showProject }: { s: ScheduleView; showProject: boolean }) 
     try {
       await fn();
     } catch (e) {
-      toast.error((e as Error).message);
+      toastError(e);
     } finally {
       setBusy(false);
     }

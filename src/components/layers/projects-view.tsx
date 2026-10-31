@@ -69,7 +69,7 @@ function useOpenImage(onLeft?: () => void) {
         leaving.current = true;
         router.replace(`/layers/${v.project.id}`);
       } catch (e) {
-        toast.error((e as Error).message || "Couldn't open the editor for this image. Please try again.");
+        toastError(e, "Couldn't open the editor for this image. Please try again.");
         setBusy(null);
       }
     },
@@ -380,7 +380,7 @@ function ProjectsInner() {
               const p = renaming!;
               const name = draft.trim();
               setRenaming(null);
-              if (name && name !== p.name) void rename(p.id, name).then(() => toast.success("Renamed", { duration: 1500 }), (err) => toast.error((err as Error).message));
+              if (name && name !== p.name) void rename(p.id, name).then(() => toast.success("Renamed", { duration: 1500 }), (err) => toastError(err));
             }}
           >
             <Input autoFocus value={draft} maxLength={80} onChange={(e) => setDraft(e.target.value)} aria-label="Project name" onFocus={(e) => e.currentTarget.select()} />
@@ -409,7 +409,7 @@ function ProjectsInner() {
               onClick={() => {
                 const p = deleting!;
                 setDeleting(null);
-                void remove(p.id).then(() => toast("Project deleted", { duration: 1500 }), (e) => toast.error((e as Error).message));
+                void remove(p.id).then(() => toast("Project deleted", { duration: 1500 }), (e) => toastError(e));
               }}
             >
               Delete project

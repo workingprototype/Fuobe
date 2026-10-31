@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MAX_SELLING_POINTS, type Product } from "@/lib/catalog/marketing";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 import { useProductActions, type ProductInput } from "@/components/marketing/hooks";
 import { areaCls, FieldRow, inputCls, TagInput } from "./fields";
 import { ImageList } from "./image-list";
@@ -48,13 +49,13 @@ function ProductForm({ onOpenChange, brandId, product, onSaved }: { onOpenChange
       onSaved?.(p);
       onOpenChange(false);
     };
-    if (product) update.mutate({ ...body, id: product.id }, { onSuccess: done, onError: (e) => toast.error((e as Error).message) });
+    if (product) update.mutate({ ...body, id: product.id }, { onSuccess: done, onError: (e) => toastError(e) });
     else
       create.mutate(
         { ...body, force },
         {
           onSuccess: done,
-          onError: (e) => ((e as { status?: number }).status === 409 ? setDup((e as Error).message) : toast.error((e as Error).message)),
+          onError: (e) => ((e as { status?: number }).status === 409 ? setDup((e as Error).message) : toastError(e)),
         },
       );
   };

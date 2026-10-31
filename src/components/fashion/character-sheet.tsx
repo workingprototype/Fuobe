@@ -20,6 +20,7 @@ import { castFieldVisible, castNameFor, randomCast, SHEET_MAX_REFS, type CastAns
 import { sheetPictures } from "@/lib/catalog/turnaround";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { toastError } from "@/lib/refusals";
 
 type Mode = "reference" | "cast" | "describe";
 const MODES: [Mode, string][] = [
@@ -130,7 +131,7 @@ export function SaveCharacter({ item, extra, defaultName }: { item: Generation; 
             { name: name.trim(), kind: "character", references: refs },
             {
               // The card turns into "Saved as @handle · Open": no toast needed.
-              onError: (e) => toast.error((e as Error).message),
+              onError: (e) => toastError(e),
             },
           )
         }
@@ -189,7 +190,7 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
     run.mutate(body, {
       // The run line already says which model runs and why (its notes), so no toast here.
       onSuccess: (r) => setIds((xs) => [...r.items.map((g) => g.id), ...xs]),
-      onError: (e) => toast.error((e as Error).message || "Failed to create character sheet"),
+      onError: (e) => toastError(e, "Failed to create character sheet"),
     });
   };
 
