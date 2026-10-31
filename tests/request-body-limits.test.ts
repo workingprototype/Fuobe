@@ -85,6 +85,34 @@ describe("M-3: the proxy holds at most a few MB of any request body", () => {
     for (const r of BIG) expect([400, 404, 413, 415, 422], `${r.name}: owner`).toContain((await r.call(form(r.path, { cookie: owner }))).status);
   });
 
+  it("each stops reading a body without a length (chunked) once it passes the route's limit", async () => {
+    // A real form with one 120 MB file, sent 1 MB at a time as it is asked for: the route must stop asking soon after its own limit.
+    const chunk = new Uint8Array(MB);
+    const enc = new TextEncoder();
+    for (const r of BIG) {
+      let pulled = 0;
+      let state = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (state === 0) {
+            state = 1;
+            return c.enqueue(enc.encode('--x\r\nContent-Disposition: form-data; name="file"; filename="big.png"\r\nContent-Type: image/png\r\n\r\n'));
+          }
+          if (pulled >= 120 * MB) {
+            c.enqueue(enc.encode("\r\n--x--\r\n"));
+            return c.close();
+          }
+          pulled += chunk.length;
+          c.enqueue(chunk);
+        },
+      });
+      const headers = { cookie: `${auth.SESSION_COOKIE}=${owner}`, "content-type": "multipart/form-data; boundary=x" };
+      const res = await r.call(new Request(`http://localhost:3000${r.path}`, { method: "POST", headers, body, duplex: "half" } as RequestInit));
+      expect(res.status, `${r.name}: status`).toBe(413);
+      expect(pulled, `${r.name}: bytes read`).toBeLessThanOrEqual(66 * MB);
+    }
+  });
+
   it("a run request cut short at the proxy's limit says it is too large", async () => {
     const r = await generations.POST(
       new Request("http://localhost:3000/api/generations", {

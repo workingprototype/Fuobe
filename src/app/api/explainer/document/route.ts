@@ -1,4 +1,4 @@
-import { gateAsProxy } from "@/server/direct-gate";
+import { gateAsProxy, readFormWithin } from "@/server/direct-gate";
 import { EngineSchema, FacelessError, handle, MAX_DOCUMENT_BYTES, readDocument } from "@/server/faceless";
 
 /**
@@ -10,7 +10,8 @@ export async function POST(request: Request) {
   const denied = gateAsProxy(request);
   if (denied) return denied;
   return handle(async () => {
-    const form = await request.formData().catch(() => null);
+    const form = await readFormWithin(request, MAX_DOCUMENT_BYTES);
+    if (form === "too-big") throw new FacelessError(`That file is over ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB — add the part that matters, or paste its text into the prompt`, 413);
     const file = form?.get("file");
     if (!(file instanceof File)) throw new FacelessError("Choose a PDF or a Word file (.docx)");
     if (file.size > MAX_DOCUMENT_BYTES) throw new FacelessError(`${file.name} is over ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB — add the part that matters, or paste its text into the prompt`, 413);

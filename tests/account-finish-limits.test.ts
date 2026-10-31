@@ -90,6 +90,47 @@ describe("M-5: an account's finished pictures count like its other files", () =>
     }
   });
 
+  it("reads at most two of an account's pictures at once", async () => {
+    const { enter } = await import("@/server/rate");
+    const held = [enter(`finish-now:${a}`, 2), enter(`finish-now:${a}`, 2)];
+    try {
+      const r = await post(soulRun(a), cookie);
+      expect(r.status).toBe(429);
+      expect(r.headers.get("retry-after")).toBeTruthy();
+    } finally {
+      for (const release of held) release?.();
+    }
+    expect((await post(soulRun(a), cookie)).status).toBe(200);
+  });
+
+  it("stops reading an account's chunked picture soon after 32 MB", async () => {
+    const chunk = new Uint8Array(2 ** 20);
+    const enc = new TextEncoder();
+    let pulled = 0;
+    let started = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (!started) {
+          started = true;
+          return c.enqueue(enc.encode('--x\r\nContent-Disposition: form-data; name="file"; filename="big.png"\r\nContent-Type: image/png\r\n\r\n'));
+        }
+        if (pulled >= 100 * 2 ** 20) {
+          c.enqueue(enc.encode("\r\n--x--\r\n"));
+          return c.close();
+        }
+        pulled += chunk.length;
+        c.enqueue(chunk);
+      },
+    });
+    const id = soulRun(a);
+    const r = await finish.POST(
+      new Request(`http://localhost:3000/api/generations/${id}/finish`, { method: "POST", headers: { cookie: `${auth.SESSION_COOKIE}=${cookie}`, "content-type": "multipart/form-data; boundary=x" }, body, duplex: "half" } as RequestInit),
+      { params: Promise.resolve({ id }) } as never,
+    );
+    expect(r.status).toBe(413);
+    expect(pulled).toBeLessThanOrEqual(34 * 2 ** 20);
+  });
+
   it("has an hourly limit", async () => {
     for (let i = 0; i < ACCOUNT_LIMITS.finishesPerHour; i++) hit(`finish:${a}`, ACCOUNT_LIMITS.finishesPerHour, 60 * 60_000);
     const r = await post(soulRun(a), cookie);

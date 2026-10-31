@@ -1,8 +1,8 @@
 import { ACCOUNT_LIMITS, ACCOUNT_MESSAGES, accountTotalBytes, accountUsage, diskHasRoom, filesFullMessage } from "@/server/account-files";
 import { requestAccount } from "@/server/auth";
-import { gateAsProxy } from "@/server/direct-gate";
+import { gateAsProxy, readFormWithin } from "@/server/direct-gate";
 import { FinishError, finishOutput } from "@/server/generations";
-import { hit, unhit } from "@/server/rate";
+import { enter, hit, unhit } from "@/server/rate";
 
 const MAX_BYTES = 64 * 1024 * 1024;
 /** An account's finished picture (its own result: the proxy checks): smaller. */
@@ -22,12 +22,21 @@ export async function POST(request: Request, ctx: RouteContext<"/api/generations
   const { id } = await ctx.params;
   const account = requestAccount(request);
   const max = account ? ACCOUNT_MAX_BYTES : MAX_BYTES;
-  if (Number(request.headers.get("content-length") ?? 0) > max + 64 * 1024) return Response.json({ error: `That picture is too large (${max / 2 ** 20} MB max)` }, { status: 413 });
-  const form = await request.formData().catch(() => null);
+  const tooLarge = () => Response.json({ error: `That picture is too large (${max / 2 ** 20} MB max)` }, { status: 413 });
+  // An account's pictures are read two at a time at most, each never past its limit (a chunked body included).
+  const reading = account ? enter(`finish-now:${account.id}`, 2) : () => {};
+  if (!reading) return Response.json({ error: ACCOUNT_MESSAGES.finishBusy }, { status: 429, headers: { "Retry-After": "5", "Cache-Control": "no-store" } });
+  let form: FormData | "too-big" | null;
+  try {
+    form = await readFormWithin(request, max);
+  } finally {
+    reading();
+  }
+  if (form === "too-big") return tooLarge();
   const file = form?.get("file");
   const index = Number(form?.get("index"));
   if (!(file instanceof File)) return Response.json({ error: "No file" }, { status: 400 });
-  if (file.size > max) return Response.json({ error: `That picture is too large (${max / 2 ** 20} MB max)` }, { status: 413 });
+  if (file.size > max) return tooLarge();
   const data = Buffer.from(await file.arrayBuffer());
   if (file.type !== "image/png" || !data.subarray(0, 8).equals(PNG_MAGIC)) return Response.json({ error: "Finished pictures are PNG images" }, { status: 415 });
   if (account) {
