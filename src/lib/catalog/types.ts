@@ -547,6 +547,11 @@ export interface ModelOptions {
   /** The words a run takes when none are given (Fuobe Try-On: its try-on LoRA's own instruction). */
   defaultPrompt?: string;
   /**
+   * The prompt the model reads, when it isn't plain words: "ideogram4" = an Ideogram 4 JSON caption. The server writes
+   * one from the words before the run (src/lib/ideogram-caption.ts) and keeps it as the run's prompt.
+   */
+  promptFormat?: "ideogram4";
+  /**
    * LoRAs the model's recipe always loads (Fuobe Try-On's try-on LoRA): every run carries them before the user's own
    * (an API's LoRA cap leaves out the user's first), their trigger words leading the prompt. A ComfyUI graph that loads
    * one itself isn't given it twice (injectLoras), and a run is refused while Settings → Models & licences has one

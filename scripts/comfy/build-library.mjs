@@ -131,6 +131,8 @@ export const BINDING_KEYS = new Set([
   'historyVideo', 'historyStart', 'historyLength', 'keyFrame', 'spanFrames', 'tailStart', 'tailFrames', 'prevMask',
   // Originals O11: Fuobe Speak's InfiniteTalk recipe on kijai's wrapper, the face mosaic
   'scheduler', 'motionFrame', 'colormatch', 'audioCfg', 'threshold', 'mosaicScale',
+  // The owner's SOTA image families (2026-10-31): Ideogram 4's sampling preset
+  'preset',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
@@ -154,7 +156,11 @@ async function hfTreeSize(url) {
 async function hfSize(url, cache) {
   if (cache[url] !== undefined && !cache[url]?.error) return cache[url];
   try {
-    const res = await fetch(url, { method: 'HEAD', redirect: 'manual' });
+    let res = await fetch(url, { method: 'HEAD', redirect: 'manual' });
+    // A renamed repository answers with a redirect to its new name on huggingface.co (Comfy-Org/flux2-dev → Flux-2-Dev):
+    // follow that one. The download's own redirect, to the CDN, carries the size and isn't followed.
+    const moved = res.headers.get('location');
+    if ([301, 302, 307, 308].includes(res.status) && moved?.startsWith('/')) res = await fetch(new URL(moved, url), { method: 'HEAD', redirect: 'manual' });
     const linked = res.headers.get('x-linked-size');
     const len = linked || (res.status === 200 ? res.headers.get('content-length') : null);
     if (res.status === 401 || res.status === 403) {

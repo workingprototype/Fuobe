@@ -1,6 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { MediaKind, Operation } from "@/lib/catalog/types";
+import { writeCaption } from "@/lib/ideogram-caption";
 import { activeLocal, aiHelper, chatLocal, type JsonSpec } from "./llm";
 import { engineMode, getSetting } from "./settings";
 import { tenant } from "./tenant";
@@ -183,4 +184,32 @@ export async function enhanceSoulWords(words: string): Promise<string> {
 
 export async function enhancePrompt(prompt: string, kind: MediaKind, op: Operation): Promise<string> {
   return (await llmText(SYSTEM, instruction(prompt, kind, op))) ?? heuristicEnhance(prompt, kind, op);
+}
+
+/**
+ * Ideogram 4's caption writer (src/lib/ideogram-caption.ts): the schema in its key order and the "lean JSON" house style.
+ * Written for Fuobe after Ideogram's own docs and caption verifier, and the preview pipeline's measured rules.
+ */
+const IDEOGRAM_SYSTEM = `You turn an idea into a JSON caption for the Ideogram 4 image model. Answer with one JSON object and nothing else: no code fence, no words before or after it.
+The schema, with the keys in exactly this order:
+{"high_level_description":"...","style_description":{"aesthetics":"...","lighting":"...","photo":"...","medium":"photograph","color_palette":["#RRGGBB"]},"compositional_deconstruction":{"background":"...","elements":[{"type":"obj","bbox":[top,left,bottom,right],"desc":"..."},{"type":"text","text":"...","desc":"..."}]}}
+Rules:
+- A picture that isn't a photograph has "medium" (illustration, painting, 3d_render, graphic_design…) then "art_style" in place of "photo": aesthetics, lighting, medium, art_style, color_palette.
+- high_level_description: 25 to 35 words. The shot size first, then the subject, the main clothing or materials, the place and the time of day. Name everything the picture must show.
+- The first element is the main subject, in at most 45 words, and it is the only element with a bbox: whole numbers 0 to 1000 from the top left, [top, left, bottom, right]. At most 4 more elements of up to 20 words each, without a bbox.
+- People are adults, fully clothed and styled like fashion models, in their late twenties unless the idea gives an age. Describe the hair, one or two face features, each garment's material and colour on an opaque base, the shoes when the whole body shows, the pose as physical facts and where they look. End a person's desc with "Her whole head is inside the frame." (His or Their as fits).
+- lighting: at most 18 words, one named light source and at most one fill, ending with "neutral white balance".
+- photo: at most 13 words: the lens, the camera height and the aperture; for people add "smooth skin with fine pores".
+- background: at most 35 words, only what must be visible.
+- color_palette: 5 to 7 uppercase hex colours that fit the idea.
+- Words the picture shows as lettering go in "text" elements, exactly as the idea quotes them. A picture without lettering mentions no text, logo, sign or label anywhere.
+- Describe only what is in the picture. Never write no, not, without, never, empty or free of: a thing that is named gets drawn. Never write "sexy". Leave out sheer, mesh, see-through, translucent, stubble, weathered, rugged and wrinkles.
+- Keep the idea's subject and intent. Write in English. No other keys (no aspect_ratio).`;
+
+/**
+ * An Ideogram 4 caption for some words at a picture size: an LLM's (Claude, else a local model), checked and asked once more
+ * when it breaks the rules, else the plain wrapper. An account's run has no LLM here, so it gets the wrapper.
+ */
+export function ideogramCaption(words: string, size: { width?: number; height?: number } = {}): Promise<string> {
+  return writeCaption(words, size, (request) => llmText(IDEOGRAM_SYSTEM, request, { json: "object" }));
 }
