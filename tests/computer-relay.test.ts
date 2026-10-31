@@ -34,6 +34,7 @@ const { getGeneration } = await import("@/server/generations");
 const { db } = await import("@/server/db");
 const { resetRates } = await import("@/server/rate");
 const { RELAY_WORDS } = await import("@/lib/relay");
+const { lastGpuDevice } = await import("@/server/account-gpu");
 
 let fake: LocalComfy;
 let routes: ComputerRoutes;
@@ -137,6 +138,8 @@ describe("a run on the ComfyUI on the person's own computer", () => {
     const state = await (await gpuRoute.GET(new Request("http://localhost:3000/api/account/gpu", { headers: { cookie, ...SITE_HEADERS } }))).json();
     expect(state.gpu).toMatchObject({ mode: "computer", online: true, device: "cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync", version: "0.42.0", port: fake.port, cors: "exact" });
     expect(JSON.stringify(state)).not.toMatch(/private|base-directory/);
+    // A price check reads the GPU the tab reported (Split soundtrack's pick), and never calls it.
+    expect(lastGpuDevice(a)).toBe("cuda");
 
     fake.log.length = 0;
     expect(await t.runner.claimAndRun()).toBe(true);

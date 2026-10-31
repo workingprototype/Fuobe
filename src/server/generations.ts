@@ -407,6 +407,13 @@ export const ASSET_FREE: Record<string, string> = {
   "assist_schedules.mode_json": "the Assist mode a scheduled run starts in",
   "assist_connectors.url": "a remote MCP server Claude connects to, never one of ours",
   "assist_connectors.tools_json": "the tool names a connector is limited to",
+  "relay_runners.facts_json": "what a person's computer said about its ComfyUI: its GPU, memory, version and LoRA names",
+  "relay_tasks.graph_json": "the graph a person's computer runs: file names on that computer's ComfyUI, never a Fuobe file",
+  "relay_tasks.extra_json": "the run's LoRA names and where they download from, as its generation's request has them (which keeps them)",
+  "relay_tasks.wanted_json": "the results asked of a person's computer: file names on its ComfyUI",
+  "relay_tasks.received_json": "how much of each result has arrived",
+  "relay_tasks.result_json": "the finished entry a person's ComfyUI reported: its own file names",
+  "relay_tasks.refusal_json": "a ComfyUI refusal: node classes and model names",
 };
 
 /** The query that finds the rows of one ASSET_REFS table naming a file (@id), except the purged generation's own (@g). */
