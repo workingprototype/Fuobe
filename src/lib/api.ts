@@ -44,7 +44,8 @@ export interface Asset {
 
 async function json<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw responseError(res, body.error ?? `Request failed (${res.status})`);
+  // With its status, so a refusal or a missing thing isn't retried (src/app/providers.tsx).
+  if (!res.ok) throw responseError(res, Object.assign(new Error(body.error ?? `Request failed (${res.status})`), { status: res.status }));
   return body;
 }
 
@@ -1111,10 +1112,25 @@ export async function signOut(): Promise<void> {
   window.location.reload();
 }
 
-/** A guest or an account, once known: the studio's library, projects and settings are its owner's, not theirs. */
+/**
+ * A guest or an account, once known: the studio's library, projects and settings are its owner's, not theirs. False
+ * until the page has hydrated: another Suspense boundary may have filled the cache first, and the first render must
+ * match the server's HTML.
+ */
 export function useIsVisitor(): boolean {
   const v = useViewer().data;
-  return !!v && !v.owner;
+  const hydrated = useHydrated();
+  return hydrated && !!v && !v.owner;
+}
+
+/**
+ * The studio's owner, once known (and after hydration, as useIsVisitor): what only the owner can do (Assist's Create
+ * and Schedule, the Library's folders, shares and Trash) shows from then on, so a visitor never sees it flash in and out.
+ */
+export function useIsOwner(): boolean {
+  const v = useViewer().data;
+  const hydrated = useHydrated();
+  return hydrated && !!v?.owner;
 }
 
 /** "Sign up" / "Log in" with a way back here. */

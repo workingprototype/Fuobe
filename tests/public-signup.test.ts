@@ -128,6 +128,8 @@ describe("proxy with public sign-up on", () => {
       expect(r.status, p).toBe(401);
       expect(r.headers.get(access.GUEST_HEADER), p).toBe("1");
     }
+    // Assist's memory: none.
+    expect(await proxy(req("/api/assist/memory?scope=personal")).json()).toEqual({ items: [] });
     // Catalogs mixed with the owner's items: the route is told it's a guest.
     for (const p of ["/api/moodboards", "/api/assist"]) {
       const r = proxy(req(p));
@@ -226,9 +228,6 @@ describe("accounts never run on the owner's keys or GPU", () => {
       "/api/katana/k1/retry",
       "/api/enhance",
       "/api/brands/b1/chat",
-      "/api/assist",
-      "/api/assist/t1/messages",
-      "/api/assist/t1/approval",
       "/api/faceless/episodes/e1/render",
       "/api/content-factory/claude",
       // A run route that ignores ?preview=1 isn't a price check.
@@ -257,13 +256,15 @@ describe("accounts never run on the owner's keys or GPU", () => {
 describe("accounts never see or change the owner's library", () => {
   const families: Record<string, { lists: string[]; records: string[]; changes: [string, string][] }> = {
     generations: {
-      // (/api/generations itself goes to the route, which lists only the account's own runs: tests/account-gpu.test.ts.)
-      lists: ["/api/generations/trash", "/api/generations/facets"],
+      // (/api/generations, its facets and its bulk changes go to the routes, which take only the account's own runs:
+      // tests/account-gpu.test.ts, tests/public-signup-visitors.test.ts.)
+      lists: ["/api/generations/trash"],
       records: ["/api/generations/g1", "/api/generations/zip?ids=g1"],
-      changes: [["PATCH", "/api/generations/g1"], ["DELETE", "/api/generations/g1"], ["POST", "/api/generations/bulk"], ["DELETE", "/api/generations/trash"], ["POST", "/api/generations/g1/cancel"]],
+      changes: [["PATCH", "/api/generations/g1"], ["DELETE", "/api/generations/g1"], ["DELETE", "/api/generations/trash"], ["POST", "/api/generations/g1/cancel"]],
     },
-    // (POST /api/uploads is the account's own: the route checks it, tests/account-uploads.test.ts.)
-    files: { lists: ["/api/assets"], records: ["/api/files/outputs/a.png", "/api/assets/a1", "/api/uploads"], changes: [["DELETE", "/api/assets/a1"]] },
+    // (POST /api/uploads is the account's own: the route checks it, tests/account-uploads.test.ts; so is the list of its
+    // files, /api/assets: tests/public-signup-visitors.test.ts.)
+    files: { lists: [], records: ["/api/files/outputs/a.png", "/api/assets/a1", "/api/uploads"], changes: [["DELETE", "/api/assets/a1"]] },
     folders: { lists: ["/api/folders"], records: ["/api/folders/f1", "/api/folders/f1/zip"], changes: [["POST", "/api/folders"], ["PATCH", "/api/folders/f1"], ["DELETE", "/api/folders/f1"]] },
     shares: { lists: ["/api/shares"], records: ["/api/shares/s1"], changes: [["POST", "/api/shares"], ["PATCH", "/api/shares/s1"], ["DELETE", "/api/shares/s1"]] },
     layers: { lists: ["/api/layers"], records: ["/api/layers/l1"], changes: [["POST", "/api/layers"], ["PATCH", "/api/layers/l1"], ["DELETE", "/api/layers/l1"], ["POST", "/api/layers/l1/versions"]] },
@@ -271,7 +272,11 @@ describe("accounts never see or change the owner's library", () => {
     canvases: { lists: ["/api/canvases"], records: ["/api/canvases/c1"], changes: [["POST", "/api/canvases"], ["PATCH", "/api/canvases/c1"], ["DELETE", "/api/canvases/c1"], ["POST", "/api/canvases/c1/duplicate"]] },
     cinema: { lists: ["/api/cinema/projects"], records: ["/api/cinema/projects/p1", "/api/cinema/projects/p1/items"], changes: [["POST", "/api/cinema/projects"], ["PATCH", "/api/cinema/projects/p1"], ["DELETE", "/api/cinema/projects/p1"]] },
     storyboards: { lists: [], records: ["/api/storyboards"], changes: [["POST", "/api/storyboards"]] },
-    assist: { lists: ["/api/assist/projects"], records: ["/api/assist/t1", "/api/assist/memory"], changes: [["PATCH", "/api/assist/t1"], ["DELETE", "/api/assist/t1"], ["POST", "/api/assist/projects"]] },
+    assist: {
+      lists: ["/api/assist/projects", "/api/assist/memory"],
+      records: ["/api/assist/t1", "/api/assist/projects/p1"],
+      changes: [["PATCH", "/api/assist/t1"], ["DELETE", "/api/assist/t1"], ["POST", "/api/assist/projects"], ["POST", "/api/assist/memory"]],
+    },
     brands: { lists: ["/api/brands", "/api/products"], records: ["/api/brands/b1"], changes: [["POST", "/api/brands"], ["DELETE", "/api/brands/b1"], ["POST", "/api/products"]] },
   };
 

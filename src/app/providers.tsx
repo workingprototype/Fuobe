@@ -12,9 +12,16 @@ const GuidedFixHost = dynamic(() => import("@/components/gpu/guided-fix").then((
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
+/** Answers a retry can't change: signed out, not allowed, not there. */
+const NO_RETRY = new Set([401, 403, 404]);
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, refetchOnWindowFocus: true, retry: 1 } } }),
+    () =>
+      new QueryClient({
+        // One retry for a failed read, but not for a refusal or a missing thing (it would answer the same, and log twice).
+        defaultOptions: { queries: { staleTime: 5_000, refetchOnWindowFocus: true, retry: (n, e) => n < 1 && !NO_RETRY.has((e as { status?: number }).status ?? 0) } },
+      }),
   );
   // Signed in or out in another tab: this one asks who is looking again (its sidebar, its studios' refusals).
   useEffect(() => {

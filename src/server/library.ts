@@ -392,22 +392,24 @@ export interface LibraryFacets {
 
 /**
  * Counts for the owner's Library tabs and filters; helper steps are left out unless `steps` (as the lists do). Accounts'
- * runs are theirs, never counted here (public sign-up).
+ * runs are theirs, never counted here (public sign-up); with `account`, that account's own runs only (it has no Trash).
  */
-export function libraryFacets(opts: { steps?: boolean } = {}): LibraryFacets {
-  const all = "FROM generations g LEFT JOIN generation_trash t ON t.generation_id = g.id WHERE t.generation_id IS NULL AND json_extract(g.request_json, '$.account') IS NULL";
+export function libraryFacets(opts: { steps?: boolean; account?: string } = {}): LibraryFacets {
+  const whose = opts.account ? "json_extract(g.request_json, '$.account') = ?" : "json_extract(g.request_json, '$.account') IS NULL";
+  const args = opts.account ? [opts.account] : [];
+  const all = `FROM generations g LEFT JOIN generation_trash t ON t.generation_id = g.id WHERE t.generation_id IS NULL AND ${whose}`;
   const live = opts.steps ? all : `${all} AND NOT ${HELPER_SQL}`;
-  const models = db().prepare(`SELECT g.model_id AS id, COUNT(*) AS n ${live} GROUP BY g.model_id ORDER BY n DESC`).all() as { id: string; n: number }[];
-  const kinds = db().prepare(`SELECT g.kind AS kind, COUNT(*) AS n ${live} GROUP BY g.kind`).all() as { kind: MediaKind; n: number }[];
-  const reviews = db().prepare(`SELECT g.review AS review, COUNT(*) AS n ${live} AND g.review IS NOT NULL GROUP BY g.review`).all() as { review: string; n: number }[];
-  const one = (sql: string) => (db().prepare(sql).get() as { n: number }).n;
+  const models = db().prepare(`SELECT g.model_id AS id, COUNT(*) AS n ${live} GROUP BY g.model_id ORDER BY n DESC`).all(...args) as { id: string; n: number }[];
+  const kinds = db().prepare(`SELECT g.kind AS kind, COUNT(*) AS n ${live} GROUP BY g.kind`).all(...args) as { kind: MediaKind; n: number }[];
+  const reviews = db().prepare(`SELECT g.review AS review, COUNT(*) AS n ${live} AND g.review IS NOT NULL GROUP BY g.review`).all(...args) as { review: string; n: number }[];
+  const one = (sql: string) => (db().prepare(sql).get(...args) as { n: number }).n;
   return {
     models: models.map((m) => ({ id: m.id, name: getModel(m.id)?.name ?? m.id, count: m.n })),
     kinds: Object.fromEntries(kinds.map((k) => [k.kind, k.n])),
     total: one(`SELECT COUNT(*) AS n ${live}`),
     favorites: one(`SELECT COUNT(*) AS n ${live} AND g.favorite = 1`),
     failed: one(`SELECT COUNT(*) AS n ${live} AND g.status IN ('failed','canceled')`),
-    trash: trashCount(),
+    trash: opts.account ? 0 : trashCount(),
     pinned: one(`SELECT COUNT(*) AS n ${live} AND g.pinned_at IS NOT NULL`),
     steps: one(`SELECT COUNT(*) AS n ${all} AND ${HELPER_SQL}`),
     reviews: Object.fromEntries(reviews.filter((r) => isReviewStatus(r.review)).map((r) => [r.review, r.n])),

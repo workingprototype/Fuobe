@@ -20,6 +20,7 @@ import { ScheduleDialog } from "@/components/assist/schedule-dialog";
 import { ProjectDot, RailButton } from "@/components/assist/shell";
 import { SkillIcon } from "@/components/assist/skill-icon";
 import { Transcript } from "@/components/assist/transcript";
+import { AssistVisitorNote } from "@/components/assist/visitor-note";
 import { useAssistActions, useAssistThread, useEngine } from "@/lib/api";
 import { ASSIST_SUGGESTIONS, modeLabel, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
 import type { Generation } from "@/lib/catalog/types";
@@ -187,6 +188,7 @@ export function AssistView() {
               <h2 className="font-heading text-display text-balance">What are we creating today?</h2>
               <p className="mt-2 text-[14px] text-pretty text-muted-foreground">Describe the whole job. Assist picks the models, shows you the plan and cost, then runs every step. Type / to use a skill.</p>
             </div>
+            <AssistVisitorNote className="mb-4" />
             <AssistComposer
               key={draft.key}
               initialText={draft.text}

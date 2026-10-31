@@ -26,6 +26,9 @@ const GUEST_READS = new Set(["/api/status", "/api/models", "/api/search-index", 
 /** Catalogs mixed with the owner's own items: the route leaves the owner's part out for a guest (GUEST_HEADER). */
 const GUEST_FILTERED = new Set(["/api/moodboards", "/api/palettes", "/api/assist", "/api/assist/skills"]);
 
+/** One skill, its recipe and its download: the route answers a guest for a built-in skill only (404 for the owner's own). */
+const GUEST_SKILL = /^\/api\/assist\/skills\/[^/]+(\/recipe|\/download)?$/;
+
 /** The owner's lists ({ items }): a guest gets them empty. */
 const EMPTY_LISTS = [
   "/api/generations",
@@ -51,14 +54,18 @@ const EMPTY_LISTS = [
   "/api/ads/creatives",
   "/api/assist/projects",
   "/api/assist/schedules",
+  "/api/assist/memory",
 ];
+
+/** The Library's counts with nothing in it (a guest's). */
+export const NO_FACETS = { models: [], kinds: {}, total: 0, favorites: 0, failed: 0, trash: 0, pinned: 0, steps: 0, reviews: {} };
 
 const EMPTY: Record<string, unknown> = {
   ...Object.fromEntries(EMPTY_LISTS.map((p) => [p, { items: [] }])),
   "/api/shares": { items: [], signIn: true },
   "/api/photodump": { packs: [] },
   "/api/photodump/packs": { packs: [] },
-  "/api/generations/facets": { models: [], kinds: {}, total: 0, favorites: 0, failed: 0, trash: 0, pinned: 0, steps: 0, reviews: {} },
+  "/api/generations/facets": NO_FACETS,
   // GPU pre-flight: a guest has no GPU (Connect your GPU), so no board and no chips.
   "/api/gpu/readiness": { connected: false, reason: "guest" },
   "/api/gpu/badges": { connected: false, models: {}, presets: {} },
@@ -80,7 +87,7 @@ export type GuestRead =
 export function guestRead(pathname: string): GuestRead {
   if (pathname !== "/api" && !pathname.startsWith("/api/")) return { kind: "pass" };
   if (GUEST_READS.has(pathname)) return { kind: "pass" };
-  if (GUEST_FILTERED.has(pathname)) return { kind: "filtered" };
+  if (GUEST_FILTERED.has(pathname) || GUEST_SKILL.test(pathname)) return { kind: "filtered" };
   if (Object.hasOwn(EMPTY, pathname)) return { kind: "empty", body: EMPTY[pathname] };
   if (pathname === "/api/generations/stream") return { kind: "none" };
   return { kind: "closed" };
@@ -115,7 +122,8 @@ const LIBRARY_CHANGES: [methods: string, path: RegExp][] = [
   ["POST", /^\/api\/folders$/],
   ["PATCH DELETE", /^\/api\/folders\/[^/]+$/],
   ["PATCH DELETE", /^\/api\/generations\/[^/]+$/],
-  ["POST", /^\/api\/generations\/(bulk|local)$/],
+  // (POST /api/generations/bulk goes to the route, which takes an account's likes, pins and reviews of its own runs only.)
+  ["POST", /^\/api\/generations\/local$/],
   ["POST", /^\/api\/generations\/[^/]+\/(cancel|finish)$/],
   ["DELETE", /^\/api\/generations\/trash$/],
   ["DELETE", /^\/api\/assets\/[^/]+$/],
@@ -147,7 +155,8 @@ export function accountGeneration(method: string, pathname: string): string | un
   const step = /^\/api\/generations\/([^/]+)\/(cancel|finish)$/.exec(pathname);
   if (method === "POST" && step) return step[1];
   const one = GENERATION.exec(pathname);
-  return one && (method === "GET" || method === "HEAD" || method === "DELETE") ? one[1] : undefined;
+  // PATCH: a like, a pin or a review status (all the route changes).
+  return one && (method === "GET" || method === "HEAD" || method === "PATCH" || method === "DELETE") ? one[1] : undefined;
 }
 
 /**
@@ -155,8 +164,12 @@ export function accountGeneration(method: string, pathname: string): string | un
  * the list of its runs, a stored file (the proxy checks whose it is), its GPU.
  */
 export function accountOwnRead(pathname: string): boolean {
+  if (ACCOUNT_LISTS.has(pathname)) return true;
   return pathname === "/api/generations" || pathname === "/api/account/gpu" || GPU_READS.has(pathname);
 }
+
+/** The Library's counts and its Uploads (its stored files): each route answers an account with its own only. */
+const ACCOUNT_LISTS = new Set(["/api/generations/facets", "/api/assets"]);
 
 /** GPU pre-flight reads: each answers for the account's own GPU only (src/server/gpu/target.ts). */
 const GPU_READS = new Set(["/api/gpu/readiness", "/api/gpu/badges", "/api/gpu/plan"]);
@@ -172,8 +185,22 @@ export function accountMayChange(method: string, pathname: string, search: strin
   // GPU pre-flight: checking its own ComfyUI (reads only; the routes check the target and the request themselves).
   if ((method === "POST" && pathname === "/api/gpu/check") || (method === "PUT" && pathname === "/api/gpu/inventory")) return true;
   if (method === "POST" && (pathname === "/api/uploads" || pathname === "/api/media/probe")) return true;
+  // Like, pin or review many of its own runs at once (the route checks each is its own, and refuses the rest).
+  if (method === "POST" && pathname === "/api/generations/bulk") return true;
   return isPriceCheck(method, pathname, search);
 }
+
+/** Assist (chats, skills, memory, projects, schedules): any change to it, which only the owner may make on a public studio. */
+export function isAssistChange(method: string, pathname: string): boolean {
+  return method !== "GET" && method !== "HEAD" && (pathname === "/api/assist" || pathname.startsWith("/api/assist/"));
+}
+
+/**
+ * Assist plans with the install's own AI helpers and keeps the owner's chats, memory and projects, so an account gets
+ * this one answer to any change there (code "assist-owner"; price checks still go through), with or without its own
+ * GPU. A guest's change is a 401, as everywhere. The Assist pages say the same to both (src/components/assist/visitor-note.tsx).
+ */
+export const ASSIST_OWNER_MESSAGE = "Assist runs on the studio owner's AI, so only the owner can use it here. Fuobe is open source: run it yourself for your own chats, skills, memory and schedules.";
 
 /** A change to the studio's library or projects (refused for an account with LIBRARY_MESSAGE, not "Connect your GPU"). */
 export function isLibraryChange(method: string, pathname: string): boolean {

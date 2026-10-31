@@ -8,12 +8,14 @@ import {
   accountGeneration,
   accountMayChange,
   accountOwnRead,
+  ASSIST_OWNER_MESSAGE,
   CONNECT_GPU_HEADER,
   CONNECT_GPU_MESSAGE,
   GUEST_HEADER,
   GUEST_LIBRARY_MESSAGE,
   GUEST_RUN_MESSAGE,
   guestRead,
+  isAssistChange,
   isLibraryChange,
   isPriceCheck,
   LIBRARY_MESSAGE,
@@ -162,6 +164,9 @@ function guest(request: NextRequest): NextResponse {
   return NextResponse.json({ error: GUEST_RUN_MESSAGE }, { status: 401, headers: guestHeaders });
 }
 
+/** Any change to Assist by an account: one answer, which the Assist pages also show (a GPU doesn't change it). */
+const assistOwner = () => NextResponse.json({ error: ASSIST_OWNER_MESSAGE, code: "assist-owner" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+
 /**
  * A read by a guest or an account: pages and catalog reads go through, the owner's lists come back
  * empty, and the rest of the owner's library is refused (401 for a guest, who can sign up; 403 for an account).
@@ -187,14 +192,15 @@ function readAsGuest(request: NextRequest, isAccount: boolean): NextResponse {
  * (accountGeneration, accountOwnRead: only what it made). Install-wide settings, keys and tokens are
  * the owner's, and it never runs on the owner's cloud keys or GPU: with its own ComfyUI connected
  * ("Your GPU") the studios' generations run there, and anything else that would reach a model is
- * refused ("Connect your GPU" until it has one).
+ * refused ("Connect your GPU" until it has one). Assist is the owner's (isAssistChange): a GPU doesn't change that.
  */
 const notYours = () => NextResponse.json({ error: ACCOUNT_LIBRARY_MESSAGE }, { status: 403, headers: { "Cache-Control": "no-store" } });
 
 function account(request: NextRequest, who: Account): NextResponse {
   const { pathname, search } = request.nextUrl;
   if (ownerOnly(request.method, pathname)) {
-    return NextResponse.json({ error: "Only the studio's owner can change settings, keys and tokens." }, { status: 403 });
+    const verb = request.method === "GET" || request.method === "HEAD" ? "see" : "change";
+    return NextResponse.json({ error: `Only the studio's owner can ${verb} settings, keys and tokens.` }, { status: 403 });
   }
   // Its own runs and their files: only what it made.
   const gen = accountGeneration(request.method, pathname);
@@ -204,6 +210,7 @@ function account(request: NextRequest, who: Account): NextResponse {
   if (request.method === "GET" || request.method === "HEAD") return accountOwnRead(pathname) ? pass(request) : readAsGuest(request, true);
   if (isPriceCheck(request.method, pathname, search)) return priceCheck(request, `account:${who.id}`);
   if (accountMayChange(request.method, pathname, search)) return pass(request);
+  if (isAssistChange(request.method, pathname)) return assistOwner();
   if (isLibraryChange(request.method, pathname)) return NextResponse.json({ error: LIBRARY_MESSAGE, code: "library" }, { status: 403 });
   // A tool its own GPU wouldn't run says so first: "Connect your GPU" only for what a GPU unlocks.
   if (!ownGpuRun(request.method, pathname)) return NextResponse.json({ error: OWN_GPU_TOOL_MESSAGE, code: "own-gpu-tool" }, { status: 403 });

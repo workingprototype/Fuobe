@@ -81,7 +81,7 @@ function tomorrowAt9(now: number): string {
 export function ScheduleDialog({ open, onOpenChange, schedule, seed }: { open: boolean; onOpenChange: (open: boolean) => void; schedule?: ScheduleView; seed?: ScheduleSeed }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(92svh,820px)] gap-0 overflow-hidden p-0 sm:max-w-[600px]">{open && <Form schedule={schedule} seed={seed} onDone={() => onOpenChange(false)} />}</DialogContent>
+      <DialogContent className="flex max-h-[min(92svh,820px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[600px]">{open && <Form schedule={schedule} seed={seed} onDone={() => onOpenChange(false)} />}</DialogContent>
     </Dialog>
   );
 }

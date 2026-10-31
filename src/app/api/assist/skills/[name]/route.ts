@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { z } from "zod";
+import { isGuest } from "@/lib/guest-access";
 import { deleteSkill, getSkill, setSkillEnabled, SkillError, updateSkill } from "@/server/skills";
 
 const Patch = z.object({
@@ -14,10 +15,12 @@ const Patch = z.object({
 
 const fail = (e: unknown) => Response.json({ error: (e as Error).message }, { status: e instanceof SkillError ? e.status : 500 });
 
-export async function GET(_req: Request, ctx: RouteContext<"/api/assist/skills/[name]">) {
+export async function GET(request: Request, ctx: RouteContext<"/api/assist/skills/[name]">) {
   await connection();
   const s = getSkill((await ctx.params).name);
-  return s ? Response.json(s) : Response.json({ error: "No such skill" }, { status: 404 });
+  // A guest or an account (public sign-up) sees the built-in skills, not the owner's own.
+  if (!s || (isGuest(request) && s.source !== "builtin")) return Response.json({ error: "No such skill" }, { status: 404 });
+  return Response.json(s);
 }
 
 /** Switch a skill on or off, or edit one of your own. */
