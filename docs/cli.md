@@ -298,6 +298,9 @@ fuobe worker baseline             # the desktop's usual share of the GPU, for st
 fuobe worker install              # Windows: shows a sign-in task and pause/resume shortcuts; --yes adds them
 ```
 
+On Windows, `node scripts/build-worker-exe.mjs` builds `Fuobe Worker Setup.exe`, which does all of this on a PC with no
+Node, git or pnpm (gpu-workers.md, "Setup program").
+
 ## Skills for other agents
 
 Fuobe's skills are [Agent Skills](https://agentskills.io/specification), so the open `skills` CLI

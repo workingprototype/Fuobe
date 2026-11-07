@@ -179,6 +179,55 @@ again at once on exit code 75. An update that is only half done (a new checkout 
 end the worker: it works on until the parts match, and checks the stamp once a minute meanwhile. A program that
 installs updates writes `update-ready.json` last, after it has checked the new build.
 
+### Setup program (Windows)
+
+`Fuobe Worker Setup.exe` sets up a Windows 10 or 11 PC (x64, NVIDIA card) with no Node, git or pnpm on it. The studio
+does not offer it as a download. Whoever runs the studio builds it from a checkout that they verified (the steps
+above), with `node scripts/build-worker-exe.mjs [--out <dir>]` on Windows. The build prints the exe's SHA-256 and writes
+it next to the exe, with `manifest.json` (the commit, the Node version and its SHA-256, the payload's SHA-256 and the
+packages it carries). Check the SHA-256 on the PC before you run the exe. The exe is not signed, so Windows may show
+"Windows protected your PC": select More info, then Run anyway.
+
+The exe is a Node single executable application. It carries a gzip of a Node runtime and the worker's code: the
+built parts, every file the build stamp reads, the catalog, the 3D finish scripts and the packages the worker loads.
+It checks that payload's SHA-256, unpacks it once into `%LOCALAPPDATA%\Fuobe\worker\versions\<id>`, and runs the setup
+program (`bin/lib/worker/setup/main.mjs`) with that Node. The setup program:
+
+1. Shows the PC: the graphics card and its memory, the driver and the CUDA version it runs, the memory, the free space
+   of each drive, and the Windows version.
+2. Lists the ComfyUI folders it finds (the usual folders on each drive and in your user folder, the folders of running
+   ComfyUI processes, and ComfyUI Desktop's settings), with their model folders (`models` and the folders of
+   `extra_model_paths.yaml`) and their sizes. You pick one. With none, it offers ComfyUI's official portable build,
+   pinned by address, size and SHA-256 in `setup/portable.mjs`. It checks the download before it unpacks it. ComfyUI
+   Desktop cannot run the worker (it keeps its Python and node packs outside its ComfyUI folder), but its model
+   folders can be used.
+3. Asks only for the studio's address (`https://fuobe.com` by default) and the worker's token, as hidden input. It
+   checks the token with the studio first (an empty inventory, which changes nothing there). The token goes only to
+   `worker.json`.
+4. Runs `fuobe worker setup` with those answers and the folders it found. The rules of setup apply: no cloud-synced
+   folder, and the worker folder is not content indexed. It also refuses a `port` in `worker.json` that is 8188 or that
+   another program uses. Then it runs `fuobe worker install --yes` (the sign-in task and the pause shortcuts) and
+   starts the task. The worker starts paused.
+5. Sends the inventory once and shows the studio's answer: how many workflows the PC can run now, and for the others,
+   by lane, the missing files (folder, name, size), node packs and inputs. A text report and a JSON file go next to the
+   setup log.
+
+The log is `%LOCALAPPDATA%\Fuobe\worker-setup\setup-<time>.log`. It never holds the token or the contents of
+`worker.json`. Options: `--check` shows the PC, the ComfyUI found and the plan, and changes nothing; `--no-install`
+adds no task and no shortcut; `--root <dir>` sets the folder for jobs (default: `FuobeWorker` on ComfyUI's drive, or
+the drive with the most free space); `--comfy <dir>`, `--site <url>` and `--yes` (the first ComfyUI) skip questions.
+
+`--limited` runs the worker as its own standard Windows user instead (it needs an admin's yes):
+`bin/lib/worker/setup/limited/Install-LimitedWorker.ps1` makes the user, sets the folder rights and closes the folders
+where every user may write, adds firewall rules (this PC and the studio on port 443 only), and registers a task that
+starts the worker at boot. It switches the task on only after a check as that user passes.
+`Remove-LimitedWorker.ps1` undoes it.
+
+To update, run a newer setup exe. It unpacks the new version beside the old one, keeps `worker.json` (press Enter at
+the token question), adds the task again for the new version and writes `update-ready.json`. The running worker
+finishes its job and ends with exit code 75, and the task starts it on the new code. With `--limited`, run it with
+`--limited` again.
+
 ### The worker's own ComfyUI
 
 The worker always starts and stops its own ComfyUI process. It never uses a ComfyUI that it did not start. Its ComfyUI:
@@ -935,7 +984,7 @@ routes.
   `tests/worker-input-rules.test.ts`, `tests/worker-environment.test.ts`, `tests/worker-guard.test.ts`,
   `tests/worker-runner.test.ts`, `tests/worker-recovery.test.ts`, `tests/worker-parts.test.ts`,
   `tests/worker-turns.test.ts`, `tests/worker-turns-run.test.ts`, `tests/worker-update.test.ts`, `tests/cpu-slot.test.ts`,
-  `tests/worker-cpu-slot.test.ts`, `tests/fuobe-connect-nodes.test.ts`). The CPU slot tests run a CPU task while a GPU job runs, refuse a GLB that names
+  `tests/worker-cpu-slot.test.ts`, `tests/fuobe-connect-nodes.test.ts`, `tests/worker-setup-exe.test.ts`). The CPU slot tests run a CPU task while a GPU job runs, refuse a GLB that names
   an outside file on the worker, bring a turntable back with its GLB, check that an account's picture reaches its
   ComfyUI with no EXIF, and drop a preview over 64 KB. The turn tests use a fake port table, fake GPU
   counters and a fake lock file. With only local ComfyUI work on the GPU, the worker writes `siteWaiting` and claims
