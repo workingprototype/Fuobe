@@ -53,7 +53,7 @@ export const BENTO_BOARD = "effect-chain-pearl-earring";
  * once the noise is off.
  */
 export const BENTO_VOICE = { room: "voice-room", quiet: "voice-quiet", widths: [480, 768, 1024] } as const;
-/** The Live edit steps the live tile plays: the session's first three changes (Home's Live edit section plays them all). */
+/** The steps the live tile plays: the portrait session's first three changes (Home's Live edit section plays this or the room). */
 export const BENTO_LIVE_STEPS = ["s0", "s1", "s2", "s3"];
 
 /** Where each tile goes. Each label is the navigation's name for the place (or the app's own). */
@@ -152,7 +152,7 @@ function example(file: string): string {
   return `${file}?v=${m.v}`;
 }
 
-/** The phrase typed before each step of the Live edit session, in its own words: every `type` since the last step. */
+/** The phrase typed before each step of the tile's portrait session, in its own words: every `type` since the last step. */
 export function livePhrases(demo: Pick<Demo, "script">, steps = BENTO_LIVE_STEPS): string[] {
   const out: string[] = [];
   let typed = "";
@@ -166,6 +166,11 @@ export function livePhrases(demo: Pick<Demo, "script">, steps = BENTO_LIVE_STEPS
   return out;
 }
 
+/**
+ * The live tile's session: always the portrait (PORTRAIT_DEMO). The LiveDemo players (Home's Live edit section and
+ * drawn Live card, the Apps card, Live edit's guest view, the Edit studio's Live pane) show it or the room makeover, one
+ * at random per page (pickDemo in src/lib/live/demo.ts).
+ */
 async function readDemo(): Promise<Demo> {
   return JSON.parse(await fs.readFile(path.join(process.cwd(), "public", "previews", "live-edit", "demo.json"), "utf8")) as Demo;
 }
@@ -200,7 +205,7 @@ export async function homeBento(f: BentoFacts) {
   const demo = await readDemo();
   const frame = (id: string) => {
     const fr = demo.frames[id];
-    if (!fr?.small || !fr.mid || !fr.src || !fr.webp) throw new Error(`Home's live tile names frame ${id}, which the Live edit session doesn't have`);
+    if (!fr?.small || !fr.mid || !fr.src || !fr.webp) throw new Error(`Home's live tile names frame ${id}, which the portrait session doesn't have`);
     return { avif: [{ src: fr.small, w: 512 }, { src: fr.mid, w: 768 }, { src: fr.src, w: 1280 }], fallback: fr.webp } satisfies BentoPicture;
   };
   // The video tile's reel: each clip in the widths it comes in, and the first one's first frame as the poster, in its
