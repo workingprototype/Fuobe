@@ -160,6 +160,12 @@ describe("proxy matcher (C13)", () => {
     expect(matches("/favicon.ico")).toBe(false);
     expect(matches("/icon.svg")).toBe(false);
     expect(matches("/apple-icon.png")).toBe(false);
+    // Search engines, mail apps and browsers read these signed out.
+    expect(matches("/robots.txt")).toBe(false);
+    expect(matches("/sitemap.xml")).toBe(false);
+    expect(matches("/manifest.webmanifest")).toBe(false);
+    expect(matches("/brand/fuobe-icon-512.png")).toBe(false);
+    expect(matches("/robots.txt/x")).toBe(true);
     expect(matches("/_next/static/chunks/a.js")).toBe(false);
   });
   it("skips only a real dot: a path with 'svg', 'ico' or 'png' after another character still runs the proxy", () => {

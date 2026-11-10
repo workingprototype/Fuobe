@@ -440,7 +440,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except build assets and the public folder's own files: the favicon and app icons,
+  // Everything except build assets and the public folder's own files: the favicon and app icons, the brand files
+  // (public/brand, which emails and app installs load), robots.txt, the sitemap and the web manifest (search engines and
+  // browsers read them signed out; they hold no one's data),
   // the demo samples, the preset covers, the examples pages load (public/examples), vendored scripts (the 3D viewer's meshopt decoder), the
   // motion templates' own type faces (public/fonts) and the
   // SVGs at the root. Generated SVGs under /api/files stay behind sign-in. The routes that take a file in a form
@@ -449,6 +451,6 @@ export const config = {
   // proxy would hold the whole file in memory first. So do a computer's report of a finished job and its results
   // (src/app/api/gpu/computer/tasks), and live edit's kept master from a tab on its own computer (src/app/api/live/masters).
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico$|apple-icon\\.png$|samples/|previews/|examples/|vendor/|fonts/|api/uploads$|api/generations/[^/]+/finish$|api/layers/renders$|api/assist/skills/upload$|api/assist/projects/[^/]+/sources$|api/explainer/document$|api/audio-tools/export$|api/gpu/computer/tasks/[^/]+/(?:report|outputs/[^/]+)$|api/live/masters$|[^/]+\\.svg$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico$|apple-icon\\.png$|robots\\.txt$|sitemap\\.xml$|manifest\\.webmanifest$|brand/|samples/|previews/|examples/|vendor/|fonts/|api/uploads$|api/generations/[^/]+/finish$|api/layers/renders$|api/assist/skills/upload$|api/assist/projects/[^/]+/sources$|api/explainer/document$|api/audio-tools/export$|api/gpu/computer/tasks/[^/]+/(?:report|outputs/[^/]+)$|api/live/masters$|[^/]+\\.svg$).*)",
   ],
 };
