@@ -28,6 +28,13 @@ import { cn } from "@/lib/utils";
 
 // The viewer is only needed once a recent result is opened.
 const Viewer = lazy(() => import("@/components/studio/viewer").then((m) => ({ default: m.Viewer })));
+// The studio's own composer (Image, Video, Edit): loaded once the page is idle, or at the first touch of the composer.
+type StudioComposer = typeof import("@/components/home/home-studio-composer").default;
+type HomeStudioMode = "image" | "video" | "edit";
+let studioLoad: Promise<StudioComposer> | null = null;
+const loadStudioComposer = () => (studioLoad ??= import("@/components/home/home-studio-composer").then((m) => m.default));
+/** The composer's words on screen: the studio composer's once it is in, else the light one's. */
+const composerBox = () => document.querySelector<HTMLTextAreaElement>("#start-creating textarea");
 
 const MODES = [
   { id: "image", label: "Image", icon: ImageIcon, href: "/image", placeholder: "Describe an image…" },
@@ -221,6 +228,34 @@ export function HomeView({
   // A Try chip's prompt fills two lines on a phone and scrolls past that, so the chips and the goals under the
   // composer stay where the thumb is; typing lets it grow again.
   const [chipFilled, setChipFilled] = useState(false);
+  // The studio's composer takes the light one's place once the page is idle, or as soon as the composer is touched.
+  // `seed` opens it again with new words (a Try chip, New creation).
+  const [Studio, setStudio] = useState<StudioComposer | null>(null);
+  const [seed, setSeed] = useState(0);
+  // Typing in the light composer when the studio's arrives: the words and the caret move over.
+  const typing = useRef(false);
+  const wantStudio = useCallback(() => {
+    void loadStudioComposer().then((c) => {
+      typing.current = document.activeElement === box.current;
+      setStudio(() => c);
+    });
+  }, []);
+  useEffect(() => {
+    const ric = typeof requestIdleCallback === "function";
+    const id = ric ? requestIdleCallback(wantStudio, { timeout: 3000 }) : window.setTimeout(wantStudio, 1200);
+    return () => (ric ? cancelIdleCallback(id) : clearTimeout(id));
+  }, [wantStudio]);
+  const studioMode = mode.id === "live" ? null : (mode.id as HomeStudioMode);
+  const studioOn = !!Studio && !!studioMode;
+  useEffect(() => {
+    if (!Studio || !typing.current) return;
+    typing.current = false;
+    requestAnimationFrame(() => {
+      const el = composerBox();
+      el?.focus({ preventScroll: true });
+      el?.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [Studio]);
   useEffect(() => {
     if (!status) return;
     try {
@@ -254,30 +289,57 @@ export function HomeView({
   // What Start will run, and what it costs, before it's pressed (or why it's a demo, and the engine that would run it).
   const runsFor = status && mode.id !== "live" ? startLine(status, quotes?.[mode.id as "image" | "video" | "edit"], engine, mode.id as "image" | "video" | "edit") : null;
   const openModel = mode.id === "live" ? undefined : quotes?.[mode.id as "image" | "video" | "edit"]?.open?.name;
-  const focusComposer = () => requestAnimationFrame(() => box.current?.focus());
+  const focusComposer = () => requestAnimationFrame(() => composerBox()?.focus());
   // The composer sits under the first screen: it comes into view, then takes the focus without the page jumping again.
   const startOver = useCallback(() => {
     setPrompt("");
-    requestAnimationFrame(() => {
-      box.current?.scrollIntoView({ block: "center" });
-      box.current?.focus({ preventScroll: true });
-    });
+    setSeed((n) => n + 1);
+    // Twice: the studio's composer opens again on the next frame.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const el = composerBox();
+        el?.scrollIntoView({ block: "center" });
+        el?.focus({ preventScroll: true });
+      }),
+    );
   }, []);
   // A Try chip: its mode and prompt go in, the caret goes to the end, and nothing runs until Start.
   const tryChip = (c: TryChip) => {
     setMode(MODES.find((m) => m.id === c.mode) ?? MODES[0]);
     setPrompt(c.prompt);
+    setSeed((n) => n + 1);
     setChipFilled(true);
     setFlash((n) => n + 1);
     box.current?.focus();
     requestAnimationFrame(() => {
-      const el = box.current;
+      const el = composerBox();
+      el?.focus();
       if (!el) return;
       el.setSelectionRange(c.prompt.length, c.prompt.length);
       // A phone shows its last lines, where the caret is.
       el.scrollTop = el.scrollHeight;
     });
   };
+
+  const modeRow = (
+    <div role="radiogroup" aria-label="What to make" className="scrollbar-none flex min-w-0 items-center gap-0.5 overflow-x-auto sm:gap-1">
+      {MODES.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          role="radio"
+          aria-checked={mode.id === m.id}
+          onClick={() => setMode(m)}
+          className={cn(
+            "inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors sm:gap-1.5 sm:px-3",
+            mode.id === m.id ? "bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
+          )}
+        >
+          <m.icon className="size-3.5" /> {m.label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <PageShell>
@@ -314,7 +376,27 @@ export function HomeView({
               : "Frontier cloud models or fully open-source workflows — same studio, your choice."}
         </p>
         {/* id: where the first screen's "Start creating" leads (ScrollCue, home-islands.tsx: START_CREATING_ID). */}
-        <div id="start-creating" className="relative mt-6 w-full max-w-[720px] rounded-[20px] border bg-background p-2.5 text-left shadow-soft transition focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
+        {Studio && studioMode ? (
+          // The studio's own composer: what to make and the engine above it, then its inputs, model, settings and price.
+          <div id="start-creating" className="relative mt-6 w-full max-w-[760px] text-left">
+            <div className="mb-2 flex items-center gap-1.5 px-1">
+              {modeRow}
+              <span className="ml-auto hidden shrink-0 sm:block">
+                <EngineSwitch value={engine} onChange={setEngine} size="sm" />
+              </span>
+            </div>
+            <div data-composer className="relative">
+              {flash > 0 && <span key={flash} aria-hidden className="pointer-events-none absolute -inset-px z-10 animate-ring-flash rounded-composer ring-4 ring-primary/30 motion-reduce:hidden" />}
+              <Studio mode={studioMode} prompt={prompt} seed={seed} onPrompt={setPrompt} />
+            </div>
+          </div>
+        ) : (
+        <div
+          id="start-creating"
+          onPointerDown={wantStudio}
+          onFocus={wantStudio}
+          className="relative mt-6 w-full max-w-[720px] rounded-[20px] border bg-background p-2.5 text-left shadow-soft transition focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
+        >
           {flash > 0 && <span key={flash} aria-hidden className="pointer-events-none absolute -inset-px animate-ring-flash rounded-[inherit] ring-4 ring-primary/30 motion-reduce:hidden" />}
           <textarea
             value={prompt}
@@ -340,23 +422,7 @@ export function HomeView({
             )}
           />
           <div className="flex items-center gap-1.5">
-            <div role="radiogroup" aria-label="What to make" className="scrollbar-none flex min-w-0 items-center gap-0.5 overflow-x-auto sm:gap-1">
-              {MODES.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={mode.id === m.id}
-                  onClick={() => setMode(m)}
-                  className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors sm:gap-1.5 sm:px-3",
-                    mode.id === m.id ? "bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
-                  )}
-                >
-                  <m.icon className="size-3.5" /> {m.label}
-                </button>
-              ))}
-            </div>
+            {modeRow}
             <div className="ml-auto flex items-center gap-2">
               <span className="hidden sm:block">
                 <EngineSwitch value={engine} onChange={setEngine} size="sm" />
@@ -367,8 +433,10 @@ export function HomeView({
             </div>
           </div>
         </div>
-        {/* Its line's height is kept from the first paint, so the chips and the goals under it don’t move when it fills in. */}
-        {visitor && openModel && !visitor.gpu.connected ? (
+        )}
+        {/* Its line's height is kept from the first paint, so the chips and the goals under it don’t move when it fills in.
+            The studio's composer says what its run costs and where on its own button. */}
+        {studioOn ? null : visitor && openModel && !visitor.gpu.connected ? (
           <p className="mt-2 min-h-[18px] text-[12px] text-muted-foreground">
             {visitor.kind === "guest" ? (
               <>
