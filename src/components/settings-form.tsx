@@ -802,7 +802,7 @@ export function SettingsForm({ prices }: { prices?: string }) {
       <Section
         id="auto-image"
         title="Auto image model"
-        description="Auto is the Image studio's first pick on the open engine: Krea 2 Realism for every picture, MOSS-Image first for lettering, posters and logos, and Qwen-Image 2.1 for edits. When the first model is switched off, can't run or fails, the other one makes the same run, at no extra charge. Prompts that match the lines below start on Krea 2 Realism too, and their run details name the line."
+        description="Auto is the Image studio's first pick on the open engine: MiniMax H3 Image first for every picture, then Krea 2 Realism, or MOSS-Image for lettering, posters and logos; Qwen-Image 2.1 for edits. MiniMax H3 Image runs where the GPU has about 32 GB and its files; elsewhere Auto starts on the next model. When a model is switched off, can't run or fails, the next one makes the same run, at no extra charge. Prompts that match the lines below start on Krea 2 Realism instead, and their run details name the line."
         inactive={mode === "cloud" ? "Not used in Paid APIs only mode" : undefined}
       >
         <AutoPatternsSetting setting={get("autoImagePatterns")} saving={save.isPending} onSave={set("autoImagePatterns")} />

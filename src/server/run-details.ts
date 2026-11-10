@@ -2,7 +2,7 @@ import "server-only";
 import fs from "node:fs";
 import { getModel, getPreset } from "@/lib/catalog";
 import { presetRoutes } from "@/lib/catalog/preset-recipe-routes";
-import { AUTO_IMAGE } from "@/lib/auto-image";
+import { AUTO_IMAGE, AUTO_LEAD_MODEL } from "@/lib/auto-image";
 import { cleanNodeTimes, type NodeTime } from "@/lib/node-times";
 import type { AutoWhy, Engine, GenerationRequest, MediaKind } from "@/lib/catalog/types";
 import { madeOfRun } from "@/lib/catalog/fitted";
@@ -505,12 +505,24 @@ export function surfaceOf(feature: string, stamp: GenerationRequest): RunSurface
 /** Why Auto picked its model, in words. */
 export const AUTO_WHY_WORDS: Record<AutoWhy, string> = {
   edit: "It had a picture to work from, so it went to the edit model",
-  text: "Its words ask for lettering, so it went to MOSS-Image first",
+  text: "Its words ask for lettering, so it went to MiniMax H3 Image first",
   trigger: "Its words match a pattern in Settings → Auto image model, so it went to Krea 2 Realism first",
-  plain: "A plain prompt, so it went to Krea 2 Realism first",
+  plain: "A plain prompt, so it went to MiniMax H3 Image first",
   fallback: "The model before it couldn't make it, so Auto's next model made it",
   declined: "Ideogram 4 declined it, so this model made it instead",
 };
+
+/**
+ * Why Auto picked the model it did, in words: AUTO_WHY_WORDS, and for a plain or lettering prompt that started on another
+ * model than MiniMax H3 Image (its GPU couldn't take that lane or hold its files, or it was switched off), that one.
+ */
+function autoWhyWords(why: AutoWhy, model: string): string {
+  if ((why === "plain" || why === "text") && model !== AUTO_LEAD_MODEL) {
+    const name = getModel(model)?.name ?? model;
+    return `${why === "text" ? "Its words ask for lettering" : "A plain prompt"}, and ${getModel(AUTO_LEAD_MODEL)?.name ?? AUTO_LEAD_MODEL} didn't fit the GPU it went to (or was switched off), so it went to ${name} first`;
+  }
+  return AUTO_WHY_WORDS[why] ?? why;
+}
 
 const DECLINED_STAGE_WORDS: Record<string, string> = {
   retry: "Ideogram 4 declined it and was asked again with a new seed",
@@ -543,7 +555,7 @@ export function madeByOf(run: AdminRun, meta: Record<string, unknown>): RunMadeB
     .map((n) => n?.trim())
     .filter((n): n is string => !!n);
   return {
-    ...(pick && { auto: { model: pick.model, name: getModel(pick.model)?.name ?? pick.model, why: pick.why, words: AUTO_WHY_WORDS[pick.why] ?? pick.why } }),
+    ...(pick && { auto: { model: pick.model, name: getModel(pick.model)?.name ?? pick.model, why: pick.why, words: autoWhyWords(pick.why, pick.model) } }),
     ...(declined && { declined }),
     notices,
     // Worked out here when the run doesn't carry it: the same rules the studios use before a run.

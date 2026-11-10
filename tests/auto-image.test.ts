@@ -5,6 +5,7 @@ import { planGeneration, estimateCost } from "@/lib/catalog/plan";
 import { getPreset } from "@/lib/catalog";
 import {
   AUTO_IMAGE,
+  AUTO_LARGE_MODELS,
   AUTO_MODELS,
   AUTO_T2I_MODELS,
   autoCandidates,
@@ -13,6 +14,7 @@ import {
   autoNext,
   autoPatterns,
   autoPatternsProblems,
+  autoResolution,
   DECLINED_FALLBACKS,
   DEFAULT_AUTO_PATTERNS,
   matchedPattern,
@@ -29,8 +31,10 @@ import type { Generation } from "@/lib/catalog/types";
 
 const defaults = autoPatterns(DEFAULT_AUTO_PATTERNS.join("\n"));
 const pick = (prompt: string, more: { op?: "t2i" | "edit" | "inpaint" | "outpaint"; images?: number } = {}) => autoCandidates({ prompt, ...more }, defaults);
-const KREA_FIRST = ["oss-krea2-realism", "oss-moss-image"];
-const MOSS_FIRST = ["oss-moss-image", "oss-krea2-realism"];
+const H3 = "oss-minimax-h3-image";
+const PLAIN = [H3, "oss-krea2-realism", "oss-moss-image"];
+const LETTERING = [H3, "oss-moss-image", "oss-krea2-realism"];
+const KREA_FIRST = ["oss-krea2-realism", H3, "oss-moss-image"];
 
 describe("Auto in the catalog", () => {
   it("is an open image choice named Auto, next to the models it picks, which keep their names", () => {
@@ -38,6 +42,7 @@ describe("Auto in the catalog", () => {
     expect(m).toMatchObject({ name: "Auto", engine: "open", kind: "image" });
     expect(m.routes.map((r) => r.op)).toEqual(["t2i", "edit"]);
     for (const [id, name] of [
+      [H3, "MiniMax H3 Image"],
       ["oss-ideogram-4", "Ideogram 4"],
       ["oss-krea2-realism", "Krea 2 Realism"],
       ["oss-fibo2-dev", "FIBO 2 Dev"],
@@ -48,16 +53,20 @@ describe("Auto in the catalog", () => {
     // Every model it may pick is in the catalog, as an open image model.
     for (const id of AUTO_MODELS) expect(getModel(id), id).toMatchObject({ engine: "open", kind: "image" });
     expect(MODELS.filter((x) => x.name === "Auto")).toHaveLength(1);
-    // Its text-to-image route is Krea 2 Realism's (the GPU pre-flight reads it), and it says what it picks.
+    // Its text-to-image route is Krea 2 Realism's (the lane every GPU Auto plans on can take; the GPU pre-flight reads it),
+    // and it says what it picks, MiniMax H3 Image first.
     expect(m.routes.find((r) => r.op === "t2i")?.endpoint).toBe(getModel("oss-krea2-realism")!.routes[0].endpoint);
+    expect(m.tagline).toMatch(/^Picks the model for you: MiniMax H3 Image first/);
     expect(m.tagline).toMatch(/Krea 2 Realism/);
     expect(m.tagline).toMatch(/MOSS-Image/);
     expect(m.tagline).not.toMatch(/Ideogram|FIBO/);
   });
 
   it("never plans a picture from words on Ideogram 4 or FIBO 2 Dev; both stay in the catalog to pick by hand", () => {
-    expect(AUTO_T2I_MODELS).toEqual(KREA_FIRST);
-    expect(autoModelsFor("t2i")).toEqual(KREA_FIRST);
+    expect(AUTO_T2I_MODELS).toEqual(PLAIN);
+    expect(autoModelsFor("t2i")).toEqual(PLAIN);
+    // MiniMax H3 Image's lane needs a large GPU: the server plans it only where the GPUs can take it.
+    expect([...AUTO_LARGE_MODELS]).toEqual([H3]);
     for (const id of ["oss-ideogram-4", "oss-fibo2-dev"]) {
       expect(autoModelsFor("t2i")).not.toContain(id);
       expect(getModel(id)).toMatchObject({ engine: "open", kind: "image" });
@@ -90,7 +99,7 @@ describe("what Auto picks", () => {
     for (const words of ["put the logo on the poster", "a cat in a gown"]) expect(pick(words, { images: 1 }).models).not.toContain("oss-ideogram-4");
   });
 
-  it("lettering, posters, logos, signs and words in quotes: MOSS-Image, then Krea 2 Realism", () => {
+  it("lettering, posters, logos, signs and words in quotes: MiniMax H3 Image, then MOSS-Image, then Krea 2 Realism", () => {
     for (const words of [
       "a film poster for a heist movie",
       "a minimal logo for a coffee roaster",
@@ -101,10 +110,10 @@ describe("what Auto picks", () => {
       // Lettering wins over a pattern.
       "a poster of a model in a bikini",
     ])
-      expect(pick(words), words).toEqual({ models: MOSS_FIRST, why: "text" });
+      expect(pick(words), words).toEqual({ models: LETTERING, why: "text" });
   });
 
-  it("a prompt the setting's patterns match: Krea 2 Realism, then MOSS-Image, naming the line", () => {
+  it("a prompt the setting's patterns match: Krea 2 Realism, then MiniMax H3 Image, then MOSS-Image, naming the line", () => {
     for (const words of [
       "a cat in an antique-gold paillette gown, studio light, her hair lifting in the wind",
       "a fox wearing a tailored velvet suit at a gala",
@@ -120,9 +129,21 @@ describe("what Auto picks", () => {
     expect(pick("a cat in an antique-gold paillette gown").pattern).toMatch(/gowns/);
   });
 
-  it("everything else: Krea 2 Realism, then MOSS-Image", () => {
+  it("everything else: MiniMax H3 Image, then Krea 2 Realism, then MOSS-Image", () => {
     for (const words of ["a koi pond at night, neon rain", "a cat asleep on a windowsill", "a dog running on a beach", "a woman in a red evening gown on a staircase", "sheerness of the cliffs", "a swimmer at dawn"])
-      expect(pick(words), words).toEqual({ models: KREA_FIRST, why: "plain" });
+      expect(pick(words), words).toEqual({ models: PLAIN, why: "plain" });
+  });
+
+  it("asks MiniMax H3 Image for its 2K where Auto's size is below what it makes; other picks keep the size asked", () => {
+    const h3 = getModel(H3)!;
+    expect(h3.options.resolutions).toEqual(["2K", "4K"]);
+    expect(autoResolution("1K", h3)).toBe("2K");
+    expect(autoResolution("1.5K", h3)).toBe("2K");
+    expect(autoResolution("2K", h3)).toBe("2K");
+    expect(autoResolution(undefined, h3)).toBeUndefined();
+    // Krea 2 Realism makes every size Auto offers; MOSS-Image's largest is below Auto's 2K, which it keeps as it did.
+    for (const r of ["1K", "1.5K", "2K"]) expect(autoResolution(r, getModel("oss-krea2-realism"))).toBe(r);
+    expect(autoResolution("2K", getModel("oss-moss-image"))).toBe("2K");
   });
 
   it("lettering a prompt only rules out doesn't count as asking for it", () => {
@@ -133,7 +154,7 @@ describe("what Auto picks", () => {
       "a clean product shot, text-free, logo-free",
       "a misty forest, avoid text and labels",
     ])
-      expect(pick(words), words).toEqual({ models: KREA_FIRST, why: "plain" });
+      expect(pick(words), words).toEqual({ models: PLAIN, why: "plain" });
     // A prompt that rules some lettering out and asks for other lettering still asks for it.
     for (const words of ['a poster that says "OPEN", no watermark', "a neon sign above a bar, no logos", "no text on the shirt, a logo on the cap"])
       expect(pick(words), words).toMatchObject({ why: "text" });
@@ -144,16 +165,19 @@ describe("what Auto picks", () => {
       const c = pick(words);
       expect(c.models, words).not.toContain("oss-ideogram-4");
       expect(c.models, words).not.toContain("oss-fibo2-dev");
-      expect([...c.models].sort(), words).toEqual([...KREA_FIRST].sort());
+      expect([...c.models].sort(), words).toEqual([...PLAIN].sort());
     }
   });
 
-  it("the next model after one fails: the other of the two, each at most once, then none", () => {
-    expect(autoNext(KREA_FIRST, ["oss-krea2-realism"])).toEqual(["oss-moss-image"]);
-    expect(autoNext(MOSS_FIRST, ["oss-moss-image"])).toEqual(["oss-krea2-realism"]);
-    expect(autoNext(KREA_FIRST, ["oss-krea2-realism", "oss-moss-image"])).toEqual([]);
-    // An older run that started on Ideogram 4: both are left, in order.
-    expect(autoNext(KREA_FIRST, ["oss-ideogram-4"])).toEqual(KREA_FIRST);
+  it("the next model after one fails: the next in order, each at most once, then none", () => {
+    expect(autoNext(PLAIN, [H3])).toEqual(["oss-krea2-realism", "oss-moss-image"]);
+    expect(autoNext(PLAIN, [H3, "oss-krea2-realism"])).toEqual(["oss-moss-image"]);
+    expect(autoNext(LETTERING, [H3])).toEqual(["oss-moss-image", "oss-krea2-realism"]);
+    expect(autoNext(LETTERING, [H3, "oss-moss-image"])).toEqual(["oss-krea2-realism"]);
+    expect(autoNext(KREA_FIRST, ["oss-krea2-realism"])).toEqual([H3, "oss-moss-image"]);
+    expect(autoNext(PLAIN, PLAIN)).toEqual([]);
+    // An older run that started on Ideogram 4: all are left, in order.
+    expect(autoNext(PLAIN, ["oss-ideogram-4"])).toEqual(PLAIN);
   });
 
   it("Ideogram 4 picked by name, after it declines: Krea 2 Realism, FIBO 2 Dev, MOSS-Image, then none", () => {

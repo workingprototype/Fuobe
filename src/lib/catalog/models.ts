@@ -147,14 +147,15 @@ const open: ModelDef[] = [
   // A studio's "Best" list is its default, then the `top` models in this order (bestForStudio in src/lib/composer.ts).
   // Auto: the Image studio's default on the open engine. Not a model of its own: the server plans each run on the model it
   // picks (src/lib/auto-image.ts), and the run names that model. Its routes are its picks' own (Krea 2 Realism for words,
-  // Qwen-Image 2.1 for edits), so the picker, the price and the GPU pre-flight read them; it never runs as itself.
+  // the lane every GPU Auto plans on can take, MiniMax H3 Image's needing a large one; Qwen-Image 2.1 for edits), so the
+  // picker, the price and the GPU pre-flight read them; it never runs as itself.
   o({
     id: AUTO_IMAGE,
     name: AUTO_NAME,
     vendor: "Fuobe",
     family: "auto",
     kind: "image",
-    tagline: "Picks the model for you: Krea 2 Realism for most pictures, MOSS-Image for lettering, Qwen-Image 2.1 for edits",
+    tagline: "Picks the model for you: MiniMax H3 Image first, then Krea 2 Realism, or MOSS-Image for lettering; Qwen-Image 2.1 for edits",
     routes: [comfy("t2i", "krea2-realism-t2i", "Auto picks the model before the run"), { ...comfy("edit", "qwen-image-21-edit", "Auto: Qwen-Image 2.1, up to 4 references"), unsized: true }],
     options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K", "2K"], maxImages: 4, seed: true },
     defaults: { aspectRatio: "1:1", resolution: "1.5K" },

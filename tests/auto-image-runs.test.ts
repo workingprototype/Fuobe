@@ -3,10 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { GenInput, Generation } from "@/lib/catalog/types";
 import { tempDir } from "./helpers/temp-dir";
 
-// Auto's runs: each is planned on the model Auto picks (Krea 2 Realism, MOSS-Image for lettering, Qwen-Image 2.1 for an
-// edit; never Ideogram 4 or FIBO 2 Dev for a picture from words) and keeps Auto with its pick. When its text-to-image
-// model fails, the other one makes the same run, each at most once, and only then does it fail. Ideogram 4 picked by name
-// still takes its own fallbacks when it declines (tests/ideogram-declined.test.ts). Its rules alone: tests/auto-image.test.ts.
+// Auto's runs: each is planned on the model Auto picks (MiniMax H3 Image, then Krea 2 Realism, or MOSS-Image for
+// lettering; Qwen-Image 2.1 for an edit; never Ideogram 4 or FIBO 2 Dev for a picture from words) and keeps Auto with its
+// pick. When its text-to-image model fails, the next one makes the same run, each at most once, and only then does it
+// fail. Ideogram 4 picked by name still takes its own fallbacks when it declines (tests/ideogram-declined.test.ts). Its
+// rules alone: tests/auto-image.test.ts; by the GPU's size and files: tests/auto-image-gpu.test.ts.
 vi.setConfig({ testTimeout: 60_000 });
 const dir = tempDir("fuobe-auto-image-runs-");
 process.env.FUOBE_DATA_DIR = dir;
@@ -43,6 +44,7 @@ const poll = mockProvider.poll;
 const answers = new Map<string, Buffer[]>();
 
 const CAT = "a cat in an antique-gold paillette gown, studio light, her hair lifting in the wind";
+const H3 = "oss-minimax-h3-image";
 
 beforeAll(() => setSetting("demoMode", "auto"));
 beforeEach(() => {
@@ -91,25 +93,28 @@ const rowsSince = (id: string) => db().prepare("SELECT COUNT(*) FROM generations
 const line = (g: Generation) => renderToStaticMarkup(MadeNote({ g })!);
 
 describe("what Auto runs on", () => {
-  it("plain words: Krea 2 Realism, and the run keeps Auto with its pick", async () => {
-    const g = await run("a red fox in deep snow", { params: { aspectRatio: "16:9" } });
+  it("plain words: MiniMax H3 Image at its 2K, and the run keeps Auto with its pick", async () => {
+    const g = await run("a red fox in deep snow", { params: { aspectRatio: "16:9", resolution: "1.5K" } });
     expect(g.status, g.error ?? "").toBe("succeeded");
-    expect(handed.map((h) => h.model)).toEqual(["oss-krea2-realism"]);
-    expect(g.modelId).toBe("oss-krea2-realism");
+    expect(handed.map((h) => h.model)).toEqual([H3]);
+    expect(g.modelId).toBe(H3);
     expect(g.request.modelId).toBe(AUTO_IMAGE);
-    expect(g.request.auto).toEqual({ model: "oss-krea2-realism", why: "plain" });
+    expect(g.request.auto).toEqual({ model: H3, why: "plain" });
     expect(handed[0].input.aspectRatio).toBe("16:9");
-    expect(line(g)).toContain("Auto · made with Krea 2 Realism");
+    // Auto's 1.5K is below what MiniMax H3 Image makes: it makes the run at its own 2K. The request keeps what was asked.
+    expect(handed[0].input.resolution).toBe("2K");
+    expect(g.request.params?.resolution).toBe("1.5K");
+    expect(line(g)).toContain("Auto · made with MiniMax H3 Image");
     expect(line(g)).not.toContain("next model");
     expect(g.request.notice).toBeUndefined();
   });
 
-  it("lettering: MOSS-Image", async () => {
+  it("lettering: MiniMax H3 Image first too", async () => {
     const g = await run('a poster that says "GRAND OPENING" in gold letters');
     expect(g.status, g.error ?? "").toBe("succeeded");
-    expect(handed.map((h) => h.model)).toEqual(["oss-moss-image"]);
-    expect(g.request.auto).toEqual({ model: "oss-moss-image", why: "text" });
-    expect(line(g)).toContain("Auto · made with MOSS-Image");
+    expect(handed.map((h) => h.model)).toEqual([H3]);
+    expect(g.request.auto).toEqual({ model: H3, why: "text" });
+    expect(line(g)).toContain("Auto · made with MiniMax H3 Image");
   });
 
   it("a prompt the patterns match: Krea 2 Realism, naming the pattern", async () => {
@@ -139,29 +144,34 @@ describe("what Auto runs on", () => {
 
   it("Ideogram 4 and FIBO 2 Dev are never planned for a picture from words, whatever the words or the switches", () => {
     const words = ["a koi pond at night", 'a poster that says "OPEN"', CAT, "a neon sign above a bar", "a woman in a red evening gown"];
-    for (const prompt of words) expect(["oss-krea2-realism", "oss-moss-image"], prompt).toContain(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt }).model.id);
+    for (const prompt of words) expect([H3, "oss-krea2-realism", "oss-moss-image"], prompt).toContain(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt }).model.id);
+    changeAccess([{ kind: "model", id: H3, on: false }]);
+    expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: "a koi pond at night" }).model.id).toBe("oss-krea2-realism");
+    expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: 'a poster that says "OPEN"' }).model.id).toBe("oss-moss-image");
     changeAccess([{ kind: "model", id: "oss-krea2-realism", on: false }]);
     for (const prompt of words) expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt }).model.id, prompt).toBe("oss-moss-image");
     changeAccess([{ kind: "model", id: "oss-moss-image", on: false }]);
-    // Neither is on: Auto asks for a model rather than reaching for Ideogram 4 or FIBO 2 Dev.
+    // None is on: Auto asks for a model rather than reaching for Ideogram 4 or FIBO 2 Dev.
     expect(() => previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: "a koi pond at night" })).toThrow(/Auto has no image model switched on here/);
   });
 
   it("the owner's own patterns still route, and a model switched off is passed over", async () => {
     setSetting("autoImagePatterns", "koi");
     expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: "a koi pond at night" }).model.id).toBe("oss-krea2-realism");
-    expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: CAT }).model.id).toBe("oss-krea2-realism");
+    // The built-in lines are gone with that list: a prompt only they matched is a plain one now.
+    expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: CAT }).model.id).toBe(H3);
     setSetting("autoImagePatterns", "");
+    expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: CAT }).model.id).toBe("oss-krea2-realism");
     expect(getSetting("autoImagePatterns")).toBe(DEFAULT_AUTO_PATTERNS.join("\n"));
-    changeAccess([{ kind: "model", id: "oss-moss-image", on: false }]);
+    changeAccess([{ kind: "model", id: H3, on: false }, { kind: "model", id: "oss-moss-image", on: false }]);
     expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: 'a poster that says "OPEN"' }).model.id).toBe("oss-krea2-realism");
   });
 
   it("is priced before Run as the model it would pick (free on a GPU), and a pick it carries stays while it is one of Auto's", () => {
     const p = previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: "a koi pond at night" });
-    expect(p.model.id).toBe("oss-krea2-realism");
+    expect(p.model.id).toBe(H3);
     expect(p.costUsd).toBe(0);
-    expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: 'a sign that says "OPEN"' }).model.id).toBe("oss-moss-image");
+    expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: 'a sign that says "OPEN"' }).model.id).toBe(H3);
     // A run planned again (a resend, a run that waited to enter the line) keeps the model it was made with.
     expect(previewGeneration({ feature: "image", modelId: AUTO_IMAGE, prompt: CAT, auto: { model: "oss-moss-image", why: "fallback" } }).model.id).toBe("oss-moss-image");
     // An older run's Ideogram 4 or FIBO 2 Dev pick, or a pick that isn't one of Auto's, is planned again.
@@ -181,52 +191,78 @@ describe("what Auto runs on", () => {
 });
 
 describe("Auto's next model when one fails", () => {
-  it("Krea 2 Realism fails: MOSS-Image makes the same run at once, and the run says so", async () => {
-    failing = new Set(["oss-krea2-realism"]);
+  it("MiniMax H3 Image fails: Krea 2 Realism makes the same run at once, at the size asked, and the run says so", async () => {
+    failing = new Set([H3]);
     const g = await run("a red fox in deep snow", { params: { aspectRatio: "4:5", resolution: "1K" } });
     expect(g.status, g.error ?? "").toBe("succeeded");
-    expect(handed.map((h) => h.model)).toEqual(["oss-krea2-realism", "oss-moss-image"]);
-    expect(g.modelId).toBe("oss-moss-image");
+    expect(handed.map((h) => h.model)).toEqual([H3, "oss-krea2-realism"]);
+    expect(g.modelId).toBe("oss-krea2-realism");
     expect(g.request.modelId).toBe(AUTO_IMAGE);
-    expect(g.request.auto).toEqual({ model: "oss-moss-image", why: "fallback" });
+    expect(g.request.auto).toEqual({ model: "oss-krea2-realism", why: "fallback" });
     expect(g.request.notice).toBeUndefined();
     expect(g.outputs).toHaveLength(1);
-    // The same words, the shape and size asked; Working, saying which model makes it.
+    // The same words and shape; MiniMax H3 Image at its 2K, Krea 2 Realism at the 1K asked; Working, saying which model makes it.
+    expect(handed[0].input.resolution).toBe("2K");
     expect(handed[1].input.prompt).toBe("a red fox in deep snow");
     expect(handed[1].input.aspectRatio).toBe("4:5");
+    expect(handed[1].input.resolution).toBe("1K");
     expect(handed[1].run.status).toBe("running");
-    expect(handed[1].run.message).toBe("Making it with MOSS-Image");
+    expect(handed[1].run.message).toBe("Making it with Krea 2 Realism");
     expect(rowsSince(g.id)).toBe(1);
-    expect(line(g)).toContain("Auto · made with MOSS-Image · Auto&#x27;s next model");
+    expect(line(g)).toContain("Auto · made with Krea 2 Realism · Auto&#x27;s next model");
     expect(line(g)).not.toContain("declined");
     expect(g.declinedCards).toBeUndefined();
   });
 
-  it("lettering: MOSS-Image fails, Krea 2 Realism makes it", async () => {
-    failing = new Set(["oss-moss-image"]);
-    const g = await run('a storefront with "OPEN LATE" painted on the glass');
+  it("MiniMax H3 Image and Krea 2 Realism fail: MOSS-Image makes it", async () => {
+    failing = new Set([H3, "oss-krea2-realism"]);
+    const g = await run("a red fox in deep snow");
     expect(g.status, g.error ?? "").toBe("succeeded");
-    expect(handed.map((h) => h.model)).toEqual(["oss-moss-image", "oss-krea2-realism"]);
-    expect(g.request.auto).toEqual({ model: "oss-krea2-realism", why: "fallback" });
+    expect(handed.map((h) => h.model)).toEqual([H3, "oss-krea2-realism", "oss-moss-image"]);
+    expect(g.request.auto).toEqual({ model: "oss-moss-image", why: "fallback" });
     expect(rowsSince(g.id)).toBe(1);
   });
 
-  it("when both fail, each was tried once, never Ideogram 4 or FIBO 2 Dev, and the run fails once as one run", async () => {
-    failing = new Set(["oss-krea2-realism", "oss-moss-image", "oss-fibo2-dev", "oss-ideogram-4"]);
+  it("lettering: MiniMax H3 Image fails, MOSS-Image makes it; MOSS-Image fails too, Krea 2 Realism", async () => {
+    failing = new Set([H3]);
+    const g = await run('a storefront with "OPEN LATE" painted on the glass');
+    expect(g.status, g.error ?? "").toBe("succeeded");
+    expect(handed.map((h) => h.model)).toEqual([H3, "oss-moss-image"]);
+    expect(g.request.auto).toEqual({ model: "oss-moss-image", why: "fallback" });
+    expect(rowsSince(g.id)).toBe(1);
+
+    handed = [];
+    failing = new Set([H3, "oss-moss-image"]);
+    const k = await run('a neon sign that says "LATE"');
+    expect(k.status, k.error ?? "").toBe("succeeded");
+    expect(handed.map((h) => h.model)).toEqual([H3, "oss-moss-image", "oss-krea2-realism"]);
+    expect(k.request.auto).toEqual({ model: "oss-krea2-realism", why: "fallback" });
+  });
+
+  it("a prompt the patterns match: Krea 2 Realism first, then MiniMax H3 Image", async () => {
+    failing = new Set(["oss-krea2-realism"]);
+    const g = await run(CAT);
+    expect(g.status, g.error ?? "").toBe("succeeded");
+    expect(handed.map((h) => h.model)).toEqual(["oss-krea2-realism", H3]);
+    expect(g.request.auto).toEqual({ model: H3, why: "fallback" });
+  });
+
+  it("when all fail, each was tried once, never Ideogram 4 or FIBO 2 Dev, and the run fails once as one run", async () => {
+    failing = new Set([H3, "oss-krea2-realism", "oss-moss-image", "oss-fibo2-dev", "oss-ideogram-4"]);
     const g = await run("a red fox in deep snow");
     expect(g.status).toBe("failed");
     expect(g.error).toMatch(/Out of memory/);
-    expect(handed.map((h) => h.model)).toEqual(["oss-krea2-realism", "oss-moss-image"]);
+    expect(handed.map((h) => h.model)).toEqual([H3, "oss-krea2-realism", "oss-moss-image"]);
     expect(g.request.modelId).toBe(AUTO_IMAGE);
     expect(rowsSince(g.id)).toBe(1);
   });
 
-  it("the next model switched off: the run fails as its first model did", async () => {
-    changeAccess([{ kind: "model", id: "oss-moss-image", on: false }]);
-    failing = new Set(["oss-krea2-realism"]);
+  it("the next models switched off: the run fails as its first model did", async () => {
+    changeAccess([{ kind: "model", id: "oss-krea2-realism", on: false }, { kind: "model", id: "oss-moss-image", on: false }]);
+    failing = new Set([H3]);
     const g = await run("a red fox in deep snow");
     expect(g.status).toBe("failed");
-    expect(handed.map((h) => h.model)).toEqual(["oss-krea2-realism"]);
+    expect(handed.map((h) => h.model)).toEqual([H3]);
   });
 });
 

@@ -5,10 +5,12 @@ import { startFakeBilling, FAKE_POLICY, type FakeBilling } from "./helpers/fake-
 import { tempDir } from "./helpers/temp-dir";
 
 /**
- * An account's free run of Auto on this install's GPUs: Auto picks its model there as anywhere (Krea 2 Realism, or
- * MOSS-Image for lettering), and when that model fails, the other one makes the same run on the same GPUs. One press of
- * Run stays one run: the hourly count, the runs at once and the billing hold count it once; the account reads which
- * model made its picture. The price before Run is the picked model's. (The owner's runs: tests/auto-image-runs.test.ts.)
+ * An account's free run of Auto on this install's GPUs: Auto picks its model there as anywhere (MiniMax H3 Image, then
+ * Krea 2 Realism, or MOSS-Image for lettering), MiniMax H3 Image only where a worker allowed its lane has its files and
+ * the VRAM it needs; when a model fails, the next one makes the same run on the same GPUs. One press of Run stays one
+ * run: the hourly count, the runs at once and the billing hold count it once; the account reads which model made its
+ * picture. The price before Run is the picked model's. (The owner's runs: tests/auto-image-runs.test.ts; a GPU the check
+ * reads: tests/auto-image-gpu.test.ts.)
  */
 
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
@@ -52,6 +54,7 @@ const { AUTO_IMAGE } = await import("@/lib/auto-image");
 const { autoLine } = await import("@/lib/auto-image");
 const { encodePng } = await import("@/server/png");
 
+const H3 = "oss-minimax-h3-image";
 const HOST = "localhost:3000";
 const SITE_HEADERS = { host: HOST, "sec-fetch-site": "same-origin", origin: `http://${HOST}` };
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
@@ -80,14 +83,20 @@ const post = async (body: Record<string, unknown>, cookie: string, preview = fal
   return { status: r.status, body: (await r.json()) as { items?: { id: string }[]; code?: string; error?: string; modelId?: string; modelName?: string; place?: string; quote?: Record<string, unknown> } };
 };
 
-/** A worker as the owner adds it, connected: the line is open for the account's runs. */
-function standInWorker() {
+/**
+ * A worker as the owner adds it, connected: the line is open for the account's runs. `vramGb`: its card (96 GB by
+ * default); `without`: workflows whose files it doesn't hold.
+ */
+function standInWorker(o: { vramGb?: number; without?: string[] } = {}) {
   const w = pool.addWorker(`stand-in-${++n}`);
   const lanes = allLanes(loadIndex(), sha);
   pool.patchWorker(w.id, { paused: false, hours: { always: true }, allow: Object.fromEntries(lanes.map((l) => [l.lane, { delayMs: 0 }])), claimAfterMs: 0 });
+  const workflows = loadManifest()
+    .workflows.map((x) => x.id)
+    .filter((id) => !o.without?.includes(id));
   db()
     .prepare("UPDATE relay_workers SET lanes_json = ?, facts_json = ?, catalog_version = ?, protocol = 3 WHERE id = ?")
-    .run(JSON.stringify({ lanes: lanes.map((l) => l.lane), workflows: loadManifest().workflows.map((x) => x.id) }), JSON.stringify({ vramBytes: 96 * 2 ** 30 }), catalogVersion(), w.id);
+    .run(JSON.stringify({ lanes: lanes.map((l) => l.lane), workflows }), JSON.stringify({ vramBytes: (o.vramGb ?? 96) * 2 ** 30 }), catalogVersion(), w.id);
   db().prepare("UPDATE relay_workers SET seen_at = ?, paused_local = 0 WHERE id = ?").run(Date.now(), w.id);
   return w;
 }
@@ -161,7 +170,7 @@ afterEach(() => {
 });
 
 describe("an account's free run of Auto on this install's GPUs", () => {
-  it("a plain prompt: Krea 2 Realism, with no Ideogram 4 or FIBO 2 Dev job", async () => {
+  it("a plain prompt: MiniMax H3 Image, with no Ideogram 4 or FIBO 2 Dev job", async () => {
     const a = account();
     accountId = a.id;
     const r = await post({ feature: "image", modelId: AUTO_IMAGE, prompt: "a red fox in deep snow", params: { aspectRatio: "4:5" } }, a.cookie);
@@ -169,31 +178,31 @@ describe("an account's free run of Auto on this install's GPUs", () => {
     const g = await settled(r.body.items![0].id);
     expect(g.status, g.error ?? "").toBe("succeeded");
     expect(g.place).toBe("pool");
-    expect(sent.map((s) => s.model)).toEqual(["oss-krea2-realism"]);
-    expect(g.request.auto).toEqual({ model: "oss-krea2-realism", why: "plain" });
-    expect(autoLine(g)).toBe("Auto · made with Krea 2 Realism");
+    expect(sent.map((s) => s.model)).toEqual([H3]);
+    expect(g.request.auto).toEqual({ model: H3, why: "plain" });
+    expect(autoLine(g)).toBe("Auto · made with MiniMax H3 Image");
   });
 
-  it("Krea 2 Realism fails: MOSS-Image makes it there at once, and it counts as one run", async () => {
+  it("MiniMax H3 Image fails: Krea 2 Realism makes it there at once, and it counts as one run", async () => {
     const a = account();
     accountId = a.id;
-    failing = new Set(["oss-krea2-realism"]);
+    failing = new Set([H3]);
     const r = await post({ feature: "image", modelId: AUTO_IMAGE, prompt: "a red fox in deep snow", params: { aspectRatio: "4:5" } }, a.cookie);
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     const id = r.body.items![0].id;
     const g = await settled(id);
     expect(g.status, g.error ?? "").toBe("succeeded");
     expect(g.place).toBe("pool");
-    expect(g.modelId).toBe("oss-moss-image");
+    expect(g.modelId).toBe("oss-krea2-realism");
     expect(g.request.modelId).toBe(AUTO_IMAGE);
-    expect(g.request.auto).toEqual({ model: "oss-moss-image", why: "fallback" });
-    expect(autoLine(g)).toBe("Auto · made with MOSS-Image · Auto's next model");
+    expect(g.request.auto).toEqual({ model: "oss-krea2-realism", why: "fallback" });
+    expect(autoLine(g)).toBe("Auto · made with Krea 2 Realism · Auto's next model");
     expect(sent.map((s) => [s.model, s.id])).toEqual([
+      [H3, id],
       ["oss-krea2-realism", id],
-      ["oss-moss-image", id],
     ]);
     expect(sent[1].tile.status).toBe("running");
-    expect(sent[1].tile.message).toBe("Making it with MOSS-Image");
+    expect(sent[1].tile.message).toBe("Making it with Krea 2 Realism");
     expect(sent[1].tile.queue).toBeUndefined();
     expect(sent.map((s) => s.going)).toEqual([1, 1]);
     expect(sent.map((s) => s.hourly)).toEqual([1, 1]);
@@ -201,36 +210,65 @@ describe("an account's free run of Auto on this install's GPUs", () => {
     expect(rowsOf(a.id)).toBe(1);
   });
 
-  it("lettering: MOSS-Image first, then Krea 2 Realism when it fails, still one run", async () => {
+  it("lettering: MiniMax H3 Image first, then MOSS-Image when it fails, still one run", async () => {
     const a = account();
     accountId = a.id;
-    failing = new Set(["oss-moss-image"]);
+    failing = new Set([H3]);
     const r = await post({ feature: "image", modelId: AUTO_IMAGE, prompt: 'a sign that says "LIGHTHOUSE" at dusk' }, a.cookie);
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     const g = await settled(r.body.items![0].id);
     expect(g.status, g.error ?? "").toBe("succeeded");
-    expect(sent.map((s) => s.model)).toEqual(["oss-moss-image", "oss-krea2-realism"]);
-    expect(g.modelId).toBe("oss-krea2-realism");
-    expect(g.request.auto).toEqual({ model: "oss-krea2-realism", why: "fallback" });
+    expect(sent.map((s) => s.model)).toEqual([H3, "oss-moss-image"]);
+    expect(g.modelId).toBe("oss-moss-image");
+    expect(g.request.auto).toEqual({ model: "oss-moss-image", why: "fallback" });
     expect(sent.map((s) => s.hourly)).toEqual([1, 1]);
     expect(admitted(a.id)).toBe(1);
     expect(rowsOf(a.id)).toBe(1);
   });
 
-  it("both fail: each tried once, then the run fails once, as one run", async () => {
+  it("all fail: each tried once, then the run fails once, as one run", async () => {
     const a = account();
     accountId = a.id;
-    failing = new Set(["oss-krea2-realism", "oss-moss-image"]);
+    failing = new Set([H3, "oss-krea2-realism", "oss-moss-image"]);
     const r = await post({ feature: "image", modelId: AUTO_IMAGE, prompt: "a lighthouse at dusk" }, a.cookie);
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     const g = await settled(r.body.items![0].id);
     expect(g.status).toBe("failed");
-    expect(sent.map((s) => s.model)).toEqual(["oss-krea2-realism", "oss-moss-image"]);
+    expect(sent.map((s) => s.model)).toEqual([H3, "oss-krea2-realism", "oss-moss-image"]);
     expect(admitted(a.id)).toBe(1);
     expect(rowsOf(a.id)).toBe(1);
   });
 
-  it("a prompt the patterns match goes to Krea 2 Realism, and so does a plain one; the price before Run is that model's", async () => {
+  it("workers whose cards are too small for MiniMax H3 Image's lane: Krea 2 Realism, or MOSS-Image for lettering, priced as that", async () => {
+    db().prepare("DELETE FROM relay_workers").run();
+    standInWorker({ vramGb: 24 });
+    const a = account();
+    accountId = a.id;
+    const price = await post({ feature: "image", modelId: AUTO_IMAGE, prompt: "a koi pond at night" }, a.cookie, true);
+    expect(price.body).toMatchObject({ place: "pool", modelId: "oss-krea2-realism", quote: { allowed: true } });
+    const words = await post({ feature: "image", modelId: AUTO_IMAGE, prompt: 'a sign that says "OPEN"' }, a.cookie, true);
+    expect(words.body).toMatchObject({ place: "pool", modelId: "oss-moss-image" });
+    // When Krea 2 Realism fails there, MOSS-Image makes it: MiniMax H3 Image is never sent to a card that can't take it.
+    failing = new Set(["oss-krea2-realism"]);
+    const r = await post({ feature: "image", modelId: AUTO_IMAGE, prompt: "a red fox in deep snow" }, a.cookie);
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const g = await settled(r.body.items![0].id);
+    expect(g.status, g.error ?? "").toBe("succeeded");
+    expect(sent.map((s) => s.model)).toEqual(["oss-krea2-realism", "oss-moss-image"]);
+  });
+
+  it("workers without MiniMax H3 Image's files: the next model; one worker with them is enough", async () => {
+    db().prepare("DELETE FROM relay_workers").run();
+    standInWorker({ without: ["minimax-h3-image-t2i", "minimax-h3-image-edit"] });
+    const a = account();
+    accountId = a.id;
+    const plain = { feature: "image", modelId: AUTO_IMAGE, prompt: "a koi pond at night" };
+    expect((await post(plain, a.cookie, true)).body).toMatchObject({ place: "pool", modelId: "oss-krea2-realism" });
+    standInWorker({ vramGb: 32 });
+    expect((await post(plain, a.cookie, true)).body).toMatchObject({ place: "pool", modelId: H3, modelName: "MiniMax H3 Image" });
+  });
+
+  it("a prompt the patterns match goes to Krea 2 Realism, a plain one to MiniMax H3 Image; the price before Run is that model's", async () => {
     const a = account();
     accountId = a.id;
     const cat = { feature: "image", modelId: AUTO_IMAGE, prompt: "a cat in an antique-gold paillette gown, her hair lifting in the wind" };
@@ -238,7 +276,7 @@ describe("an account's free run of Auto on this install's GPUs", () => {
     expect(price.status, JSON.stringify(price.body)).toBe(200);
     expect(price.body).toMatchObject({ place: "pool", modelId: "oss-krea2-realism", modelName: "Krea 2 Realism", quote: { allowed: true } });
     const plain = await post({ ...cat, prompt: "a koi pond at night" }, a.cookie, true);
-    expect(plain.body).toMatchObject({ place: "pool", modelId: "oss-krea2-realism", quote: { allowed: true } });
+    expect(plain.body).toMatchObject({ place: "pool", modelId: H3, modelName: "MiniMax H3 Image", quote: { allowed: true } });
     const r = await post(cat, a.cookie);
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     const g = await settled(r.body.items![0].id);

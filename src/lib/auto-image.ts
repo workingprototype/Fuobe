@@ -11,16 +11,28 @@ import type { AutoPick, AutoWhy, Operation } from "./catalog/types";
 export const AUTO_IMAGE = "oss-auto-image";
 export const AUTO_NAME = "Auto";
 
-/** Every plain prompt, an account's, a guest's or the owner's: natural skin, light and faces. */
+/**
+ * Every plain prompt and every lettering prompt starts here, an account's, a guest's or the owner's: photoreal people and
+ * products, painting, illustration and exact lettering. Its lane needs a large GPU (AUTO_LARGE_MODELS): where the GPUs a
+ * run goes to can't take it, Auto starts on the next model.
+ */
+export const AUTO_LEAD_MODEL = "oss-minimax-h3-image";
+/** Next for a plain prompt, and first for a prompt the setting's patterns match: natural skin, light and faces. */
 export const AUTO_PHOTO_MODEL = "oss-krea2-realism";
-/** Lettering (posters, logos, signs, words in quotes): MOSS-Image follows the words and draws them in place. */
+/** Next for lettering (posters, logos, signs, words in quotes): MOSS-Image follows the words and draws them in place. */
 export const AUTO_TEXT_MODEL = "oss-moss-image";
 /**
- * Auto's text-to-image models, in order for a plain prompt; lettering takes them the other way round. When the first
- * is switched off or can't run here, the run is planned on the other; when it fails, the other makes the same run
- * (src/server/generations.ts autoFails), each model at most once.
+ * Auto's text-to-image models, in order for a plain prompt (lettering takes MOSS-Image before Krea 2 Realism; a prompt the
+ * patterns match starts on Krea 2 Realism). When one is switched off or can't run here, the run is planned on the next;
+ * when it fails, the next makes the same run (src/server/generations.ts autoFails), each model at most once.
  */
-export const AUTO_T2I_MODELS = [AUTO_PHOTO_MODEL, AUTO_TEXT_MODEL] as const;
+export const AUTO_T2I_MODELS = [AUTO_LEAD_MODEL, AUTO_PHOTO_MODEL, AUTO_TEXT_MODEL] as const;
+/**
+ * Auto's models whose lane needs a large GPU (MiniMax H3 Image: about 32 GB for its 21 GB model and 27 GB text encoder).
+ * The server plans one only where the GPUs the run goes to can take that lane and hold its files (src/server/auto-gpu.ts);
+ * elsewhere the run starts on the next model.
+ */
+export const AUTO_LARGE_MODELS: ReadonlySet<string> = new Set([AUTO_LEAD_MODEL]);
 /**
  * Ideogram 4 picked by name (Auto never plans it): when it declines a run (its grey "blocked" card for every picture),
  * the same run is made by these, in order, each only if the one before fails.
@@ -43,16 +55,16 @@ export const autoModelsFor = (op: Operation): readonly string[] => (op === "t2i"
 export const AUTO_MODELS: ReadonlySet<string> = new Set([...AUTO_T2I_MODELS, ...Object.values(AUTO_EDIT_MODELS).flat()]);
 
 /**
- * Prompts about lettering, which go to MOSS-Image first. Words in quotes count too ("a sign that says “OPEN”").
+ * Prompts about lettering, which go to MOSS-Image right after MiniMax H3 Image. Words in quotes count too ("a sign that
+ * says “OPEN”").
  */
 const TEXT_WORDS =
   /\b(text|texts|typography|typographic|typeface|font|fonts|lettering|letters|logo|logos|logotype|wordmark|monogram|poster|posters|signage|signs?|billboard|banner|headline|caption|calligraphy|graffiti|label|labels|menu|book cover|album cover|magazine cover|infographic|says|that reads)\b/i;
 const QUOTED = /["“”«»][^"“”«»\n]{2,80}["“”«»]/;
 
 /**
- * The setting's list (Settings → Auto image model): prompts Auto starts on Krea 2 Realism, the model every plain prompt
- * starts on too, and whose run details name the line they matched. Lettering still goes to MOSS-Image first. One per
- * line: a word or phrase matches as a whole word (a space or a hyphen matches either), any other line is a regular
+ * The setting's list (Settings → Auto image model): prompts Auto starts on Krea 2 Realism (then MiniMax H3 Image, then
+ * MOSS-Image), and whose run details name the line they matched. Lettering still follows its own order. One per line: a word or phrase matches as a whole word (a space or a hyphen matches either), any other line is a regular
  * expression, and a line that starts with "#" is a note; case never matters.
  */
 export const DEFAULT_AUTO_PATTERNS: readonly string[] = [
@@ -152,19 +164,35 @@ export interface AutoAsk {
 
 /**
  * The models Auto would plan a run on, best first, and why: a picture to work from → the studio's edit model for its
- * operation; lettering → MOSS-Image, then Krea 2 Realism; a prompt the setting's patterns match, and anything else →
- * Krea 2 Realism, then MOSS-Image. The same for the owner, an account and a guest. The server plans the first one that
- * is switched on and runs the operation (src/server/generations.ts autoRouted), and the next one makes the run when it
- * fails (autoNext).
+ * operation; lettering → MiniMax H3 Image, then MOSS-Image, then Krea 2 Realism; a prompt the setting's patterns match →
+ * Krea 2 Realism, then MiniMax H3 Image, then MOSS-Image; anything else → MiniMax H3 Image, then Krea 2 Realism, then
+ * MOSS-Image. The same for the owner, an account and a guest. The server plans the first one that is switched on, runs
+ * the operation and fits the GPUs the run goes to (src/server/generations.ts autoRouted), and the next one makes the run
+ * when it fails (autoNext).
  */
 export function autoCandidates(ask: AutoAsk, patterns: readonly { line: string; re: RegExp }[]): { models: string[]; why: AutoWhy; pattern?: string } {
   const op = ask.op && ask.op !== "t2i" ? ask.op : (ask.images ?? 0) > 0 ? "edit" : "t2i";
   if (op !== "t2i") return { models: [...(AUTO_EDIT_MODELS[op] ?? [])], why: "edit" };
   const words = ask.prompt ?? "";
-  if (asksForText(words)) return { models: [AUTO_TEXT_MODEL, AUTO_PHOTO_MODEL], why: "text" };
+  if (asksForText(words)) return { models: [AUTO_LEAD_MODEL, AUTO_TEXT_MODEL, AUTO_PHOTO_MODEL], why: "text" };
   const pattern = matchedPattern(words, patterns);
-  if (pattern) return { models: [...AUTO_T2I_MODELS], why: "trigger", pattern };
+  if (pattern) return { models: [AUTO_PHOTO_MODEL, AUTO_LEAD_MODEL, AUTO_TEXT_MODEL], why: "trigger", pattern };
   return { models: [...AUTO_T2I_MODELS], why: "plain" };
+}
+
+/** A size tier's place in order ("1K" < "1.5K" < "2K" < "4K"); NaN for a size that isn't a tier. */
+const tierOf = (r: string) => (/^\d+(\.\d+)?k$/i.test(r) ? parseFloat(r) : NaN);
+
+/**
+ * The size a run of Auto asks of the model it picks: as asked, unless every size that model makes is larger (MiniMax H3
+ * Image makes 2K and 4K, so Auto's 1K and 1.5K run at its 2K default). A size that isn't a tier stays as it is.
+ */
+export function autoResolution(asked: string | undefined, model: { options: { resolutions?: readonly string[] }; defaults?: { resolution?: string } } | undefined): string | undefined {
+  const sizes = model?.options.resolutions;
+  const to = model?.defaults?.resolution;
+  if (!asked || !sizes?.length || !to || sizes.includes(asked)) return asked;
+  const t = tierOf(asked);
+  return Number.isFinite(t) && sizes.every((s) => tierOf(s) > t) ? to : asked;
 }
 
 /** Auto's models left for a run, in its order, after the ones that tried it (each model makes a run at most once). */

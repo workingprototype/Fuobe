@@ -37,7 +37,7 @@ import { finishSteps, mosaicPixels, unionMasks } from "@/lib/soul-post";
 import { ANGLES_ORIGINAL, MOSAIC_SCALE } from "@/lib/catalog/open-tools";
 import { computeDimensions } from "@/lib/comfy";
 import { captionFromWords, captionWords, parseCaption } from "@/lib/ideogram-caption";
-import { AUTO_IMAGE, autoCandidates, autoModelsFor, autoNext, autoPatterns, nextDeclinedFallback } from "@/lib/auto-image";
+import { AUTO_IMAGE, AUTO_LARGE_MODELS, autoCandidates, autoModelsFor, autoNext, autoPatterns, autoResolution, nextDeclinedFallback } from "@/lib/auto-image";
 import { h3Frames, h3Prompt, inH3Layout } from "@/lib/h3-prompt";
 import { h3ReferenceTags, h3TalkPrompt } from "@/lib/h3-references";
 import {
@@ -66,6 +66,7 @@ import { listElements } from "./elements";
 import { markStale } from "./gpu/snapshots";
 import { loadIndex } from "./gpu/index-file";
 import { qwen21Gpu } from "./qwen21-gpu";
+import { autoFitsHere } from "./auto-gpu";
 import { h3Gpu } from "./h3-gpu";
 import { H3_TIER_PARAM, H3_UNET_PARAM } from "@/lib/gpu/h3-tier";
 import { DETAILS_MAX_IMAGES, GPU_PARAM, QWEN21_SPEED, speedLora } from "@/lib/qwen21-speed";
@@ -1444,16 +1445,23 @@ function autoPatternsNow(): ReturnType<typeof autoPatterns> {
  * A run of Auto (src/lib/auto-image.ts) as the model it picks runs it: the pick it carries (a run planned again: a resend,
  * a run that waited to enter the line, Auto's next model after the one before failed) while it is one of Auto's models
  * for the operation (an older run's Ideogram 4 or FIBO 2 Dev picture is planned again), else the first of its picks for these words
- * and pictures that is switched on and runs the operation (Settings → Models & licences). A picture to work from makes it
- * an edit. Any other request as it is.
+ * and pictures that is switched on and runs the operation (Settings → Models & licences), passing over a model whose lane
+ * needs a large GPU where the GPUs the run goes to can't take it (src/server/auto-gpu.ts; when no other is left, it is
+ * planned all the same). A picture to work from makes it an edit. The picked model makes the run at the size asked, or at
+ * its own default when it makes only larger sizes (autoResolution). Any other request as it is.
  */
 function autoRouted(req: GenerationRequest): GenerationRequest {
   if (req.modelId !== AUTO_IMAGE) return req;
   const images = req.inputs?.images?.length ?? 0;
+  const sized = (r: GenerationRequest, model: string): GenerationRequest => {
+    const asked = r.params?.resolution;
+    const to = autoResolution(asked, getModel(model));
+    return to === asked ? r : { ...r, params: { ...r.params, resolution: to } };
+  };
   if (req.auto) {
     const m = getModel(req.auto.model);
     const op = (req.op && m?.routes.some((r) => r.op === req.op) ? req.op : undefined) ?? (images ? "edit" : "t2i");
-    if (autoModelsFor(op).includes(req.auto.model)) return { ...req, modelId: req.auto.model, op };
+    if (autoModelsFor(op).includes(req.auto.model)) return sized({ ...req, modelId: req.auto.model, op }, req.auto.model);
   }
   const c = autoCandidates({ prompt: req.prompt, op: req.op, images }, autoPatternsNow());
   const op: Operation = c.why === "edit" ? (req.op && req.op !== "t2i" ? req.op : "edit") : "t2i";
@@ -1466,9 +1474,10 @@ function autoRouted(req: GenerationRequest): GenerationRequest {
       return false;
     }
   };
-  const model = c.models.find(runs);
+  const fits = (id: string) => !AUTO_LARGE_MODELS.has(id) || autoFitsHere(id, op);
+  const model = c.models.find((id) => runs(id) && fits(id)) ?? c.models.find(runs);
   if (!model) throw new Error(op === "t2i" ? "Auto has no image model switched on here. Pick a model" : "Auto has no edit model switched on here. Pick a model");
-  return { ...req, modelId: model, op, auto: { model, why: c.why } };
+  return sized({ ...req, modelId: model, op, auto: { model, why: c.why } }, model);
 }
 
 /** The LoRA files a graph loads itself (not injected), so a run downloads the ones ComfyUI lacks before it starts. */
@@ -3284,9 +3293,9 @@ function declinedFallback(stored: GenerationRequest, modelId: string): Generatio
  * An Ideogram 4 run whose every picture was its "blocked" card, or a run of Auto whose model failed (autoFails), is made
  * again in its place: the same run (its id, its place, its turn in the line, its billing hold), as the same job of its
  * batch, through the same submit as every run (this install's workers, the owner's ComfyUI, an account's own GPU), never
- * by a model that tried it before. A run of Auto goes to Auto's models left in its order (src/lib/auto-image.ts: Krea 2
- * Realism and MOSS-Image, never Ideogram 4), each at most once, and keeps Auto, its pick saying why (`why: "fallback"`,
- * or "declined" after Ideogram 4 declined an older run); Ideogram 4 picked by name goes to DECLINED_FALLBACKS in order and
+ * by a model that tried it before. A run of Auto goes to Auto's models left in its order (src/lib/auto-image.ts: MiniMax H3
+ * Image where the GPUs can take it, Krea 2 Realism and MOSS-Image, never Ideogram 4), each at most once, and keeps Auto,
+ * its pick saying why (`why: "fallback"`, or "declined" after Ideogram 4 declined an older run); Ideogram 4 picked by name goes to DECLINED_FALLBACKS in order and
  * names the model that made it (its model and its request's notice). Each next model is the first switched on that goes
  * where the run went, and only when the one before fails (declinedFails).
  * None is a new press of Run: no limit counts it again, and no new row or hold is made. The run's tile says which model
@@ -3299,12 +3308,9 @@ function declinedAgain(r: Row, declined: DeclinedMeta, later = false): boolean {
     const auto = stored.modelId === AUTO_IMAGE;
     const account = stored.account;
     // Planned where the run went: this install's GPUs (its stamp: place, class, hold), the account's own, or the owner's.
-    const planned = (req: GenerationRequest) =>
-      account && stored.place === "pool"
-        ? runOnPool(account, () => withRunStamp(stampOf(stored), () => prepare(req)))
-        : account
-          ? asAccount(account, () => prepare(req))
-          : prepare(req);
+    const there = <T,>(fn: () => T): T =>
+      account && stored.place === "pool" ? runOnPool(account, () => withRunStamp(stampOf(stored), fn)) : account ? asAccount(account, fn) : fn();
+    const planned = (req: GenerationRequest) => there(() => prepare(req));
     let asked = stored;
     let model: string | undefined;
     let p: ReturnType<typeof prepare> | undefined;
@@ -3312,7 +3318,8 @@ function declinedAgain(r: Row, declined: DeclinedMeta, later = false): boolean {
     // fallbacks after the one that made it now (a legacy "retry" stage has no model: it starts at the first).
     const tried = auto ? [...new Set([...(declined.tried ?? []), r.model_id])] : undefined;
     const order: string[] = [];
-    if (tried) order.push(...autoNext(autoCandidates({ prompt: stored.prompt, op: "t2i" }, autoPatternsNow()).models, tried));
+    // (A model whose lane needs a large GPU only where the GPUs the run went to can take it: src/server/auto-gpu.ts.)
+    if (tried) order.push(...autoNext(autoCandidates({ prompt: stored.prompt, op: "t2i" }, autoPatternsNow()).models, tried).filter((m) => !AUTO_LARGE_MODELS.has(m) || there(() => autoFitsHere(m, "t2i"))));
     else for (let m = nextDeclinedFallback(declined.model); m; m = nextDeclinedFallback(m)) order.push(m);
     const why = declined.cause === "failed" ? "fallback" : "declined";
     for (const m of order) {
@@ -3421,8 +3428,8 @@ const AUTO_NEXT_CAUSES: ReadonlySet<TroubleCause> = new Set<TroubleCause>([
 ]);
 
 /**
- * A text-to-image run of Auto whose model failed: the same run is made by Auto's next model (Krea 2 Realism, then
- * MOSS-Image; lettering the other way round), as a run Ideogram 4 declined is (declinedAgain): the same row, hold and
+ * A text-to-image run of Auto whose model failed: the same run is made by Auto's next model (after MiniMax H3 Image, Krea 2
+ * Realism, then MOSS-Image; lettering takes MOSS-Image first), as a run Ideogram 4 declined is (declinedAgain): the same row, hold and
  * place in line, nothing charged again. False: it goes on; null: not such a run, or no model left, so it fails as any run.
  */
 function autoFails(id: string, said: string, trouble?: Diagnosis): false | null {

@@ -1,3 +1,4 @@
+import { AUTO_IMAGE, AUTO_LEAD_MODEL } from "@/lib/auto-image";
 import { getModel } from "@/lib/catalog";
 import { estimateCost } from "@/lib/catalog/plan";
 import type { StartQuote } from "@/lib/connections";
@@ -33,9 +34,11 @@ export function startQuotes(): Record<"image" | "video" | "edit", StartQuote> {
     const usd = cloud ? estimateCost(cloud, { ...cloud.defaults }, 1, undefined, false, PRERENDER) : null;
     // The providers that host each model: a key for another one runs it as a demo.
     const providers = (m: NonNullable<typeof cloud>) => [...new Set(m.routes.map((r) => r.provider))];
+    // Auto names the model it starts on ("Auto (MiniMax H3 Image first)"): a run goes there where the GPU can take it.
+    const lead = open?.id === AUTO_IMAGE ? getModel(AUTO_LEAD_MODEL) : undefined;
     return {
       cloud: cloud ? { name: cloud.name, price: usd ? `about ${formatCost(usd)} ${what(cloud.defaults?.duration)}` : "priced by the provider", providers: providers(cloud) } : null,
-      open: open ? { name: open.name, providers: providers(open) } : null,
+      open: open ? { name: lead ? `${open.name} (${lead.name} first)` : open.name, providers: providers(open) } : null,
     };
   };
   return {
