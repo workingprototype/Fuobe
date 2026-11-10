@@ -1726,9 +1726,9 @@ export const APPS: Preset[] = [
   }),
   videoApp({
     id: "app-yes-kiss",
-    name: "Mugshot",
+    name: "Surprise Kiss",
     category: "Fun",
-    description: "A playful police booking shot",
+    description: "A quick kiss on the cheek, then a big yes",
     icon: "HeartHandshake",
     hue: 350,
     prompt:
