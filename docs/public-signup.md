@@ -196,6 +196,11 @@ so the callback address matches the one registered.
   user id is kept (table `auth_oauth_links`), never a code or a token. The account's email then counts
   as confirmed, and an optional billing service hears `emailVerified: true` and `signIn: "google"` or
   `"github"` ([billing-hook.md](billing-hook.md)).
+- **An unconfirmed email is taken over.** Email sign-up doesn't confirm the address, so someone else
+  may have set an account's password. When a provider's user first reaches an account by its email
+  and that email was never confirmed, the account's password stops working and its other sign-ins
+  end; it then reads as an account made with the provider (below). An account whose email was
+  confirmed keeps its password.
 - **No password at first.** An account made with a provider has no password: no password logs in to
   it. **Settings → Account → Set a password** gives it one (`PATCH /api/auth/me` with
   `{ "next" }`), and deleting it asks for no password. Both need a sign-in with the provider in the

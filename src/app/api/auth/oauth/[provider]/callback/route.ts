@@ -7,6 +7,7 @@ import {
   accountWithEmail,
   createOAuthAccount,
   createSession,
+  claimUnconfirmedAccount,
   linkOAuth,
   LoginGuard,
   noteSignIn,
@@ -77,7 +78,8 @@ export async function GET(request: Request, ctx: RouteContext<"/api/auth/oauth/[
   // Public sign-up may have been switched off while the visitor was at the provider.
   if (!publicSignup(request.headers.get("host"))) return back("failed");
 
-  let account: Account | undefined = oauthLinkedAccount(provider, who.subject) ?? accountWithEmail(who.email);
+  const linked = oauthLinkedAccount(provider, who.subject);
+  let account: Account | undefined = linked ?? accountWithEmail(who.email);
   let made = false;
   if (!account) {
     const refused = beginSignup(key);
@@ -98,6 +100,9 @@ export async function GET(request: Request, ctx: RouteContext<"/api/auth/oauth/[
     // An optional billing service hears of it (none set: nothing is sent).
     accountEvent("created", accountFacts(account));
   } else {
+    // Found by its email, never confirmed: the provider's verified user takes it over, and a password someone else may
+    // have set stops working (claimUnconfirmedAccount).
+    if (!linked) account = claimUnconfirmedAccount(account, provider, who.subject);
     linkOAuth(account.id, provider, who.subject);
     recordLogin(account.id);
     // Signed in with the provider, whose email is verified: the account's email counts as confirmed from now on.

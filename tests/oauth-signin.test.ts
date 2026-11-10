@@ -306,14 +306,18 @@ describe("the callback", () => {
     expect(body.account).toEqual({ email: "new.person@example.com", providers: ["google"], noPassword: true });
   });
 
+  /** An account whose email is confirmed already (as a provider's sign-in or the billing side would say). */
+  const confirmed = (id: string) => authDb().prepare("UPDATE auth_accounts SET extra_json = json_set(COALESCE(extra_json, '{}'), '$.emailVerifiedAt', 1) WHERE id = ?").run(id);
+
   it("signs in to the account with the same email, and later finds it by the provider's id", async () => {
     const a = auth.createAccount("existing@example.com", "long enough");
+    confirmed(a.id);
     who.github = { id: 777, emails: [{ email: "Existing@example.com", primary: true, verified: true }] };
     const r = await signIn("github", { next: "/shorts" });
     expect(location(r).pathname + location(r).search).toBe("/shorts");
     expect(sessionAccount()?.id).toBe(a.id);
     expect(authDb().prepare("SELECT provider, subject, made_account FROM auth_oauth_links WHERE account_id = ?").all(a.id)).toEqual([{ provider: "github", subject: "777", made_account: 0 }]);
-    // Its password still works, and it still has one.
+    // Its email was confirmed: its password still works, and it still has one.
     expect((await auth.verifyAccount("existing@example.com", "long enough"))?.id).toBe(a.id);
     expect(auth.accountHasPassword(auth.accountById(a.id)!)).toBe(true);
     // The owner changes its email: GitHub's user still signs in to it.
@@ -321,6 +325,29 @@ describe("the callback", () => {
     jar.set.mockClear();
     await signIn("github");
     expect(sessionAccount()?.id).toBe(a.id);
+  });
+
+  it("takes over an account whose email was never confirmed: its password stops working and its other sign-ins end", async () => {
+    // Someone signed up with this address and a password before its owner came with Google.
+    const a = auth.createAccount("taken-first@example.com", "someone else's");
+    const before = auth.createSession(a.id).value;
+    expect(auth.sessionViewer(before)?.kind).toBe("account");
+    who.google = { sub: "g-real-owner", email: "taken-first@example.com", email_verified: true };
+    await signIn("google");
+    expect(sessionAccount()?.id).toBe(a.id);
+    // The password set before stops working, and the sign-in made with it ends.
+    expect(await auth.verifyAccount("taken-first@example.com", "someone else's")).toBeNull();
+    expect(auth.sessionViewer(before)).toBeNull();
+    // It reads as an account made with Google: no password, its email confirmed, and its owner can set a password.
+    const now = auth.accountById(a.id)!;
+    expect(auth.accountHasPassword(now)).toBe(false);
+    expect(accountFacts(now)).toMatchObject({ emailVerified: true, signIn: "google" });
+    // Google's user signs in again (found by its id now): nothing more changes, and that sign-in stays.
+    const kept = setCookie(auth.SESSION_COOKIE)![1];
+    jar.set.mockClear();
+    await signIn("google");
+    expect(sessionAccount()?.id).toBe(a.id);
+    expect(auth.sessionViewer(kept)?.kind).toBe("account");
   });
 
   it("keeps a switched-off account out, found by email or by id", async () => {
@@ -401,6 +428,8 @@ describe("what the billing service hears", () => {
   it("a password account that signs in with a provider: its email counts as confirmed; a password log-in says password again", async () => {
     const a = auth.createAccount("pw-then-google@example.com", "long enough");
     expect(accountFacts(a)).toMatchObject({ emailVerified: false, signIn: "password" });
+    // Confirmed before (an unconfirmed one is taken over instead, and loses its password).
+    authDb().prepare("UPDATE auth_accounts SET extra_json = json_set(COALESCE(extra_json, '{}'), '$.emailVerifiedAt', 1) WHERE id = ?").run(a.id);
     who.google = { sub: "g-pw", email: "pw-then-google@example.com", email_verified: true };
     await signIn("google");
     expect(events.accountEvent).toHaveBeenLastCalledWith("signed-in", expect.objectContaining({ id: a.id, emailVerified: true, signIn: "google" }));

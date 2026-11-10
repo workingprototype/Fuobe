@@ -444,6 +444,29 @@ export function createOAuthAccount(email: string, provider: OAuthProvider, subje
 }
 
 /**
+ * A provider's first sign-in to an account found by its email, when that email was never confirmed (email sign-up
+ * doesn't confirm it): the provider's verified user owns the address, and whoever set the password may not be them. The
+ * password stops working (a hash of random bytes nobody keeps), every other sign-in of the account ends, and the account
+ * reads as one made with the provider, so its owner sets a password of their own (Settings → Account) if they want one.
+ * An account whose email is confirmed, or that has no password, is left as it is. Returns the account as it is now.
+ */
+export function claimUnconfirmedAccount(account: Account, provider: OAuthProvider, subject: string): Account {
+  if (account.emailVerifiedAt || !accountHasPassword(account)) return account;
+  const at = Date.now();
+  const hash = hashPassword(crypto.randomBytes(32).toString("hex"));
+  // Sessions issued up to now end; the one made for this sign-in, after it, is kept.
+  const after = at - 1;
+  authWrite(() => {
+    sql("UPDATE auth_accounts SET password_hash = ?, password_changed_at = NULL, sessions_after = ? WHERE id = ?").run(hash, after, account.id);
+    sql(
+      `INSERT INTO auth_oauth_links (provider, subject, account_id, made_account, created_at, last_used_at) VALUES (?, ?, ?, 1, ?, ?)
+       ON CONFLICT (provider, subject) DO UPDATE SET account_id = excluded.account_id, made_account = 1, last_used_at = excluded.last_used_at`,
+    ).run(provider, subject, account.id, at, at);
+  });
+  return { ...account, hash, passwordChangedAt: undefined, sessionsAfter: after };
+}
+
+/**
  * Inside authWrite: merge fields into an account's extra_json (the fields auth.json kept that have no column); undefined
  * removes one. Writes only when something changes. False when there is no such account.
  */
