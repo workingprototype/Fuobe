@@ -28,6 +28,8 @@ export const HOME_RELEASE = {
   line: "MiniMax's new image model, on Fuobe the day it came out. Photoreal people and products, painting, illustration and exact lettering, up to 4096 × 4096.",
   dir: "/previews/release/h3-image",
   art: [
+    { slug: "paris-velvet", label: "velvet gown on a Paris balcony at night", width: 2464, height: 1632, prompt: "A gorgeous woman in her twenties with voluminous chestnut hair, flawless glowing skin and soft smoky eyes, wearing an off-shoulder black velvet gown and diamond drop earrings, standing on a Parisian balcony at night with warm city lights glowing in soft bokeh behind her, a magnetic, knowing gaze into the lens, elegant moonlit glamour. She stands on the right third of a wide frame, the left side of the picture open and softly lit. Shot on medium format, 85mm, shallow depth of field, flawless natural skin texture, luxury fashion campaign, breathtaking and glamorous." },
+    { slug: "gold-saree", label: "gold saree in a palace courtyard", width: 2464, height: 1632, prompt: "A stunningly beautiful Indian fashion model in her twenties with long dark hair, kohl-lined eyes and radiant golden-brown skin, wearing a shimmering gold tissue saree draped low with a modern sleeveless blouse, jasmine in her hair, standing in a candlelit palace courtyard at dusk with glowing lanterns behind her, a captivating smile into the lens. She stands on the right third of a wide frame, the left side of the picture open and softly lit. Shot on medium format, 85mm, shallow depth of field, flawless natural skin texture, luxury fashion campaign, breathtaking and glamorous." },
     { slug: "couture-dunes", label: "couture gown on desert dunes", width: 1792, height: 2368, prompt: "A haute couture editorial photograph of a striking fashion model with luminous dark skin and a sleek high bun, wearing a sculptural crimson silk gown whose long train sweeps across rippled golden sand dunes. Golden-hour sun low behind her, the fabric lifted by the wind into a dramatic arc, deep blue sky, long soft shadows on the dunes. Shot on medium format, 50mm, rich saturated color, luxury fashion campaign." },
     { slug: "gold-leaf-beauty", label: "gold leaf beauty close-up", width: 1792, height: 2368, prompt: "A high-end beauty close-up of a strikingly beautiful model with flawless warm skin, glossy nude lips and delicate gold leaf placed along her cheekbones and eyelids, her eyes looking softly into the lens. Clean studio light with a soft glow, a warm champagne backdrop, extreme detail in the lashes and skin texture, luxury cosmetics campaign." },
     { slug: "sky-cathedral", label: "cathedral city above the clouds", width: 2720, height: 1536, prompt: "A Romantic-era oil painting of a vast golden cathedral city floating above a sea of clouds at sunrise, waterfalls pouring from its edges into the mist, flocks of white birds circling the spires. Visible brushstrokes, luminous warm light against cool blue shadows, epic sense of scale, museum masterpiece in the style of nineteenth-century landscape painting." },
@@ -48,12 +50,12 @@ export const HOME_RELEASE = {
    * in the tile (its object-position; the slow zoom closes in on the same point). The first shows from the first paint.
    */
   tile: [
-    { slug: "couture-dunes", position: "62% 42%" },
+    { slug: "paris-velvet", position: "62% 32%" },
+    { slug: "gold-saree", position: "70% 30%" },
     { slug: "gold-leaf-beauty", position: "50% 40%" },
     { slug: "sky-cathedral", position: "50% 45%" },
     { slug: "day-zero-poster", position: "50% 0%" },
     { slug: "snow-leopard", position: "50% 45%" },
-    { slug: "emerald-watch", position: "50% 55%" },
   ],
 };
 
