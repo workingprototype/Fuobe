@@ -240,26 +240,26 @@
 /* ---------------------------------------------------------------- grid */
 
 /*
- * The reel leads; Live edit, the highlight, and Genjutsu, whose swaps need room to be seen, are the next biggest, the
- * same size, right by it (right under it on a phone). From lg the grid is fourteen narrow columns, so the top two rows
- * (the reel, Live edit, Genjutsu) and the bottom row (the latest release, 3D, audio, the numbers, canvas) each split it their own way.
- * The audio tile, which holds a demo to play, takes four of the bottom row's columns.
+ * The latest release leads; Live edit, the highlight, and Genjutsu, whose swaps need room to be seen, are the next
+ * biggest, the same size, right by it (right under it on a phone). From lg the grid is fourteen narrow columns, so the
+ * top two rows (the latest release, Live edit, Genjutsu) and the bottom row (the video reel, 3D, audio, the numbers,
+ * canvas) each split it their own way. The audio tile, which holds a demo to play, takes four of the bottom row's columns.
  */
 .hb-grid {
   display: grid;
   gap: var(--bento-gap);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
-    "video video"
+    "release release"
     "live live"
     "genjutsu genjutsu"
-    "release three"
+    "video three"
     "audio audio"
     "canvas canvas"
     "numbers numbers";
 }
 @media (max-width: 767.98px) {
-  .hb-video {
+  .hb-release {
     aspect-ratio: 3 / 2;
   }
   /* Wide enough to show the whole portrait, short enough that the reel and it fit a phone's first screen. */
@@ -270,7 +270,7 @@
   .hb-genjutsu {
     aspect-ratio: 16 / 10;
   }
-  .hb-release,
+  .hb-video,
   .hb-three {
     aspect-ratio: 1;
   }
@@ -288,9 +288,9 @@
     /* Live edit one column two rows tall, Genjutsu two columns one row tall: the same size, each bigger than the rest. */
     grid-template-rows: 230px 230px 230px 210px auto;
     grid-template-areas:
-      "video video live"
-      "video video live"
-      "genjutsu genjutsu release"
+      "release release live"
+      "release release live"
+      "genjutsu genjutsu video"
       "three audio canvas"
       "numbers numbers numbers";
   }
@@ -301,9 +301,9 @@
     grid-template-rows: repeat(3, minmax(0, 1fr));
     height: clamp(var(--grid-min), calc(var(--content-h) - var(--bento-head) - var(--head-top) - 3.25rem), 760px);
     grid-template-areas:
-      "video video video video video video live live live live genjutsu genjutsu genjutsu genjutsu"
-      "video video video video video video live live live live genjutsu genjutsu genjutsu genjutsu"
-      "release release three three audio audio audio audio numbers numbers numbers canvas canvas canvas";
+      "release release release release release release live live live live genjutsu genjutsu genjutsu genjutsu"
+      "release release release release release release live live live live genjutsu genjutsu genjutsu genjutsu"
+      "video video three three audio audio audio audio numbers numbers numbers canvas canvas canvas";
   }
 }
 .hb-video {
@@ -508,11 +508,11 @@
   }
 }
 /*
- * The words keep the same inset in every tile, whatever its width, so tiles side by side (the reel, Live edit and
- * Genjutsu) set their titles and links on the same lines.
+ * The words keep the same inset in every tile, whatever its width, so tiles side by side (the latest release, Live edit
+ * and Genjutsu) set their titles and links on the same lines.
  */
 @container (min-width: 460px) {
-  .hb-video .hb-title {
+  .hb-release .hb-title {
     font-size: 40px;
   }
   .hb-meta.hb-big {
@@ -522,7 +522,7 @@
   }
 }
 @container (min-width: 540px) {
-  .hb-video .hb-title {
+  .hb-release .hb-title {
     font-size: 44px;
   }
 }
@@ -580,6 +580,17 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   pointer-events: none;
+}
+/* A small tile (the bottom row, a phone's square): the badge on the corner arrow's line, a size down. */
+@container (max-width: 219.98px) {
+  .hb-badge {
+    top: 10px;
+    left: 10px;
+    gap: 6px;
+    height: 26px;
+    padding: 0 9px;
+    font-size: 10.5px;
+  }
 }
 .hb-progress {
   position: absolute;
@@ -665,17 +676,17 @@
   }
 }
 
-/* The edge in the accent, with a glow inside it; brighter under the pointer. */
+/* The edge in the accent, with a glow inside it (wide enough to read on the lead tile); brighter under the pointer. */
 .hb-release::before {
   box-shadow:
     inset 0 0 0 1px color-mix(in oklch, var(--bento-accent) 75%, transparent),
-    inset 0 0 26px -6px var(--bento-glow);
+    inset 0 0 44px -10px var(--bento-glow);
 }
 @media (hover: hover) {
   .hb-release:hover::before {
     box-shadow:
       inset 0 0 0 1px color-mix(in oklch, var(--bento-accent) 85%, white),
-      inset 0 0 30px -4px color-mix(in oklch, var(--bento-accent) 45%, transparent);
+      inset 0 0 52px -8px color-mix(in oklch, var(--bento-accent) 45%, transparent);
   }
 }
 
@@ -731,6 +742,21 @@
     font-size: 11px;
   }
 }
+/* The lead tile: the badge a size up, on the same inset as the words under it. */
+@container (min-width: 460px) {
+  .hb-new-badge {
+    top: 18px;
+    left: 18px;
+    gap: 8px;
+    height: 30px;
+    padding: 0 13px 0 12px;
+    font-size: 12px;
+  }
+  .hb-new-dot {
+    width: 7px;
+    height: 7px;
+  }
+}
 
 /*
  * The model's name over the title and "Try it now" under it, in every size of the tile (a small tile drops both
@@ -745,9 +771,21 @@
 .hb-release .hb-corner {
   display: none;
 }
-/* Three lines of words on a small tile: the shade reaches higher, so the name reads over a bright picture. */
+/*
+ * Three lines of words on a narrow tile (a phone's row): the shade reaches higher, so the name reads over a bright
+ * picture. On the lead tile the words take a smaller share of its height, and the pictures show whole above them.
+ */
 .hb-release .hb-shade {
   height: 78%;
+}
+@container (min-width: 460px) {
+  .hb-release .hb-shade {
+    height: 58%;
+  }
+  .hb-release .hb-cta {
+    margin-top: 12px;
+    font-size: 14px;
+  }
 }
 @container (max-width: 199.98px) {
   .hb-release .hb-meta {

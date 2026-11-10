@@ -691,10 +691,11 @@ export function LiveTyping({ frames, phrases, sizes }: { frames: BentoPicture[];
  * The release tile's pictures: each shows for `every` ms, closing in slowly (home-bento.css: hb-release-ken), then the
  * next fades in over it in `fade` ms; after the last, the first again. Only while the first screen moves (BentoMotion:
  * not paused, on screen, not under reduced motion), and it carries on where it stopped. The first picture is in the
- * HTML; the others are asked for once it first plays, and it waits on one that hasn't arrived. Decorative: the tile's
- * link names it.
+ * HTML; the others are asked for once it first plays, and it waits on one that hasn't arrived. `lead`: the tile is the
+ * first screen's biggest, so its first picture is asked for first and lands with the first paint. Decorative: the
+ * tile's link names it.
  */
-export function BentoRelease({ slides, sizes, every, fade }: { slides: BentoSlide[]; sizes: string; every: number; fade: number }) {
+export function BentoRelease({ slides, sizes, every, fade, lead }: { slides: BentoSlide[]; sizes: string; every: number; fade: number; lead?: boolean }) {
   const play = usePlay();
   const [shown, setShown] = useState(0);
   const [prev, setPrev] = useState<number | null>(null);
@@ -729,8 +730,8 @@ export function BentoRelease({ slides, sizes, every, fade }: { slides: BentoSlid
               alt=""
               width={p.width}
               height={p.height}
-              fetchPriority="low"
-              decoding="async"
+              fetchPriority={lead && i === 0 ? "high" : "low"}
+              decoding={lead && i === 0 ? "sync" : "async"}
               draggable={false}
               className={s.fill}
               style={{ objectPosition: p.position }}

@@ -239,8 +239,8 @@ describe("Home's first screen", () => {
     const links = [...html.matchAll(/<a [^>]*>/g)].map((m) => m[0]);
     const tiles = links.filter((a) => a.includes("data-tile="));
     // Every tile is its link but the Audio tile, which holds the demo's buttons: its words are its link.
-    expect([...html.matchAll(/<(?:a|div) [^>]*data-tile="([^"]+)"/g)].map((m) => m[1])).toEqual(["video", "live", "genjutsu", "release", "threeD", "audio", "numbers", "canvas"]);
-    expect(tiles.map((a) => /data-tile="([^"]+)"/.exec(a)![1])).toEqual(["video", "live", "genjutsu", "release", "threeD", "numbers", "canvas"]);
+    expect([...html.matchAll(/<(?:a|div) [^>]*data-tile="([^"]+)"/g)].map((m) => m[1])).toEqual(["release", "live", "genjutsu", "video", "threeD", "audio", "numbers", "canvas"]);
+    expect(tiles.map((a) => /data-tile="([^"]+)"/.exec(a)![1])).toEqual(["release", "live", "genjutsu", "video", "threeD", "numbers", "canvas"]);
     const audioLink = links.find((a) => a.includes(`href="${BENTO_HREFS.audio}"`));
     expect(audioLink).toBeTruthy();
     expect(links).toHaveLength(8);
@@ -404,7 +404,7 @@ describe("Home's first screen", () => {
     expect(film.thumb).toMatch(/^\/previews\/home\/board-film\.webp\?v=/);
   });
 
-  it("shows the latest release in the bottom row: new, by its name, and one link to the Image studio on its model", () => {
+  it("leads with the latest release: new, by its name, and one link to the Image studio on its model", () => {
     const tile = /<a [^>]*data-tile="release"[\s\S]*?<\/a>/.exec(html)![0];
     const open = /^<a [^>]*>/.exec(tile)![0];
     const decode = (v: string) => v.replace(/&amp;/g, "&");
@@ -449,6 +449,12 @@ describe("Home's first screen", () => {
     expect(imgs[0]).toContain('alt=""');
     expect(imgs[0]).toContain(`src="${r.slides[0].fallback}"`);
     expect(imgs[0]).not.toContain('loading="lazy"');
+    // The first screen's biggest picture: asked for first, and decoded with the first paint.
+    expect(imgs[0]).toMatch(/fetchPriority="high"/i);
+    expect(imgs[0]).toContain('decoding="sync"');
+    // In its 480 and 960 px copies, the 960 wherever the tile shows it at more than 480 px.
+    expect(tile).toContain(`srcSet="${r.slides[0].avif[0].src} 480w, ${r.slides[0].avif[1].src} 960w"`);
+    expect(tile).toContain('sizes="(min-width: 1024px) 860px, (min-width: 768px) 840px, calc(100vw - 32px)"');
     expect(tile).toContain('data-on="true"');
     expect(tile).not.toContain("data-prev");
     for (const p of r.slides.slice(1)) expect(tile).not.toContain(p.avif[0].src);
@@ -465,7 +471,29 @@ describe("Home's first screen", () => {
     // Under reduced motion nothing moves, whatever data-play says.
     const reduced = css.slice(css.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
     expect(reduced).toMatch(/\.hb-bento \.hb-release-slide \.hb-fill,[\s\S]*\.hb-bento \.hb-new-dot,[\s\S]*animation: none !important/);
-    // It keeps the bottom row's place: the grid sets its box on every width.
-    expect(css.match(/"release three"|"genjutsu genjutsu release"|"release release three three/g)).toHaveLength(3);
+    // It leads the grid on every width (a phone's first row, a tablet's two columns and two rows, from lg six columns
+    // and two rows), and the video reel takes the bottom row's first place it had (half a phone's row by 3D, a tablet's
+    // column by Genjutsu, from lg two columns): the grid sets both boxes.
+    expect(css.match(/"release release"\n\s*"live live"/g)).toHaveLength(1);
+    expect(css.match(/"video three"/g)).toHaveLength(1);
+    expect(css.match(/"release release live"\n\s*"release release live"\n\s*"genjutsu genjutsu video"/g)).toHaveLength(1);
+    expect(css.match(/("release release release release release release live live live live genjutsu genjutsu genjutsu genjutsu"\s*){2}"video video three three /g)).toHaveLength(1);
+    // The release tile's title at the lead's display size; the video tile's at the small tiles'.
+    expect(css).toMatch(/@container \(min-width: 540px\) \{\s*\.hb-release \.hb-title \{\s*font-size: 44px;/);
+    expect(css).not.toMatch(/\.hb-video \.hb-title/);
+  });
+
+  it("shows the video reel small: its still from the first paint, its clips once that is painted, and its link", () => {
+    const tile = /<a [^>]*data-tile="video"[\s\S]*?<\/a>/.exec(html)![0];
+    expect(/href="([^"]+)"/.exec(tile)![1]).toBe(BENTO_HREFS.video);
+    expect(/aria-label="([^"]+)"/.exec(tile)![1]).toBe(bento.tiles.video.label);
+    const imgs = [...tile.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0]).toContain(`src="${bento.video.poster.fallback}"`);
+    expect(imgs[0]).not.toContain('loading="lazy"');
+    // No clip in the HTML: the reel sets its source once the still is painted.
+    expect(tile).not.toMatch(/<video\b/);
+    expect(tile).toContain('sizes="(min-width: 1024px) 330px, (min-width: 768px) 320px, calc((100vw - 44px) * 0.667)"');
+    expect(tile).toContain(`>${bento.tiles.video.title}<`);
   });
 });

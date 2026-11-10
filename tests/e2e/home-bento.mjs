@@ -13,7 +13,7 @@
 // 1. Every width (390, 768, 1024, 1280, 1440, 1920), light and dark, as a guest and as the owner: no sideways scroll,
 //    one h1, the headline in its own words ("Make anything:" on one line; the second line whole from 768, and on a
 //    phone two lines that break before "finished film,"), it rose into place once, and the first screen holds what it
-//    should (a phone: the video tile and the live tile under it; from 1024: all eight). A picture of each (--shots), and a
+//    should (a phone: the release tile and the live tile under it; from 1024: all eight). A picture of each (--shots), and a
 //    contact sheet of them all.
 // 1b. Sharp at every width and pixel ratio (1x, 2x, 3x): every picture on the first screen is at least as wide as its
 //    box shows it (object-fit: cover, times the ratio), up to the widest copy there is, and so is each clip once it
@@ -47,8 +47,8 @@
 //    live words stay), and the tiles keep their stills.
 // 5. Pause previews stops the reel and freezes every animation; pressed again, they go on.
 // 6. Weight: what the page downloads before `load` (clips aside), at 390 and 1440, reported; the first screen's own
-//    stills stay under 420 KB (the clips' posters are encoded close to their clips' first frames, and a 3x phone or a
-//    2x laptop gets the video tile's widest still). The clips are reported on their own.
+//    stills stay under 420 KB (the clips' posters are encoded close to their clips' first frames, and the release
+//    tile, the lead, shows its first picture's 960 px copy). The clips are reported on their own.
 // 7. The composer: /?new=1 brings it into view with the focus; a plain visit stays at the top (no autofocus jump).
 // 8. Every tile is a named link (the Audio tile: its words), and Tab reaches them in the grid's reading order (through
 //    the Audio tile's buttons) with a visible ring.
@@ -99,7 +99,7 @@ const WIDTHS = [
   { w: 1440, h: 900 },
   { w: 1920, h: 1080 },
 ];
-const TILES = ["video", "live", "genjutsu", "release", "threeD", "audio", "numbers", "canvas"];
+const TILES = ["release", "live", "genjutsu", "video", "threeD", "audio", "numbers", "canvas"];
 /** The tiles that play a clip by themselves (the reel, the 3D clip, Genjutsu's swap): each only once it is on screen. */
 const MOVING = ["video", "threeD", "genjutsu"];
 /** The widest copy of a clip (scripts/gen-home-bento.mjs), where its element doesn't say (a reel clip's data-max). */
@@ -147,7 +147,7 @@ const layout = (page) =>
   page.evaluate((tiles) => {
     const box = (el) => {
       const r = el.getBoundingClientRect();
-      // Its title's size: the live tile, the highlight, is second only to the video tile.
+      // Its title's size: the live tile, the highlight, is second only to the release tile.
       const title = el.querySelector("[class*=title]");
       return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, w: r.width, h: r.height, title: title ? parseFloat(getComputedStyle(title).fontSize) : 0 };
     };
@@ -254,9 +254,9 @@ if (run("1"))
         );
         if (v.phone) {
           const bottom = l.vh - 64;
-          const first = ["video", "live"];
+          const first = ["release", "live"];
           const out = first.filter((t) => l.tiles[t].top < 0 || l.tiles[t].bottom > bottom);
-          check(`${tag}: the video tile and the live tile under it on the first screen`, out.length === 0, first.map((t) => `${t} ${Math.round(l.tiles[t].bottom)}`).join(", ") + ` ≤ ${bottom}`);
+          check(`${tag}: the release tile and the live tile under it on the first screen`, out.length === 0, first.map((t) => `${t} ${Math.round(l.tiles[t].bottom)}`).join(", ") + ` ≤ ${bottom}`);
           check(`${tag}: every tile at least 44 px to tap`, TILES.every((t) => l.tiles[t].w >= 44 && l.tiles[t].h >= 44));
           // Genjutsu right under the live tile, the full row wide, at 16:9 or taller.
           const [lv, gj] = [l.tiles.live, l.tiles.genjutsu];
@@ -266,17 +266,17 @@ if (run("1"))
             `live ${Math.round(lv.w)}x${Math.round(lv.h)} to ${Math.round(lv.bottom)}, genjutsu ${Math.round(gj.w)}x${Math.round(gj.h)} from ${Math.round(gj.top)}`,
           );
         }
-        // The live tile, the highlight, and Genjutsu are the biggest after the video tile, the same size (the live tile
-        // never the smaller), and their titles no smaller than any but the video's.
+        // The live tile, the highlight, and Genjutsu are the biggest after the release tile, the same size (the live tile
+        // never the smaller), and their titles no smaller than any but the release tile's.
         const area = (t) => l.tiles[t].w * l.tiles[t].h;
-        const rest = TILES.filter((t) => !["video", "live", "genjutsu", "numbers"].includes(t));
+        const rest = TILES.filter((t) => !["release", "live", "genjutsu", "numbers"].includes(t));
         check(
-          `${tag}: the live and Genjutsu tiles the same size, second only to the video tile`,
+          `${tag}: the live and Genjutsu tiles the same size, second only to the release tile`,
           area("live") >= area("genjutsu") * 0.98 &&
             area("genjutsu") >= area("live") * 0.85 &&
             rest.every((t) => area("genjutsu") > area(t) && l.tiles.live.title >= l.tiles[t].title && l.tiles.genjutsu.title >= l.tiles[t].title) &&
-            area("video") > area("live"),
-          ["video", "live", "genjutsu", ...rest].map((t) => `${t} ${Math.round(l.tiles[t].w)}x${Math.round(l.tiles[t].h)}/${l.tiles[t].title}`).join(", "),
+            area("release") > area("live"),
+          ["release", "live", "genjutsu", ...rest].map((t) => `${t} ${Math.round(l.tiles[t].w)}x${Math.round(l.tiles[t].h)}/${l.tiles[t].title}`).join(", "),
         );
         if (v.w >= 1024) {
           const out = TILES.filter((t) => l.tiles[t].bottom > l.vh || l.tiles[t].top < 0);

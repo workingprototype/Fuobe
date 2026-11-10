@@ -15,7 +15,12 @@ import "./home-bento.css";
  * tile's width or, where the tile is the squarer shape, its height times 4/3, so the browser picks a copy that sharp.
  */
 const SIZES = {
-  video: "(min-width: 1024px) 572px, (min-width: 768px) 630px, calc(100vw - 32px)",
+  /**
+   * The video tile: two of the bottom row's fourteen columns from lg, a third of the grid tall (narrower than its 4:3
+   * clip, so its height times 4/3: up to 330 px), a column on a tablet, half the row on a phone (a square: its height
+   * times 4/3).
+   */
+  video: "(min-width: 1024px) 330px, (min-width: 768px) 320px, calc((100vw - 44px) * 0.667)",
   /**
    * The live tile: from lg a third of the grid wide and two rows tall (up to 570 px under cover on a 1920 x 1080
    * screen), two rows tall on a tablet, the full row on a phone.
@@ -24,10 +29,11 @@ const SIZES = {
   /** A 4:3 picture in a square tile on a phone (half the row): cropped at its sides, so 4/3 of the tile's width. */
   square: "(min-width: 1024px) 274px, (min-width: 768px) 320px, calc((100vw - 44px) * 0.667)",
   /**
-   * The release tile: two of the bottom row's fourteen columns from lg, a column on a tablet, half the row on a phone. Its
-   * pictures come portrait and landscape, so a landscape one under cover shows at about 16/9 of the tile's height.
+   * The release tile, the first screen's lead: from lg six of the top rows' fourteen columns and two rows tall, two
+   * columns and two rows on a tablet, the full row on a phone. Its pictures come portrait and landscape, so a landscape
+   * one under cover shows at about 16/9 of the tile's height (the 960 px copy from about 480 px of it on screen).
    */
-  release: "(min-width: 1024px) 280px, (min-width: 768px) 400px, calc((100vw - 44px) * 0.9)",
+  release: "(min-width: 1024px) 860px, (min-width: 768px) 840px, calc(100vw - 32px)",
   /**
    * The Genjutsu tile: from lg as big as the live tile, two rows tall and squarer than its 4:3 clip (so its height
    * times 4/3: up to 560 px on a 1920 x 1080 screen); two columns on a tablet; the full row on a phone.
@@ -185,14 +191,14 @@ function CanvasBoard({ board }: { board: Bento["canvas"] }) {
  */
 export function HomeBento({ bento }: { bento: Bento }) {
   const { tiles } = bento;
-  // The video tile's still is the first screen's biggest picture: asked for from the head, before the body's HTML.
-  const still = bento.video.poster;
-  preload(still.avif.at(-1)!.src, {
+  // The release tile's first picture is the first screen's biggest: asked for from the head, before the body's HTML.
+  const lead = bento.release.slides[0];
+  preload(lead.avif.at(-1)!.src, {
     as: "image",
     type: "image/avif",
     fetchPriority: "high",
-    imageSrcSet: still.avif.map((a) => `${a.src} ${a.w}w`).join(", "),
-    imageSizes: SIZES.video,
+    imageSrcSet: lead.avif.map((a) => `${a.src} ${a.w}w`).join(", "),
+    imageSizes: SIZES.release,
   });
   return (
     <section id="home-bento" aria-labelledby="home-bento-title" className={s.bento}>
@@ -220,11 +226,15 @@ export function HomeBento({ bento }: { bento: Bento }) {
       </div>
 
       <div className={s.grid}>
-        <Tile tile={tiles.video} area={s.video} bigMeta>
-          <Pic pic={still} sizes={SIZES.video} fetchPriority="high" decoding="sync" position={bento.video.reel[0].position} />
-          <BentoReel id={bento.video.id} reel={bento.video.reel} progress />
-          <span aria-hidden className={s.badge}>
-            <Video className="size-3.5" /> Video
+        {/*
+          The latest open model, new on Fuobe, leads the grid: its pictures fade one into the next as each closes in
+          slowly, under a badge saying it is new. Its name is over the title; the whole tile opens the Image studio on it.
+        */}
+        <Tile tile={tiles.release} area={s.release} bigMeta title={<ReleaseTitle released={bento.release.released} />}>
+          <BentoRelease slides={bento.release.slides} sizes={SIZES.release} every={bento.release.every} fade={bento.release.fade} lead />
+          <span aria-hidden className={s.newBadge}>
+            <span className={s.newDot} />
+            {bento.release.badge}
           </span>
         </Tile>
 
@@ -241,15 +251,12 @@ export function HomeBento({ bento }: { bento: Bento }) {
           <BentoReel id={bento.genjutsu.id} reel={bento.genjutsu.reel} wipes={bento.genjutsu.wipes} />
         </Tile>
 
-        {/*
-          The latest open model, new on Fuobe: its pictures fade one into the next as each closes in slowly, under a
-          badge saying it is new. Its name is over the title; the whole tile opens the Image studio on it.
-        */}
-        <Tile tile={tiles.release} area={s.release} title={<ReleaseTitle released={bento.release.released} />}>
-          <BentoRelease slides={bento.release.slides} sizes={SIZES.release} every={bento.release.every} fade={bento.release.fade} />
-          <span aria-hidden className={s.newBadge}>
-            <span className={s.newDot} />
-            {bento.release.badge}
+        {/* The video reel, first in the bottom row: its still from the first paint, its clips once that is painted. */}
+        <Tile tile={tiles.video} area={s.video}>
+          <Pic pic={bento.video.poster} sizes={SIZES.video} fetchPriority="low" position={bento.video.reel[0].position} />
+          <BentoReel id={bento.video.id} reel={bento.video.reel} progress />
+          <span aria-hidden className={s.badge}>
+            <Video className="size-3.5" /> Video
           </span>
         </Tile>
 
