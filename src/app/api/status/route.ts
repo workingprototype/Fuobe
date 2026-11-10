@@ -9,6 +9,7 @@ import { nothingConnected, type EngineModeName } from "@/lib/connections";
 import { getSetting, setSetting } from "@/server/settings";
 import { offeredSummary } from "@/server/model-access";
 import { poolOwnModels } from "@/server/pool-own-setup";
+import { hostedRunsOn } from "@/server/hosted-switch";
 import { placeName } from "@/server/place-name";
 import { helperKnown, helperLive } from "@/server/text-helper";
 
@@ -43,6 +44,9 @@ export async function GET(request?: Request) {
   // ComfyUI runs on the workers: the open models none of them can run now (the same set a visitor's pickers read), so
   // the owner's pickers order, tag and default as his runs will go (src/lib/runnable-here.ts).
   const ownerPool = getSetting("comfyWhere") === "workers" ? { own: poolOwnModels() } : undefined;
+  // Hosted runs on, and the owner's open models run on those same workers: the name visitors read for them, so the
+  // owner's engine switch says where Open source runs (free) and starts there.
+  const ownerPlace = ownerPool && hostedRunsOn() ? placeName() : undefined;
   return Response.json({
     providers,
     demoMode: getSetting("demoMode"),
@@ -51,6 +55,7 @@ export async function GET(request?: Request) {
     onboarded,
     ...(ownerGpu && { ownerGpu }),
     ...(ownerPool && { pool: ownerPool }),
+    ...(ownerPlace && { ownerPlace }),
     // Settings → Models & licences: the models switched off, so pickers leave them out (absent while everything is on).
     ...(access && { access }),
     // The text LLM: the AI helper setting, whether Claude takes text steps, the local server (no keys), and the free

@@ -1077,6 +1077,11 @@ export interface StatusInfo {
    * and default as his runs go (src/lib/runnable-here.ts). Never with `viewer`.
    */
   pool?: PoolRules;
+  /**
+   * Hosted runs are on and the owner's open models run on the same workers: their name (as visitors read it), so the
+   * owner's engine switch says Open source runs free there, and starts on it. Never with `viewer`.
+   */
+  ownerPlace?: string;
 }
 
 /** The viewer's own GPU for the status strip and the header pill: an account's, or the owner's computer. */
@@ -1328,7 +1333,7 @@ function useEngineSlot(): EngineSlot {
   const runOn = v?.runOn;
   const email = me?.account?.email;
   const cached = useSyncExternalStore(noopSubscribe, readCachedSlot, () => null);
-  const facts: SlotFacts = { known, viewer: kind ? { kind, hosted, runOn } : undefined, email, cached };
+  const facts: SlotFacts = { known, viewer: kind ? { kind, hosted, runOn } : undefined, email, cached, ownerPlace: !v && !!status.data?.ownerPlace };
   const slot = engineSlot(facts);
   const remember = slotToCache(facts, slot);
   useEffect(() => {

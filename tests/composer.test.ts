@@ -308,6 +308,9 @@ describe("cost and mentions", () => {
     expect(costLabel({ demo: true, cost: 0.4 }, fmt)).toBe("Placeholder · free");
     expect(costLabel({ demo: true, cost: 0.4, compact: true }, fmt)).toBe("Placeholder");
     expect(costLabel({ demo: false, cost: 0 }, fmt)).toBe("Free");
+    // A free run on the install's own GPUs (the owner while hosted runs are on): said with their name.
+    expect(costLabel({ demo: false, cost: 0, gpu: false, place: "Our GPUs" }, fmt)).toBe("Free · Our GPUs");
+    expect(costLabel({ demo: false, cost: 0, place: "Our GPUs", compact: true }, fmt)).toBe("Free");
     expect(costLabel({ demo: false, cost: 0, gpu: true }, fmt)).toBe("Free · your GPU");
     expect(costLabel({ demo: false, cost: 0, gpu: true, compact: true }, fmt)).toBe("Free · GPU");
     expect(costLabel({ demo: true, cost: 0, gpu: true }, fmt)).toBe("Placeholder · free");

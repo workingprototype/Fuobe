@@ -1323,12 +1323,14 @@ export function Composer({ docked }: { docked: boolean }) {
   const demo = !!(model && placeholdersOn(status?.demoMode));
   // On the open engine every run is free on the GPU: said even before the run can be planned (no voice sample, no clip yet).
   // Said with "your GPU" only off a hosted studio: there the run may use the studio's GPUs, and the chip or hint says where.
-  const gpuRun = saysYourGpu(engine, hostedHere);
+  // The owner while hosted runs are on: its open runs go to the same workers as everyone's, said with their name.
+  const ownerSite = !status?.viewer && status?.ownerPlace && model?.engine === "open" ? placeOf(status.ownerPlace).label : undefined;
+  const gpuRun = saysYourGpu(engine, hostedHere || !!ownerSite);
   // A cloud model that runs on a visitor's own key only (Mureka Extend on Audio → Extend & remix): never "Free · your GPU",
   // its key in the label's words.
   const keyOnly = setupViewer && !demo ? keyOnlySetup(model, engine) : null;
   const freeHere = engine === "open" && model && !keyOnly ? 0 : null;
-  const ownCostText = keyOnly && cost == null ? ownSetupLabel(keyOnly) : costLabel({ demo, cost: cost ?? freeHere, unknown: loraPriceUnknown, gpu: gpuRun }, formatCost);
+  const ownCostText = keyOnly && cost == null ? ownSetupLabel(keyOnly) : costLabel({ demo, cost: cost ?? freeHere, unknown: loraPriceUnknown, gpu: gpuRun, place: ownerSite }, formatCost);
   // An account's paid run is billed to its own provider account (Your keys), or still needs that key.
   const payer = paidThrough(model, status);
   // Its provider account's balance ran out on a run: said before the next one, with Add credit.

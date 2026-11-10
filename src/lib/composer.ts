@@ -1319,9 +1319,10 @@ export function toggleIn(list: string[], id: string): string[] {
  * The price beside Generate. `gpu`: it runs on the person's own GPU, said with "Free" so a free run never reads as
  * free of anything (the run still takes their GPU's time).
  */
-export function costLabel(s: { demo: boolean; cost: number | null; compact?: boolean; unknown?: boolean; gpu?: boolean }, format: (usd: number) => string): string {
+export function costLabel(s: { demo: boolean; cost: number | null; compact?: boolean; unknown?: boolean; gpu?: boolean; place?: string }, format: (usd: number) => string): string {
   if (s.demo) return s.compact ? "Placeholder" : "Placeholder · free";
-  if (s.cost === 0) return s.gpu ? (s.compact ? "Free · GPU" : "Free · your GPU") : "Free";
+  // `place`: a free run on the install's own GPUs, said with their name ("Free · Fuobe Cloud").
+  if (s.cost === 0) return s.place && !s.compact ? `Free · ${s.place}` : s.gpu ? (s.compact ? "Free · GPU" : "Free · your GPU") : "Free";
   if (s.cost != null) return `≈ ${format(s.cost)}`;
   // A price the provider hasn't published (fal's MOSS-Image with LoRAs): said, never shown as free.
   return s.unknown ? "Price unknown" : "";

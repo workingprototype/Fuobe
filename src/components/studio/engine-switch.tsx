@@ -69,10 +69,13 @@ export function EngineSwitch({
   const account = accountEngine(hydrated ? status : undefined);
   const locked = account && "locked" in account ? account.locked : null;
   // Hosted runs: open models run free on this studio's GPUs, said with their place name (a guest's tip too).
-  const place = hydrated && status?.viewer?.hosted ? placeOf(status.viewer.placeName) : null;
-  // A guest or an account while hosted runs are on: both sides, always, with what each costs (the owner and a
-  // self-hosted install keep the switch below exactly as it was).
-  const visitor = hydrated && !owner && !selfHostedOnly ? visitorEngine(status) : null;
+  // The owner, while hosted runs are on and its open models run on the same workers: the same place, free.
+  const ownerPlace = owner && !selfHostedOnly && status?.ownerPlace ? placeOf(status.ownerPlace) : null;
+  const place = hydrated && status?.viewer?.hosted ? placeOf(status.viewer.placeName) : ownerPlace;
+  // A guest or an account while hosted runs are on: both sides, always, with what each costs. The owner gets the same
+  // two sides there (its Cloud runs on the install's own keys); a self-hosted install keeps the switch below as it was.
+  const ownerSides: VisitorEngine | null = ownerPlace && mode === "both" ? { place: ownerPlace, guest: false, keyless: false, keys: [] } : null;
+  const visitor = (hydrated && !owner && !selfHostedOnly ? visitorEngine(status) : null) ?? ownerSides;
   if (visitor)
     return (
       <VisitorSwitch
@@ -92,7 +95,8 @@ export function EngineSwitch({
     // One engine and nothing to change: only the owner (Settings) or an account that can add a key gets a badge.
     if (!hydrated || !viewer || (!owner && !(locked?.addKey && !selfHostedOnly))) return null;
     const o = OPTIONS.find((x) => x.value === (locked ? "open" : mode))!;
-    const text = locked?.text ?? (mode === "open" ? "Open source only" : "Cloud only");
+    // Open source only, on the hosted workers: where it runs, and that it is free there.
+    const text = locked?.text ?? (mode === "open" ? (ownerPlace ? `Open source · ${engineCaption.open(ownerPlace)}` : "Open source only") : "Cloud only");
     const cls = cn(
       "inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors",
       size === "sm" ? "h-8" : "h-8 sm:h-9",

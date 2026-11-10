@@ -18,6 +18,8 @@ export const ENGINE_SLOT_KEY = "fuobe.engineSlot";
 export const ACCOUNT_ENGINE_PREFIX = "fuobe.engine.a.";
 /** A guest's switch while hosted runs are on. */
 export const GUEST_ENGINE_KEY = "fuobe.engine.guest";
+/** The owner's switch while hosted runs are on and the owner's open models run on the same workers (status `ownerPlace`). */
+export const OWNER_HOSTED_ENGINE_KEY = "fuobe.engine.owner";
 
 export interface EngineSlot {
   /** The storage key, or null when there is none yet (an account whose email hasn't answered): the pick then lasts for the page. */
@@ -51,15 +53,19 @@ export interface SlotFacts {
   email?: string | null;
   /** ENGINE_SLOT_KEY as stored. */
   cached?: string | null;
+  /** The owner, while its open models run free on the install's workers (status `ownerPlace`). */
+  ownerPlace?: boolean;
 }
 
 const isAccountKey = (k: string | null | undefined): k is string => !!k && k.startsWith(ACCOUNT_ENGINE_PREFIX) && k.length > ACCOUNT_ENGINE_PREFIX.length;
-const isHostedKey = (k: string | null | undefined): k is string => k === GUEST_ENGINE_KEY || isAccountKey(k);
+const isHostedKey = (k: string | null | undefined): k is string => k === GUEST_ENGINE_KEY || k === OWNER_HOSTED_ENGINE_KEY || isAccountKey(k);
 
 /** Where this viewer's switch is kept, and what it starts on. */
 export function engineSlot(f: SlotFacts): EngineSlot {
   if (!f.known) return isHostedKey(f.cached) ? { key: f.cached, start: "open" } : SHARED_SLOT;
   const v = f.viewer;
+  // The owner, while open models run free on the workers: a switch of its own, starting on Open source.
+  if (!v && f.ownerPlace) return { key: OWNER_HOSTED_ENGINE_KEY, start: "open" };
   if (!v?.hosted) return SHARED_SLOT;
   if (v.kind !== "account") return { key: GUEST_ENGINE_KEY, start: "open" };
   const start: Engine = v.runOn === "key" ? "cloud" : "open";
@@ -68,7 +74,7 @@ export function engineSlot(f: SlotFacts): EngineSlot {
 }
 
 /** The slot to remember for the next page (while hosted runs are on), null to forget it, undefined before the status answers. */
-export const slotToCache = (f: SlotFacts, slot: EngineSlot): string | null | undefined => (!f.known ? undefined : f.viewer?.hosted && isHostedKey(slot.key) ? slot.key : null);
+export const slotToCache = (f: SlotFacts, slot: EngineSlot): string | null | undefined => (!f.known ? undefined : (f.viewer?.hosted || (!f.viewer && f.ownerPlace)) && isHostedKey(slot.key) ? slot.key : null);
 
 /**
  * What a saved key does to the switch the studios start on: Cloud (the person just asked for paid models), except while

@@ -171,6 +171,8 @@ export interface ConnectionState {
   demoMode?: string;
   /** The owner's ComfyUI runs on the owner's computer: what its Fuobe tab last said (GET /api/status). */
   ownerGpu?: OwnerGpuView;
+  /** Hosted runs are on and the owner's open models run on the same workers: their name (GET /api/status). */
+  ownerPlace?: string;
 }
 
 /** The owner's computer, as its Fuobe tab last said (the same view as an account's "this computer"). */
@@ -248,7 +250,7 @@ export function startLine(s: ConnectionState, quote: StartQuote | undefined, eng
   const otherEngine = engine === "open" ? "cloud" : "open";
   const other = s.engineMode === "both" && hosted(quote[otherEngine]) ? otherEngine : undefined;
   const then = mode === "edit" ? " after you add the photo" : "";
-  if (engine === "open" && quote.open && hosted(quote.open)) return { text: `Start runs ${quote.open.name} on your GPU${then} · Free` };
+  if (engine === "open" && quote.open && hosted(quote.open)) return { text: `Start runs ${quote.open.name} on ${s.ownerPlace ?? "your GPU"}${then} · Free` };
   if (engine === "cloud" && quote.cloud && hosted(quote.cloud)) return { text: `Start runs ${quote.cloud.name}${then} · ${quote.cloud.price}` };
   const q = quote[engine];
   const connected = connectedEngines(s)[engine];

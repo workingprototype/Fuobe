@@ -128,6 +128,23 @@ describe("the engine switch a studio starts on", () => {
     expect(api.readEngine()).toBe("cloud");
   });
 
+  it("hosted, the owner whose open models run on the same workers: a switch of its own, starting on Open source", () => {
+    const facts = { known: true, ownerPlace: true };
+    const slot = pref.engineSlot(facts);
+    expect(slot).toEqual({ key: "fuobe.engine.owner", start: "open" });
+    expect(pref.slotToCache(facts, slot)).toBe("fuobe.engine.owner");
+    // The next page opens on it before the status answers.
+    expect(pref.engineSlot({ known: false, cached: "fuobe.engine.owner" })).toEqual({ key: "fuobe.engine.owner", start: "open" });
+    const storage = memoryStorage({ "fuobe.engine": "cloud" });
+    vi.stubGlobal("localStorage", storage);
+    expect(api.readEngine(slot)).toBe("open");
+    storage.setItem(slot.key!, "cloud");
+    expect(api.readEngine(slot)).toBe("cloud");
+    // Without it (hosted runs off, a self-hosted install): the browser's one switch, as always.
+    expect(pref.engineSlot({ known: true, ownerPlace: false })).toEqual({ key: "fuobe.engine", start: "cloud" });
+    expect(pref.slotToCache({ known: true }, pref.engineSlot({ known: true }))).toBeNull();
+  });
+
   it("hosted: an account whose remembered place is its key starts on Cloud", () => {
     expect(pref.engineSlot(known({ kind: "account", hosted: true, runOn: "key" }, "ana@example.com")).start).toBe("cloud");
     for (const runOn of ["site", "gpu", undefined]) expect(pref.engineSlot(known({ kind: "account", hosted: true, runOn }, "ana@example.com")).start).toBe("open");

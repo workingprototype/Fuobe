@@ -100,6 +100,7 @@ describe("the line under Home's composer", () => {
   it("offers the other engine when that one would run it for real", () => {
     expect(startLine(state(["comfyui"]), q.image, "cloud", "image")).toEqual({ text: "No paid API is connected, so Start can't run it yet", other: "open" });
     expect(startLine(state(["comfyui"]), q.image, "open", "image")?.text).toMatch(/^Start runs .+ on your GPU · Free$/);
+    expect(startLine({ ...state(["comfyui"]), ownerPlace: "Our GPUs" }, q.image, "open", "image")?.text).toMatch(/^Start runs .+ on Our GPUs · Free$/);
     expect(startLine(state(["fal"]), q.image, "open", "image")).toEqual({ text: "ComfyUI isn't connected, so Start can't run it yet", other: "cloud" });
     // A Replicate key doesn't run hosted MiniMax H3, so it isn't offered for Video.
     expect(startLine(state(["replicate"]), q.video, "open", "video")).toEqual({ text: "ComfyUI isn't connected, so Start can't run it yet" });
