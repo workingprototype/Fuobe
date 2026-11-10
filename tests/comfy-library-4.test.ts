@@ -99,6 +99,10 @@ describe("round-4 ComfyUI workflows", () => {
     // Graphs on node packs this server doesn't have (h3_character_swap, H3 Relay, ComfyUI-LTXVideo) name a missing node at
     // their /prompt check (tests/comfy-character-swap.test.ts, tests/restore-comfy.test.ts); the rest wait for a GPU run.
     expect(manifest.workflows.filter((w) => !w.validated).map((w) => w.id)).toEqual([
+      // MiniMax H3 Image: its core nodes came with ComfyUI master ede4e5fe (v0.45.0), newer than the validation server
+      // (tests/minimax-h3-image.test.ts checks its classes against the subset read from that master).
+      "minimax-h3-image-t2i",
+      "minimax-h3-image-edit",
       // Qwen-Image-Edit 2511's Fast graph (the base graph and its Lightning LoRA): unvalidated until its /prompt check
       // (tests/qwen-edit-speed.test.ts).
       "qwen-image-edit-2511-multi-fast",
