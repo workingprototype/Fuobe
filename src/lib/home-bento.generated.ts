@@ -33,8 +33,6 @@ export const HOME_BENTO_MEDIA: Record<string, string> = {
   "/previews/home/reel-sand-storm-1024.jpg": "cab53f24",
   "/previews/home/rotation-1024.jpg": "61a2cbc9",
   "/previews/home/genjutsu-couple-1024.jpg": "5b931a56",
-  "/previews/home/image-4-480.avif": "5a6d07a1",
-  "/previews/home/image-4-768.avif": "ef9d1b4d",
   "/previews/home/voice-room-480.avif": "e6981604",
   "/previews/home/voice-room-768.avif": "8c6ccbc8",
   "/previews/home/voice-room-1024.avif": "a919de1e",

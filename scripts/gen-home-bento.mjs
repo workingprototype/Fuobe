@@ -12,7 +12,6 @@
  *   reel-sand-storm-<width>.avif              the reel's first clip's first frame at each of its widths: the tile's poster
  *   rotation-{640,1024,1536,2048}.{mp4,avif}  the turning gown (the 3D tile) at four widths, and each one's first frame
  *   reel-sand-storm-1024.jpg, rotation-1024.jpg the 1024 px clips' first frames, for a browser without AVIF
- *   image-4-{480,768}.avif                the Image studio's example 4
  *   voice-{room,quiet}-{480,768,1024}.avif  Clean up voice's demo photos (public/samples/clean-voice/): the restaurant,
  *                                         and the same photo softened around her, which the Audio tile shows once the
  *                                         noise is off; voice-{room,quiet}-1024.jpg for a browser without AVIF
@@ -215,8 +214,6 @@ const VOICE_WIDTHS = [480, 768, 1024];
  * its width, and a crop where it has one.
  */
 const STILLS = [
-  { name: "image-4-480.avif", from: "/examples/image/4/out.jpg", width: 480 },
-  { name: "image-4-768.avif", from: "/examples/image/4/out.jpg", width: 768 },
   ...VOICE.flatMap((v) => [
     ...VOICE_WIDTHS.map((width) => ({ name: `${v.name}-${width}.avif`, from: v.from, width })),
     { name: `${v.name}-${FALLBACK_WIDTH}.jpg`, from: v.from, width: FALLBACK_WIDTH },

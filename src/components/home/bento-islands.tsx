@@ -4,16 +4,17 @@ import { Zap } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useNavUi } from "@/components/nav/nav-ui";
 import { usePreviewPlayback, usePreviewsPaused } from "@/components/preset-preview";
-import type { BentoPicture } from "@/lib/home-bento";
+import type { BentoPicture, BentoSlide } from "@/lib/home-bento";
 import { REEL_STALL_MS, fadeDue, fadeOf, holdOf, nextInReel, reelProgress, reelSources, wipeFrame, type ReelClip, type ReelWipe } from "@/lib/home-reel";
 import { coverWidth, pickWidth, type Sized } from "@/lib/media-pick";
 import { releaseVideo } from "@/lib/media-release";
 import { browserPlaybackEnv } from "@/lib/preview-playback";
+import { RELEASE_TITLES, releaseTitle } from "@/lib/release-day";
 import { s } from "./home-bento-classes";
 
 /*
  * The first screen's few islands (home-bento.tsx): the switch that lets it move, the video tile's reel, the 3D tile's
- * clip, the typing on the live tile and the numbers tile's launcher. Everything else on it is HTML from the server.
+ * clip, the typing on the live tile, the release tile's pictures and title, and the numbers tile's launcher. Everything else on it is HTML from the server.
  */
 
 /** Whether the page has loaded (the first screen's animations wait for it) and whether it may move now (BentoMotion). */
@@ -684,6 +685,71 @@ export function LiveTyping({ frames, phrases, sizes }: { frames: BentoPicture[];
       </span>
     </>
   );
+}
+
+/**
+ * The release tile's pictures: each shows for `every` ms, closing in slowly (home-bento.css: hb-release-ken), then the
+ * next fades in over it in `fade` ms; after the last, the first again. Only while the first screen moves (BentoMotion:
+ * not paused, on screen, not under reduced motion), and it carries on where it stopped. The first picture is in the
+ * HTML; the others are asked for once it first plays, and it waits on one that hasn't arrived. Decorative: the tile's
+ * link names it.
+ */
+export function BentoRelease({ slides, sizes, every, fade }: { slides: BentoSlide[]; sizes: string; every: number; fade: number }) {
+  const play = usePlay();
+  const [shown, setShown] = useState(0);
+  const [prev, setPrev] = useState<number | null>(null);
+  const [fetched, setFetched] = useState(false);
+  if (play && !fetched) setFetched(true);
+  const imgs = useRef<(HTMLImageElement | null)[]>([]);
+  const at = useRef(0);
+  useEffect(() => {
+    if (!play || slides.length < 2) return;
+    const t = window.setInterval(() => {
+      const next = (at.current + 1) % slides.length;
+      const img = imgs.current[next];
+      // Not in yet: this one stays a turn longer.
+      if (!img?.complete || !img.naturalWidth) return;
+      setPrev(at.current);
+      setShown(next);
+      at.current = next;
+    }, every);
+    return () => clearInterval(t);
+  }, [play, every, slides.length]);
+  return (
+    <span className={s.pic}>
+      {slides.map((p, i) =>
+        i === 0 || fetched ? (
+          <picture key={p.fallback} className={s.releaseSlide} data-on={i === shown || undefined} data-prev={i === prev || undefined} style={{ "--fade": `${fade}ms`, "--o": p.position } as React.CSSProperties}>
+            <source type="image/avif" srcSet={p.avif.map((a) => `${a.src} ${a.w}w`).join(", ")} sizes={sizes} />
+            <img
+              ref={(el) => {
+                imgs.current[i] = el;
+              }}
+              src={p.fallback}
+              alt=""
+              width={p.width}
+              height={p.height}
+              fetchPriority="low"
+              decoding="async"
+              draggable={false}
+              className={s.fill}
+              style={{ objectPosition: p.position }}
+            />
+          </picture>
+        ) : null,
+      )}
+    </span>
+  );
+}
+
+const noSubscribe = () => () => {};
+
+/**
+ * The release tile's title: the later one in the HTML (Home is prerendered), "today" in the browser on the day the
+ * model came out (src/lib/release-day.ts).
+ */
+export function ReleaseTitle({ released }: { released: string }) {
+  return useSyncExternalStore(noSubscribe, () => releaseTitle(released, new Date()), () => RELEASE_TITLES.later);
 }
 
 /**

@@ -6,9 +6,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 /*
- * Home's latest-release section (HOME_RELEASE in src/lib/home-showcase.ts, ReleaseSection in home-sections.tsx): every
+ * Home's latest-release section (HOME_RELEASE in src/lib/home-release.ts, ReleaseSection in home-sections.tsx): every
  * picture has its files in public/ and its prompt, and every tile opens the Image studio on the model with that prompt
- * filled in, without starting a run.
+ * filled in, without starting a run. The first screen's release tile (tests/home-bento.test.ts) fades through some of
+ * them, and its title says "today" on the day the model came out only.
  */
 
 vi.mock("next/cache", () => ({ cacheLife: () => {} }));
@@ -21,6 +22,7 @@ vi.mock("next/navigation", () => ({
 const { ReleaseSection } = await import("@/components/home/home-sections");
 const { HOME_RELEASE, releaseArtSrc, releaseHref, releasePill } = await import("@/lib/home-showcase");
 const { START_PARAM } = await import("@/lib/composer");
+const { RELEASE_TITLES, releaseTitle } = await import("@/lib/release-day");
 
 const root = process.cwd();
 const size = (url: string) => fs.statSync(path.join(root, "public", url), { throwIfNoEntry: false })?.size ?? 0;
@@ -53,6 +55,26 @@ describe("Home's latest release", () => {
     // Every file in the folder is one of the pictures: none left behind by an earlier release.
     const dir = path.join(root, "public", HOME_RELEASE.dir);
     for (const f of fs.readdirSync(dir)) expect(slugs, f).toContain(f.split(".")[0]);
+  });
+
+  it("picks the first screen's tile pictures from its own, people and fashion first", () => {
+    const slugs = HOME_RELEASE.tile.map((t) => t.slug);
+    expect(slugs).toHaveLength(6);
+    expect(new Set(slugs).size).toBe(slugs.length);
+    for (const t of HOME_RELEASE.tile) {
+      expect(HOME_RELEASE.art.map((a) => a.slug), t.slug).toContain(t.slug);
+      expect(t.position).toMatch(/^\d+% \d+%$/);
+    }
+    expect(slugs.slice(0, 2)).toEqual(HOME_RELEASE.art.slice(0, 2).map((a) => a.slug));
+  });
+
+  it("says \"today\" on the release tile on the day the model came out (UTC), and a title that stays true after", () => {
+    expect(releaseTitle("2026-11-10", new Date("2026-11-10T00:00:00Z"))).toBe(RELEASE_TITLES.today);
+    expect(releaseTitle("2026-11-10", new Date("2026-11-10T23:59:59Z"))).toBe(RELEASE_TITLES.today);
+    expect(releaseTitle("2026-11-10", new Date("2026-11-11T00:00:00Z"))).toBe(RELEASE_TITLES.later);
+    expect(releaseTitle("2026-11-10", new Date("2027-03-01T12:00:00Z"))).toBe(RELEASE_TITLES.later);
+    expect(RELEASE_TITLES).toEqual({ today: "Live on Fuobe today", later: "Now on Fuobe" });
+    expect(RELEASE_TITLES.later).not.toMatch(/today|new/i);
   });
 
   it("opens the studios on the model, a tile with its prompt filled in and no run started", () => {

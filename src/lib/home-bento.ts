@@ -4,17 +4,19 @@
  * published file with its content version, so nothing here is typed in twice (tests/home-bento.test.ts).
  */
 import "server-only";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { MODELS, isListed } from "@/lib/catalog";
 import { getTemplate } from "@/lib/catalog/canvas";
 import { runsOn } from "@/lib/catalog/engines";
 import type { ModelDef } from "@/lib/catalog/types";
-import { EXAMPLE_MEDIA } from "@/lib/examples/media.generated";
 import { HOME_BENTO_GENJUTSU, HOME_BENTO_MEDIA, HOME_BENTO_REEL, HOME_BENTO_TINT } from "@/lib/home-bento.generated";
+import { HOME_RELEASE, releaseArtSrc, releaseHref } from "@/lib/home-release";
 import type { ReelClip, ReelWipe } from "@/lib/home-reel";
 import type { Demo } from "@/lib/live/demo";
 import { presetCover } from "@/lib/preset-covers";
+import { RELEASE_TITLES } from "@/lib/release-day";
 import { templateCover } from "@/lib/template-covers";
 
 /** The preset whose clip the 3D tile plays (no other card on Home plays it: tests/home-showcase.test.ts). */
@@ -31,8 +33,11 @@ export const BENTO_REEL = HOME_BENTO_REEL.map((c) => c.id);
 export const BENTO_REEL_ID = "home-reel";
 /** The width of the JPEG copy of each clip's first frame, for a browser without AVIF. */
 export const BENTO_CLIP_FALLBACK = 1024;
-/** The Image studio's example the image tile shows and opens with (src/lib/examples/plan.json). */
-export const BENTO_IMAGE_EXAMPLE = { id: "image.4", out: "/examples/image/4/out.jpg" };
+/**
+ * The release tile: the latest open model's pictures (HOME_RELEASE.tile, from public/previews/release/), each shown for
+ * `every` ms and faded into the next over `fade` ms, and the words of its badge.
+ */
+export const BENTO_RELEASE = { every: 3000, fade: 900, badge: "New · Day 0" } as const;
 /**
  * The Genjutsu tile: a reel of swaps shown as they happen (HOME_BENTO_GENJUTSU, made by scripts/gen-home-bento.mjs):
  * Genjutsu's own Group swap example first (a couple, both people swapped in one take; the studio's cover
@@ -59,7 +64,7 @@ export const BENTO_LIVE_STEPS = ["s0", "s1", "s2", "s3"];
 /** Where each tile goes. Each label is the navigation's name for the place (or the app's own). */
 export const BENTO_HREFS = {
   video: "/cinema",
-  image: `/image?example=${BENTO_IMAGE_EXAMPLE.id}`,
+  release: releaseHref("image"),
   audio: "/audio/clean",
   threeD: "/image-to-3d",
   genjutsu: "/genjutsu",
@@ -145,11 +150,30 @@ function made(file: string): string {
   return `${file}?v=${v}`;
 }
 
-/** A published example file with its version (src/lib/examples/media.generated.ts). */
-function example(file: string): string {
-  const m = EXAMPLE_MEDIA[file];
-  if (!m) throw new Error(`Home's first screen names ${file}, which isn't a published example file`);
-  return `${file}?v=${m.v}`;
+/** A published file under public/ with its content version (the first 8 hex of its SHA-256, as the covers' URLs). */
+async function versioned(file: string): Promise<string> {
+  const bytes = await fs.readFile(path.join(process.cwd(), "public", file)).catch(() => null);
+  if (!bytes?.length) throw new Error(`Home's first screen names ${file}, which isn't a published file`);
+  return `${file}?v=${createHash("sha256").update(bytes).digest("hex").slice(0, 8)}`;
+}
+
+/** A picture on the release tile: its copies, its original size and its framing in the tile. */
+export interface BentoSlide extends BentoPicture {
+  width: number;
+  height: number;
+  position: string;
+}
+
+/** The release tile's pictures, each in its 480 and 960 px AVIF and its 480 px WebP, at their content versions. */
+async function releaseSlides(release = HOME_RELEASE): Promise<BentoSlide[]> {
+  return Promise.all(
+    release.tile.map(async ({ slug, position }) => {
+      const art = release.art.find((a) => a.slug === slug);
+      if (!art) throw new Error(`Home's release tile names ${slug}, which isn't one of the release's pictures`);
+      const [a480, a960, fallback] = await Promise.all([versioned(releaseArtSrc(slug, 480, "avif")), versioned(releaseArtSrc(slug, 960, "avif")), versioned(releaseArtSrc(slug, 480, "webp"))]);
+      return { avif: [{ src: a480, w: 480 }, { src: a960, w: 960 }], fallback, width: art.width, height: art.height, position };
+    }),
+  );
 }
 
 /** The phrase typed before each step of the Live edit session, in its own words: every `type` since the last step. */
@@ -263,11 +287,21 @@ export async function homeBento(f: BentoFacts) {
     href: BENTO_HREFS[key],
     label: `${kind}: ${title}. ${cta}`,
   });
+  // The latest release, by its own name: the model over the title, and the studio it opens on that model. The title
+  // here is the one for after its first day (the page is built once; ReleaseTitle says "today" on the day itself).
+  const release: BentoTile = {
+    key: "release",
+    meta: HOME_RELEASE.name,
+    title: RELEASE_TITLES.later,
+    cta: "Try it now",
+    href: BENTO_HREFS.release,
+    label: `${HOME_RELEASE.name}, new: try it now`,
+  };
   return {
     facts: f,
     tiles: {
       video: tile("video", "Video", `${f.videoModels} video models · ${f.motions} camera moves`, "Films, ads and shorts", "Open Cinema Studio"),
-      image: tile("image", "Image", `Image · ${f.imageModels} models`, "Portraits and campaigns", "Open Image"),
+      release,
       audio: tile("audio", "Audio", `Audio · ${f.soundTools} sound tools`, "Studio-clean voice", "Open Clean up voice"),
       threeD: tile("threeD", "3D", `3D · ${f.models3d} models`, "Spin it in 3D", "Open Image to 3D"),
       genjutsu: tile("genjutsu", "Genjutsu", "Genjutsu", "Swap anyone in a clip", "Open Genjutsu"),
@@ -280,10 +314,7 @@ export async function homeBento(f: BentoFacts) {
       canvas: tile("canvas", "Canvas", "Canvas", "Chain any step, end to end", "Open Canvas"),
     },
     video: reel(),
-    image: {
-      avif: [480, 768].map((w) => ({ src: made(`/previews/home/image-4-${w}.avif`), w })),
-      fallback: example(BENTO_IMAGE_EXAMPLE.out),
-    } satisfies BentoPicture,
+    release: { ...BENTO_RELEASE, released: HOME_RELEASE.released, slides: await releaseSlides() },
     threeD: moving(BENTO_CLIPS.threeD, BENTO_CLIP_FILES.threeD),
     genjutsu: genjutsu(),
     voice: { room: voicePic(BENTO_VOICE.room), quiet: voicePic(BENTO_VOICE.quiet) },

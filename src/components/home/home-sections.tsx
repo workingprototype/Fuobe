@@ -285,7 +285,7 @@ function ReleaseTile({ art, copy }: { art: ReleaseArt; copy?: boolean }) {
 
 /**
  * The newest open model, first under the first screen: what it is, two ways in, and a card of pictures it made, each a
- * way to start from its prompt (HOME_RELEASE in home-showcase.ts; the next release swaps the data and the pictures).
+ * way to start from its prompt (HOME_RELEASE in home-release.ts; the next release swaps the data and the pictures).
  */
 export function ReleaseSection() {
   const r = HOME_RELEASE;

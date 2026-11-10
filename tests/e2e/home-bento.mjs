@@ -99,7 +99,7 @@ const WIDTHS = [
   { w: 1440, h: 900 },
   { w: 1920, h: 1080 },
 ];
-const TILES = ["video", "live", "genjutsu", "image", "threeD", "audio", "numbers", "canvas"];
+const TILES = ["video", "live", "genjutsu", "release", "threeD", "audio", "numbers", "canvas"];
 /** The tiles that play a clip by themselves (the reel, the 3D clip, Genjutsu's swap): each only once it is on screen. */
 const MOVING = ["video", "threeD", "genjutsu"];
 /** The widest copy of a clip (scripts/gen-home-bento.mjs), where its element doesn't say (a reel clip's data-max). */

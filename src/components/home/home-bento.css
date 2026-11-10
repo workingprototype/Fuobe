@@ -242,7 +242,7 @@
 /*
  * The reel leads; Live edit, the highlight, and Genjutsu, whose swaps need room to be seen, are the next biggest, the
  * same size, right by it (right under it on a phone). From lg the grid is fourteen narrow columns, so the top two rows
- * (the reel, Live edit, Genjutsu) and the bottom row (image, 3D, audio, the numbers, canvas) each split it their own way.
+ * (the reel, Live edit, Genjutsu) and the bottom row (the latest release, 3D, audio, the numbers, canvas) each split it their own way.
  * The audio tile, which holds a demo to play, takes four of the bottom row's columns.
  */
 .hb-grid {
@@ -253,7 +253,7 @@
     "video video"
     "live live"
     "genjutsu genjutsu"
-    "image three"
+    "release three"
     "audio audio"
     "canvas canvas"
     "numbers numbers";
@@ -270,7 +270,7 @@
   .hb-genjutsu {
     aspect-ratio: 16 / 10;
   }
-  .hb-image,
+  .hb-release,
   .hb-three {
     aspect-ratio: 1;
   }
@@ -290,7 +290,7 @@
     grid-template-areas:
       "video video live"
       "video video live"
-      "genjutsu genjutsu image"
+      "genjutsu genjutsu release"
       "three audio canvas"
       "numbers numbers numbers";
   }
@@ -303,14 +303,14 @@
     grid-template-areas:
       "video video video video video video live live live live genjutsu genjutsu genjutsu genjutsu"
       "video video video video video video live live live live genjutsu genjutsu genjutsu genjutsu"
-      "image image three three audio audio audio audio numbers numbers numbers canvas canvas canvas";
+      "release release three three audio audio audio audio numbers numbers numbers canvas canvas canvas";
   }
 }
 .hb-video {
   grid-area: video;
 }
-.hb-image {
-  grid-area: image;
+.hb-release {
+  grid-area: release;
 }
 .hb-audio {
   grid-area: audio;
@@ -619,24 +619,143 @@
   transition-timing-function: cubic-bezier(0.6, 0, 0.4, 1);
 }
 
-/* ---------------------------------------------------------------- image: a slow push in */
+/* ---------------------------------------------------------------- release: the latest open model, new */
 
-.hb-kenburns {
-  transform-origin: 50% 40%;
+/*
+ * The latest open model's pictures (BentoRelease in bento-islands.tsx), in a layer of their own under the tile's words:
+ * the one shown on top, fading in over the one before it (held under it until the next turn), the rest unseen. Each
+ * closes in slowly toward its own framing point (--o) while it shows and while the next fades in over it, so nothing
+ * snaps back on screen. The tile's edge and a soft inner glow are the accent, and the badge's dot pulses: it reads as
+ * new. All of it moves only while data-play is "1", freezes at "0", and without it the first picture rests whole.
+ */
+.hb-release > .hb-pic {
+  isolation: isolate;
 }
-.hb-bento[data-play] .hb-kenburns {
-  animation: bento-ken 16s ease-in-out infinite alternate;
+.hb-release-slide {
+  position: absolute;
+  inset: 0;
+  display: block;
+  opacity: 0;
+}
+.hb-release-slide[data-prev] {
+  z-index: 1;
+  opacity: 1;
+}
+.hb-release-slide[data-on] {
+  z-index: 2;
+  opacity: 1;
+  transition: opacity var(--fade, 900ms) cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hb-release-slide .hb-fill {
+  transform-origin: var(--o, 50% 40%);
+}
+.hb-bento[data-play] .hb-release-slide:is([data-on], [data-prev]) .hb-fill {
+  animation: hb-release-ken 4.2s cubic-bezier(0.25, 0.1, 0.45, 1) both;
   animation-play-state: paused;
 }
-.hb-bento[data-play="1"] .hb-kenburns {
+.hb-bento[data-play="1"] .hb-release-slide:is([data-on], [data-prev]) .hb-fill {
   animation-play-state: running;
 }
-@keyframes bento-ken {
+@keyframes hb-release-ken {
   from {
     transform: scale(1);
   }
   to {
-    transform: scale(1.06);
+    transform: scale(1.1);
+  }
+}
+
+/* The edge in the accent, with a glow inside it; brighter under the pointer. */
+.hb-release::before {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--bento-accent) 75%, transparent),
+    inset 0 0 26px -6px var(--bento-glow);
+}
+@media (hover: hover) {
+  .hb-release:hover::before {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--bento-accent) 85%, white),
+      inset 0 0 30px -4px color-mix(in oklch, var(--bento-accent) 45%, transparent);
+  }
+}
+
+/* "New · Day 0", as Genjutsu's "Swapped": an accent pill top left, with a white dot that pulses while the tile plays. */
+.hb-new-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px 0 8px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--bento-accent) 82%, black);
+  box-shadow: 0 0 16px var(--bento-glow);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.hb-new-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #fff;
+}
+.hb-bento[data-play] .hb-new-dot {
+  animation: hb-new-pulse 1.6s ease-out infinite;
+  animation-play-state: paused;
+}
+.hb-bento[data-play="1"] .hb-new-dot {
+  animation-play-state: running;
+}
+@keyframes hb-new-pulse {
+  from {
+    box-shadow: 0 0 0 0 rgb(255 255 255 / 70%);
+  }
+  to {
+    box-shadow: 0 0 0 6px rgb(255 255 255 / 0%);
+  }
+}
+@container (min-width: 220px) {
+  .hb-new-badge {
+    top: 14px;
+    left: 14px;
+    height: 26px;
+    padding: 0 11px 0 10px;
+    font-size: 11px;
+  }
+}
+
+/*
+ * The model's name over the title and "Try it now" under it, in every size of the tile (a small tile drops both
+ * elsewhere): the name is what is new. The badge holds the top, so no corner arrow.
+ */
+.hb-release .hb-meta {
+  display: block;
+}
+.hb-release .hb-cta {
+  display: inline-flex;
+}
+.hb-release .hb-corner {
+  display: none;
+}
+/* Three lines of words on a small tile: the shade reaches higher, so the name reads over a bright picture. */
+.hb-release .hb-shade {
+  height: 78%;
+}
+@container (max-width: 199.98px) {
+  .hb-release .hb-meta {
+    letter-spacing: 0.04em;
+  }
+  .hb-release .hb-cta {
+    margin-top: 5px;
+    font-size: 12px;
   }
 }
 
@@ -1562,7 +1681,8 @@ html:has([role="dialog"]) .hb-cue-float[data-shown] {
   .hb-frame {
     transition: none;
   }
-  .hb-bento .hb-kenburns,
+  .hb-bento .hb-release-slide .hb-fill,
+  .hb-bento .hb-new-dot,
   .hb-bento .hb-caret,
   .hb-bento .hb-edges path {
     animation: none !important;

@@ -1,6 +1,6 @@
 import { ArrowRight, ArrowUpRight, Play, Sparkles, Video } from "lucide-react";
 import { preload } from "react-dom";
-import { BentoClip, BentoMotion, BentoReel, LiveTyping, NumbersLink } from "@/components/home/bento-islands";
+import { BentoClip, BentoMotion, BentoReel, BentoRelease, LiveTyping, NumbersLink, ReleaseTitle } from "@/components/home/bento-islands";
 import { BentoVoice } from "@/components/home/bento-voice";
 import { PausePreviews, ScrollCue } from "@/components/home/home-islands";
 import { IntentLink } from "@/components/intent-link";
@@ -23,6 +23,11 @@ const SIZES = {
   live: "(min-width: 1024px) 570px, (min-width: 768px) 630px, calc(100vw - 32px)",
   /** A 4:3 picture in a square tile on a phone (half the row): cropped at its sides, so 4/3 of the tile's width. */
   square: "(min-width: 1024px) 274px, (min-width: 768px) 320px, calc((100vw - 44px) * 0.667)",
+  /**
+   * The release tile: two of the bottom row's fourteen columns from lg, a column on a tablet, half the row on a phone. Its
+   * pictures come portrait and landscape, so a landscape one under cover shows at about 16/9 of the tile's height.
+   */
+  release: "(min-width: 1024px) 280px, (min-width: 768px) 400px, calc((100vw - 44px) * 0.9)",
   /**
    * The Genjutsu tile: from lg as big as the live tile, two rows tall and squarer than its 4:3 clip (so its height
    * times 4/3: up to 560 px on a 1920 x 1080 screen); two columns on a tablet; the full row on a phone.
@@ -80,14 +85,17 @@ function Pic({
   );
 }
 
-/** A tile's words: its kind and how much of it, its title, and where it opens (or, on a small tile, an arrow). */
-function Copy({ tile, bigMeta }: { tile: BentoTile; bigMeta?: boolean }) {
+/**
+ * A tile's words: its kind and how much of it, its title (`title`: in place of the tile's own), and where it opens (or,
+ * on a small tile, an arrow).
+ */
+function Copy({ tile, bigMeta, title }: { tile: BentoTile; bigMeta?: boolean; title?: React.ReactNode }) {
   return (
     <>
       <span aria-hidden className={s.shade} />
       <span aria-hidden className={s.copy}>
         {tile.meta && <span className={cn(s.meta, bigMeta && s.big)}>{tile.meta}</span>}
-        <span className={s.title}>{tile.title}</span>
+        <span className={s.title}>{title ?? tile.title}</span>
         <span className={s.cta}>
           {tile.cta} <ArrowRight className="size-3.5" />
         </span>
@@ -103,11 +111,11 @@ function Copy({ tile, bigMeta }: { tile: BentoTile; bigMeta?: boolean }) {
  * One tile: the whole of it is one link, named by its kind, title and where it goes. (The Audio tile holds a demo's
  * buttons, so only its words are its link: bento-voice.tsx.)
  */
-function Tile({ tile, area, children, bigMeta }: { tile: BentoTile; area: string; children?: React.ReactNode; bigMeta?: boolean }) {
+function Tile({ tile, area, children, bigMeta, title }: { tile: BentoTile; area: string; children?: React.ReactNode; bigMeta?: boolean; title?: React.ReactNode }) {
   return (
     <IntentLink href={tile.href} aria-label={tile.label} data-tile={tile.key} className={cn(s.tile, area)}>
       {children}
-      <Copy tile={tile} bigMeta={bigMeta} />
+      <Copy tile={tile} bigMeta={bigMeta} title={title} />
     </IntentLink>
   );
 }
@@ -233,8 +241,16 @@ export function HomeBento({ bento }: { bento: Bento }) {
           <BentoReel id={bento.genjutsu.id} reel={bento.genjutsu.reel} wipes={bento.genjutsu.wipes} />
         </Tile>
 
-        <Tile tile={tiles.image} area={s.image}>
-          <Pic pic={bento.image} sizes={SIZES.square} className={s.kenburns} fetchPriority="low" />
+        {/*
+          The latest open model, new on Fuobe: its pictures fade one into the next as each closes in slowly, under a
+          badge saying it is new. Its name is over the title; the whole tile opens the Image studio on it.
+        */}
+        <Tile tile={tiles.release} area={s.release} title={<ReleaseTitle released={bento.release.released} />}>
+          <BentoRelease slides={bento.release.slides} sizes={SIZES.release} every={bento.release.every} fade={bento.release.fade} />
+          <span aria-hidden className={s.newBadge}>
+            <span className={s.newDot} />
+            {bento.release.badge}
+          </span>
         </Tile>
 
         <Tile tile={tiles.threeD} area={s.three}>

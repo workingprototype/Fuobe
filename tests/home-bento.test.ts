@@ -31,9 +31,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-const { BENTO_BOARD, BENTO_CLIPS, BENTO_CLIP_WIDTHS, BENTO_GENJUTSU, BENTO_GENJUTSU_WIDTHS, BENTO_HREFS, BENTO_IMAGE_EXAMPLE, BENTO_REEL, BENTO_REEL_ID, BENTO_VOICE, livePhrases, openModelsOf } =
+const { BENTO_BOARD, BENTO_CLIPS, BENTO_CLIP_WIDTHS, BENTO_GENJUTSU, BENTO_GENJUTSU_WIDTHS, BENTO_HREFS, BENTO_REEL, BENTO_RELEASE, BENTO_REEL_ID, BENTO_VOICE, livePhrases, openModelsOf } =
   await import("@/lib/home-bento");
-const { HOME_BEFORE_AFTER, HOME_EFFECTS, HOME_MOTIONS, HOME_REVEALS, HOME_STUDIOS, homeShowcase, navLabel } = await import("@/lib/home-showcase");
+const { HOME_BEFORE_AFTER, HOME_EFFECTS, HOME_MOTIONS, HOME_RELEASE, HOME_REVEALS, HOME_STUDIOS, homeShowcase, navLabel, releaseArtSrc, releaseHref } = await import("@/lib/home-showcase");
+const { RELEASE_TITLES } = await import("@/lib/release-day");
 const { HomeBento } = await import("@/components/home/home-bento");
 const { voiceButton } = await import("@/components/home/bento-voice");
 
@@ -166,7 +167,7 @@ describe("Home's first screen", () => {
   });
 
   it("lists every picture at its real width", async () => {
-    const pictures: BentoPicture[] = [bento.video.poster, bento.threeD.poster, bento.image, bento.genjutsu.poster, bento.genjutsu.still, bento.voice.room, bento.voice.quiet, ...bento.live.frames];
+    const pictures: BentoPicture[] = [bento.video.poster, bento.threeD.poster, ...bento.release.slides, bento.genjutsu.poster, bento.genjutsu.still, bento.voice.room, bento.voice.quiet, ...bento.live.frames];
     for (const p of pictures)
       for (const a of p.avif) {
         const m = await sharp(file(a.src)).metadata();
@@ -218,16 +219,13 @@ describe("Home's first screen", () => {
         return HUB_MODES[hub as keyof typeof HUB_MODES].some((m) => m.id === mode) && fs.existsSync(path.join(root, "src", "app", "(studio)", hub, "[mode]", "page.tsx"));
       return fs.existsSync(path.join(root, "src", "app", "(studio)", seg, "page.tsx"));
     };
-    for (const href of [BENTO_HREFS.video, BENTO_HREFS.image, BENTO_HREFS.audio, BENTO_HREFS.threeD, BENTO_HREFS.genjutsu, BENTO_HREFS.live, BENTO_HREFS.canvas])
+    for (const href of [BENTO_HREFS.video, BENTO_HREFS.release, BENTO_HREFS.audio, BENTO_HREFS.threeD, BENTO_HREFS.genjutsu, BENTO_HREFS.live, BENTO_HREFS.canvas])
       expect(route(href), href).toBe(true);
-    const plan = JSON.parse(fs.readFileSync(path.join(root, "src", "lib", "examples", "plan.json"), "utf8")) as { id: string; surface: string; output?: string }[];
-    expect(plan.find((r) => r.id === BENTO_IMAGE_EXAMPLE.id)).toMatchObject({ surface: "studio:image", output: BENTO_IMAGE_EXAMPLE.out });
     expect(BENTO_HREFS.numbers).toBe("#home-studios");
     expect(fs.readFileSync(path.join(root, "src", "components", "home", "home-sections.tsx"), "utf8")).toContain('id="home-studios"');
     // The words each link ends on are the place's own name.
     const t = bento.tiles;
     expect(t.video.cta).toBe(`Open ${navLabel("/cinema")}`);
-    expect(t.image.cta).toBe(`Open ${navLabel("/image")}`);
     // The Audio tile plays Clean up voice's demo, and opens that mode's own page.
     expect(BENTO_HREFS.audio).toBe("/audio/clean");
     expect(t.audio.cta).toBe(`Open ${HUB_MODES.audio.find((m) => m.id === "clean")!.label}`);
@@ -241,8 +239,8 @@ describe("Home's first screen", () => {
     const links = [...html.matchAll(/<a [^>]*>/g)].map((m) => m[0]);
     const tiles = links.filter((a) => a.includes("data-tile="));
     // Every tile is its link but the Audio tile, which holds the demo's buttons: its words are its link.
-    expect([...html.matchAll(/<(?:a|div) [^>]*data-tile="([^"]+)"/g)].map((m) => m[1])).toEqual(["video", "live", "genjutsu", "image", "threeD", "audio", "numbers", "canvas"]);
-    expect(tiles.map((a) => /data-tile="([^"]+)"/.exec(a)![1])).toEqual(["video", "live", "genjutsu", "image", "threeD", "numbers", "canvas"]);
+    expect([...html.matchAll(/<(?:a|div) [^>]*data-tile="([^"]+)"/g)].map((m) => m[1])).toEqual(["video", "live", "genjutsu", "release", "threeD", "audio", "numbers", "canvas"]);
+    expect(tiles.map((a) => /data-tile="([^"]+)"/.exec(a)![1])).toEqual(["video", "live", "genjutsu", "release", "threeD", "numbers", "canvas"]);
     const audioLink = links.find((a) => a.includes(`href="${BENTO_HREFS.audio}"`));
     expect(audioLink).toBeTruthy();
     expect(links).toHaveLength(8);
@@ -251,7 +249,7 @@ describe("Home's first screen", () => {
       expect(label, a).toBeTruthy();
       expect(label!.length).toBeGreaterThan(10);
     }
-    const KINDS = { video: "Video", image: "Image", audio: "Audio", threeD: "3D", genjutsu: "Genjutsu", live: "Live edit", canvas: "Canvas" };
+    const KINDS = { video: "Video", audio: "Audio", threeD: "3D", genjutsu: "Genjutsu", live: "Live edit", canvas: "Canvas" };
     for (const [key, kind] of Object.entries(KINDS)) {
       const t = bento.tiles[key as keyof typeof KINDS];
       expect(t.label).toBe(`${kind}: ${t.title}. ${t.cta}`);
@@ -296,13 +294,19 @@ describe("Home's first screen", () => {
       for (const w of m.slice(1).filter(Boolean)) expect(w.replace(/\$\{[^}]+\}/g, "").replace(/3D/g, ""), w).not.toMatch(/\d/);
   });
 
-  it("reads plainly: no model or maker names, no status or prompt words", () => {
-    const visible = html
+  it("reads plainly: no model or maker names but the release tile's own, no status or prompt words", () => {
+    // The release tile names its model, by design (checked on its own below).
+    const release = /<a [^>]*data-tile="release"[\s\S]*?<\/a>/.exec(html)![0];
+    expect(release).toContain(`>${HOME_RELEASE.name}<`);
+    const others = html.replace(release, "");
+    const visible = others
       .replace(/<[^>]+>/g, " ")
       .replace(/&#x27;|&quot;|&amp;/g, " ")
       .replace(/\s+/g, " ");
-    const labels = [...html.matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1]);
-    const texts = [visible.replace(/Rendered locally on ComfyUI, on one RTX 5090\.|Every preview on this page was rendered locally on ComfyUI, on one RTX 5090\./g, ""), ...labels];
+    const labels = [...others.matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1]);
+    // The release tile's words without its model's name and the site's (its title: "Now on Fuobe"): plain too.
+    const own = release.replace(/<[^>]+>/g, " ").replaceAll(HOME_RELEASE.name, " ").replace(/\bFuobe\b/g, " ").replace(/\s+/g, " ");
+    const texts = [own, bento.tiles.release.label.replace(HOME_RELEASE.name, ""), visible.replace(/Rendered locally on ComfyUI, on one RTX 5090\.|Every preview on this page was rendered locally on ComfyUI, on one RTX 5090\./g, ""), ...labels];
     const WORDS = new Set(["Relight", "Runway", "Canvas", "Image", "Audio", "Video"]);
     const names = [...new Set(MODELS.flatMap((m) => [m.name, m.vendor]).filter((n): n is string => !!n && n.trim().length >= 3 && !WORDS.has(n)))];
     const status = /\b(unverified|not checked|todo|tbd|test|placeholder|demo|preview made with|gpu|comfy|lora|checkpoint)\b/i;
@@ -398,5 +402,70 @@ describe("Home's first screen", () => {
     expect(graph.nodes.find((n) => n.id === film.id)?.type).toBe("output");
     expect(photo.thumb).toMatch(/^\/previews\/home\/board-photo\.webp\?v=/);
     expect(film.thumb).toMatch(/^\/previews\/home\/board-film\.webp\?v=/);
+  });
+
+  it("shows the latest release in the bottom row: new, by its name, and one link to the Image studio on its model", () => {
+    const tile = /<a [^>]*data-tile="release"[\s\S]*?<\/a>/.exec(html)![0];
+    const open = /^<a [^>]*>/.exec(tile)![0];
+    const decode = (v: string) => v.replace(/&amp;/g, "&");
+    expect(BENTO_HREFS.release).toBe(releaseHref("image"));
+    expect(decode(/href="([^"]+)"/.exec(open)![1])).toBe(`/image?model=${HOME_RELEASE.modelId}`);
+    expect(/aria-label="([^"]+)"/.exec(open)![1]).toBe(`${HOME_RELEASE.name}, new: try it now`);
+    expect(bento.tiles.release.label).toBe(`${HOME_RELEASE.name}, new: try it now`);
+    // Its words: the badge, the model's name over the title (the later one in the HTML: the page is built once), the link's.
+    const words = tile.replace(/<[^>]+>/g, "|").split("|").map((w) => w.trim()).filter(Boolean);
+    expect(words).toEqual([BENTO_RELEASE.badge, HOME_RELEASE.name, RELEASE_TITLES.later, bento.tiles.release.cta]);
+    expect(BENTO_RELEASE.badge).toBe("New · Day 0");
+    expect(bento.tiles.release.cta).toBe("Try it now");
+    // The tile it took the place of is gone, files and all (the folder test above holds the rest of previews/home).
+    expect(Object.keys(bento.tiles)).not.toContain("image");
+    expect(html).not.toMatch(/\/previews\/home\/image-4|Portraits and campaigns/);
+  });
+
+  it("fades through the release's own pictures, the first one in the HTML and the rest once it plays", () => {
+    const r = bento.release;
+    expect(r.released).toBe(HOME_RELEASE.released);
+    expect([r.every, r.fade]).toEqual([BENTO_RELEASE.every, BENTO_RELEASE.fade]);
+    expect(r.fade).toBeLessThan(r.every);
+    expect(r.slides).toHaveLength(HOME_RELEASE.tile.length);
+    for (const [i, { slug, position }] of HOME_RELEASE.tile.entries()) {
+      const p = r.slides[i];
+      const art = HOME_RELEASE.art.find((a) => a.slug === slug)!;
+      // The release folder's own files (none copied into previews/home), each at its content version.
+      expect(p.avif.map((a) => a.w)).toEqual([480, 960]);
+      for (const [url, src] of [
+        [p.avif[0].src, releaseArtSrc(slug, 480, "avif")],
+        [p.avif[1].src, releaseArtSrc(slug, 960, "avif")],
+        [p.fallback, releaseArtSrc(slug, 480, "webp")],
+      ] as const)
+        expect(url).toBe(`${src}?v=${contentVersion([file(src)])}`);
+      expect([p.width, p.height]).toEqual([art.width, art.height]);
+      expect(p.position).toBe(position);
+    }
+    const tile = /<a [^>]*data-tile="release"[\s\S]*?<\/a>/.exec(html)![0];
+    // Only the first picture is in the HTML, shown, with nothing under it; decorative (the link names the tile).
+    const imgs = [...tile.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0]).toContain('alt=""');
+    expect(imgs[0]).toContain(`src="${r.slides[0].fallback}"`);
+    expect(imgs[0]).not.toContain('loading="lazy"');
+    expect(tile).toContain('data-on="true"');
+    expect(tile).not.toContain("data-prev");
+    for (const p of r.slides.slice(1)) expect(tile).not.toContain(p.avif[0].src);
+  });
+
+  it("moves the release tile only while the first screen plays, and never under reduced motion", () => {
+    const css = fs.readFileSync(path.join(root, "src", "components", "home", "home-bento.css"), "utf8");
+    // Its zoom and the badge's pulse run under data-play only ("1": running, "0": frozen); without it the first picture rests.
+    for (const sel of [".hb-release-slide:is([data-on], [data-prev]) .hb-fill", ".hb-new-dot"]) {
+      expect(css).toContain(`.hb-bento[data-play] ${sel} {`);
+      expect(css).toContain(`.hb-bento[data-play="1"] ${sel} {`);
+    }
+    expect(css).not.toMatch(/^\.hb-release-slide[^{]*\{[^}]*animation:/m);
+    // Under reduced motion nothing moves, whatever data-play says.
+    const reduced = css.slice(css.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reduced).toMatch(/\.hb-bento \.hb-release-slide \.hb-fill,[\s\S]*\.hb-bento \.hb-new-dot,[\s\S]*animation: none !important/);
+    // It keeps the bottom row's place: the grid sets its box on every width.
+    expect(css.match(/"release three"|"genjutsu genjutsu release"|"release release three three/g)).toHaveLength(3);
   });
 });
