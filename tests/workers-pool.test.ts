@@ -787,6 +787,36 @@ describe("a worker's list of model files", () => {
     expect(kept.files.map((f) => `${f.folder}/${f.name}`).sort()).toEqual(good.map((f) => `${f.folder}/${f.name}`).sort());
     expect(beatWith(w, workerInventoryHash(inv)).worker.sendInventory).toBe(false);
   });
+
+  it("works its lanes out again on the next beat when the requirements index changed after its list came, and asks for the list again", async () => {
+    const { inventoryHash: workerInventoryHash } = await import("../bin/lib/worker/inventory.mjs");
+    const { indexKey } = await import("@/server/gpu/index-file");
+    const n = nested();
+    const w = bare("stale-lanes", [n.lane], n.minVram + GB);
+    const inv = { files: n.files.map(({ folder, name, size, sha256 }) => ({ folder, name, size, sha256 })), nodePacks: n.nodePacks, media: ["image", "video", "audio"] };
+    expect((await put(w, inv)).status).toBe(200);
+    const fresh = JSON.parse(row(w).lanes_json ?? "{}") as { lanes: string[]; workflows: string[]; index?: string };
+    expect(fresh.index).toBe(indexKey());
+    // Its lanes as an older index gave them (the workflow is new since; the row from before lanes said their index),
+    // with the same list of files: the worker sees no change of its own, so it sends no list by itself.
+    for (const stale of [{ lanes: [], workflows: [] }, { lanes: [], workflows: [], index: "another-index" }]) {
+      db().prepare("UPDATE relay_workers SET lanes_json = ? WHERE id = ?").run(JSON.stringify(stale), w.id);
+      const id = task({ lane: n.lane, workflow: n.id, minVram: n.minVram, account: "acct-stale-lanes" });
+      expect(claim(w)).toBeNull();
+      // The next beat works them out again from the list it sent, at once, and asks for the list again.
+      expect(beatWith(w, workerInventoryHash(inv)).worker.sendInventory).toBe(true);
+      expect(JSON.parse(row(w).lanes_json ?? "{}")).toEqual(fresh);
+      expect(claim(w)?.id).toBe(id);
+      db().prepare("UPDATE relay_tasks SET state = 'done', worker_id = NULL, device = NULL WHERE id = ?").run(id);
+      // Worked out for this index: the next beat neither works them out again nor asks for the list.
+      expect(beatWith(w, workerInventoryHash(inv)).worker.sendInventory).toBe(false);
+    }
+  });
+
+  it("leaves the lanes of a worker that sent no list yet as they are", () => {
+    const w = worker("no-list-yet", { lanes: [LANE_A], workflows: ["wf-a"] });
+    expect(JSON.parse(row(w).lanes_json ?? "{}")).toEqual({ lanes: [LANE_A], workflows: ["wf-a"] });
+  });
 });
 
 describe("routes", () => {

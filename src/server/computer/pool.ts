@@ -10,7 +10,7 @@ import { APPS, MODELS } from "@/lib/catalog";
 import { laneName, type LaneName } from "@/lib/lane-names";
 import { clock, hoursAt, parseHours, type Hours } from "@/lib/worker-hours";
 import { db } from "../db";
-import { loadIndex } from "../gpu/index-file";
+import { indexKey, loadIndex } from "../gpu/index-file";
 import { hostedRunsOn } from "../hosted-switch";
 import { heldView } from "../pool-holds";
 import { catalogVersion } from "./catalog-version";
@@ -166,7 +166,8 @@ interface Allow {
 }
 
 const allowOf = (w: WorkerRow) => json<Record<string, Allow>>(w.allow_json, {});
-const capableOf = (w: WorkerRow) => json<{ lanes: string[]; workflows: string[] }>(w.lanes_json, { lanes: [], workflows: [] });
+/** The lanes and workflows its files let it run, and the requirements index they were worked out with (none: an older row). */
+const capableOf = (w: WorkerRow) => json<{ lanes: string[]; workflows: string[]; index?: string }>(w.lanes_json, { lanes: [], workflows: [] });
 const factsOf = (w: WorkerRow) => json<ComputerFacts>(w.facts_json, {});
 /** The worker's verified files as its last list said (inventory_json), read once for each list it sends. */
 const inventories = new Map<string, { hash: string | null; inv: Inventory }>();
@@ -407,6 +408,8 @@ export function workerBeat(w: WorkerRow, b: WorkerBeat, now = Date.now()): BeatA
       ...(s.prefix && { prefix: s.prefix }),
     }));
     const fresh = d.prepare("SELECT * FROM relay_workers WHERE id = ?").get(w.id) as WorkerRow;
+    // Its lanes from another requirements index (the catalog changed since its list came): worked out again now.
+    const lanesRefreshed = refreshLanes(fresh);
     // Stop now (the website, or the worker paused itself with --now / a busy GPU): its jobs go back in line at no cost,
     // and the worker takes their prompts off its ComfyUI.
     const stopNow = !!fresh.stop_now || (b.local.paused && !!b.local.why && (b.local.why === "here-now" || b.local.why.startsWith("gpu-busy")));
@@ -474,7 +477,8 @@ export function workerBeat(w: WorkerRow, b: WorkerBeat, now = Date.now()): BeatA
         minProtocol: MIN_PROTOCOL,
         ...(catalogVersion() && { catalogVersion: catalogVersion()! }),
         // While a model folder isn't there, the studio keeps the list it has (its lanes don't go missing meanwhile).
-        sendInventory: b.local.why !== MODELS_NOT_READY && (!fresh.inventory_hash || fresh.inventory_hash !== b.inventoryHash),
+        // Its lanes were just worked out again for a new index: the list again too, for files the old index didn't name.
+        sendInventory: b.local.why !== MODELS_NOT_READY && (lanesRefreshed || !fresh.inventory_hash || fresh.inventory_hash !== b.inventoryHash),
         ...(nextToken && { token: nextToken }),
         ...(fresh.expires_at && { tokenExpiresAt: fresh.expires_at }),
         // The owner's mode it follows now: who goes first, and what local work on its PC does.
@@ -670,8 +674,26 @@ export function saveInventory(w: WorkerRow, raw: unknown): { lanes: string[]; wo
   const invHash = inventoryHash({ ...inv, files: sent });
   db()
     .prepare("UPDATE relay_workers SET inventory_json = ?, inventory_hash = ?, lanes_json = ? WHERE id = ?")
-    .run(JSON.stringify(inv), invHash, JSON.stringify({ lanes: r.lanes, workflows: r.workflows }), w.id);
+    .run(JSON.stringify(inv), invHash, JSON.stringify({ lanes: r.lanes, workflows: r.workflows, index: indexKey() }), w.id);
   return r;
+}
+
+/**
+ * A worker's lanes worked out with another requirements index than this server's (a deploy changed the catalog after
+ * its list of files came, or a server with the old index took the list during a deploy's overlap): worked out again at
+ * once from the list it sent, so a workflow the new index adds, or a lane it changes, counts from this beat on. True when
+ * they were (the studio then asks for its list again too, for files the old index didn't name). A worker that sent no
+ * list yet is left as it is.
+ */
+export function refreshLanes(w: WorkerRow): boolean {
+  if (!w.inventory_json) return false;
+  const key = indexKey();
+  if (capableOf(w).index === key) return false;
+  const r = lanesFor(loadIndex(), inventoryOf(w), sha);
+  const lanesJson = JSON.stringify({ lanes: r.lanes, workflows: r.workflows, index: key });
+  db().prepare("UPDATE relay_workers SET lanes_json = ? WHERE id = ?").run(lanesJson, w.id);
+  w.lanes_json = lanesJson;
+  return true;
 }
 
 /** The hash a worker sends with each beat, so the studio asks for the whole list only when it changed. */
