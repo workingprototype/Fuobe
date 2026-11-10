@@ -361,6 +361,7 @@ function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePro
             label={op?.startsWith("upscale") ? "Resolution" : "Quality"}
             options={shape.resolution}
             value={p.resolution ?? d.resolution ?? shape.resolution[0]}
+            format={(v) => opts.resolutionLabels?.[v] ?? v}
             onChange={(v) => setP({ resolution: v })}
             unavailable={(v) => why("resolution", v, (x) => setP({ resolution: String(x) }))}
           />

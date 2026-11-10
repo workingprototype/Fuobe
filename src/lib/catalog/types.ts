@@ -749,6 +749,8 @@ export interface ModelOptions {
   inbetween?: true;
   aspectRatios?: string[];
   resolutions?: string[];
+  /** How a size reads in the studio's Quality picker and its summary ("4K" as "4K · Max"); a size left out reads as itself. */
+  resolutionLabels?: Record<string, string>;
   /**
    * Tiers a finishing pass reaches after the model's own render, offered only where the brief puts them (the Video
    * studio and Cinema, through studioResolutions): MiniMax H3's 2K on your GPU is a 768p draft redrawn by Open-H3

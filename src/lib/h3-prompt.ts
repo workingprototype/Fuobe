@@ -89,6 +89,8 @@ export function h3Canvas(shape?: string): { width: number; height: number } {
 
 /**
  * A graph from the MiniMax H3 video family (minimax-h3-t2v, -i2v, -flf2v, their -hq graphs and the orbit graph, and the 768p
- * draft that keeps its latent for a 2K finish, video-h3-t2v-2k).
+ * draft that keeps its latent for a 2K finish, video-h3-t2v-2k). MiniMax H3 Image's stills (minimax-h3-image-*) are not: they
+ * take the size asked for, not H3's video canvas.
  */
-export const isH3Graph = (workflowId: string): boolean => workflowId.startsWith("minimax-h3-") || workflowId === "video-h3-t2v-2k";
+export const isH3Graph = (workflowId: string): boolean =>
+  (workflowId.startsWith("minimax-h3-") && !workflowId.startsWith("minimax-h3-image-")) || workflowId === "video-h3-t2v-2k";

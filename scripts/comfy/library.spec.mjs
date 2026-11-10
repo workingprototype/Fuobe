@@ -682,6 +682,12 @@ export const KNOWN_MODELS = {
   'flux3-image-klein-base-bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/feef60b0aaf63a4773ace96636ebbcf43b881312/diffusion_models/flux3-image-klein-base-bf16.safetensors' },
   // BFL's prompt upsampler (Qwen3.5 9B fine-tune, Apache-2.0): the Prompt helper. The w4a8 file is the Comfy templates' (the card's
   // download line names the int8 one, 9.75 GB).
+  // MiniMax H3 Image (minimax-h3-image-*): Comfy-Org's repack of the DiT and its VAE at 892de7cb, and the int8 convrot Qwen3-VL-32B
+  // encoder of Comfy-Org/MiniMax-H3 at 54472221 (the templates' encoder; it runs on cards before Blackwell, unlike the nvfp4 one the
+  // H3 video graphs load). The Prompt helper's Qwen3.5 9B w4a8 is the MOSS-Image row above (the same file).
+  'minimax_h3_image_pruned_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/892de7cb61df49753bf15145a711154803a355cb/diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors' },
+  'minimax_h3_image_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/892de7cb61df49753bf15145a711154803a355cb/vae/minimax_h3_image_vae_fp16.safetensors' },
+  'qwen3vl_32b_minimax_h3_int8_convrot.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/54472221d27c695fca9621b0c3ed52f06c4af707/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors' },
   'qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/feef60b0aaf63a4773ace96636ebbcf43b881312/text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors', variants: ['qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors', 'qwen3.5_9b_flux3_prompt_upsampler_bf16.safetensors'] },
 };
 
@@ -690,6 +696,22 @@ const KLEIN_LICENSE =
   'FLUX Kommunity License v1.0 (FLUX 3 Image Klein and Klein Base: non-commercial use, plus commercial outputs for Qualifying Users under US$5M gross ' +
   'annual revenue; other commercial use needs a BFL licence; not blanket permission for commercial fine-tuning or distribution); Qwen3-VL-4B-Instruct ' +
   'encoder and the FLUX 3 prompt upsampler (Qwen3.5 9B fine-tune) Apache-2.0; FLUX.2 VAE Apache-2.0';
+
+// MiniMax H3 Image (minimax-h3-image-*): every file's licence, as information.
+const H3_IMAGE_LICENSE =
+  'MiniMax-H3-Image Community License (the MiniMax H3 Image model and its VAE): territory EXCLUDES the US, the EU, the UK and South Korea; ' +
+  'annualized revenue above US$1M, or a hosted service for third parties, needs MiniMax\'s prior written authorization; show "MiniMax-H3-Image" on the ' +
+  'product\'s interface; no outputs used to improve other AI models · MiniMax H3 Community License (the packaged Qwen3-VL-32B text encoder) · ' +
+  'Qwen3.5 9B (the Prompt helper) Apache-2.0';
+const H3_IMAGE_NOTES =
+  'Comfy-Org\'s image_minimax_h3_image templates (workflow_templates 0.11.105) in API form, core nodes only, without the subgraph, ResolutionSelector, ' +
+  'ComfySwitchNode, PreviewAny, image compare and notes. MiniMaxH3ImageConditioning (ComfyUI master from ede4e5fe, PR #17655) gives the positive ' +
+  'conditioning and the latent the KSampler starts from; the negative is ConditioningZeroOut. 6 steps, CFG 1, euler / simple, denoise 1. ' +
+  'Prompt helper (off unless params.extra.promptHelper is "on"): the words go into the template\'s task text (StringReplace on "{input text}"), ' +
+  'TextGenerateV2 on Qwen3.5 9B w4a8 (thinking on, temperature 1, top_k 20, top_p 0.95, 8192 tokens) writes one JSON object, and JsonExtractString ' +
+  'reads its expanded_caption. Off, skipPromptHelper links the conditioning\'s prompt to the "Your words" node and the helper\'s nodes go. ' +
+  'The model is tuned for 2048 x 2048 of area (about 4 MP) and works up to about 16 MP (4096 x 4096 at 1:1). VRAM: measured on a 32 GB card ' +
+  '(the DiT is 21 GB and the encoder 27 GB; ComfyUI offloads the encoder after it runs).';
 
 // MiniMax H3 video (minimax-h3-*): licence and note text the seven graphs share.
 const H3_LICENSE =
@@ -1268,6 +1290,44 @@ export const SPEC = [
       'flux3-klein-t2i on Klein Base, the undistilled checkpoint BFL, fal\'s trainer and AI-Toolkit train LoRAs on: 50 steps, CFG 3.5, euler / simple (the card), ' +
       'the empty negative now counts. The run\'s LoRAs (a trained FLUX 3 Klein Soul ID, Settings -> LoRAs) are injected after the UNETLoader as a LoraLoaderModelOnly stack. ' +
       'Same prompt helper, Prompt helper off and layout rules as flux3-klein-t2i. About three times the distilled model\'s sampling time.',
+  },
+  // ---- MiniMax H3 Image (oss-minimax-h3-image) ----------------------------------------------------------------------------------
+  {
+    id: 'minimax-h3-image-t2i',
+    title: 'MiniMax H3 Image text to image (6 steps, about 4 MP by default, up to 16 MP; an optional prompt helper writes the full caption)',
+    capability: 't2i',
+    handBuilt: 'hand-built/minimax-h3-image-t2i.json',
+    bindings: {
+      prompt: [b('4', 'value')], width: [b('5', 'width')], height: [b('5', 'height')],
+      seed: [b('7', 'seed'), b('11', 'sampling_mode.seed')],
+    },
+    outputs: [{ node: '9', kind: 'image' }],
+    limits: { maxWidth: 6272, maxHeight: 6272, dimensionMultiple: 32 },
+    // The Prompt helper's Qwen3.5 9B is needed only when it is on (its nodes are taken out otherwise).
+    optionalModels: ['qwen3.5_9b_w4a8_gptq.safetensors'],
+    vramGb: 32,
+    license: H3_IMAGE_LICENSE,
+    notes: `${H3_IMAGE_NOTES} The canvas is the run's aspect ratio at its size (2K: 2048 x 2048 of area; 4K: 4096 x 4096), on the 32 px grid.`,
+  },
+  {
+    id: 'minimax-h3-image-edit',
+    title: 'MiniMax H3 Image edit with up to 5 pictures (<Picture 1> is the one edited; 6 steps at about 4 MP)',
+    capability: 'edit',
+    handBuilt: 'hand-built/minimax-h3-image-edit.json',
+    bindings: {
+      prompt: [b('4', 'value')], image: [b('20', 'image')], image2: [b('21', 'image')], image3: [b('22', 'image')], image4: [b('23', 'image')],
+      image5: [b('24', 'image')], seed: [b('7', 'seed'), b('11', 'sampling_mode.seed')],
+    },
+    outputs: [{ node: '9', kind: 'image' }],
+    limits: { maxImages: 5 },
+    optionalModels: ['qwen3.5_9b_w4a8_gptq.safetensors'],
+    vramGb: 32,
+    license: H3_IMAGE_LICENSE,
+    notes:
+      `${H3_IMAGE_NOTES} Each picture is fed as the template does: LoadImage, ResizeImageMaskNode to 4 MP (scale total pixels, area), then to the ` +
+      '32 px grid (scale to multiple, area), into MiniMaxH3ImageConditioning images.image_N; GetImageSize of Picture 1 after both resizes sets the width and ' +
+      'height, so the result keeps Picture 1\'s shape at about 4 MP. Pictures not given are left out from the last (the conditioning takes them as optional ' +
+      'inputs). The prompt names them <Picture 1> ... <Picture 5>. With the helper on, TextGenerateV2 also looks at Picture 1 (images.image1).',
   },
   {
     id: 'qwen-image-edit-2509',

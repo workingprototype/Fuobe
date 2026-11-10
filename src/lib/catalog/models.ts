@@ -125,6 +125,19 @@ const KLEIN_PROMPT_HELPER: NonNullable<ModelOptions["controls"]>[number] = {
   labels: { on: "On · full caption (not with boxes)", off: "Off · your words as typed" },
 };
 
+/**
+ * MiniMax H3 Image's Prompt helper on your GPU: Qwen3.5 9B (a 7.3 GB file) thinks first, then writes the full caption from the
+ * words (and, for an edit, from Picture 1). Off by default: off sends the words as typed. On adds about 1.5-2 minutes on a
+ * 32 GB card, which its label says.
+ */
+const H3_IMAGE_PROMPT_HELPER: NonNullable<ModelOptions["controls"]>[number] = {
+  param: PROMPT_HELPER_PARAM,
+  label: "Prompt helper",
+  values: ["off", "on"],
+  default: "off",
+  labels: { off: "Off · your words as typed", on: "On · writes a fuller caption first (takes 1.5–2 min longer)" },
+};
+
 type OpenSpec = Omit<ModelDef, "engine" | "badges"> & { badges?: ModelDef["badges"] };
 const o = (m: OpenSpec): ModelDef => ({ ...m, engine: "open", badges: ["open", ...(m.badges ?? [])] });
 
@@ -282,6 +295,32 @@ const open: ModelDef[] = [
     routes: [comfy("t2i", "flux3-klein-base-t2i-lora", "50 steps, CFG 3.5; your LoRAs load after it")],
     options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K", "2K", "4K"], seed: true, layout: "flux3", controls: [KLEIN_PROMPT_HELPER] },
     defaults: { aspectRatio: "1:1", resolution: "1K" },
+  }),
+
+  // MiniMax H3 Image: text to image and edits with up to 5 pictures (<Picture 1> is the one edited), 6 steps. Tuned for 2048 x
+  // 2048 of area: 2K (about 4 MP) by default, 4K (about 16 MP) as Max. The edit follows Picture 1's shape at about 4 MP. Its
+  // Prompt helper is opt-in. Not a default anywhere (the current picks stay).
+  o({
+    id: "oss-minimax-h3-image",
+    name: "MiniMax H3 Image",
+    vendor: "MiniMax",
+    family: "minimax-h3",
+    kind: "image",
+    tagline: "MiniMax's open image model: rich 4 MP pictures, 16 MP at Max, and edits with up to 5 pictures · 32 GB GPU",
+    badges: ["new"],
+    routes: [
+      comfy("t2i", "minimax-h3-image-t2i", "6 steps; about 4 MP at 2K, 16 MP at 4K"),
+      { ...comfy("edit", "minimax-h3-image-edit", "6 steps, up to 5 pictures; <Picture 1> is the one edited"), unsized: true, maxImages: 5 },
+    ],
+    options: {
+      aspectRatios: IMG_AR,
+      resolutions: ["2K", "4K"],
+      resolutionLabels: { "4K": "4K · Max" },
+      maxImages: 5,
+      seed: true,
+      controls: [H3_IMAGE_PROMPT_HELPER],
+    },
+    defaults: { aspectRatio: "1:1", resolution: "2K" },
   }),
 
   // Krea 2 text to image (its edit models come after FIBO 2's, as the owner ranks them).

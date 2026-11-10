@@ -194,6 +194,17 @@ export const STUDIO_ROWS: StudioRowDef[] = [
       { modelId: QWEN21_SMALL_MODEL, op: "edit" },
     ],
   },
+  // MiniMax H3 Image: text to image and edits on its own 21 GB DiT and 27 GB encoder (a 32 GB card), which the Image and Edit
+  // studios' defaults don't load. The row's page opens the Image studio on it.
+  {
+    href: "/image?model=oss-minimax-h3-image",
+    label: "MiniMax H3 Image",
+    group: "Images",
+    steps: [
+      { modelId: "oss-minimax-h3-image", op: "t2i" },
+      { modelId: "oss-minimax-h3-image", op: "edit" },
+    ],
+  },
   { href: "/upscale", label: "Upscale", group: "Images", config: S.UPSCALE_STUDIO },
   // hi3d-refine: Image to 3D with "Refine detail · Hi3D 1.0": the default open model, then Hi3D's refine of its mesh.
   {

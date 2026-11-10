@@ -35,7 +35,7 @@ export const PT_EXTENSIONS = ['.ckpt', '.pt', '.pt2', '.bin', '.pth', '.safetens
 export const UNLISTED_FOLDERS = new Set(['Hi3D', 'sams']);
 
 /** Core classes of the newest families, read one by one when /object_info can't be: an older ComfyUI lacks them first. */
-const NEWEST_CORE = /^(SeedVR2|Trellis2|SAM3|LTXV|LTXAV|ComfyMathExpression|TextEncodeQwenImage21|QwenImage21Cache|Ideogram4|TextEncodeFibo2|DualModelGuider|CFGOverride)/;
+const NEWEST_CORE = /^(SeedVR2|Trellis2|SAM3|LTXV|LTXAV|ComfyMathExpression|TextEncodeQwenImage21|QwenImage21Cache|Ideogram4|TextEncodeFibo2|DualModelGuider|CFGOverride|MiniMaxH3ImageConditioning|TextGenerateV2)/;
 const NEWEST_CORE_MODULES = new Set(['comfy_extras.nodes_bg_removal']);
 
 // A pack that registers other packs' nodes again under its own name: on a ComfyUI that has it, /object_info gives

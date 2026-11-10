@@ -263,6 +263,8 @@ const OPTIONAL_REFERENCE_INPUTS: ReadonlySet<string> = new Set([
   "BatchImagesNode",
   // Qwen-Image 2.1 on a small GPU: Zen Image Edit's encoder takes image_2-4 the same way.
   "ZenImage21TextEncode",
+  // MiniMax H3 Image's edit: Pictures 2-5 (images.image_2-5), each after its own two resizes.
+  "MiniMaxH3ImageConditioning",
 ]);
 
 /** Uploads that are sides of one object (image = the first side, image2 the second…), and the node they all go into. */

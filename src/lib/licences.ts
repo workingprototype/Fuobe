@@ -301,6 +301,8 @@ const KNOWN: { re: RegExp; name: string; class: LicenceClass; url?: string }[] =
   { re: /Hi3D Open License/, name: "Hi3D Open License Agreement 1.0", class: "conditions", url: "https://huggingface.co/hi3d-official/Hi3Dv1.0/blob/d502e938cbedc6e87aba8884614c5ca6d177a4b6/LICENSE" },
   // Before SAM's: the H3 workflows' text names both, and the territory catch is the one that counts.
   { re: /MiniMax-Music3 Community License/, name: "MiniMax-Music3 Community License", class: "conditions", url: "https://huggingface.co/MiniMaxAI/MiniMax-Music3/blob/1b525ccb685ae809f33027c51c351eeb5833cf72/LICENSE" },
+  // Before MiniMax H3's: MiniMax H3 Image's text names both (its encoder is H3's), and the image model's licence is its own.
+  { re: /MiniMax-H3-Image Community License/, name: "MiniMax-H3-Image Community License", class: "regions", url: "https://huggingface.co/MiniMaxAI/MiniMax-H3-Image/blob/492fd8c4eca666f1085f57e30738c1e0d86b3439/LICENSE" },
   { re: /MiniMax H3 Community License/, name: "MiniMax H3 Community License", class: "regions", url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE" },
   { re: /SAM License/, name: "Meta SAM License", class: "conditions" },
   { re: /OpenRAIL\+\+-M/, name: "CreativeML OpenRAIL++-M", class: "conditions" },

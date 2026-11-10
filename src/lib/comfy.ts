@@ -639,37 +639,71 @@ export function bypassNode(wf: ComfyWorkflow, nodeId: string, input: string, kee
  * Graphs that run a prompt helper before the model (FLUX 3 Image Klein's: BFL's upsampler, a TextGenerate whose caption the
  * text encoder reads). Options → Prompt helper "off" (params.extra.promptHelper) or a layout of boxes takes it out.
  */
-export const PROMPT_HELPER_GRAPHS: ReadonlySet<string> = new Set(["flux3-klein-t2i", "flux3-klein-edit", "flux3-klein-base-t2i-lora", "kandinsky6-t2av", "kandinsky6-i2av"]);
+export const PROMPT_HELPER_GRAPHS: ReadonlySet<string> = new Set([
+  "flux3-klein-t2i",
+  "flux3-klein-edit",
+  "flux3-klein-base-t2i-lora",
+  "kandinsky6-t2av",
+  "kandinsky6-i2av",
+  "minimax-h3-image-t2i",
+  "minimax-h3-image-edit",
+]);
 
 /**
  * Prompt helper graphs whose helper runs only when asked ("on"): Kandinsky 6.0's (Kandinsky6BeautifyPrompt on a 19 GB Qwen3.5
- * 9B file), off by default on both engines as on fal.
+ * 9B file), off by default on both engines as on fal, and MiniMax H3 Image's (TextGenerateV2 on a 7.3 GB Qwen3.5 9B, thinking on).
  */
-export const PROMPT_HELPER_OPT_IN: ReadonlySet<string> = new Set(["kandinsky6-t2av", "kandinsky6-i2av"]);
+export const PROMPT_HELPER_OPT_IN: ReadonlySet<string> = new Set(["kandinsky6-t2av", "kandinsky6-i2av", "minimax-h3-image-t2i", "minimax-h3-image-edit"]);
 
 /** The file an opt-in helper loads (an optional file of its graph): a run with the helper on needs it on that ComfyUI. */
 export const PROMPT_HELPER_FILES: Readonly<Record<string, string>> = {
   "kandinsky6-t2av": "text_encoders/qwen3.5_9b_bf16.safetensors",
   "kandinsky6-i2av": "text_encoders/qwen3.5_9b_bf16.safetensors",
+  "minimax-h3-image-t2i": "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+  "minimax-h3-image-edit": "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
 };
 
 /** params.extra.promptHelper: "on" (the graph's default) or "off". */
 export const PROMPT_HELPER_PARAM = "promptHelper";
 
 /**
+ * MiniMax H3 Image's helper, read back from the JsonExtractString a conditioning reads (`link`): TextGenerateV2 writes one JSON
+ * object, JsonExtractString takes its expanded_caption, and TextGenerateV2's prompt is the template's task text with the words put
+ * in by StringReplace (its `replace`), or the words themselves. The words, as linked or written; undefined when `link` is no
+ * such chain.
+ */
+function jsonHelperWords(wf: ComfyWorkflow, link: unknown): unknown {
+  if (!isLinkValue(link) || wf[link[0]]?.class_type !== "JsonExtractString") return undefined;
+  const json = wf[link[0]].inputs.json_string;
+  if (!isLinkValue(json) || json[1] !== 0 || wf[json[0]]?.class_type !== "TextGenerateV2") return undefined;
+  const asked = wf[json[0]].inputs.prompt;
+  return isLinkValue(asked) && wf[asked[0]]?.class_type === "StringReplace" ? wf[asked[0]].inputs.replace : asked;
+}
+
+/**
  * The words as typed, without the prompt helper: every CLIPTextEncode that reads a TextGenerate's caption reads that
- * TextGenerate's own prompt instead, and the helper's nodes (its model, system prompt, the references it looked at) go
- * with dropUnused. Unchanged when no encoder reads a TextGenerate.
+ * TextGenerate's own prompt instead, MiniMax H3 Image's conditioning reads the words its helper was given (jsonHelperWords:
+ * the "Your words" node), and the helper's nodes (its model, system prompt, task text, the references it looked at) go with
+ * dropUnused. Unchanged when no encoder reads a helper.
  */
 export function skipPromptHelper(wf: ComfyWorkflow, keep: string[] = []): ComfyWorkflow {
   const reads = (n: ComfyWorkflow[string], input: string, helper: string) => isLinkValue(n.inputs[input]) && wf[(n.inputs[input] as [string, number])[0]]?.class_type === helper;
-  const readers = Object.values(wf).filter((n) => (n.class_type === "CLIPTextEncode" && reads(n, "text", "TextGenerate")) || (n.class_type === "Kandinsky6TextEncode" && reads(n, "video_caption", "Kandinsky6BeautifyPrompt")));
+  const readers = Object.values(wf).filter(
+    (n) =>
+      (n.class_type === "CLIPTextEncode" && reads(n, "text", "TextGenerate")) ||
+      (n.class_type === "Kandinsky6TextEncode" && reads(n, "video_caption", "Kandinsky6BeautifyPrompt")) ||
+      (n.class_type === "MiniMaxH3ImageConditioning" && jsonHelperWords(wf, n.inputs.prompt) !== undefined),
+  );
   if (!readers.length) return wf;
   const out = cloneWorkflow(wf);
   const own = (v: unknown) => (isLinkValue(v) ? [...v] : String(v ?? ""));
   for (const n of Object.values(out)) {
     const t = n.inputs.text;
     if (n.class_type === "CLIPTextEncode" && isLinkValue(t) && out[t[0]]?.class_type === "TextGenerate") n.inputs.text = own(out[t[0]].inputs.prompt);
+    if (n.class_type === "MiniMaxH3ImageConditioning") {
+      const words = jsonHelperWords(out, n.inputs.prompt);
+      if (words !== undefined) n.inputs.prompt = own(words);
+    }
     // Kandinsky 6.0: the encoder reads the captions the helper was given (its video and audio captions, outputs 0 and 1).
     if (n.class_type !== "Kandinsky6TextEncode") continue;
     for (const [input, slot] of [["video_caption", 0], ["audio_caption", 1]] as const) {

@@ -169,7 +169,10 @@ export function settingsSummary(shape: SettingsShape, params: GenParams, model?:
     const ar = params.aspectRatio ?? d.aspectRatio ?? shape.aspect[0];
     parts.push(ar === "auto" ? "Auto" : ar);
   }
-  if (shape.resolution) parts.push(params.resolution ?? d.resolution ?? shape.resolution[0]);
+  if (shape.resolution) {
+    const res = params.resolution ?? d.resolution ?? shape.resolution[0];
+    parts.push(model?.options.resolutionLabels?.[res] ?? res);
+  }
   if (params.shots?.length) parts.push(`${params.shots.length} shots`);
   else if (shape.duration) parts.push(durationLabel(params.duration ?? d.duration ?? shape.duration[0]));
   if (shape.count) parts.push(`×${params.numOutputs ?? 1}`);

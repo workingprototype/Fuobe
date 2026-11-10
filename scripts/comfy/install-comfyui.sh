@@ -14,6 +14,9 @@ COMFYUI_DIR="${COMFYUI_DIR:-/home/user/ComfyUI}"
 # 0.11.100, comfy-kitchen 0.2.40, comfy-aimdo 0.6.0) has both, but the library has not been validated on it yet, so it is opt-in:
 # COMFYUI_REF=17ff1dcce963bd9f23095ec9b28febbfc4db8388. Move the default only after a full re-validation on it (npm run build,
 # node validate-workflows.mjs) updates the manifest's comfyuiCommit.
+# MiniMax H3 Image (minimax-h3-image-t2i / -edit) needs MiniMaxH3ImageConditioning (#17655, ede4e5fe, merged 2026-11-10): v0.45.0
+# (989d93d0) is the first release with it, and master 0439dd79 (reports 0.44.0) has it. Its graphs are built from that master's
+# /object_info and not validated yet, so it is opt-in too: COMFYUI_REF=989d93d0d968e704c589ce0146bb18c77f6b50cc.
 COMFYUI_REF="${COMFYUI_REF:-fc04da91b2ab12f99e4716371a7e4f98ac982597}"   # v0.41.0-7
 PYTHON_VERSION="${PYTHON_VERSION:-3.13}"
 
