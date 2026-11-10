@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { FORMAT_INFO, formatList, formatsOf } from "@/lib/av/formats";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, fpsFrames, fpsPlan, fpsSummary } from "@/lib/av/fps";
 import { targetShortEdge, upscaledSize, upscaleFactorFor, upscaleTier } from "@/lib/av/upscale";
-import { exportValues, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipBytes, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
+import { esrganWholeFrames, exportValues, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipBytes, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { getModel } from "@/lib/catalog";
 import { buildPayload } from "@/lib/catalog/payload";
 import { estimateCost, planGeneration } from "@/lib/catalog/plan";
@@ -370,8 +370,8 @@ const gens = await import("@/server/generations");
 const { saveFile } = await import("@/server/storage");
 
 const clip = (o: Partial<MediaInfo>): MediaInfo => ({ container: "mp4", hasVideo: true, hasAudio: true, duration: 4, videoDuration: 4, width: 1280, height: 720, fps: 24, frames: 96, ...o });
-async function prep(endpoint: string, op: Operation, input: GenInput, info: MediaInfo = clip({}), ram = 64 * 2 ** 30) {
-  return prepareWorkflow(endpoint, { video: "clip.mp4", seed: 7, ...input }, { generationId: "gen1", op, upload: async (_d, _t, n) => `up_${n}`, media: (n) => (n === "clip.mp4" ? info : undefined), serverRam: async () => ram });
+async function prep(endpoint: string, op: Operation, input: GenInput, info: MediaInfo = clip({}), ram = 64 * 2 ** 30, vram?: number) {
+  return prepareWorkflow(endpoint, { video: "clip.mp4", seed: 7, ...input }, { generationId: "gen1", op, upload: async (_d, _t, n) => `up_${n}`, media: (n) => (n === "clip.mp4" ? info : undefined), serverRam: async () => ram, vram: async () => vram });
 }
 const byClass = (wf: ComfyWorkflow, type: string) => Object.entries(wf).filter(([, n]) => n.class_type === type);
 const one = (wf: ComfyWorkflow, type: string) => {
@@ -518,6 +518,23 @@ describe("chunked open upscaling (R4-38)", () => {
   it("ESRGAN on a big source goes down to one frame a pass (about 0.85 GB a frame from 1440p to 2160p)", async () => {
     const { workflow: wf } = await prep("upscale-video-esrgan-chunked", "upscale-video", { resolution: "2160p" }, clip({ width: 2560, height: 1440 }));
     expect(one(wf, "VHS_BatchManager").inputs.frames_per_batch).toBe(1);
+  });
+
+  it("ESRGAN upscales whole frames in fp16 on a card with room for them, else the core node's tiles", async () => {
+    const h3 = clip({ width: 1344, height: 768 });
+    const big = await prep("upscale-video-esrgan-chunked", "upscale-video", { resolution: "1080p" }, h3, undefined, 32 * 2 ** 30);
+    expect(one(big.workflow, "ImageUpscaleWithModelBatched").inputs).toEqual({ upscale_model: ["3", 0], images: ["1", 0], per_batch: 1, precision: "float16" });
+    expect(byClass(big.workflow, "ImageUpscaleWithModel")).toHaveLength(0);
+    // An 8 GB card, or a card nobody knows: the tiled core node, the same links.
+    for (const vram of [8 * 2 ** 30, undefined]) {
+      const { workflow: wf } = await prep("upscale-video-esrgan-chunked", "upscale-video", { resolution: "1080p" }, h3, undefined, vram);
+      expect(byClass(wf, "ImageUpscaleWithModelBatched"), String(vram)).toHaveLength(0);
+      expect(one(wf, "ImageUpscaleWithModel").inputs).toEqual({ upscale_model: ["3", 0], image: ["1", 0] });
+    }
+    expect(esrganWholeFrames({ width: 1920, height: 1080 }, 32 * 2 ** 30)).toBe(true);
+    expect(esrganWholeFrames({ width: 3840, height: 2160 }, 32 * 2 ** 30)).toBe(false);
+    expect(esrganWholeFrames({ width: 1344, height: 768 }, 12 * 2 ** 30)).toBe(true);
+    expect(esrganWholeFrames({}, 32 * 2 ** 30)).toBe(false);
   });
 
   it("SeedVR2: passes of 4n+1 frames", async () => {

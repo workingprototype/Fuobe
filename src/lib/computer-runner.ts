@@ -321,6 +321,39 @@ const retryAfter = (res: Response) => Math.min(30, Math.max(1, Number(res.header
 const hasPrefix = (prompt: unknown, prefix: string) =>
   !!prompt && typeof prompt === "object" && Object.values(prompt as Record<string, { inputs?: Record<string, unknown> }>).some((n) => n?.inputs?.filename_prefix === prefix);
 
+type GraphLike = Record<string, { class_type?: unknown; inputs?: Record<string, unknown> } | undefined>;
+
+/**
+ * A meta-batch graph's passes: its VHS_BatchManager (`node`), the frames each pass takes, and the loader that reads the
+ * clip pass by pass (its progress counts the clip's frames, `max` = all of them). Null for any other graph.
+ */
+export function batchPlan(graph: unknown): { node: string; perPass: number; loader: string } | null {
+  const g = graph && typeof graph === "object" ? (graph as GraphLike) : {};
+  for (const [id, n] of Object.entries(g)) {
+    if (n?.class_type !== "VHS_BatchManager") continue;
+    const perPass = Number(n.inputs?.frames_per_batch);
+    if (!Number.isFinite(perPass) || perPass < 1) continue;
+    const loader = Object.entries(g).find(([, m]) => {
+      const link = m?.inputs?.meta_batch;
+      return typeof m?.class_type === "string" && /^VHS_Load/.test(m.class_type) && Array.isArray(link) && link[0] === id;
+    });
+    if (loader) return { node: id, perPass: Math.floor(perPass), loader: loader[0] };
+  }
+  return null;
+}
+
+/**
+ * A meta-batch job's progress as passes: `done` passes of all it takes (the clip's `frames` ÷ the frames a pass takes),
+ * in the shape of a sampler's steps, so the run's card reads "Step 3 of 21" and fills by pass. Without the frame count
+ * yet (its loader hasn't reported), only the node: the run shows it is working.
+ */
+export function passProgress(plan: { node: string; perPass: number }, frames: number | undefined, done: number): { value?: number; max?: number; node: string; nodesDone: number } {
+  // One node "done" for every report: the passes are one stage of the run, never a node after another.
+  if (!frames || !Number.isFinite(frames) || frames <= 0) return { node: plan.node, nodesDone: 1 };
+  const max = Math.max(1, Math.ceil(Math.round(frames) / plan.perPass));
+  return { value: Math.max(0, Math.min(done, max)), max, node: plan.node, nodesDone: 1 };
+}
+
 /** Every string inside a value with its absolute paths as base names (engine-error.ts). */
 function pathsOut<T>(v: T, depth = 0): T {
   if (typeof v === "string") return withoutLocalPaths(v) as T;
@@ -352,7 +385,9 @@ export class ComputerRunner {
   private stopping = new Set<string>();
   private ws: SocketLike | null = null;
   private wsOpen = false;
-  private events = new Map<string, { value?: number; max?: number; node?: string; nodesDone: number; done?: boolean }>();
+  private events = new Map<string, { value?: number; max?: number; node?: string; nodesDone: number; done?: boolean; maxes?: Record<string, number> }>();
+  /** A meta-batch job's progress as passes (passProgress), by task: what its reports and beats send instead of a pass's own steps. */
+  private batchShown = new Map<string, ReturnType<typeof passProgress>>();
   /** Each prompt's node times from the socket (a worker sends them with its "finished" report); the latest few. */
   private clocks = new Map<string, NodeClock>();
   private factsSentAt = 0;
@@ -500,7 +535,11 @@ export class ComputerRunner {
         const e = parseComfyText(m.data);
         if (!e || !("promptId" in e) || !e.promptId) return;
         const cur = this.events.get(e.promptId) ?? { nodesDone: 0 };
-        if (e.type === "progress") Object.assign(cur, { value: e.value, max: e.max, node: e.node });
+        if (e.type === "progress") {
+          Object.assign(cur, { value: e.value, max: e.max, node: e.node });
+          // Each node's step count (a meta-batch loader's is the clip's frames: passProgress).
+          if (e.node && typeof e.max === "number") cur.maxes = { ...cur.maxes, [e.node]: e.max };
+        }
         else if (e.type === "executing" && e.node) Object.assign(cur, { node: e.node, nodesDone: cur.nodesDone + 1, value: undefined, max: undefined });
         else if (e.type === "success" || e.type === "error" || e.type === "interrupted" || (e.type === "executing" && !e.node)) cur.done = true;
         this.events.set(e.promptId, cur);
@@ -626,7 +665,8 @@ export class ComputerRunner {
     const running = this.view.jobs
       .filter((j) => j.phase !== "done" && j.phase !== "failed")
       .map((j) => {
-        const ev = this.events.get(this.promptOf.get(j.taskId) ?? "");
+        // A meta-batch job: its passes (passProgress), never its first pass's own steps.
+        const ev = this.batchShown.get(j.taskId) ?? this.events.get(this.promptOf.get(j.taskId) ?? "");
         return { task: j.taskId, ...(j.position !== undefined && { position: j.position }), ...(j.phase === "running" && ev && { value: ev.value, max: ev.max, nodesDone: ev.nodesDone }) };
       });
     const stopped = [...this.stoppedDone];
@@ -763,6 +803,7 @@ export class ComputerRunner {
     } finally {
       this.madeOf.delete(t.id);
       this.finishMade.delete(t.id);
+      this.batchShown.delete(t.id);
       const why = this.whyOf.get(t.id);
       this.whyOf.delete(t.id);
       const phase = this.view.jobs.find((j) => j.taskId === t.id)?.phase;
@@ -1219,6 +1260,25 @@ export class ComputerRunner {
     let lastPreview: Blob | undefined;
     let lastPreviewAt = -Infinity;
     let following: string | undefined;
+    // A meta-batch job shows its passes as its steps (passProgress): the prompts its passes ran under, and how many ended.
+    const batch = t.metaBatch ? batchPlan(t.graph) : null;
+    const passIds = new Set<string>([t.promptId]);
+    let passesDone = 0;
+    let passKey = "";
+    const frames = () => {
+      for (const id of passIds) {
+        const m = batch && this.events.get(id)?.maxes?.[batch.loader];
+        if (m) return m;
+      }
+      return undefined;
+    };
+    const batchNow = (done: number) => {
+      const p = passProgress(batch!, frames(), done);
+      this.batchShown.set(t.id, p);
+      return p;
+    };
+    // From the start, its beats carry its passes too, never its first pass's own steps.
+    if (batch) batchNow(0);
     // A worker's watchdog: when the job last moved (a step, a node, its place, a pass).
     let movedAt = this.now();
     let moveKey = "";
@@ -1265,10 +1325,27 @@ export class ComputerRunner {
         moved(JSON.stringify([queued.map((r) => r[1]), passes.length, ev?.value, ev?.node, ev?.nodesDone]));
         if (!running && worker) await this.keep(t, { kind: "passes", entries: passes, execMs: execOf(passes) });
         const passWhy = running ? null : entryReason(passes, { graph: t.graph });
-        const a = await this.report(t, { event: "passes", running, entries: running ? [] : passes.map(slim), ...(!running && exec(execOf(passes))), ...(passWhy && { why: passWhy }) });
+        let shown: ReturnType<typeof passProgress> | null = null;
+        if (running && batch) {
+          for (const r of queued) passIds.add(String(r[1]));
+          // A pass started or ended: count the ended ones again (its ComfyUI's history keeps every pass of the job).
+          const key = JSON.stringify(queued.map((r) => r[1]));
+          if (key !== passKey) {
+            passKey = key;
+            const h = await this.read<Record<string, HistoryEntryLike>>(`/history?max_items=${META_BATCH_HISTORY}`).catch(() => null);
+            if (h) passesDone = Object.values(h).filter((e) => hasPrefix(e.prompt?.[2], following!) && e.status?.completed).length;
+          }
+          shown = batchNow(passesDone);
+        }
+        // While a pass runs, a meta-batch job with a pass plan reports its passes as its progress (a "running" report,
+        // which any studio takes); without one, only that a pass still runs.
+        const a = await this.report(
+          t,
+          shown ? { event: "running", ...shown } : { event: "passes", running, entries: running ? [] : passes.map(slim), ...(!running && exec(execOf(passes))), ...(passWhy && { why: passWhy }) },
+        );
         if (a.stop) throw new Stopped();
         if (!running) return { entries: passes, answer: a };
-        this.job(t, { phase: "running" });
+        this.job(t, { phase: "running", ...(shown?.max && { value: shown.value, max: shown.max }) });
         await this.sleep(POLL_MS * 2);
         continue;
       }
@@ -1305,7 +1382,10 @@ export class ComputerRunner {
       if (w.s === "running") runningSince ??= this.now();
       const ev = this.events.get(t.promptId);
       moved(JSON.stringify([w.s, w.s === "pending" ? w.ahead : null, ev?.value, ev?.max, ev?.node, ev?.nodesDone]));
-      const report: ReportEvent = w.s === "pending" ? { event: "queued", position: w.ahead } : { event: "running", value: ev?.value, max: ev?.max, node: ev?.node, nodesDone: ev?.nodesDone };
+      // A meta-batch job's first pass: no pass has ended yet (its own steps would read as most of the run).
+      const first = batch && w.s === "running" ? batchNow(0) : null;
+      const report: ReportEvent =
+        w.s === "pending" ? { event: "queued", position: w.ahead } : first ? { event: "running", ...first } : { event: "running", value: ev?.value, max: ev?.max, node: ev?.node, nodesDone: ev?.nodesDone };
       const key = JSON.stringify(report);
       // A worker sends its ComfyUI's latest preview with its progress, when the claim asks for one: a small JPEG, at most
       // one every 2 s.
@@ -1321,7 +1401,7 @@ export class ComputerRunner {
         lastSent = this.now();
         if (preview) lastPreviewAt = this.now();
       }
-      this.job(t, w.s === "pending" ? { phase: "queued", position: w.ahead } : { phase: "running", value: ev?.value, max: ev?.max });
+      this.job(t, w.s === "pending" ? { phase: "queued", position: w.ahead } : first ? { phase: "running", value: first.value, max: first.max } : { phase: "running", value: ev?.value, max: ev?.max });
       // The socket says when steps move; without it, a read a second.
       await this.sleep(this.wsOpen ? PROGRESS_EVERY_MS : POLL_MS);
     }

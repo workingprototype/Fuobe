@@ -3,7 +3,7 @@
  * the studio is busy, what it shows once a result is saved, and how it carries a job's token.
  */
 import { describe, expect, it } from "vitest";
-import { ComputerRunner, tileJob } from "@/lib/computer-runner";
+import { batchPlan, ComputerRunner, passProgress, tileJob } from "@/lib/computer-runner";
 import { jobWords } from "@/lib/relay";
 
 const TASK = { id: "AAAAAAAAAAAAAAAA", generationId: "g-1", lease: "a".repeat(64), graph: {}, promptId: "00000000-0000-4000-8000-000000000000", preview: false, inputs: [] };
@@ -77,5 +77,31 @@ describe("a report", () => {
     await report(s.runner, { event: "queued", position: 0 });
     expect(s.headers[0]["x-fuobe-lease"]).toBe(TASK.lease);
     expect(s.reports[0]).toEqual({ event: "queued", position: 0 });
+  });
+});
+
+describe("a meta-batch job's passes", () => {
+  const graph = {
+    "1": { class_type: "VHS_LoadVideoFFmpeg", inputs: { video: "in.mp4", meta_batch: ["2", 0] } },
+    "2": { class_type: "VHS_BatchManager", inputs: { frames_per_batch: 6 } },
+    "4": { class_type: "ImageUpscaleWithModel", inputs: { image: ["1", 0] } },
+    "7": { class_type: "VHS_VideoCombine", inputs: { images: ["4", 0], meta_batch: ["2", 0], filename_prefix: "fuobe/x" } },
+  };
+
+  it("finds the batch manager, its frames a pass and the loader that reads the clip", () => {
+    expect(batchPlan(graph)).toEqual({ node: "2", perPass: 6, loader: "1" });
+    expect(batchPlan({ "1": { class_type: "KSampler", inputs: {} } })).toBeNull();
+    // A batch manager no loader reads: no plan (its passes can't be counted).
+    expect(batchPlan({ "2": graph["2"], "7": graph["7"] })).toBeNull();
+    expect(batchPlan(null)).toBeNull();
+  });
+
+  it("counts passes from the clip's frames: 124 frames at 6 a pass are 21", () => {
+    const plan = batchPlan(graph)!;
+    expect(passProgress(plan, 124, 0)).toEqual({ value: 0, max: 21, node: "2", nodesDone: 1 });
+    expect(passProgress(plan, 124, 5)).toEqual({ value: 5, max: 21, node: "2", nodesDone: 1 });
+    expect(passProgress(plan, 124, 30)).toMatchObject({ value: 21, max: 21 });
+    // Before the loader said the frames: the node only.
+    expect(passProgress(plan, undefined, 0)).toEqual({ node: "2", nodesDone: 1 });
   });
 });

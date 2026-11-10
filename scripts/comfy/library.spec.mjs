@@ -347,7 +347,7 @@ export const PACK_CLASSES = {
   'ComfyUI-H3-FaceRefine': /^H3Face(TrackCrop|MaskSAM|Stitch)$/,
   'ComfyUI-Impact-Pack': /^SAMLoader$/,
   comfyui_controlnet_aux: /^Metric3D-NormalMapPreprocessor$/,
-  'ComfyUI-KJNodes': /^VRAM_Debug$/,
+  'ComfyUI-KJNodes': /^(VRAM_Debug|ImageUpscaleWithModelBatched)$/,
   'ComfyUI-Qwen-Watermark': /^QWM(Detect|ResidualDetect|RefineMask|Prepare|Composite|Final)$/,
 };
 
@@ -5990,6 +5990,7 @@ export const SPEC = [
     title: 'Video Upscale (Real-ESRGAN 4x) in passes of a few frames: memory stays flat whatever the length (VHS meta-batch)',
     capability: 'upscale-video',
     handBuilt: 'hand-built/upscale-video-esrgan-chunked.json',
+    packs: ['ComfyUI-KJNodes'],
     bindings: {
       video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], upscaleModel: [b('3', 'model_name')], shortSide: [b('5', 'resize_type.shorter_size')],
     },
@@ -6000,7 +6001,7 @@ export const SPEC = [
     license: 'Real-ESRGAN weights (BSD-3-Clause); VideoHelperSuite GPL-3.0 code',
     notes:
       'R4-38: upscale-video-esrgan decodes the whole film (about 38 GB of float frames for 30 s at 480p before the 4x model). This one decodes framesPerBatch frames per pass (VHS_BatchManager re-queues the prompt ' +
-      'until the clip is done, as mixed-media-zimage-frames does), upscales them with the model (tiled), scales them so the shorter edge is shortSide px (params.resolution: 1080p -> 1080, the shape kept) and pipes them ' +
+      'until the clip is done, as mixed-media-zimage-frames does), upscales them with the model (whole frames in fp16 through KJNodes\x27 ImageUpscaleWithModelBatched, about twice as fast as the core node; the provider swaps in the core node\x27s fp32 tiles when the GPU has no room for whole frames or its memory is unknown), scales them so the shorter edge is shortSide px (params.resolution: 1080p -> 1080, the shape kept) and pipes them ' +
       'into one ffmpeg H.264 encode that stays open across passes; the last pass writes the file with the source\'s sound at the source frame rate. The provider follows the passes by their filename prefix. ' +
       'framesPerBatch: the provider sizes it from the clip\'s header so a pass holds about 1.5 GB of frames (16 by default). Any spandrel model in models/upscale_models works as upscaleModel (x2 / x4). ' +
       'Tested on CPU with an x4 ESRGAN network: 30 s 256x144 25 fps with sound -> 1920x1080, 750 frames, AAC, 47 passes of 16 frames in 417 s, ComfyUI\'s RSS peaked 0.87 GB above idle (upscale-video-esrgan on 10 s of the same clip, 4x to 1024x576 only, peaked 3.0 GB above idle); through Fuobe a silent 2 s 24 fps clip -> 1280x720, 48 frames, no audio link.',

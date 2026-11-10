@@ -56,7 +56,7 @@ afterAll(async () => {
 });
 beforeEach(() => {
   resetRates();
-  Object.assign(fake.opts, { failNext: undefined, outputs: ["image"], metaBatch: undefined, steps: 3, stepMs: 10 });
+  Object.assign(fake.opts, { failNext: undefined, outputs: ["image"], metaBatch: undefined, metaFrames: undefined, steps: 3, stepMs: 10 });
   db().prepare("UPDATE generations SET status = 'canceled' WHERE status IN ('queued', 'running')").run();
   db().prepare("DELETE FROM relay_runners").run();
 });
@@ -565,5 +565,41 @@ describe("a run on the ComfyUI on the person's own computer", () => {
     // One prompt from the tab; the other passes were ComfyUI's own.
     expect(fake.posts() - posts).toBe(1);
     expect([...fake.history.values()].filter((h) => JSON.stringify(h.prompt).includes("fuobe/meta-gen"))).toHaveLength(3);
+  });
+
+  it("shows a meta-batch job's passes as its steps, never its first pass's own steps", async () => {
+    const { createTask } = await import("@/server/computer/tasks");
+    const now = Date.now();
+    db()
+      .prepare("INSERT INTO generations (id, feature, model_id, engine, provider, op, kind, status, request_json, external_id, external_meta_json, outputs_json, created_at, updated_at) VALUES ('meta-steps', 'video', 'oss-x', 'open', 'comfyui', 'upscale-video', 'video', 'queued', ?, NULL, '{}', '[]', ?, ?)")
+      .run(JSON.stringify({ account: a }), now, now);
+    // 7 frames, 2 a pass: 4 passes. The upscale node has steps of its own in each pass.
+    const graph = {
+      "1": { class_type: "VHS_LoadVideoFFmpeg", inputs: { meta_batch: ["2", 0] } },
+      "2": { class_type: "VHS_BatchManager", inputs: { frames_per_batch: 2 } },
+      "4": { class_type: "KSampler", inputs: { image: ["1", 0] } },
+      "9": { class_type: "VHS_VideoCombine", inputs: { images: ["4", 0], filename_prefix: "fuobe/meta-steps", meta_batch: ["2", 0] } },
+    };
+    const task = createTask({ principal: `acct:${a}`, generationId: "meta-steps", graph, prefix: "fuobe/meta-steps", metaBatch: true, preview: false });
+    Object.assign(fake.opts, { metaBatch: 4, metaFrames: 7, outputs: ["video"], steps: 3, stepMs: 40 });
+    const reported: Record<string, unknown>[] = [];
+    const post = routes.report.POST;
+    const spied = { ...routes, report: { POST: async (req: Request, ctx: never) => (reported.push(await req.clone().json()), post(req, ctx)) } };
+    const t = tab(spied as typeof routes, cookie, fake.port);
+    await t.runner.beat();
+    await t.runner.claimAndRun();
+    expect((db().prepare("SELECT state FROM relay_tasks WHERE id = ?").get(task.id) as { state: string }).state).toBe("done");
+    const running = reported.filter((r) => r.event === "running");
+    // Every progress report counts passes (the batch manager's node, 4 in all) once the loader said the clip's frames.
+    expect(running.length).toBeGreaterThan(1);
+    for (const r of running) expect(r).toMatchObject({ node: "2", nodesDone: 1 });
+    const counted = running.filter((r) => r.max !== undefined);
+    expect(counted.length).toBeGreaterThan(0);
+    for (const r of counted) expect(r.max).toBe(4);
+    const values = counted.map((r) => r.value as number);
+    expect(values).toEqual([...values].sort((x, y) => x - y));
+    expect(Math.max(...values)).toBeGreaterThanOrEqual(2);
+    // The first pass's own steps (3 of them) never reach the studio as the run's.
+    expect(running.some((r) => r.max === 3)).toBe(false);
   });
 });

@@ -42,6 +42,11 @@ export interface LocalComfyOptions {
   outputs?: ("image" | "video" | "audio" | "exr" | "text" | "fake-png")[];
   /** VHS meta-batch: the job finishes without outputs and queues this many more passes (the last one saves the clip). */
   metaBatch?: number;
+  /**
+   * The clip a meta-batch job's loader reads (a VHS_Load* node with a meta_batch input): its frames. Each pass's loader
+   * reports the frames read so far of all of them, as VHS's does (one progress bar across the passes).
+   */
+  metaFrames?: number;
   /** Embedded Python (portable / Easy-Install). */
   portable?: boolean;
   loras?: string[];
@@ -363,6 +368,13 @@ export function startLocalComfy(given: LocalComfyOptions, port = 0): Promise<Loc
     const started = Date.now();
     const begin: [string, Record<string, unknown>] = ["execution_start", { prompt_id: job.id, timestamp: started }];
     event(job.clientId, "execution_start", { prompt_id: job.id });
+    const loader = opts.metaFrames ? Object.keys(job.graph).find((k) => /^VHS_Load/.test(job.graph[k].class_type) && Array.isArray(job.graph[k].inputs?.meta_batch)) : undefined;
+    if (loader) {
+      const bm = job.graph[(job.graph[loader].inputs!.meta_batch as [string, number])[0]];
+      const per = Number(bm?.inputs?.frames_per_batch) || 1;
+      event(job.clientId, "executing", { node: loader, prompt_id: job.id });
+      event(job.clientId, "progress", { value: Math.min(opts.metaFrames!, (job.pass ?? 1) * per), max: opts.metaFrames, prompt_id: job.id, node: loader });
+    }
     event(job.clientId, "executing", { node, prompt_id: job.id });
     let step = 0;
     const next = () => {

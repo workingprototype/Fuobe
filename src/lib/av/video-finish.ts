@@ -81,6 +81,23 @@ export function framesPerPass(clip: ClipFacts, o: { shortSide?: number; modelSca
   return n;
 }
 
+/**
+ * ESRGAN video upscale's fast node (KJNodes' ImageUpscaleWithModelBatched): whole frames in fp16, one at a time, about
+ * twice as fast as the core node's tiles in fp32. Its graphics memory for each megapixel of the source (Real-ESRGAN x4plus:
+ * a 1344x768 frame took about 6.3 GB on the worker's RTX 5090).
+ */
+export const ESRGAN_WHOLE_FRAME_BYTES_PER_MP = 6.5 * 2 ** 30;
+
+/**
+ * Whether ESRGAN may upscale whole frames on this card: their memory at most 60 % of the card's (the rest stays for
+ * ComfyUI and whatever else the card holds). Without the clip's size or the card's memory: no (the tiled core node,
+ * which fits any card).
+ */
+export function esrganWholeFrames(clip: ClipFacts, vramBytes: number | undefined): boolean {
+  if (!clip.width || !clip.height || !vramBytes || vramBytes <= 0) return false;
+  return ((clip.width * clip.height) / 1e6) * ESRGAN_WHOLE_FRAME_BYTES_PER_MP <= 0.6 * vramBytes;
+}
+
 /** The workflow of RTX Video Super Resolution (Upscale → Video's Quick · RTX). */
 export const RTX_UPSCALE_WORKFLOW = "upscale-video-rtx";
 
