@@ -638,7 +638,23 @@ export function sessionCookieOf(request: Request): string | undefined {
 export const ADMIN_BEARER = /^Bearer\s+fuobe_adm_/i;
 export const hasAdminBearer = (request: Request) => ADMIN_BEARER.test(request.headers.get("authorization") ?? "");
 
+/**
+ * Requests this server makes itself on an account's behalf (an admin's re-run of the account's run, admin-rerun.ts):
+ * read as that account's own, as if its signed-in page had sent them. Only server code can make one (accountRequest);
+ * no request that arrives from outside is ever in this map.
+ */
+const ACTING = new WeakMap<Request, Account>();
+
+/** A request read as `account`'s own by requestViewer and requestAccount (never one a client sent). */
+export function accountRequest(account: Account, url: string, init: RequestInit): Request {
+  const request = new Request(url, init);
+  ACTING.set(request, account);
+  return request;
+}
+
 export function requestViewer(request: Request, cookie = sessionCookieOf(request)): RequestViewer {
+  const acting = ACTING.get(request);
+  if (acting) return { kind: "account", account: acting };
   if (hasAdminBearer(request)) return { kind: "guest" };
   if (!authEnabled() || validToken(request.headers.get("authorization"))) return { kind: "owner" };
   const v = sessionViewer(cookie);
@@ -649,6 +665,8 @@ export function requestViewer(request: Request, cookie = sessionCookieOf(request
 
 /** The account behind this request's session, while public sign-up is on for its address (null: the owner, a guest, or off). */
 export function requestAccount(request: Request, cookie = sessionCookieOf(request)): Account | null {
+  const acting = ACTING.get(request);
+  if (acting) return acting;
   if (hasAdminBearer(request) || validToken(request.headers.get("authorization"))) return null;
   const v = sessionViewer(cookie);
   return v?.kind === "account" && publicSignup(request.headers.get("host")) ? v.account : null;

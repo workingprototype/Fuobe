@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { generationAccount } from "@/server/account-library";
 import { actorHas, adminAccess, audit, auditContentRead, lacksScope } from "@/server/admin-tokens";
 import { deleteForever } from "@/server/library";
+import { rerunLinks } from "@/server/admin-rerun";
 import { runDetails } from "@/server/run-details";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -11,7 +12,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * only, or an admin token with runs:read and outputs:view): what it asked for (each setting beside its default), its
  * files, where it ran, what came back and what the account was shown, its batch, its chain's earlier and later steps,
  * and the runs around it. Keys, tokens and a GPU's address never are part of it (src/server/run-details.ts). The
- * account's email needs accounts:read. Each read is in the admin log with the account (or "owner") as its target.
+ * account's email needs accounts:read. `rerunOf` and `rerunAs`: the run an admin re-ran it from, or as. Each read is in the admin log with the account (or "owner") as its target.
  */
 export async function GET(request: Request, ctx: RouteContext<"/api/admin/generations/[id]">) {
   await connection();
@@ -23,7 +24,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/admin/genera
   const details = runDetails(id, { emails: actorHas(access.actor, "accounts:read") });
   if (!details) return Response.json({ error: "No such run" }, { status: 404, headers: NO_STORE });
   auditContentRead(access.actor, "runs.content", [details.run.account?.id ?? "owner"], { run: id });
-  return Response.json(details, { headers: NO_STORE });
+  return Response.json({ ...details, ...rerunLinks([id]).get(id) }, { headers: NO_STORE });
 }
 
 /**

@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { accountRunOptions, listAdminRuns } from "@/server/account-admin";
 import { actorHas, adminAccess, auditContentRead, auditRead } from "@/server/admin-tokens";
+import { rerunLinks } from "@/server/admin-rerun";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -11,7 +12,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * `started`, `running`: waiting and started), `kind` (image, video, audio, model3d, text), `model` (letters of the model
  * id), `from` and `to` (yyyy-mm-dd, UTC, both included), `q` (words of the prompt, or a run id), `before=<createdAt>:<id>`
  * (the `next` of the last page) and `limit` (≤ 100). Each run says `whose` it is (`account`, `guest`, `owner`); the
- * owner's own have `account: null` and their `source`.
+ * owner's own have `account: null` and their `source`. A run an admin re-ran has `rerunAs` (the new run's id), and the
+ * new run has `rerunOf`.
  *
  * A token with runs:read alone gets each run's facts (when, which model, how it ended); its prompt, inputs and results
  * need outputs:view, and the accounts' emails need accounts:read. Every read of runs' content, the owner's too, is in
@@ -40,5 +42,6 @@ export async function GET(request: Request) {
   };
   auditRead(access.actor, "runs.list", filters);
   if (show.content) auditContentRead(access.actor, "runs.content", page.items.map((r) => r.account?.id ?? "owner"), filters);
-  return Response.json(page, { headers: NO_STORE });
+  const links = rerunLinks(page.items.map((r) => r.id));
+  return Response.json({ ...page, items: page.items.map((r) => ({ ...r, ...links.get(r.id) })) }, { headers: NO_STORE });
 }

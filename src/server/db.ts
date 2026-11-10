@@ -977,7 +977,12 @@ export const ADMIN_TABLES = `CREATE TABLE IF NOT EXISTS admin_tokens (
     detail_json TEXT,
     status INTEGER NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS admin_audit_at ON admin_audit(at);`;
+  CREATE INDEX IF NOT EXISTS admin_audit_at ON admin_audit(at);
+  CREATE TABLE IF NOT EXISTS admin_reruns (
+    run_id TEXT PRIMARY KEY,
+    new_ids_json TEXT,
+    at INTEGER NOT NULL
+  );`;
 
 /**
  * Skills (src/server/recipes.ts, src/server/skill-runs.ts): a run of a skill whose steps wait for each other across
