@@ -587,6 +587,18 @@
     "error": null,
     "at": "2026-11-04T22:09:31.258Z"
   },
+  "minimax-h3-image-edit": {
+    "sha256": "d918c407b4468b32d9c0dff49c78d217548a65cac8b75a7c1de07cdecdf6265a",
+    "validated": true,
+    "error": null,
+    "at": "2026-11-10T18:19:04.452Z"
+  },
+  "minimax-h3-image-t2i": {
+    "sha256": "09a980e1f10a5d6dc87b1f6774897d47858cca8262bb87904d84db62c3850715",
+    "validated": true,
+    "error": null,
+    "at": "2026-11-10T18:18:59.355Z"
+  },
   "minimax-h3-orbit": {
     "sha256": "108d0cbf2c0e8dc1c26faa21569af805f3059d90fa3d915ff482577db6fb06f2",
     "validated": true,
