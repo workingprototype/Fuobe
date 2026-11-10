@@ -75,11 +75,12 @@ export function FinishChoices({
   const rtx = offered(RTX_UPSCALE_MODEL);
   const chip = badgeFor(badges, { modelId: RTX_UPSCALE_MODEL, op: "upscale-video" });
   // On this install's GPUs, they run it or not; on the viewer's own GPU, its card as the GPU check read it.
-  const standing = here && rtx ? (runsHere(here, rtx) ? "fits" : rtxStanding("nvidia-rtx", undefined)) : rtxStanding("nvidia-rtx", badges?.gpu, !!chip && chip[0] === "u" && (chip[3] & 24) !== 0);
+  const onHere = !!here && !!rtx && runsHere(here, rtx);
+  const standing = here && rtx ? (onHere ? "fits" : rtxStanding("nvidia-rtx", undefined)) : rtxStanding("nvidia-rtx", badges?.gpu, !!chip && chip[0] === "u" && (chip[3] & 24) !== 0);
   const quick = rtx && {
     modelId: RTX_UPSCALE_MODEL,
     label: RTX_COPY.quick,
-    hint: standing === "fits" ? RTX_COPY.quickHint : standing === "no" ? RTX_COPY.needsCard : `${RTX_COPY.onRtx}. Adds no new detail.`,
+    hint: onHere ? RTX_COPY.quickHere : standing === "fits" ? RTX_COPY.quickHint : standing === "no" ? RTX_COPY.needsCard : `${RTX_COPY.onRtx}. Adds no new detail.`,
     m: rtx,
     ...(standing === "no" && model?.id !== RTX_UPSCALE_MODEL && { off: true as const }),
   };
@@ -115,7 +116,7 @@ export function FinishChoices({
           );
         })}
       </div>
-      {model?.id === RTX_UPSCALE_MODEL && <p className="mt-1.5 px-1 text-[11px] leading-snug text-pretty text-muted-foreground">{RTX_COPY.picked}</p>}
+      {model?.id === RTX_UPSCALE_MODEL && <p className="mt-1.5 px-1 text-[11px] leading-snug text-pretty text-muted-foreground">{onHere ? RTX_COPY.pickedHere : RTX_COPY.picked}</p>}
       {model?.id === REGEN_MODEL && (
         <>
           <p className="mt-1.5 px-1 text-[11px] leading-snug text-pretty text-muted-foreground">

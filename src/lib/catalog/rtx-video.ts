@@ -31,6 +31,8 @@ export const rtxCardOf = (modelId: string | undefined): GpuNeed | undefined => (
 export const RTX_COPY = {
   quick: "Quick · RTX",
   quickHint: "Fast and sharp on your NVIDIA RTX card. Adds no new detail.",
+  /** Its hint where runs go to this install's GPUs (they run it). */
+  quickHere: "The fastest: sharp and ready quickly. Adds no new detail.",
   /** Under the choice when the card can't run it. */
   needsCard: "Needs an NVIDIA RTX card",
   needsCard40: "Needs an NVIDIA RTX 40 series card or newer",
@@ -39,6 +41,8 @@ export const RTX_COPY = {
   /** The line under a picked RTX model. */
   picked: "Free on your GPU · runs on NVIDIA's RTX video engine, so only on NVIDIA RTX cards.",
   picked40: "Free on your GPU · runs on NVIDIA's RTX video engine, so only on RTX 40 series cards and newer.",
+  /** The line under it where runs go to this install's GPUs. */
+  pickedHere: "Runs on NVIDIA's RTX video engine: every frame sharpened, the sound kept.",
 };
 
 /** When ComfyUI lacks the nodes: the owner's line names the install switch; a visitor's stays plain. */
