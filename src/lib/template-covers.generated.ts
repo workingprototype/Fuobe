@@ -29,6 +29,7 @@ export const TEMPLATE_COVERS: Record<string, TemplateCoverEntry> = {
   "examples/character-sheet": "1d94f4a3",
   "examples/element-maya": "bdc40bc0",
   "examples/element-rooftop-bar": "89956b16",
+  "examples/storyboard-heist": {"poster":"/previews/templates/examples/storyboard-heist.jpg?v=5cad326a","frames":["/previews/templates/examples/storyboard-heist-2.jpg?v=8b6af733","/previews/templates/examples/storyboard-heist-3.jpg?v=9cbcdc66","/previews/templates/examples/storyboard-heist-4.jpg?v=f912c60a","/previews/templates/examples/storyboard-heist-5.jpg?v=0020cb2f","/previews/templates/examples/storyboard-heist-6.jpg?v=b9ae4bcb"]},
   "fashion/blue-green-gradient": {"poster":"/previews/templates/fashion/blue-green-gradient.jpg?v=cfd7c476","frames":["/previews/templates/fashion/blue-green-gradient-2.jpg?v=3bfe4f29","/previews/templates/fashion/blue-green-gradient-3.jpg?v=b2faa17d"]},
   "fashion/light-blue-studio": {"poster":"/previews/templates/fashion/light-blue-studio.jpg?v=bc7be70e","frames":["/previews/templates/fashion/light-blue-studio-2.jpg?v=d6a82960","/previews/templates/fashion/light-blue-studio-3.jpg?v=17d9e8cd"]},
   "fashion/red-room": {"poster":"/previews/templates/fashion/red-room.jpg?v=1a3e7b1b","frames":["/previews/templates/fashion/red-room-2.jpg?v=c7fad0ef","/previews/templates/fashion/red-room-3.jpg?v=560f362d"]},

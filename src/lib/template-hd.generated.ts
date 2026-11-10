@@ -15,6 +15,7 @@ export const TEMPLATE_HD: Record<string, { w: number[]; v: string; still?: numbe
   "content-factory/tiny-worlds": { "w":[1024], "v":"45e45539", "still":768 },
   "examples/element-maya": { "w":[640,1024], "v":"61a75661", "still":614 },
   "examples/element-rooftop-bar": { "w":[640,1024], "v":"7533232f", "still":614 },
+  "examples/storyboard-heist": { "w":[1024], "v":"c7fc7f69", "still":768 },
   "marketing/ad-benefit-ladder": { "w":[640,1024], "v":"0257f493", "still":576 },
   "marketing/ad-dark-premium": { "w":[640,1024], "v":"75599f29", "still":576 },
   "marketing/ad-ingredient-halo": { "w":[640,1024], "v":"cb1adddb", "still":576 },
