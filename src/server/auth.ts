@@ -75,7 +75,14 @@ export interface Account {
   gpu?: AccountGpu;
   /** Its own keys ("Your keys"), sealed: src/server/account-keys.ts opens them. */
   keys?: Partial<Record<CloudProvider, StoredKey>>;
+  /** How it last signed in (kept with the row's other fields, extra_json): its password unless it says otherwise. */
+  signIn?: SignInWay;
+  /** When its email was first confirmed (a provider's verified email: Google or GitHub). Cleared when the email changes. */
+  emailVerifiedAt?: number;
 }
+
+/** How an account signs in: its email and password, or a provider. */
+export type SignInWay = "password" | "google" | "github";
 
 /** The install's own row: the cookie secret, the Settings password and the public sign-up switch. */
 interface Install {
@@ -227,6 +234,26 @@ export function createSession(accountId?: string): { value: string; maxAge: numb
   return { value: `${payload}.${sign(keyFor(d, who), payload)}`, maxAge: SESSION_DAYS * 86_400 };
 }
 
+/** When a session cookie was made (its expiry less a session's length), or null when it isn't one. Not a check of it. */
+export function sessionIssuedAt(value: string | undefined): number | null {
+  const exp = value?.split(".")[0];
+  return exp && /^\d{1,16}$/.test(exp) ? Number(exp) - SESSION_MS : null;
+}
+
+/**
+ * A MAC of `payload` for one purpose, with a key made from the install's cookie secret: for short-lived values this
+ * server hands a browser and reads back (the provider sign-in's state cookie). Never a session: a session's key differs.
+ */
+export function installMac(purpose: string, payload: string): string {
+  let d = install();
+  if (!d.secret) {
+    authWrite(ensureSecret);
+    d = install();
+  }
+  const key = crypto.createHmac("sha256", d.secret).update(`fuobe:${purpose}`).digest();
+  return crypto.createHmac("sha256", key).update(payload).digest("base64url");
+}
+
 /**
  * An account cookie made before account keys held the password's fingerprint was signed with the secret alone. It is
  * still taken (it ends with its 30 days, so a deploy signs nobody out) until the account first changes its password.
@@ -344,6 +371,148 @@ export function createAccount(email: string, password: string): Account {
   return account;
 }
 
+// ---------------------------------------------------------------------------
+// Public sign-up: Google and GitHub (src/server/oauth.ts)
+
+/** The providers an account can sign in with besides its password (the install's own settings say which are on). */
+export type OAuthProvider = "google" | "github";
+
+/** The account a provider's user signs in to, by the provider's own user id. A link whose account is gone is removed. */
+export function oauthLinkedAccount(provider: OAuthProvider, subject: string): Account | undefined {
+  if (authStoreClosed()) return undefined;
+  const r = sql("SELECT account_id FROM auth_oauth_links WHERE provider = ? AND subject = ?").get(provider, subject) as { account_id: string } | undefined;
+  if (!r) return undefined;
+  const account = accountById(r.account_id);
+  if (!account) authWrite(() => sql("DELETE FROM auth_oauth_links WHERE provider = ? AND subject = ? AND account_id = ?").run(provider, subject, r.account_id));
+  return account;
+}
+
+/** Remember that this provider's user signs in to this account (and when it last did). */
+export function linkOAuth(accountId: string, provider: OAuthProvider, subject: string): void {
+  const at = Date.now();
+  authWrite(() => {
+    mustExist(accountId);
+    sql(
+      `INSERT INTO auth_oauth_links (provider, subject, account_id, made_account, created_at, last_used_at) VALUES (?, ?, ?, 0, ?, ?)
+       ON CONFLICT (provider, subject) DO UPDATE SET account_id = excluded.account_id, last_used_at = excluded.last_used_at`,
+    ).run(provider, subject, accountId, at, at);
+  });
+}
+
+/**
+ * Sign-up with a provider: an account as createAccount makes one (the same email rule, one account per email), linked to
+ * the provider's user. It has no password of its own: its hash is of 32 random bytes nobody keeps, so no password logs
+ * in to it, and its session key (keyFor) is still its own. It can set a password later (setFirstAccountPassword).
+ */
+export function createOAuthAccount(email: string, provider: OAuthProvider, subject: string): Account {
+  const e = normalizeEmail(email);
+  if (!e) throw new AccountError("Enter a valid email address", 400);
+  const taken = () => new AccountError("An account with this email already exists. Log in instead.", 409);
+  if (sql("SELECT 1 FROM auth_accounts WHERE email = ?").get(e)) throw taken();
+  const at = Date.now();
+  // The provider said the email is verified (src/server/oauth.ts takes no other): it counts as confirmed.
+  const account: Account = {
+    id: crypto.randomBytes(9).toString("hex"),
+    email: e,
+    hash: hashPassword(crypto.randomBytes(32).toString("hex")),
+    createdAt: at,
+    lastLoginAt: at,
+    signIn: provider,
+    emailVerifiedAt: at,
+  };
+  try {
+    authWrite(() => {
+      ensureSecret();
+      sql("INSERT INTO auth_accounts (id, email, password_hash, created_at, last_login_at, extra_json) VALUES (?, ?, ?, ?, ?, ?)").run(
+        account.id,
+        account.email,
+        account.hash,
+        account.createdAt,
+        account.lastLoginAt,
+        JSON.stringify({ signIn: provider, emailVerifiedAt: at }),
+      );
+      sql(
+        `INSERT INTO auth_oauth_links (provider, subject, account_id, made_account, created_at, last_used_at) VALUES (?, ?, ?, 1, ?, ?)
+         ON CONFLICT (provider, subject) DO UPDATE SET account_id = excluded.account_id, made_account = 1, last_used_at = excluded.last_used_at`,
+      ).run(provider, subject, account.id, at, at);
+    });
+  } catch (err) {
+    if ((err as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE" && /auth_accounts\.email/.test((err as Error).message)) throw taken();
+    throw err;
+  }
+  return account;
+}
+
+/**
+ * Inside authWrite: merge fields into an account's extra_json (the fields auth.json kept that have no column); undefined
+ * removes one. Writes only when something changes. False when there is no such account.
+ */
+function patchExtra(id: string, patch: Record<string, unknown>): boolean {
+  const r = sql("SELECT extra_json FROM auth_accounts WHERE id = ?").get(id) as { extra_json: string | null } | undefined;
+  if (!r) return false;
+  const before = r.extra_json ? (JSON.parse(r.extra_json) as Record<string, unknown>) : {};
+  const after = { ...before };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete after[k];
+    else after[k] = v;
+  }
+  if (JSON.stringify(after) === JSON.stringify(before)) return true;
+  sql("UPDATE auth_accounts SET extra_json = ? WHERE id = ?").run(Object.keys(after).length ? JSON.stringify(after) : null, id);
+  return true;
+}
+
+/**
+ * Note how an account just signed in (the billing service's account facts, billing.ts accountFacts). A provider's sign-in
+ * also confirms the email, which the provider verified: the first time is kept. A password sign-in writes only when the
+ * account last signed in another way. Returns the account as it is now.
+ */
+export function noteSignIn(account: Account, via: SignInWay): Account {
+  const verified = via !== "password" && !account.emailVerifiedAt ? Date.now() : undefined;
+  if ((account.signIn ?? "password") === via && !verified) return account;
+  if (authStoreClosed()) return account;
+  authWrite(() => patchExtra(account.id, { signIn: via === "password" ? undefined : via, ...(verified && { emailVerifiedAt: verified }) }));
+  return { ...account, signIn: via === "password" ? undefined : via, ...(verified && { emailVerifiedAt: verified }) };
+}
+
+/** The providers an account is linked to, in a fixed order. */
+export function accountProviders(id: string): OAuthProvider[] {
+  if (authStoreClosed()) return [];
+  const have = new Set((sql("SELECT DISTINCT provider FROM auth_oauth_links WHERE account_id = ?").all(id) as { provider: string }[]).map((r) => r.provider));
+  return (["google", "github"] as const).filter((p) => have.has(p));
+}
+
+/**
+ * Whether the account has a password of its own: every account made with an email and a password has one, and one made
+ * with a provider has one once it (or the owner) set one.
+ */
+export function accountHasPassword(account: Pick<Account, "id" | "passwordChangedAt">): boolean {
+  if (account.passwordChangedAt) return true;
+  if (authStoreClosed()) return true;
+  return !sql("SELECT 1 FROM auth_oauth_links WHERE account_id = ? AND made_account = 1").get(account.id);
+}
+
+/**
+ * An account made with a provider sets its first password (Settings → Account). There is no current one to check: the
+ * caller asks for a recent sign-in with the provider instead (sessionIssuedAt). Its other sign-ins end, as with a change.
+ */
+export async function setFirstAccountPassword(id: string, next: string): Promise<Account> {
+  if (next.length < 8) throw new AccountError("Use at least 8 characters", 400);
+  const account = accountById(id);
+  if (!account) throw new AccountError("No such account", 404);
+  if (accountHasPassword(account)) throw new AccountError("Enter your current password", 400);
+  const salt = crypto.randomBytes(16);
+  const hash = `${salt.toString("hex")}:${(await scrypt(next, salt)).toString("hex")}`;
+  const changed = { hash, passwordChangedAt: Date.now() };
+  updateAccount(id, "password_hash = ?, password_changed_at = ?", changed.hash, changed.passwordChangedAt);
+  return { ...account, ...changed };
+}
+
+/** The account with this email (any case), or undefined. */
+export function accountWithEmail(email: string): Account | undefined {
+  const e = normalizeEmail(email);
+  return e ? accountByEmail(e) : undefined;
+}
+
 /** The account with this (normalised) email, or undefined: one lookup on the unique email. */
 function accountByEmail(e: string): Account | undefined {
   if (authStoreClosed()) return undefined;
@@ -430,7 +599,10 @@ export function setAccountEmailAsOwner(id: string, email: string): string {
     authWrite(() => {
       const other = sql("SELECT id FROM auth_accounts WHERE email = ?").get(e) as { id: string } | undefined;
       if (other && other.id !== id) throw taken();
+      const was = sql("SELECT email FROM auth_accounts WHERE id = ?").get(id) as { email: string } | undefined;
       if (!sql("UPDATE auth_accounts SET email = ?, sessions_after = ? WHERE id = ?").run(e, Date.now(), id).changes) throw new AccountError("No such account", 404);
+      // A new address isn't confirmed yet.
+      if (was && was.email !== e) patchExtra(id, { emailVerifiedAt: undefined });
     });
   } catch (err) {
     if ((err as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE" && /auth_accounts\.email/.test((err as Error).message)) throw taken();
@@ -537,6 +709,7 @@ export function deleteAccount(id: string): void {
   authWrite(() => {
     sql("DELETE FROM auth_account_keys WHERE account_id = ?").run(id);
     sql("DELETE FROM auth_account_gpu WHERE account_id = ?").run(id);
+    sql("DELETE FROM auth_oauth_links WHERE account_id = ?").run(id);
     if (!sql("DELETE FROM auth_accounts WHERE id = ?").run(id).changes) throw new AccountError("No such account", 404);
   });
 }

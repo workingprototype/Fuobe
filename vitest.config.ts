@@ -45,6 +45,11 @@ export default defineConfig({
           "FIREWORKS_API_KEY",
           "FUOBE_HF_TOKEN",
           "FUOBE_LLM_TEST_BASE",
+          // Continue with Google or GitHub: off unless a test sets them (tests/oauth-signin.test.ts).
+          "FUOBE_OAUTH_GOOGLE_ID",
+          "FUOBE_OAUTH_GOOGLE_SECRET",
+          "FUOBE_OAUTH_GITHUB_ID",
+          "FUOBE_OAUTH_GITHUB_SECRET",
         ].map((k) => [k, ""]),
       ),
     },

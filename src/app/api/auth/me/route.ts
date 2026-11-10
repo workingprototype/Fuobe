@@ -1,7 +1,25 @@
 import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { z } from "zod";
-import { AccountError, accountGpu, authEnabled, createSession, publicSignup, SESSION_COOKIE, sessionCookieOf, sessionViewer, setAccountPassword, validToken, verifyAccount } from "@/server/auth";
+import {
+  AccountError,
+  accountGpu,
+  accountHasPassword,
+  accountProviders,
+  authEnabled,
+  createSession,
+  publicSignup,
+  SESSION_COOKIE,
+  sessionCookieOf,
+  sessionIssuedAt,
+  sessionViewer,
+  setAccountPassword,
+  setFirstAccountPassword,
+  validToken,
+  verifyAccount,
+  type Account,
+} from "@/server/auth";
+import { oauthProviders, PROVIDER_NAME } from "@/server/oauth";
 import { runnerFacts } from "@/server/computer/tasks";
 import { getSetting } from "@/server/settings";
 import { soundLive } from "@/server/sound-live";
@@ -21,12 +39,22 @@ export async function GET(request: Request) {
   const comfyPort = computer ? runnerFacts(account ? `acct:${account.id}` : "owner")?.port : undefined;
   // The sound features that have passed a real run (src/server/sound-live.ts): their switches start on and show to everyone.
   const live = Object.entries(soundLive()).flatMap(([k, v]) => (v ? [k] : []));
+  // Continue with Google or GitHub: the providers this install set up, while sign-up is open.
+  const oauth = open ? oauthProviders() : [];
+  const linked = account ? accountProviders(account.id) : [];
   return Response.json(
     {
       signedIn: owner || !!account,
       owner,
       publicSignup: open,
-      ...(account && { account: { email: account.email } }),
+      ...(oauth.length && { oauth }),
+      ...(account && {
+        account: {
+          email: account.email,
+          ...(linked.length && { providers: linked }),
+          ...(!accountHasPassword(account) && { noPassword: true }),
+        },
+      }),
       ...(computer && { computer: true, ...(comfyPort && { comfyPort }) }),
       ...(live.length && { soundLive: live }),
     },
@@ -49,18 +77,42 @@ function notAnAccount(request: Request, signedOut: string, owner: string): Respo
   return Response.json({ error: isOwner ? owner : signedOut }, { status: isOwner ? 403 : 401 });
 }
 
-/** An account deletes itself (its password again, to be sure). Signs it out. */
+/**
+ * An account made with Google or GitHub has no password to enter again: deleting it or setting its first password asks
+ * for a sign-in with the provider in the last 10 minutes instead.
+ */
+const RECENT_SIGN_IN_MS = 10 * 60_000;
+
+/** This session's sign-in was in the last 10 minutes. */
+const recentSignIn = (cookie: string | undefined) => (sessionIssuedAt(cookie) ?? 0) >= Date.now() - RECENT_SIGN_IN_MS;
+
+/** 403 `sign-in-again`: the page offers the account's provider, and comes back here. */
+function signInAgain(account: Account, then: string): Response {
+  const p = accountProviders(account.id).find((x) => oauthProviders().includes(x));
+  const name = p ? PROVIDER_NAME[p] : "your provider";
+  return Response.json(
+    { error: `To keep your account safe, continue with ${name} again, then ${then} within 10 minutes.`, code: "sign-in-again", ...(p && { provider: p }) },
+    { status: 403 },
+  );
+}
+
+/** An account deletes itself (its password again, to be sure; or a recent sign-in with its provider). Signs it out. */
 export async function DELETE(request: Request) {
   const jar = await cookies();
-  const session = sessionViewer(sessionCookieOf(request));
+  const cookie = sessionCookieOf(request);
+  const session = sessionViewer(cookie);
   const ownerRefusal = "This deletes an account, not the studio";
   if (!session) return notAnAccount(request, "You're signed out. Log in again to delete your account.", ownerRefusal);
   if (session.kind !== "account") return Response.json({ error: ownerRefusal }, { status: 403 });
-  const parsed = z.object({ password: z.string().min(1).max(500) }).safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return Response.json({ error: "Wrong password" }, { status: 403 });
-  const rate = passwordCheck(session.account.id);
-  if (!rate.ok) return Response.json({ error: "Too many tries. Wait a minute, then try again." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterS) } });
-  if (!(await verifyAccount(session.account.email, parsed.data.password))) return Response.json({ error: "Wrong password" }, { status: 403 });
+  if (!accountHasPassword(session.account)) {
+    if (!recentSignIn(cookie)) return signInAgain(session.account, "delete your account");
+  } else {
+    const parsed = z.object({ password: z.string().min(1).max(500) }).safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return Response.json({ error: "Wrong password" }, { status: 403 });
+    const rate = passwordCheck(session.account.id);
+    if (!rate.ok) return Response.json({ error: "Too many tries. Wait a minute, then try again." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterS) } });
+    if (!(await verifyAccount(session.account.email, parsed.data.password))) return Response.json({ error: "Wrong password" }, { status: 403 });
+  }
   // Switched off at once, its running jobs stopped (on its own keys), then its runs, files and record go.
   await removeAccount(session.account.id);
   jar.delete(SESSION_COOKIE);
@@ -68,17 +120,19 @@ export async function DELETE(request: Request) {
 }
 
 const NewPassword = z.object({
-  current: z.string().max(500),
+  /** Left out by an account setting its first password (made with Google or GitHub). */
+  current: z.string().max(500).optional(),
   next: z.string().min(8, "Use at least 8 characters").max(500, "Use at most 500 characters"),
 });
 
 /**
- * An account changes its password (the current one first, to be sure). Its other sign-ins end; this browser gets a new
- * session cookie.
+ * An account changes its password (the current one first, to be sure), or sets its first one (made with Google or
+ * GitHub: a recent sign-in with the provider instead). Its other sign-ins end; this browser gets a new session cookie.
  */
 export async function PATCH(request: Request) {
   const jar = await cookies();
-  const session = sessionViewer(sessionCookieOf(request));
+  const cookie = sessionCookieOf(request);
+  const session = sessionViewer(cookie);
   const ownerRefusal = "This changes an account's password, not the studio's";
   if (!session) return notAnAccount(request, "You're signed out. Log in again to change your password.", ownerRefusal);
   if (session.kind !== "account") return Response.json({ error: ownerRefusal }, { status: 403 });
@@ -87,12 +141,18 @@ export async function PATCH(request: Request) {
     const next = parsed.error.issues.find((i) => i.path[0] === "next");
     return Response.json({ error: next?.message ?? "Enter your current password and a new one" }, { status: 400 });
   }
+  // Made with Google or GitHub: its first password, after a recent sign-in with the provider (no current one to enter).
+  const first = !accountHasPassword(session.account);
+  if (first && !recentSignIn(cookie)) return signInAgain(session.account, "set your password");
+  const current = parsed.data.current;
+  if (!first && current === undefined) return Response.json({ error: "Enter your current password and a new one" }, { status: 400 });
   // Not a change: it would sign the other browsers out for nothing. (Two of the request's own words: no password check.)
-  if (parsed.data.next === parsed.data.current) return Response.json({ error: "Choose a new password, not the one you use now" }, { status: 400 });
+  if (!first && parsed.data.next === current) return Response.json({ error: "Choose a new password, not the one you use now" }, { status: 400 });
   const rate = passwordCheck(session.account.id);
   if (!rate.ok) return Response.json({ error: "Too many tries. Wait a minute, then try again." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterS) } });
   try {
-    await setAccountPassword(session.account.id, parsed.data.current, parsed.data.next);
+    if (first) await setFirstAccountPassword(session.account.id, parsed.data.next);
+    else await setAccountPassword(session.account.id, current ?? "", parsed.data.next);
   } catch (e) {
     if (e instanceof AccountError) return Response.json({ error: e.message }, { status: e.status });
     throw e;

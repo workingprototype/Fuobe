@@ -44,6 +44,8 @@ import { authStoreFailed } from "@/server/auth-store";
  * "who am I" answer for themselves whether public sign-up is on.
  */
 const OPEN = new Set(["/login", "/api/auth/login", "/api/auth/signup", "/api/auth/me", "/api/gpu/pair/start", "/api/gpu/pair/poll", "/api/version"]);
+/** Continue with Google or GitHub, and the provider's way back: open the same way (the routes answer 404 while it's off). */
+const OAUTH_ROUTE = /^\/api\/auth\/oauth\/[a-z]+(\/callback)?$/;
 
 /**
  * A worker's token (src/server/computer/workers.ts) works only on the routes a computer runs jobs through; the route
@@ -421,7 +423,7 @@ export function proxy(request: NextRequest) {
     return workerRoute(pathname) ? NextResponse.next() : NextResponse.json({ error: "A worker's token only runs jobs." }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   if (!authEnabled()) return pass(request);
-  if (OPEN.has(pathname)) return NextResponse.next();
+  if (OPEN.has(pathname) || (read && OAUTH_ROUTE.test(pathname))) return NextResponse.next();
   const open = publicSignup(request.headers.get("host") ?? request.nextUrl.host);
   const viewer = viewerOf(request, open);
   if (viewer?.kind === "owner") return pass(request);

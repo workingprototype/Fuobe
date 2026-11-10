@@ -273,6 +273,54 @@ interface PublicSignupStatus {
   setting: boolean;
   fromEnv: boolean | null;
   active: boolean;
+  /** Continue with Google or GitHub: its client id and secret are set on the server, and the owner's switch. */
+  oauth?: { provider: "google" | "github"; configured: boolean; on: boolean }[];
+}
+
+const OAUTH_SWITCH = { google: { name: "oauthGoogle", label: "Sign in with Google", env: "FUOBE_OAUTH_GOOGLE_ID" }, github: { name: "oauthGithub", label: "Sign in with GitHub", env: "FUOBE_OAUTH_GITHUB_ID" } } as const;
+
+/**
+ * Settings → Security → Sign in with Google / GitHub, under Public sign-up: a switch for each provider whose client id and
+ * secret are set on the server (PUT /api/settings oauthGoogle / oauthGithub, "on" or "off"). Off hides its button at once.
+ */
+function OAuthSwitches({ status }: { status: PublicSignupStatus }) {
+  const qc = useQueryClient();
+  const id = useId();
+  const [busy, setBusy] = useState<string | null>(null);
+  const configured = (status.oauth ?? []).filter((o) => o.configured);
+  if (!configured.length) {
+    return (
+      <p className="text-[12px] text-muted-foreground">
+        To offer Continue with Google or GitHub, set FUOBE_OAUTH_GOOGLE_ID and FUOBE_OAUTH_GOOGLE_SECRET, or FUOBE_OAUTH_GITHUB_ID and FUOBE_OAUTH_GITHUB_SECRET, on the server.
+      </p>
+    );
+  }
+  const set = async (provider: "google" | "github", on: boolean) => {
+    setBusy(provider);
+    try {
+      await call("/api/settings", "PUT", { [OAUTH_SWITCH[provider].name]: on ? "on" : "off" });
+      await qc.invalidateQueries({ queryKey: ["auth", "public"] });
+      void qc.invalidateQueries({ queryKey: ["viewer"] });
+      void qc.invalidateQueries({ queryKey: ["settings"] });
+    } catch (e) {
+      toastError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="space-y-2 pt-2">
+      {configured.map((o) => (
+        <div key={o.provider} className="flex items-center gap-3">
+          <Label htmlFor={`${id}-${o.provider}`} className="flex-1 text-[13px] font-medium">
+            {OAUTH_SWITCH[o.provider].label}
+          </Label>
+          <Switch id={`${id}-${o.provider}`} checked={o.on} disabled={busy !== null} onCheckedChange={(on) => void set(o.provider, on)} />
+        </div>
+      ))}
+      <p className="text-[12px] text-muted-foreground">Shows Continue with {configured.map((o) => (o.provider === "google" ? "Google" : "GitHub")).join(" and ")} on the sign-up and log-in forms while public sign-up is on.</p>
+    </div>
+  );
 }
 
 /** Public sign-up: guests browse read-only, and anyone can make an account (that runs on its own GPU). */
@@ -312,6 +360,7 @@ function PublicSignup() {
         </a>
         .
       </p>
+      <OAuthSwitches status={p} />
     </div>
   );
 }

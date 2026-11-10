@@ -1301,6 +1301,8 @@ function open(): Database.Database {
   db.exec(SKILL_TABLES);
   // An account's own canvases (account-canvas.ts): not a numbered migration, so branches never clash over its place.
   db.exec(ACCOUNT_CANVAS_TABLES);
+  // Sign-in with Google or GitHub (src/server/oauth.ts): not a numbered migration either.
+  db.exec(OAUTH_TABLES);
   // Fuobe Chat (src/server/chat/store.ts): not a numbered migration either.
   db.exec(CHAT_TABLES);
   // When a chat was archived (it leaves the list, kept under Archived), for tables made before it.
@@ -1348,6 +1350,23 @@ function open(): Database.Database {
   keepPrivate(file);
   return db;
 }
+
+/**
+ * Sign-in with Google or GitHub (public sign-up, src/server/oauth.ts): which account a provider's user signs in to, by the
+ * provider's own user id (never a token or an email). `made_account`: the account was made by that sign-in, so it has
+ * no password of its own until it sets one. No foreign key: moving auth.json in again rewrites the accounts' rows with
+ * the same ids, and a cascade would drop these with them. A row whose account is gone is ignored and removed.
+ */
+const OAUTH_TABLES = `CREATE TABLE IF NOT EXISTS auth_oauth_links (
+    provider TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    made_account INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    PRIMARY KEY (provider, subject)
+  );
+  CREATE INDEX IF NOT EXISTS auth_oauth_links_account ON auth_oauth_links(account_id);`;
 
 /** An account's own canvases (public sign-up, src/server/account-canvas.ts), never in the owner's `canvases`. */
 const ACCOUNT_CANVAS_TABLES = `CREATE TABLE IF NOT EXISTS account_canvases (

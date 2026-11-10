@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { authEnabled, publicSignup, publicSignupFromEnv, publicSignupSetting, sessionCookieOf, setPublicSignup, validSession } from "@/server/auth";
+import { oauthStatus } from "@/server/oauth";
 
 const status = (request: Request) => ({
   /** The Settings switch. */
@@ -9,6 +10,8 @@ const status = (request: Request) => ({
   fromEnv: publicSignupFromEnv(),
   /** On for this address right now. */
   active: publicSignup(request.headers.get("host")),
+  /** Continue with Google or GitHub: whether each one's client id and secret are set, and the owner's switch (Settings: oauthGoogle, oauthGithub). */
+  oauth: oauthStatus(),
 });
 
 /** Settings → Security: public sign-up (guests browse read-only, anyone can make an account). */

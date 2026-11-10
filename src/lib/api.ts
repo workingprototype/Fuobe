@@ -1475,13 +1475,24 @@ export function useAssistActions() {
 // ---------------------------------------------------------------------------
 // Who is looking (public sign-up: GET /api/auth/me)
 
+/** The providers an account can sign in with (src/server/oauth.ts). */
+export type OAuthProviderId = "google" | "github";
+
 export interface ViewerInfo {
   signedIn: boolean;
   /** The install password's session or an API token (also everyone while no password is set). */
   owner: boolean;
   /** Guests may browse and anyone may sign up. */
   publicSignup: boolean;
-  account?: { email: string };
+  /** Continue with Google or GitHub: the providers this studio set up (only while sign-up is open). */
+  oauth?: OAuthProviderId[];
+  account?: {
+    email: string;
+    /** The providers it signs in with besides a password. */
+    providers?: OAuthProviderId[];
+    /** Made with a provider and no password set yet: Settings offers to set one. */
+    noPassword?: true;
+  };
   /** Runs go to the ComfyUI on the person's own computer, which a Fuobe tab of theirs runs (components/gpu/computer-runner.tsx). */
   computer?: boolean;
   /** The port their computer's tab last found ComfyUI on (a browser that remembers none starts there). */

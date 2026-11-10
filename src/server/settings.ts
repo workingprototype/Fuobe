@@ -149,6 +149,12 @@ export const SETTINGS = {
    * opened its data keeps "friendly", as before (db.ts keepFriendlyFailures).
    */
   runFailureDetail: { key: "runs.failureDetail", env: "FUOBE_RUN_FAILURE_DETAIL", default: "full", options: ["full", "friendly"] },
+  /**
+   * Settings → Security → Sign in with Google / GitHub (public sign-up, src/server/oauth.ts): "off" hides the button and
+   * closes its routes without a restart. On by default, so a provider whose client id and secret are set shows at once.
+   */
+  oauthGoogle: { key: "oauth.google", default: "on", options: ["on", "off"] },
+  oauthGithub: { key: "oauth.github", default: "on", options: ["on", "off"] },
   /** "1" once the first-run guide was put away, or /api/status first saw something the engine mode generates with connected: Home stops offering it. */
   onboarded: { key: "onboarding.done", default: "0", options: ["0", "1"] },
 } satisfies Record<string, SettingDef>;

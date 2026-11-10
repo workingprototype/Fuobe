@@ -42,7 +42,7 @@ twice: the service must treat a repeated call (the same `requestId`, or the same
 All JSON. Times are Unix milliseconds. Amounts are whole numbers in the service's own unit.
 
 ```ts
-type AccountFacts = { id: string; email: string | null; emailVerified: boolean; signIn: "google" | "password"; createdAt: number; adultAt: number | null };
+type AccountFacts = { id: string; email: string | null; emailVerified: boolean; signIn: "google" | "github" | "password"; createdAt: number; adultAt: number | null };
 type Place = "own-gpu" | "own-key" | "pool" | "install-key";
 type RunFacts = {
   place: Place; model: string; op: string | null; app: string | null; preset: string | null; studio: string;
@@ -77,6 +77,11 @@ type Policy = {
   links?: Action[]; notice?: { id: string; text: string; url?: string }; ttlS: number;
 };
 ```
+
+`AccountFacts.signIn` is how the account signed in last: `"password"` (its email and password), or `"google"` or
+`"github"` (Continue with Google or GitHub, [public-signup.md](public-signup.md#google-and-github)). `emailVerified` is
+true once the account has signed in with a provider that verified its email; an email changed later is not verified
+until that happens again.
 
 `cardText` is what a preset card says when its run would go to this install's GPUs for the viewer, such as "Try free"
 (at most 40 characters). With a service set, the cards say only these words, and nothing when the policy has none.

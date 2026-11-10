@@ -6,8 +6,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { isWay } from "@/lib/ai-setup/ways";
-import { announceAuthChange, rememberViewer, signOut, useStatus, useViewer } from "@/lib/api";
+import { OAuthButtons, PROVIDER_LABEL } from "@/components/oauth-buttons";
+import { welcomePath } from "@/lib/after-signup";
+import { announceAuthChange, rememberViewer, signOut, useStatus, useViewer, type OAuthProviderId } from "@/lib/api";
 import { safeNext } from "@/lib/safe-redirect";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,27 @@ type Mode = "signup" | "login" | "owner";
 
 /** On a public site the owner's sign-in isn't advertised: production builds open it at /login?owner=1. */
 const OWNER_LINK = process.env.NODE_ENV !== "production";
+
+/** Why a sign-in with Google or GitHub came back here (?oauth_error=, src/app/api/auth/oauth/[provider]/callback). */
+function oauthMessage(code: string | null, provider: string | null): string | null {
+  const name = provider === "google" || provider === "github" ? PROVIDER_LABEL[provider as OAuthProviderId] : "your provider";
+  switch (code) {
+    case "expired":
+      return "That sign-in took a while or started in another browser. Please try again.";
+    case "cancelled":
+      return `Signing in with ${name} was cancelled. You can try again, or use your email.`;
+    case "unverified":
+      return `Your ${name} account has no verified email address yet. Verify one with ${name}, or sign up with your email.`;
+    case "disabled":
+      return "This account can't log in.";
+    case "busy":
+      return "Lots of sign-ins right now. Please try again in a minute.";
+    case "failed":
+      return `We couldn't finish signing in with ${name}. Please try again in a moment.`;
+    default:
+      return null;
+  }
+}
 
 const COPY: Record<Mode, { title: string; lead: string; button: string }> = {
   signup: { title: "Create your free account", lead: "Just an email and a password. You're in within seconds.", button: "Sign up" },
@@ -40,6 +62,10 @@ export function LoginForm() {
   const [shown, setShown] = useState(false);
   const [busy, setBusy] = useState(false);
   const next = safeNext(params.get("next"), typeof window === "undefined" ? "http://localhost" : window.location.origin);
+  // Continue with Google or GitHub: only the providers this studio set up, and never on the owner's sign-in.
+  const providers = mode === "owner" ? [] : (viewer.data?.oauth ?? []);
+  // A provider sign-in that came back here, until the visitor does something else.
+  const [oauthError, setOauthError] = useState(() => oauthMessage(params.get("oauth_error"), params.get("provider")));
 
   // Sign up and log in have their own tab title (the page's metadata says "Sign in" for both).
   useEffect(() => {
@@ -50,6 +76,7 @@ export function LoginForm() {
   const choose = (m: Mode) => {
     setChosen(m);
     setError(null);
+    setOauthError(null);
     setTaken(false);
     if (m === "owner") return;
     const q = new URLSearchParams(params.toString());
@@ -65,25 +92,16 @@ export function LoginForm() {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setOauthError(null);
     const url = mode === "signup" ? "/api/auth/signup" : "/api/auth/login";
     const body = mode === "owner" ? { password } : { email, password };
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (res.ok) {
       // Only a page on this site: never bounce to another origin after signing in.
       const after = safeNext(params.get("next"), window.location.origin);
-      // A new account connects its GPU first (the pre-flight board), then goes on to where it was headed. Not back to
-      // Settings' Your GPU (its Sign up free): the welcome page is that same choice.
-      const q = new URLSearchParams({ welcome: "1" });
-      if (after !== "/" && !after.startsWith("/connect") && !after.startsWith("/settings#your-gpu")) q.set("next", after);
-      // "Set it up with my AI" (a guest's sign-up from it): the welcome page opens with it, on the link's way.
-      const nextUrl = new URL(after, window.location.origin);
-      if (nextUrl.pathname === "/connect" && nextUrl.searchParams.get("setup") === "ai") {
-        q.set("setup", "ai");
-        const way = nextUrl.searchParams.get("way");
-        if (isWay(way)) q.set("way", way);
-      }
-      // With hosted runs on, a GPU of its own is optional: straight back to where it was.
-      const dest = mode === "signup" && !hosted ? new URL(`/connect?${q}`, window.location.origin).toString() : after;
+      // A new account connects its GPU first (the welcome page), then goes on to where it was headed. With hosted runs
+      // on, a GPU of its own is optional: straight back to where it was.
+      const dest = mode === "signup" && !hosted ? welcomePath(after, window.location.origin) : after;
       rememberViewer(mode === "owner" ? "owner" : "account");
       announceAuthChange();
       window.location.assign(dest);
@@ -123,6 +141,9 @@ export function LoginForm() {
   }
 
   const copy = COPY[mode];
+  // With Google or GitHub on, the lead names them first.
+  const names = providers.map((p) => PROVIDER_LABEL[p]).join(" or ");
+  const lead = !names ? copy.lead : mode === "signup" ? `Continue with ${names}, or use an email and a password.` : `Log in with ${names}, or with your email and password.`;
   const short = mode === "signup" && password.length > 0 && password.length < 8;
   return (
     <form onSubmit={submit} className="w-full max-w-sm animate-fade-up rounded-2xl border bg-background p-7 shadow-soft">
@@ -130,7 +151,22 @@ export function LoginForm() {
         {mode === "signup" ? <Sparkles className="size-5" /> : <Lock className="size-5" />}
       </div>
       <h1 className="font-heading text-[28px] leading-tight">{copy.title}</h1>
-      <p className="mt-1 text-[13px] text-muted-foreground">{copy.lead}</p>
+      <p className="mt-1 text-[13px] text-muted-foreground">{lead}</p>
+      {oauthError && !error && (
+        <p role="alert" className="mt-4 text-[13px] text-destructive">
+          {oauthError}
+        </p>
+      )}
+      {providers.length > 0 && (
+        <>
+          <OAuthButtons providers={providers} next={next} mode={mode === "signup" ? "signup" : "login"} className="mt-5" />
+          <div className="mt-5 flex items-center gap-3 text-[12px] text-muted-foreground" role="separator" aria-label="or">
+            <span className="h-px flex-1 bg-border" />
+            or
+            <span className="h-px flex-1 bg-border" />
+          </div>
+        </>
+      )}
       {mode !== "owner" && (
         <Input
           type="email"
@@ -142,7 +178,7 @@ export function LoginForm() {
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="mt-5 h-11"
+          className={cn(providers.length > 0 ? "mt-4" : "mt-5", "h-11")}
           aria-invalid={!!error}
         />
       )}

@@ -58,6 +58,8 @@ takes an account's GPU type from the status strip's last check and asks the GPU 
   still works as before: `POST /api/auth/login` with `{ "password" }`, or the owner's sign-in at
   `/login?owner=1`. The login page links to it only in development, so a public site doesn't
   advertise it.
+- Or **Continue with Google** or **Continue with GitHub**, when the install has set them up
+  ([Google and GitHub](#google-and-github)).
 - Accounts are stored in the database (`fuobe.db` in the data folder, table `auth_accounts`): the
   email in lower case (one account per email), a salted scrypt hash of the password (the same scheme
   as the install password), and the creation time. An install from before this kept them in
@@ -157,6 +159,50 @@ An account is signed in, but it sees the owner's studio as a guest does:
   export id answers 404. The last part answers 201 with the run, within the same run budget (429) and through the
   same checks (422).
 
+## Google and GitHub
+
+An install can let visitors sign up and log in with Google or GitHub as well as with an email and a
+password. It is off unless the install sets a provider's client id and secret, and it works only
+while public sign-up is on. The owner's sign-in (the install password) doesn't change.
+
+| Provider | Variables | Callback URL to register |
+|---|---|---|
+| Google (an OAuth client of type "Web application") | `FUOBE_OAUTH_GOOGLE_ID`, `FUOBE_OAUTH_GOOGLE_SECRET` | `<your site>/api/auth/oauth/google/callback` |
+| GitHub (an OAuth app) | `FUOBE_OAUTH_GITHUB_ID`, `FUOBE_OAUTH_GITHUB_SECRET` | `<your site>/api/auth/oauth/github/callback` |
+
+`<your site>` is the address visitors open, with its scheme (`https://studio.example.com`). Behind a
+reverse proxy, the proxy must send `X-Forwarded-Host` and `X-Forwarded-Proto` (or the original `Host`),
+so the callback address matches the one registered.
+
+- **Switching one off.** **Settings → Security → Sign in with Google** and **Sign in with GitHub**
+  (settings `oauthGoogle` and `oauthGithub`, `on` or `off`) show for each provider whose id and
+  secret are set. They are on by default; off hides the button and closes its routes at once, with no
+  restart.
+- **The buttons.** With a provider set up, the sign-in and sign-up forms show **Continue with Google**
+  and **Continue with GitHub** above the email form. `GET /api/auth/me` lists the providers that are
+  on (`oauth: ["google", "github"]`) while sign-up is open.
+- **The flow.** `GET /api/auth/oauth/<provider>?next=<path>` sends the browser to the provider (the
+  authorization-code flow, with PKCE). A random `state` is kept for 10 minutes in an HttpOnly cookie
+  signed with the install's secret, and the callback (`GET /api/auth/oauth/<provider>/callback`)
+  takes the code only with that browser's state. `next` must be a path on this site: anything else
+  goes to the home page. Both routes answer 404 while the provider isn't set up or sign-up is off.
+- **A verified email only.** Google's email counts only when Google says it is verified. GitHub's
+  counts only when it is the account's primary email and verified. Without one, the login page says
+  so, and no account is made.
+- **Which account.** A provider's user signs in to the account linked to it before (by the provider's
+  own user id), else to the account with the same email, which is then linked. Otherwise an account
+  is made as sign-up makes one, within the same sign-up limits for the visitor, and a new account goes
+  to the welcome page first. A switched-off account can't log in this way either. Only the provider's
+  user id is kept (table `auth_oauth_links`), never a code or a token. The account's email then counts
+  as confirmed, and an optional billing service hears `emailVerified: true` and `signIn: "google"` or
+  `"github"` ([billing-hook.md](billing-hook.md)).
+- **No password at first.** An account made with a provider has no password: no password logs in to
+  it. **Settings → Account → Set a password** gives it one (`PATCH /api/auth/me` with
+  `{ "next" }`), and deleting it asks for no password. Both need a sign-in with the provider in the
+  last 10 minutes; past that they answer 403 with `code: "sign-in-again"`, and the page offers
+  **Continue with Google** (or GitHub) again.
+- Codes, tokens and the client secret are never logged. A failed provider call logs its status only.
+
 ## Managing accounts
 
 The owner sees everyone who signed up in **Settings → Accounts**, the last section of Settings (the
@@ -217,7 +263,8 @@ and `totals`; `?format=csv` for the file), `PATCH /api/admin/accounts/<id>` with
 needs `runs:read` and `outputs:view`, and `accounts:read` for the email) and
 `DELETE /api/admin/generations/<id>` (an account's run only).
 
-An account can delete itself: `DELETE /api/auth/me` with `{ "password" }`. When an account is
+An account can delete itself: `DELETE /api/auth/me` with `{ "password" }` (an account made with Google
+or GitHub that has no password: a recent sign-in with it instead, [Google and GitHub](#google-and-github)). When an account is
 deleted (by itself or by the owner), its runs are stopped and removed, and its uploads and results
 are deleted with it.
 

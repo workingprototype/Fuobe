@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { accountEvent, accountFacts } from "@/server/billing";
-import { authEnabled, createSession, LoginGuard, normalizeEmail, publicSignup, recordLogin, SESSION_COOKIE, verifyAccount, verifyPassword } from "@/server/auth";
+import { authEnabled, createSession, LoginGuard, noteSignIn, normalizeEmail, publicSignup, recordLogin, SESSION_COOKIE, verifyAccount, verifyPassword } from "@/server/auth";
 import { enter, hit } from "@/server/rate";
 
 /** The install password alone (the owner), or an account's email and password (public sign-up). */
@@ -97,7 +97,7 @@ export async function POST(request: Request) {
     if (account.disabled) return Response.json({ error: "This account can't log in." }, { status: 403 });
     accountId = account.id;
     recordLogin(account.id);
-    accountEvent("signed-in", accountFacts(account));
+    accountEvent("signed-in", accountFacts(noteSignIn(account, "password")));
   } else {
     const wait = ownerGuard().blockedFor(key);
     if (wait > 0) return tooMany(wait, key);

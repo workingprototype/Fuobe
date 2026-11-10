@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { OAuthButtons } from "@/components/oauth-buttons";
 import { useHashAnchor } from "@/components/use-hash-anchor";
-import { announceAuthChange, leaveNotice, rememberViewer, signInHref, signOut, useHydrated, useViewer } from "@/lib/api";
+import { announceAuthChange, leaveNotice, rememberViewer, signInHref, signOut, useHydrated, useViewer, type OAuthProviderId, type ViewerInfo } from "@/lib/api";
 import { FUOBE_REPO } from "@/lib/connections";
 import { cn } from "@/lib/utils";
 
@@ -40,7 +41,7 @@ export function OwnerSettings({ children }: { children: React.ReactNode }) {
   return (
     <>
       {v.account ? (
-        <AccountSection email={v.account.email} />
+        <AccountSection account={v.account} />
       ) : (
         <section className="space-y-3 border-b py-8">
           <h2 className="text-[15px] font-semibold">Run Fuobe on your own GPU</h2>
@@ -101,11 +102,24 @@ function Licences() {
   );
 }
 
+/** Where an account made with Google or GitHub signs in again before it sets a password or deletes itself. */
+const ACCOUNT_AGAIN = "/settings#account";
+
+/** The answer's 403 `sign-in-again` (an account with no password, signed in a while ago): the provider to offer. */
+async function signInAgainOf(res: Response): Promise<{ error?: string; provider?: OAuthProviderId }> {
+  const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string; provider?: string };
+  const provider = body.code === "sign-in-again" && (body.provider === "google" || body.provider === "github") ? body.provider : undefined;
+  return { error: body.error, provider };
+}
+
 /**
- * An account's own: changing its password, signing out, and deleting it (its password again, DELETE /api/auth/me),
- * which takes its runs, files and GPU with it.
+ * An account's own: changing its password (or setting its first one, when it was made with Google or GitHub), signing
+ * out, and deleting it (its password again, or a recent sign-in with its provider: DELETE /api/auth/me), which takes
+ * its runs, files and GPU with it.
  */
-function AccountSection({ email }: { email: string }) {
+function AccountSection({ account }: { account: NonNullable<ViewerInfo["account"]> }) {
+  const { email } = account;
+  const noPassword = !!account.noPassword;
   const id = useId();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -115,6 +129,8 @@ function AccountSection({ email }: { email: string }) {
   const [error, setError] = useState("");
   // The password was wrong (403): only then is its field marked, not for "too many tries" or no answer.
   const [wrong, setWrong] = useState(false);
+  // No password, and the sign-in was a while ago: the provider to continue with first.
+  const [again, setAgain] = useState<OAuthProviderId | undefined>();
   // A link to /settings#account arrives before this section exists: it is scrolled to once it does.
   useHashAnchor("account", true);
   const remove = async (e: React.FormEvent) => {
@@ -122,8 +138,9 @@ function AccountSection({ email }: { email: string }) {
     setBusy(true);
     setError("");
     setWrong(false);
+    setAgain(undefined);
     try {
-      const res = await fetch("/api/auth/me", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+      const res = await fetch("/api/auth/me", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(noPassword ? {} : { password }) });
       if (res.status === 204) {
         // This browser's other tabs hear it, then a full load (as a guest's): the page and every cached answer were the
         // account's. The home page says it was deleted, which a sign-out alone would look the same as.
@@ -144,9 +161,10 @@ function AccountSection({ email }: { email: string }) {
         announceAuthChange();
         return;
       }
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      const body = await signInAgainOf(res);
       setError(body.error ?? `The account wasn't deleted (${res.status})`);
-      setWrong(res.status === 403);
+      setAgain(body.provider);
+      setWrong(res.status === 403 && !noPassword);
     } catch {
       setError("We couldn't reach Fuobe. Check your connection and try again.");
     }
@@ -163,7 +181,7 @@ function AccountSection({ email }: { email: string }) {
       <div className="min-w-0 space-y-6">
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => setChanging(true)}>
-            <KeyRound /> Change password
+            <KeyRound /> {noPassword ? "Set a password" : "Change password"}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => void signOut()}>
             <LogOut /> Sign out
@@ -179,7 +197,7 @@ function AccountSection({ email }: { email: string }) {
           </Button>
         </div>
       </div>
-      <ChangePassword email={email} open={changing} onOpenChange={setChanging} />
+      <ChangePassword email={email} first={noPassword} open={changing} onOpenChange={setChanging} />
       <Dialog
         open={open}
         onOpenChange={(o) => {
@@ -188,6 +206,7 @@ function AccountSection({ email }: { email: string }) {
           setPassword("");
           setError("");
           setWrong(false);
+          setAgain(undefined);
         }}
       >
         <DialogContent className="sm:max-w-md">
@@ -195,36 +214,47 @@ function AccountSection({ email }: { email: string }) {
             <DialogHeader>
               <DialogTitle>Delete your account?</DialogTitle>
               <DialogDescription>
-                {email} and everything you made with it go for good. Enter your password to confirm.
+                {email} and everything you made with it go for good.{noPassword ? "" : " Enter your password to confirm."}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-1.5">
-              <Label htmlFor={`${id}-password`} className="text-[13px]">
-                Password
-              </Label>
-              <Input
-                id={`${id}-password`}
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                aria-invalid={wrong}
-                aria-describedby={error ? `${id}-error` : undefined}
-                autoFocus
-              />
-              {error && (
-                <p id={`${id}-error`} role="alert" className="text-[12px] text-destructive">
-                  {error}
-                </p>
-              )}
-            </div>
+            {noPassword ? (
+              error && (
+                <div className="space-y-3">
+                  <p id={`${id}-error`} role="alert" className="text-[13px] text-destructive">
+                    {error}
+                  </p>
+                  {again && <OAuthButtons providers={[again]} next={ACCOUNT_AGAIN} mode="login" size="sm" />}
+                </div>
+              )
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor={`${id}-password`} className="text-[13px]">
+                  Password
+                </Label>
+                <Input
+                  id={`${id}-password`}
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  aria-invalid={wrong}
+                  aria-describedby={error ? `${id}-error` : undefined}
+                  autoFocus
+                />
+                {error && (
+                  <p id={`${id}-error`} role="alert" className="text-[12px] text-destructive">
+                    {error}
+                  </p>
+                )}
+              </div>
+            )}
             <DialogFooter>
               <DialogClose asChild>
                 <Button type="button" variant="ghost" disabled={busy}>
                   Cancel
                 </Button>
               </DialogClose>
-              <Button type="submit" variant="destructive" disabled={busy || !password}>
+              <Button type="submit" variant="destructive" disabled={busy || (!noPassword && !password)}>
                 {busy && <Loader2 className="animate-spin" />}
                 Delete account
               </Button>
@@ -257,9 +287,10 @@ function PasswordInput({ id, shown, onShow, ...props }: React.ComponentProps<typ
 
 /**
  * Settings → Account → Change password (PATCH /api/auth/me): the current password, then the new one. Every other
- * browser signed in to the account is signed out; this one stays signed in.
+ * browser signed in to the account is signed out; this one stays signed in. `first`: an account made with Google or
+ * GitHub sets its first password (no current one; the server asks for a recent sign-in with the provider instead).
  */
-function ChangePassword({ email, open, onOpenChange }: { email: string; open: boolean; onOpenChange: (open: boolean) => void }) {
+function ChangePassword({ email, first, open, onOpenChange }: { email: string; first: boolean; open: boolean; onOpenChange: (open: boolean) => void }) {
   const id = useId();
   const qc = useQueryClient();
   const [current, setCurrent] = useState("");
@@ -269,6 +300,7 @@ function ChangePassword({ email, open, onOpenChange }: { email: string; open: bo
   const [error, setError] = useState("");
   // The current password was wrong (403): only then is its field marked, not for "too many tries" or no answer.
   const [wrong, setWrong] = useState(false);
+  const [again, setAgain] = useState<OAuthProviderId | undefined>();
   const short = next.length > 0 && next.length < 8;
   const reset = () => {
     setCurrent("");
@@ -276,18 +308,23 @@ function ChangePassword({ email, open, onOpenChange }: { email: string; open: bo
     setShown(false);
     setError("");
     setWrong(false);
+    setAgain(undefined);
   };
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError("");
     setWrong(false);
+    setAgain(undefined);
     try {
-      const res = await fetch("/api/auth/me", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current, next }) });
+      const res = await fetch("/api/auth/me", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current: first ? "" : current, next }) });
       if (res.ok) {
-        toast.success("Password changed", { description: "You're still signed in here. Any other browser signed in to your account is signed out." });
+        toast.success(first ? "Password set" : "Password changed", {
+          description: first ? "You can now log in with your email and this password too." : "You're still signed in here. Any other browser signed in to your account is signed out.",
+        });
         reset();
         onOpenChange(false);
+        if (first) void qc.invalidateQueries({ queryKey: ["viewer"] });
       } else if (res.status === 401) {
         // This browser was signed out (the password was changed in another one): the page shows Log in instead.
         setBusy(false);
@@ -299,9 +336,10 @@ function ChangePassword({ email, open, onOpenChange }: { email: string; open: bo
         announceAuthChange();
         return;
       } else {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const body = await signInAgainOf(res);
         setError(body.error ?? `The password wasn't changed (${res.status})`);
-        setWrong(res.status === 403);
+        setAgain(body.provider);
+        setWrong(res.status === 403 && !first);
       }
     } catch {
       setError("We couldn't reach Fuobe. Check your connection and try again.");
@@ -320,27 +358,33 @@ function ChangePassword({ email, open, onOpenChange }: { email: string; open: bo
       <DialogContent className="sm:max-w-md">
         <form onSubmit={save} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>Change your password</DialogTitle>
-            <DialogDescription>Changing your password signs out every other browser where you&apos;re signed in. You stay signed in here.</DialogDescription>
+            <DialogTitle>{first ? "Set a password" : "Change your password"}</DialogTitle>
+            <DialogDescription>
+              {first
+                ? "Then you can log in with your email and this password as well. You stay signed in here."
+                : "Changing your password signs out every other browser where you're signed in. You stay signed in here."}
+            </DialogDescription>
           </DialogHeader>
           {/* The account's email, for password managers: they update its saved login rather than save a new one. */}
           <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />
-          <div className="space-y-1.5">
-            <Label htmlFor={`${id}-current`} className="text-[13px]">
-              Current password
-            </Label>
-            <PasswordInput
-              id={`${id}-current`}
-              shown={shown}
-              onShow={() => setShown((s) => !s)}
-              autoComplete="current-password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-              aria-invalid={wrong}
-              aria-describedby={error ? `${id}-error` : undefined}
-              autoFocus
-            />
-          </div>
+          {!first && (
+            <div className="space-y-1.5">
+              <Label htmlFor={`${id}-current`} className="text-[13px]">
+                Current password
+              </Label>
+              <PasswordInput
+                id={`${id}-current`}
+                shown={shown}
+                onShow={() => setShown((s) => !s)}
+                autoComplete="current-password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                aria-invalid={wrong}
+                aria-describedby={error ? `${id}-error` : undefined}
+                autoFocus
+              />
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor={`${id}-new`} className="text-[13px]">
               New password
@@ -352,6 +396,7 @@ function ChangePassword({ email, open, onOpenChange }: { email: string; open: bo
               autoComplete="new-password"
               value={next}
               onChange={(e) => setNext(e.target.value)}
+              autoFocus={first}
               aria-invalid={short}
               aria-describedby={`${id}-hint`}
             />
@@ -364,15 +409,16 @@ function ChangePassword({ email, open, onOpenChange }: { email: string; open: bo
               {error}
             </p>
           )}
+          {again && <OAuthButtons providers={[again]} next={ACCOUNT_AGAIN} mode="login" size="sm" />}
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="ghost" disabled={busy}>
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={busy || !current || next.length < 8}>
+            <Button type="submit" disabled={busy || (!first && !current) || next.length < 8}>
               {busy && <Loader2 className="animate-spin" />}
-              Change password
+              {first ? "Set password" : "Change password"}
             </Button>
           </DialogFooter>
         </form>

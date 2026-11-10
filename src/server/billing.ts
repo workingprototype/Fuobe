@@ -25,7 +25,8 @@ export interface AccountFacts {
   id: string;
   email: string | null;
   emailVerified: boolean;
-  signIn: "google" | "password";
+  /** How the account signed in last: its email and password, or Google or GitHub. */
+  signIn: "google" | "github" | "password";
   createdAt: number;
   adultAt: number | null;
 }
@@ -338,7 +339,7 @@ function logDown(what: string, e: unknown): void {
 }
 
 /** An account as the billing service sees it. */
-export function accountFacts(a: Pick<Account, "id" | "email" | "createdAt"> & { signIn?: "google" | "password"; emailVerifiedAt?: number; adultAt?: number }): AccountFacts {
+export function accountFacts(a: Pick<Account, "id" | "email" | "createdAt"> & { signIn?: "google" | "github" | "password"; emailVerifiedAt?: number; adultAt?: number }): AccountFacts {
   return { id: a.id, email: a.email || null, emailVerified: !!a.emailVerifiedAt, signIn: a.signIn ?? "password", createdAt: a.createdAt, adultAt: a.adultAt ?? null };
 }
 
