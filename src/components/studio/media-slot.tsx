@@ -217,7 +217,7 @@ export function LibraryGrid({ kinds, onPick }: { kinds: MediaKind[]; onPick: (v:
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
         </div>
       ) : assets.data?.length ? (
-        <div className="grid max-h-72 grid-cols-4 gap-1.5 overflow-y-auto">
+        <div className="grid auto-rows-max max-h-72 grid-cols-4 gap-1.5 overflow-y-auto">
           {assets.data.map((a) => (
             <button
               key={a.id}

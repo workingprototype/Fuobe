@@ -264,7 +264,7 @@ function AddRef({ onFiles, onPick, compact }: { onFiles: (f: FileList) => void; 
           <ImagePlus className="size-4" /> Upload images, videos or audio
         </button>
         <p className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">From your library</p>
-        <div className="grid max-h-56 grid-cols-4 gap-1 overflow-y-auto">
+        <div className="grid auto-rows-max max-h-56 grid-cols-4 gap-1 overflow-y-auto">
           {(assets.data ?? []).slice(0, 40).map((a) => (
             <button
               key={a.id}

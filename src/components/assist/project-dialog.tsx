@@ -114,7 +114,7 @@ function Form({ project, onDone }: { project?: AssistProject; onDone: (p?: Assis
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">Skills</legend>
           <p className="text-[12px] text-muted-foreground">{picked.length ? `Assist can use only these ${picked.length} skill${picked.length > 1 ? "s" : ""} here.` : "None picked: every skill that's switched on is available. Pick some to limit the project to them."}</p>
-          <div className="grid max-h-56 gap-1 overflow-y-auto rounded-xl border p-1.5 sm:grid-cols-2">
+          <div className="grid auto-rows-max max-h-56 gap-1 overflow-y-auto rounded-xl border p-1.5 sm:grid-cols-2">
             {skills.data?.map((s) => (
               <label key={s.name} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-accent">
                 <Checkbox checked={picked.includes(s.name)} onCheckedChange={() => toggle(s.name)} aria-label={s.title} />

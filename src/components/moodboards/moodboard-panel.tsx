@@ -109,7 +109,7 @@ export function MoodboardPanel({ value, onPick }: { value?: MoodboardPick; onPic
               </div>
             )}
           </div>
-          <div className="grid max-h-[46svh] grid-cols-3 gap-1.5 overflow-y-auto sm:max-h-[320px]">
+          <div className="grid auto-rows-max max-h-[46svh] grid-cols-3 gap-1.5 overflow-y-auto sm:max-h-[320px]">
             {curated.map((c) => (
               <button
                 key={c.id}
@@ -127,7 +127,7 @@ export function MoodboardPanel({ value, onPick }: { value?: MoodboardPick; onPic
           </div>
         </>
       ) : (
-        <div className="grid max-h-[50svh] grid-cols-2 gap-2 overflow-y-auto sm:max-h-[340px]">
+        <div className="grid auto-rows-max max-h-[50svh] grid-cols-2 gap-2 overflow-y-auto sm:max-h-[340px]">
           {isLoading ? (
             Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="aspect-square" />)
           ) : mine.length ? (

@@ -84,7 +84,7 @@ export function LookPicker({
       )}
 
       {source === "fuobe" && (
-        <div role="tabpanel" id="look-panel-fuobe" aria-labelledby="look-tab-fuobe" className="grid max-h-[460px] grid-cols-3 gap-1 overflow-y-auto pr-0.5 sm:grid-cols-4 xl:grid-cols-5">
+        <div role="tabpanel" id="look-panel-fuobe" aria-labelledby="look-tab-fuobe" className="grid auto-rows-max max-h-[460px] grid-cols-3 gap-1 overflow-y-auto pr-0.5 sm:grid-cols-4 xl:grid-cols-5">
           {presets.map((p) => (
             <LookCard
               key={p.id}
@@ -104,7 +104,7 @@ export function LookPicker({
       {source === "soul" && (
         <div role="tabpanel" id="look-panel-soul" aria-labelledby="look-tab-soul" className="space-y-2">
           <p className="text-[12px] text-muted-foreground">Fuobe Soul&apos;s looks: their words and LoRAs restyle the first frame, and every frame follows it.</p>
-          <div className="grid max-h-[460px] grid-cols-3 gap-1.5 overflow-y-auto pr-0.5 sm:grid-cols-4 xl:grid-cols-5">
+          <div className="grid auto-rows-max max-h-[460px] grid-cols-3 gap-1.5 overflow-y-auto pr-0.5 sm:grid-cols-4 xl:grid-cols-5">
             {souls.map((l) => {
               const on = look?.kind === "soul" && look.id === l.id;
               return (

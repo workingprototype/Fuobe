@@ -1389,7 +1389,7 @@ function LibraryGrid({ kind, onPick }: { kind: MediaKind; onPick: (url: string, 
       {assets.isLoading ? (
         <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
       ) : assets.data?.length ? (
-        <div className="grid max-h-72 grid-cols-4 gap-1.5 overflow-y-auto max-md:max-h-none">
+        <div className="grid auto-rows-max max-h-72 grid-cols-4 gap-1.5 overflow-y-auto max-md:max-h-none">
           {assets.data.map((a) => (
             <button key={a.id} className="aspect-square overflow-hidden rounded-md bg-muted ring-primary transition hover:ring-2" onClick={() => onPick(a.url, a.name ?? undefined)} aria-label={a.name ?? "Library item"}>
               {a.kind === "video" ? (

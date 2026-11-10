@@ -69,7 +69,7 @@ export default function FilmLookChip({ value, onChange, disabled }: { value?: st
             </button>
           ))}
         </div>
-        <div className="grid max-h-80 grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-4">
+        <div className="grid auto-rows-max max-h-80 grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-4">
           {items.map((l) => (
             <button
               key={l.id}

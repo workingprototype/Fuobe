@@ -97,7 +97,7 @@ export function ProductSlot({ value, onChange, required, brandId, pulse }: { val
             {products.isLoading ? (
               <Loader2 className="size-4 animate-spin text-muted-foreground" />
             ) : list.length ? (
-              <div className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+              <div className="grid auto-rows-max max-h-64 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
                 {list.map((p) => (
                   <button key={p.id} type="button" disabled={!p.images.length} onClick={() => choose(productChoice(p))} className={cn("min-w-0 rounded-lg p-1 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50", value?.productId === p.id && "bg-brand-faint")} title={p.images.length ? p.name : `${p.name} has no images`}>
                     <ProductThumb product={p} className="aspect-square rounded-md" />

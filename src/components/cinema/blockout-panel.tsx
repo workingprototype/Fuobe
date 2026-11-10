@@ -518,7 +518,7 @@ export function BlockoutPanel(props: BlockoutPanelProps) {
                   </div>
                   <UnavailableNote {...elementNote.noteProps} />
                   <p className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">From your library</p>
-                  <div className="grid max-h-44 grid-cols-4 gap-1 overflow-y-auto">
+                  <div className="grid auto-rows-max max-h-44 grid-cols-4 gap-1 overflow-y-auto">
                     {(images.data ?? []).slice(0, 40).map((a) => (
                       <button key={a.id} type="button" onClick={() => addRef({ url: a.url, role: "location", name: undefined })} className="aspect-square overflow-hidden rounded-md bg-muted" aria-label={`Use ${a.name ?? "this picture"}`}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
