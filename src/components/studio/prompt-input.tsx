@@ -156,7 +156,8 @@ export const PromptInput = forwardRef<
 
   return (
     <div className={cn("relative", className)}>
-      <div ref={mirror} aria-hidden className={cn(shared, "pointer-events-none absolute inset-0 overflow-hidden text-foreground")}>
+      {/* Collapsed (docked, not focused), the words show as exactly one line ending in "…", never a cut second line. */}
+      <div ref={mirror} aria-hidden className={cn(shared, "pointer-events-none absolute inset-0 overflow-hidden text-foreground", collapsed && "line-clamp-1")}>
         <Highlights text={value} handles={handles} />
       </div>
       <textarea

@@ -393,7 +393,9 @@ export function Composer({ docked }: { docked: boolean }) {
   useUploadReaper(draft);
   // Typed into before the page hydrated: the prompt already has focus (onFocus never ran).
   useLayoutEffect(() => {
-    if (root.current?.contains(document.activeElement)) setFocused(true);
+    // Opened on a link that carries its words (?prompt=: a Home picture, a hand-off): the composer starts open, so the
+    // whole prompt shows rather than its first line.
+    if (root.current?.contains(document.activeElement) || new URLSearchParams(window.location.search).has("prompt")) setFocused(true);
   }, []);
   useEffect(() => {
     const el = root.current;
