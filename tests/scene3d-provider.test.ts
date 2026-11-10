@@ -111,8 +111,14 @@ describe("open engine: the recomposition on Qwen-Image-Edit 2511 (qwen-image-edi
     expect(workflow["83"].inputs.image).toBe("still.png");
     // No third reference: the still again, which the Qwen edit encoder takes harmlessly.
     expect(workflow["1201"].inputs.image).toBe("still.png");
-    const lora = Object.values(workflow).find((n) => n.class_type === "LoraLoaderModelOnly");
-    expect(lora?.inputs).toMatchObject({ lora_name: "qwen-image-edit-2511-multiple-angles-lora.safetensors", strength_model: 1 });
+    const loras = Object.values(workflow).filter((n) => n.class_type === "LoraLoaderModelOnly");
+    const lora = loras.find((n) => n.inputs.lora_name === "qwen-image-edit-2511-multiple-angles-lora.safetensors");
+    expect(lora?.inputs).toMatchObject({ strength_model: 1 });
+    // On Options → Speed's default (Fast) the 4-step Lightning LoRA rides with it; the sampler's model goes through both.
+    expect(loras.map((n) => n.inputs.lora_name).sort()).toEqual(["Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors", "qwen-image-edit-2511-multiple-angles-lora.safetensors"]);
+    const chain: string[] = [];
+    for (let at = (workflow["170:145"].inputs.model as [string, number])[0]; workflow[at].class_type === "LoraLoaderModelOnly"; at = (workflow[at].inputs.model as [string, number])[0]) chain.push(String(workflow[at].inputs.lora_name));
+    expect(chain.sort()).toEqual(loras.map((n) => String(n.inputs.lora_name)).sort());
     // The capture already shows the flown view (300° round): the LoRA is told not to turn it again.
     expect(String(workflow["170:151"].inputs.prompt)).toMatch(/^<sks> front view eye-level shot medium shot\. Re-render this exact camera view/);
     expect(String(workflow["170:151"].inputs.prompt)).toContain("a 50 mm standard lens at f/2.8");

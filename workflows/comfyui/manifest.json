@@ -2032,6 +2032,99 @@
       "notes": "TextEncodeQwenImageEditPlus takes up to 3 images; refer to them as \"image 1/2/3\" in the prompt. All three are required. Output size follows image 1."
     },
     {
+      "id": "qwen-image-edit-2511-multi-fast",
+      "title": "Qwen-Image-Edit 2511 Multi-Image (3 images) · 4 steps, Lightning LoRA",
+      "capability": "edit",
+      "file": "qwen-image-edit-2511-multi-fast.json",
+      "source": "derived from qwen-image-edit-2511-multi (see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "170:151",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "170:149",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "41",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "83",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "1201",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "170:169",
+            "input": "seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+          "sizeGb": 0.85
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "qwen_image_edit_2511_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_int8_convrot.safetensors",
+          "sizeGb": 20.5
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Qwen-Image-Edit-2511, Lightning LoRA)",
+      "validated": false,
+      "notes": "Options → Speed \"fast\" (the default) on qwen-image-edit-2511-multi: the same graph with LightX2V's Qwen-Image-Edit-2511-Lightning 4-step LoRA (LoraLoaderModelOnly, strength 1) between the UNETLoader and ModelSamplingAuraFlow, 4 steps at cfg 1, euler / simple. No steps or cfg binding: the LoRA sets both. \"best\" runs qwen-image-edit-2511-multi (40 steps, cfg 4). TextEncodeQwenImageEditPlus takes up to 3 images; refer to them as \"image 1/2/3\" in the prompt. All three are required. Output size follows image 1."
+    },
+    {
       "id": "flux1-kontext-dev-edit",
       "title": "FLUX.1 Kontext [dev] Image Edit",
       "capability": "edit",

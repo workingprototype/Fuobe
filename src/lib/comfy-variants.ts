@@ -1,7 +1,9 @@
 import { exrWorkflow } from "@/lib/av/video-finish";
 import { idolViewsGraph } from "@/lib/av/idol-views";
-import { qwen21Graph } from "@/lib/qwen21-speed";
-import { H3_TIER_PARAM, tierGraphFor } from "@/lib/gpu/h3-tier";
+import { GPU_PARAM, qwen21Graph } from "@/lib/qwen21-speed";
+import { qwenEditGraph } from "@/lib/qwen-edit-speed";
+import { H3_TIER_PARAM, H3_UNET_PARAM, tierGraphFor } from "@/lib/gpu/h3-tier";
+import type { GenerationRequest } from "@/lib/catalog/types";
 
 /**
  * Which workflow a ComfyUI route runs for a request: the route's endpoint, or a variant picked by an option.
@@ -98,6 +100,34 @@ export interface VariantRequest {
   has: (id: string) => boolean;
 }
 
+/**
+ * The workflow id a ComfyUI run takes, from its request and what its plan decided (previewGeneration's `gpu` and `h3`):
+ * the GPU pre-flight's gate checks this graph and the billing facts name it (RunFacts.workflow).
+ */
+export function requestWorkflowId(
+  endpoint: string,
+  req: Pick<GenerationRequest, "inputs" | "params">,
+  o: { op: string; gpu?: string; h3?: { gpuTier: string; unet?: string }; has: (id: string) => boolean },
+): { id: string; extra: Record<string, unknown> } {
+  const extra: Record<string, unknown> = {
+    ...req.params?.extra,
+    ...(o.gpu && { [GPU_PARAM]: o.gpu }),
+    ...(o.h3 && { [H3_TIER_PARAM]: o.h3.gpuTier, ...(o.h3.unet && { [H3_UNET_PARAM]: o.h3.unet }) }),
+  };
+  const id = resolveWorkflowId(endpoint, {
+    op: o.op,
+    clips: req.inputs?.videos?.length ?? 0,
+    images: req.inputs?.images?.length ?? 0,
+    format: req.params?.format,
+    audio2: !!req.inputs?.audio2 || !!req.params?.extra?.audio2,
+    audio: !!req.inputs?.audio,
+    mask: !!req.inputs?.mask,
+    extra,
+    has: o.has,
+  });
+  return { id, extra };
+}
+
 /** The workflow id a route's endpoint runs as, for this request. */
 export function resolveWorkflowId(endpointTemplate: string, r: VariantRequest): string {
   // "video-concat-{n}": one workflow per clip count.
@@ -116,6 +146,8 @@ export function resolveWorkflowId(endpointTemplate: string, r: VariantRequest): 
   if (shot && r.extra.productShot === true && r.images === 1 && r.has(shot)) endpoint = shot;
   // Qwen-Image 2.1: Options → Speed's graph, or the small encoder's when Options → GPU says Small (src/lib/qwen21-speed.ts).
   endpoint = qwen21Graph(endpoint, r.extra, r.has);
+  // Qwen-Image-Edit 2511: Options → Speed's Fast graph unless the run asks for Best (src/lib/qwen-edit-speed.ts).
+  endpoint = qwenEditGraph(endpoint, r.extra, r.has);
   // MiniMax H3: an orbit runs the Orbit LoRA graph (whatever the quality or tier). Else Quality → Fast · Pika Flex runs its
   // 6-step graph: Pika's bf16 adapters ride on the full fl2va int8 model, so Flex is the full model's alone, and it wins over a
   // smaller card's tier. The plan sees to it that the two never meet here by chance (src/server/h3-gpu.ts): Flex with Auto keeps

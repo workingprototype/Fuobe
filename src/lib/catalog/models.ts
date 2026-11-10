@@ -5,6 +5,7 @@ import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
 import { PROMPT_HELPER_PARAM } from "@/lib/comfy";
 import { KANDINSKY_PLACEHOLDER } from "@/lib/kandinsky-prompt";
 import { QWEN21_DECODER, QWEN21_GPU, QWEN21_SPEED } from "@/lib/qwen21-speed";
+import { QWEN_EDIT_SPEED } from "@/lib/qwen-edit-speed";
 import { QMA_AZIMUTHS, QMA_AZIMUTH_LABELS, QMA_DISTANCES, QMA_DISTANCE_LABELS, QMA_DISTANCE_ZOOM, QMA_ELEVATIONS, QMA_ELEVATION_DEGREES, QMA_ELEVATION_LABELS, QMA_MODEL, QMA_PARAMS } from "@/lib/qma";
 import { H3_DECODER, H3_FAST_DECODE_OFFERED, H3_GPU_TIER } from "@/lib/gpu/h3-tier";
 import { loraEntry, loraRef } from "./loras";
@@ -555,8 +556,9 @@ const open: ModelDef[] = [
     kind: "image",
     tagline: "Edit with words, up to 3 references",
     badges: ["top"],
+    // Options → Speed: Fast (4 steps, the Lightning LoRA, the default) or Best (40 steps): src/lib/qwen-edit-speed.ts.
     routes: [comfy("edit", "qwen-image-edit-2511-multi")],
-    options: { maxImages: 3, seed: true, negativePrompt: true },
+    options: { maxImages: 3, seed: true, negativePrompt: true, controls: [QWEN_EDIT_SPEED] },
   }),
   o({
     id: "oss-flux-kontext",

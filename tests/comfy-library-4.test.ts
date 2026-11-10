@@ -99,6 +99,9 @@ describe("round-4 ComfyUI workflows", () => {
     // Graphs on node packs this server doesn't have (h3_character_swap, H3 Relay, ComfyUI-LTXVideo) name a missing node at
     // their /prompt check (tests/comfy-character-swap.test.ts, tests/restore-comfy.test.ts); the rest wait for a GPU run.
     expect(manifest.workflows.filter((w) => !w.validated).map((w) => w.id)).toEqual([
+      // Qwen-Image-Edit 2511's Fast graph (the base graph and its Lightning LoRA): unvalidated until its /prompt check
+      // (tests/qwen-edit-speed.test.ts).
+      "qwen-image-edit-2511-multi-fast",
       // Green screen and fine hair (nm10-keying): ComfyUI-RMBG 3.3.0 and the CorridorKey wrapper aren't on the validation
       // server (tests/keying.test.ts checks their classes against the packs' source).
       "image-matte-feynobg",

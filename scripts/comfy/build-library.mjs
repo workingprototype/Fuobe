@@ -336,7 +336,19 @@ async function main() {
       graph = readJson(path.join(HERE, spec.handBuilt));
       meta = { models: [] };
       source = `hand-built (scripts/comfy/${spec.handBuilt})`;
-    } else throw new Error(`${spec.id}: needs export or handBuilt`);
+    } else if (spec.derive) {
+      // A variant of another entry (Qwen-Image-Edit 2511's Fast graph): that entry's built graph, then this entry's
+      // transforms. Its models keep the base entry's download URLs, so both name the same pinned files.
+      const baseFile = path.join(OUT_DIR, `${spec.derive}.json`);
+      const base = prevManifest.workflows.find((w) => w.id === spec.derive);
+      if (!fs.existsSync(baseFile) || !base) {
+        errors.push(`${spec.id}: ${spec.derive} isn't built yet; build it first`);
+        continue;
+      }
+      graph = readJson(baseFile);
+      meta = { models: (base.models || []).filter((m) => m.url).map((m) => ({ name: m.file, url: m.url, directory: m.folder })) };
+      source = `derived from ${spec.derive} (see notes)`;
+    } else throw new Error(`${spec.id}: needs export, handBuilt or derive`);
 
     // ---- transform
     try {

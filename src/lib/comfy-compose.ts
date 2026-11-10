@@ -231,6 +231,7 @@ const MEDIA_LOADERS: Record<string, string> = {
 const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {
   // Edit graphs whose extra images feed TextEncodeQwenImageEditPlus: a repeated reference is harmless.
   "qwen-image-edit-2511-multi": { reuse: true },
+  "qwen-image-edit-2511-multi-fast": { reuse: true },
   "storyboard-qwen-edit-2509-next-scene": { reuse: true },
   "tryon-flux2-klein-4b": { required: ["image2"], hints: { image: "Add a photo of the person", image2: "Add the garment to try on" } },
   // Its describer reads the outfit photo; the words graph (outfit-swap-qwen-image-21-text) runs when there is none.

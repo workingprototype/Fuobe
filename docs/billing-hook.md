@@ -49,6 +49,7 @@ type RunFacts = {
   kind: "image" | "video" | "audio" | "text" | "model3d"; engine: "open" | "cloud"; provider: string;
   jobs: number; outputsPerJob: number; megapixels: number | null; seconds: number | null; fps: number | null;
   loras: number; inputs: { image: number; video: number; audio: number }; lane: string | null; providerUsd: number | null;
+  workflow?: string | null;
   steps?: { model: string; op: string | null; kind: RunFacts["kind"]; jobs: number; lane: string | null }[];
 };
 type QueueFacts = { lane: string; ahead: number; etaS: number | null; workersOnline: number; nextOpenAt: number | null; mine: { waiting: number; running: number } };
@@ -138,6 +139,10 @@ every visitor (`src/lib/service-copy.ts`).
 workflow binds (a canvas the request names counts only there; else the aspect ratio and resolution, the model's
 defaults where the request names none), or for a workflow sized by its input (an edit, an upscale, a face swap) the
 input's size, an upscale's times its factor, within the workflow's limits. It is null for sound, text and 3D.
+
+`workflow` is the graph a ComfyUI run resolves to after its options pick a variant (a speed, a quality, a GPU tier),
+so a service can treat graph variants differently: Qwen-Image-Edit 2511 on Fast is `qwen-image-edit-2511-multi-fast`, on
+Best `qwen-image-edit-2511-multi`. It is absent (or null) for every other run, and a service should accept a run without it.
 
 `steps` lists every step of the run that uses this install's GPUs, the run's own step first: a chain (a film of
 several shots, a picture and then a step on it) is priced once, with one quote and one hold, for one press of Run.

@@ -50,6 +50,11 @@ export interface RunFacts {
   lane: string | null;
   providerUsd: number | null;
   /**
+   * The graph a ComfyUI run resolves to after its options pick a variant (a speed, a quality, a GPU tier), so an external
+   * billing service can treat graph variants differently. Absent or null for every other run.
+   */
+  workflow?: string | null;
+  /**
    * Every step of the run that uses this install's GPUs, its own step first, so one quote and one hold cover a whole
    * chain (one press of Run) and the steps a run makes beside its own model (a 2K take's Open-H3 Regenerate finish).
    * Steps that need no model (joins, trims) and text steps are left out: they cost nothing. Absent: the run is its own

@@ -2,11 +2,11 @@ import "server-only";
 import crypto from "node:crypto";
 import { getModel } from "@/lib/catalog";
 import { controlSets } from "@/lib/catalog/plan";
-import { COMPANION_GRAPHS, resolveWorkflowId } from "@/lib/comfy-variants";
+import { COMPANION_GRAPHS, requestWorkflowId } from "@/lib/comfy-variants";
 import { PROMPT_HELPER_FILES, PROMPT_HELPER_PARAM } from "@/lib/comfy";
 import { fixPlan } from "@/lib/gpu/plan";
-import { CLEAN_VAE, DECODER_PARAM, GPU_PARAM } from "@/lib/qwen21-speed";
-import { H3_TIER_PARAM, H3_UNET_PARAM, withTierFile } from "@/lib/gpu/h3-tier";
+import { CLEAN_VAE, DECODER_PARAM } from "@/lib/qwen21-speed";
+import { H3_UNET_PARAM, withTierFile } from "@/lib/gpu/h3-tier";
 import { cardLabel, needTargets, toolReadiness } from "@/lib/gpu/readiness";
 import { GPU_NEED_TEXT } from "@/lib/gpu/rtx";
 import type { FileKey, FixPlan, ToolReadiness, ToolRef } from "@/lib/gpu/types";
@@ -59,22 +59,7 @@ export async function gateGeneration(t: GpuTarget, g: GateInput): Promise<GateRe
   let idx = loadIndex();
   const req = g.request;
   const has = (id: string) => !!idx.workflows[id];
-  const extra: Record<string, unknown> = {
-    ...req.params?.extra,
-    ...(g.gpu && { [GPU_PARAM]: g.gpu }),
-    ...(g.h3 && { [H3_TIER_PARAM]: g.h3.gpuTier, ...(g.h3.unet && { [H3_UNET_PARAM]: g.h3.unet }) }),
-  };
-  const id = resolveWorkflowId(g.route.endpoint, {
-    op: g.op,
-    clips: req.inputs?.videos?.length ?? 0,
-    images: req.inputs?.images?.length ?? 0,
-    format: req.params?.format,
-    audio2: !!req.inputs?.audio2 || !!req.params?.extra?.audio2,
-    audio: !!req.inputs?.audio,
-    mask: !!req.inputs?.mask,
-    extra,
-    has,
-  });
+  const { id, extra } = requestWorkflowId(g.route.endpoint, req, { op: g.op, gpu: g.gpu, h3: g.h3, has });
   if (!has(id)) return { ok: true };
   // A decoder an option picks (Qwen-Image 2.1's "Clean" Texture-Fix VAE, MiniMax H3's Fast decode) is an optional file of the
   // graph: this run needs it. The request carries the option's value ({ decoder: "clean" }); the model's control turns it into

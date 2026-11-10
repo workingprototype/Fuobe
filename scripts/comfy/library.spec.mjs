@@ -1340,6 +1340,46 @@ export const SPEC = [
     vramGb: 24,
     notes: 'TextEncodeQwenImageEditPlus takes up to 3 images; refer to them as "image 1/2/3" in the prompt. All three are required. Output size follows image 1.',
   },
+  // Options → Speed "fast" (the default) on qwen-image-edit-2511-multi (src/lib/qwen-edit-speed.ts): the built graph above
+  // with one LoRA, its steps and CFG set to the LoRA's.
+  {
+    id: 'qwen-image-edit-2511-multi-fast',
+    title: 'Qwen-Image-Edit 2511 Multi-Image (3 images) · 4 steps, Lightning LoRA',
+    capability: 'edit',
+    derive: 'qwen-image-edit-2511-multi',
+    transforms: [
+      {
+        op: 'addNodes',
+        nodes: {
+          1202: {
+            class_type: 'LoraLoaderModelOnly',
+            inputs: { lora_name: 'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors', strength_model: 1.0, model: ['170:161', 0] },
+            _meta: { title: 'LoraLoaderModelOnly (Lightning 4 steps)' },
+          },
+        },
+      },
+      { op: 'set', node: '170:145', input: 'model', value: ['1202', 0] },
+      { op: 'set', node: '170:166', input: 'value', value: 4 },
+      { op: 'set', node: '170:154', input: 'value', value: 1.0 },
+    ],
+    bindings: {
+      prompt: [b('170:151', 'prompt')],
+      negativePrompt: [b('170:149', 'prompt')],
+      image: [b('41', 'image')],
+      image2: [b('83', 'image')],
+      image3: [b('1201', 'image')],
+      seed: [b('170:169', 'seed')],
+    },
+    outputs: [{ node: '9', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Qwen-Image-Edit-2511, Lightning LoRA)',
+    notes:
+      'Options → Speed "fast" (the default) on qwen-image-edit-2511-multi: the same graph with LightX2V\'s Qwen-Image-Edit-2511-Lightning 4-step LoRA ' +
+      '(LoraLoaderModelOnly, strength 1) between the UNETLoader and ModelSamplingAuraFlow, 4 steps at cfg 1, euler / simple. ' +
+      'No steps or cfg binding: the LoRA sets both. "best" runs qwen-image-edit-2511-multi (40 steps, cfg 4). ' +
+      'TextEncodeQwenImageEditPlus takes up to 3 images; refer to them as "image 1/2/3" in the prompt. All three are required. Output size follows image 1.',
+  },
   {
     id: 'flux1-kontext-dev-edit',
     title: 'FLUX.1 Kontext [dev] Image Edit',
