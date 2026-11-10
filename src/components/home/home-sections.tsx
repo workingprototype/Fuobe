@@ -28,7 +28,8 @@ import { PresetCard } from "@/components/preset-gallery";
 import { ASSIST_SUGGESTIONS } from "@/lib/assist";
 import { WORKFLOWS_ON_GITHUB } from "@/lib/comfy-install";
 import { FUOBE_REPO } from "@/lib/connections";
-import { HOME_BODY_DOUBLE, HOME_LIVE, presetHref, type HomeShowcase } from "@/lib/home-showcase";
+import { ReleaseArtCard } from "@/components/home/release-art";
+import { HOME_BODY_DOUBLE, HOME_LIVE, HOME_RELEASE, presetHref, releaseArtSrc, releaseHref, releasePill, type HomeShowcase, type ReleaseArt } from "@/lib/home-showcase";
 import { area } from "@/lib/nav-areas";
 import { studioCount } from "@/lib/nav-model";
 import { staggered, type AutoPlay } from "@/lib/preview-playback";
@@ -253,6 +254,85 @@ export function AppsSection({ facts, beforeAfter, reveals, start }: Pick<HomeSho
           className="self-start sm:grid-cols-3 lg:grid-cols-4 xl:contents"
           item={(i) => (i < 6 ? "xl:col-span-7" : "xl:col-span-6")}
         />
+      </div>
+    </section>
+  );
+}
+
+/** A release tile's width at each row height (release-art.css: 132 px, 184 px from sm, 212 px from lg), for its srcset. */
+const artSizes = (ar: number) => `(min-width: 1024px) ${Math.ceil(212 * ar)}px, (min-width: 640px) ${Math.ceil(184 * ar)}px, ${Math.ceil(132 * ar)}px`;
+
+/** One of the release's pictures: a link that opens the Image studio on the model with its prompt filled in. */
+function ReleaseTile({ art, copy }: { art: ReleaseArt; copy?: boolean }) {
+  const ar = art.width / art.height;
+  const sizes = artSizes(ar);
+  const name = `Make your own: ${art.label}`;
+  return (
+    // A row's second copy (the loop) is for the eye only: out of the tab order and the accessibility tree.
+    <li style={{ "--ar": `${art.width} / ${art.height}` } as React.CSSProperties} data-copy={copy || undefined} aria-hidden={copy || undefined} inert={copy || undefined}>
+      <Link href={releaseHref("image", art.prompt)} prefetch={false} aria-label={name} className="rart-tile">
+        <picture>
+          <source type="image/avif" srcSet={`${releaseArtSrc(art.slug, 480, "avif")} 480w, ${releaseArtSrc(art.slug, 960, "avif")} 960w`} sizes={sizes} />
+          <img src={releaseArtSrc(art.slug, 480, "webp")} width={art.width} height={art.height} alt="" loading="lazy" decoding="async" draggable={false} />
+        </picture>
+        <span aria-hidden className="rart-cap">
+          Make your own
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+/**
+ * The newest open model, first under the first screen: what it is, two ways in, and a card of pictures it made, each a
+ * way to start from its prompt (HOME_RELEASE in home-showcase.ts; the next release swaps the data and the pictures).
+ */
+export function ReleaseSection() {
+  const r = HOME_RELEASE;
+  const rows = [r.art.filter((_, i) => i % 2 === 0), r.art.filter((_, i) => i % 2 === 1)];
+  return (
+    <section aria-labelledby="home-release" data-reveal className={cn(SECTION, "[--cv:581px] sm:[--cv:651px] md:[--cv:643px] lg:[--cv:639px] xl:[--cv:639px]")}>
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
+        <div className="min-w-0 max-w-[60ch]">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-highlight px-2 py-0.5 text-[11px] font-semibold text-highlight-foreground">{releasePill(r.released)}</span>
+          <h2 id="home-release" className={cn(H2, "mt-3")}>
+            {r.name}
+          </h2>
+          <p className={LINE}>{r.line}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3">
+          <IntentLink href={releaseHref("image")} className="group inline-flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-[14px] font-medium text-primary-foreground transition hover:opacity-90">
+            Try it now <ArrowRight className="size-4 transition-transform duration-150 group-hover:translate-x-0.5" />
+          </IntentLink>
+          <IntentLink
+            href={releaseHref("edit")}
+            // 44 px to tap: its hit area reaches past the words.
+            className="relative text-[14px] font-medium underline decoration-foreground/25 underline-offset-4 transition-colors after:absolute after:-inset-x-2 after:-inset-y-3 after:content-[''] hover:decoration-foreground"
+          >
+            Edit a photo with it
+          </IntentLink>
+        </div>
+      </div>
+      <ReleaseArtCard label={`Pictures made with ${r.name}`} className="mt-6">
+        {rows.map((row, i) => (
+          <div key={i} className="rart-row" data-dir={i === 1 ? "back" : undefined} style={{ "--rart-dur": `${i === 1 ? 118 : 100}s` } as React.CSSProperties}>
+            <ul className="rart-track">
+              {row.map((a) => (
+                <ReleaseTile key={a.slug} art={a} />
+              ))}
+              {row.map((a) => (
+                <ReleaseTile key={`${a.slug}-copy`} art={a} copy />
+              ))}
+            </ul>
+          </div>
+        ))}
+      </ReleaseArtCard>
+      <div className="mt-3 flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
+        <p className="min-w-0">
+          <span className="sm:hidden">Made with {r.name}. Pick one to start from it.</span>
+          <span className="max-sm:hidden">Every picture here was made with {r.name}. Pick one to start from its prompt.</span>
+        </p>
+        <PausePreviews />
       </div>
     </section>
   );

@@ -7,6 +7,7 @@ import {
   LiveEditSection,
   MotionsSection,
   OpenSourceSection,
+  ReleaseSection,
   StartSection,
   StudiosSection,
 } from "@/components/home/home-sections";
@@ -48,7 +49,8 @@ export default async function Page() {
       prices={starterPriceLine()}
       quotes={startQuotes()}
     >
-      {/* Live edit is the highlight: its own section comes first, right under the first screen and the composer. */}
+      {/* The newest open model comes first, right under the first screen and the composer; then Live edit, the highlight. */}
+      <ReleaseSection />
       <LiveEditSection />
       {/* Body Double: everyone in a shot as their double, and Live from the camera. */}
       <BodyDoubleSection />

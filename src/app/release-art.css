@@ -1,0 +1,149 @@
+/*
+ * Home's latest-release card (home-sections.tsx: ReleaseSection, components/home/release-art.tsx). Two rows of pictures
+ * at one height, each tile as wide as its picture's shape (--ar), so nothing moves when a picture comes in. Each row's
+ * track holds its tiles twice and drifts by half its width, so it loops without a seam; the second row drifts the other
+ * way. A mouse over the card pauses both rows; keyboard focus in it stops them at their start, and the row scrolls to the
+ * focused tile. data-paused (Pause previews, or off screen) pauses them. With reduced motion nothing moves: the copies
+ * are gone and each row scrolls sideways. In @layer components, so the card's own utilities win.
+ */
+@layer components {
+  .rart {
+    --rart-h: 132px;
+    --rart-gap: 8px;
+    display: grid;
+    gap: var(--rart-gap);
+    padding-block: var(--rart-gap);
+    overflow: hidden;
+    border-radius: 22px;
+    background: var(--media);
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.08);
+    isolation: isolate;
+  }
+  @media (min-width: 640px) {
+    .rart {
+      --rart-h: 184px;
+      --rart-gap: 10px;
+      border-radius: 28px;
+    }
+  }
+  @media (min-width: 1024px) {
+    .rart {
+      --rart-h: 212px;
+    }
+  }
+
+  .rart-row {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-left: var(--rart-gap);
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    /* The pictures come in and leave through a soft edge. */
+    mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  }
+  .rart-row::-webkit-scrollbar {
+    display: none;
+  }
+  .rart-track {
+    display: flex;
+    width: max-content;
+  }
+  .rart-track > li {
+    flex: none;
+    height: var(--rart-h);
+    aspect-ratio: var(--ar);
+    margin-right: var(--rart-gap);
+  }
+
+  .rart-tile {
+    position: relative;
+    display: block;
+    height: 100%;
+    overflow: hidden;
+    border-radius: 14px;
+    background: oklch(1 0 0 / 0.05);
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .rart-tile img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  /* The focus ring sits inside the tile: the row clips anything outside it. */
+  .rart-tile::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow:
+      inset 0 0 0 2px #fff,
+      inset 0 0 0 4px var(--ring);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .rart-tile:focus-visible::after {
+    opacity: 1;
+  }
+  .rart-cap {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    padding: 28px 10px 9px;
+    background: linear-gradient(to bottom, transparent, oklch(0 0 0 / 0.68));
+    color: #fff;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.25;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .rart-tile:hover .rart-cap,
+  .rart-tile:focus-visible .rart-cap {
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .rart-track {
+      animation: rart-drift var(--rart-dur, 100s) linear infinite;
+    }
+    .rart-row[data-dir="back"] .rart-track {
+      animation-direction: reverse;
+    }
+    .rart:hover .rart-track,
+    .rart[data-paused] .rart-track {
+      animation-play-state: paused;
+    }
+    .rart:has(:focus-visible) .rart-track {
+      animation: none;
+    }
+    .rart-tile img {
+      transition: scale 700ms cubic-bezier(0.2, 0, 0, 1);
+    }
+    .rart-tile:hover img {
+      scale: 1.04;
+    }
+    .rart-cap {
+      translate: 0 4px;
+      transition:
+        opacity 200ms ease-out,
+        translate 200ms ease-out;
+    }
+    .rart-tile:hover .rart-cap,
+    .rart-tile:focus-visible .rart-cap {
+      translate: 0 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rart-track > [data-copy] {
+      display: none;
+    }
+  }
+}
+
+@keyframes rart-drift {
+  to {
+    transform: translateX(-50%);
+  }
+}

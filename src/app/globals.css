@@ -6,6 +6,7 @@
 @import "./motion.css";
 @import "./tab-row.css";
 @import "./fx-compare.css";
+@import "./release-art.css";
 
 @custom-variant dark (&:is(.dark *));
 /* Hover for the app frame's controls: like hover:, but only while the mouse leads (nav-states.css), so a control under a
