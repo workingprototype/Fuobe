@@ -290,6 +290,9 @@ function pulseSlot(root: HTMLElement | null, key: string, retried = false) {
 }
 
 /** An empty attachment tile's upload button (focus it, or click it from a toast action to open the file picker). */
+/** A popover, menu, sheet or toast the composer opened: being there is still being in the composer. */
+const insideComposerLayer = (el: Element) => !!el.closest("[data-radix-popper-content-wrapper],[role=dialog],[role=menu],[role=listbox],[data-sonner-toaster]");
+
 function slotButton(root: HTMLElement | null, key: string) {
   return root?.querySelector<HTMLButtonElement>(`[data-slot-key="${key}"] button[aria-label$=": upload"]`) ?? null;
 }
@@ -398,6 +401,17 @@ export function Composer({ docked }: { docked: boolean }) {
     el?.addEventListener(EXPAND_EVENT, expand);
     return () => el?.removeEventListener(EXPAND_EVENT, expand);
   }, []);
+  // Open and docked: a press outside the composer and its menus folds it (the feed, the page around it).
+  useEffect(() => {
+    if (!focused || !docked) return;
+    const press = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t || root.current?.contains(t) || insideComposerLayer(t)) return;
+      setFocused(false);
+    };
+    document.addEventListener("pointerdown", press, true);
+    return () => document.removeEventListener("pointerdown", press, true);
+  }, [focused, docked]);
 
   const pickerOps = config.pickerOps ?? config.ops;
   // For a viewer whose runs go to this studio's GPUs (hosted runs), the open models they keep off stay in the list with
@@ -1788,8 +1802,12 @@ export function Composer({ docked }: { docked: boolean }) {
       onFocus={() => setFocused(true)}
       onBlur={(e) => {
         const to = e.relatedTarget as HTMLElement | null;
+        // Focus going nowhere, or to the page around the composer, keeps it open: a picked menu item closing its menu, a
+        // click on plain space, or Safari's click on a chip (which focuses the page's <main>, not the chip). Only a press
+        // outside (below) or focus moving to something else folds it, so it never folds mid-setup.
+        if (!to || to.contains(e.currentTarget)) return;
         // Moving into one of the composer's own popovers or sheets keeps it open.
-        if (e.currentTarget.contains(to) || to?.closest("[data-radix-popper-content-wrapper],[role=dialog]")) return;
+        if (e.currentTarget.contains(to) || insideComposerLayer(to)) return;
         setFocused(false);
       }}
       onKeyDown={(e) => {
