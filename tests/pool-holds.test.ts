@@ -490,6 +490,56 @@ describe("service blips (H3)", () => {
     expect(await until(() => taskOf(idOf(r)))).toBeTruthy();
   });
 
+  it("a run the service holds until it says ready: made at once with its card, asked again calmly, and started by itself with no page open", async () => {
+    const a = account();
+    await check(a.cookie);
+    const look = { title: "One more step", tone: "info", action: { label: "Details", url: "/details" }, waitFor: { url: "/ready", everyMs: 4000 } };
+    fake.refuse = { code: "blocked", text: "One more step, then your run starts by itself.", hold: true, ...look };
+    const r = await press(a.cookie);
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body.held).toEqual({ reason: "service", card: { text: "One more step, then your run starts by itself.", ...look } });
+    const id = idOf(r);
+    expect(tile(id)).toBe("One more step · starts by itself");
+    expect(heldOf(id)!.ready_json).toBeTruthy();
+    // still held: asked again, nothing sent, nothing failed
+    await tick();
+    await tick();
+    expect(taskOf(id)).toBeUndefined();
+    expect(getGeneration(id)!.status).toBe("queued");
+    // the service says ready (no page asks anything): it reserves under its press's request id and enters the line
+    const requestId = heldOf(id)!.request_id;
+    fake.refuse = null;
+    const t = await until(() => taskOf(id), 400);
+    expect(t).toBeTruthy();
+    expect(heldOf(id)).toBeUndefined();
+    expect([...fake.holds.values()].filter((h) => h.requestId === requestId)).toHaveLength(1);
+  });
+
+  it("a run held until ready that the service never says ready for is cancelled quietly after its time", async () => {
+    const a = account();
+    await check(a.cookie);
+    fake.refuse = { code: "blocked", text: "One more step.", hold: true };
+    const r = await press(a.cookie);
+    const id = idOf(r);
+    expect(heldOf(id)).toBeTruthy();
+    db().prepare("UPDATE pool_holds SET pressed_at = ? WHERE generation_id = ?").run(Date.now() - billing.HOLD_READY_MS - 1000, id);
+    await release.releaseHeldRuns();
+    expect(heldOf(id)).toBeUndefined();
+    await until(() => getGeneration(id)!.status === "canceled");
+    expect(getGeneration(id)!.error ?? null).toBeNull();
+  });
+
+  it("an answer that asks to hold, where runs aren't held (no `held` in the policy), stays the refusal it was", async () => {
+    const a = account();
+    fake.policy = { ...FAKE_POLICY, ttlS: 0 };
+    billing.resetBillingCache();
+    await check(a.cookie);
+    fake.refuse = { code: "blocked", text: "One more step.", hold: true };
+    const r = await press(a.cookie);
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe("blocked");
+  });
+
   it("a refusal once the service answers ends the run in plain words", async () => {
     const was = { ...billing.RESERVE_INLINE };
     try {

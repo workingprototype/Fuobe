@@ -1310,6 +1310,10 @@ function open(): Database.Database {
   db.exec(RUN_ON_TABLES);
   // Runs on this install's GPUs waiting to enter the line (pool-holds.ts): empty unless hosted runs are on.
   db.exec(POOL_HOLD_TABLES);
+  // A run held until the billing service says ready keeps its card (pool-holds.ts ready_json), for tables made before it.
+  if (!(db.prepare("PRAGMA table_info(pool_holds)").all() as { name: string }[]).some((c) => c.name === "ready_json")) {
+    addColumn(db, "ALTER TABLE pool_holds ADD COLUMN ready_json TEXT");
+  }
   // The billing service's last policy answer (billing.ts keptPolicy): empty unless hosted runs are on.
   db.exec(KEPT_POLICY_TABLES);
   // Its list reads this small summary, never every board's pages (a table made before it had the column gets it).

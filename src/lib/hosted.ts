@@ -72,6 +72,8 @@ export interface BillingRefusalDetail {
   waitFor?: { url: string; everyMs: number };
   /** The same run sent again as a new press (a fresh request id), for waitFor (true when it started). */
   runFresh?: () => Promise<boolean>;
+  /** The run is made and held until the service says ready: it starts by itself, so nothing is sent again. */
+  heldRun?: boolean;
   /** A changed price: the same run sent again at the new price (true when it started). */
   runAgain?: () => Promise<boolean>;
   /** The same run sent again on the account's own GPU (true when it started). */

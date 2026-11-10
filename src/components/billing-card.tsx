@@ -32,7 +32,7 @@ export function BillingCard() {
     const onRefusal = (e: Event) => {
       const d = (e as CustomEvent<BillingRefusalDetail>).detail;
       setRefusal(d);
-      setPhase(d.waitFor && d.runFresh ? "waiting" : "none");
+      setPhase(d.waitFor && (d.runFresh || d.heldRun) ? "waiting" : "none");
       setOpen(true);
       // A new price (or the balance it was refused for): the composer and the chip ask again.
       refreshPriceChecks(qc);
@@ -44,9 +44,10 @@ export function BillingCard() {
   const r = refusal;
   // While the card is open and waiting: ask the service's address; once ready, send the run once more by itself.
   useEffect(() => {
-    if (!open || phase !== "waiting" || !r?.waitFor || !r.runFresh) return;
+    if (!open || phase !== "waiting" || !r?.waitFor || (!r.runFresh && !r.heldRun)) return;
     const stop = new AbortController();
-    const run = r.runFresh;
+    // A held run starts by itself on the server: the card only says so. Else the same run is sent again, once.
+    const run = r.heldRun ? async () => true : r.runFresh!;
     void waitUntilReady(r.waitFor.url, r.waitFor.everyMs, { signal: stop.signal }).then(async (ready) => {
       if (!ready || stop.signal.aborted) return;
       setPhase("ready");

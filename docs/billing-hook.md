@@ -332,6 +332,8 @@ above, unchanged.
 | `links` | Up to two more links, `[{ label, url }]` (labels up to 40 characters; `url` a same-site path or https), shown before `action`. |
 | `waitFor: { url, everyMs }` | A same-site path (an address on another site is left out) that the page asks with a GET, never cached, every `everyMs` (2 to 60 seconds; 4 by default) while the card is open, for 10 minutes at most. Once it answers `{ "ready": true }`, the card says "All set", sends the same run once more by itself as a new press (a fresh request id), and closes when it has started. While it waits, the card's links open in a new tab, so the card stays. |
 
+| `hold: true` | Only where runs wait instead of being refused (the policy has `limits.held`): the run is made at once and held until the service says ready. Its tile says "<title> · starts by itself", and the card opens once with the same look (and its `waitFor`, which here only closes the card: nothing is sent again). The release loop asks the reserve again under the press's own request id every few seconds; once it is taken, the run enters the line by itself, with no page open, after restarts too. A run the service hasn't taken within 48 hours is cancelled quietly. Without `limits.held`, the answer stays the refusal it is. |
+
 ```json
 { "ok": false, "code": "blocked", "text": "One more step and your run starts.", "title": "One quick step",
   "tone": "info", "action": { "label": "Details", "url": "/your-page" }, "waitFor": { "url": "/your-page/ready", "everyMs": 4000 } }

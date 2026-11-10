@@ -13,6 +13,7 @@ import {
   BILLING_WAIT,
   billingConfigured,
   cardLook,
+  type ReadyCard,
   cachedPolicy,
   forgetBalance,
   FREE_QUOTE,
@@ -686,7 +687,7 @@ export function policyWait(p: Pick<Policy, "limits"> | null | undefined): Pick<R
  * start (`today`, `hour`: its hold is made; `credits`: it reserves then).
  */
 export type ReserveWait =
-  | { reason: "service"; requestId: string; paused?: true }
+  | { reason: "service"; requestId: string; paused?: true; ready?: ReadyCard }
   | { reason: "today" | "hour"; startAt: number }
   | { reason: "credits"; startAt: number; requestId: string };
 
@@ -748,6 +749,12 @@ export async function reservePool(
     // No free generations left until they renew: it waits, and reserves then.
     const at = await renewalAt(a, account, run, queue);
     if (at !== null) return { ok: true, stamp: base, wait: { reason: "credits", startAt: at, requestId }, facts };
+    // Held until the service says ready: the run is made and waits; it reserves again under this same request id, and
+    // enters the line once the service takes it, with no page open (pool-release.ts).
+    if (a.hold === true) {
+      const ready: ReadyCard = { text: a.text, ...(a.action && { action: a.action }), ...cardLook(a) };
+      return { ok: true, stamp: base, wait: { reason: "service", requestId, ready }, facts };
+    }
   }
   if (!a.ok) {
     if (a.unsure) {

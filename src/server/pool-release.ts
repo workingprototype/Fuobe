@@ -1,12 +1,12 @@
 import "server-only";
 import type { GenerationRequest } from "@/lib/catalog/types";
 import { accountById } from "./auth";
-import { accountFacts, billingConfigured, forgetBalance, keptPolicy, policy as billingPolicy, policyGiveUpMs, reserve, serviceAnsweredAt, type Policy } from "./billing";
+import { accountFacts, billingConfigured, forgetBalance, HOLD_READY_MS, keptPolicy, policy as billingPolicy, policyGiveUpMs, reserve, serviceAnsweredAt, type Policy } from "./billing";
 import { db } from "./db";
-import { failWaiting, previewGeneration, restampRows, sendHeld } from "./generations";
+import { cancelGeneration, failWaiting, previewGeneration, restampRows, sendHeld } from "./generations";
 import { queueFacts, runOnPool } from "./hosted";
 import { heldStamp, moderateRun, renewalAt, type ReserveFacts } from "./hosted-run";
-import { dropGone, dropRun, endRunLease, heldRunHeads, leaseRun, runHolds, setRunHold, startReason, takeRun, type HoldRow } from "./pool-holds";
+import { dropGone, dropRun, endRunLease, expiredReadyHolds, heldRunHeads, leaseRun, runHolds, setRunHold, startReason, takeRun, type HoldRow } from "./pool-holds";
 import { lineRoom, poolRunCounts } from "./pool-limits";
 import { stampOf, withoutStamp, withRunStamp } from "./run-stamp";
 
@@ -27,6 +27,9 @@ import { stampOf, withoutStamp, withRunStamp } from "./run-stamp";
  * Each run is leased to one app process while it is released (pool-holds.ts leaseRun), so two processes during a deploy
  * never release one run twice, and a process that stops mid-way leaves it to the other once its lease ends.
  */
+
+/** How often a run held until the service says ready asks again. */
+export const READY_ASK_MS = 5000;
 
 /** Service calls one turn of the loop makes at most: a service that hangs holds up nothing else for long. */
 const SERVICE_TRIES_PER_TURN = 3;
@@ -148,6 +151,11 @@ async function serviceStep(h: HoldRow, now: number): Promise<"ready" | "wait" | 
         later(h, now, a.code === "paused" && !a.down);
         return a.down ? "down" : "wait";
       }
+      // Still held until the service says ready: asked again later, calmly (it isn't the service that is slow).
+      if (a.hold === true && h.ready_json) {
+        setRunHold(h.run_id, { tries: h.tries + 1, tried_at: now, next_at: now + READY_ASK_MS });
+        return "wait";
+      }
       // No free generations left until they renew: it waits for them, and reserves then.
       const renews = await renewalAt(a, account, facts.run, queue, now);
       if (renews !== null) {
@@ -175,6 +183,12 @@ async function serviceStep(h: HoldRow, now: number): Promise<"ready" | "wait" | 
  * Holds whose rows no longer wait (stopped, deleted) go first.
  */
 export async function releaseHeldRuns(now = Date.now()): Promise<number> {
+  // Held until ready for longer than HOLD_READY_MS: cancelled quietly (no failure on the tile, nothing charged).
+  for (const run of expiredReadyHolds(HOLD_READY_MS, now)) {
+    const ids = runHolds(run).map((r) => r.generation_id);
+    dropRun(run);
+    for (const id of ids) await cancelGeneration(id).catch(() => undefined);
+  }
   dropGone();
   const heads = heldRunHeads();
   if (!heads.length) return 0;

@@ -501,7 +501,10 @@ export async function POST(request: Request) {
     if (viewer.kind === "owner" && token && getSetting("comfyWhere") === "computer" && items.some((g) => g.provider === "comfyui")) notes.push(RUNS_ON_COMPUTER_NOTE);
     // What the run leaves out or changes (a model that replaced a retired one, a LoRA that runs only on a GPU, a length the API rounds).
     const all = [...new Set([...notes, ...items.flatMap((g) => g.notes ?? [])])];
-    return Response.json({ items, ...(all.length && { notes: all }), ...(gpuWarning && { gpuWarning }), ...(heldFor && { held: { reason: heldFor } }) }, { status: 201 });
+    // Held until the billing service says ready: its card goes with the answer (the page opens it once; the run starts by
+    // itself when the service says ready, with or without the page).
+    const card = heldFor && wait?.reason === "service" ? wait.ready : undefined;
+    return Response.json({ items, ...(all.length && { notes: all }), ...(gpuWarning && { gpuWarning }), ...(heldFor && { held: { reason: heldFor, ...(card && { card }) } }) }, { status: 201 });
   } catch (e) {
     const refusal = e instanceof AccountRunError ? e.refusal : undefined;
     // A price check of a paid model the account has no key for says so, without opening "Add your key".

@@ -35,6 +35,8 @@ export interface LineFacts {
   startAt?: number;
   paused?: boolean;
   note?: string;
+  /** Held until the service says ready: the step it waits for (its card's title). The run starts by itself after it. */
+  waitsFor?: string;
 }
 
 /** "about 40 s", "about 2 min", "about 3 h". */
@@ -86,6 +88,7 @@ function warmingWords(q: LineFacts, now: number): string {
  */
 export function waitWords(q: LineFacts, now = Date.now()): string | null {
   if (q.light) return "ready in seconds";
+  if (q.waitsFor) return "starts by itself";
   if (q.held === "mine") return "starts after your other runs";
   if (q.held === "list") return "starts as soon as you're in";
   if (q.held === "today" || q.held === "hour" || q.held === "credits") return `starts ${atWords(q.startAt, now)}`;
@@ -104,6 +107,7 @@ export const capitalFirst = (s: string): string => (s ? s[0].toUpperCase() + s.s
  * while runs there are paused. Null when nothing is known.
  */
 export function noteWords(q: LineFacts, now = Date.now()): string | null {
+  if (q.waitsFor) return `${q.waitsFor} · starts by itself`;
   if (q.held === "service" && q.paused && q.note) return q.note;
   if (q.held === "list") return "You're on the waiting list. Your runs start as soon as you're in.";
   // (The same sentences as a limit's refusal, src/lib/limit-words.ts.)
@@ -127,6 +131,7 @@ const MANY_AHEAD = 5;
  * list"; one waiting for the service, as warming up.
  */
 export function lineWords(q: LineFacts, now = Date.now()): string {
+  if (q.waitsFor) return `${q.waitsFor} · starts by itself`;
   if (q.held === "mine") {
     const s = q.etaSeconds;
     return s !== null && Number.isFinite(s) && s >= 0 ? `After your other runs · ready in ${aboutWords(s)}` : "After your other runs";

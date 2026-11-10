@@ -1592,6 +1592,8 @@ export interface Generation {
     held?: "mine" | "today" | "service" | "hour" | "list" | "credits";
     startAt?: number;
     paused?: true;
+    /** Held until the service says ready: the step it waits for (the service's card title). */
+    waitsFor?: string;
   };
   /**
    * A run working on this install's GPUs: the address of its latest preview picture (a JPEG, for the run's own account

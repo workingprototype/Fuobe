@@ -50,3 +50,13 @@ describe("the billing card's wait", () => {
     expect(freshBody("not json", () => "new")).toBe("not json");
   });
 });
+
+describe("a run held until the service says ready", () => {
+  it("says on its tile and before Run that it starts by itself after the service's step", async () => {
+    const { lineWords, noteWords, waitWords } = await import("@/lib/pool-line");
+    const q = { place: 1, etaSeconds: null, held: "service" as const, waitsFor: "One more step" };
+    expect(lineWords(q)).toBe("One more step · starts by itself");
+    expect(noteWords(q)).toBe("One more step · starts by itself");
+    expect(waitWords(q)).toBe("starts by itself");
+  });
+});

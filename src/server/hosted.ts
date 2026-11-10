@@ -381,9 +381,20 @@ export function queueFacts(accountId: string | null, workflowId?: string | null)
  * starts when a GPU is free). Behind the account's runs going: about when it would be ready, when known (when the first
  * of them is due done, plus a new run's wait now). Until a time: that time. Null when the row isn't held.
  */
-export function heldLine(generationId: string, now = Date.now()): (LinePlace & { held: HoldReason; startAt?: number; paused?: true }) | null {
+export function heldLine(generationId: string, now = Date.now()): (LinePlace & { held: HoldReason; startAt?: number; paused?: true; waitsFor?: string }) | null {
   const h = holdOf(generationId);
   if (!h) return null;
+  // Held until the service says ready: its card's title on the tile ("<title> · starts by itself").
+  if (h.ready_json) {
+    let title = "One more step";
+    try {
+      const c = JSON.parse(h.ready_json) as { title?: unknown };
+      if (typeof c.title === "string" && c.title) title = c.title;
+    } catch {
+      // the plain words
+    }
+    return { place: 1, etaSeconds: null, held: h.reason, waitsFor: title };
+  }
   const startAt = h.start_at !== null && h.start_at > now ? h.start_at : undefined;
   const base = { held: h.reason, ...(startAt !== undefined && { startAt }) };
   if (startAt !== undefined) return { place: 1, etaSeconds: null, ...base };

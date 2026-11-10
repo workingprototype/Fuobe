@@ -229,7 +229,19 @@ export type ReserveAnswer =
       /** The hold is made, and the run waits until then (epoch ms) before it enters the line (absent: at once). */
       startAt?: number;
     }
-  | ({ ok: false; code: RefuseCode | "price-changed"; text: string; quote?: Quote; action?: Action; offer?: Offer } & CardLook);
+  | ({ ok: false; code: RefuseCode | "price-changed"; text: string; quote?: Quote; action?: Action; offer?: Offer; hold?: boolean } & CardLook);
+
+/**
+ * A run the service holds until it says ready (a refusal with `hold: true`, while runs wait instead of being refused):
+ * the run is made and waits to enter the line, and is cancelled quietly when the service hasn't said ready within this.
+ */
+export const HOLD_READY_MS = 48 * 60 * 60_000;
+
+/** What a run held until ready shows: the service's words and its card look (the card opens once, at the press). */
+export interface ReadyCard extends CardLook {
+  text: string;
+  action?: Action;
+}
 
 export interface Balance {
   amount: number;

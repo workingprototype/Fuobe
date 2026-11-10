@@ -1824,6 +1824,17 @@ export function watchGuestRefusals(): void {
     // A run started here, on the ComfyUI on this computer: the tab that runs it asks for it at once.
     if (res.status === 201 && method === "POST" && requestPath(input) === "/api/generations") {
       window.dispatchEvent(new Event(COMPUTER_KICK_EVENT));
+      // A run held until the billing service says ready: its card opens once (the run starts by itself).
+      res
+        .clone()
+        .json()
+        .then((b: { held?: { card?: { text?: string } & Omit<BillingRefusalDetail, "code" | "error"> } }) => {
+          const c = b.held?.card;
+          if (!c?.text || !refusalCard("gpu", window.location)) return;
+          const { text, ...look } = c;
+          window.dispatchEvent(new CustomEvent<BillingRefusalDetail>(BILLING_EVENT, { detail: { ...look, code: "held", error: text, heldRun: true } }));
+        })
+        .catch(() => {});
     }
     // An account's paid run without its own key for that provider (x-fuobe-add-key: fal | replicate): "Add your key".
     const addKey = res.status === 403 ? res.headers.get(ADD_KEY_HEADER) : null;

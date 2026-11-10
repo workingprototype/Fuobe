@@ -56,6 +56,8 @@ export interface HoldRow {
   next_at: number | null;
   holder: string | null;
   lease_until: number | null;
+  /** Held until the service says ready: its card (JSON, billing.ts ReadyCard); null for any other hold. */
+  ready_json: string | null;
 }
 
 /** A run to hold, as the press made it. */
@@ -86,6 +88,8 @@ export interface NewHold {
   requestId?: string;
   /** What the reserve at release sends of the run (its facts, the price shown, its timing). */
   facts?: unknown;
+  /** Held until the service says ready: its words and card (billing.ts ReadyCard). */
+  ready?: unknown;
 }
 
 /** Hold a run (call it inside the transaction that made its rows). Returns its run id (its first row's id). */
@@ -93,8 +97,8 @@ export function holdRun(h: NewHold, now = Date.now()): string {
   const runId = h.runId ?? h.rows[0]?.id;
   if (!runId) throw new Error("A run to hold has no rows");
   const insert = db().prepare(
-    `INSERT INTO pool_holds (generation_id, run_id, account_id, reason, pressed_at, start_at, rank_rule, reserved, checked, paused, counted, request_id, facts_json, job, tries, tried_at, next_at)
-     VALUES (@id, @run, @account, @reason, @pressed, @start, @rank, @reserved, @checked, @paused, @counted, @request, @facts, @job, 0, NULL, @next)
+    `INSERT INTO pool_holds (generation_id, run_id, account_id, reason, pressed_at, start_at, rank_rule, reserved, checked, paused, counted, request_id, facts_json, job, tries, tried_at, next_at, ready_json)
+     VALUES (@id, @run, @account, @reason, @pressed, @start, @rank, @reserved, @checked, @paused, @counted, @request, @facts, @job, 0, NULL, @next, @ready)
      ON CONFLICT(generation_id) DO NOTHING`,
   );
   const facts = h.facts === undefined ? null : JSON.stringify(h.facts);
@@ -115,6 +119,7 @@ export function holdRun(h: NewHold, now = Date.now()): string {
       facts,
       job: r.job,
       next: now,
+      ready: h.ready === undefined ? null : JSON.stringify(h.ready),
     });
   }
   return runId;
@@ -263,7 +268,7 @@ export interface HoldCauses {
   /** The policy's limits (pool-limits.ts AdmitPlan): behind the account's runs going, or an hourly limit until `startAt`. */
   limit?: { reason: "mine" | "hour"; startAt?: number };
   /** The billing service's answer (hosted-run.ts ReserveWait). */
-  wait?: { reason: "service" | "today" | "hour" | "credits"; startAt?: number; requestId?: string; paused?: true };
+  wait?: { reason: "service" | "today" | "hour" | "credits"; startAt?: number; requestId?: string; paused?: true; ready?: unknown };
   /** The moderation service didn't answer: the run is checked before it enters the line. */
   unchecked?: boolean;
 }
@@ -275,7 +280,7 @@ export interface HoldCauses {
  * the back of the line when the account's own limits held it too. It reserves at release when the service didn't
  * answer, or for free generations that renew.
  */
-export function holdShape(c: HoldCauses): Pick<NewHold, "reason" | "startAt" | "rankRule" | "reserved" | "checked" | "paused" | "requestId"> | null {
+export function holdShape(c: HoldCauses): Pick<NewHold, "reason" | "startAt" | "rankRule" | "reserved" | "checked" | "paused" | "requestId" | "ready"> | null {
   if (!c.limit && !c.wait && !c.unchecked) return null;
   const starts = [c.limit?.startAt, c.wait?.startAt].filter((n): n is number => typeof n === "number");
   const startAt = starts.length ? Math.max(...starts) : undefined;
@@ -290,7 +295,13 @@ export function holdShape(c: HoldCauses): Pick<NewHold, "reason" | "startAt" | "
     checked: !c.unchecked,
     ...(c.wait?.paused && { paused: true }),
     ...(c.wait?.requestId && { requestId: c.wait.requestId }),
+    ...(c.wait?.ready !== undefined && { ready: c.wait.ready }),
   };
+}
+
+/** Held runs the service hasn't said ready for within HOLD_READY_MS (billing.ts): their run ids. */
+export function expiredReadyHolds(maxMs: number, now = Date.now()): string[] {
+  return (db().prepare("SELECT DISTINCT run_id FROM pool_holds WHERE ready_json IS NOT NULL AND pressed_at < ?").all(now - maxMs) as { run_id: string }[]).map((r) => r.run_id);
 }
 
 /**
