@@ -25,6 +25,8 @@ export const IMAGE_STUDIO: StudioConfig = {
   // Auto picks the open model for each run (src/lib/auto-image.ts): MiniMax H3 Image first where the GPU can take it, then
   // Krea 2 Realism (MOSS-Image for lettering), Qwen-Image 2.1 for edits. The default for everyone: the owner, an account and a guest.
   defaultModels: { cloud: "nano-banana-pro", open: AUTO_IMAGE },
+  // The newest open model's card above the composer (src/components/studio/release-nudge.tsx).
+  releaseNudge: "image",
   // A model's own settings (MOSS-Image's Quality, Ideogram's speed) sit under "Options".
   controlsTitle: "Options",
   // Layout mode: boxes on the picture, one row each, read in place by MOSS-Image, FLUX.3, FLUX 3 Klein and Ideogram 4.5.
@@ -59,6 +61,7 @@ export const EDIT_STUDIO: StudioConfig = {
   live: true,
   related: { href: "/apps/app-watermark-remover", label: "Remove watermarks, captions and logos automatically" },
   defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-image-21" },
+  releaseNudge: "edit",
   suggestions: [
     "Make it golden hour",
     "Remove the people in the background",

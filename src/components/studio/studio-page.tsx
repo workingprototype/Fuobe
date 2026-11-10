@@ -33,6 +33,7 @@ import { HoldFilesForGuests } from "./hold-files";
 import { EngineSwitch } from "./engine-switch";
 import { HubHeaderExtras, useInHub } from "./hub-chrome";
 import { Feed } from "./feed";
+import { ReleaseNudge } from "./release-nudge";
 import { applyExample, draftFromGeneration, initialDraft, slot } from "./draft";
 import { PresetUrlCtx, StartRequestCtx, StudioProvider, usePresetUrl, useStudio, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
 
@@ -650,6 +651,7 @@ function StudioBody({ header, tabs, examples }: { header?: React.ReactNode; tabs
             <DockedExamples />
           </div>
         )}
+        {config.releaseNudge && <ReleaseNudge studio={config.releaseNudge} docked={hasItems} />}
         <div data-composer className={cn("mx-auto w-full", hasItems ? "max-w-[800px]" : "max-w-[760px]")}>
           <HoldFilesForGuests>
             <Composer docked={hasItems} />

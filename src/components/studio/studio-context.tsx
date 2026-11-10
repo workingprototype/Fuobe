@@ -41,6 +41,8 @@ export interface StudioConfig {
   /** Preset picker shown in the composer. */
   presetPicker?: "motion" | "effect";
   preset?: Preset;
+  /** The newest open model's "is here" card above the composer, with this studio's line (src/lib/release-nudge.ts). */
+  releaseNudge?: "image" | "edit";
   defaultModels: { cloud: string; open: string };
   /**
    * An app's models on each engine (withRecipe, src/lib/catalog/preset-recipes.ts): the one its preview was made with
