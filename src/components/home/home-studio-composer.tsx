@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { CatalogProvider, useCatalog } from "@/components/studio/catalog";
 import { Composer } from "@/components/studio/composer";
 import { initialDraft } from "@/components/studio/draft";
+import { GuestDraftPathCtx } from "@/components/studio/guest-draft";
 import { HoldFilesForGuests } from "@/components/studio/hold-files";
 import { StudioProvider, useStudio, type StudioConfig } from "@/components/studio/studio-context";
 import { CREATE_GENERATION_KEY, useEngine } from "@/lib/api";
@@ -66,9 +67,12 @@ function StudioDraftBox({ mode, prompt, onPrompt }: { mode: HomeStudioMode; prom
     <StudioProvider config={config} initial={initial}>
       <PromptReport onPrompt={onPrompt} />
       <OpenStudioOnRun mode={mode} />
-      <HoldFilesForGuests>
-        <Composer docked={false} />
-      </HoldFilesForGuests>
+      {/* A guest's draft is kept as its studio keeps it, so Image, Video and Edit never share one. */}
+      <GuestDraftPathCtx.Provider value={STUDIOS[mode].href}>
+        <HoldFilesForGuests>
+          <Composer docked={false} />
+        </HoldFilesForGuests>
+      </GuestDraftPathCtx.Provider>
     </StudioProvider>
   );
 }

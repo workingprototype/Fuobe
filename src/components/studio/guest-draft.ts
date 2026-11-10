@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { clearDraft, readDraft, restoredDraft, restoredPrompt, sameDraft, saveDraft, savePendingRun, takePendingRun, type PendingRun, type ShownPrice } from "@/lib/guest-draft";
 import type { OwnSetup } from "@/lib/own-setup";
 import { replaceAttachment } from "@/lib/composer";
@@ -25,6 +25,12 @@ export function uploadKept(held: SlotValue[], up: (v: SlotValue) => Promise<Slot
 }
 
 /**
+ * The page a composer's guest draft is kept under, when it isn't the address: Home's composer keeps each mode's draft
+ * as its studio does (`/video`), so the modes never share one.
+ */
+export const GuestDraftPathCtx = createContext<string | null>(null);
+
+/**
  * A guest's whole draft through sign-up (hosted runs on; src/lib/guest-draft.ts), for the studio composer:
  * - a guest whose files are kept in this browser (`hold`) has the draft saved for this page as it changes;
  * - once who is looking is known, a saved draft comes back (its kept files with fresh previews); for an account (just
@@ -34,10 +40,11 @@ export function uploadKept(held: SlotValue[], up: (v: SlotValue) => Promise<Slot
  * Nothing happens for the owner, nor for a guest with hosted runs off (nothing is saved for them).
  */
 export function useGuestDraft({ hold, viewer, draft, setDraft }: { hold: boolean; viewer: "guest" | "account" | undefined; draft: Draft; setDraft: (patch: Partial<Draft> | ((d: Draft) => Partial<Draft>)) => void }) {
+  const named = useContext(GuestDraftPathCtx);
   const path = useRef<string | null>(null);
   useEffect(() => {
-    path.current = window.location.pathname;
-  }, []);
+    path.current = named ?? window.location.pathname;
+  }, [named]);
 
   const [pending, setPending] = useState<(PendingRun & { same: boolean }) | null>(null);
   const [lost, setLost] = useState(false);
