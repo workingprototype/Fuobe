@@ -4,6 +4,7 @@ import { SIGNATURE_MODELS } from "@/lib/catalog/palettes";
 import { FACE_MOSAIC_MODELS } from "@/lib/catalog/open-tools";
 import { UPSCALE_FIRST_STEPS } from "@/lib/catalog/upscale-first";
 import { FINISH_CHOICES, REGEN_MODEL } from "@/lib/catalog/regenerate";
+import { RTX_UPSCALE_MODEL } from "@/lib/catalog/rtx-video";
 import type { Preset } from "@/lib/catalog/types";
 import type { StudioConfig } from "@/components/studio/studio-context";
 
@@ -165,6 +166,8 @@ export const VIDEO_UPSCALE_STUDIO: StudioConfig = {
   extraModels: [REGEN_MODEL],
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
   defaultModels: { cloud: "topaz-video", open: "oss-seedvr2" },
+  // Where runs go to this install's GPUs and they run it (NVIDIA RTX cards): Quick · RTX, the fastest, is the default.
+  hereDefault: RTX_UPSCALE_MODEL,
   clipFacts: true,
 };
 

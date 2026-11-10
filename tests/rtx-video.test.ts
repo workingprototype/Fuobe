@@ -407,3 +407,21 @@ describe("where the choices show up", () => {
     expect(fs.readFileSync(path.join(ROOT, "src/components/studio/radio-keys.ts"), "utf8")).toContain(':not([aria-disabled="true"])');
   });
 });
+
+describe("Upscale → Video on this install's GPUs", () => {
+  it("starts on Quick · RTX where they run it, and keeps the studio's defaults anywhere else", async () => {
+    const { VIDEO_UPSCALE_STUDIO } = await import("@/lib/studios");
+    const { hereDefaults } = await import("@/lib/composer");
+    const { runsHere } = await import("@/lib/runnable-here");
+    expect(VIDEO_UPSCALE_STUDIO.hereDefault).toBe(RTX.RTX_UPSCALE_MODEL);
+    const rtx = { id: RTX.RTX_UPSCALE_MODEL, kind: "video" as const, engine: "open" as const };
+    // Their cards run it: it is the open default there.
+    const fits = { rules: undefined, owner: false };
+    expect(hereDefaults(VIDEO_UPSCALE_STUDIO.defaultModels, VIDEO_UPSCALE_STUDIO.hereDefault, runsHere(fits, rtx))).toEqual({ cloud: "topaz-video", open: RTX.RTX_UPSCALE_MODEL });
+    // They can't run it now (no RTX card among them), or runs go to the viewer's own GPU: the studio's own default.
+    const noCard = { rules: { own: { [RTX.RTX_UPSCALE_MODEL]: { need: "gpu" as const } } }, owner: false };
+    expect(runsHere(noCard, rtx)).toBe(false);
+    expect(hereDefaults(VIDEO_UPSCALE_STUDIO.defaultModels, VIDEO_UPSCALE_STUDIO.hereDefault, runsHere(noCard, rtx))).toEqual(VIDEO_UPSCALE_STUDIO.defaultModels);
+    expect(hereDefaults(VIDEO_UPSCALE_STUDIO.defaultModels, undefined, true)).toEqual(VIDEO_UPSCALE_STUDIO.defaultModels);
+  });
+});

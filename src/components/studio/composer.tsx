@@ -111,6 +111,7 @@ import {
   showsPrompt,
   startStep,
   viewerDefaults,
+  hereDefaults,
   writesCaptions,
   WRITE_PROMPT,
 } from "@/lib/composer";
@@ -473,7 +474,11 @@ export function Composer({ docked }: { docked: boolean }) {
 
   // The studio's defaults as this viewer runs them: Ideogram 4 gives way to its stand-in where the server writes no caption.
   const writes = writesCaptions(status);
-  const defaults = useMemo(() => viewerDefaults(config.defaultModels, config.uncaptioned, writes), [config.defaultModels, config.uncaptioned, writes]);
+  // Where this viewer's runs go to this install's GPUs and they run the studio's own choice for them (hereDefault), it is
+  // the open default there (Upscale → Video: Quick · RTX on NVIDIA RTX cards).
+  const hereModel = config.hereDefault && catalog.offered(config.hereDefault, "open") ? catalog.getModel(config.hereDefault) : undefined;
+  const hereRuns = !!here && !!hereModel && runsHere(here, hereModel);
+  const defaults = useMemo(() => hereDefaults(viewerDefaults(config.defaultModels, config.uncaptioned, writes), config.hereDefault, hereRuns), [config.defaultModels, config.uncaptioned, writes, config.hereDefault, hereRuns]);
 
   // Keep the selected model in sync with the engine switch. A camera motion or effect keeps its Original (Fuobe DoP),
   // moving to the model its move names on this engine (Jib Up: Fuobe DoP on the GPU, Fuobe DoP · LTX in the cloud) when
@@ -525,6 +530,16 @@ export function Composer({ docked }: { docked: boolean }) {
     const m = to !== model.id && model.id === config.defaultModels[engine] && (!lockedModel || appIds.includes(to)) ? catalog.getModel(to) : undefined;
     if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
   }, [writes, model, defaults, engine, config.defaultModels, lockedModel, appIds, catalog, setDraft]);
+
+  // Runs that go to this install's GPUs, which run the studio's choice for them (hereDefault): the untouched default
+  // moves to it once that is known. A model the person picked, or a link that names one, stays.
+  const hereChecked = useRef(false);
+  useEffect(() => {
+    if (hereChecked.current || !hereRuns || !model || engine !== "open" || lockedModel || preset) return;
+    hereChecked.current = true;
+    const m = model.id === config.defaultModels.open && defaults.open !== model.id && new URLSearchParams(window.location.search).get("model") !== model.id ? catalog.getModel(defaults.open) : undefined;
+    if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
+  }, [hereRuns, model, engine, lockedModel, preset, config.defaultModels.open, defaults.open, catalog, setDraft]);
 
   // The preset's recipe (the model its preview was made with) that this viewer can't run: a Replicate-only account and
   // hosted MiniMax H3 (fal only), or a model switched off in Settings → Models & licences. The composer moves to the
@@ -2045,6 +2060,7 @@ export function Composer({ docked }: { docked: boolean }) {
               : undefined
           }
           describing={describing}
+          here={here}
         />
       )}
 

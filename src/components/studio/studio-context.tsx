@@ -52,6 +52,11 @@ export interface StudioConfig {
    * account, a guest, or an install with no local model answering: writesCaptions in src/lib/composer.ts).
    */
   uncaptioned?: Partial<{ cloud: string; open: string }>;
+  /**
+   * The open default where this viewer's runs go to this install's GPUs and they run it (runnable-here.ts): the fastest
+   * choice those GPUs have (Upscale → Video: Quick · RTX where they are NVIDIA RTX cards). Anywhere else, defaultModels.
+   */
+  hereDefault?: string;
   suggestions?: string[];
   /** Prompt is optional (e.g. motions, upscale). */
   promptOptional?: boolean;

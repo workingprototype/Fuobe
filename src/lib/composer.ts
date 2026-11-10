@@ -960,6 +960,14 @@ export function viewerDefaults<D extends { cloud: string; open: string }>(defaul
 }
 
 /**
+ * The open default where this viewer's runs go to this install's GPUs (StudioConfig.hereDefault), when they run it now
+ * (`runs`: runnable-here.ts runsHere for it); otherwise the defaults as they are.
+ */
+export function hereDefaults<D extends { cloud: string; open: string }>(defaults: D, hereDefault: string | undefined, runs: boolean): D {
+  return hereDefault && runs ? { ...defaults, open: hereDefault } : defaults;
+}
+
+/**
  * What the engine switch (or a model change) does to the composer's model: the model id to move to, or undefined to
  * keep it. An app runs only on its own models for the engine (its recipe's, then its route's): any other model, even
  * one that also runs on this engine (Fuobe Soul, AI Influencer's cloud model), gives way to the first. A model that
