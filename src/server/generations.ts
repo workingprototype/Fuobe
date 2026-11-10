@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
+import { splitRunRequest } from "@/lib/split-outputs";
 import { ANY_ANGLE } from "@/lib/catalog/any-angle";
 import { NO_SUBJECT_MESSAGE, withFrontView } from "./any-angle";
 import { applyMentions } from "@/lib/catalog/elements";
@@ -1740,6 +1741,8 @@ export function createGenerations(sent: GenerationRequest, opts: CreateOptions =
   if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name, plan.op));
   const jobs = waits ? 1 : plan.jobs;
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
+  // Split one run per picture (or group): each run's request says what it makes itself, and keeps the number asked for.
+  const stored = splitRunRequest(kept, jobs, plan.perJobOutputs);
   const now = Date.now();
   const created: Generation[] = [];
   for (let i = 0; i < jobs; i++) {
@@ -1760,7 +1763,7 @@ export function createGenerations(sent: GenerationRequest, opts: CreateOptions =
       // A step whose prompt comes from an earlier step shows its own words (not the placeholder) until then.
       prompt: waits && req.chain?.some((s) => s.slot === "prompt") ? original.prompt?.replaceAll("{text}", "…").trim() || null : plan.prompt,
       // An Original remembers the engine it ran on, so a retry or a chained step runs there too.
-      request_json: JSON.stringify(dualEngine(plan.model) ? { ...kept, engine: plan.model.engine } : kept),
+      request_json: JSON.stringify(dualEngine(plan.model) ? { ...stored, engine: plan.model.engine } : stored),
       provider_input_json: null,
       external_id: null,
       external_meta_json: null,

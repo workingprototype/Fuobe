@@ -1236,6 +1236,12 @@ export type LoraField =
 /** What the UI posts to /api/generations. Asset references are local asset ids or URLs. */
 export interface GenerationRequest {
   /**
+   * Server-only (the request schema drops it from what a client sends): one run of a request for more pictures than one
+   * run makes, split one run per picture or group. The number asked for; `params.numOutputs` is this run's own, so its
+   * tile, Retry and Library show and make that many. Reuse brings the number asked for back to the composer.
+   */
+  askedOutputs?: number;
+  /**
    * Public sign-up: the account whose own ComfyUI runs this ("Your GPU"), never the install's providers. Set by the
    * server from the session only (the request schema drops it from what a client sends).
    */

@@ -3,6 +3,7 @@
  * example a page loads into its composer. Plain functions, shared by the studio page and its tests.
  */
 import { nanoid } from "nanoid";
+import { reuseOutputs } from "@/lib/split-outputs";
 import type { Generation, GenerationRequest, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { handoffFrames, presetModel, presetParams, routeParams, withoutLayout } from "@/lib/composer";
 import { presetRoutes } from "@/lib/catalog/preset-recipe-routes";
@@ -126,6 +127,8 @@ export function draftFromRequest(request: GenerationRequest, config: StudioConfi
   if (r.inputs?.voiceAudio) slots.voiceAudio = slot(r.inputs.voiceAudio);
   if (r.inputs?.voiceAudio2) slots.voiceAudio2 = slot(r.inputs.voiceAudio2);
   const params = { ...r.params };
+  // One run of a request split one per picture: Reuse brings back the number asked for, not this run's own.
+  if (request.askedOutputs) params.numOutputs = reuseOutputs({ askedOutputs: request.askedOutputs, params });
   // A keyframes run comes back in Frames mode, each still at its place in the clip.
   const times = params.keyframeTimes;
   const frames =
