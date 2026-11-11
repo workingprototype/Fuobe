@@ -97,12 +97,19 @@ def _turbo(x):
     return torch.stack([r, g, b], -1).clamp(0, 1)
 
 
+# torch.quantile takes at most 2**24 values; an even sample of this many gives the same range to well under 1%.
+QUANTILE_SAMPLE = 1_000_000
+
+
 def _nearness(depth, mask):
     """MoGe's depth render (near is bright) stretched to 0-1 over the people, with one range for the whole clip."""
     d = depth[..., 0]
     inside = d[mask > 0.5]
     if inside.numel() < 16:
         return d
+    if inside.numel() > QUANTILE_SAMPLE:
+        # A long or large clip has more people pixels than quantile takes: an evenly spaced sample over every frame.
+        inside = inside[:: -(-inside.numel() // QUANTILE_SAMPLE)]
     lo, hi = torch.quantile(inside.float(), torch.tensor([0.02, 0.98], device=d.device, dtype=torch.float32))
     return ((d - lo) / (hi - lo).clamp_min(1e-4)).clamp(0, 1)
 
