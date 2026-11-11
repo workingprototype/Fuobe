@@ -147,3 +147,111 @@ export function expandH3References(wf: ComfyWorkflow, files: H3ReferenceFiles): 
   });
   return out;
 }
+
+/** Where a motion copy takes place: the clip's setting and camera (with the new person in it), or the picture's own setting. */
+export type H3MotionPlace = "picture" | "clip";
+
+/** The place a motion copy uses when the words don't say. */
+export const H3_MOTION_DEFAULT_PLACE: H3MotionPlace = "clip";
+
+export interface H3MotionPlan {
+  /** The picture whose person performs the motion (1-based). */
+  picture: number;
+  /** How the words name that person ("woman"), or "person". */
+  who: string;
+  place: H3MotionPlace;
+}
+
+const MOTION_WORD = /\b(?:danc\w*|move|moves|moving|movements?|motion|choreograph\w*|steps|poses?|posing|gestures?|perform\w*|mimic\w*|copy|copies|copying|imitat\w*)\b/i;
+const PERSON_WORD = /^(?:woman|man|girl|boy|lady|guy|person|model|dancer|actor|actress|character|singer|athlete)$/i;
+const PLACE_NOUN = "(?:setting|place|room|background|location|studio|stage|scene|set)";
+const placeOf = (tag: "Video" | "Picture") =>
+  new RegExp(`\\b${PLACE_NOUN}\\s+(?:of|from|in)\\s+<${tag} \\d+>|<${tag} \\d+>'s\\s+${PLACE_NOUN}\\b|\\b(?:same|that)\\s+${PLACE_NOUN}\\s+as\\s+<${tag} \\d+>`, "i");
+const CLIP_PLACE = placeOf("Video");
+const PICTURE_PLACE = placeOf("Picture");
+const IN_LAYOUT = /\b(?:integrated_multimodal_description|subject_definitions)\s*:/;
+
+/**
+ * Whether the words ask for the person in a reference picture to perform the movement of the reference clip ("the woman in
+ * image 1 dancing like the woman in clip 1"), and which picture and place. Null for anything else, for words already in
+ * H3's layout, and for more than one clip or any voice or music clip.
+ */
+export function h3MotionPlan(words: string, refs: { images: number; videos: number; audios: number }): H3MotionPlan | null {
+  if (refs.images < 1 || refs.videos !== 1 || refs.audios > 0) return null;
+  const text = h3ReferenceTags(words.trim());
+  if (!text || IN_LAYOUT.test(text)) return null;
+  const sentences = text.split(/(?<=[.!?])\s+|\n+/);
+  if (!sentences.some((s) => (/<Video 1>/.test(s) || /\bthe (?:clip|video)\b/i.test(s)) && MOTION_WORD.test(s))) return null;
+  const named = /\b(?:the|a|an)\s+(\w+)\s+(?:in|from|of)\s+<Picture (\d+)>/i.exec(text);
+  const picture = named ? Number(named[2]) : Number(/<Picture (\d+)>/.exec(text)?.[1] ?? 1);
+  if (picture < 1 || picture > refs.images) return null;
+  const who = named && PERSON_WORD.test(named[1]) ? named[1].toLowerCase() : "person";
+  const place: H3MotionPlace = CLIP_PLACE.test(text) ? "clip" : PICTURE_PLACE.test(text) ? "picture" : H3_MOTION_DEFAULT_PLACE;
+  return { picture, who, place };
+}
+
+/** The person's words as the shot's action: the request verb goes, the pictured person becomes <Subject 1>, the clip's performer is named by role. */
+function motionAction(words: string, picture: number): string {
+  let s = h3ReferenceTags(words.trim())
+    .replace(/^(?:please\s+)?(?:create|make|generate|render|produce|show)\s+(?:me\s+)?(?:(?:a|an|the)\s+)?(?:(?:short\s+)?(?:video|clip|film|animation)\s+)?(?:(?:of|where|in which|showing)\s+)?/i, "")
+    .replace(new RegExp(`\\b(?:the|a|an)\\s+\\w+\\s+(?:in|from|of)\\s+<Picture ${picture}>`, "gi"), "<Subject 1>")
+    .replace(/\b(?:the|a|an)\s+\w+\s+(?:in|from|of)\s+<Video 1>/gi, "the performer of <Video 1>")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!s) return "";
+  s = s[0].toUpperCase() + s.slice(1);
+  return /[.!?]$/.test(s) ? s : `${s}.`;
+}
+
+const PRONOUN: Record<string, [string, string]> = { woman: ["her", "her"], girl: ["her", "her"], lady: ["her", "her"], actress: ["her", "her"], man: ["him", "his"], boy: ["him", "his"], guy: ["him", "his"], actor: ["him", "his"] };
+
+/**
+ * H3's full-reference layout for a motion copy: the person of the picture, with the complete outfit, performs the movement,
+ * framing and timing of the clip in every frame through the last frame. Place "clip": the clip's setting and camera stay
+ * and its performer becomes the pictured person. Place "picture": the clip supplies only motion and every surface comes from
+ * the picture. The clip's own sound is reused unless a sound or music line is given. Other pictures stay further references.
+ * Null when the words are not a motion copy (h3MotionPlan).
+ */
+export function h3MotionPrompt(
+  words: string,
+  refs: { images: number; videos: number; audios: number },
+  opts: { place?: H3MotionPlace; sound?: string; music?: string } = {},
+): string | null {
+  const found = h3MotionPlan(words, refs);
+  if (!found) return null;
+  const place = opts.place ?? found.place;
+  const P = `<Picture ${found.picture}>`;
+  const V = "<Video 1>";
+  const [them, their] = PRONOUN[found.who] ?? ["them", "their"];
+  const inClip = place === "clip";
+  const extra: string[] = [];
+  for (let n = 1, k = 3; n <= refs.images; n++) if (n !== found.picture) extra.push(`<Subject ${k++}> is what <Picture ${n}> shows, used as the shot describes.`);
+  const defs = [
+    `<Subject 1> is the ${found.who} in ${P}, with ${their} complete outfit.`,
+    `<Subject 2> is the setting of ${inClip ? V : P}.`,
+    inClip
+      ? `${V} is the source of the setting, camera, body movement, framing and timing. Its performer becomes <Subject 1>.`
+      : `${V} is a motion guide at 24 fps. It supplies only the body poses, arm and leg movements, head direction, framing and timing; every visible surface comes from ${P}.`,
+    ...extra,
+  ];
+  const summary = `[reference generation + audio reuse] The target video shows <Subject 1> in <Subject 2>, performing the movement of ${V} with its ${inClip ? "camera, framing" : "framing"} and timing, from the first frame to the last.`;
+  const retention = [
+    `<Subject 1> (appears in [Shot 1]): fully_preserved - the identity and complete outfit of ${P}.`,
+    inClip ? `<Subject 2> (setting): fully_preserved - the place, light and camera of ${V}.` : `<Subject 2> (setting): fully_preserved - the place of ${P} fills the frame around <Subject 1> in every frame.`,
+    inClip
+      ? `${V} (setting, motion and timing): partially_preserved - its place, camera, movement and timing stay; its performer is <Subject 1>.`
+      : `${V} (motion and timing): attribute_transfer - its movement is performed by <Subject 1>.`,
+  ];
+  const shot = inClip
+    ? `[Shot 1] The performer of ${V} is <Subject 1> in every frame through the last frame, with the face, hair and complete outfit of ${P}. <Subject 1> performs every movement of ${V} at the same moment, full body in frame, with its camera and framing, in real time. One continuous take.`
+    : `[Shot 1] <Subject 1> performs every movement of ${V} at the same moment, moving into each new pose with its timing, full body in frame, through the last frame. The setting of ${P} stays fully visible around ${them} in every frame. One continuous take.`;
+  const action = motionAction(words, found.picture);
+  return [
+    `subject_definitions:\n${defs.join("\n")}`,
+    `summary:\n${summary}`,
+    `retention_analysis:\n${retention.join("\n")}`,
+    `detailed_description:\nLive-action footage in the setting and light of ${inClip ? V : P}.\n${shot}${action ? ` ${action}` : ""}`,
+    `overall_soundscape:\n${opts.sound?.trim() || `The sound of ${V}, reused unchanged.`}`,
+    `non_diegetic_music:\n${opts.music?.trim() || `The music of ${V}, reused unchanged.`}`,
+  ].join("\n\n");
+}

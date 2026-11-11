@@ -40,7 +40,7 @@ import { computeDimensions } from "@/lib/comfy";
 import { captionFromWords, captionWords, parseCaption } from "@/lib/ideogram-caption";
 import { AUTO_IMAGE, AUTO_LARGE_MODELS, autoCandidates, autoModelsFor, autoNext, autoPatterns, autoResolution, nextDeclinedFallback } from "@/lib/auto-image";
 import { h3Frames, h3Prompt, inH3Layout } from "@/lib/h3-prompt";
-import { h3ReferenceTags, h3TalkPrompt } from "@/lib/h3-references";
+import { h3MotionPrompt, h3ReferenceTags, h3TalkPrompt } from "@/lib/h3-references";
 import {
   CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
@@ -3753,7 +3753,11 @@ async function handOver(id: string, route: ModelRoute, providerId: ProviderId, p
       prompt = wrapped;
       update(id, { prompt });
     } else if (plan.model.options.promptFormat === "minimax-h3" && plan.op === "ref2v" && prompt) {
-      const wrapped = h3Prompt(h3ReferenceTags(prompt), "t2v", h3Frames(plan.params.duration ?? plan.model.defaults?.duration ?? 5), plan.sound?.soundscape, plan.sound?.music);
+      // A person in a picture performing a clip's movement gets H3's full-reference layout, so each input has its role.
+      const refs = { images: req.inputs?.images?.length ?? 0, videos: req.inputs?.videos?.length ?? 0, audios: req.inputs?.audios?.length ?? 0 };
+      const wrapped =
+        h3MotionPrompt(prompt, refs, { sound: plan.sound?.soundscape, music: plan.sound?.music }) ??
+        h3Prompt(h3ReferenceTags(prompt), "t2v", h3Frames(plan.params.duration ?? plan.model.defaults?.duration ?? 5), plan.sound?.soundscape, plan.sound?.music);
       if (wrapped !== prompt) {
         prompt = wrapped;
         update(id, { prompt });
