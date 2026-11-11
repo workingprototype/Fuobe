@@ -29219,7 +29219,7 @@
       ],
       "vramGb": 24,
       "license": "MiniMax H3 Community License (H3 Ref2VA, its VAEs, the packaged Qwen3-VL text encoder, the DMAD LoRA derived from it): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax's written authorization; show \"MiniMax H3\" on the product's interface; no outputs used to improve other AI models · Qwen3-VL 8B describer Apache-2.0 · SAM 3.1 under Meta's SAM License · graphs from D3voz/openjutsu (MIT) · Context Loop nodes GPL-3.0, Fantastic PromptBuilder MIT, H3 OneClick Swap MIT · Metric3D BSD-2-Clause",
-      "validated": false,
+      "validated": true,
       "notes": "Genjutsu Motion transfer's \"MiniMax H3\" model (oss-h3-motion): video-from-picture-h3 with the character photo itself as Picture 1 (no prepared first frame) and words that put the character in the photo's setting. video = the part fitted at 24 fps, image = the character photo. params.extra.openjutsu: seconds, quality 480p | 720p, motion 0 | 512 | 768, seed (the same settings as From picture's video).",
       "autoDownloads": [
         "Metric3D vit-small (metric_depth_vit_small_800k.pth) -> custom_nodes/comfyui_controlnet_aux/ckpts/JUGGHM/Metric3D (fetched on first run unless placed there)"

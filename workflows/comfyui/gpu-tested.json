@@ -10,6 +10,7 @@
     "body-double-clip": { "passed": true, "date": "2026-11-08" },
     "finish-faces": { "passed": true, "date": "2026-11-09" },
     "reshoot-edit": { "passed": true, "date": "2026-11-08" },
-    "reshoot-swap": { "passed": true, "date": "2026-11-08" }
+    "reshoot-swap": { "passed": true, "date": "2026-11-08" },
+    "motion-h3": { "passed": true, "date": "2026-11-11" }
   }
 }

@@ -1367,6 +1367,12 @@
     "error": "HTTP 400: missing_node_type: Node 'VRMBG 3.0: each frame conditioned on the one before' not found. The custom node may not be installed. (Node ID '#3')",
     "at": "2026-11-02T11:08:13.090Z"
   },
+  "video-motion-transfer-h3": {
+    "sha256": "5968d25aa34e29478d41f88a812e4ec183ea64d2e7a44663c7bad9b1669bb9f8",
+    "validated": true,
+    "error": null,
+    "at": "2026-11-11T10:48:42.399Z"
+  },
   "video-mux-audio": {
     "sha256": "68af795bae0c0e89749819173916044e4024a6ce3035f830b48c80e0b6899181",
     "validated": true,

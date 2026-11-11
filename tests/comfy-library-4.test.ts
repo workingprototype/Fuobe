@@ -143,7 +143,6 @@ describe("round-4 ComfyUI workflows", () => {
       // Genjutsu's Openjutsu modes not checked against ComfyUI yet; each opens only after its /prompt
       // check and a real render (workflows/comfyui/gpu-tested.json, src/server/genjutsu-live.ts).
       "image-from-picture-prepare",
-      "video-motion-transfer-h3",
     ]);
     for (const w of manifest.workflows) for (const o of w.outputs) if (o.role) expect(ROLES, `${w.id} ${o.role}`).toContain(o.role);
   });

@@ -32,6 +32,8 @@ import { withRunStamp, type RunStamp } from "@/server/run-stamp";
 import { hostedRunsOn } from "@/server/hosted-switch";
 import { endTry, notePressRun, pressPrior, pressRun, pressTries, pressTry, readPressId } from "@/server/run-requests";
 import { limitFields, limitWords } from "@/lib/limit-words";
+import { motionCopyRequest } from "@/lib/motion-copy";
+import { storedMedia } from "@/server/storage";
 
 /**
  * List generations, newest first. Filters: kind / kinds, features (`x*` = prefix), models, statuses,
@@ -183,6 +185,11 @@ export async function POST(request: Request) {
   // The owner's run sent with an API token (a script, the CLI, an agent) and no source of its own reads as automated.
   let req = account ? { ...asked, account: account.id, source: undefined, sourceName: undefined, engine: accountEngineMode(account.id) === "open" ? ("open" as const) : asked.engine } : { ...asked, account: undefined, ...(token && !asked.source && { source: "api" as const }) };
   const onOwn = <T,>(fn: () => T): T => (account ? asAccount(account.id, fn) : fn());
+  // The person in a picture moving like the clip, asked of H3 with references, runs as Motion transfer (src/lib/motion-copy.ts),
+  // from the start of the clip for as long as it lasts.
+  const clip = req.inputs?.videos?.[0];
+  const copied = motionCopyRequest(req, clip ? onOwn(() => storedMedia(clip)?.info?.duration) : undefined);
+  if (copied) req = copied;
   // A visitor's price check: priced as it would run, as that visitor (an account: its own GPU and keys; a guest: the open
   // engine, no demo).
   const priced = <T,>(fn: () => T): T => (viewer.kind === "owner" ? fn() : account ? asAccount(account.id, fn) : asVisitor(null, fn));
