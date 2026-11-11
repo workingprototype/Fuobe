@@ -614,7 +614,7 @@
   },
   "ComfyUI-BodyDouble": {
     "repo": "https://github.com/workingprototype/Fuobe",
-    "commit": "26d386bdacb371d06aa2325ac1b90373a11ff6b7",
+    "commit": "e5ed1abefc958ce937594aeffa6d5319cb39ff36",
     "registry": null,
     "requirementsTxt": false,
     "isolated": false,

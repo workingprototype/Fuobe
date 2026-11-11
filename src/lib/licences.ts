@@ -681,7 +681,7 @@ export const NODE_PACKS: NodePack[] = [
     note: "Fuobe's pinned form of jtydhr88's InstantHMR nodes (only the loader and the predictor); Apache-2.0 code. The InstantHMR weights are under the SAM License: the nano to medium files are non-commercial (some training images are research-only), and instanthmr_medium_commercial allows commercial use under its terms. The MHR body model is Apache-2.0",
   }),
   // Body Double's own pack, in this repository at its pinned commit (comfy-nodes/ComfyUI-BodyDouble).
-  pack("ComfyUI-BodyDouble", "https://github.com/workingprototype/Fuobe/tree/26d386bdacb371d06aa2325ac1b90373a11ff6b7/comfy-nodes/ComfyUI-BodyDouble", {
+  pack("ComfyUI-BodyDouble", "https://github.com/workingprototype/Fuobe/tree/e5ed1abefc958ce937594aeffa6d5319cb39ff36/comfy-nodes/ComfyUI-BodyDouble", {
     name: "MIT",
     class: "commercial",
     url: SPDX("MIT"),

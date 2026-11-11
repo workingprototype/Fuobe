@@ -29684,7 +29684,7 @@
       "customNodes": [
         {
           "name": "ComfyUI-BodyDouble",
-          "repo": "https://github.com/workingprototype/Fuobe/tree/26d386bdacb371d06aa2325ac1b90373a11ff6b7/comfy-nodes/ComfyUI-BodyDouble"
+          "repo": "https://github.com/workingprototype/Fuobe/tree/e5ed1abefc958ce937594aeffa6d5319cb39ff36/comfy-nodes/ComfyUI-BodyDouble"
         },
         {
           "name": "ComfyUI-InstantHMR",
@@ -29795,7 +29795,7 @@
       "customNodes": [
         {
           "name": "ComfyUI-BodyDouble",
-          "repo": "https://github.com/workingprototype/Fuobe/tree/26d386bdacb371d06aa2325ac1b90373a11ff6b7/comfy-nodes/ComfyUI-BodyDouble"
+          "repo": "https://github.com/workingprototype/Fuobe/tree/e5ed1abefc958ce937594aeffa6d5319cb39ff36/comfy-nodes/ComfyUI-BodyDouble"
         },
         {
           "name": "ComfyUI-InstantHMR",
