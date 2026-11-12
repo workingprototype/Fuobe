@@ -6,8 +6,9 @@
  * ComfyUI shows it is there (the loader node's combo list, the folder listing, or not at all).
  *
  * Built from the committed library alone, no ComfyUI and no network: manifest.json, the workflow graphs,
- * object_info.subset.json (which classes are core and which belong to a pack), packs.json (pins, kept by hand) and
- * model-pins.json (revisions and sizes). It runs at the end of build-library.mjs and alone:
+ * object_info.subset.json (which classes are core and which belong to a pack), packs.json (pins, kept by hand),
+ * model-pins.json (revisions and sizes) and model-variants.json (other files of the same models, kept by hand). It runs
+ * at the end of build-library.mjs and alone:
  *
  *   node scripts/comfy/build-requirements.mjs                 # write requirements.json
  *   node scripts/comfy/build-requirements.mjs --refresh-pins  # maintainers: re-read model-pins.json from Hugging Face
@@ -97,10 +98,10 @@ export const cpuWork = (wf) => typeof wf.vramGb === 'number' && wf.vramGb === 0 
 
 /**
  * Build the index from the library's inputs. Pure: no file or network access.
- * @param {{ manifest: object, graphs: Record<string, object>, subset: Record<string, object | null>, packs: Record<string, object>, pins: Record<string, { revision: string, sizeBytes: number, sha256?: string }>, packClasses?: Record<string, RegExp> }} inputs
+ * @param {{ manifest: object, graphs: Record<string, object>, subset: Record<string, object | null>, packs: Record<string, object>, pins: Record<string, { revision: string, sizeBytes: number, sha256?: string }>, variants?: { variants: object[] }, packClasses?: Record<string, RegExp> }} inputs
  * @returns {import('../../src/lib/gpu/types').RequirementIndex}
  */
-export function buildIndex({ manifest, graphs, subset, packs, pins, packClasses = PACK_CLASSES }) {
+export function buildIndex({ manifest, graphs, subset, packs, pins, variants = { variants: [] }, packClasses = PACK_CLASSES }) {
   const problems = [];
   /** A class's owner: "core", or a pack name. */
   const ownerOf = (cls, wf) => {
@@ -228,6 +229,11 @@ export function buildIndex({ manifest, graphs, subset, packs, pins, packClasses 
     };
   }
 
+  // Variants: other files of the same models a workflow may load in place of some of its own (model-variants.json).
+  const built = modelVariants({ variants, workflows, files, graphs, subset, pins });
+  problems.push(...built.problems);
+  for (const [id, list] of Object.entries(built.byWorkflow)) workflows[id] = { ...workflows[id], variants: list };
+
   // Packs: every pack a workflow uses, with its pins from packs.json.
   const usedPacks = uniq(Object.values(workflows).flatMap((w) => Object.keys(w.packs)));
   const indexPacks = {};
@@ -280,18 +286,114 @@ export function buildIndex({ manifest, graphs, subset, packs, pins, packClasses 
   return index;
 }
 
+/** ComfyUI reads an older folder name as the same folder: `clip` for `text_encoders`, `unet` for `diffusion_models`. */
+const FOLDER_KIND = { clip: 'text_encoders', unet: 'diffusion_models' };
+const folderKind = (folder) => FOLDER_KIND[folder] ?? folder;
+
+/** A card generation as nvidia-smi gives it (its CUDA compute capability): "8.6", "12.0". */
+const GPU_GEN = /^\d{1,2}\.\d{1,2}$/;
+const genValue = (g) => {
+  const [major, minor] = g.split('.').map(Number);
+  return major * 100 + minor;
+};
+
+/** A variant's name: lower case letters, digits and dashes. */
+const VARIANT_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+/**
+ * Each workflow's variants from model-variants.json, checked against the built files and workflows: `byWorkflow` (workflow
+ * id → its variants, in the file's order, which is the order of preference) and `problems` (the build stops on any).
+ * A variant swaps some of a workflow's own files for other files of the same model. It is refused when its new file is
+ * missing from the catalog, has no pinned size and SHA-256, sits in another model folder, or isn't read by each loader
+ * input that reads the old file in the workflow's graph (that loader input reads the new file in no catalog workflow).
+ *
+ * @param {{ variants: { variants?: object[] }, workflows: Record<string, { files: string[] }>, files: Record<string, object>, graphs: Record<string, object>, subset: Record<string, object | null>, pins: Record<string, { sizeBytes?: number, sha256?: string }> }} o
+ */
+export function modelVariants({ variants, workflows, files, graphs, subset, pins }) {
+  const problems = [];
+  const byWorkflow = {};
+  const list = variants?.variants;
+  if (!Array.isArray(list)) return { byWorkflow, problems: ['model-variants.json: "variants" must be a list'] };
+  const sha256Of = (f) => {
+    const pin = pins[f.url] ?? pins[f.pinnedUrl];
+    const sha = f.sha256 ?? pin?.sha256;
+    return typeof sha === 'string' && /^[0-9a-f]{64}$/.test(sha) && pin?.sizeBytes === f.sizeBytes ? sha : null;
+  };
+  list.forEach((v, i) => {
+    const at = `model-variants.json variant ${i + 1}${typeof v?.id === 'string' ? ` (${v.id})` : ''}`;
+    if (!v || typeof v !== 'object') {
+      problems.push(`${at}: not an object`);
+      return;
+    }
+    if (typeof v.id !== 'string' || !VARIANT_ID.test(v.id)) problems.push(`${at}: id must be lower case letters, digits and dashes`);
+    let gpuGen;
+    if (v.gpuGen !== undefined) {
+      const { min, max } = v.gpuGen ?? {};
+      if (typeof min !== 'string' || typeof max !== 'string' || !GPU_GEN.test(min) || !GPU_GEN.test(max) || genValue(min) > genValue(max)) {
+        problems.push(`${at}: gpuGen must be { "min": "8.0", "max": "8.6" } (compute capabilities, the lower first)`);
+      } else gpuGen = { min, max };
+    }
+    if (v.vramGb !== undefined && (typeof v.vramGb !== 'number' || !Number.isFinite(v.vramGb) || v.vramGb <= 0)) problems.push(`${at}: vramGb must be a number of GB`);
+    const swap = v.files && typeof v.files === 'object' && !Array.isArray(v.files) ? Object.entries(v.files) : [];
+    if (!swap.length) problems.push(`${at}: files must map at least one of the workflow's files to another`);
+    for (const [from, to] of swap) {
+      const a = files[from];
+      const b = typeof to === 'string' ? files[to] : undefined;
+      if (!a) problems.push(`${at}: ${from} isn't a file of the catalog`);
+      if (!b) problems.push(`${at}: ${to} isn't a file of the catalog (a workflow of the manifest must name it)`);
+      if (!a || !b) continue;
+      if (from === to) problems.push(`${at}: ${from} is swapped for itself`);
+      if (folderKind(a.folder) !== folderKind(b.folder)) problems.push(`${at}: ${to} is in another model folder than ${from}`);
+      if (!sha256Of(b)) problems.push(`${at}: ${to} has no pinned size and SHA-256 (model-pins.json)`);
+    }
+    const ids = Array.isArray(v.workflows) ? v.workflows : [];
+    if (!ids.length) problems.push(`${at}: workflows must name at least one workflow`);
+    for (const id of ids) {
+      const wf = workflows[id];
+      if (!wf) {
+        problems.push(`${at}: ${id} isn't a workflow of the manifest`);
+        continue;
+      }
+      if ((byWorkflow[id] ?? []).some((x) => x.id === v.id)) problems.push(`${at}: ${id} has two variants named ${v.id}`);
+      for (const [from, to] of swap) {
+        const a = files[from];
+        const b = files[to];
+        if (!a || !b) continue;
+        if (!wf.files.includes(from)) {
+          problems.push(`${at}: ${from} isn't one of ${id}'s files`);
+          continue;
+        }
+        // The loader inputs that read the old file in this graph: each must read the new one too.
+        const slots = new Set();
+        for (const node of Object.values(graphs[id] ?? {})) {
+          for (const [input, value] of Object.entries(node?.inputs ?? {})) {
+            if (value === a.file && comboInput(subset[node.class_type], input)) slots.add(`${node.class_type}.${input}`);
+          }
+        }
+        if (!slots.size) problems.push(`${at}: ${id}'s graph loads ${from} through no loader input, so nothing can be swapped`);
+        const takes = new Set((b.loaders ?? []).map(([cls, input]) => `${cls}.${input}`));
+        for (const s of slots) if (!takes.has(s)) problems.push(`${at}: ${id} loads ${from} with ${s}, which reads ${to} in no workflow of the catalog`);
+      }
+      (byWorkflow[id] ??= []).push({ id: v.id, files: sortObj(Object.fromEntries(swap)), ...(gpuGen && { gpuGen }), ...(v.vramGb !== undefined && { vramGb: v.vramGb }) });
+    }
+  });
+  return { byWorkflow, problems };
+}
+
 /** The inputs as committed. */
 export function loadInputs(dir = LIBRARY) {
   const read = (f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
   const manifest = read('manifest.json');
   const graphs = Object.fromEntries(manifest.workflows.map((w) => [w.id, read(w.file)]));
   const pinsFile = path.join(dir, 'model-pins.json');
+  const variantsFile = path.join(dir, 'model-variants.json');
   return {
     manifest,
     graphs,
     subset: read('object_info.subset.json'),
     packs: read('packs.json'),
     pins: fs.existsSync(pinsFile) ? read('model-pins.json') : {},
+    variants: fs.existsSync(variantsFile) ? read('model-variants.json') : { variants: [] },
     packClasses: PACK_CLASSES,
   };
 }

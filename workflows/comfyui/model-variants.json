@@ -1,0 +1,37 @@
+{
+  "variants": [
+    {
+      "id": "int8",
+      "gpuGen": { "min": "8.0", "max": "8.6" },
+      "workflows": ["krea2-edit-general", "krea2-edit-identity", "krea2-inpaint", "krea2-outpaint", "krea2-realism-t2i", "krea2-turbo-i2i", "krea2-turbo-t2i"],
+      "files": {
+        "diffusion_models/krea2_turbo_fp8_scaled.safetensors": "diffusion_models/krea2_turbo_int8_convrot.safetensors",
+        "text_encoders/qwen3vl_4b_fp8_scaled.safetensors": "text_encoders/qwen3vl_4b_int8_convrot.safetensors"
+      }
+    },
+    {
+      "id": "int8",
+      "gpuGen": { "min": "8.0", "max": "8.6" },
+      "workflows": ["style-ref-krea2"],
+      "files": {
+        "text_encoders/qwen3vl_4b_fp8_scaled.safetensors": "text_encoders/qwen3vl_4b_int8_convrot.safetensors"
+      }
+    },
+    {
+      "id": "int8",
+      "gpuGen": { "min": "8.0", "max": "8.6" },
+      "workflows": ["ideogram4-t2i"],
+      "files": {
+        "text_encoders/qwen3vl_8b_fp8_scaled.safetensors": "text_encoders/qwen3vl_8b_int8_convrot.safetensors"
+      }
+    },
+    {
+      "id": "int8",
+      "gpuGen": { "min": "8.0", "max": "8.6" },
+      "workflows": ["flux3-klein-base-t2i-lora", "flux3-klein-edit", "flux3-klein-t2i"],
+      "files": {
+        "text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors": "text_encoders/qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors"
+      }
+    }
+  ]
+}

@@ -101,6 +101,23 @@ export interface IndexWorkflow {
   cpu?: true;
   /** The card its nodes need (the NVIDIA RTX Video nodes): checked against the GPU's name. */
   gpu?: GpuNeed;
+  /**
+   * Other files of the same models that the workflow may load in place of some of its own (workflows/comfyui/model-variants.json),
+   * best first. A GPU runs the workflow with its own files or with a variant's (src/lib/gpu/model-variants.ts).
+   */
+  variants?: ModelVariant[];
+}
+
+/** One variant of a workflow's files (workflows/comfyui/model-variants.json, checked by scripts/comfy/build-requirements.mjs). */
+export interface ModelVariant {
+  /** Its name, one per workflow ("int8"). */
+  id: string;
+  /** The workflow's file → the file loaded in its place: the same model folder, a pinned catalog file. */
+  files: Record<FileKey, FileKey>;
+  /** The card generations it suits, by CUDA compute capability ("8.0" to "8.6"), both ends counted. None: no card prefers it. */
+  gpuGen?: { min: string; max: string };
+  /** Its own graphics memory need, when it differs from the workflow's. */
+  vramGb?: number;
 }
 
 // ---------------------------------------------------------------------------
