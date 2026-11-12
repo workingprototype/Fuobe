@@ -24,6 +24,8 @@ import {
   type TaskInput,
   type WantedFile,
   previewOf,
+  cleanNodeClass,
+  cleanNodeTitle,
 } from "@/lib/relay";
 import { reasonText } from "@/lib/comfy-reason";
 import { cleanNodeTimes } from "@/lib/node-times";
@@ -71,7 +73,62 @@ export interface Progress extends LiveProgress {
   position?: number;
   /** Taken by a worker with another model loaded (or none): loading its model, until its first step reports. */
   cold?: boolean;
+  /**
+   * When the worker's watchdog last saw the job move (this server's clock: the worker says how long ago, JobMotion).
+   * Absent: an older worker, or a tab, which doesn't say.
+   */
+  movedAt?: number;
+  /** How busy the worker's GPU was at its last word (0-100); null when it couldn't say. Absent: it doesn't say. */
+  gpuBusy?: number | null;
+  /** The running node's class and title (the owner's view only, NodeFacts), as its last report named the node. */
+  nodeClass?: string;
+  nodeTitle?: string;
+  /** A meta-batch job's pass now, of all its passes. */
+  pass?: { n: number; of: number };
   at: number;
+}
+
+/** A report's NodeFacts, checked: kept only with the node they describe (a report that names another node clears them). */
+export function nodeFactsOf(r: Record<string, unknown>): Pick<Progress, "nodeClass" | "nodeTitle" | "pass"> {
+  const nodeClass = cleanNodeClass(r.nodeClass);
+  const nodeTitle = cleanNodeTitle(r.nodeTitle);
+  const p = r.pass && typeof r.pass === "object" ? (r.pass as Record<string, unknown>) : null;
+  const n = Number(p?.n);
+  const of = Number(p?.of);
+  const pass = Number.isInteger(n) && Number.isInteger(of) && n >= 1 && of >= n && of <= 1e5 ? { n, of } : undefined;
+  return { ...(nodeClass && { nodeClass }), ...(nodeTitle && { nodeTitle }), ...(pass && { pass }) };
+}
+
+/** What a running job's ComfyUI does now, for the owner's views (never a person's): its node, its step or pass. */
+export interface JobNow {
+  node: string | null;
+  nodeClass: string | null;
+  nodeTitle: string | null;
+  value?: number;
+  max?: number;
+  pass?: { n: number; of: number };
+}
+
+/** A task's JobNow from its kept progress (null: nothing said yet). */
+export function jobNowOf(p: Progress | undefined): JobNow | null {
+  if (!p || (p.node === undefined && p.nodeClass === undefined && p.max === undefined)) return null;
+  return {
+    node: p.node ?? null,
+    nodeClass: p.nodeClass ?? null,
+    nodeTitle: p.nodeTitle ?? null,
+    ...(p.max && p.value !== undefined && { value: Math.min(p.value, p.max), max: p.max }),
+    ...(p.pass && { pass: p.pass }),
+  };
+}
+
+/** A "moved ago" longer than this is read as this (a day): no stored time is ever before the job could have moved. */
+const MAX_MOVED_AGO_MS = 24 * 3_600_000;
+
+/** A report's or a beat's JobMotion, checked: when it last moved (on `now`'s clock) and how busy its GPU is (0-100, or null). */
+export function motionOf(r: Record<string, unknown>, now: number): Pick<Progress, "movedAt" | "gpuBusy"> {
+  const ago = typeof r.movedAgoMs === "number" && Number.isFinite(r.movedAgoMs) && r.movedAgoMs >= 0 ? Math.min(r.movedAgoMs, MAX_MOVED_AGO_MS) : undefined;
+  const busy = typeof r.gpuBusy === "number" && Number.isFinite(r.gpuBusy) ? Math.round(Math.max(0, Math.min(100, r.gpuBusy))) : r.gpuBusy === null ? null : undefined;
+  return { ...(ago !== undefined && { movedAt: Math.round(now - ago) }), ...(busy !== undefined && { gpuBusy: busy }) };
 }
 
 /**
@@ -662,7 +719,15 @@ export function noteProgress(id: string, r: Record<string, unknown>, now: number
     const cur = d.prepare(`SELECT progress_json, state FROM relay_tasks WHERE id = ? AND ${STILL_HELD}`).get(id, lease) as Pick<TaskRow, "progress_json" | "state"> | undefined;
     if (!cur) return false;
     // Its steps as passes (src/lib/run-progress.ts): a node started since clears the step of the node before.
-    const next: Progress = { ...trackReport(taskProgress(cur), p, now), ...(p.position !== undefined && { position: p.position }), at: now };
+    // Its motion (a worker's watchdog, JobMotion) over what it said before; a word without it keeps the last.
+    const next: Progress = { ...trackReport(taskProgress(cur), p, now), ...(p.position !== undefined && { position: p.position }), ...motionOf(r, now), at: now };
+    // The node's class and title go with the node a report names: a report naming a node says them anew.
+    if (node) {
+      delete next.nodeClass;
+      delete next.nodeTitle;
+      delete next.pass;
+      Object.assign(next, nodeFactsOf(r));
+    }
     // Its first step reported: its model is loaded (noteCold), so it is no longer getting ready.
     const wasCold = next.cold === true;
     if (p.value !== undefined) delete next.cold;

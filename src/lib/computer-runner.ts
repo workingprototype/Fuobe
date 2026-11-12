@@ -26,7 +26,11 @@ import {
   type ComputerFacts,
   type GiveBackWhy,
   type HistoryEntryLike,
+  type JobMotion,
+  type NodeFacts,
   type RelayState,
+  cleanNodeClass,
+  cleanNodeTitle,
   type ReportEvent,
   type TabFailure,
   type TaskInput,
@@ -207,6 +211,8 @@ export interface WorkerHooks {
    * JPEG (at most 512 pixels on its long side), or null when it can't. Without it, only a small JPEG is sent.
    */
   shrinkPreview?(preview: Blob): Promise<Blob | null>;
+  /** How busy its GPU is now (0-100, its latest reading), or null when it can't say. Sent with each running job (JobMotion). */
+  gpuBusy?(): number | null;
 }
 
 /** ComfyUI's words for running out of memory (lib/gpu/fix-codes.ts says the same). */
@@ -347,12 +353,30 @@ export function batchPlan(graph: unknown): { node: string; perPass: number; load
  * in the shape of a sampler's steps, so the run's card reads "Step 3 of 21" and fills by pass. Without the frame count
  * yet (its loader hasn't reported), only the node: the run shows it is working.
  */
+/**
+ * The running node's facts from the job's graph (ComfyUI's API format), for the owner's view: its class, and its title
+ * when it has its own. A node inside a subgraph ("672:642") is the inner node, when the graph has it by its own id.
+ */
+export function nodeFactsOf(graph: unknown, node: string | undefined): NodeFacts {
+  if (!node || !graph || typeof graph !== "object") return {};
+  const g = graph as Record<string, { class_type?: unknown; _meta?: { title?: unknown } } | undefined>;
+  const parts = node.split(":");
+  const n = g[node] ?? g[parts.at(-1)!] ?? g[parts[0]!];
+  if (!n || typeof n !== "object") return {};
+  const nodeClass = cleanNodeClass(n.class_type);
+  const title = cleanNodeTitle(n._meta?.title);
+  return { ...(nodeClass && { nodeClass }), ...(title && title !== nodeClass && { nodeTitle: title }) };
+}
+
 export function passProgress(plan: { node: string; perPass: number }, frames: number | undefined, done: number): { value?: number; max?: number; node: string; nodesDone: number } {
   // One node "done" for every report: the passes are one stage of the run, never a node after another.
   if (!frames || !Number.isFinite(frames) || frames <= 0) return { node: plan.node, nodesDone: 1 };
   const max = Math.max(1, Math.ceil(Math.round(frames) / plan.perPass));
   return { value: Math.max(0, Math.min(done, max)), max, node: plan.node, nodesDone: 1 };
 }
+
+/** A meta-batch job's pass now (1-based) of all its passes, from its passProgress; nothing without the count yet. */
+export const passOf = (p: { value?: number; max?: number }): Pick<NodeFacts, "pass"> => (p.max ? { pass: { n: Math.min((p.value ?? 0) + 1, p.max), of: p.max } } : {});
 
 /** Every string inside a value with its absolute paths as base names (engine-error.ts). */
 function pathsOut<T>(v: T, depth = 0): T {
@@ -386,6 +410,8 @@ export class ComputerRunner {
   private ws: SocketLike | null = null;
   private wsOpen = false;
   private events = new Map<string, { value?: number; max?: number; node?: string; nodesDone: number; done?: boolean; maxes?: Record<string, number> }>();
+  /** When each followed job last moved, by task (its watchdog's movedAt, this runner's clock): its reports and beats say how long ago. */
+  private movedOf = new Map<string, number>();
   /** A meta-batch job's progress as passes (passProgress), by task: what its reports and beats send instead of a pass's own steps. */
   private batchShown = new Map<string, ReturnType<typeof passProgress>>();
   /** Each prompt's node times from the socket (a worker sends them with its "finished" report); the latest few. */
@@ -646,6 +672,17 @@ export class ComputerRunner {
     else if (e.event === "give-back") this.whyOf.set(t.id, `given back to the line: ${e.why}`);
   }
 
+  /**
+   * A followed job's motion (JobMotion): how long ago its watchdog last saw it move, and, on a worker that reads its GPU,
+   * how busy the GPU is. Empty for a job it doesn't follow (a browser tab sends no GPU reading either).
+   */
+  motion(taskId: string): JobMotion {
+    const at = this.movedOf.get(taskId);
+    if (at === undefined) return {};
+    const busy = this.deps.worker?.gpuBusy ? this.deps.worker.gpuBusy() : undefined;
+    return { movedAgoMs: Math.max(0, Math.round(this.now() - at)), ...(busy !== undefined && { gpuBusy: busy }) };
+  }
+
   /** One beat: say this computer is here, keep its jobs alive, and stop what the server says to stop. */
   async beat(takeover = false): Promise<BeatAnswer | null> {
     if (!this.alive) return null;
@@ -667,7 +704,7 @@ export class ComputerRunner {
       .map((j) => {
         // A meta-batch job: its passes (passProgress), never its first pass's own steps.
         const ev = this.batchShown.get(j.taskId) ?? this.events.get(this.promptOf.get(j.taskId) ?? "");
-        return { task: j.taskId, ...(j.position !== undefined && { position: j.position }), ...(j.phase === "running" && ev && { value: ev.value, max: ev.max, nodesDone: ev.nodesDone }) };
+        return { task: j.taskId, ...(j.position !== undefined && { position: j.position }), ...(j.phase === "running" && ev && { value: ev.value, max: ev.max, nodesDone: ev.nodesDone }), ...(j.phase === "running" && this.motion(j.taskId)) };
       });
     const stopped = [...this.stoppedDone];
     return this.beatWith(
@@ -804,6 +841,7 @@ export class ComputerRunner {
       this.madeOf.delete(t.id);
       this.finishMade.delete(t.id);
       this.batchShown.delete(t.id);
+      this.movedOf.delete(t.id);
       const why = this.whyOf.get(t.id);
       this.whyOf.delete(t.id);
       const phase = this.view.jobs.find((j) => j.taskId === t.id)?.phase;
@@ -1282,10 +1320,12 @@ export class ComputerRunner {
     // A worker's watchdog: when the job last moved (a step, a node, its place, a pass).
     let movedAt = this.now();
     let moveKey = "";
+    this.movedOf.set(t.id, movedAt);
     const moved = (key: string) => {
       if (key !== moveKey) {
         moveKey = key;
         movedAt = this.now();
+        this.movedOf.set(t.id, movedAt);
       }
     };
     // The run limit counts from when its ComfyUI first runs the job (its wait in ComfyUI's own queue doesn't count). A
@@ -1341,7 +1381,7 @@ export class ComputerRunner {
         // which any studio takes); without one, only that a pass still runs.
         const a = await this.report(
           t,
-          shown ? { event: "running", ...shown } : { event: "passes", running, entries: running ? [] : passes.map(slim), ...(!running && exec(execOf(passes))), ...(passWhy && { why: passWhy }) },
+          shown ? { event: "running", ...shown, ...this.motion(t.id), ...nodeFactsOf(t.graph, ev?.node ?? shown.node), ...passOf(shown) } : { event: "passes", running, entries: running ? [] : passes.map(slim), ...(!running && exec(execOf(passes))), ...(passWhy && { why: passWhy }) },
         );
         if (a.stop) throw new Stopped();
         if (!running) return { entries: passes, answer: a };
@@ -1384,8 +1424,13 @@ export class ComputerRunner {
       moved(JSON.stringify([w.s, w.s === "pending" ? w.ahead : null, ev?.value, ev?.max, ev?.node, ev?.nodesDone]));
       // A meta-batch job's first pass: no pass has ended yet (its own steps would read as most of the run).
       const first = batch && w.s === "running" ? batchNow(0) : null;
+      // The node it runs now, by its class and title, for the owner's view (a meta-batch job: its first pass).
       const report: ReportEvent =
-        w.s === "pending" ? { event: "queued", position: w.ahead } : first ? { event: "running", ...first } : { event: "running", value: ev?.value, max: ev?.max, node: ev?.node, nodesDone: ev?.nodesDone };
+        w.s === "pending"
+          ? { event: "queued", position: w.ahead }
+          : first
+            ? { event: "running", ...first, ...nodeFactsOf(t.graph, ev?.node ?? first.node), ...passOf(first) }
+            : { event: "running", value: ev?.value, max: ev?.max, node: ev?.node, nodesDone: ev?.nodesDone, ...nodeFactsOf(t.graph, ev?.node) };
       const key = JSON.stringify(report);
       // A worker sends its ComfyUI's latest preview with its progress, when the claim asks for one: a small JPEG, at most
       // one every 2 s.
@@ -1395,7 +1440,9 @@ export class ComputerRunner {
       const preview = due ? await previewForReport(shown, lastPreviewAt, this.now(), worker?.shrinkPreview?.bind(worker)) : undefined;
       if (due) lastPreview = shown;
       if ((key !== lastKey || preview) && this.now() - lastSent >= PROGRESS_EVERY_MS) {
-        const a = await this.report(t, preview && report.event === "running" ? { ...report, preview } : report);
+        // Its motion goes with it (never part of the key: a report goes when the job moved, not when time passed).
+        const sent: ReportEvent = report.event === "running" ? { ...report, ...this.motion(t.id), ...(preview && { preview }) } : report;
+        const a = await this.report(t, sent);
         if (a.stop) throw new Stopped();
         lastKey = key;
         lastSent = this.now();

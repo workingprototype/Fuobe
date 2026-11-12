@@ -39,7 +39,7 @@ function worker(name: string): W {
   return w;
 }
 
-function beat(w: W, o: { holding?: unknown; local?: { paused?: boolean; why?: string | null }; running?: { task: string; value?: number; max?: number }[] } = {}) {
+function beat(w: W, o: { holding?: unknown; local?: { paused?: boolean; why?: string | null }; running?: Record<string, unknown>[] } = {}) {
   return pool.workerBeat(
     row(w),
     pool.cleanBeat({
@@ -245,5 +245,111 @@ describe("GET /api/admin/queue", () => {
     expect(body.held).toMatchObject({ mine: 0, oldestAt: null });
     expect(body.holding).toEqual([expect.objectContaining({ task: id, principal: "user" })]);
     expect(JSON.stringify(body)).not.toContain("acct-secret");
+  });
+});
+
+describe("is the job really moving (a worker's JobMotion)", () => {
+  it("keeps when the job last moved on the studio's clock and how busy the GPU is, and the workers API says both", () => {
+    const w = worker("moves");
+    const { id } = task();
+    claim(w);
+    setState(id, { state: "running", started_at: clock });
+    clock += 30_000;
+    beat(w, { running: [{ task: id, value: 3, max: 30, movedAgoMs: 4000, gpuBusy: 97 }] });
+    const job = pool.listWorkers(clock).find((x) => x.id === w.id)!.jobs![0];
+    expect(job).toMatchObject({ taskId: id, movedAt: clock - 4000, gpuBusy: 97, stallMs: pool.stallLimitMs(LANE) });
+    // A beat without them (an older worker) keeps the last; one with nonsense is read safely.
+    clock += 20_000;
+    beat(w, { running: [{ task: id, value: 3, max: 30 }] });
+    expect(pool.listWorkers(clock).find((x) => x.id === w.id)!.jobs![0]).toMatchObject({ movedAt: clock - 24_000, gpuBusy: 97 });
+    beat(w, { running: [{ task: id, value: 3, max: 30, movedAgoMs: -5, gpuBusy: 250 }] });
+    expect(pool.listWorkers(clock).find((x) => x.id === w.id)!.jobs![0]).toMatchObject({ movedAt: clock - 24_000, gpuBusy: 100 });
+    beat(w, { running: [{ task: id, value: 3, max: 30, movedAgoMs: 1000, gpuBusy: null }] });
+    expect(pool.listWorkers(clock).find((x) => x.id === w.id)!.jobs![0]).toMatchObject({ movedAt: clock - 1000, gpuBusy: null });
+  });
+
+  it("an older worker's job says nothing about its motion", () => {
+    const w = worker("older");
+    const { id } = task();
+    claim(w);
+    setState(id, { state: "running", started_at: clock });
+    beat(w, { running: [{ task: id, value: 3, max: 30 }] });
+    expect(pool.listWorkers(clock).find((x) => x.id === w.id)!.jobs![0]).toMatchObject({ movedAt: null, gpuBusy: null });
+  });
+
+  it("checks a report's motion: a length on the studio's clock, a busy share from 0 to 100", () => {
+    expect(tasks.motionOf({ movedAgoMs: 4000, gpuBusy: 96.6 }, 100_000)).toEqual({ movedAt: 96_000, gpuBusy: 97 });
+    expect(tasks.motionOf({ movedAgoMs: "4000", gpuBusy: "x" }, 100_000)).toEqual({});
+    expect(tasks.motionOf({ gpuBusy: null }, 100_000)).toEqual({ gpuBusy: null });
+    // A PC that says it moved days ago is read as a day ago at most.
+    expect(tasks.motionOf({ movedAgoMs: 9e12 }, 1e13).movedAt).toBe(1e13 - 24 * 3_600_000);
+  });
+
+  it("never says 0 s left: a job past its typical time has no time left to say", () => {
+    expect(pool.etaOf(10 * MIN, clock, clock + 4 * MIN)).toBe(360);
+    expect(pool.etaOf(10 * MIN, clock, clock + 10 * MIN)).toBeNull();
+    expect(pool.etaOf(10 * MIN, clock, clock + 18 * MIN)).toBeNull();
+    expect(pool.etaOf(null, clock, clock)).toBeNull();
+  });
+
+  it("a card's typical time is its lane's own (never another lane's), from its finished runs", () => {
+    const add = (lane: string, ms: number) =>
+      db()
+        .prepare("INSERT INTO worker_jobs (at, event, worker_id, worker_name, task_id, generation_id, principal, lane, exec_ms, device) VALUES (?, 'finished', 'w', 'w', 't', 'g', 'pool:pool', ?, ?, NULL)")
+        .run(clock, lane, ms);
+    for (const ms of [8 * MIN, 10 * MIN, 12 * MIN]) add("lane-typical", ms);
+    add("lane-other", 2 * MIN);
+    expect(pool.cardTypicalMs({ lane: "lane-typical", worker_id: null }, clock)).toBe(10 * MIN);
+    expect(pool.cardTypicalMs({ lane: "lane-empty", worker_id: null }, clock)).toBeNull();
+    expect(pool.cardTypicalMs({ lane: null, worker_id: null }, clock)).toBeNull();
+  });
+});
+
+describe("what its ComfyUI runs now (the owner's view)", () => {
+  const rowOf = (id: string) => db().prepare("SELECT * FROM relay_tasks WHERE id = ?").get(id) as import("@/server/computer/tasks").TaskRow;
+  const report = (id: string, e: Record<string, unknown>) => tasks.report(rowOf(id), e as never, () => ({ error: "unused" }) as never, clock);
+
+  it("keeps the running node's class, title and step from a report, and the workers API and the queue say them", () => {
+    const w = worker("names");
+    const { id } = task();
+    claim(w);
+    setState(id, { state: "running", started_at: clock });
+    report(id, { event: "running", node: "61", nodeClass: "KSampler", nodeTitle: "Main sampler", value: 14, max: 30, nodesDone: 5, movedAgoMs: 3000, gpuBusy: 97 });
+    const job = pool.listWorkers(clock).find((x) => x.id === w.id)!.jobs![0];
+    expect(job.doing).toEqual({ node: "61", nodeClass: "KSampler", nodeTitle: "Main sampler", value: 14, max: 30 });
+    expect(liveQueue(clock).running[0]).toMatchObject({ doing: { node: "61", nodeClass: "KSampler" }, movedAt: clock - 3000, gpuBusy: 97 });
+    // A beat (no node) keeps them; a report naming the next node says its own (none here: they go).
+    beat(w, { running: [{ task: id, value: 15, max: 30 }] });
+    expect(pool.listWorkers(clock).find((x) => x.id === w.id)!.jobs![0].doing).toMatchObject({ nodeClass: "KSampler", value: 15 });
+    report(id, { event: "running", node: "601", nodesDone: 6 });
+    expect(pool.listWorkers(clock).find((x) => x.id === w.id)!.jobs![0].doing).toEqual({ node: "601", nodeClass: null, nodeTitle: null });
+  });
+
+  it("never keeps a path or a long text as a title, nor an odd class", () => {
+    expect(tasks.nodeFactsOf({ nodeClass: "VAEDecodeTiled", nodeTitle: "Decode" })).toEqual({ nodeClass: "VAEDecodeTiled", nodeTitle: "Decode" });
+    expect(tasks.nodeFactsOf({ nodeClass: "<script>", nodeTitle: "C:/models/x.safetensors" })).toEqual({});
+    expect(tasks.nodeFactsOf({ nodeTitle: "a woman in a red dress walks along the beach at sunset, cinematic" })).toEqual({});
+    expect(tasks.nodeFactsOf({ pass: { n: 3, of: 7 } })).toEqual({ pass: { n: 3, of: 7 } });
+    expect(tasks.nodeFactsOf({ pass: { n: 9, of: 7 } })).toEqual({});
+  });
+});
+
+describe("which step of its Run a run is (the admin runs list)", () => {
+  it("steps that wait for one another, by their place in the chain; a batch side by side has none", async () => {
+    const { runStepOf } = await import("@/server/account-admin");
+    const add = (id: string, batch: string, dependsOn: string | null) =>
+      db()
+        .prepare("INSERT INTO generations (id, feature, model_id, engine, provider, op, kind, status, request_json, outputs_json, created_at, updated_at, depends_on, batch_id) VALUES (?, 'video', 'm', 'open', 'comfyui', 'i2v', 'video', 'queued', '{}', '[]', ?, ?, ?, ?)")
+        .run(id, clock, clock, dependsOn, batch);
+    add("chain-a", "b-chain", null);
+    add("chain-b", "b-chain", "chain-a");
+    add("chain-c", "b-chain", JSON.stringify(["chain-b"]));
+    add("side-1", "b-side", null);
+    add("side-2", "b-side", null);
+    const g = (id: string, batchId: string) => ({ id, batchId, request: {} }) as never;
+    expect(runStepOf(g("chain-a", "b-chain"))).toEqual({ n: 1, of: 3 });
+    expect(runStepOf(g("chain-c", "b-chain"))).toEqual({ n: 3, of: 3 });
+    expect(runStepOf(g("side-1", "b-side"))).toBeNull();
+    expect(runStepOf({ id: "alone", batchId: null, request: {} } as never)).toBeNull();
   });
 });

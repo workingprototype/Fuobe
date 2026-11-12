@@ -379,7 +379,7 @@ export function shownError(id: string, raw: string | null): string | null {
  */
 function poolMessage(r: Pick<Row, "status" | "message">, ready = false): string | null {
   if (r.status === "queued") return POOL_WORDS.inLine;
-  if (r.status === "running") return ready ? POOL_WORDS.gettingReady : isPoolRunWords(r.message) && r.message !== POOL_WORDS.gettingReady ? r.message : POOL_WORDS.working;
+  if (r.status === "running") return ready ? POOL_WORDS.gettingReady : isPoolRunWords(r.message) && !r.message.startsWith(POOL_WORDS.gettingReady) ? r.message : POOL_WORDS.working;
   return null;
 }
 

@@ -43,7 +43,11 @@ function eventOf(b: Record<string, unknown>): ReportEvent | null {
     case "running": {
       // A worker's live preview: kept only as a JPEG of at most 64 KB (a larger one is dropped, the report kept).
       const preview = previewOf(b.preview);
-      return { event: e, value: num(b.value), max: num(b.max), nodesDone: num(b.nodesDone), ...(typeof b.node === "string" && { node: b.node }), ...(preview && { preview }) };
+      // A worker's watchdog facts (JobMotion), when it sends them: noteProgress checks and keeps them.
+      const motion = { ...(num(b.movedAgoMs) !== undefined && { movedAgoMs: num(b.movedAgoMs) }), ...((b.gpuBusy === null || num(b.gpuBusy) !== undefined) && { gpuBusy: num(b.gpuBusy) ?? null }) };
+      // What its ComfyUI runs now, for the owner (noteProgress cleans it again).
+      const facts = { ...(typeof b.nodeClass === "string" && { nodeClass: b.nodeClass }), ...(typeof b.nodeTitle === "string" && { nodeTitle: b.nodeTitle }), ...(!!b.pass && typeof b.pass === "object" ? { pass: b.pass as never } : {}) };
+      return { event: e, value: num(b.value), max: num(b.max), nodesDone: num(b.nodesDone), ...(typeof b.node === "string" && { node: b.node }), ...(preview && { preview }), ...motion, ...facts };
     }
     case "finished": {
       // A worker's slowest nodes, as its ComfyUI's socket timed them (cleaned: ids, classes, times and step counts only).

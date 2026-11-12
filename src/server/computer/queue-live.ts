@@ -9,7 +9,7 @@ import { loadIndex } from "../gpu/index-file";
 import { claimableNow, controlledLine, firstClaimableNow, localWorkOf, ownerHandsOn, ownerWaitingNow, workerState } from "./pool";
 import { controlWords, effectiveMode, liveOverrides, MODE_WORDS, overrideView, personKey, poolMode, poolModes, recentOverrides, sweepControls, workerModeOf, type EffectiveMode, type OverrideView, type QueueMode } from "./queue-controls";
 import type { LocalWork } from "@/lib/relay";
-import { json, taskCold, taskProgress, type TaskRow } from "./tasks";
+import { json, taskCold, taskProgress, type TaskRow, jobNowOf, type JobNow } from "./tasks";
 import type { WorkerRow } from "./workers";
 
 /**
@@ -36,6 +36,11 @@ export interface RunningJob {
   /** Where it is, in words ("Making your picture · step 36 of 48", "Loading the model", "Saving the results"). */
   step: string | null;
   progress: { value: number; max: number } | null;
+  /** What its ComfyUI runs now (tasks.ts JobNow), when its worker said; the owner's view only. */
+  doing?: JobNow;
+  /** When its worker last saw it move (the site's clock), and how busy its GPU is (0-100), when its worker says. */
+  movedAt?: number;
+  gpuBusy?: number | null;
   startedAt: number | null;
   claimedAt: number | null;
   /** When its run was made (pressed). */
@@ -197,6 +202,10 @@ export function liveQueue(now = Date.now()): { running: RunningJob[]; holding: H
       slot: t.slot === "cpu" || t.finish_json ? "cpu" : "gpu",
       step,
       progress: !cold && p?.max ? { value: Math.min(p.value ?? 0, p.max), max: p.max } : null,
+      ...(() => {
+        const jn = t.state === "running" ? jobNowOf(p) : null;
+        return { ...(jn && { doing: jn }), ...(p?.movedAt !== undefined && { movedAt: p.movedAt }), ...(p?.gpuBusy !== undefined && { gpuBusy: p.gpuBusy }) };
+      })(),
       startedAt: t.started_at ?? t.sent_at ?? t.claimed_at,
       claimedAt: t.claimed_at,
       createdAt: g?.created_at ?? null,

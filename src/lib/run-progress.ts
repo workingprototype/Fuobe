@@ -236,6 +236,46 @@ export const collectingShare = (received: number | undefined) => PROGRESS_BANDS.
 /** The share to show: never below the highest shown in this try, never above 0.99. */
 export const floored = (share: number, shown: number | undefined) => Math.min(PROGRESS_BANDS.most, Math.max(share, shown ?? 0));
 
+/** A bar by time never shows more than this while the job runs (the time is a lane's typical one, not this job's). */
+export const TIME_SHARE_MOST = 0.95;
+/** "About N min left" only while at least this much of the typical time is left (never "about 0 min left"). */
+const LEFT_MIN_MS = 60_000;
+
+/** What a person's card shows for a job on the workers: a share, or none, and about how many minutes are left. */
+export interface CardProgress {
+  /** 0 to 0.99, or null: no honest share to show. */
+  share: number | null;
+  /** About how many minutes are left (whole, at least 1), only from the lane's typical run time. */
+  leftMin?: number;
+}
+
+/**
+ * A running job's progress as a person's card shows it (a job on this install's GPUs), honest about what is known:
+ *
+ * - a step bar only while its sampler reports its steps (`view.step`);
+ * - otherwise a bar by time from the lane's typical run (`typicalMs`, against `runMs`, how long it has run), never above
+ *   TIME_SHARE_MOST, and "about N min left" only from that typical time, while a minute or more of it is left;
+ * - otherwise no share at all (a count of nodes says little about the time a job takes).
+ *
+ * A share is never below the highest one shown in this try (`shown`), so the bar never moves back.
+ */
+export function cardProgress(view: Pick<ProgressView, "stage" | "share" | "step">, o: { runMs: number; typicalMs: number | null; shown?: number }): CardProgress {
+  if (view.stage === "sampling" && view.step) return { share: floored(view.share, o.shown) };
+  if (!o.typicalMs || o.typicalMs <= 0) return { share: null };
+  const ran = Math.max(0, o.runMs);
+  const left = o.typicalMs - ran;
+  return { share: floored(Math.min(TIME_SHARE_MOST, ran / o.typicalMs), o.shown), ...(left >= LEFT_MIN_MS && { leftMin: Math.max(1, Math.round(left / 60_000)) }) };
+}
+
+/** "about 4 min left" (null: nothing to say). */
+export const leftWords = (leftMin: number | undefined): string | null => (leftMin && leftMin >= 1 ? `about ${Math.round(leftMin)} min left` : null);
+
+/** Words with "about N min left" after them, when there is a time to say. */
+export const withLeft = (words: string, leftMin: number | undefined): string => {
+  const left = leftWords(leftMin);
+  return left ? `${words} · ${left}` : words;
+};
+
 /** "Step 3 of 6". */
 export const stepWords = (step: { value: number; max: number }) => `Step ${Math.min(step.value, step.max)} of ${step.max}`;
 
@@ -247,8 +287,12 @@ export function poolRunWords(v: Pick<ProgressView, "stage" | "step">): string {
 }
 
 /** Is this one of poolRunWords' (the words a person's running job may show)? */
-export const isPoolRunWords = (m: string | null | undefined): m is string =>
-  !!m && (m === POOL_WORDS.working || m === POOL_WORDS.gettingReady || m === POOL_WORDS.finishing || /^Working · Step \d+ of \d+$/.test(m));
+export const isPoolRunWords = (m: string | null | undefined): m is string => {
+  if (!m) return false;
+  // Each may say about how long is left (withLeft).
+  const words = m.replace(/ · about \d+ min left$/, "");
+  return words === POOL_WORDS.working || words === POOL_WORDS.gettingReady || words === POOL_WORDS.finishing || /^Working · Step \d+ of \d+$/.test(words);
+};
 
 /** The owner's words for a running job: its stage, and the sampler's step ("Making your clip · step 3 of 6"). */
 export function runWords(kind: MadeKind, v: Pick<ProgressView, "stage" | "step">): string {

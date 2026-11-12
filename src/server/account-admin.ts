@@ -6,6 +6,7 @@ import { listAccounts, type AccountInfo } from "./auth";
 import { db } from "./db";
 import { declinedCardsIn, getGeneration, listGenerations, type ListOptions } from "./generations";
 import { cursorFrom, HELPER_SQL, KINDS } from "./library";
+import { SAME_PRESS } from "./computer/queue-controls";
 
 /**
  * Settings → Accounts (the owner only): what accounts make. Their numbers (runs, space) and their runs, newest first,
@@ -183,7 +184,62 @@ export type RunWhose = "account" | "guest" | "owner";
  * A run in the owner's admin list: an account's or a guest's (as AccountRun), or the owner's own (`account` null, `whose`
  * "owner", and `source`: what made it, "hands-on" when its runner said nothing).
  */
-export type AdminRun = Omit<AccountRun, "account"> & { account: AccountOfRun | null; source?: RunSource; sourceName?: string };
+export type AdminRun = Omit<AccountRun, "account"> & { account: AccountOfRun | null; source?: RunSource; sourceName?: string; step?: RunStep };
+
+/** Which step of its Run a run is: the n-th of `of` steps that wait for one another (one press of Run made them all). */
+export interface RunStep {
+  n: number;
+  of: number;
+}
+
+/** A run's own ids it waits for (depends_on: one id, or a JSON list). */
+function waitsFor(dependsOn: string | null): string[] {
+  if (!dependsOn) return [];
+  if (!dependsOn.startsWith("[")) return [dependsOn];
+  try {
+    const v = JSON.parse(dependsOn) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The steps of the Run that made a run (its press: the same hold, else the same batch), each by its place in the chain:
+ * a step that waits for none is step 1, one that waits for step k is step k + 1. Null: the press made no steps that
+ * wait for one another (a run on its own, or a batch of runs side by side). `cache`: by press, for one page of runs.
+ */
+export function runStepOf(g: Pick<Generation, "id" | "batchId" | "request">, cache = new Map<string, Map<string, RunStep> | null>()): RunStep | null {
+  const hold = typeof g.request.hold === "string" && g.request.hold ? g.request.hold : null;
+  const batch = g.batchId ?? null;
+  if (!hold && !batch) return null;
+  const key = hold ? `h:${hold}` : `b:${batch}`;
+  if (!cache.has(key)) {
+    const rows = db()
+      .prepare(`SELECT g.id, g.depends_on FROM generations g WHERE ${SAME_PRESS} ORDER BY g.created_at, g.id LIMIT 64`)
+      .all({ hold, batch }) as { id: string; depends_on: string | null }[];
+    const ids = new Set(rows.map((r) => r.id));
+    const deps = new Map(rows.map((r) => [r.id, waitsFor(r.depends_on).filter((d) => ids.has(d))]));
+    const inChain = new Set<string>();
+    for (const [id, ds] of deps) if (ds.length) [id, ...ds].forEach((x) => inChain.add(x));
+    let steps: Map<string, RunStep> | null = null;
+    if (inChain.size) {
+      const depth = new Map<string, number>();
+      const depthOf = (id: string, seen: Set<string>): number => {
+        if (depth.has(id)) return depth.get(id)!;
+        if (seen.has(id)) return 0;
+        seen.add(id);
+        const d = Math.max(0, ...(deps.get(id) ?? []).map((x) => depthOf(x, seen) + 1));
+        depth.set(id, d);
+        return d;
+      };
+      const of = Math.max(...[...inChain].map((id) => depthOf(id, new Set()))) + 1;
+      steps = new Map([...inChain].map((id) => [id, { n: depthOf(id, new Set()) + 1, of }]));
+    }
+    cache.set(key, steps);
+  }
+  return cache.get(key)?.get(g.id) ?? null;
+}
 
 /** Whose a run is: its email (null: the account was deleted), or no email and `emailHidden` for a reader that may not see emails. */
 export type AccountOfRun = { id: string; email?: string | null; emailHidden?: true };
@@ -206,7 +262,7 @@ function withStates(outputs: OutputFile[]): (OutputFile & { state: OutputState }
  */
 export type AccountRunFacts = Pick<
   AdminRun,
-  "id" | "batchId" | "feature" | "presetId" | "presetName" | "modelId" | "modelName" | "engine" | "provider" | "op" | "kind" | "status" | "progress" | "costUsd" | "createdAt" | "updatedAt" | "completedAt" | "place" | "account" | "whose" | "source" | "sourceName"
+  "id" | "batchId" | "feature" | "presetId" | "presetName" | "modelId" | "modelName" | "engine" | "provider" | "op" | "kind" | "status" | "progress" | "costUsd" | "createdAt" | "updatedAt" | "completedAt" | "place" | "account" | "whose" | "source" | "sourceName" | "step"
 > & { outputs: { kind: OutputFile["kind"]; state: OutputState }[] };
 
 function factsOnly(r: AdminRun): AccountRunFacts {
@@ -233,6 +289,7 @@ function factsOnly(r: AdminRun): AccountRunFacts {
     whose: r.whose,
     ...(r.source && { source: r.source }),
     ...(r.sourceName && { sourceName: r.sourceName }),
+    ...(r.step && { step: r.step }),
     outputs: r.outputs.map((x) => ({ kind: x.kind, state: x.state })),
   };
 }
@@ -270,9 +327,12 @@ export function listAdminRuns(o: ListOptions & { whose?: RunsWhose }, show: { co
   const emails = new Map(listAccounts().map((a) => [a.id, a.email]));
   const found = listGenerations(opts).filter((g) => (whose === "people" ? !!g.request.account : whose === "ours" ? !g.request.account : true));
   const last = found.at(-1);
+  // Each run's step of its Run, when its press made steps that wait for one another ("step 1 of 2").
+  const presses = new Map<string, Map<string, RunStep> | null>();
   return {
     items: found.map((g) => {
-      const run = asAdminRun(g, emails, show.emails);
+      const step = runStepOf(g, presses);
+      const run: AdminRun = { ...asAdminRun(g, emails, show.emails), ...(step && { step }) };
       return show.content ? run : factsOnly(run);
     }),
     next: last && found.length === limit ? `${last.createdAt}:${last.id}` : null,

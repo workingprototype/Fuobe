@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  cardProgress,
   collectingShare,
   floored,
   isPoolRunWords,
@@ -10,7 +11,9 @@ import {
   progressPlan,
   progressView,
   runWords,
+  TIME_SHARE_MOST,
   trackReport,
+  withLeft,
   type LiveProgress,
   type ProgressPlan,
 } from "@/lib/run-progress";
@@ -206,5 +209,40 @@ describe("its words", () => {
     expect(runWords("video", { stage: "sampling", step: { value: 3, max: 6 } })).toBe("Making your clip · step 3 of 6");
     expect(runWords("video", { stage: "finishing" })).toBe("Finishing your clip");
     expect(runWords("video", { stage: "loading" })).toBe("Loading the model");
+  });
+});
+
+describe("a person's card for a job on the workers (cardProgress)", () => {
+  const MIN = 60_000;
+  it("shows a step bar only while the sampler reports its steps", () => {
+    const view = { stage: "sampling" as const, share: 0.5, step: { value: 10, max: 20 } };
+    expect(cardProgress(view, { runMs: 2 * MIN, typicalMs: 10 * MIN })).toEqual({ share: 0.5 });
+    // Never back below what this try showed.
+    expect(cardProgress(view, { runMs: 2 * MIN, typicalMs: null, shown: 0.6 })).toEqual({ share: 0.6 });
+  });
+
+  it("with no steps, a bar by the lane's typical time, capped below the end, and minutes left only from that", () => {
+    const finishing = { stage: "finishing" as const, share: 0.97 };
+    expect(cardProgress(finishing, { runMs: 4 * MIN, typicalMs: 10 * MIN })).toEqual({ share: 0.4, leftMin: 6 });
+    // Past its typical time: capped, and no time left to say (never "about 0 min left").
+    const late = cardProgress(finishing, { runMs: 18 * MIN, typicalMs: 10 * MIN });
+    expect(late.share).toBe(TIME_SHARE_MOST);
+    expect(late.leftMin).toBeUndefined();
+    // Under a minute left: no time either.
+    expect(cardProgress(finishing, { runMs: 9.5 * MIN, typicalMs: 10 * MIN }).leftMin).toBeUndefined();
+  });
+
+  it("with no steps and no typical time, no share at all (a count of nodes is not progress)", () => {
+    expect(cardProgress({ stage: "finishing", share: 0.97 }, { runMs: 18 * MIN, typicalMs: null })).toEqual({ share: null });
+    expect(cardProgress({ stage: "preparing", share: 0.05 }, { runMs: MIN, typicalMs: null })).toEqual({ share: null });
+  });
+
+  it("says the minutes left after the words, and those words still count as a running job's", () => {
+    expect(withLeft("Working", 4)).toBe("Working · about 4 min left");
+    expect(withLeft("Working", undefined)).toBe("Working");
+    expect(withLeft("Working", 0)).toBe("Working");
+    expect(isPoolRunWords("Working · about 4 min left")).toBe(true);
+    expect(isPoolRunWords("Finishing · about 1 min left")).toBe(true);
+    expect(isPoolRunWords("Working · about 0 s left")).toBe(false);
   });
 });

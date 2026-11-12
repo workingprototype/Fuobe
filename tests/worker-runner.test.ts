@@ -161,6 +161,46 @@ describe("a worker's runner", () => {
     expect(JSON.parse(String(state(id).exec_nodes))).toEqual(finished.nodes);
   });
 
+  it("says with each running report and beat how long ago the job moved and how busy its GPU is, and the studio keeps both", async () => {
+    const w = worker();
+    const id = task();
+    const s = studio(w);
+    fake.opts.steps = 6;
+    fake.opts.stepMs = 150;
+    const beats: Record<string, unknown>[] = [];
+    s.set((p, init) => {
+      if (p.endsWith("/beat")) beats.push(JSON.parse(String(init.body)));
+      return undefined;
+    });
+    const r = runner(s, hooks({ gpuBusy: () => 97 }));
+    const done = r.claimAndRun();
+    // A beat while it runs: its running job carries its motion.
+    for (let i = 0; i < 200 && !s.reports.some((x) => x.event === "running" && typeof x.value === "number"); i++) await sleep(10);
+    await r.beat();
+    const kept = tasks.taskProgress(state(id));
+    await done;
+    expect(state(id).state).toBe("done");
+    const running = s.reports.filter((x) => x.event === "running");
+    expect(running.length).toBeGreaterThan(0);
+    for (const x of running) {
+      expect(x.movedAgoMs).toBeTypeOf("number");
+      expect(x.movedAgoMs as number).toBeGreaterThanOrEqual(0);
+      expect(x.gpuBusy).toBe(97);
+    }
+    const job = (beats.at(-1)!.running as Record<string, unknown>[]).find((j) => j.task === id)!;
+    expect(job).toMatchObject({ gpuBusy: 97 });
+    expect(job.movedAgoMs).toBeTypeOf("number");
+    // On the studio's clock: when it moved, at most a moment before now, and the GPU's reading as said.
+    expect(kept?.movedAt).toBeTypeOf("number");
+    expect(kept!.movedAt!).toBeLessThanOrEqual(Date.now());
+    expect(Date.now() - kept!.movedAt!).toBeLessThan(30_000);
+    expect(kept?.gpuBusy).toBe(97);
+    // The node it ran, by its class from the graph (the owner's view): in its reports, and kept with its progress.
+    expect(running.some((x) => x.nodeClass === "KSampler")).toBe(true);
+    // A finished job has no motion left to say.
+    expect(r.motion(id)).toEqual({});
+  });
+
   it("a browser tab's runner (no worker hooks) reports as it always did", async () => {
     const w = worker();
     const id = task();
@@ -169,6 +209,8 @@ describe("a worker's runner", () => {
     expect(state(id).state).toBe("done");
     const finished = s.reports.find((x) => x.event === "finished")!;
     expect(Object.keys(finished).sort()).toEqual(["entry", "event"]);
+    // It reads no GPU: no GPU reading goes with its progress.
+    expect(s.reports.filter((x) => x.event === "running").every((x) => !("gpuBusy" in x))).toBe(true);
   });
 
   it("out of memory: frees its ComfyUI's memory and sends the job once more, and the studio never hears of the first try", async () => {

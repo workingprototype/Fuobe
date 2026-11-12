@@ -16,7 +16,10 @@ const PORT = 3367;
 
 describe("the GPU check (check 11)", () => {
   it("reads nvidia-smi, [N/A] included", () => {
-    expect(parseGpu("6144, 61\n")).toEqual({ usedMb: 6144, tempC: 61 });
+    expect(parseGpu("6144, 61\n")).toEqual({ usedMb: 6144, tempC: 61, busyPct: null });
+    // How busy it is: its utilization, kept from 0 to 100 ([N/A] is unknown).
+    expect(parseGpu("6144, 61, 97\n")).toEqual({ usedMb: 6144, tempC: 61, busyPct: 97 });
+    expect(parseGpu("6144, 61, [N/A]\n")).toEqual({ usedMb: 6144, tempC: 61, busyPct: null });
     expect(parseApps("1234, C:\\Program Files\\Blender\\blender.exe, [N/A]\n77, python.exe, 2048\n")).toEqual([
       { pid: 1234, name: "blender.exe", usedMb: null },
       { pid: 77, name: "python.exe", usedMb: 2048 },

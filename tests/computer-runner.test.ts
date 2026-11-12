@@ -3,7 +3,7 @@
  * the studio is busy, what it shows once a result is saved, and how it carries a job's token.
  */
 import { describe, expect, it } from "vitest";
-import { batchPlan, ComputerRunner, passProgress, tileJob } from "@/lib/computer-runner";
+import { batchPlan, ComputerRunner, nodeFactsOf, passOf, passProgress, tileJob } from "@/lib/computer-runner";
 import { jobWords } from "@/lib/relay";
 
 const TASK = { id: "AAAAAAAAAAAAAAAA", generationId: "g-1", lease: "a".repeat(64), graph: {}, promptId: "00000000-0000-4000-8000-000000000000", preview: false, inputs: [] };
@@ -103,5 +103,27 @@ describe("a meta-batch job's passes", () => {
     expect(passProgress(plan, 124, 30)).toMatchObject({ value: 21, max: 21 });
     // Before the loader said the frames: the node only.
     expect(passProgress(plan, undefined, 0)).toEqual({ node: "2", nodesDone: 1 });
+  });
+});
+
+describe("the running node's facts for the owner's view", () => {
+  const graph = {
+    "61": { class_type: "KSampler", inputs: {}, _meta: { title: "Main sampler" } },
+    "642": { class_type: "VAEDecode", inputs: {}, _meta: { title: "VAEDecode" } },
+    "578": { class_type: "UNETLoader", inputs: {}, _meta: { title: "D:/models/h3.safetensors" } },
+  };
+  it("names its class and its own title, a subgraph's inner node, and never a path", () => {
+    expect(nodeFactsOf(graph, "61")).toEqual({ nodeClass: "KSampler", nodeTitle: "Main sampler" });
+    // The title that only repeats the class says nothing more.
+    expect(nodeFactsOf(graph, "672:642")).toEqual({ nodeClass: "VAEDecode" });
+    expect(nodeFactsOf(graph, "578")).toEqual({ nodeClass: "UNETLoader" });
+    expect(nodeFactsOf(graph, "9")).toEqual({});
+    expect(nodeFactsOf(null, "61")).toEqual({});
+    expect(nodeFactsOf(graph, undefined)).toEqual({});
+  });
+  it("says a meta-batch job's pass from its passes", () => {
+    expect(passOf({ value: 2, max: 7 })).toEqual({ pass: { n: 3, of: 7 } });
+    expect(passOf({ value: 7, max: 7 })).toEqual({ pass: { n: 7, of: 7 } });
+    expect(passOf({})).toEqual({});
   });
 });

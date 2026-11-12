@@ -20,13 +20,17 @@ const num = (s) => {
   return Number.isFinite(v) ? v : null;
 };
 
-/** `nvidia-smi --query-gpu=memory.used,temperature.gpu --format=csv,noheader,nounits` → the first GPU. */
+/**
+ * `nvidia-smi --query-gpu=memory.used,temperature.gpu,utilization.gpu --format=csv,noheader,nounits` → the first GPU.
+ * `busyPct`: how busy it is (0-100), null when nvidia-smi said nothing there ([N/A], or an answer without it).
+ */
 export function parseGpu(text) {
   const line = String(text ?? "").split(/\r?\n/).find((l) => l.trim());
   if (!line) return null;
-  const [used, temp] = line.split(",");
+  const [used, temp, util] = line.split(",");
   const usedMb = num(used);
-  return usedMb === null ? null : { usedMb, tempC: num(temp) };
+  const busy = String(util ?? "").trim() ? num(util) : null;
+  return usedMb === null ? null : { usedMb, tempC: num(temp), busyPct: busy === null ? null : Math.max(0, Math.min(100, Math.round(busy))) };
 }
 
 /** `--query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits`; used_memory is often [N/A] on Windows. */
@@ -55,7 +59,7 @@ const run = (cmd, args) =>
 export async function readGpu(cmd = "nvidia-smi") {
   const [bin, ...pre] = Array.isArray(cmd) ? cmd : [cmd];
   const call = (args) => run(bin, [...pre, ...args]);
-  const gpu = await call(["--query-gpu=memory.used,temperature.gpu", "--format=csv,noheader,nounits"]);
+  const gpu = await call(["--query-gpu=memory.used,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"]);
   if (gpu === null) return null;
   const g = parseGpu(gpu);
   if (!g) return null;

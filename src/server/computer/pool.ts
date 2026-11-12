@@ -14,7 +14,7 @@ import { indexKey, loadIndex } from "../gpu/index-file";
 import { hostedRunsOn } from "../hosted-switch";
 import { heldView } from "../pool-holds";
 import { catalogVersion } from "./catalog-version";
-import { cleanFacts, dropProgress, endTask, json, logWorkerJob, noteCold, noteProgress, noteStage, setPoolClocks, setPoolGiveBack, setPoolLost, setTask, stageOf, takeTask, taskById, taskCold, taskProgress, type TaskRow } from "./tasks";
+import { cleanFacts, dropProgress, endTask, json, logWorkerJob, noteCold, noteProgress, noteStage, setPoolClocks, setPoolGiveBack, setPoolLost, setTask, stageOf, takeTask, taskById, taskCold, taskProgress, jobNowOf, type JobNow, type TaskRow } from "./tasks";
 import { queueSettings, runCeilingMs } from "../queue-settings";
 import { createWorker, offerNextToken, revokeWorker, rotateWorker, type WorkerRow } from "./workers";
 import { modelLabel } from "./queue-live";
@@ -287,6 +287,8 @@ export function cleanBeat(b: unknown): WorkerBeat {
     gpu: {
       otherApps: apps.map((a) => ({ pid: num((a as Record<string, unknown>)?.pid) ?? 0, name: text((a as Record<string, unknown>)?.name, 64) ?? "?", vramBytes: num((a as Record<string, unknown>)?.vramBytes) ?? 0 })),
       tempC: num(gpu.tempC),
+      // How busy its GPU is (0-100); absent from an older worker, null when it can't say.
+      ...((gpu.busyPct === null || num(gpu.busyPct) !== null) && { busyPct: num(gpu.busyPct) === null ? null : Math.round(Math.max(0, Math.min(100, num(gpu.busyPct)!))) }),
     },
     ...(o.facts !== undefined && { facts: cleanFacts(o.facts) }),
     ...(typeof o.catalogVersion === "string" && /^[0-9a-f]{64}$/.test(o.catalogVersion) && { catalogVersion: o.catalogVersion }),
@@ -1198,6 +1200,29 @@ export function typicalPoolMs(lane: string | null): number | null {
   return (lane ? of(q("AND lane = ?", lane)) : null) ?? of(q(""));
 }
 
+/** Each lane's typical run as cardTypicalMs read it last, and when (read again after LANE_TIME_MS). */
+const laneTimes = new Map<string, { at: number; ms: number | null }>();
+const LANE_TIME_MS = 60_000;
+
+/**
+ * How long a task's run usually takes, for a person's card (src/lib/run-progress.ts cardProgress): its worker's bench
+ * for its lane, else its lane's typical run (the middle of its last 20 finished runs). Null when neither says: then
+ * the card shows no time-based share. Never another lane's times.
+ */
+export function cardTypicalMs(t: Pick<TaskRow, "lane" | "worker_id">, now = Date.now()): number | null {
+  if (!t.lane) return null;
+  const w = t.worker_id ? (db().prepare("SELECT bench_json FROM relay_workers WHERE id = ?").get(t.worker_id) as Pick<WorkerRow, "bench_json"> | undefined) : undefined;
+  const bench = w ? benchOf(w as WorkerRow)[t.lane]?.medianMs : undefined;
+  if (bench && bench > 0) return bench;
+  const kept = laneTimes.get(t.lane);
+  if (kept && now - kept.at < LANE_TIME_MS) return kept.ms;
+  const rows = db().prepare("SELECT exec_ms AS ms FROM worker_jobs WHERE event = 'finished' AND exec_ms > 0 AND lane = ? ORDER BY id DESC LIMIT 20").all(t.lane) as { ms: number }[];
+  const ms = rows.length ? rows.map((r) => r.ms).sort((a, b) => a - b)[Math.floor(rows.length / 2)] : null;
+  if (laneTimes.size >= 256) laneTimes.delete(laneTimes.keys().next().value!);
+  laneTimes.set(t.lane, { at: now, ms });
+  return ms;
+}
+
 /** How long a task should take: its lane's bench on the quickest of these workers, its own estimate, or the lane's typical run. */
 function estFor(t: Pick<TaskRow, "lane" | "est_ms">, workers: WorkerRow[], typical: (lane: string | null) => number | null): number {
   const bench = workers.map((w) => (t.lane && benchOf(w)[t.lane]?.medianMs) || 0).filter((ms) => ms > 0);
@@ -1794,13 +1819,37 @@ export interface ActiveJob {
   startedAt: number | null;
   progress: { value?: number; max?: number; node?: string; nodesDone?: number; position?: number; cold?: boolean } | null;
   progressAt: number | null;
+  /**
+   * When the worker's watchdog last saw it move (a step, a node, its place, a pass), on this server's clock; null: the
+   * worker doesn't say (an older one). Past `stallMs` without a move, the worker gives the job back to the line.
+   */
+  movedAt: number | null;
+  /** How busy the worker's GPU was at its last word (0-100); null: unknown. */
+  gpuBusy: number | null;
+  /** What its ComfyUI runs now (its node's class and title, its step or pass); null: nothing said yet. */
+  doing: JobNow | null;
+  /** How long the job may go without moving before the worker gives it back (its lane's stall limit). */
+  stallMs: number;
   /** How long a job like it takes on this worker (its lane's bench, the task's estimate, or the lane's typical run). */
   typicalMs: number | null;
-  /** About how long until it is done, from typicalMs and its start (null: unknown). */
+  /**
+   * About how long until it is done, from typicalMs and its start: more than 0, or null (unknown, or it already ran
+   * longer than typicalMs: never "0 s left" for a job still running).
+   */
   etaS: number | null;
   owners: "owner" | "account";
   feature?: string;
   modelName?: string;
+  /** Its run's operation and kind of result (t2i, i2v…; image, video…): what kind of task it is. */
+  op?: string;
+  kind?: string;
+}
+
+/** Seconds left from a typical run time and a start: at least 1, or null when there is no typical time or it has passed. */
+export function etaOf(typicalMs: number | null, since: number, now: number): number | null {
+  if (!typicalMs) return null;
+  const s = Math.round((since + typicalMs - now) / 1000);
+  return s >= 1 ? s : null;
 }
 
 /** A lane's label from the catalog's lanes (worked out once per index). */
@@ -1817,11 +1866,11 @@ setEventNames({
 type ActiveRow = Pick<TaskRow, "id" | "generation_id" | "lane" | "state" | "device" | "slot" | "finish_json" | "claimed_at" | "started_at" | "progress_json" | "account" | "est_ms">;
 
 function activeJobs(w: WorkerRow, rows: ActiveRow[], now: number, typical: (lane: string | null) => number | null): ActiveJob[] {
-  const gen = db().prepare("SELECT feature, model_id FROM generations WHERE id = ?");
+  const gen = db().prepare("SELECT feature, model_id, op, kind FROM generations WHERE id = ?");
   return rows.map((t) => {
     const p = taskProgress(t);
     const typicalMs = estOn(t as TaskRow, w) ?? typical(t.lane);
-    const g = gen.get(t.generation_id) as { feature: string | null; model_id: string | null } | undefined;
+    const g = gen.get(t.generation_id) as { feature: string | null; model_id: string | null; op: string | null; kind: string | null } | undefined;
     const model = modelLabel(g?.model_id);
     const progress = p ? Object.fromEntries((["value", "max", "node", "nodesDone", "position", "cold"] as const).filter((k) => p[k] !== undefined).map((k) => [k, p[k]])) : null;
     return {
@@ -1836,11 +1885,17 @@ function activeJobs(w: WorkerRow, rows: ActiveRow[], now: number, typical: (lane
       startedAt: t.started_at,
       progress,
       progressAt: p?.at ?? null,
+      movedAt: p?.movedAt ?? null,
+      gpuBusy: p?.gpuBusy ?? null,
+      doing: t.state === "running" ? jobNowOf(p) : null,
+      stallMs: stallLimitMs(t.lane),
       typicalMs,
-      etaS: typicalMs ? Math.max(0, Math.round(((t.started_at ?? now) + typicalMs - now) / 1000)) : null,
+      etaS: etaOf(typicalMs, t.started_at ?? now, now),
       owners: t.account ? "account" : "owner",
       ...(g?.feature && { feature: g.feature }),
       ...(model && { modelName: model }),
+      ...(g?.op && { op: g.op }),
+      ...(g?.kind && { kind: g.kind }),
     };
   });
 }

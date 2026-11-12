@@ -628,7 +628,7 @@ describe("the run ceiling", () => {
     expect(getGeneration(id)).toMatchObject({ status: "running", message: POOL_WORDS.working });
   });
 
-  it("taken cold, its share follows the stages: loading, the sampler's steps, then the last few percent; never backwards, never 100% before done", async () => {
+  it("taken cold, its share is honest: none while loading, the sampler's steps, none after them (no typical time for its lane); never backwards, never 100% before done", async () => {
     const w = standInWorker();
     const { id, t } = await accountRun("its share follows the stages");
     pool.workerBeat(workerRow(w), pool.cleanBeat({ device: `wkr-${w.id}`, protocol: 3, version: "1", local: { paused: false, why: null, until: null }, gpu: {}, inventoryHash: null, running: [], stopped: [], catalogVersion: catalogVersion(), warmLane: "another-lane" }), Date.now());
@@ -646,32 +646,33 @@ describe("the run ceiling", () => {
       await tick();
       const g = getGeneration(id)!;
       expect(g.status).toBe("running");
-      shares.push(g.progress ?? 0);
+      if (g.progress !== null) shares.push(g.progress);
       return g;
     };
-    // Its model loads while the nodes before the sampler start: a small share, under its words.
+    // Its model loads while the nodes before the sampler start: its words, and no share (no steps, no typical time).
     for (let n = 1; n < before; n++) {
       const g = await look({ nodesDone: n, node: `load-${n}` });
       expect(g.message).toBe(POOL_WORDS.gettingReady);
-      expect(g.progress ?? 0).toBeLessThanOrEqual(0.1);
+      expect(g.progress).toBeNull();
     }
     // The sampler's steps: most of the bar, with the step in its words.
     const at: number[] = [];
     for (let v = 1; v <= 6; v++) {
-      const g = await look({ nodesDone: before, node: sampler, value: v, max: 6 });
+      // Its worker names the node for the owner; the person reads none of it.
+      const g = await look({ nodesDone: before, node: sampler, value: v, max: 6, nodeClass: "KSampler", nodeTitle: "Main sampler" });
       expect(g.message).toBe(`Working · Step ${v} of 6`);
+      expect(JSON.stringify(g)).not.toMatch(/KSampler|Main sampler/);
       at.push(g.progress!);
     }
     expect(at[2]).toBeGreaterThan(0.45);
     expect(at[2]).toBeLessThan(0.6);
     // A late beat with the step before changes nothing.
     await look({ nodesDone: before, value: 5, max: 6 });
-    // After the sampler: the decode and the file, the last few percent.
+    // After the sampler: the decode and the file. A count of nodes is no share: none, and no time left to say.
     for (let k = 1; k <= meta.plan.after; k++) {
       const g = await look({ nodesDone: before + k, node: `after-${k}` });
       expect(g.message).toBe(POOL_WORDS.finishing);
-      expect(g.progress!).toBeGreaterThanOrEqual(0.9);
-      expect(g.progress!).toBeLessThanOrEqual(0.97);
+      expect(g.progress).toBeNull();
     }
     for (let i = 1; i < shares.length; i++) expect(shares[i]).toBeGreaterThanOrEqual(shares[i - 1]);
     expect(Math.max(...shares)).toBeLessThan(1);

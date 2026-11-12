@@ -68,6 +68,8 @@ const HOUR = 3_600_000;
 export const COUNTERS_REUSE_MS = 90_000;
 /** Busy readings in a row (5 s apart) that only the GPU's total decided, before they pause the worker. */
 export const TOTAL_BUSY_READINGS = 6;
+/** A GPU reading (every 5 s) says how busy the GPU is for this long; after that, how busy it is is unknown (null). */
+export const GPU_BUSY_FRESH_MS = 30_000;
 
 /** The worker looks at its model folders again this often (a folder that comes back after a restart counts). */
 export const RESCAN_MS = 10 * 60_000;
@@ -324,8 +326,10 @@ async function work(saved, deps, owner) {
   let inv = { files: [], nodePacks: [], media: ffmpeg ? ["image", "video", "audio"] : ["image"] };
   let packs = [];
   let invHash = null;
-  let gpuInfo = { otherApps: [], tempC: null };
+  let gpuInfo = { otherApps: [], tempC: null, busyPct: null };
   let lastGpuAt = 0;
+  // When the GPU was last read: a reading older than GPU_BUSY_FRESH_MS says nothing about how busy it is now.
+  let gpuReadAt = 0;
   let pause = { paused: true, why: "here", until: null };
   let busyJob = false;
   let job = Promise.resolve();
@@ -715,7 +719,7 @@ async function work(saved, deps, owner) {
   let lastCpuTask = null;
   /** What a slot's runner says it works on, for the beat. */
   const runningOf = (r) =>
-    r.view.jobs.filter((j) => j.phase !== "done" && j.phase !== "failed").map((j) => ({ task: j.taskId, ...(j.position !== undefined && { position: j.position }), ...(j.phase === "running" && { value: j.value, max: j.max }) }));
+    r.view.jobs.filter((j) => j.phase !== "done" && j.phase !== "failed").map((j) => ({ task: j.taskId, ...(j.position !== undefined && { position: j.position }), ...(j.phase === "running" && { value: j.value, max: j.max, ...r.motion?.(j.taskId) }) }));
 
   const runner = new ComputerRunner(
     {
@@ -828,6 +832,8 @@ async function work(saved, deps, owner) {
         stallMs: 10 * 60_000,
         stallLocalMs: Number(cfg.stallMin) > 0 ? Number(cfg.stallMin) * 60_000 : null,
         free: () => comfy.free(),
+        // How busy its GPU is, sent with each running job: its latest reading, or null when there is no fresh one.
+        gpuBusy: () => (now() - gpuReadAt <= GPU_BUSY_FRESH_MS ? (gpuInfo.busyPct ?? null) : null),
         // A live preview that isn't a small JPEG is made again by ffmpeg (none without it).
         shrinkPreview: deps.shrinkPreview ?? previewShrinker({ ffmpeg: ffmpeg ? ffmpegBin : null, dir: path.join(cfg.workDir, "preview") }),
         crashes: (t) => crashes[t.id] ?? 0,
@@ -1067,7 +1073,8 @@ async function work(saved, deps, owner) {
           } else verdict = { ...othersOf(reading, own, busyMb), job: own.job };
           const was = gpu.paused;
           gpu.update(verdict, reading.tempC, t);
-          gpuInfo = { otherApps: reading.apps.filter((a) => a.pid !== comfy.pid).map((a) => ({ pid: a.pid, name: a.name, vramBytes: (a.usedMb ?? 0) * 2 ** 20 })), tempC: reading.tempC };
+          gpuInfo = { otherApps: reading.apps.filter((a) => a.pid !== comfy.pid).map((a) => ({ pid: a.pid, name: a.name, vramBytes: (a.usedMb ?? 0) * 2 ** 20 })), tempC: reading.tempC, busyPct: reading.busyPct ?? null };
+          gpuReadAt = t;
           if (!was && gpu.paused) log(`Another program is using the GPU (${gpu.who}): pausing (${Math.round(verdict.othersMb ?? 0)} MB not its own${verdict.source ? `, by ${verdict.source}` : ""}).`);
           if (was && !gpu.paused) log("The GPU stayed free for the whole cool-down: resuming.");
         }

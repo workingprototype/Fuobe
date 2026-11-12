@@ -71,7 +71,7 @@ import {
   type WantedFile,
 } from "@/lib/relay";
 import type { GenerationFix } from "@/lib/catalog/types";
-import { collectingShare, floored, planOf, poolRunWords, progressPlan, progressView, runWords, trackReport, type LiveProgress, type ProgressPlan, type ProgressView } from "@/lib/run-progress";
+import { cardProgress, collectingShare, floored, planOf, poolRunWords, progressPlan, progressView, runWords, trackReport, withLeft, type CardProgress, type LiveProgress, type ProgressPlan, type ProgressView } from "@/lib/run-progress";
 import {
   checkClocks,
   createTask,
@@ -94,7 +94,7 @@ import {
   type Principal,
   type TaskRow,
 } from "../computer/tasks";
-import { attemptDeadline, ownerRunClass, poolFacts, poolFields, poolLane, poolWaitMs, poolWaitWords, runPlaceOf, workersCanRun, workersHold } from "../computer/pool";
+import { attemptDeadline, cardTypicalMs, ownerRunClass, poolFacts, poolFields, poolLane, poolWaitMs, poolWaitWords, runPlaceOf, workersCanRun, workersHold } from "../computer/pool";
 import { notOnGpusText } from "../runs-here";
 import { catalogVersion } from "../computer/catalog-version";
 import { ticketProblem, type JobTicket } from "@/lib/job-ticket";
@@ -697,6 +697,15 @@ function runPlan(meta: Record<string, unknown>, t?: Pick<TaskRow, "id" | "graph_
     graphPlans.set(t.id, plan);
   }
   return graphPlans.get(t.id) ?? null;
+}
+
+/**
+ * A job on the workers as a person's card shows it (src/lib/run-progress.ts cardProgress): a step bar only from its
+ * sampler's steps, else a bar by time from its lane's typical run, else no share. `view`: taskView's.
+ */
+export function taskCard(t: Pick<TaskRow, "lane" | "worker_id" | "progress_json" | "started_at" | "claimed_at">, view: ProgressView, now = Date.now()): CardProgress {
+  const p = taskProgress(t);
+  return cardProgress(view, { runMs: now - (t.started_at ?? t.claimed_at ?? now), typicalMs: cardTypicalMs(t, now), shown: p?.shown });
 }
 
 /**
@@ -1897,7 +1906,8 @@ async function pollComputer(principal: Principal, meta: Record<string, unknown>,
   if (!tenantAccount()) return { state: res.state, progress: res.progress, message: res.message, ...clocks };
   if (t.state === "waiting") return { state: "queued", message: POOL_WORDS.inLine, ...clocks };
   // Working: its stage, with the sampler's step ("Working · Step 3 of 6"), as the server reads it.
-  const words = res.state !== "running" ? POOL_WORDS.working : t.state === "collecting" ? POOL_WORDS.finishing : t.state === "running" ? poolRunWords(taskView(t, meta)) : POOL_WORDS.working;
+  const view = t.state === "running" ? taskView(t, meta) : null;
+  const words = res.state !== "running" ? POOL_WORDS.working : t.state === "collecting" ? POOL_WORDS.finishing : view ? withLeft(poolRunWords(view), view.stage === "loading" ? undefined : taskCard(t, view).leftMin) : POOL_WORDS.working;
   return { state: "running", progress: res.progress, message: words, ...clocks };
 }
 
@@ -1964,6 +1974,12 @@ async function pollTask(principal: Principal, t: TaskRow, meta: Record<string, u
     case "running": {
       // Its stages: getting ready, the sampler's steps, then the nodes after it; never less than this try showed.
       const view = taskView(t, meta);
+      // A job on the workers: honest about what is known (taskCard). A step bar, a bar by its lane's time, or none.
+      if (t.pools) {
+        const card = taskCard(t, view);
+        if (card.share !== null) noteShown(t.id, card.share);
+        return { state: "running", ...(card.share !== null && { progress: card.share }), message: down ?? withLeft(runWords(kind, view), card.leftMin), ...(sentAt && { sentAt }) };
+      }
       noteShown(t.id, view.share);
       return { state: "running", progress: view.share, message: down ?? runWords(kind, view), ...(sentAt && { sentAt }) };
     }

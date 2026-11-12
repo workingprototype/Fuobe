@@ -48,6 +48,41 @@ export type TabFailure = (typeof TAB_FAILURES)[number];
 export const GIVE_BACK = ["stalled", "run-limit", "media", "update-worker", "outside-ceiling", "self-check"] as const;
 export type GiveBackWhy = (typeof GIVE_BACK)[number];
 
+/**
+ * Is a running job really moving? What a worker adds to its "running" reports and to each running job in its beats.
+ * Both are optional: an older worker sends neither, and an older studio ignores them.
+ */
+export interface JobMotion {
+  /**
+   * How long ago (ms) its watchdog last saw the job move (a step, a node, its place, a pass). A length, never a clock
+   * time: the studio takes it from its own clock, so the PC's clock can't skew it.
+   */
+  movedAgoMs?: number;
+  /** How busy its GPU is now (nvidia-smi's utilization, 0-100), or null when it can't say. */
+  gpuBusy?: number | null;
+}
+
+/**
+ * What its ComfyUI runs now, for the owner's view (a "running" report): the running node's class and title from the
+ * job's graph (short and cleaned: never a file path or prompt text, NodeFacts), and a meta-batch job's pass.
+ */
+export interface NodeFacts {
+  nodeClass?: string;
+  nodeTitle?: string;
+  /** A meta-batch job: the pass it runs now, of all its passes. */
+  pass?: { n: number; of: number };
+}
+
+/** A node class as it may be shown: letters, digits and a few marks, at most 64 characters (else none). */
+export const cleanNodeClass = (v: unknown): string | undefined => (typeof v === "string" && /^[\w .+:|()-]{1,64}$/.test(v.trim()) ? v.trim() : undefined);
+
+/** A node's title as it may be shown: one short line with no path, at most 48 characters (else none). */
+export const cleanNodeTitle = (v: unknown): string | undefined => {
+  if (typeof v !== "string") return undefined;
+  const t = v.replace(/\s+/g, " ").trim();
+  return t && t.length <= 48 && !/[\\/<>{}"`]|https?:|\.(safetensors|ckpt|pt|pth|gguf|bin|png|jpe?g|webp|mp4|wav)\b/i.test(t) ? t : undefined;
+};
+
 /** What the tab reports about one task. */
 export type ReportEvent =
   /**
@@ -65,8 +100,9 @@ export type ReportEvent =
   /**
    * Running: the sampler's steps, and the node. A worker may add its ComfyUI's latest preview (`preview`: a JPEG as
    * base64, at most PREVIEW_LIMITS.maxBytes, at most one every PREVIEW_LIMITS.everyMs). A larger one is dropped.
+   * A worker adds its watchdog's facts (JobMotion).
    */
-  | { event: "running"; value?: number; max?: number; node?: string; nodesDone?: number; preview?: string }
+  | ({ event: "running"; value?: number; max?: number; node?: string; nodesDone?: number; preview?: string } & JobMotion & NodeFacts)
   /**
    * Finished: its /history entry. A worker adds the most VRAM it took (for the benchmarks), how long its ComfyUI spent
    * executing the job (`execMs`: execution only, no waits, no uploads), its GPU's name (`device`), and `kept` when the
@@ -276,11 +312,12 @@ export interface WorkerBeat {
    * ("waiting-for-yield", "waiting-for-yield:no-answer").
    */
   local: { paused: boolean; why: string | null; until: number | null };
-  gpu: { otherApps: { pid: number; name: string; vramBytes: number }[]; tempC: number | null };
+  /** `busyPct`: how busy its GPU is (nvidia-smi utilization, 0-100); null or absent when unknown (an older worker). */
+  gpu: { otherApps: { pid: number; name: string; vramBytes: number }[]; tempC: number | null; busyPct?: number | null };
   facts?: ComputerFacts;
   inventoryHash: string | null;
   warmLane: string | null;
-  running: { task: string; position?: number; value?: number; max?: number; node?: string; nodesDone?: number }[];
+  running: ({ task: string; position?: number; value?: number; max?: number; node?: string; nodesDone?: number } & JobMotion)[];
   stopped: string[];
   /** The tasks whose finished results the worker keeps on its disk (a stop-now leaves them its own, to send them up). */
   held?: string[];
@@ -299,7 +336,7 @@ export interface WorkerBeat {
    */
   cpuSlot?: CpuSlot | null;
   /** The tasks its CPU slot works on, with where each is (as `running` for its GPU's). */
-  cpuRunning?: { task: string; position?: number; value?: number; max?: number; node?: string; nodesDone?: number }[];
+  cpuRunning?: ({ task: string; position?: number; value?: number; max?: number; node?: string; nodesDone?: number } & JobMotion)[];
   /**
    * Why it doesn't start the line's work now although it may work, when it says (absent: it holds nothing back, or it
    * is an older worker program): one of HOLDING_WHY's keys, since when, and the task it took, if it holds one.

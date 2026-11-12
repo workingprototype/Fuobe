@@ -347,13 +347,15 @@ export function accountOfPerson(key: string): string | null {
   return rows.find((r) => personKey(r.account) === key)?.account ?? null;
 }
 
-/** An override as the admin API shows it: a person by their key (never an account id), a run by its id. */
+/** An override as the admin API shows it: a person by their key (never an account id), a run by its id and its rows. */
 export function overrideView(o: QueueOverride) {
   return {
     id: o.id,
     kind: o.kind,
     action: o.action,
     generationId: o.kind === "run" ? o.target : null,
+    // Every row of the run it covers (the run pressed and the other steps of the same Run): a hold on one step holds them all.
+    generations: o.kind === "run" ? o.generations : [],
     person: o.kind === "person" ? personKey(o.target) : null,
     guest: o.kind === "person" && o.target.startsWith("guest"),
     workerId: o.workerId,
@@ -409,7 +411,7 @@ export function checkOverride(body: unknown, now = Date.now()): OverrideInput | 
 }
 
 /** SQL: row `g` was made by the same press of Run as the row asked about (pool.ts SAME_PRESS). */
-const SAME_PRESS = "(CASE WHEN @hold IS NOT NULL THEN json_extract(g.request_json, '$.hold') IS @hold ELSE @batch IS NOT NULL AND g.batch_id IS @batch END)";
+export const SAME_PRESS = "(CASE WHEN @hold IS NOT NULL THEN json_extract(g.request_json, '$.hold') IS @hold ELSE @batch IS NOT NULL AND g.batch_id IS @batch END)";
 
 /** A run's rows: it and every other step the same press made (null: no such run). */
 export function runRows(generationId: string): { generations: string[]; account: string | null; status: string } | null {
