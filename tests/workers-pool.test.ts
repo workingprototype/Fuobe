@@ -26,6 +26,7 @@ const lanesModule = await import("@/lib/lanes");
 const { lanesFor, needsOf, laneOf } = lanesModule;
 const { loadIndex } = await import("@/server/gpu/index-file");
 const { QUEUE_DEFAULTS, queueSettings, runCeilingMs, saveQueueSettings } = await import("@/server/queue-settings");
+const { META_BATCH_HISTORY } = await import("@/lib/relay");
 
 const LANE_A = "aaaaaaaaaaaa";
 const LANE_B = "bbbbbbbbbbbb";
@@ -919,6 +920,20 @@ describe("a worker's own reports: giving a job back, its execution time, the inp
     };
     return { t, say };
   }
+
+  it("a meta-batch job's finished passes are taken however many there are, up to what a worker reads back", async () => {
+    clock = Date.now();
+    const pass = (i: number) => ({ prompt: [i, `p-${i}`], status: { completed: true, status_str: "success" }, outputs: {} });
+    const id = task();
+    const { t, say } = await routed(worker("many-passes"), id);
+    expect((await say({ event: "sent", promptId: t.promptId })).status).toBe(200);
+    // 120 passes: a 10 s clip upscaled from 1080p to 4K at 2 frames a pass.
+    expect((await say({ event: "passes", running: false, entries: Array.from({ length: 120 }, (_, i) => pass(i)) })).status).toBe(200);
+    const over = task();
+    const late = await routed(worker("too-many-passes"), over);
+    expect((await late.say({ event: "sent", promptId: late.t.promptId })).status).toBe(200);
+    expect((await late.say({ event: "passes", running: false, entries: Array.from({ length: META_BATCH_HISTORY + 1 }, (_, i) => pass(i)) })).status).toBe(400);
+  });
 
   it("a job given back goes back in line with its place, counts as an attempt, and the third time fails in plain words", async () => {
     clock = Date.now();

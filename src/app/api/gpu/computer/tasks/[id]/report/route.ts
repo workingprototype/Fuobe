@@ -1,5 +1,5 @@
 import { cleanNodeTimes } from "@/lib/node-times";
-import { GIVE_BACK, PREVIEW_LIMITS, previewOf, RELAY_LIMITS, TAB_FAILURES, type ReportEvent } from "@/lib/relay";
+import { GIVE_BACK, META_BATCH_HISTORY, PREVIEW_LIMITS, previewOf, RELAY_LIMITS, TAB_FAILURES, type ReportEvent } from "@/lib/relay";
 import { gateAsProxy, readBodyWithin } from "@/server/direct-gate";
 import { callerKey, principalOf, rateOf, relayAnswer } from "@/server/computer/http";
 import { noteFinished } from "@/server/computer/bench";
@@ -51,7 +51,8 @@ function eventOf(b: Record<string, unknown>): ReportEvent | null {
       return b.entry && typeof b.entry === "object" ? { event: e, entry: b.entry as never, ...(num(b.peakVramBytes) !== undefined && { peakVramBytes: num(b.peakVramBytes) }), ...exec, ...why, ...(nodes && { nodes }) } : null;
     }
     case "passes":
-      return Array.isArray(b.entries) && b.entries.length <= 64 ? { event: e, running: b.running === true, entries: b.entries as never, ...(b.running !== true && { ...exec, ...why }) } : null;
+      // Every pass a meta-batch job ran, as many as a worker reads back (a long clip upscaled to 4K takes 100 or more).
+      return Array.isArray(b.entries) && b.entries.length <= META_BATCH_HISTORY ?{ event: e, running: b.running === true, entries: b.entries as never, ...(b.running !== true && { ...exec, ...why }) } : null;
     case "give-back":
       return typeof b.why === "string" && (GIVE_BACK as readonly string[]).includes(b.why) ? { event: e, why: b.why as never } : null;
     case "failed":
