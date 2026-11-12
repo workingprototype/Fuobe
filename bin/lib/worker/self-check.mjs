@@ -3,7 +3,7 @@
 // change nothing. So the worker runs the detector on one fixed photo (its face is about 168 px tall): after each start
 // of its ComfyUI, and before each job that detects faces. It takes about a second. A reading outside FACE_RANGE starts
 // its ComfyUI again, then checks once more; a second failure gives the job back to the line, and the worker pauses
-// itself ("self-check") for an hour.
+// itself ("self-check") for 5 minutes.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,6 +69,16 @@ export function faceHeight(report) {
   return m ? { min: Number(m[1]), mean: Number(m[2]), max: Number(m[3]) } : null;
 }
 
+/** ComfyUI's reason a check failed, as one short line for the worker's log (no folders: a path keeps only its file name). */
+export function shortDetail(s) {
+  return String(s ?? "")
+    .replace(/[A-Za-z]:[\\/][^\s'"]*[\\/]([^\\/\s'"]+)/g, "$1")
+    .replace(/\/(?:[^/\s'"]+\/)+([^/\s'"]+)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
 /** Does this reading pass? Every frame's height (one frame here) has to be inside FACE_RANGE. */
 export const facePasses = (h) => !!h && h.min >= FACE_RANGE.min && h.max <= FACE_RANGE.max;
 
@@ -86,8 +96,8 @@ export async function runSelfCheck(fetchFn, base, o = {}) {
   form.append("image", new Blob([photo], { type: "image/jpeg" }), SELF_CHECK_INPUT);
   form.append("overwrite", "true");
   form.append("type", "input");
-  const up = await fetchFn(`${base}/upload/image`, { method: "POST", body: form }).catch(() => null);
-  if (!up?.ok) return { ok: false, height: null, why: "upload" };
+  const up = await fetchFn(`${base}/upload/image`, { method: "POST", body: form }).catch((e) => ({ ok: false, status: 0, text: async () => String(e?.message ?? e) }));
+  if (!up?.ok) return { ok: false, height: null, why: "upload", detail: shortDetail(`HTTP ${up?.status ?? 0} ${await up?.text?.().catch(() => "")}`) };
   const sent = await fetchFn(`${base}/prompt`, json({ prompt: selfCheckGraph(o.n ?? 0), client_id: o.clientId ?? "fuobe-self-check" })).catch(() => null);
   const id = sent?.ok ? (await sent.json().catch(() => ({})))?.prompt_id : null;
   if (typeof id !== "string" || !id) return { ok: false, height: null, why: "refused" };
@@ -108,7 +118,10 @@ export async function runSelfCheck(fetchFn, base, o = {}) {
     await fetchFn(`${base}/interrupt`, json({ prompt_id: id })).catch(() => null);
     return { ok: false, height: null, why: "timeout" };
   }
-  if (entry.status?.status_str === "error") return { ok: false, height: null, why: "failed" };
+  if (entry.status?.status_str === "error") {
+    const err = (entry.status.messages ?? []).find((m) => Array.isArray(m) && m[0] === "execution_error")?.[1];
+    return { ok: false, height: null, why: "failed", detail: err ? shortDetail(`${err.node_type ?? ""}: ${err.exception_type ?? ""} ${err.exception_message ?? ""}`) : null };
+  }
   const text = entry.outputs?.["3"]?.text;
   const h = faceHeight(Array.isArray(text) ? text.join("\n") : text);
   if (!h) return { ok: false, height: null, why: "no-report" };

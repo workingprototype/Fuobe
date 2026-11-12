@@ -216,7 +216,7 @@ export function workerState(w: WorkerRow, now = Date.now()): { state: WorkerStat
     if (why.startsWith("gpu-busy")) return { state: "gpu-busy", words: `Your GPU is busy${why.includes(":") ? ` (${why.split(":").slice(1).join(":")})` : ""}` };
     if (why === "comfy-crashes") return { state: "comfy-down", words: "ComfyUI keeps stopping" };
     if (why === "port-busy") return { state: "comfy-down", words: "Its ComfyUI port is taken by another program" };
-    if (why === "self-check") return { state: "comfy-down", words: "Its face check didn't pass after a restart: it starts its ComfyUI again within the hour" };
+    if (why === "self-check") return { state: "comfy-down", words: "Its face check didn't pass after a restart: it checks again within 5 minutes" };
     // A model folder isn't there yet (a drive still locked after a restart): it waits for it, with its lanes as they were.
     if (why === MODELS_NOT_READY) return { state: "models-not-ready", words: "Waiting for its model folders" };
     return { state: "paused", words: w.local_until ? `Paused here until ${clock(w.local_until, tz)}` : "Paused here" };

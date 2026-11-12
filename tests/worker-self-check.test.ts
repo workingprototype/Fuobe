@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { detectsFaces, FACE_DETECTOR, FACE_RANGE, faceHeight, facePasses, runSelfCheck, SELF_CHECK_INPUT, SELF_CHECK_PHOTO, selfCheckGraph } from "../bin/lib/worker/self-check.mjs";
+import { detectsFaces, FACE_DETECTOR, FACE_RANGE, faceHeight, facePasses, runSelfCheck, SELF_CHECK_INPUT, SELF_CHECK_PHOTO, selfCheckGraph, shortDetail } from "../bin/lib/worker/self-check.mjs";
 
 const ROOT = path.resolve(__dirname, "..");
 const report = (min: number, mean: number, max: number) =>
@@ -111,5 +111,22 @@ describe("one check against its ComfyUI", () => {
     const r = await runSelfCheck(silent.fetchFn, base, { ...fast, now: () => (t += 1000), timeoutMs: 10_000 });
     expect(r).toMatchObject({ ok: false, why: "timeout" });
     expect(silent.calls.some((x) => new URL(x.url).pathname === "/interrupt")).toBe(true);
+  });
+
+  it("says why it failed: ComfyUI's error, or the upload's answer, with no folders in it", async () => {
+    const failing = standIn({ status: "error" });
+    const fetchFn = async (url: string, init?: RequestInit) => {
+      if (new URL(url).pathname === "/history/check-1") {
+        const messages = [["execution_start", {}], ["execution_error", { node_type: "LoadImage", exception_type: "PermissionError", exception_message: "[Errno 13] Permission denied: 'X:\\fuobe-worker\\work\\input\\fuobe-self-check.jpg'" }]];
+        return new Response(JSON.stringify({ "check-1": { status: { status_str: "error", completed: false, messages }, outputs: {} } }), { status: 200 });
+      }
+      return failing.fetchFn(url, init);
+    };
+    const r = await runSelfCheck(fetchFn, base, fast);
+    expect(r).toMatchObject({ ok: false, why: "failed" });
+    expect(r.detail).toBe("LoadImage: PermissionError [Errno 13] Permission denied: 'fuobe-self-check.jpg'");
+    expect(await runSelfCheck(standIn({ uploadOk: false }).fetchFn, base, fast)).toMatchObject({ why: "upload", detail: "HTTP 500 no" });
+    expect(shortDetail("OSError: /home/x/models/face/model.onnx not found " + "z".repeat(400)).startsWith("OSError: model.onnx not found")).toBe(true);
+    expect(shortDetail("z".repeat(400))).toHaveLength(200);
   });
 });

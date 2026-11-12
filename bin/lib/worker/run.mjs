@@ -64,6 +64,10 @@ export function loadRequirements(file = path.join(ROOT, "workflows/comfyui/requi
 }
 
 const HOUR = 3_600_000;
+/** After a failed face self-check, the wait before the next try of a check that did not run to the end. */
+export const SELF_CHECK_RETRY_MS = 5_000;
+/** A face self-check that failed twice (once more after a restart of its ComfyUI): face jobs wait this long, then it checks again. */
+export const SELF_CHECK_PAUSE_MS = 5 * 60_000;
 /** How long the last counters read that worked stands in for one that failed. */
 export const COUNTERS_REUSE_MS = 90_000;
 /** Busy readings in a row (5 s apart) that only the GPU's total decided, before they pause the worker. */
@@ -497,15 +501,27 @@ async function work(saved, deps, owner) {
   }
   /**
    * Its face detector's self-check (self-check.mjs) on its GPU ComfyUI, while that ComfyUI has the face nodes. A failure
-   * starts its ComfyUI again and checks once more; a second failure pauses the worker ("self-check") for an hour. True
-   * when it passed, or when there is nothing to check.
+   * starts its ComfyUI again and checks once more; a second failure pauses face work ("self-check") for
+   * SELF_CHECK_PAUSE_MS (5 minutes). True when it passed, or when there is nothing to check.
    */
   async function checkFaces(when) {
     if (!faceNodes || !comfy.ready) return true;
     const once = () => runSelfCheck((url, init) => comfy.fetch(url, init), comfy.base, { n: ++faceChecks, now, sleep });
-    const first = await once();
+    const read = (r) => `${r.height === null ? "no face" : `${Math.round(r.height)} px`} (${r.why}${r.detail ? `: ${r.detail}` : ""})`;
+    let first = await once();
     if (first.ok) return true;
-    log(`Its face check ${when} read ${first.height === null ? "no face" : `${Math.round(first.height)} px`} (${first.why}): starting its ComfyUI again.`);
+    // A check that didn't run to the end (its graph failed, its photo didn't upload, it timed out) is often a ComfyUI
+    // that has only just started: one more try after a few seconds, before it is started again.
+    if (first.why !== "height" && first.why !== "no-report") {
+      log(`Its face check ${when} didn't finish: ${read(first)}. Trying once more in ${Math.round(SELF_CHECK_RETRY_MS / 1000)} s.`);
+      await sleep(SELF_CHECK_RETRY_MS);
+      first = await once();
+      if (first.ok) {
+        log(`Its face check passed on the second try (${Math.round(first.height)} px).`);
+        return true;
+      }
+    }
+    log(`Its face check ${when} read ${read(first)}: starting its ComfyUI again.`);
     // While it starts again, the loop starts no ComfyUI of its own (a start under way already holds `starting`).
     const mine = !starting;
     const again = (async () => {
@@ -530,7 +546,7 @@ async function work(saved, deps, owner) {
     }
     comfyTrouble = "self-check";
     troubleAt = now();
-    log(`Its face check failed again after the restart (${second.why}): face jobs go back in line, and it pauses for an hour.`);
+    log(`Its face check failed again after the restart (${second.why}${second.detail ? `: ${second.detail}` : ""}): face jobs go back in line, and it checks again in ${Math.round(SELF_CHECK_PAUSE_MS / 60_000)} minutes.`);
     return false;
   }
   // One look at a time; the next beat carries a changed hash, and the studio then asks for the list.
@@ -1283,8 +1299,8 @@ async function work(saved, deps, owner) {
       awake.set(!!answer?.worker && (busyJob || busyCpu || hold.ids().length > 0 || !!mayWork()));
       // A taken port is tried again (a bind test, never a connection) once a minute.
       if (comfyTrouble === "port-busy" && t - troubleAt >= 60_000) comfyTrouble = null;
-      // A failed face self-check: an hour later its ComfyUI starts again, and checks again first.
-      if (comfyTrouble === "self-check" && t - troubleAt >= HOUR) comfyTrouble = null;
+      // A failed face self-check: five minutes later its ComfyUI starts again, and checks again first.
+      if (comfyTrouble === "self-check" && t - troubleAt >= SELF_CHECK_PAUSE_MS) comfyTrouble = null;
       const s = state();
       if (s !== lastState) {
         lastState = s;
