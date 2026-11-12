@@ -13,6 +13,8 @@ import { installedDbs, type DbsModel } from "./av/split";
 import type { GenInput, Operation } from "./catalog/types";
 import type { ComfyWorkflow } from "./comfy";
 import { ComposeError, composeWorkflow, withoutSaveMetadata, type ComposeCatalog, type ComposedSize, type ComposeRequest } from "./comfy-compose";
+import { swapGraphFiles } from "./gpu/model-variants";
+import type { RequirementIndex } from "./gpu/types";
 import { ceilingProblem, FILE_SETTINGS, ticketProblem, TICKET_VERSION, type Ceiling, type JobTicket, type TicketFacts, type TicketInput, type TicketInputKind } from "./job-ticket";
 import type { MediaInfo } from "./media-probe";
 
@@ -186,10 +188,11 @@ export function graphFingerprint(graph: ComfyWorkflow, made: { data: Uint8Array 
  * catalog and no facts of any PC, as a worker checks it (composeTicket). Null when the ticket doesn't compose.
  */
 export async function ticketGraphSha(job: { ticket: JobTicket; generationId: string; inputs: { name: string; sha256: string }[] }, env: { catalog: ComposeCatalog; catalogVersion: string }): Promise<string | null> {
-  const { graphSha: _old, runLimitMs: _run, stallMs: _stall, ...ticket } = job.ticket;
+  const { graphSha: _old, runLimitMs: _run, stallMs: _stall, variant: _variant, ...ticket } = job.ticket;
   void _old;
   void _run;
   void _stall;
+  void _variant;
   const r = await composeOne({ ...job, ticket: { ...ticket, catalogVersion: env.catalogVersion } }, { catalog: env.catalog, catalogVersion: env.catalogVersion }, false).catch(() => null);
   return r?.ok ? graphFingerprint(r.graph, r.made) : null;
 }
@@ -210,6 +213,31 @@ export const catalogKnows = (catalog: ComposeCatalog, id: string) => catalog.has
  * given back as they came out, for the studio to stage in place of the old ones, never checked against them.
  */
 export async function composeTicket(job: TicketJob, env: ComposeEnv): Promise<TicketOutcome> {
+  const r = await composeAsMade(job, env);
+  return r.ok ? withVariant(r, job.ticket as Partial<JobTicket>, env) : r;
+}
+
+/**
+ * A composed graph with the ticket's model variant written in (JobTicket.variant: src/lib/gpu/model-variants.ts), as this
+ * build's own catalog defines that variant for the workflow: the same files, or the job goes back in line for an updated
+ * worker. The graph's fingerprint is always checked before (composeAsMade): a variant is chosen per worker at the claim.
+ */
+function withVariant(r: Extract<TicketOutcome, { ok: true }>, t: Partial<JobTicket>, env: ComposeEnv): TicketOutcome {
+  const v = t.variant;
+  if (!v) return r;
+  const changed = (detail: string): TicketOutcome => ({ ok: false, reason: "update-worker", detail, graphChanged: true });
+  const own = env.index?.workflows[r.workflowId]?.variants?.find((x) => x.id === v.id);
+  const same = !!own && Object.keys(own.files).length === Object.keys(v.files).length && Object.entries(own.files).every(([from, to]) => v.files[from] === to);
+  if (!own || !same) return changed("the ticket's model variant isn't this build's");
+  try {
+    return { ...r, graph: swapGraphFiles(r.graph, own.files, env.index!) };
+  } catch {
+    return changed("the ticket's model variant names a file this build doesn't have");
+  }
+}
+
+/** composeTicket before a model variant: the graph the studio's composer makes from the ticket. */
+async function composeAsMade(job: TicketJob, env: ComposeEnv): Promise<TicketOutcome> {
   const t = job.ticket as Partial<JobTicket> | null;
   const other = !env.remake && !!t && typeof t === "object" && t.catalogVersion !== env.catalogVersion && typeof t.graphSha === "string" && /^[0-9a-f]{64}$/.test(t.graphSha);
   if (!other) return composeOne(job, env, false);
@@ -227,7 +255,16 @@ export async function composeTicket(job: TicketJob, env: ComposeEnv): Promise<Ti
 }
 
 type TicketJob = { ticket: unknown; generationId: string; inputs: { name: string; sha256: string }[] };
-type ComposeEnv = { catalog: ComposeCatalog; catalogVersion: string; ceiling?: Ceiling | null; laneOf?: (workflowId: string) => string | null; facts?: WorkerFacts; remake?: boolean };
+type ComposeEnv = {
+  catalog: ComposeCatalog;
+  catalogVersion: string;
+  ceiling?: Ceiling | null;
+  laneOf?: (workflowId: string) => string | null;
+  facts?: WorkerFacts;
+  remake?: boolean;
+  /** This build's requirement index: the model variants a ticket may name (none given: a ticket that names one is refused). */
+  index?: Pick<RequirementIndex, "files" | "workflows">;
+};
 
 async function composeOne(job: TicketJob, env: ComposeEnv, otherCatalog: boolean): Promise<TicketOutcome> {
   if (!GENERATION_ID.test(String(job.generationId))) return { ok: false, reason: "bad-ticket", detail: "not a run id" };

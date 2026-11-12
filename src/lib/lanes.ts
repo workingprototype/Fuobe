@@ -89,15 +89,27 @@ export function allLanes(index: RequirementIndex, sha: Sha): { lane: string; lab
   return [...by].map(([lane, workflows]) => ({ lane, label: laneLabel(index, lane, sha), workflows })).sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/** Index files as a task needs them (folder, name, exact size, sha256 when pinned). */
+const fileNeeds = (index: RequirementIndex, keys: readonly string[]): FileNeed[] =>
+  keys
+    .map((k) => index.files[k as keyof RequirementIndex["files"]])
+    .filter(Boolean)
+    .map((f) => ({ folder: f.folder, name: f.file, size: f.sizeBytes, sha256: f.sha256 ?? null }));
+
 /** What a workflow's task needs: its default files (folder, name, exact size, sha256 when pinned), packs and VRAM (with the tolerance). */
 export function needsOf(index: RequirementIndex, workflowId: string): Needs | null {
   const wf = index.workflows[workflowId];
   if (!wf) return null;
-  const files = wf.files
-    .map((k) => index.files[k])
-    .filter(Boolean)
-    .map((f) => ({ folder: f.folder, name: f.file, size: f.sizeBytes, sha256: f.sha256 ?? null }));
-  return { workflowId, files, packs: Object.keys(wf.packs).sort(), minVramBytes: minVramBytesFor(wf.vramGb) };
+  return { workflowId, files: fileNeeds(index, wf.files), packs: Object.keys(wf.packs).sort(), minVramBytes: minVramBytesFor(wf.vramGb) };
+}
+
+/**
+ * The files of each of a workflow's model variants (src/lib/gpu/model-variants.ts): its own files with the variant's in
+ * their place, in the catalog's order of preference.
+ */
+export function variantNeeds(index: RequirementIndex, workflowId: string): { id: string; files: FileNeed[] }[] {
+  const wf = index.workflows[workflowId];
+  return (wf?.variants ?? []).map((v) => ({ id: v.id, files: fileNeeds(index, wf.files.map((k) => v.files[k] ?? k)) }));
 }
 
 /** The kinds of input file a worker may take. A worker makes every clip and sound again before its ComfyUI reads it. */
@@ -160,8 +172,8 @@ export function hasFile(inv: Inventory, need: FileNeed): boolean {
 export const hasFiles = (inv: Inventory, needs: readonly FileNeed[] | undefined): boolean => !needs?.length || needs.every((n) => hasFile(inv, n));
 
 /**
- * What a worker can run with what it has: the workflows whose files and packs are all there (and whose packs' node
- * classes its ComfyUI loaded, where it said), the lanes whose every workflow runs, and, for the other lanes, what it lacks. A task goes only to a worker that can run its workflow.
+ * What a worker can run with what it has: the workflows whose files (its own, or one of its variants') and packs are all
+ * there (and whose packs' node classes its ComfyUI loaded, where it said), the lanes whose every workflow runs, and, for the other lanes, what it lacks. A task goes only to a worker that can run its workflow.
  */
 export function lanesFor(
   index: RequirementIndex,
@@ -177,7 +189,9 @@ export function lanesFor(
     if (index.workflows[id].isolated) continue;
     const lane = laneOf(index, id, sha)!;
     const n = needsOf(index, id)!;
-    const missingFiles = n.files.filter((f) => !hasFile(inv, f));
+    // Its own files, or every file of one of its variants: a worker that has either may run it.
+    let missingFiles = n.files.filter((f) => !hasFile(inv, f));
+    if (missingFiles.length && variantNeeds(index, id).some((v) => hasFiles(inv, v.files))) missingFiles = [];
     const missingPacks = n.packs.filter((p) => !packs.has(p));
     const missingMedia = mediaOf(index.workflows[id]).filter((k) => !takes.has(k));
     const notLoaded = unloadedNodes(index.workflows[id], packs);

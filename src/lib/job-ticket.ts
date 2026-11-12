@@ -80,6 +80,18 @@ export interface JobTicket {
   /** Set at the claim: how long the job may run, and go without progress. */
   runLimitMs?: number;
   stallMs?: number;
+  /**
+   * Set at the claim: the model variant this worker runs the workflow with (src/lib/gpu/model-variants.ts), its id and
+   * files (the workflow's file → the file in its place). The worker composes the graph, then writes in the variant as its
+   * own catalog defines it, which must be these same files.
+   */
+  variant?: TicketVariant;
+}
+
+/** A job ticket's model variant (JobTicket.variant). */
+export interface TicketVariant {
+  id: string;
+  files: Record<string, string>;
 }
 
 /** Why a ticket can't be used: an older or newer catalog ("update-worker"), or settings outside their rules. */
@@ -308,6 +320,26 @@ const FACTS = shape({
 export const WORKFLOW_ID = /^[a-z0-9][a-z0-9._-]{0,95}(\{n\}[a-z0-9._-]{0,32})?$/i;
 const OP = /^[a-z0-9][a-z0-9-]{0,47}$/;
 const OUTPUT_KINDS = ["image", "video", "audio", "text", "model3d", "frame", "file"];
+/** A model variant's id, and a model file as "folder/file" (the catalog's names: no climbing out, no root or drive). */
+const VARIANT_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const MODEL_KEY = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.+ ()/-]{1,200}$/;
+const modelKeyOk = (k: string) => MODEL_KEY.test(k) && !k.split("/").some((part) => part === "" || part === "." || part === "..");
+
+/** What is wrong with a ticket's model variant, or null: an id and a few files, each "folder/file" → "folder/file" of one folder. */
+function variantProblem(v: unknown): string | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return "not a variant";
+  const x = v as Record<string, unknown>;
+  if (Object.keys(x).some((k) => k !== "id" && k !== "files")) return "an unknown field";
+  if (typeof x.id !== "string" || !VARIANT_ID.test(x.id)) return "not a variant id";
+  const files = x.files;
+  if (!files || typeof files !== "object" || Array.isArray(files)) return "no files";
+  const pairs = Object.entries(files as Record<string, unknown>);
+  if (!pairs.length || pairs.length > 16) return "files out of range";
+  for (const [from, to] of pairs) {
+    if (typeof to !== "string" || !modelKeyOk(from) || !modelKeyOk(to)) return "a file isn't a model file";
+  }
+  return null;
+}
 
 /**
  * Why a ticket can't be used, or null. `o.catalogVersion`: the reader's own (another one is "update-worker"); `o.known`:
@@ -321,7 +353,7 @@ export function ticketProblem(
   const bad = (detail: string): TicketRefusal => ({ reason: "bad-ticket", detail });
   if (!t || typeof t !== "object" || Array.isArray(t)) return bad("not a ticket");
   const k = t as Partial<JobTicket> & Record<string, unknown>;
-  for (const key of Object.keys(k)) if (!["v", "workflowId", "catalogVersion", "op", "settings", "inputs", "outputs", "size", "loraSlot", "graphSha", "runLimitMs", "stallMs"].includes(key)) return bad(`${key} isn't part of a ticket`);
+  for (const key of Object.keys(k)) if (!["v", "workflowId", "catalogVersion", "op", "settings", "inputs", "outputs", "size", "loraSlot", "graphSha", "runLimitMs", "stallMs", "variant"].includes(key)) return bad(`${key} isn't part of a ticket`);
   if (k.v !== TICKET_VERSION) return { reason: "update-worker", detail: "another ticket version" };
   if (typeof k.catalogVersion !== "string" || !SHA.test(k.catalogVersion)) return bad("no catalog version");
   if (k.graphSha !== undefined && (typeof k.graphSha !== "string" || !SHA.test(k.graphSha))) return bad("graphSha isn't a SHA-256");
@@ -333,6 +365,7 @@ export function ticketProblem(
   if (typeof k.op !== "string" || !OP.test(k.op)) return bad("not an operation");
   if (k.loraSlot !== undefined && typeof k.loraSlot !== "boolean") return bad("loraSlot isn't true or false");
   for (const f of ["runLimitMs", "stallMs"] as const) if (k[f] !== undefined && num(0, 7 * 86_400_000, true)(k[f])) return bad(`${f} out of range`);
+  if (k.variant !== undefined && variantProblem(k.variant)) return bad(`variant: ${variantProblem(k.variant)}`);
   const out = k.outputs as { count?: unknown; kind?: unknown } | undefined;
   if (!out || num(1, 256, true)(out.count) || typeof out.kind !== "string" || !OUTPUT_KINDS.includes(out.kind) || Object.keys(out).some((x) => x !== "count" && x !== "kind")) return bad("outputs out of range");
   const size = k.size as Partial<TicketSize> | undefined;

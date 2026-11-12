@@ -54,6 +54,7 @@ import { hfPage } from "@/lib/gpu/plan";
 import { fileTitle } from "@/lib/gpu/readiness";
 import { formatBytes } from "@/lib/gpu/requirements";
 import type { FileKey } from "@/lib/gpu/types";
+import { hasVariants } from "@/lib/gpu/model-variants";
 import { isEngineWords, plainEngineFailure } from "@/lib/engine-error";
 import {
   FILE_TROUBLE_WORDS,
@@ -2062,7 +2063,13 @@ export const comfyProvider: ProviderAdapter = {
       // The pack switched off in Settings → Models & licences: Idol 3D runs its core graph, as without the pack.
       idolPack: async () => ((await import("@/server/model-access")).readAccess().packs.includes(IDOL_PACK) ? false : comfyHasClass(IDOL_PACK_CLASS, worker)),
     });
-    const { manifest, workflow: wf, meta } = prepared;
+    const { manifest, workflow: composed, meta } = prepared;
+    // On a ComfyUI the GPU check reads (not the workers', whose files are chosen when one takes the job): a model variant's
+    // files when the check found them there and not the workflow's own (src/server/gpu/files-here.ts).
+    let wf = composed;
+    if (!onWorkers(computerScope()) && !onPoolWorkers() && hasVariants(loadIndex(), manifest.id)) {
+      wf = await import("../gpu/files-here").then((m) => m.withFilesHere(composed, manifest.id)).catch(() => composed);
+    }
     // MiniMax H3's 2K draft that kept its latent says where (the finish loads it only there: generations.ts latentHandOff).
     const latentAt = manifest.id === H3_LATENT_DRAFT_WORKFLOW ? comfyPlace() : null;
     if (latentAt) meta.latentAt = latentAt;

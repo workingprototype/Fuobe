@@ -1,5 +1,6 @@
 import { compareVersions, formatBytes, nameKey, splitKey, vramGb } from "./requirements";
 import { knownProblemNeed, knownProblems } from "./known-problems";
+import { fileChoices, pickFiles, type FileChoice } from "./model-variants";
 import { cardFits, GPU_NEED_TEXT, readCard, type GpuNeed } from "./rtx";
 import type { Badge, FileKey, GpuInventory, IndexFile, InventorySummary, Need, Readiness, RequirementIndex, ToolReadiness, ToolRef, VramFit } from "./types";
 
@@ -190,12 +191,30 @@ function fileNeed(key: FileKey, f: IndexFile, kind: "model" | "model-replace", c
   };
 }
 
+/**
+ * The files a workflow runs with on this ComfyUI (src/lib/gpu/model-variants.ts): its own when they are all there (or
+ * the check didn't read them), else a model variant's whose files are all there, else its own (what it needs then). So
+ * nobody downloads a file of the same model in another format when one variant is already there.
+ */
+export function filesHere(id: string, inv: GpuInventory, idx: RequirementIndex): FileChoice | null {
+  const choices = fileChoices(idx, id);
+  if (choices.length < 2) return choices[0] ?? null;
+  const there = (key: FileKey) => {
+    const f = idx.files[key];
+    const s = f ? filePresence(f, inv) : "unknown";
+    return s === "present" || s === "unobservable" || s === "unknown";
+  };
+  return pickFiles(choices, { has: there, variants: true }) ?? choices[0];
+}
+
 /** SPEC §7.1, one workflow. */
 export function workflowReadiness(id: string, inv: GpuInventory, idx: RequirementIndex, ctx: ReadinessContext): WorkflowReadiness {
   const w = idx.workflows[id];
   const base: WorkflowReadiness = { state: "unknown", needs: [], have: [], vram: { needGb: 0, fit: "any" }, firstRun: [], unvalidated: false, unobservable: [] };
   if (!w || !inv.reachable) return base;
-  const out: WorkflowReadiness = { ...base, state: "ready", firstRun: w.firstRun, unvalidated: !w.validated, vram: vramFit(w.vramGb, inv) };
+  // Its own files, or a model variant's that are all there.
+  const files = filesHere(id, inv, idx) ?? { files: w.files, vramGb: w.vramGb };
+  const out: WorkflowReadiness = { ...base, state: "ready", firstRun: w.firstRun, unvalidated: !w.validated, vram: vramFit(files.vramGb, inv) };
   if (w.isolated && ctx.computer) return { ...out, state: "unsupported", reason: "This one needs its own ComfyUI, so it can't run next to your other add-ons." };
   if (w.isolated && ctx.account) return { ...out, state: "unsupported", reason: "This one needs its own ComfyUI, so it can't run next to your other add-ons." };
   // The NVIDIA RTX Video nodes: only on an NVIDIA RTX card (frame generation: RTX 40 or later). A card the check can't
@@ -245,7 +264,7 @@ export function workflowReadiness(id: string, inv: GpuInventory, idx: Requiremen
   }
   if (packNeeds.size) out.needs.push({ key: "restart", kind: "restart", label: "Restart ComfyUI", detail: "ComfyUI loads new add-ons when it starts." });
   // Files.
-  for (const key of w.files) {
+  for (const key of files.files) {
     const f = idx.files[key];
     if (!f) continue;
     const s = filePresence(f, inv);

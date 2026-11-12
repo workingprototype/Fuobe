@@ -8,8 +8,9 @@ import path from "node:path";
  * 2: it says which inputs it takes, makes every clip and sound again, and keeps its ComfyUI behind the guard. 3: it makes
  * every picture of a job ticket again from its pixels too, and may have a CPU slot. 4: it runs a job ticket made for
  * another catalog when its own composer makes the same graph from it (the ticket's graphSha), and gives it back otherwise.
+ * 5: it composes a job ticket that names a model variant with that variant's files, as its own catalog defines them.
  */
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 
 /**
  * The protocol this worker says it speaks: PROTOCOL, or 2 when it can't make pictures again (no sharp in its checkout).

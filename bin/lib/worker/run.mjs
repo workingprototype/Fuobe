@@ -649,7 +649,7 @@ async function work(saved, deps, owner) {
     // Each workflow's lane, when its ceiling names lanes.
     if (ceiling?.lanes && !laneOf) laneOf = laneMap(index, deps.allLanes ?? (await import("./dist/lanes.mjs")).allLanes);
     const facts = composer.workerFactsFrom(await readPcAnswers(ownFetch, base));
-    const r = await composer.composeTicket({ ticket: t.ticket, generationId: t.generationId, inputs: t.inputs }, { catalog: workerCatalog(catalogDir), catalogVersion, ceiling, laneOf, facts });
+    const r = await composer.composeTicket({ ticket: t.ticket, generationId: t.generationId, inputs: t.inputs }, { catalog: workerCatalog(catalogDir), catalogVersion, ceiling, laneOf, facts, index });
     if (r.ok) return { graph: r.graph, made: r.made };
     // A ticket for the studio's newer catalog whose graph this build makes otherwise: back in line at no cost, and the
     // update is asked for at once (the updater reads it in status.json).
