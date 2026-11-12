@@ -2288,6 +2288,15 @@ async function advanceDependents(): Promise<void> {
     // An optional input whose step failed is left out (Genjutsu's anchor frame): the step runs without it.
     const skipped = allSlots.flatMap((s, i) => (s.optional && broken(allDeps[i]) ? [i] : []));
     const failedDeps = allDeps.filter((d, i) => broken(d) && !skipped.includes(i));
+    if (failedDeps.length && failedDeps.every((d) => d?.status === "canceled")) {
+      // Every step it waited for was stopped (a person's Stop on that step, or on the whole run): this one is stopped with
+      // it, never failed. Nothing went wrong, so no failure is logged, and its own hold and unused inputs go.
+      if (markCanceled(r.id)) {
+        dropHold(r.id);
+        dropUnused(allIds);
+      }
+      continue;
+    }
     if (failedDeps.length) {
       // The owner's line goes with the first step after the failure: a step whose earlier steps all stopped only because
       // theirs did (a frame-by-frame chain broken at frame 3) writes none of its own.

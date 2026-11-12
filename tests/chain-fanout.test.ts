@@ -208,12 +208,15 @@ describe("fan-out and fan-in in createPipeline", () => {
     for (const w of waiting) expect(await settle(w.id, 20_000)).toMatchObject({ status: "failed", error: "An earlier step didn't finish" });
   });
 
-  it("a person's Stop on a run makes a step already failed by the stop before it stopped, not failed", async () => {
+  it("a step waiting for a stopped step is stopped with it, never failed; one waiting for a failed step fails", async () => {
     const hold = held();
     const next = gens.createGenerations({ feature: "t", modelId: "nano-banana-2", op: "edit", prompt: "Ink" }, { dependsOn: hold.id })[0];
-    // The Stop reaches the first step; the sweep fails the waiting one before the Stop reaches it too.
+    const third = gens.createGenerations({ feature: "t", modelId: "nano-banana-2", op: "edit", prompt: "Ink" }, { dependsOn: next.id })[0];
+    // The person stops the first step only (a video before its Fix faces): the steps after it are stopped too.
     db().prepare("UPDATE generations SET status = 'canceled', completed_at = ? WHERE id = ?").run(Date.now(), hold.id);
-    expect(await settle(next.id, 20_000)).toMatchObject({ status: "failed", error: "An earlier step didn't finish" });
+    expect(await settle(next.id, 20_000)).toMatchObject({ status: "canceled", error: null });
+    expect(await settle(third.id, 20_000)).toMatchObject({ status: "canceled", error: null });
+    // A Stop that reaches it afterwards changes nothing.
     await gens.cancelGeneration(next.id);
     expect(row(next.id)).toMatchObject({ status: "canceled", error: null });
     // A step that failed because its input failed stays failed.
