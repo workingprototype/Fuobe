@@ -267,6 +267,41 @@ describe("the text slot", () => {
     expect(s.own().mb).toBe(3698);
   });
 
+  it("an answer that meets a dropped connection or a restarting studio is sent again, and arrives", async () => {
+    const site = studio([{ id: "hlp_r", lease: "LR", user: "Write a chorus", maxTokens: 200 }]);
+    let tries = 0;
+    const call = async (p: string, init?: RequestInit) => {
+      if (p === "/api/gpu/computer/text/hlp_r" && ++tries <= 2) {
+        if (tries === 1) throw new TypeError("fetch failed");
+        return new Response(null, { status: 503 });
+      }
+      return site.call(p, init);
+    };
+    const { s, logs } = makeSlot(call);
+    await until(s, Date.now, { may: true, room: "gpu" }, () => site.answers.length === 1);
+    expect(tries).toBe(3);
+    expect(site.answers[0]).toMatchObject({ id: "hlp_r", body: { lease: "LR" } });
+    expect(logs.some((l) => l.includes("A text job stopped"))).toBe(false);
+  });
+
+  it("a cut wait for a job took none: said once as that, never as a stopped job", async () => {
+    let cuts = 0;
+    const call = async (p: string) => {
+      if (p === "/api/gpu/computer/text/claim") {
+        cuts++;
+        throw new TypeError("fetch failed");
+      }
+      return new Response(null, { status: 404 });
+    };
+    const clock = { t: Date.now() };
+    const { s, logs } = makeSlot(call, { clock });
+    await until(s, () => (clock.t += 5000), { may: true, room: "gpu" }, () => cuts >= 3);
+    const said = logs.filter((l) => l.includes("wait for a text job was cut"));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain("no job was taken");
+    expect(logs.some((l) => l.includes("A text job stopped"))).toBe(false);
+  });
+
   it("a GPU that isn't free: the next start runs on the CPU only, and an idle server stops", async () => {
     const clock = { t: Date.now() };
     const site = studio([

@@ -11,6 +11,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { comfyEnv, killTree, pickPort, RotatingLog } from "./comfy.mjs";
 
+/** How many times an answer goes to the studio before it is given up (1 s, 2 s, 4 s apart). */
+export const ANSWER_TRIES = 4;
+/** A cut wait for a text job is said in the log at most this often. */
+export const WAIT_CUT_SAY_MS = 10 * 60_000;
 export const TEXT_DEFAULTS = { context: 16_384, idleMin: 10, gpuMinFreeMb: 8000, cpu: true, threads: 8, startMs: 180_000, answerMs: 120_000, claimWaitMs: 20_000 };
 
 /** A job that sends its words as they come: how often it sends them, how often it says it is alive with none, its whole time. */
@@ -330,6 +334,7 @@ export class TextSlot {
     this.job = Promise.resolve();
     this.lastJobAt = 0;
     this.missedAt = -Infinity;
+    this.waitCutSaidAt = -Infinity;
     // Ends a claim that waits for a job when the worker stops.
     this.ending = new AbortController();
     // The claim that waits now (ended when the slot stops taking jobs), and whether a job is in hand.
@@ -413,7 +418,16 @@ export class TextSlot {
       .then((had) => (this.missedAt = had ? -Infinity : this.now()))
       .catch((e) => {
         this.missedAt = this.now();
-        if (!this.ending.signal.aborted) this.log(`A text job stopped: ${e.message}`);
+        if (this.ending.signal.aborted) return;
+        // A cut wait took no job: said once in a while, not for each blip.
+        if (e?.waitCut) {
+          if (this.now() - this.waitCutSaidAt >= WAIT_CUT_SAY_MS) {
+            this.waitCutSaidAt = this.now();
+            this.log(`The text slot's ${e.message}.`);
+          }
+          return;
+        }
+        this.log(`A text job stopped: ${e.message}`);
       })
       .finally(() => (this.busy = false));
   }
@@ -437,6 +451,9 @@ export class TextSlot {
     } catch (e) {
       // The slot stopped taking jobs while it waited for one: no job, nothing went wrong.
       if (claiming.signal.aborted && !this.ending.signal.aborted) return false;
+      // The wait itself was cut (the site restarted, the network dropped for a moment): no job was taken, so nothing is
+      // lost; it asks again after a few seconds.
+      if (!this.ending.signal.aborted) throw Object.assign(new Error(`the wait for a text job was cut (${e?.message ?? e}): no job was taken, it asks again`), { waitCut: true });
       throw e;
     } finally {
       if (this.claiming === claiming) this.claiming = null;
@@ -467,9 +484,32 @@ export class TextSlot {
       answer = { error: (this.d.redact ? this.d.redact(why) : why).slice(0, 200) };
     }
     this.lastJobAt = this.now();
-    const sent = await this.d.call(`/api/gpu/computer/text/${encodeURIComponent(job.id)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lease: job.lease, ...answer }) });
-    await sent.body?.cancel().catch(() => {});
+    await this.sendAnswer(job, answer);
     return true;
+  }
+
+  /**
+   * The answer to the studio, with its lease. A dropped connection (the site restarting for a deploy, this PC's network
+   * for a moment) or a busy or restarting studio (429, 5xx) is tried again, ANSWER_TRIES times in all, so a person's
+   * answer isn't lost to a blip; any other answer (the job ended, the lease is someone else's) isn't.
+   */
+  async sendAnswer(job, answer) {
+    const sleep = this.d.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    const body = JSON.stringify({ lease: job.lease, ...answer });
+    for (let i = 1; ; i++) {
+      let res = null;
+      let err = null;
+      try {
+        res = await this.d.call(`/api/gpu/computer/text/${encodeURIComponent(job.id)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      } catch (e) {
+        err = e;
+      }
+      await res?.body?.cancel().catch(() => {});
+      const again = err !== null || res.status === 429 || res.status >= 500;
+      if (!again) return;
+      if (i >= ANSWER_TRIES) throw new Error(`its answer to text job ${job.id} didn't reach the studio after ${ANSWER_TRIES} tries (${err ? err.message : `HTTP ${res.status}`})`);
+      await sleep(1000 * 2 ** (i - 1));
+    }
   }
 
   /** The answer's words from its server. */
