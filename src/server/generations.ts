@@ -469,6 +469,24 @@ function waitingOf(r: Pick<Row, "id" | "depends_on" | "batch_id" | "request_json
 /** A run whose job was being sent when it stopped (a server cut off in the middle of the send): its provider may have it. */
 const maybeSent = (r: Pick<Row, "error" | "external_meta_json">): boolean => r.error === CUT_OFF_SENDING || typeof readMeta(r.external_meta_json).heal?.sending === "number";
 
+/** The ids a run waits for (its depends_on: one id, or a JSON list). */
+function dependsOnIds(dependsOn: string | null | undefined): string[] {
+  if (!dependsOn) return [];
+  if (!dependsOn.startsWith("[")) return [dependsOn];
+  try {
+    return (JSON.parse(dependsOn) as unknown[]).filter((x): x is string => typeof x === "string");
+  } catch {
+    return [];
+  }
+}
+
+/** The finished clips among the runs one request made: videos that no other of those runs waits for. */
+export function finalClips(runs: Generation[]): Generation[] {
+  const q = db().prepare("SELECT depends_on FROM generations WHERE id = ?").pluck();
+  const waitedOn = new Set(runs.flatMap((g) => dependsOnIds(q.get(g.id) as string | null | undefined)));
+  return runs.filter((g) => g.kind === "video" && !waitedOn.has(g.id));
+}
+
 /**
  * A run that is one step of a longer one: it waits for an earlier step, or a later step (queued or running) waits for it.
  * Run with your key can't move such a step alone (the route answers 409 CHAINED_RUN, and its tile doesn't offer it).
@@ -1713,9 +1731,11 @@ export function createGenerations(sent: GenerationRequest, opts: CreateOptions =
     const extra = { ...original.params?.extra };
     delete extra[FIX_FACES_AFTER_PARAM];
     const takes = createGenerations({ ...original, params: { ...original.params, extra } }, { batchId });
+    // Only the finished clips get Fix faces: a take can come with earlier steps of its own (a picture made first for its
+    // end frame, say), which have no video to fix.
     const fixed: Generation[] = [];
     try {
-      for (const t of takes) fixed.push(...createGenerations(fixFacesAfterStep(original), { batchId, dependsOn: t.id }));
+      for (const t of finalClips(takes)) fixed.push(...createGenerations(fixFacesAfterStep(original), { batchId, dependsOn: t.id }));
     } catch (e) {
       for (const g of [...fixed, ...takes]) void cancelGeneration(g.id);
       throw e;
