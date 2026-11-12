@@ -852,6 +852,26 @@ again with ffmpeg first: at most 512 pixels on its long side, from a local PNG o
 Without ffmpeg, only small JPEG previews go; a picture that still doesn't fit in 64 KB is not sent. The studio keeps a
 preview only from the attempt that holds the job, and drops a larger one (the progress stays).
 
+### Live hardware stats
+
+With each GPU reading (every 5 seconds) the worker also reads its PC's live hardware stats and sends the last ones in
+its beat as `stats` (src/lib/relay.ts `WorkerStats`, bin/lib/worker/stats.mjs). No extra process and no admin rights:
+
+- The GPU from the same nvidia-smi query as the busy check: load, temperature, power draw and limit, core and memory
+  clocks, VRAM used and total, fan and power state. A field nvidia-smi can't give is null. When the card idles (P8, or
+  under 5% busy and under 50 °C) yet reports more than 150 W, `powerSuspect` is true and the watts are kept as
+  reported. An nvidia-smi that refuses one of the fields gets the busy check's short query, and the whole one again
+  after 10 minutes.
+- The CPU's load from the CPU times between two readings, and the memory used and total.
+- `sensorsFile` in worker.json (none by default): a JSON file another program on the PC writes, with `at` (an ISO time),
+  `cpu` (`packageC`, `coreMaxC`, `powerW`, `clockMhz`, `vcoreV`) and `board` (`tempsC: [{ name, c }]`,
+  `fansRpm: [{ name, rpm }]`). It is read only when its `at` is within 30 seconds. A missing or half-written file, or one
+  with a byte order mark, is fine. It adds `cpuTempC` (`packageC`, else `coreMaxC`), `cpuPowerW`, `cpuClockMhz`,
+  `vcoreV` and `board` (at most 8 temperatures and 8 fans, short plain names).
+
+The studio keeps the newest per worker, cleaned and clamped, with its own receive time (`receivedAt`). A beat without
+`stats` (an older worker) leaves none. Only `GET /api/admin/workers` shows them.
+
 ### When something goes wrong
 
 The worker keeps its jobs going by itself:
@@ -1059,7 +1079,8 @@ Each worker counts against its own rate limits, so three workers that beat every
   is the studio's (`catalogCurrent`). Its state is `update-worker` while it is built from another catalog and accounts'
   runs may come to the install's GPUs. `asked` is its last claim for its GPU and the answer in words, `jobs` every job it
   holds now in either slot (stage, progress, typical run and ETA; `current` stays its GPU's job), and `lastEvent` the
-  newest row of its timeline other than a log line.
+  newest row of its timeline other than a log line. `stats` is its PC's live hardware stats from its last beat, with
+  `receivedAt` (null: none).
 - `GET /api/admin/workers/events`: the workers' timeline (above), newest first, by worker, kinds and run, in pages.
 - `PATCH /api/admin/workers/<id>`: `{ paused, pauseNow, drain, autoResume, hours, allow, claimAfterMs, switchAfterMs,
   rotate, revoke }`. Hours are `{ "always": true }` or `{ "tz": "Asia/Kolkata", "days": { "mon": [["01:00", "09:00"]] } }`.

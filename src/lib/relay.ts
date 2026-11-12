@@ -349,6 +349,45 @@ export interface WorkerBeat {
   log?: WorkerLogLine[];
   /** Local work on its PC, as the helper there last wrote it (absent: none written, or an older worker program). */
   localWork?: LocalWork | null;
+  /** Its PC's live hardware stats, read every few seconds (absent: an older worker program). For the owner only. */
+  stats?: WorkerStats;
+}
+
+/** A worker PC's GPU in its live stats (nvidia-smi). Whole numbers; null where the card doesn't say. */
+export interface WorkerGpuStats {
+  busyPct: number | null;
+  tempC: number | null;
+  powerW: number | null;
+  powerLimitW: number | null;
+  /** The card idles yet reports a high power draw: the watts are as reported, and likely wrong. */
+  powerSuspect?: true;
+  coreMHz: number | null;
+  memMHz: number | null;
+  vramUsedMb: number | null;
+  vramTotalMb: number | null;
+  fanPct: number | null;
+  /** Its power state ("P0" busiest to "P8" idle, or more). */
+  pstate: string | null;
+}
+
+/** A worker PC's live hardware stats in its beat (bin/lib/worker/stats.mjs). Sensor fields only when the PC has them. */
+export interface WorkerStats {
+  /** When the PC read them (its own clock). */
+  at: number;
+  /** Null: no NVIDIA GPU, or no reading. */
+  gpu: WorkerGpuStats | null;
+  cpuPct: number | null;
+  cpuCores: number | null;
+  ramUsedMb: number | null;
+  ramTotalMb: number | null;
+  /** From a sensors file on the PC, when there is a fresh one. */
+  cpuTempC?: number;
+  cpuPowerW?: number;
+  cpuClockMhz?: number;
+  vcoreV?: number;
+  board?: { temps: { name: string; c: number }[]; fans: { name: string; rpm: number }[] };
+  /** Free space per drive, when a later worker sends it. */
+  disks?: { drive: string; freeBytes: number; totalBytes: number }[];
 }
 
 /** A worker's log line in its beat. */

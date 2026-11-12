@@ -93,6 +93,8 @@ export interface WorkerRow {
   update_asked_at?: number | null;
   update_asked_by?: string | null;
   update_asked_commit?: string | null;
+  /** Its PC's live hardware stats (src/lib/relay.ts WorkerStats) and when the studio heard them, as its last beat said. */
+  stats_json?: string | null;
 }
 
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");

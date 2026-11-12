@@ -44,6 +44,7 @@ import { LogRing } from "./log-ring.mjs";
 import { failure, Reach, retrying } from "./retry.mjs";
 import { builtCatalogVersion, ceilingOf, ceilingWords, graphInside, laneMap, readPcAnswers, workerCatalog } from "./tickets.mjs";
 import { TEXT_DRAIN_MS, TextSlot, textSlotOf, textTurn } from "./text.mjs";
+import { CpuMeter, ramNow, readSensors, STATS_SEND_MS, statsOf } from "./stats.mjs";
 import { readLocalWork, SiteTurns, writeMode, writeSite } from "./turns.mjs";
 import { CodeWatch, headOf, restartDue, UPDATE_DEFER_MAX_MS } from "./update.mjs";
 
@@ -331,6 +332,9 @@ async function work(saved, deps, owner) {
   let packs = [];
   let invHash = null;
   let gpuInfo = { otherApps: [], tempC: null, busyPct: null };
+  // The PC's live hardware stats (stats.mjs), read with the GPU: the last reading goes in each beat.
+  let hwStats = null;
+  const cpuMeter = new CpuMeter(deps.cpuTimes);
   let lastGpuAt = 0;
   // When the GPU was last read: a reading older than GPU_BUSY_FRESH_MS says nothing about how busy it is now.
   let gpuReadAt = 0;
@@ -774,6 +778,9 @@ async function work(saved, deps, owner) {
           canRotateToken: canRotate,
           local: pause,
           gpu: gpuInfo,
+          // The PC's live hardware stats (GPU, CPU, memory, sensors); older studios ignore them.
+          // Only a recent reading: one the loop could not renew for a while never reaches the studio as new.
+          ...(hwStats && now() - hwStats.at <= STATS_SEND_MS && { stats: hwStats }),
           inventoryHash: invHash,
           warmLane: null,
           // The catalog its build composes job tickets for, and what its PC may ever run.
@@ -1065,6 +1072,12 @@ async function work(saved, deps, owner) {
       if (t - lastGpuAt >= (deps.gpuEveryMs ?? 5000)) {
         lastGpuAt = t;
         const reading = await (deps.readGpu ?? readGpu)(cfg.nvidiaSmi);
+        // The live stats from the same reading, with the CPU, the memory and the sensors file (never fails the turn).
+        try {
+          hwStats = statsOf({ at: now(), gpu: reading?.stats ?? null, cpu: cpuMeter.read(), ram: (deps.ramNow ?? ramNow)(), sensors: readSensors(cfg.sensorsFile, Date.now(), deps.readSensorsFile) });
+        } catch {
+          hwStats = null;
+        }
         if (reading) {
           const mine = text?.own() ?? { pids: [], mb: 0 };
           const own = { running: comfy.alive(), mb: await comfy.vramMb(), pid: comfy.pid, port: comfy.alive() ? comfy.port : null, job: busyJob && jobUsesGpu, extraPids: mine.pids, extraMb: mine.mb };

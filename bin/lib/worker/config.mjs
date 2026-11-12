@@ -63,6 +63,11 @@ export const DEFAULTS = {
   yieldMaxHoursPerDay: 20,
   interruptGapMin: 30,
   neverInterrupt: false,
+  /**
+   * A sensors file another program on this PC writes (CPU and motherboard temperatures, stats.mjs readSensors). None: no
+   * such readings. The worker only reads it, with its GPU reading.
+   */
+  sensorsFile: null,
 };
 
 const file = (home, name) => path.join(home, name);

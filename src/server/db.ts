@@ -1147,6 +1147,8 @@ const RELAY_COLUMNS: [string, string, string][] = [
   ["relay_workers", "update_asked_at", "INTEGER"],
   ["relay_workers", "update_asked_by", "TEXT"],
   ["relay_workers", "update_asked_commit", "TEXT"],
+  // A worker PC's live hardware stats as its last beat said, with when the studio heard them (WorkerBeat.stats).
+  ["relay_workers", "stats_json", "TEXT"],
 ];
 
 declare global {

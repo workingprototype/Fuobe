@@ -19,7 +19,7 @@ import { queueSettings, runCeilingMs } from "../queue-settings";
 import { createWorker, offerNextToken, revokeWorker, rotateWorker, type WorkerRow } from "./workers";
 import { modelLabel } from "./queue-live";
 import { effectiveMode, workerModeOf, LOCAL_WORK, lineControls, liveOverrides, modeClass, modeClassSql, overrideTargets, plainLine, poolMode, sweepControls, taskControl, DEFAULT_MODE, type EffectiveMode, type LineControls, type QueueMode, type TaskControl } from "./queue-controls";
-import type { LocalWork } from "@/lib/relay";
+import type { LocalWork, WorkerGpuStats, WorkerStats } from "@/lib/relay";
 import { cleanLogLines, lastEventOf, lastOfKind, logWorkerEvent, logWorkerEvents, setEventNames, type NewWorkerEvent, type WorkerEventKind } from "./worker-events";
 
 /**
@@ -306,7 +306,94 @@ export function cleanBeat(b: unknown): WorkerBeat {
     ...(Array.isArray(o.log) && o.log.length > 0 && { log: cleanLogLines(o.log) }),
     // Local work on its PC (counts and codes only); an older worker sends none.
     ...(o.localWork !== undefined && { localWork: cleanLocalWork(o.localWork) }),
+    // Its PC's live hardware stats; an older worker sends none.
+    ...(cleanStats(o.stats) && { stats: cleanStats(o.stats)! }),
   };
+}
+
+const whole = (v: unknown, lo: number, hi: number, digits = 0): number | null => {
+  const n = num(v);
+  if (n === null) return null;
+  const f = 10 ** digits;
+  return Math.max(lo, Math.min(hi, Math.round(n * f) / f));
+};
+const sensorName = (v: unknown): string | null => {
+  if (typeof v !== "string") return null;
+  const s = v.replace(/[^\w .:#()+/-]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 32).trim();
+  return s || null;
+};
+
+/** A beat's GPU stats as they may be kept: whole numbers in range, null where unknown; else null. */
+function cleanGpuStats(v: unknown): WorkerGpuStats | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const pstate = typeof o.pstate === "string" && /^P\d{1,2}$/.test(o.pstate) ? o.pstate : null;
+  return {
+    busyPct: whole(o.busyPct, 0, 100),
+    tempC: whole(o.tempC, -50, 150),
+    powerW: whole(o.powerW, 0, 5000),
+    powerLimitW: whole(o.powerLimitW, 0, 5000),
+    ...(o.powerSuspect === true && { powerSuspect: true as const }),
+    coreMHz: whole(o.coreMHz, 0, 20_000),
+    memMHz: whole(o.memMHz, 0, 50_000),
+    vramUsedMb: whole(o.vramUsedMb, 0, 1_000_000),
+    vramTotalMb: whole(o.vramTotalMb, 0, 1_000_000),
+    fanPct: whole(o.fanPct, 0, 100),
+    pstate,
+  };
+}
+
+/**
+ * A beat's live hardware stats as they may be kept (WorkerStats): known fields only, numbers clamped, sensor names short
+ * and plain, at most 8 board temperatures and fans and 26 drives. Null when it has no reading time.
+ */
+export function cleanStats(v: unknown): WorkerStats | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const at = num(o.at);
+  if (at === null || at <= 0) return null;
+  const opt = <K extends string>(k: K, n: number | null) => (n === null ? {} : ({ [k]: n } as Record<K, number>));
+  const list = (x: unknown) => (Array.isArray(x) ? x : []);
+  const b = (o.board && typeof o.board === "object" ? o.board : null) as Record<string, unknown> | null;
+  const temps = list(b?.temps)
+    .map((t) => ({ name: sensorName((t as Record<string, unknown>)?.name), c: whole((t as Record<string, unknown>)?.c, -50, 150) }))
+    .filter((t): t is { name: string; c: number } => !!t.name && t.c !== null)
+    .slice(0, 8);
+  const fans = list(b?.fans)
+    .map((f) => ({ name: sensorName((f as Record<string, unknown>)?.name), rpm: whole((f as Record<string, unknown>)?.rpm, 0, 30_000) }))
+    .filter((f): f is { name: string; rpm: number } => !!f.name && f.rpm !== null)
+    .slice(0, 8);
+  const disks = list(o.disks)
+    .map((d) => d as Record<string, unknown>)
+    .filter((d) => typeof d?.drive === "string" && /^[A-Z]$/.test(d.drive) && (num(d.freeBytes) ?? -1) >= 0 && (num(d.totalBytes) ?? -1) >= 0)
+    .map((d) => ({ drive: d.drive as string, freeBytes: Math.floor(num(d.freeBytes)!), totalBytes: Math.floor(num(d.totalBytes)!) }))
+    .slice(0, 26);
+  return {
+    at,
+    gpu: cleanGpuStats(o.gpu),
+    cpuPct: whole(o.cpuPct, 0, 100),
+    cpuCores: whole(o.cpuCores, 0, 4096),
+    ramUsedMb: whole(o.ramUsedMb, 0, 1e8),
+    ramTotalMb: whole(o.ramTotalMb, 0, 1e8),
+    ...opt("cpuTempC", whole(o.cpuTempC, -50, 150)),
+    ...opt("cpuPowerW", whole(o.cpuPowerW, 0, 2000)),
+    ...opt("cpuClockMhz", whole(o.cpuClockMhz, 0, 20_000)),
+    ...opt("vcoreV", whole(o.vcoreV, 0, 3, 3)),
+    ...((temps.length > 0 || fans.length > 0) && { board: { temps, fans } }),
+    ...(disks.length > 0 && { disks }),
+  };
+}
+
+/** A worker's live hardware stats as its last beat said, with when the studio heard them (`receivedAt`, its own clock). */
+export type WorkerStatsView = WorkerStats & { receivedAt: number };
+
+/** The stats a worker's last beat carried (null: none, or an older worker). The panel judges how fresh they are. */
+export function workerStatsOf(w: Pick<WorkerRow, "stats_json">): WorkerStatsView | null {
+  if (!w.stats_json) return null;
+  const raw = json<Record<string, unknown> | null>(w.stats_json, null);
+  const s = cleanStats(raw);
+  const receivedAt = num(raw?.receivedAt);
+  return s && receivedAt ? { ...s, receivedAt } : null;
 }
 
 /** A beat's `localWork` as it may be kept: a known state, a short code, a count, whether one runs, when; else null. */
@@ -372,7 +459,7 @@ export function workerBeat(w: WorkerRow, b: WorkerBeat, now = Date.now()): BeatA
     d.prepare("UPDATE relay_workers SET commit_sha = ?, behind_since = ?, update_asked_at = ? WHERE id = ?").run(b.commit ?? null, behindSince, askDone ? null : asked, w.id);
     d.prepare(
       `UPDATE relay_workers SET seen_at = ?, device = ?, protocol = ?, version = ?, paused_local = ?, local_why = ?, local_until = ?,
-         warm_lane = ?, facts_json = COALESCE(?, facts_json), catalog_version = ?, ceiling_json = ?, cpu_slot_json = ?, holding_json = ?, local_work_json = ? WHERE id = ?`,
+         warm_lane = ?, facts_json = COALESCE(?, facts_json), catalog_version = ?, ceiling_json = ?, cpu_slot_json = ?, holding_json = ?, local_work_json = ?, stats_json = ? WHERE id = ?`,
     ).run(
       now,
       device,
@@ -390,6 +477,8 @@ export function workerBeat(w: WorkerRow, b: WorkerBeat, now = Date.now()): BeatA
       b.holding ? JSON.stringify({ ...b.holding, since: Math.min(b.holding.since, now) }) : null,
       // Local work on its PC: its time never later than now either.
       b.localWork ? JSON.stringify({ ...b.localWork, at: Math.min(b.localWork.at, now) }) : null,
+      // Its PC's live stats, with when the studio heard them (none from an older worker: nothing old stays).
+      b.stats ? JSON.stringify({ ...b.stats, receivedAt: now }) : null,
       w.id,
     );
     // Its PC slept: a job taken back from it for going quiet meanwhile counts against no one.
@@ -1736,6 +1825,8 @@ export interface WorkerView {
   localWork: LocalWork | null;
   /** Its program against the studio's version: current, updating by itself, or behind long enough for the owner to act. */
   update: WorkerUpdate;
+  /** Its PC's live hardware stats from its last beat, with when the studio heard them (null: none). */
+  stats: WorkerStatsView | null;
 }
 
 /** A worker's program against the studio's version (WorkerView.update). Versions and commits as their first 12 hex. */
@@ -1961,6 +2052,7 @@ export function workerView(w: WorkerRow, now = Date.now(), typical: (lane: strin
     ownMode: workerModeOf(w),
     localWork: localWorkOf(w, now),
     update: updateOf(w, now),
+    stats: workerStatsOf(w),
   };
 }
 

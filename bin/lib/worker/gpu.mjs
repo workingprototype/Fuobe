@@ -21,7 +21,8 @@ const num = (s) => {
 };
 
 /**
- * `nvidia-smi --query-gpu=memory.used,temperature.gpu,utilization.gpu --format=csv,noheader,nounits` → the first GPU.
+ * `nvidia-smi --query-gpu=memory.used,temperature.gpu,utilization.gpu[,...] --format=csv,noheader,nounits` → the first
+ * GPU. Fields after the third are ignored here (parseGpuStats reads them).
  * `busyPct`: how busy it is (0-100), null when nvidia-smi said nothing there ([N/A], or an answer without it).
  */
 export function parseGpu(text) {
@@ -47,6 +48,56 @@ export function parseApps(text) {
     .filter((a) => a.pid > 0);
 }
 
+/**
+ * What one GPU reading asks nvidia-smi for, in this order: the first three are what the busy check reads (parseGpu), the
+ * rest are the live hardware stats (parseGpuStats). One process for all of them. No admin rights.
+ */
+export const GPU_FIELDS = "memory.used,temperature.gpu,utilization.gpu,power.draw,power.limit,clocks.gr,clocks.mem,memory.total,fan.speed,pstate";
+/** The busy check's own fields: the fallback for an nvidia-smi that refuses a field of GPU_FIELDS. */
+export const GPU_FIELDS_SHORT = "memory.used,temperature.gpu,utilization.gpu";
+/** After a refused GPU_FIELDS query, the short one is used for this long before GPU_FIELDS is tried again. */
+export const FULL_QUERY_RETRY_MS = 10 * 60_000;
+/** Above this many watts while the GPU idles, its power reading is flagged (`powerSuspect`): some cards report far too much. */
+export const IDLE_POWER_SUSPECT_W = 150;
+
+// A field nvidia-smi can't give ("[N/A]", "[Not Supported]", nothing): null, never 0.
+const field = (s) => {
+  const t = String(s ?? "").trim();
+  if (!t) return null;
+  const v = Number(t);
+  return Number.isFinite(v) ? v : null;
+};
+const within = (v, lo, hi) => (v === null ? null : Math.max(lo, Math.min(hi, Math.round(v))));
+
+/**
+ * The live hardware stats from a GPU_FIELDS line (the first GPU), or null when there is no line or no memory reading.
+ * Every number is whole and clamped; a field nvidia-smi didn't give is null. `powerSuspect`: the card idles (P8, or under
+ * 5% busy and under 50 °C) yet says it draws over IDLE_POWER_SUSPECT_W. The reading itself is kept as reported.
+ */
+export function parseGpuStats(text) {
+  const line = String(text ?? "").split(/\r?\n/).find((l) => l.trim());
+  if (!line) return null;
+  const f = line.split(",");
+  const vramUsedMb = within(field(f[0]), 0, 1_000_000);
+  if (vramUsedMb === null) return null;
+  const ps = String(f[9] ?? "").trim();
+  const pstate = /^P\d{1,2}$/.test(ps) ? ps : null;
+  const stats = {
+    busyPct: within(field(f[2]), 0, 100),
+    tempC: within(field(f[1]), -50, 150),
+    powerW: within(field(f[3]), 0, 5000),
+    powerLimitW: within(field(f[4]), 0, 5000),
+    coreMHz: within(field(f[5]), 0, 20_000),
+    memMHz: within(field(f[6]), 0, 50_000),
+    vramUsedMb,
+    vramTotalMb: within(field(f[7]), 0, 1_000_000),
+    fanPct: within(field(f[8]), 0, 100),
+    pstate,
+  };
+  const idle = pstate === "P8" || (stats.busyPct !== null && stats.busyPct < 5 && stats.tempC !== null && stats.tempC < 50);
+  return idle && stats.powerW !== null && stats.powerW > IDLE_POWER_SUSPECT_W ? { ...stats, powerSuspect: true } : stats;
+}
+
 const run = (cmd, args) =>
   new Promise((resolve) => {
     execFile(cmd, args, { timeout: 5000, windowsHide: true }, (err, stdout) => resolve(err ? null : String(stdout)));
@@ -55,17 +106,30 @@ const run = (cmd, args) =>
 /**
  * One reading of the GPU, or null when nvidia-smi isn't there (no NVIDIA GPU: nothing to watch). `cmd`: its path, or a
  * command and its first arguments (["node", "fake-smi.mjs"] in the tests).
+ *
+ * @param {string | string[]} [cmd]
  */
 export async function readGpu(cmd = "nvidia-smi") {
   const [bin, ...pre] = Array.isArray(cmd) ? cmd : [cmd];
   const call = (args) => run(bin, [...pre, ...args]);
-  const gpu = await call(["--query-gpu=memory.used,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"]);
+  // One query for the busy check and the live stats. An nvidia-smi that refuses one of its fields answers the short one,
+  // and the whole one is tried again after FULL_QUERY_RETRY_MS.
+  const key = [bin, ...pre].join("\u0000");
+  const full = !((shortUntil.get(key) ?? 0) > Date.now());
+  let gpu = full ? await call([`--query-gpu=${GPU_FIELDS}`, "--format=csv,noheader,nounits"]) : null;
+  if (gpu === null) {
+    gpu = await call([`--query-gpu=${GPU_FIELDS_SHORT}`, "--format=csv,noheader,nounits"]);
+    if (gpu !== null && full) shortUntil.set(key, Date.now() + FULL_QUERY_RETRY_MS);
+  }
   if (gpu === null) return null;
   const g = parseGpu(gpu);
   if (!g) return null;
   const apps = parseApps((await call(["--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"])) ?? "");
-  return { ...g, apps };
+  return { ...g, apps, stats: parseGpuStats(gpu) };
 }
+
+/** The nvidia-smi commands that refused GPU_FIELDS, and until when they get the short query. */
+const shortUntil = new Map();
 
 /** The first GPU's memory in MB (`--query-gpu=memory.total`), or null when nvidia-smi can't say. */
 export async function readGpuTotal(cmd = "nvidia-smi") {
