@@ -4,8 +4,12 @@
 // whose worker has stopped (its process is gone, or its process id now belongs to another program) is taken over.
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { commandLineOf } from "./comfy.mjs";
+
+/** A lock this much older than the computer's start is from before it (the slack covers the clock and the uptime's rounding). */
+const BOOT_SLACK_MS = 60_000;
 
 /** Another worker runs on this worker folder. */
 export class WorkerRunning extends Error {
@@ -40,6 +44,10 @@ export async function workerLives(rec, o = {}) {
   const pid = Number(rec?.pid);
   if (!Number.isInteger(pid) || pid <= 0) return false;
   if (pid === process.pid) return [...held.values()].includes(rec.id);
+  // A lock written before this computer last started: its worker stopped with the computer, and its process id may
+  // now belong to another program (one whose command line can't be read would count as a worker's below).
+  const bootAt = (o.now ?? Date.now)() - (o.uptimeS ?? os.uptime()) * 1000;
+  if (typeof rec.at === "number" && rec.at < bootAt - BOOT_SLACK_MS) return false;
   if (!running(pid)) return false;
   const line = await (o.commandLineOf ?? commandLineOf)(pid);
   if (line === null || line === undefined) return true;

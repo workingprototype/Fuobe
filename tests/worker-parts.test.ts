@@ -402,6 +402,14 @@ describe("one worker at a time on a worker folder", () => {
       }
       // Its command line can't be read (another user's process): it may be a worker, so refused.
       await expect(takeLock(dir, { commandLineOf: async () => null })).rejects.toBeInstanceOf(WorkerRunning);
+      // ...unless the lock is from before the computer last started: after a crash its process id went to another
+      // program, so it is taken over.
+      const now = Date.now();
+      fs.writeFileSync(lockFile(dir), JSON.stringify({ pid: other.pid, id: "x", script: "/x/bin/fuobe.mjs", at: now - 3_600_000 }));
+      (await takeLock(dir, { commandLineOf: async () => null, now: () => now, uptimeS: 600 })).release();
+      // A lock written since the start still counts.
+      fs.writeFileSync(lockFile(dir), JSON.stringify({ pid: other.pid, id: "x", script: "/x/bin/fuobe.mjs", at: now - 300_000 }));
+      await expect(takeLock(dir, { commandLineOf: async () => null, now: () => now, uptimeS: 600 })).rejects.toBeInstanceOf(WorkerRunning);
       expect(await workerLives({ pid: other.pid, id: "x", script: "" }, { commandLineOf: async () => "node other.js" })).toBe(false);
     } finally {
       other.kill();
