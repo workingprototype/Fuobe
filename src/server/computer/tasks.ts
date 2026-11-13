@@ -634,6 +634,7 @@ export function cleanFacts(f: unknown, keep?: ComputerFacts): ComputerFacts {
     ...((o.cors === "exact" || o.cors === "any" || o.cors === "other") && { cors: o.cors }),
     ...(typeof o.guard === "boolean" && { guard: o.guard }),
     ...(typeof o.gpuGen === "string" && /^\d{1,2}\.\d{1,2}$/.test(o.gpuGen) && { gpuGen: o.gpuGen }),
+    ...(o.dynamicVramOff === true && { dynamicVramOff: true as const }),
     ...(loras && { loras }),
   };
 }

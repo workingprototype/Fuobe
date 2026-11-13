@@ -6,7 +6,7 @@
  *
  * Pure: the server, the worker program and the tests share it. `sha256hex` is passed in (node:crypto on the server).
  */
-import type { IndexWorkflow, RequirementIndex } from "./gpu/types";
+import type { IndexWorkflow, RequirementIndex, StreamNeed } from "./gpu/types";
 
 export const BIG_FILE_BYTES = 2 * 2 ** 30;
 export const SMALL_LANE = "small";
@@ -50,6 +50,34 @@ export const VRAM_TOLERANCE = 0.03;
 
 /** The graphics memory a workflow of `gb` whole GB needs from a worker, in bytes (3% under the whole GB). */
 export const minVramBytesFor = (gb: number) => Math.round((gb || 0) * 2 ** 30 * (1 - VRAM_TOLERANCE));
+
+/** What a GPU says of its memory, as memoryFit reads it. */
+export interface MemoryFacts {
+  vramBytes?: number;
+  /** Its system RAM. Unknown (its ComfyUI hasn't said yet): no streaming. */
+  ramBytes?: number;
+  /** Its ComfyUI runs with dynamic VRAM off (--disable-dynamic-vram and the like): no streaming. */
+  dynamicVramOff?: boolean;
+}
+
+/**
+ * Can a GPU run a workflow with its weights streamed from RAM (its streaming need, stream-needs.json): its VRAM covers the
+ * need's VRAM and its RAM covers the need's RAM, each with the same 3% allowance as the VRAM test (a 32 GB PC reports
+ * about 31.9 GiB). Never with no streaming need, unknown RAM, or dynamic VRAM off.
+ */
+export function streamFits(stream: StreamNeed | null | undefined, have: MemoryFacts): boolean {
+  if (!stream || have.dynamicVramOff || !have.ramBytes || !have.vramBytes) return false;
+  return minVramBytesFor(stream.vramGb) <= have.vramBytes && minVramBytesFor(stream.ramGb) <= have.ramBytes;
+}
+
+/**
+ * How a GPU holds a workflow of `needGb`: every weight on its card ("vram"), part of them streamed from its RAM
+ * ("stream", slower: streamFits), or not at all (null).
+ */
+export function memoryFit(needGb: number, stream: StreamNeed | null | undefined, have: MemoryFacts): "vram" | "stream" | null {
+  if (minVramBytesFor(needGb) <= (have.vramBytes ?? 0)) return "vram";
+  return streamFits(stream, have) ? "stream" : null;
+}
 
 type Sha = (text: string) => string;
 

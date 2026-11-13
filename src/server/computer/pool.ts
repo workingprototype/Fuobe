@@ -3,7 +3,7 @@ import { ENGINE_WORDS } from "@/lib/engine-error";
 import crypto from "node:crypto";
 import { FINISH_KINDS, type FinishTicket } from "@/lib/finish-ticket";
 import { ceilingProblem, cleanCeiling, insideCeiling, lanesInside, type Ceiling } from "@/lib/job-ticket";
-import { allLanes, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, minVramBytesFor, needsOf, packKey, partLanes, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs } from "@/lib/lanes";
+import { allLanes, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, memoryFit, needsOf, packKey, partLanes, streamFits, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs } from "@/lib/lanes";
 import { fileChoices, hasVariants, pickFiles, swapGraphFiles, type FileChoice } from "@/lib/gpu/model-variants";
 import type { FileKey } from "@/lib/gpu/types";
 import { POOL_WORDS, RELAY_TIMES, SENT_STATES, type BeatAnswer, type ClaimedTask, type ComputerFacts, type CpuSlot, type WorkerAnswer, type WorkerBeat, type WorkerHolding } from "@/lib/relay";
@@ -935,17 +935,29 @@ function claimed(t: TaskRow, w: WorkerRow, device: string, now: number): Claimed
 /**
  * The files this worker runs a workflow with (src/lib/gpu/model-variants.ts pickFiles): a model variant made for its
  * card's generation (gpuGen in its facts), else the workflow's own files, else another variant, by the file sets it has
- * whole (its lanes' `sets`, from the files it verified) and its VRAM. Null when it has none of them, or too little VRAM.
- * A worker program older than VARIANT_PROTOCOL gets the workflow's own files only.
+ * whole (its lanes' `sets`, from the files it verified) and its memory: the VRAM of the set, or the workflow's streaming
+ * need in VRAM and RAM (memoryFit). Null when it has none of them, or too little memory. A worker program older than
+ * VARIANT_PROTOCOL gets the workflow's own files only.
  */
 export function workerFiles(w: Pick<WorkerRow, "lanes_json" | "facts_json" | "protocol">, workflowId: string): FileChoice | null {
   const cap = capableOf(w);
   if (!cap.workflows.includes(workflowId)) return null;
   const whole = cap.sets?.[workflowId] ?? [null];
   const facts = json<ComputerFacts>(w.facts_json, {});
-  const vram = facts.vramBytes ?? 0;
-  const choices = fileChoices(loadIndex(), workflowId).filter((c) => whole.includes(c.variant));
-  return pickFiles(choices, { gpuGen: facts.gpuGen ?? null, has: () => true, fits: (gb) => minVramBytesFor(gb) <= vram, variants: (w.protocol ?? 0) >= VARIANT_PROTOCOL });
+  const index = loadIndex();
+  const stream = index.workflows[workflowId]?.stream;
+  const choices = fileChoices(index, workflowId).filter((c) => whole.includes(c.variant));
+  return pickFiles(choices, { gpuGen: facts.gpuGen ?? null, has: () => true, fits: (gb) => memoryFit(gb, stream, facts) !== null, variants: (w.protocol ?? 0) >= VARIANT_PROTOCOL });
+}
+
+/**
+ * Has this worker the memory for a task's workflow with no model variants: the VRAM the task needs (with the 3%
+ * allowance already in it), or the workflow's streaming need in VRAM and RAM (streamFits).
+ */
+function memoryFor(needs: Needs | null, w: Pick<WorkerRow, "facts_json">): boolean {
+  const facts = json<ComputerFacts>(w.facts_json, {});
+  if ((needs?.minVramBytes ?? 0) <= (facts.vramBytes ?? 0)) return true;
+  return !!needs?.workflowId && streamFits(loadIndex().workflows[needs.workflowId]?.stream, facts);
 }
 
 /** How long a task should take on this worker: the lane's bench median there, or the task's own estimate. */
@@ -978,10 +990,11 @@ function fits(t: TaskRow, w: WorkerRow, now: number): boolean {
   if (needs?.workflowId ? !cap.workflows.includes(needs.workflowId) : !cap.lanes.includes(lane)) return false;
   // The files the run adds beyond its workflow's own (a look's LoRAs): only a worker that verified each one.
   if (needs?.runtime?.length && !hasFiles(inventoryOf(w), needs.runtime)) return false;
-  // A workflow with model variants: the files (its own or a variant's) and the VRAM of the choice this worker would run.
+  // A workflow with model variants: the files (its own or a variant's) and the memory of the choice this worker would
+  // run. Either way, the workflow's streaming need counts as well as its VRAM need.
   if (needs?.workflowId && hasVariants(loadIndex(), needs.workflowId)) {
     if (!workerFiles(w, needs.workflowId)) return false;
-  } else if ((needs?.minVramBytes ?? 0) > (factsOf(w).vramBytes ?? 0)) return false;
+  } else if (!memoryFor(needs, w)) return false;
   if (now - t.created_at < w.claim_after_ms + (allow[lane]?.delayMs ?? 0)) return false;
   return true;
 }
@@ -1576,7 +1589,7 @@ function ableWorkers(workflowId: string | null, o: { size?: Needs["size"]; ticke
     if (!needs || !(lane! in allow) || !cap.workflows.includes(workflowId) || ceilingProblem(ceiling, { workflowId, lane, size: o.size })) return false;
     if (o.files?.length && !hasFiles(inventoryOf(w), o.files)) return false;
     if (hasVariants(loadIndex(), workflowId)) return !!workerFiles(w, workflowId);
-    return needs.minVramBytes <= (factsOf(w).vramBytes ?? 0);
+    return memoryFor(needs, w);
   });
 }
 

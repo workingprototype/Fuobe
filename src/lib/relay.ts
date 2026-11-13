@@ -235,6 +235,11 @@ export interface ComputerFacts {
   loras?: string[];
   /** A worker's GPU generation (its compute capability, "8.9"). */
   gpuGen?: string;
+  /**
+   * Its ComfyUI runs with dynamic VRAM off (--disable-dynamic-vram, --highvram, --gpu-only, --novram or --cpu), so it
+   * doesn't stream model weights from RAM (src/lib/lanes.ts streamFits). Absent: on, or not said.
+   */
+  dynamicVramOff?: true;
 }
 
 export const FACT_LIMITS = { loras: 20_000, loraName: 256, text: 120 };
