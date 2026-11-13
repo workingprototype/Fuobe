@@ -563,6 +563,7 @@ export const KNOWN_MODELS = {
   'qwen3.5_0.8b_bf16.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/main/model.safetensors-00001-of-00001.safetensors' },
   'qwen3.5_2b_bf16.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen3.5/resolve/main/text_encoders/qwen3.5_2b_bf16.safetensors' },
   'wan2.1_vace_14B_fp16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors' },
+  'wan2.1_vace_14B_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/PxTicks/Wan2.1-VACE-14B-int8-convrot/resolve/main/wan2.1_vace_14B_int8_convrot.safetensors' },
   'wan2.1_vace_1.3B_fp16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_1.3B_fp16.safetensors' },
   't5xxl_fp16.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/void-model/resolve/main/text_encoders/t5xxl_fp16.safetensors' },
   'cogvideox_vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/void-model/resolve/main/vae/cogvideox_vae.safetensors' },
@@ -1788,6 +1789,7 @@ export const SPEC = [
   },
   {
     id: 'wan21-vace-14b-ref2v',
+    optionalModels: ['wan2.1_vace_14B_int8_convrot.safetensors'],
     title: 'Wan 2.1 VACE 14B Reference to Video',
     capability: 'ref2v',
     export: 'video_wan_vace_14B_ref2v',
@@ -5162,6 +5164,7 @@ export const SPEC = [
   // ---- Edit video: remove, swap, insert ------------------------------------------------
   {
     id: 'video-inpaint-wan-vace',
+    optionalModels: ['wan2.1_vace_14B_int8_convrot.safetensors'],
     title: 'Remove an object from a video by naming it: SAM 3.1 tracking + Wan 2.1 VACE 14B fill (lightx2v 4-step)',
     capability: 'remove-object',
     handBuilt: 'hand-built/video-inpaint-wan-vace.json',
@@ -5198,6 +5201,7 @@ export const SPEC = [
   },
   {
     id: 'video-inpaint-wan-vace-painted',
+    optionalModels: ['wan2.1_vace_14B_int8_convrot.safetensors'],
     title: 'Remove an object painted on the first frame: SAM 3.1 tracks the mask + Wan 2.1 VACE 14B fill (lightx2v 4-step)',
     capability: 'remove-object',
     handBuilt: 'hand-built/video-inpaint-wan-vace-painted.json',
@@ -5260,6 +5264,7 @@ export const SPEC = [
   },
   {
     id: 'video-swap-wan-vace',
+    optionalModels: ['wan2.1_vace_14B_int8_convrot.safetensors'],
     title: 'Swap an object or character for a reference image: SAM 3.1 tracking + Wan 2.1 VACE 14B with reference (lightx2v 4-step)',
     capability: 'video-swap',
     handBuilt: 'hand-built/video-swap-wan-vace.json',
@@ -5281,6 +5286,7 @@ export const SPEC = [
   },
   {
     id: 'video-insert-wan-vace',
+    optionalModels: ['wan2.1_vace_14B_int8_convrot.safetensors'],
     title: 'Insert an object into a painted region: Wan 2.1 VACE 14B with a reference image (region held for the whole window)',
     capability: 'video-insert',
     handBuilt: 'hand-built/video-insert-wan-vace.json',

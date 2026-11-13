@@ -59,6 +59,11 @@ describe("the catalog's variants (build-requirements.mjs)", () => {
           expect(b.folder, `${id} ${v.id}`).toBe(a.folder);
           expect(pins[b.url]?.sha256 ?? b.sha256, `${to}`).toMatch(/^[0-9a-f]{64}$/);
           expect(pins[b.url]?.sizeBytes, `${to}`).toBe(b.sizeBytes);
+          // A smaller build no graph loads is one of the workflow's optional files, and fills the old file's slot.
+          if (!b.loaders?.length) {
+            expect(wf.optional, `${id} ${to}`).toContain(to);
+            continue;
+          }
           for (const l of a.loaders ?? []) expect(b.loaders?.map((x) => x.join(".")), `${to}`).toContain(l.join("."));
         }
       }

@@ -1513,5 +1513,10 @@
   "revision": "9e9ed14b8be4b751d7517b8ca58dd199d509720c",
   "sizeBytes": 9053456480,
   "sha256": "ee251661dffdebfa4a8c2555d2967b642f0efe9f2e350830a6e5c691935e23c3"
+ },
+ "https://huggingface.co/PxTicks/Wan2.1-VACE-14B-int8-convrot/resolve/main/wan2.1_vace_14B_int8_convrot.safetensors": {
+  "revision": "7afd04f39d891b998fa7dd00559495e97fc44db5",
+  "sizeBytes": 17590109680,
+  "sha256": "f3071cba96dd9310b00ff9ba81842a0e6d44d47658dcab980d1031ac0481c11b"
  }
 }

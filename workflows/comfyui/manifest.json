@@ -4787,6 +4787,13 @@
           "folder": "text_encoders",
           "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors",
           "sizeGb": 11.37
+        },
+        {
+          "file": "wan2.1_vace_14B_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/PxTicks/Wan2.1-VACE-14B-int8-convrot/resolve/main/wan2.1_vace_14B_int8_convrot.safetensors",
+          "sizeGb": 17.59,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -22459,6 +22466,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
           "sizeGb": 0.63
+        },
+        {
+          "file": "wan2.1_vace_14B_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/PxTicks/Wan2.1-VACE-14B-int8-convrot/resolve/main/wan2.1_vace_14B_int8_convrot.safetensors",
+          "sizeGb": 17.59,
+          "optional": true
         }
       ],
       "customNodes": [
@@ -22639,6 +22653,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
           "sizeGb": 0.63
+        },
+        {
+          "file": "wan2.1_vace_14B_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/PxTicks/Wan2.1-VACE-14B-int8-convrot/resolve/main/wan2.1_vace_14B_int8_convrot.safetensors",
+          "sizeGb": 17.59,
+          "optional": true
         }
       ],
       "customNodes": [
@@ -22987,6 +23008,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
           "sizeGb": 0.63
+        },
+        {
+          "file": "wan2.1_vace_14B_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/PxTicks/Wan2.1-VACE-14B-int8-convrot/resolve/main/wan2.1_vace_14B_int8_convrot.safetensors",
+          "sizeGb": 17.59,
+          "optional": true
         }
       ],
       "customNodes": [
@@ -23158,6 +23186,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
           "sizeGb": 0.63
+        },
+        {
+          "file": "wan2.1_vace_14B_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/PxTicks/Wan2.1-VACE-14B-int8-convrot/resolve/main/wan2.1_vace_14B_int8_convrot.safetensors",
+          "sizeGb": 17.59,
+          "optional": true
         }
       ],
       "customNodes": [

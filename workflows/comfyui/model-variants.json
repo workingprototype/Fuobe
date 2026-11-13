@@ -19,6 +19,36 @@
         "diffusion_models/krea2_turbo_fp8_scaled.safetensors": "diffusion_models/krea2_turbo_int8_convrot.safetensors",
         "text_encoders/qwen3vl_4b_fp8_scaled.safetensors": "text_encoders/qwen3vl_4b_int8_convrot.safetensors"
       }
+    },
+    {
+      "id": "int8",
+      "gpuGen": {
+        "min": "8.0",
+        "max": "8.6"
+      },
+      "workflows": [
+        "video-inpaint-wan-vace",
+        "video-inpaint-wan-vace-painted",
+        "video-insert-wan-vace",
+        "video-swap-wan-vace"
+      ],
+      "files": {
+        "diffusion_models/wan2.1_vace_14B_fp16.safetensors": "diffusion_models/wan2.1_vace_14B_int8_convrot.safetensors"
+      }
+    },
+    {
+      "id": "int8",
+      "gpuGen": {
+        "min": "8.0",
+        "max": "8.6"
+      },
+      "workflows": [
+        "wan21-vace-14b-ref2v"
+      ],
+      "files": {
+        "diffusion_models/wan2.1_vace_14B_fp16.safetensors": "diffusion_models/wan2.1_vace_14B_int8_convrot.safetensors",
+        "text_encoders/umt5_xxl_fp16.safetensors": "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+      }
     }
   ]
 }
