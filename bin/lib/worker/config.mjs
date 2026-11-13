@@ -69,6 +69,12 @@ export const DEFAULTS = {
    * such readings. The worker only reads it, with its GPU reading.
    */
   sensorsFile: null,
+  /**
+   * The RAM guard (ram.mjs), for a PC its owner also works on: { othersGb, afterS?, everyS? }. Other programs above
+   * `othersGb` of the PC's memory: no job that streams from RAM, and after `afterS` (60) with no job in hand a pause that
+   * the automatic resume ends. None: off, as before.
+   */
+  ramGuard: null,
 };
 
 const file = (home, name) => path.join(home, name);

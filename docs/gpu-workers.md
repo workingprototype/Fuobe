@@ -301,6 +301,26 @@ The worker obeys any one of these pauses. One pause never ends another pause.
   cool-down. A pause by hand is never ended by the automatic resume. Turn it on with `autoResume` in `worker.json`, or
   with **Resume by itself after another program used the GPU** in Settings → Workers. The website's switch wins over
   `worker.json`. With it on, a PC can serve whenever its owner isn't using the GPU.
+- **This PC's memory is in use** (the RAM guard, off by default). For a PC whose owner also works on it with programs
+  that need memory more than the GPU (an editor, a game, Python, another AI app). Turn it on in `worker.json` with
+  `"ramGuard": { "othersGb": 12 }` (also `afterS`, 60 by default, and `everyS`, 10). Other programs' RAM is the PC's
+  used memory minus what the worker's own processes hold: the worker, its ComfyUI, its CPU slot's ComfyUI, its text
+  slot's server, and the programs they started. Each process counts the larger of its working set and its private
+  bytes. The worker reads them every `everyS` seconds: on Windows with one PowerShell call (`Win32_Process`, about a
+  second, beside its loop), elsewhere with `ps`. No admin rights are needed.
+  - Above `othersGb`, its claims ask for no job that streams its weights from RAM (`noStream` in the claim). The studio
+    then offers it only jobs whose weights fit whole on its card, and the others go to another worker. A streamed job
+    keeps its weights in the PC's RAM for its whole run, and on a 32 GB PC the measured ones fill it. A job whose weights
+    fit on the card uses the RAM only while it loads.
+  - Above `othersGb` for `afterS` seconds with no GPU job in hand, it pauses: the state says "This PC's memory is in use
+    (editor.exe)" (`ram-busy:<program>`, the largest other program). Its ComfyUI and its text slot's server stop, so
+    their memory goes back to the PC. The automatic resume ends it, as for a busy GPU: `resumeAfterMin` minutes in a row
+    under the line. A resume by hand ends it too.
+  - A job in hand is never stopped for RAM alone. The time above the line counts from its end. If the PC really runs out
+    of memory, the studio's fallback for a streamed job that runs out of memory moves it to another worker
+    ([Streaming from RAM](#streaming-from-ram)).
+  - A reading that fails keeps the last good one for a minute. After that, the guard counts the memory as free: a guard
+    that can't read never keeps the worker from people's jobs.
 - **Hours:** outside its hours, the worker takes nothing new. Near the end of a window, it takes only a job that its
   estimate says will finish in time.
 
@@ -740,6 +760,9 @@ Every other workflow streams by the computed rule.
   no other worker for it, or for a job taken with every weight on the card, or for any other error, the job fails as
   before. The worker still takes the workflow with every weight on its card. Settings → Workers shows the list on the
   worker's card, and the owner clears one entry or all of them (`PATCH /api/admin/workers/{id}` with `clearNoStream`).
+- **A PC whose memory is in use.** A worker's claim with `noStream` (its RAM guard, [Pauses](#pauses)) counts no RAM
+  for that claim: it takes only a job whose weights, or a model variant's, fit whole on its card. Its facts stay as they
+  are, and the claim's words add "its PC's memory is in use: only jobs that fit whole on its card".
 - **Times.** A worker that streams runs slower. Its run limits come from its own measured runs in the lane (above), so
   they stay right for it.
 
@@ -1150,8 +1173,9 @@ its target), at most once an hour each.
   than job tickets, which sends no account's run to workers).
   `stallMs` is how long the job may go with no progress before the worker gives it back (see "The stall limit"). A
   worker ignores a `stallMs` under one minute, and uses its own 10 minutes then.
-  A worker's CPU slot sends `slot: "cpu"` and gets only work for that slot, with `slot: "cpu"` on the task. A
-  finishing job carries `finish` (a finish ticket) in place of `graph` or `ticket`. `reportPreview: true` asks for live
+  A worker's CPU slot sends `slot: "cpu"` and gets only work for that slot, with `slot: "cpu"` on the task. Its GPU's
+  slot sends `noStream: true` while its RAM guard says the PC's memory is in use: it then gets only a job whose weights
+  fit whole on its card. A finishing job carries `finish` (a finish ticket) in place of `graph` or `ticket`. `reportPreview: true` asks for live
   previews (see "Live previews").
 - `POST /api/gpu/computer/bench`: bench jobs for this worker only (none are defined yet). The times of every finished
   job also count: the last 20 jobs in each lane give the median and the 90th percentile.
@@ -1239,7 +1263,10 @@ routes.
   `tests/worker-turns.test.ts`, `tests/worker-turns-run.test.ts`, `tests/worker-update.test.ts`, `tests/cpu-slot.test.ts`,
   `tests/worker-cpu-slot.test.ts`, `tests/fuobe-connect-nodes.test.ts`, `tests/model-variants.test.ts`,
   `tests/pool-model-variants.test.ts`, `tests/stream-needs.test.ts`, `tests/stream-oom-fallback.test.ts`,
-  `tests/pool-first-pick.test.ts`, `tests/worker-build-loads.test.ts`). The model variant
+  `tests/pool-first-pick.test.ts`, `tests/worker-build-loads.test.ts`, `tests/worker-ram-guard.test.ts`). The RAM guard
+  tests read stand-in process lists (Windows' and `ps`), find the worker's own process trees, and run the worker with a
+  stand-in PC memory: a claim with `noStream`, the pause the studio names, the automatic resume, a job in hand that
+  goes on to its end, and no reading at all with the guard off. The model variant
   tests check the build's refusals, which files a worker gets by its card and its files, the swapped graph and ticket,
   and an older worker program. The streaming tests check the build's refusals, the memory rule (VRAM only, VRAM and
   RAM, unknown RAM, dynamic VRAM off, the 3% allowance, the computed rule and its reserve, the workflows that never
