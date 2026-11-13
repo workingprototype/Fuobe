@@ -1154,6 +1154,10 @@ const RELAY_COLUMNS: [string, string, string][] = [
   // The workflows a worker no longer takes by streaming its weights from RAM (a job of one ran out of memory that way):
   // workflow id → when, as JSON (pool.ts noStreamOf). The owner clears it in Settings → Workers.
   ["relay_workers", "no_stream_json", "TEXT"],
+  // The owner's RAM guard switch for a worker (pool.ts; off by default), and whether its last GPU claim asked for no
+  // streaming from RAM (its RAM guard: pool.ts streamTakers).
+  ["relay_workers", "ram_guard", "INTEGER NOT NULL DEFAULT 0"],
+  ["relay_workers", "asked_no_stream", "INTEGER NOT NULL DEFAULT 0"],
 ];
 
 declare global {

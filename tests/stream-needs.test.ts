@@ -348,18 +348,69 @@ describe("which workers qualify on memory (the claim)", () => {
     expect(claim(worker("ampere-low-ram", KREA, { vramBytes: 10 * GB, ramBytes: 16 * GB, gpuGen: "8.6" }))).toBeNull();
   });
 
-  it("a claim that asks for no streaming (the worker's RAM guard): only a job whose weights fit whole on its card, said in its claim's words", () => {
+  // A claim with noStream (the worker's RAM guard): a preference, never a wait.
+  const noStream = (w: W) => pool.workerClaim(row(w), [], clock, "gpu", { noStream: true });
+  const streamedOf = (id: string) => JSON.parse(tasks.taskById(id)!.extra_json ?? "{}").streamed;
+
+  it("no streaming asked, and no other worker could take the job now: it takes it streamed all the same, said in its claim's words", () => {
     const id = job(FLEX);
     const small = worker("flex-shared-pc", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB });
-    expect(pool.workerClaim(row(small), [], clock, "gpu", { noStream: true })).toBeNull();
-    expect(row(small).asked_words).toMatch(/its PC's memory is in use: only jobs that fit whole on its card/);
-    expect(tasks.taskById(id)!.state).toBe("waiting");
-    // Its facts are as they were: the next claim without it streams as before.
+    expect(noStream(small)?.id).toBe(id);
+    // Marked streamed: the fallback after running out of memory applies.
+    expect(streamedOf(id)).toBe(true);
+    expect(row(small).asked_words).toMatch(/its PC's memory is in use: no other worker could take this job now/);
+    // Its facts are as they were.
     expect(JSON.parse(row(small).facts_json ?? "{}").ramBytes).toBe(31.9 * GB);
-    expect(pool.workerClaim(row(small), [], clock)?.id).toBe(id);
-    expect(JSON.parse(tasks.taskById(id)!.extra_json ?? "{}").streamed).toBe(true);
-    // A card that holds it whole takes it whatever the claim says.
+    // A card that holds it whole takes it whatever the claim says, not streamed.
     const whole = job(FLEX);
-    expect(pool.workerClaim(row(worker("flex-whole", FLEX, { vramBytes: 32 * GB, ramBytes: 16 * GB })), [], clock, "gpu", { noStream: true })?.id).toBe(whole);
+    expect(noStream(worker("flex-whole", FLEX, { vramBytes: 32 * GB, ramBytes: 16 * GB }))?.id).toBe(whole);
+    expect(streamedOf(whole)).toBeUndefined();
+  });
+
+  it("no streaming asked, and another free worker takes that job next: it leaves the job for it", () => {
+    const id = job(FLEX);
+    const small = worker("flex-shared-pc", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB });
+    const big = worker("flex-whole", FLEX, { vramBytes: 32 * GB, ramBytes: 16 * GB });
+    expect(noStream(small)).toBeNull();
+    expect(row(small).asked_words).toMatch(/its PC's memory is in use: it prefers jobs that fit whole on its card/);
+    expect(tasks.taskById(id)!.state).toBe("waiting");
+    expect(claim(big)?.id).toBe(id);
+    expect(streamedOf(id)).toBeUndefined();
+    // Another worker that streams it too counts: it is free, and the job is its next.
+    const next = job(FLEX);
+    const other = worker("flex-other", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB });
+    expect(noStream(small)).toBeNull();
+    expect(claim(other)?.id).toBe(next);
+  });
+
+  it("a worker that isn't free now doesn't count: paused, or busy with a job (as for first pick)", () => {
+    const first = job(FLEX);
+    const small = worker("flex-shared-pc", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB });
+    const big = worker("flex-whole", FLEX, { vramBytes: 32 * GB, ramBytes: 16 * GB });
+    pool.patchWorker(big.id, { paused: true }, clock);
+    expect(noStream(small)?.id).toBe(first);
+    // Busy: its GPU's slot holds a job.
+    pool.patchWorker(big.id, { paused: false }, clock);
+    const busy = job(FLEX);
+    expect(claim(big)?.id).toBe(busy);
+    const third = job(FLEX);
+    const small2 = worker("flex-shared-pc-2", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB });
+    expect(noStream(small2)?.id).toBe(third);
+    expect(streamedOf(third)).toBe(true);
+  });
+
+  it("two workers that both ask for no streaming never leave a job to each other", () => {
+    const id = job(FLEX);
+    const a = worker("flex-a", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB });
+    const b = worker("flex-b", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB });
+    // b's claim: a's last claim asked for nothing, so a could stream it: b leaves it.
+    expect(noStream(b)).toBeNull();
+    expect(row(b).asked_no_stream).toBe(1);
+    // a's claim: b asks for no streaming too, so b counts only with what fits whole on its card: a takes it.
+    expect(noStream(a)?.id).toBe(id);
+    expect(streamedOf(id)).toBe(true);
+    // A claim without it clears the mark.
+    expect(claim(b)).toBeNull();
+    expect(row(b).asked_no_stream).toBe(0);
   });
 });

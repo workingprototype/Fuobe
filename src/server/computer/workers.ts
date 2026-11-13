@@ -63,6 +63,8 @@ export interface WorkerRow {
   pick_order?: number;
   /** The workflows it no longer takes by streaming from RAM, as JSON: workflow id → when (pool.ts noStreamOf). */
   no_stream_json?: string | null;
+  /** The owner's RAM guard switch for it: 1 on, 0 off (pool.ts; its numbers are in its worker.json). */
+  ram_guard?: number;
   state: string;
   seen_at: number | null;
   /** A pool worker's next token (its SHA-256), offered in a beat answer and not used yet; its expiry; when it was made. */
@@ -85,6 +87,8 @@ export interface WorkerRow {
   /** Its last claim for its GPU's slot, and the answer in words (pool.ts workerClaim). */
   asked_at?: number | null;
   asked_words?: string | null;
+  /** 1: that claim asked for no streaming from RAM (its RAM guard; pool.ts streamTakers). */
+  asked_no_stream?: number;
   /** The owner's mode for this worker (queue-controls.ts ModeSetting), winning over its pool's while it lasts. NULL: none. */
   mode_json?: string | null;
   /** Local work on its PC (a queue of the owner's own), as its last beat said (src/lib/relay.ts LocalWork). NULL: none. */

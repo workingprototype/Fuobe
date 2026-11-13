@@ -792,7 +792,7 @@ export class ComputerRunner {
   /**
    * Ask for a job and run it (one at a time). True when there was one. Only while ComfyUI here answers to this site: a
    * computer whose ComfyUI is closed, or runs without Fuobe's setting, keeps its place but takes nothing. `noStream`: a
-   * worker whose PC's memory is in use (its RAM guard) asks for no job that streams its weights from RAM.
+   * worker whose PC's memory is in use (its RAM guard) prefers no job that streams its weights from RAM.
    */
   async claimAndRun(o: { onlyHeld?: boolean; noStream?: boolean } = {}): Promise<boolean> {
     if (!this.alive || this.busy || this.o.access) return false;

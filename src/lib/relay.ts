@@ -270,6 +270,12 @@ export interface WorkerAnswer {
   drain: boolean;
   /** The automatic resume after a busy GPU, as the owner set it; null: the worker's own setting. */
   autoResume: boolean | null;
+  /**
+   * The owner's RAM guard switch (off by default; a studio from before sends none: off). On, with other programs above
+   * its worker.json's line of the PC's memory, it prefers jobs that fit whole on its card and its ComfyUI lets go of its
+   * memory before each job and when idle.
+   */
+  ramGuard?: boolean;
   insideHours: boolean;
   /** When its hours start or end next. */
   nextChangeAt: number | null;
@@ -314,7 +320,7 @@ export interface WorkerBeat {
   why: string | null;
   /**
    * Its own pause switch: by hand ("here", "here-until:<ms>", "here-now"), by itself ("gpu-busy:<process>",
-   * "ram-busy:<process>": its RAM guard, other programs use the PC's memory; its job in hand goes on, "comfy-crashes", "port-busy", "models-not-ready": a model folder isn't there yet, "self-check": its face detector's
+   * "comfy-crashes", "port-busy", "models-not-ready": a model folder isn't there yet, "self-check": its face detector's
    * check failed twice). Not paused, `why` may say that it waits for local ComfyUI work to make room
    * ("waiting-for-yield", "waiting-for-yield:no-answer").
    */

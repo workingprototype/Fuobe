@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     if (worker?.kind === "pool") await refreshTicketsBeforeClaim();
     // A shared GPU takes the best task it can run from its pool (pool.ts), for its GPU or for its CPU slot (`slot`:
     // "cpu"); a person's computer, their own oldest. A worker whose PC's memory is in use (`noStream`, its RAM guard)
-    // takes only a job whose weights fit whole on its card.
+    // prefers a job whose weights fit whole on its card, and takes one it streams when no other worker could now.
     const task = worker?.kind === "pool" ? workerClaim(worker, running, Date.now(), body?.slot === "cpu" ? "cpu" : "gpu", { noStream: body?.noStream === true }) : claim(principal, String(body?.device ?? ""), running);
     if (!task) return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
     return Response.json({ task }, { headers: { "Cache-Control": "no-store" } });

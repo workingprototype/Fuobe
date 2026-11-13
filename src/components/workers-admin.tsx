@@ -35,6 +35,8 @@ interface WorkerView {
   pausedLocal: boolean;
   drain: boolean;
   autoResume: boolean | null;
+  /** Its RAM guard (a server from before sends none). */
+  ramGuard?: boolean;
   hours: Hours | null;
   allow: Record<string, { delayMs: number }>;
   /** Its pick order: above 0, it gets first pick of the jobs it can run while it is free (a server from before sends none). */
@@ -420,6 +422,23 @@ function WorkerCard({ w, lanes, onToken }: { w: WorkerView; lanes: Lane[]; onTok
           </span>
         </span>
       </label>
+      {w.ramGuard !== undefined && (
+        <label className="flex items-start gap-2 text-[13px]">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 accent-[var(--primary)]"
+            checked={w.ramGuard}
+            disabled={patch.isPending}
+            onChange={(e) => patch.mutate({ ramGuard: e.target.checked })}
+          />
+          <span>
+            RAM guard
+            <span className="block text-[12px] text-muted-foreground">
+              For a PC someone also works on. While other programs use a lot of its memory, this worker lets go of its own memory before each job and gives jobs that need extra memory to another worker when one is free. It keeps taking work, so nobody waits.
+            </span>
+          </span>
+        </label>
+      )}
       {w.pickOrder !== undefined && (
         <label className="flex items-start gap-2 text-[13px]">
           <input

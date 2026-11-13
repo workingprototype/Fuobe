@@ -223,8 +223,6 @@ export function workerState(w: WorkerRow, now = Date.now()): { state: WorkerStat
   const why = w.local_why ?? "";
   if (w.paused_local) {
     if (why.startsWith("gpu-busy")) return { state: "gpu-busy", words: `Your GPU is busy${why.includes(":") ? ` (${why.split(":").slice(1).join(":")})` : ""}` };
-    // Its RAM guard: other programs use the PC's memory. The same kind of pause as a busy GPU: it resumes by itself.
-    if (why.startsWith("ram-busy")) return { state: "gpu-busy", words: `This PC's memory is in use${why.includes(":") ? ` (${why.split(":").slice(1).join(":")})` : ""}` };
     if (why === "comfy-crashes") return { state: "comfy-down", words: "ComfyUI keeps stopping" };
     if (why === "port-busy") return { state: "comfy-down", words: "Its ComfyUI port is taken by another program" };
     if (why === "self-check") return { state: "comfy-down", words: "Its face check didn't pass after a restart: it checks again within 5 minutes" };
@@ -572,6 +570,8 @@ export function workerBeat(w: WorkerRow, b: WorkerBeat, now = Date.now()): BeatA
         pauseNow: stopNow,
         drain: !!fresh.drain,
         autoResume: fresh.auto_resume === null || fresh.auto_resume === undefined ? null : !!fresh.auto_resume,
+        // The owner's RAM guard switch for this worker (its numbers stay in its worker.json).
+        ramGuard: !!fresh.ram_guard,
         insideHours: h.inside,
         nextChangeAt: h.nextChangeAt,
         lanes: Object.keys(allowOf(fresh)),
@@ -844,22 +844,51 @@ export function workerClaim(w: WorkerRow, running: string[], now = Date.now(), s
     if (mine) return claimed(mine, fresh, device, now);
     if (held.length) return null;
     if (!eligible(fresh, now)) {
-      if (slot === "gpu") noteAsked(fresh, "blocked", `Asked for work: not taking work (${blockedWhy(fresh, now)})`, now);
+      if (slot === "gpu") noteAsked(fresh, "blocked", `Asked for work: not taking work (${blockedWhy(fresh, now)})`, now, noStream ? { noStream: true } : {});
       return null;
     }
     // First pick: its GPU leaves a job for a free worker with a higher pick order that would take it next, for a short
     // grace (firstPicks), and takes its own next best.
     const left = slot === "gpu" ? firstPicks(fresh, now) : new Map<string, string>();
-    // Its PC's memory is in use (the worker's RAM guard): this claim streams nothing from its RAM, so it takes only a job
-    // whose weights fit whole on its card (and a model variant that does), and leaves the rest for another worker.
+    const leave = new Set(left.keys());
+    // Its PC's memory is in use (the worker's RAM guard, `noStream`): a preference, never a wait. Its best job as
+    // always; when that one would stream its weights from this worker's RAM, the jobs that would stream here and that
+    // another worker takes next (streamTakers) are left for it, and it takes its best of the rest. A streamed job no other
+    // worker could take now is still its own (marked streamed, so the fallback after running out of memory applies).
     const asking = noStream ? withoutStreaming(fresh) : fresh;
-    const { task: t, looked } = pick(asking, now, slot, new Set(left.keys()));
+    const wholeHere = (x: TaskRow) => fitsSlot(x, asking, now, slot);
+    let { task: t, looked } = pick(fresh, now, slot, leave);
+    if (noStream && t && !wholeHere(t)) {
+      const taken = streamTakers(fresh, now, leave);
+      if (taken.has(t.id)) t = pick(fresh, now, slot, leave, (x) => wholeHere(x) || !taken.has(x.id)).task;
+    }
+    const streamed = noStream && !!t && !wholeHere(t);
     const many = `${looked}${looked >= LOOK_AT ? "+" : ""}`;
     const none = left.size ? `Asked for work: ${many} waiting, ${left.size === 1 ? "1 left" : `${left.size} left`} for a worker that picks first` : `Asked for work: ${many} waiting, none it can run now`;
-    const memory = noStream ? " (its PC's memory is in use: only jobs that fit whole on its card)" : "";
+    const memory = !noStream ? "" : streamed ? " (its PC's memory is in use: no other worker could take this job now)" : " (its PC's memory is in use: it prefers jobs that fit whole on its card)";
     if (slot === "gpu") noteAsked(fresh, t ? "found" : "nothing", `${t ? `Asked for work: took 1 of ${many} waiting` : looked ? none : "Asked for work: nothing waiting"}${memory}`, now, { waiting: looked, ...(left.size && { leftFor: [...new Set(left.values())] }), ...(noStream && { noStream: true }) });
-    return t ? claimed(t, asking, device, now) : null;
+    // A job that fits whole on its card is taken as such (a model variant too); one it streams, with its RAM counted.
+    return t ? claimed(t, noStream && !streamed ? asking : fresh, device, now) : null;
   }).immediate();
+}
+
+/**
+ * The jobs other workers take next, now (a claim with `noStream`): each other pool worker that is free now (freeNow, as
+ * for first pick: may take work, nothing holds it back, its GPU's slot empty), with the job its own claim would take
+ * next (pick: its pool, lanes and delays, mode, files and memory, the retry rule and its hours), each job counted once.
+ * A worker whose own last claim asked for no streaming (its RAM guard too) counts only with what fits whole on its card,
+ * so two such workers never leave a job to each other. A worker busy with a job can't take one now, as for first pick.
+ */
+function streamTakers(w: WorkerRow, now: number, leave: ReadonlySet<string>): Set<string> {
+  const taken = new Set(leave);
+  const others = db().prepare("SELECT * FROM relay_workers WHERE kind = 'pool' AND revoked_at IS NULL AND id != ? AND pool = ? ORDER BY pick_order DESC, id").all(w.id, w.pool) as WorkerRow[];
+  for (const x of others) {
+    if (!freeNow(x, now)) continue;
+    const t = pick(x.asked_no_stream ? withoutStreaming(x) : x, now, "gpu", taken).task;
+    if (t) taken.add(t.id);
+  }
+  for (const id of leave) taken.delete(id);
+  return taken;
 }
 
 /**
@@ -888,7 +917,7 @@ function blockedWhy(w: WorkerRow, now: number): string {
  */
 function noteAsked(w: WorkerRow, answer: "found" | "nothing" | "blocked", words: string, now: number, detail: Record<string, unknown> = {}): void {
   try {
-    db().prepare("UPDATE relay_workers SET asked_at = ?, asked_words = ? WHERE id = ?").run(now, words, w.id);
+    db().prepare("UPDATE relay_workers SET asked_at = ?, asked_words = ?, asked_no_stream = ? WHERE id = ?").run(now, words, detail.noStream === true ? 1 : 0, w.id);
     const last = lastOfKind(w.id, "looking");
     if (last && last.event === answer && (answer !== "blocked" || last.words === words)) return;
     logWorkerEvent({ kind: "looking", event: answer, workerId: w.id, words, detail }, now);
@@ -1100,16 +1129,17 @@ function beforeWindowEnds(t: TaskRow, w: WorkerRow, now: number): boolean {
  * never makes a person wait: while any person's run waits that this worker can take, it takes the best of them. Only
  * among the owner's own jobs may one in the lane it has loaded go ahead of the best one, while the best one has waited
  * less than the pick allowance (the install's setting, capped by this worker's switch_after_ms; 0: strict order).
- * `leave`: the tasks it leaves for a worker that picks first (firstPicks).
+ * `leave`: the tasks it leaves for a worker that picks first (firstPicks); `also`: one more test a task must pass (a
+ * claim with `noStream`: workerClaim).
  */
-function pick(w: WorkerRow, now: number, slot: WorkerSlot = "gpu", leave?: ReadonlySet<string>): { task: TaskRow | null; looked: number } {
+function pick(w: WorkerRow, now: number, slot: WorkerSlot = "gpu", leave?: ReadonlySet<string>, also?: (t: TaskRow) => boolean): { task: TaskRow | null; looked: number } {
   const settings = queueSettings(now);
   // The owner's controls: this worker's mode, and the runs and people sent first or held.
   const c = controlsOf(w, now);
   // Each slot looks only at its own tasks.
   const rows = lineRows("*", `pools IS NOT NULL AND state = 'waiting' AND stop = 0 AND INSTR(',' || pools || ',', ?) > 0 ${slotWhere(w, slot)}`, [`,${w.pool},`], c, LOOK_AT);
   const looked = rows.length;
-  const ok = controlledOrder(rows, settings.fairShare, c, w.id).filter((t) => !leave?.has(t.id) && fitsSlot(t, w, now, slot) && retryOk(t, w, now) && beforeWindowEnds(t, w, now));
+  const ok = controlledOrder(rows, settings.fairShare, c, w.id).filter((t) => !leave?.has(t.id) && fitsSlot(t, w, now, slot) && retryOk(t, w, now) && beforeWindowEnds(t, w, now) && (!also || also(t)));
   if (!ok.length) return { task: null, looked };
   const best = ok[0];
   const allowance = Math.min(w.switch_after_ms, settings.pickAllowanceMs);
@@ -2016,6 +2046,11 @@ export interface WorkerView {
   localWhy: string | null;
   drain: boolean;
   autoResume: boolean | null;
+  /**
+   * Its RAM guard (off by default): with other programs above its line of the PC's memory (its worker.json's numbers),
+   * it prefers jobs that fit whole on its card and its ComfyUI lets go of its memory before each job and when idle.
+   */
+  ramGuard: boolean;
   hours: Hours | null;
   allow: Record<string, Allow>;
   claimAfterMs: number;
@@ -2268,6 +2303,7 @@ export function workerView(w: WorkerRow, now = Date.now(), typical: (lane: strin
     localWhy: w.local_why,
     drain: !!w.drain,
     autoResume: w.auto_resume === null || w.auto_resume === undefined ? null : !!w.auto_resume,
+    ramGuard: !!w.ram_guard,
     hours: hoursOf(w),
     allow: allowOf(w),
     claimAfterMs: w.claim_after_ms,
@@ -2327,6 +2363,8 @@ export interface WorkerPatch {
   drain?: boolean;
   /** true or false sets the automatic resume for this worker; null leaves it to the worker's worker.json. */
   autoResume?: boolean | null;
+  /** Its RAM guard on or off (WorkerView.ramGuard). */
+  ramGuard?: boolean;
   hours?: unknown;
   allow?: unknown;
   claimAfterMs?: number;
@@ -2382,6 +2420,10 @@ export function patchWorker(id: string, p: WorkerPatch, now = Date.now(), by = "
     if (p.autoResume !== null && typeof p.autoResume !== "boolean") throw new Error("The automatic resume is on, off or the PC's own setting");
     set.auto_resume = p.autoResume === null ? null : p.autoResume ? 1 : 0;
   }
+  if (p.ramGuard !== undefined) {
+    if (typeof p.ramGuard !== "boolean") throw new Error("The RAM guard is on or off");
+    set.ram_guard = p.ramGuard ? 1 : 0;
+  }
   if (p.hours !== undefined) {
     if (p.hours !== null && !parseHours(p.hours)) throw new Error("Hours need a time zone and windows like 01:00–09:00");
     set.hours_json = p.hours === null ? null : JSON.stringify(parseHours(p.hours));
@@ -2419,7 +2461,7 @@ export function patchWorker(id: string, p: WorkerPatch, now = Date.now(), by = "
   if (p.paused === false) actions.push(["resume", "Resumed on the website"]);
   if (p.drain === true) actions.push(["drain", "Set to finish its job, then pause"]);
   else if (p.drain === false) actions.push(["undrain", "No longer pausing after its job"]);
-  const edited = (["autoResume", "hours", "allow", "claimAfterMs", "switchAfterMs", "pickOrder"] as const).filter((k) => p[k] !== undefined);
+  const edited = (["autoResume", "ramGuard", "hours", "allow", "claimAfterMs", "switchAfterMs", "pickOrder"] as const).filter((k) => p[k] !== undefined);
   if (edited.length) actions.push(["edit", `Settings changed: ${edited.join(", ")}`, { keys: edited }]);
   if (p.clearNoStream !== undefined) {
     const cleared = p.clearNoStream === true ? Object.keys(noStreamOf(w)) : p.clearNoStream.filter((k) => noStreamOf(w)[k] !== undefined);
