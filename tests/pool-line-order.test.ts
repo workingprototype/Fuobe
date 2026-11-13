@@ -728,18 +728,18 @@ describe("GET and PATCH /api/admin/queue/settings", () => {
   const ownerCookie = () => `${auth.SESSION_COOKIE}=${auth.createSession().value}`;
   const audits = () => db().prepare("SELECT * FROM admin_audit WHERE action = 'queue.settings' ORDER BY id").all() as { actor: string; detail_json: string | null; status: number; token_id: string | null }[];
 
-  it("the defaults are today's: a 45 minute ceiling, no owner wait limit, strict order, and 2 hours back in line inside a hold", async () => {
+  it("the defaults are today's: a 45 minute ceiling, no owner wait limit, strict order, 20 s of first pick, and 2 hours back in line inside a hold", async () => {
     const res = await settingsRoute.GET(req({ cookie: ownerCookie() }));
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(await res.json()).toEqual({ settings: { runCeilingS: { default: 2700, lanes: {} }, ownerWaitLimitS: null, fairShare: false, pickAllowanceMs: 0, pausedBudgetS: 7200 } });
+    expect(await res.json()).toEqual({ settings: { runCeilingS: { default: 2700, lanes: {} }, ownerWaitLimitS: null, fairShare: false, pickAllowanceMs: 0, firstPickGraceMs: 20_000, pausedBudgetS: 7200 } });
   });
 
   it("the owner changes them; each change is logged with the values before and after", async () => {
     const lane = allLanes(loadIndex(), sha)[0].lane;
-    const res = await settingsRoute.PATCH(req({ method: "PATCH", cookie: ownerCookie(), body: { runCeilingS: { default: 3000, lanes: { [lane]: 3600 } }, ownerWaitLimitS: 86_400, fairShare: true, pausedBudgetS: 3600 } }));
+    const res = await settingsRoute.PATCH(req({ method: "PATCH", cookie: ownerCookie(), body: { runCeilingS: { default: 3000, lanes: { [lane]: 3600 } }, ownerWaitLimitS: 86_400, fairShare: true, firstPickGraceMs: 30_000, pausedBudgetS: 3600 } }));
     expect(res.status).toBe(200);
-    const want = { runCeilingS: { default: 3000, lanes: { [lane]: 3600 } }, ownerWaitLimitS: 86_400, fairShare: true, pickAllowanceMs: 0, pausedBudgetS: 3600 };
+    const want = { runCeilingS: { default: 3000, lanes: { [lane]: 3600 } }, ownerWaitLimitS: 86_400, fairShare: true, pickAllowanceMs: 0, firstPickGraceMs: 30_000, pausedBudgetS: 3600 };
     expect(await res.json()).toEqual({ settings: want });
     expect(qs.queueSettings()).toEqual(want);
     const row = audits().at(-1)!;
@@ -760,6 +760,8 @@ describe("GET and PATCH /api/admin/queue/settings", () => {
       { ownerWaitLimitS: -1 },
       { fairShare: "yes" },
       { pickAllowanceMs: 1.5 },
+      { firstPickGraceMs: -1 },
+      { firstPickGraceMs: 600_001 },
       { pausedBudgetS: -1 },
       { pausedBudgetS: 8 * 24 * 3600 },
       { somethingElse: 1 },
@@ -786,7 +788,8 @@ describe("GET and PATCH /api/admin/queue/settings", () => {
     globalThis.__fuobeQueueSettings = undefined;
     const known: Record<string, unknown> = { ...stored };
     delete known.retiredSetting;
-    expect(qs.queueSettings()).toEqual(known);
+    // A setting it doesn't hold (one added since it was stored) takes its default.
+    expect(qs.queueSettings()).toEqual({ ...known, firstPickGraceMs: 20_000 });
   });
 
   it("an admin token reads them with queue:read and changes them with queue:write", async () => {

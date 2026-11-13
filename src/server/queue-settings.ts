@@ -12,6 +12,8 @@ import { db } from "./db";
  *   next job goes after every other account's job that came before it and is the first of its own.
  * - `pickAllowanceMs`: how long a job in the lane a worker has loaded may go ahead of an older one in another lane, so a
  *   worker doesn't reload its models for every job (0: strict order).
+ * - `firstPickGraceMs`: how long a job may wait for a worker with a higher pick order to take it, while that worker is
+ *   free and can run it, before another worker takes it (0: no job waits for one).
  * - `pausedBudgetS`: how long, in all, a run that has started may spend back in line while its worker steps aside (another
  *   program on its GPU, a pause) and still be inside its hold's deadline. With the run ceiling, it sets the time a run
  *   asks its hold to stay open (holdTiming). A run past it still delivers its result.
@@ -24,16 +26,18 @@ export interface QueueSettings {
   ownerWaitLimitS: number | null;
   fairShare: boolean;
   pickAllowanceMs: number;
+  firstPickGraceMs: number;
   pausedBudgetS: number;
 }
 
-export const QUEUE_DEFAULTS: QueueSettings = { runCeilingS: { default: 2700, lanes: {} }, ownerWaitLimitS: null, fairShare: false, pickAllowanceMs: 0, pausedBudgetS: 7200 };
+export const QUEUE_DEFAULTS: QueueSettings = { runCeilingS: { default: 2700, lanes: {} }, ownerWaitLimitS: null, fairShare: false, pickAllowanceMs: 0, firstPickGraceMs: 20_000, pausedBudgetS: 7200 };
 
 /** The bounds each value may take. */
 export const QUEUE_BOUNDS = {
   ceilingS: { min: 60, max: 24 * 3600 },
   ownerWaitS: { min: 60, max: 7 * 24 * 3600 },
   pickAllowanceMs: { min: 0, max: 3_600_000 },
+  firstPickGraceMs: { min: 0, max: 600_000 },
   pausedBudgetS: { min: 0, max: 7 * 24 * 3600 },
   lanes: 200,
 };
@@ -48,7 +52,7 @@ declare global {
 const copy = (s: QueueSettings): QueueSettings => ({ ...s, runCeilingS: { default: s.runCeilingS.default, lanes: { ...s.runCeilingS.lanes } } });
 
 /** The settings this version knows. */
-const QUEUE_KEYS = ["runCeilingS", "ownerWaitLimitS", "fairShare", "pickAllowanceMs", "pausedBudgetS"];
+const QUEUE_KEYS = ["runCeilingS", "ownerWaitLimitS", "fairShare", "pickAllowanceMs", "firstPickGraceMs", "pausedBudgetS"];
 
 /**
  * A stored value read leniently: anything that isn't valid is the default (a bad row never stops a run). A setting
@@ -121,6 +125,11 @@ export function checkQueuePatch(body: unknown, base: QueueSettings = queueSettin
     const p = QUEUE_BOUNDS.pickAllowanceMs;
     if (!inRange(b.pickAllowanceMs, p)) return { error: `pickAllowanceMs is ${p.min} to ${p.max}` };
     out.pickAllowanceMs = b.pickAllowanceMs;
+  }
+  if (b.firstPickGraceMs !== undefined) {
+    const p = QUEUE_BOUNDS.firstPickGraceMs;
+    if (!inRange(b.firstPickGraceMs, p)) return { error: `firstPickGraceMs is ${p.min} to ${p.max}` };
+    out.firstPickGraceMs = b.firstPickGraceMs;
   }
   if (b.pausedBudgetS !== undefined) {
     const p = QUEUE_BOUNDS.pausedBudgetS;

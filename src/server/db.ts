@@ -1149,6 +1149,8 @@ const RELAY_COLUMNS: [string, string, string][] = [
   ["relay_workers", "update_asked_commit", "TEXT"],
   // A worker PC's live hardware stats as its last beat said, with when the studio heard them (WorkerBeat.stats).
   ["relay_workers", "stats_json", "TEXT"],
+  // A worker's pick order (pool.ts firstPickOf): higher picks first among workers that are free and can run a job.
+  ["relay_workers", "pick_order", "INTEGER NOT NULL DEFAULT 0"],
 ];
 
 declare global {

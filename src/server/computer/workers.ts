@@ -59,6 +59,8 @@ export interface WorkerRow {
   allow_json: string | null;
   claim_after_ms: number;
   switch_after_ms: number;
+  /** Its pick order: a free worker with a higher one gets first pick of a job both can run (pool.ts firstPickOf). 0: none. */
+  pick_order?: number;
   state: string;
   seen_at: number | null;
   /** A pool worker's next token (its SHA-256), offered in a beat answer and not used yet; its expiry; when it was made. */

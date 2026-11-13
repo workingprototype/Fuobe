@@ -657,7 +657,10 @@ function gpuClaimableRows(w: WorkerRow, now: number, whose: "people" | "owner"):
       ? `(${CLASS_RANK} <> ${OWNER_CLASS} OR generation_id IN (SELECT value FROM json_each(?)))`
       : `${CLASS_RANK} = ${OWNER_CLASS} AND generation_id NOT IN (SELECT value FROM json_each(?))`;
   const rows = lineRows(LINE_COLS, `pools IS NOT NULL AND state = 'waiting' AND stop = 0 AND ${byClass} AND INSTR(',' || pools || ',', ?) > 0 ${slotWhere(w, "gpu")}`, [sentNext, `,${w.pool},`], c, LOOK_AT);
-  const fit = rows.filter((t) => fitsSlot(t, w, now, "gpu") && retryOk(t, w, now) && beforeWindowEnds(t, w, now));
+  const able = rows.filter((t) => fitsSlot(t, w, now, "gpu") && retryOk(t, w, now) && beforeWindowEnds(t, w, now));
+  // A job left for a free worker that picks first is not this worker's to take for now: its PC makes no room for it.
+  const left = able.length ? firstPicks(w, now) : null;
+  const fit = left?.size ? able.filter((t) => !left.has(t.id)) : able;
   if (plainLine(c)) return fit;
   // Held runs and people, runs pinned to another worker, and the owner's own jobs in People only don't count. In Our work
   // first, while local work on its PC runs, people's runs ask it for no room unless the owner sent them next or boosted
@@ -841,9 +844,13 @@ export function workerClaim(w: WorkerRow, running: string[], now = Date.now(), s
       if (slot === "gpu") noteAsked(fresh, "blocked", `Asked for work: not taking work (${blockedWhy(fresh, now)})`, now);
       return null;
     }
-    const { task: t, looked } = pick(fresh, now, slot);
+    // First pick: its GPU leaves a job for a free worker with a higher pick order that would take it next, for a short
+    // grace (firstPicks), and takes its own next best.
+    const left = slot === "gpu" ? firstPicks(fresh, now) : new Map<string, string>();
+    const { task: t, looked } = pick(fresh, now, slot, new Set(left.keys()));
     const many = `${looked}${looked >= LOOK_AT ? "+" : ""}`;
-    if (slot === "gpu") noteAsked(fresh, t ? "found" : "nothing", t ? `Asked for work: took 1 of ${many} waiting` : looked ? `Asked for work: ${many} waiting, none it can run now` : "Asked for work: nothing waiting", now, { waiting: looked });
+    const none = left.size ? `Asked for work: ${many} waiting, ${left.size === 1 ? "1 left" : `${left.size} left`} for a worker that picks first` : `Asked for work: ${many} waiting, none it can run now`;
+    if (slot === "gpu") noteAsked(fresh, t ? "found" : "nothing", t ? `Asked for work: took 1 of ${many} waiting` : looked ? none : "Asked for work: nothing waiting", now, { waiting: looked, ...(left.size && { leftFor: [...new Set(left.values())] }) });
     return t ? claimed(t, fresh, device, now) : null;
   }).immediate();
 }
@@ -1033,15 +1040,16 @@ function beforeWindowEnds(t: TaskRow, w: WorkerRow, now: number): boolean {
  * never makes a person wait: while any person's run waits that this worker can take, it takes the best of them. Only
  * among the owner's own jobs may one in the lane it has loaded go ahead of the best one, while the best one has waited
  * less than the pick allowance (the install's setting, capped by this worker's switch_after_ms; 0: strict order).
+ * `leave`: the tasks it leaves for a worker that picks first (firstPicks).
  */
-function pick(w: WorkerRow, now: number, slot: WorkerSlot = "gpu"): { task: TaskRow | null; looked: number } {
+function pick(w: WorkerRow, now: number, slot: WorkerSlot = "gpu", leave?: ReadonlySet<string>): { task: TaskRow | null; looked: number } {
   const settings = queueSettings(now);
   // The owner's controls: this worker's mode, and the runs and people sent first or held.
   const c = controlsOf(w, now);
   // Each slot looks only at its own tasks.
   const rows = lineRows("*", `pools IS NOT NULL AND state = 'waiting' AND stop = 0 AND INSTR(',' || pools || ',', ?) > 0 ${slotWhere(w, slot)}`, [`,${w.pool},`], c, LOOK_AT);
   const looked = rows.length;
-  const ok = controlledOrder(rows, settings.fairShare, c, w.id).filter((t) => fitsSlot(t, w, now, slot) && retryOk(t, w, now) && beforeWindowEnds(t, w, now));
+  const ok = controlledOrder(rows, settings.fairShare, c, w.id).filter((t) => !leave?.has(t.id) && fitsSlot(t, w, now, slot) && retryOk(t, w, now) && beforeWindowEnds(t, w, now));
   if (!ok.length) return { task: null, looked };
   const best = ok[0];
   const allowance = Math.min(w.switch_after_ms, settings.pickAllowanceMs);
@@ -1050,6 +1058,66 @@ function pick(w: WorkerRow, now: number, slot: WorkerSlot = "gpu"): { task: Task
   if (slot === "cpu" || allowance <= 0 || !w.warm_lane || best.lane === w.warm_lane || classRank(best) !== OWNER_CLASS || !plain(best)) return { task: best, looked };
   const warm = ok.find((t) => t.lane === w.warm_lane && classRank(t) === OWNER_CLASS && plain(t));
   return { task: warm && (best.rank_at ?? best.created_at) >= now - allowance ? warm : best, looked };
+}
+
+// ---------------------------------------------------------------------------
+// First pick: a worker with a higher pick order gets a job first, while it is free and can run it
+
+/** A worker with a higher pick order than the one that claims, free now, and the job its own claim would take next. */
+export interface FirstPicker {
+  id: string;
+  pickOrder: number;
+  /** That job, and since when it could take it (the job came, and its delays passed). Null: none. */
+  next: { taskId: string; since: number } | null;
+}
+
+/**
+ * Who gets first pick of a job a worker could take (pure): of the free workers with a pick order above the claiming
+ * worker's (`mine`), the one with the highest pick order whose next job it is, while that job has been there for it for
+ * less than `graceMs`. Null: the claiming worker takes it. A grace of 0 leaves no job for anyone.
+ */
+export function firstPickOf(taskId: string, mine: number, pickers: readonly FirstPicker[], now: number, graceMs: number): string | null {
+  if (graceMs <= 0) return null;
+  const by = pickers.filter((p) => p.pickOrder > mine && p.next?.taskId === taskId && now - p.next.since < graceMs);
+  by.sort((a, b) => b.pickOrder - a.pickOrder || (a.id < b.id ? -1 : 1));
+  return by[0]?.id ?? null;
+}
+
+/**
+ * Is this worker free to take a job now: it may take work (eligible: heard from within 30 s, paused in neither place,
+ * not draining, inside its hours), it says nothing holds it back (its beat's `holding`: starting its ComfyUI, local work
+ * first, an update…), and its GPU's slot holds no job.
+ */
+function freeNow(x: WorkerRow, now: number): boolean {
+  if (!eligible(x, now) || x.holding_json || (x.local_why ?? "").startsWith("waiting-for-yield")) return false;
+  return !db().prepare("SELECT 1 FROM relay_tasks WHERE worker_id = ? AND device = ? AND state IN ('sending','queued','running','collecting')").get(x.id, slotDevice(x, "gpu"));
+}
+
+/** When a task became one this worker could take: when it came, plus the worker's claim delay and its lane's delay. */
+const claimableSince = (t: TaskRow, x: WorkerRow) => t.created_at + x.claim_after_ms + (allowOf(x)[t.lane ?? ""]?.delayMs ?? 0);
+
+/**
+ * The tasks this worker's GPU leaves for workers with a higher pick order, each to the worker it is left for
+ * (firstPickOf): each such worker that is free now (freeNow), highest pick order first, with the job its own claim
+ * would take next (pick: its pool, lanes and their delays, files, packs and memory, the retry rule, its hours and mode),
+ * the tasks left for the workers above it left out. Empty at once (one query) when no worker has a higher pick order, or
+ * the grace is 0.
+ */
+function firstPicks(w: WorkerRow, now: number): Map<string, string> {
+  const out = new Map<string, string>();
+  const graceMs = queueSettings(now).firstPickGraceMs;
+  if (graceMs <= 0) return out;
+  const mine = w.pick_order ?? 0;
+  const above = db().prepare("SELECT * FROM relay_workers WHERE kind = 'pool' AND revoked_at IS NULL AND id != ? AND pick_order > ? ORDER BY pick_order DESC, id").all(w.id, mine) as WorkerRow[];
+  const pickers: FirstPicker[] = [];
+  for (const x of above) {
+    if (!freeNow(x, now)) continue;
+    const t = pick(x, now, "gpu", new Set(out.keys())).task;
+    pickers.push({ id: x.id, pickOrder: x.pick_order ?? 0, next: t ? { taskId: t.id, since: claimableSince(t, x) } : null });
+    const who = t ? firstPickOf(t.id, mine, pickers, now, graceMs) : null;
+    if (t && who) out.set(t.id, who);
+  }
+  return out;
 }
 
 /**
@@ -1847,6 +1915,8 @@ export interface WorkerView {
   allow: Record<string, Allow>;
   claimAfterMs: number;
   switchAfterMs: number;
+  /** Its pick order: higher gets first pick of a job that a worker with a lower one could take too, while it is free. 0: none. */
+  pickOrder: number;
   warmLane: string | null;
   /** The lanes it can run every workflow of. */
   lanes: string[];
@@ -2092,6 +2162,7 @@ export function workerView(w: WorkerRow, now = Date.now(), typical: (lane: strin
     allow: allowOf(w),
     claimAfterMs: w.claim_after_ms,
     switchAfterMs: w.switch_after_ms,
+    pickOrder: w.pick_order ?? 0,
     warmLane: w.warm_lane,
     lanes: capableOf(w).lanes,
     partLanes: partLanes(loadIndex(), capableOf(w).workflows, sha),
@@ -2135,6 +2206,10 @@ export function addWorker(name: string, pool = "pool"): { id: string; token: str
   return createWorker({ name: clean, kind: "pool", pool });
 }
 
+/** The pick order a worker may have (WorkerPatch.pickOrder). */
+export const PICK_ORDER_MIN = -100;
+export const PICK_ORDER_MAX = 100;
+
 export interface WorkerPatch {
   paused?: boolean;
   pauseNow?: boolean;
@@ -2145,6 +2220,8 @@ export interface WorkerPatch {
   allow?: unknown;
   claimAfterMs?: number;
   switchAfterMs?: number;
+  /** A whole number from PICK_ORDER_MIN to PICK_ORDER_MAX: higher picks first (firstPicks). 0: none. */
+  pickOrder?: number;
   rotate?: boolean;
   revoke?: boolean;
 }
@@ -2208,6 +2285,10 @@ export function patchWorker(id: string, p: WorkerPatch, now = Date.now(), by = "
   }
   if (p.claimAfterMs !== undefined) set.claim_after_ms = Math.max(0, Math.min(24 * 3_600_000, Math.round(Number(p.claimAfterMs) || 0)));
   if (p.switchAfterMs !== undefined) set.switch_after_ms = Math.max(0, Math.min(24 * 3_600_000, Math.round(Number(p.switchAfterMs) || 0)));
+  if (p.pickOrder !== undefined) {
+    if (!Number.isInteger(p.pickOrder) || p.pickOrder < PICK_ORDER_MIN || p.pickOrder > PICK_ORDER_MAX) throw new Error(`The pick order is a whole number from ${PICK_ORDER_MIN} to ${PICK_ORDER_MAX}`);
+    set.pick_order = p.pickOrder;
+  }
   const keys = Object.keys(set);
   if (keys.length) d.prepare(`UPDATE relay_workers SET ${keys.map((k) => `${k} = @${k}`).join(", ")} WHERE id = @id`).run({ ...set, id });
   const token = p.rotate ? rotateWorker(id) ?? undefined : undefined;
@@ -2219,7 +2300,7 @@ export function patchWorker(id: string, p: WorkerPatch, now = Date.now(), by = "
   if (p.paused === false) actions.push(["resume", "Resumed on the website"]);
   if (p.drain === true) actions.push(["drain", "Set to finish its job, then pause"]);
   else if (p.drain === false) actions.push(["undrain", "No longer pausing after its job"]);
-  const edited = (["autoResume", "hours", "allow", "claimAfterMs", "switchAfterMs"] as const).filter((k) => p[k] !== undefined);
+  const edited = (["autoResume", "hours", "allow", "claimAfterMs", "switchAfterMs", "pickOrder"] as const).filter((k) => p[k] !== undefined);
   if (edited.length) actions.push(["edit", `Settings changed: ${edited.join(", ")}`, { keys: edited }]);
   if (token) actions.push(["rotate", "New token made"]);
   noteAdmin(id, actions, by, now);
