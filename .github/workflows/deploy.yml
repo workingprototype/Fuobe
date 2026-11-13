@@ -71,6 +71,10 @@ jobs:
       - name: Typecheck
         run: pnpm exec next typegen && pnpm typecheck
 
+      # The worker program's built parts, as a worker loads them: every built module is imported (a few seconds).
+      - name: Worker parts load
+        run: node scripts/check-worker-build.mjs
+
       - name: Build
         run: pnpm build
 

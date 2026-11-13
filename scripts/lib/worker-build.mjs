@@ -120,7 +120,8 @@ export function workerFiles({ root = ROOT, catalogDir } = {}) {
       if (!SOURCES.includes(dep)) throw new Error(`${name}.ts imports ./${dep}, which the worker build doesn't include`);
       return `from "./${dep}.mjs"`;
     });
-    if (/from "(@\/|\.\.\/)/.test(js)) throw new Error(`${name}.ts imports something outside src/lib's worker files`);
+    // A sub-folder of src/lib (./gpu/argv) is outside the build as much as ../ or @/ is.
+    if (/from "(@\/|\.\.\/|\.\/[^"]*\/)/.test(js)) throw new Error(`${name}.ts imports something outside src/lib's worker files`);
     files[`${name}.mjs`] = `// Built from src/lib/${name}.ts by scripts/build-worker.mjs. Don't edit.\n${js}`;
   }
   const json = (data) => `${JSON.stringify({ built: "scripts/build-worker.mjs", ...data }, null, 1)}\n`;
