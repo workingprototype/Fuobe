@@ -62,6 +62,8 @@ const STREAMED = [
   "video-motion-transfer-h3",
   "video-scene-edit-h3",
   "z-image-turbo-t2i",
+  "ltx2-t2v",
+  "wan22-i2v-14b-lightx2v",
 ];
 
 /** The committed inputs with stream-needs.json replaced. */

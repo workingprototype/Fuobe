@@ -5,6 +5,7 @@
         "fibo2-dev-t2i",
         "flux3-klein-t2i",
         "krea2-turbo-t2i",
+        "ltx2-t2v",
         "ltx25-t2v",
         "minimax-h3-fast-flf2v",
         "minimax-h3-fast-i2v",
@@ -23,6 +24,7 @@
         "video-h3-t2v-2k",
         "video-motion-transfer-h3",
         "video-scene-edit-h3",
+        "wan22-i2v-14b-lightx2v",
         "z-image-turbo-t2i"
       ],
       "vramGb": 10,
