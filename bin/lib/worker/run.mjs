@@ -327,6 +327,8 @@ async function work(saved, deps, owner) {
   // Its ComfyUI lists the nodes of its face detector's self-check (self-check.mjs), and how many checks it ran.
   let faceNodes = false;
   let faceChecks = 0;
+  // When a face self-check last failed twice: face jobs go back in line until SELF_CHECK_PAUSE_MS later; other jobs go on.
+  let facesDownAt = null;
   let answer = null;
   let inv = { files: [], nodePacks: [], media: ffmpeg ? ["image", "video", "audio"] : ["image"] };
   let packs = [];
@@ -505,11 +507,16 @@ async function work(saved, deps, owner) {
   }
   /**
    * Its face detector's self-check (self-check.mjs) on its GPU ComfyUI, while that ComfyUI has the face nodes. A failure
-   * starts its ComfyUI again and checks once more; a second failure pauses face work ("self-check") for
-   * SELF_CHECK_PAUSE_MS (5 minutes). True when it passed, or when there is nothing to check.
+   * starts its ComfyUI again and checks once more; a second failure holds back face jobs only (they go back in line,
+   * "self-check") for SELF_CHECK_PAUSE_MS (5 minutes), while every other job goes on. True when it passed, or when there
+   * is nothing to check.
    */
   async function checkFaces(when) {
     if (!faceNodes || !comfy.ready) return true;
+    if (facesDownAt !== null) {
+      if (now() - facesDownAt < SELF_CHECK_PAUSE_MS) return false;
+      facesDownAt = null;
+    }
     const once = () => runSelfCheck((url, init) => comfy.fetch(url, init), comfy.base, { n: ++faceChecks, now, sleep });
     const read = (r) => `${r.height === null ? "no face" : `${Math.round(r.height)} px`} (${r.why}${r.detail ? `: ${r.detail}` : ""})`;
     let first = await once();
@@ -548,9 +555,8 @@ async function work(saved, deps, owner) {
       log(`Its face check passed after the restart (${Math.round(second.height)} px).`);
       return true;
     }
-    comfyTrouble = "self-check";
-    troubleAt = now();
-    log(`Its face check failed again after the restart (${second.why}${second.detail ? `: ${second.detail}` : ""}): face jobs go back in line, and it checks again in ${Math.round(SELF_CHECK_PAUSE_MS / 60_000)} minutes.`);
+    facesDownAt = now();
+    log(`Its face check failed again after the restart (${second.why}${second.detail ? `: ${second.detail}` : ""}): face jobs go back in line for ${Math.round(SELF_CHECK_PAUSE_MS / 60_000)} minutes, then it checks again first; other jobs go on.`);
     return false;
   }
   // One look at a time; the next beat carries a changed hash, and the studio then asks for the list.
@@ -1312,8 +1318,6 @@ async function work(saved, deps, owner) {
       awake.set(!!answer?.worker && (busyJob || busyCpu || hold.ids().length > 0 || !!mayWork()));
       // A taken port is tried again (a bind test, never a connection) once a minute.
       if (comfyTrouble === "port-busy" && t - troubleAt >= 60_000) comfyTrouble = null;
-      // A failed face self-check: five minutes later its ComfyUI starts again, and checks again first.
-      if (comfyTrouble === "self-check" && t - troubleAt >= SELF_CHECK_PAUSE_MS) comfyTrouble = null;
       const s = state();
       if (s !== lastState) {
         lastState = s;

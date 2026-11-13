@@ -748,8 +748,10 @@ takes about a second.
   `H3FaceSelect`. It checks only when its ComfyUI lists `H3FaceTrackCrop` and `PreviewAny`.
 - When a check fails, the worker starts its ComfyUI again and checks once more.
 - When the second check fails too, the job goes back in line with its place kept, and the try does not count against
-  it (give-back `self-check`). The worker pauses itself (`local.why: "self-check"`), and Settings → Workers shows that
-  its face check didn't pass. After an hour, the worker starts its ComfyUI again, and the check runs again first.
+  it (give-back `self-check`). For 5 minutes after that, every face job it is given goes back in line the same way,
+  without a check. Every other job goes on as usual: its ComfyUI keeps running. After the 5 minutes, the next face job
+  checks again first. (A worker program from before this rule paused itself instead, `local.why: "self-check"`, and
+  Settings → Workers showed that its face check didn't pass.)
 
 After each job, however it ended, nothing of it stays in its ComfyUI: the worker empties the queue, stops a prompt that
 still runs, and clears the whole history (a meta-batch's passes too). It also deletes the job's inputs and results from
@@ -1099,8 +1101,8 @@ its target), at most once an hour each.
     and waits as a job no worker took (its wait limit holds, unless a worker ran it before). Refused later on (a worker
     that started again after an update and took its own job back), it counts as an attempt, and the job keeps its
     claim's time.
-    With `self-check` (the worker's face self-check failed twice, and it paused itself), the job goes back in line with
-    its place kept, and the try costs no attempt.
+    With `self-check` (the worker's face self-check failed twice, so it holds back face jobs for a while), the job goes
+    back in line with its place kept, and the try costs no attempt.
   - `failed` can also give `unknown-node`, `unsafe-path` (a path, or an input outside its rule), `model-unverified`,
     `input-crashed` (its ComfyUI stopped twice on the job), `input-unreadable` (ffmpeg could not read a clip or a
     sound), `bad-ticket` (a ticket it can't use, or a graph where a ticket belongs), `unsafe-model` (a 3D model that
