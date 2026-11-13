@@ -10,8 +10,11 @@
         "minimax-h3-flash-flf2v",
         "minimax-h3-flash-i2v",
         "minimax-h3-flash-t2v",
+        "minimax-h3-flex-ref2va",
+        "minimax-h3-i2v",
         "minimax-h3-image-edit",
-        "minimax-h3-image-t2i"
+        "minimax-h3-image-t2i",
+        "qwen-image-21-relight"
       ],
       "vramGb": 10,
       "ramGb": 32

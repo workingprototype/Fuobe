@@ -44,6 +44,9 @@ const STREAMED = [
   "minimax-h3-flash-flf2v",
   "krea2-turbo-t2i",
   "flux3-klein-t2i",
+  "minimax-h3-i2v",
+  "minimax-h3-flex-ref2va",
+  "qwen-image-21-relight",
 ];
 
 /** The committed inputs with stream-needs.json replaced. */
