@@ -6,7 +6,6 @@
  * through) and never sends cookies.
  */
 import { INPUT_NAME, UUID, type HistoryEntryLike, type WantedFile } from "./relay";
-import { parseArgv } from "./gpu/argv";
 
 /** Where to look, in order: Desktop's port after the usual one, then the ports people move to. */
 export const COMFY_PORTS = [8188, 8000, 8189, 8190, 8288, 8001, 7821] as const;
@@ -331,9 +330,13 @@ export const sameFinder = (a: Finder, b: Finder): boolean => a.s === b.s && JSON
  * Facts for the server from /system_stats: never the command line, only whether its cross-site setting names this site
  * and whether its dynamic VRAM is off; and whether Fuobe's guard answered (`guard`, when it was asked).
  */
+/** The ComfyUI options that turn its dynamic VRAM off (comfy/cli_args.py). */
+const DYNAMIC_VRAM_OFF = ["--disable-dynamic-vram", "--highvram", "--gpu-only", "--novram", "--cpu"];
+
 export function statsFacts(s: SystemStats, origin: string, guard?: boolean) {
   const argv = s.system?.argv ?? [];
-  const dynamicVramOff = parseArgv(argv).dynamicVramOff;
+  // ComfyUI's dynamic VRAM is off with any of these (as gpu/argv.ts reads them; this file is part of the worker build, which has no gpu/ folder).
+  const dynamicVramOff = DYNAMIC_VRAM_OFF.some((flag) => argv.some((a) => a === flag || a.startsWith(`${flag}=`)));
   const at = argv.indexOf("--enable-cors-header");
   const value = at >= 0 ? argv[at + 1] : undefined;
   const cors = at < 0 ? undefined : !value || value.startsWith("--") || value === "*" ? ("any" as const) : value.replace(/\/+$/, "") === origin ? ("exact" as const) : ("other" as const);
