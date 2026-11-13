@@ -88,6 +88,26 @@ describe("the catalog's variants (build-requirements.mjs)", () => {
     expect(() => build([variant({ files: { [TE_FP8]: "text_encoders/clip_l.safetensors" } })])).toThrow("loads text_encoders/qwen3vl_4b_fp8_scaled.safetensors with CLIPLoader.clip_name, which reads text_encoders/clip_l.safetensors in no workflow of the catalog");
   });
 
+  it("takes a smaller build that no graph loads when the workflow names it as an optional file, in the slot it stands in for", () => {
+    const inputs = loadInputs(LIBRARY);
+    const url = "https://huggingface.co/example/krea-2-small/resolve/main/krea2_turbo_small_int4.safetensors";
+    const SMALL = "diffusion_models/krea2_turbo_small_int4.safetensors" as FileKey;
+    const manifest = structuredClone(inputs.manifest);
+    manifest.workflows.find((w: { id: string }) => w.id === KREA).models.push({ file: "krea2_turbo_small_int4.safetensors", folder: "diffusion_models", url, sizeGb: 7, optional: true });
+    const pins = { ...inputs.pins, [url]: { revision: "a".repeat(40), sizeBytes: 7_000_000_000, sha256: "b".repeat(64) } };
+    const withSmall = (v: object) => buildIndex({ ...inputs, manifest, pins, variants: { variants: [v] } });
+    const out = withSmall(variant({ id: "int4", files: { [FP8]: SMALL } }));
+    expect(out.workflows[KREA].variants).toEqual([{ id: "int4", gpuGen: { min: "8.0", max: "8.6" }, files: { [FP8]: SMALL } }]);
+    expect(out.files[SMALL].loaders).toBeUndefined();
+    // The graph gets it in the old file's loader input.
+    const graph = JSON.parse(fs.readFileSync(path.join(LIBRARY, `${KREA}.json`), "utf8"));
+    expect(JSON.stringify(swapGraphFiles(graph, { [FP8]: SMALL }, out))).toContain("krea2_turbo_small_int4.safetensors");
+    // A workflow that doesn't name it among its own optional files can't swap to it.
+    expect(() => withSmall(variant({ id: "int4", workflows: ["krea2-turbo-i2i"], files: { [FP8]: SMALL } }))).toThrow(
+      "loads diffusion_models/krea2_turbo_fp8_scaled.safetensors with UNETLoader.unet_name, which reads diffusion_models/krea2_turbo_small_int4.safetensors in no workflow of the catalog",
+    );
+  });
+
   it("refuses a malformed entry: its id, its card generations, its VRAM, two of one name", () => {
     expect(() => build([variant({ id: "Int 8" })])).toThrow(/id must be lower case/);
     expect(() => build([variant({ gpuGen: { min: "8.6", max: "8.0" } })])).toThrow(/gpuGen must be/);

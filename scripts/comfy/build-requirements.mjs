@@ -378,6 +378,9 @@ export function modelVariants({ variants, workflows, files, graphs, subset, pins
           }
         }
         if (!slots.size) problems.push(`${at}: ${id}'s graph loads ${from} through no loader input, so nothing can be swapped`);
+        // A file no graph loads, named only as one of this workflow's optional files (a smaller build of the same model):
+        // the loader input it fills is the slot it is swapped into.
+        if (!b.loaders?.length && wf.optional?.includes(to)) continue;
         const takes = new Set((b.loaders ?? []).map(([cls, input]) => `${cls}.${input}`));
         for (const s of slots) if (!takes.has(s)) problems.push(`${at}: ${id} loads ${from} with ${s}, which reads ${to} in no workflow of the catalog`);
       }
