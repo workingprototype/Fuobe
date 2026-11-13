@@ -64,7 +64,11 @@ describe("the catalog's variants (build-requirements.mjs)", () => {
             expect(wf.optional, `${id} ${to}`).toContain(to);
             continue;
           }
-          for (const l of a.loaders ?? []) expect(b.loaders?.map((x) => x.join(".")), `${to}`).toContain(l.join("."));
+          // Each loader input that reads the old file in this workflow's graph reads the new one in some catalog workflow.
+          const graph = JSON.parse(fs.readFileSync(path.join(LIBRARY, `${id}.json`), "utf8")) as Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+          const slots = (a.loaders ?? []).filter(([cls, input]) => Object.values(graph).some((n) => n.class_type === cls && n.inputs[input] === a.file));
+          expect(slots.length, `${id} ${from}`).toBeGreaterThan(0);
+          for (const l of slots) expect(b.loaders?.map((x) => x.join(".")), `${to}`).toContain(l.join("."));
         }
       }
     }

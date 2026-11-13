@@ -1538,5 +1538,10 @@
   "revision": "f68ace85e60b4a02a323e394253731947657b7d2",
   "sizeBytes": 20499083752,
   "sha256": "638402843782296122f42f2ff557a63a9535c4fbc3f6978308042c8d0f4012b4"
+ },
+ "https://huggingface.co/AX1Y2JP/FLUX.1-dev-INT8-ConvRot/resolve/main/flux1-dev-int8-convrot.safetensors": {
+  "revision": "01a17db182d52088b222d615ce54729fa090b378",
+  "sizeBytes": 12339070170,
+  "sha256": "6ce471dba256885b623f33697c80ceec42c19b2382a5ca022f7a84b4fdc70c4e"
  }
 }

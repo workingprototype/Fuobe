@@ -102,6 +102,20 @@
       "files": {
         "diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors": "diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors"
       }
+    },
+    {
+      "id": "int8",
+      "gpuGen": {
+        "min": "8.0",
+        "max": "8.6"
+      },
+      "workflows": [
+        "flux1-dev-t2i"
+      ],
+      "files": {
+        "diffusion_models/flux1-dev.safetensors": "diffusion_models/flux1-dev-int8-convrot.safetensors",
+        "text_encoders/t5xxl_fp16.safetensors": "text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors"
+      }
     }
   ]
 }
