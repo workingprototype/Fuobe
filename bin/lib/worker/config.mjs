@@ -70,9 +70,10 @@ export const DEFAULTS = {
    */
   sensorsFile: null,
   /**
-   * The RAM guard (ram.mjs), for a PC its owner also works on: { othersGb, afterS?, everyS? }. Other programs above
-   * `othersGb` of the PC's memory: no job that streams from RAM, and after `afterS` (60) with no job in hand a pause that
-   * the automatic resume ends. None: off, as before.
+   * The RAM guard's numbers (ram.mjs), for a PC its owner also works on: { othersGb?, everyS? } (12 GB and 10 s by
+   * default). The guard runs only while the owner's switch for this worker is on (Settings → Workers); with other
+   * programs above `othersGb` of the PC's memory it prefers jobs that fit whole on its card, and its ComfyUI lets go of
+   * its memory before each GPU job and when idle.
    */
   ramGuard: null,
 };

@@ -179,16 +179,13 @@ export function siteProblem(site, o = {}) {
 
 /**
  * The worker's local pause, from its switch (`worker pause`), the GPU, its model folders (`modelsMissing`: the ones that
- * aren't there), its ComfyUI and its RAM guard (`ram`, ram.mjs RamWatch, or null): { paused, why, until }. A pause by
- * hand ("here", "here-until:<ms>", "here-now") always wins over the GPU's, and the GPU's over the RAM guard's.
- *
- * @param {{ paused: boolean; who: string | null } | null} [ram]
+ * aren't there) and its ComfyUI: { paused, why, until }. A pause by hand ("here", "here-until:<ms>", "here-now") always
+ * wins over the GPU's. Its RAM guard never pauses it (ram.mjs).
  */
-export function localPause(control, gpu, comfyTrouble, now, modelsMissing = [], ram = null) {
+export function localPause(control, gpu, comfyTrouble, now, modelsMissing = []) {
   if (control.paused && control.until && now >= control.until) return null; // its --for ran out: the caller clears it
   if (control.paused) return { paused: true, why: control.now ? "here-now" : control.until ? `here-until:${control.until}` : "here", until: control.until ?? null };
   if (gpu.paused) return { paused: true, why: `gpu-busy:${gpu.who ?? "another program"}`, until: null };
-  if (ram?.paused) return { paused: true, why: `ram-busy:${ram.who ?? "other programs"}`, until: null };
   if (modelsMissing.length) return { paused: true, why: "models-not-ready", until: null };
   if (comfyTrouble) return { paused: true, why: comfyTrouble, until: null };
   return { paused: false, why: null, until: null };
@@ -213,7 +210,7 @@ export function siteOf(answer) {
  * "signed-out" (the studio doesn't know its token) or "disconnected". `deps`: { fetch, now, sleep, readGpu, log, home, env,
  * signal, requirements, ComputerRunner, rules, pins, runtime (the run-time files it verifies: inventory.mjs
  * runtimeFileList), allowed, ffmpegVersion, reencode, awake, rescanMs, comfy (OwnComfy's own options), readCounters,
- * readListeners, readProcs and ramGuard (the RAM guard, ram.mjs), gpuEveryMs, gpuGraceMs (MID_JOB_GRACE_MS), gpuBriefMs (BRIEF_PAUSE_MS), readGpuGen, idleClaimMs
+ * readListeners, readProcs, ramNow and ramGuard (the RAM guard's numbers, ram.mjs), gpuEveryMs, gpuGraceMs (MID_JOB_GRACE_MS), gpuBriefMs (BRIEF_PAUSE_MS), readGpuGen, idleClaimMs
  * (IDLE_CLAIM_MS), canCleanPictures, and for job tickets: composer
  * (src/lib/ticket-compose.ts as built), catalogVersion, catalogDir, allLanes, codeWatch (update.mjs's CodeWatch: new
  * code on disk ends it with "update" once no person's job waits for it and its jobs are done) and updateDeferMs
@@ -313,15 +310,19 @@ async function work(saved, deps, owner) {
     briefResumeMs: BRIEF_COOL_DOWN_MS,
     briefEveryMs: BRIEF_EVERY_MS,
   });
-  // The RAM guard (ram.mjs, worker.json `ramGuard`; off unless set): other programs' share of the PC's memory, read every
-  // few seconds. Above its line, claims ask for no job that streams from RAM; after a while above it with no GPU job in
-  // hand, a pause, ended by the same automatic resume as a busy GPU's.
-  // (Tests give their own: { othersMb, afterMs, everyMs }.)
-  const ramCfg = deps.ramGuard !== undefined ? deps.ramGuard : ramGuardOf(cfg.ramGuard);
-  if (ramCfg?.problem) log(`${ramCfg.problem}: its RAM guard is off.`);
-  const ramGuard = ramCfg && !ramCfg.problem ? ramCfg : null;
-  const ramWatch = ramGuard ? new RamWatch({ othersMb: ramGuard.othersMb, afterMs: ramGuard.afterMs, autoResume: !!cfg.autoResume, resumeAfterMs: (cfg.resumeAfterMin ?? 10) * 60_000 }) : null;
-  if (ramGuard) log(`Its RAM guard is on: with other programs above ${Math.round((ramGuard.othersMb / 1024) * 10) / 10} GB of this PC's memory, it takes only jobs that fit whole on its card, and pauses after ${Math.round(ramGuard.afterMs / 1000)} s with no job in hand.`);
+  // The RAM guard (ram.mjs): other programs' share of the PC's memory, read every few seconds while the owner's switch
+  // for this worker is on (the beat's `worker.ramGuard`; off by default). worker.json `ramGuard` gives only its numbers.
+  // Above its line, claims prefer jobs that fit whole on its card, and its ComfyUI lets go of its memory before each GPU
+  // job and when idle. It never pauses. (Tests give their own numbers: { othersMb, everyMs }.)
+  const ramCfg = deps.ramGuard ?? ramGuardOf(cfg.ramGuard);
+  if (ramCfg.problem) log(`${ramCfg.problem}: its RAM guard uses its default for it.`);
+  const ramGuard = { othersMb: ramCfg.othersMb, everyMs: ramCfg.everyMs };
+  const ramWatch = new RamWatch({ othersMb: ramGuard.othersMb });
+  // The site's switch as the last beat said (null before the first answer), and whether its ComfyUI let go of its memory
+  // since its last GPU job.
+  let ramOn = null;
+  let ramIdleFreed = false;
+  const gbOf = (mb) => `${Math.round((mb ?? 0) / 102.4) / 10} GB`;
   let ramReadAt = -Infinity;
   // A reading under way, and the last one that came back and isn't used yet ({ split }: null when it failed).
   let ramReading = null;
@@ -909,6 +910,12 @@ async function work(saved, deps, owner) {
             emptyCache();
             lastTask = t.id;
           }
+          // Its RAM guard, above the line: its own ComfyUI lets go of its memory before a GPU job starts there (not for a
+          // job already in it, kept results going up, or a finishing job, which runs on no ComfyUI).
+          if (!o.onlyHeld && ramOn && ramWatch.over && t.finish === undefined && (!t.resume || t.resume === "sending")) {
+            ramIdleFreed = true;
+            await comfy.free();
+          }
         },
       },
     },
@@ -1012,11 +1019,13 @@ async function work(saved, deps, owner) {
   const take = (o) => {
     busyJob = true;
     jobUsesGpu = !o?.onlyHeld;
-    // Other programs use the PC's memory (its RAM guard): a claim asks for no job that streams from RAM.
+    // Other programs use the PC's memory (its RAM guard): a claim prefers no job that streams from RAM.
     job = runner
-      .claimAndRun(!o?.onlyHeld && ramWatch?.over ? { ...o, noStream: true } : o)
+      .claimAndRun(!o?.onlyHeld && ramOn && ramWatch.over ? { ...o, noStream: true } : o)
       .then((had) => {
         if (!o?.onlyHeld) gpuMissedAt = had ? -Infinity : now();
+        // A GPU job ran: its ComfyUI may hold models again, let go of once it is idle.
+        if (had && !o?.onlyHeld) ramIdleFreed = false;
       })
       .catch((e) => log(comfy.task ? `A job stopped: ${failure(e)}` : `It can't ask the studio for a job: ${failure(e)}`))
       .finally(() => {
@@ -1089,12 +1098,10 @@ async function work(saved, deps, owner) {
         writeControl(deps.home, { paused: false });
         control = { paused: false };
         gpu.clear();
-        ramWatch?.clear();
         log("The pause ran out: back to work.");
       }
       if (control.resumedAt && control.resumedAt > (gpu.clearedAt ?? 0)) {
         gpu.clear();
-        ramWatch?.clear();
         gpu.clearedAt = control.resumedAt;
       }
       // The GPU, every 5 s: nvidia-smi's total, and with a turns folder the GPU counters and the port table too.
@@ -1137,11 +1144,22 @@ async function work(saved, deps, owner) {
           if (was && !gpu.paused) log("The GPU stayed free for the whole cool-down: resuming.");
         }
       }
-      // The RAM guard, every everyS: the PC's used memory less its own processes' (itself, its ComfyUIs, its text slot's
-      // server and what they started). A failed reading keeps the last good one for RAM_REUSE_MS, then counts as free. The
-      // reading runs beside the loop (a PowerShell start takes about a second, longer when memory is short): the loop
-      // uses each one once it is there.
-      if (ramWatch && !ramReading && t - ramReadAt >= ramGuard.everyMs) {
+      // The RAM guard, while the owner's switch is on, every everyS: the PC's used memory less its own processes' (itself,
+      // its ComfyUIs, its text slot's server and what they started). A failed reading keeps the last good one for
+      // RAM_REUSE_MS, then counts as free. The reading runs beside the loop (a PowerShell start takes about a second,
+      // longer when memory is short): the loop uses each one once it is there.
+      const ramSwitch = answer?.worker?.ramGuard === true;
+      if (answer && ramSwitch !== ramOn) {
+        if (ramSwitch) log(`Its RAM guard is on: with other programs above ${gbOf(ramGuard.othersMb)} of this PC's memory, it prefers jobs that fit whole on its card, and its ComfyUI lets go of its memory before each job and when idle.`);
+        else if (ramOn) log("Its RAM guard is off: it takes any job it can run, as before.");
+        if (!ramSwitch) {
+          ramWatch.clear();
+          ramRead = null;
+          ramGood = null;
+        }
+        ramOn = ramSwitch;
+      }
+      if (ramOn && !ramReading && t - ramReadAt >= ramGuard.everyMs) {
         ramReadAt = t;
         const roots = [process.pid, comfy.pid, cpuComfy?.pid ?? null, text?.server?.pid ?? null];
         ramReading = (deps.readProcs ?? readProcs)(cfg.powershell)
@@ -1152,7 +1170,7 @@ async function work(saved, deps, owner) {
           })
           .finally(() => (ramReading = null));
       }
-      if (ramWatch && ramRead) {
+      if (ramOn && ramRead) {
         const { split: got } = ramRead;
         ramRead = null;
         if (got) {
@@ -1163,16 +1181,17 @@ async function work(saved, deps, owner) {
           log("Couldn't read the memory of this PC's programs: its RAM guard tries again at the next reading.");
           ramFailSaid = true;
         }
-        // The owner's switch for the automatic resume (the beat's) counts here as for a busy GPU.
-        ramWatch.o.autoResume = gpu.o.autoResume;
         const wasOver = ramWatch.over;
-        const wasPaused = ramWatch.paused;
-        ramWatch.update(t - ramGoodAt <= RAM_REUSE_MS ? ramGood : null, busyJob && jobUsesGpu, t);
-        const gb = (mb) => `${Math.round((mb ?? 0) / 102.4) / 10} GB`;
-        if (!wasOver && ramWatch.over && !ramWatch.paused) log(`Other programs use ${gb(ramWatch.othersMb)} of this PC's memory (its RAM guard's line is ${gb(ramGuard.othersMb)}): it takes only jobs that fit whole on its card.`);
-        if (!wasPaused && ramWatch.paused) log(`This PC's memory is in use (${ramWatch.who ?? "other programs"}, ${gb(ramWatch.othersMb)} not its own): pausing until it stays under the line for the cool-down.`);
-        if (wasPaused && !ramWatch.paused) log("This PC's memory stayed free for the whole cool-down: resuming.");
-        else if (wasOver && !ramWatch.over && !ramWatch.paused) log("Other programs' memory is under its RAM guard's line again: it takes any job it can run.");
+        ramWatch.update(t - ramGoodAt <= RAM_REUSE_MS ? ramGood : null);
+        if (!wasOver && ramWatch.over) {
+          log(`Other programs use ${gbOf(ramWatch.othersMb)} of this PC's memory${ramWatch.who ? ` (the most: ${ramWatch.who})` : ""}, above its RAM guard's line of ${gbOf(ramGuard.othersMb)}: it prefers jobs that fit whole on its card, and its ComfyUI lets go of its memory before each job and when idle.`);
+          ramIdleFreed = false;
+        } else if (wasOver && !ramWatch.over) log("Other programs' memory is under its RAM guard's line again: it takes any job it can run, as before.");
+      }
+      // Above the line with no GPU job in hand: its own ComfyUI lets go of its memory, once until its next GPU job.
+      if (ramOn && ramWatch.over && !ramIdleFreed && !busyJob && comfy.ready) {
+        ramIdleFreed = true;
+        await comfy.free();
       }
       if (comfyTrouble === "comfy-crashes" && !comfy.crashedTooOften(t) && t - guardMissingAt >= HOUR) comfyTrouble = null;
       // A ComfyUI that stopped answering (hung) is stopped; the next turn starts it again. Every beat looks at it (its
@@ -1196,7 +1215,7 @@ async function work(saved, deps, owner) {
           });
         } else modelsMissing = missing;
       }
-      let next = localPause(control, gpu, comfyTrouble, t, modelsMissing, ramWatch) ?? { paused: false, why: null, until: null };
+      let next = localPause(control, gpu, comfyTrouble, t, modelsMissing) ?? { paused: false, why: null, until: null };
       // Waiting for its turn is not a pause: its jobs keep their place in the line. The helper's estimate of the start
       // goes with it.
       if (!next.paused && turn.waitForYield) next = { paused: false, why: turn.late ? "waiting-for-yield:no-answer" : "waiting-for-yield", until: turn.startsAt };
@@ -1344,10 +1363,9 @@ async function work(saved, deps, owner) {
         }
       }
       // The text slot: never while paused by hand, on the website or outside its hours. While the worker waits for its
-      // GPU's job to end before it restarts on new code, the text slot goes on: text jobs take seconds. Its RAM guard's
-      // pause stops it too: its server's memory goes back to the PC's other programs.
+      // GPU's job to end before it restarts on new code, the text slot goes on: text jobs take seconds.
       if (text) {
-        const byHand = pause.paused && /^(here|ram-busy)/.test(pause.why ?? "");
+        const byHand = pause.paused && /^here/.test(pause.why ?? "");
         const turn = textTurn({ updating, gpuBusy: busyJob || busyCpu, byHand, worker: answer?.worker ?? null });
         text.tick(t, { ...turn, room: textRoom() });
       }

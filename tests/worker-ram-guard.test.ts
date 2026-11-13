@@ -1,13 +1,15 @@
 /**
- * The worker's RAM guard (bin/lib/worker/ram.mjs, worker.json `ramGuard`), for a PC its owner also works on. Its parts
- * on their own (the setting, the process list, the worker's own processes, the pause and resume), then the worker end to
- * end against the studio's real routes and its own stand-in ComfyUI (tests/helpers/fake-local-comfy.ts): the process
- * list and the PC's memory are stand-ins, never a real PowerShell or ps.
+ * The worker's RAM guard (bin/lib/worker/ram.mjs), for a PC its owner also works on. The owner's switch in Settings →
+ * Workers turns it on (the beat's answer, `worker.ramGuard`; off by default); worker.json `ramGuard` holds only its
+ * numbers. Its parts on their own (the numbers, the process list, the worker's own processes, the reading), the switch
+ * on the studio's side (the PATCH route, the view, the beat's answer), then the worker end to end against the studio's
+ * real routes and its own stand-in ComfyUI (tests/helpers/fake-local-comfy.ts): the process list and the PC's memory
+ * are stand-ins, never a real PowerShell or ps.
  *
- * - Above the line: its claims ask for no streamed job; with no job in hand for `afterS`, it pauses ("ram-busy"), and the
- *   studio says "This PC's memory is in use"; under the line for the cool-down, it resumes by itself.
- * - A job in hand goes on to its end: the pause comes after it.
- * - Off (no `ramGuard`): it never reads the process list, and its claims are as before.
+ * - Above the line: its claims ask for no streamed job, and its own ComfyUI lets go of its memory (/free) when idle and
+ *   before each job. Nothing pauses: it keeps taking jobs.
+ * - A job in hand goes on to its end.
+ * - The switch off (the default): it never reads the process list, and its claims are as before.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -30,15 +32,21 @@ globalThis.__fuobeTestDiskFree = 1e13;
 
 const GB = 1024;
 
-describe("the setting (ramGuardOf)", () => {
-  it("off unless set; the defaults; what it refuses", () => {
-    expect(ramGuardOf(undefined)).toBeNull();
-    expect(ramGuardOf(null)).toBeNull();
-    expect(ramGuardOf(false)).toBeNull();
-    expect(ramGuardOf({ othersGb: 12 })).toEqual({ othersMb: 12 * GB, afterMs: 60_000, everyMs: 10_000 });
-    expect(ramGuardOf({ othersGb: 10.5, afterS: 30, everyS: 5 })).toEqual({ othersMb: 10752, afterMs: 30_000, everyMs: 5000 });
-    for (const bad of [{}, { othersGb: 0 }, { othersGb: "x" }, { othersGb: 12, afterS: 5 }, { othersGb: 12, everyS: 120 }, [12], 12, true]) {
-      expect(ramGuardOf(bad)).toHaveProperty("problem");
+describe("its numbers (ramGuardOf)", () => {
+  it("the defaults when not set; each number on its own; what it can't use keeps its default and says so", () => {
+    const def = { othersMb: 12 * GB, everyMs: 10_000 };
+    expect(ramGuardOf(undefined)).toEqual(def);
+    expect(ramGuardOf(null)).toEqual(def);
+    expect(ramGuardOf(false)).toEqual(def);
+    expect(ramGuardOf({})).toEqual(def);
+    expect(ramGuardOf({ othersGb: 10.5 })).toEqual({ othersMb: 10752, everyMs: 10_000 });
+    expect(ramGuardOf({ everyS: 5 })).toEqual({ othersMb: 12 * GB, everyMs: 5000 });
+    // An older worker.json's afterS is no longer read.
+    expect(ramGuardOf({ othersGb: 16, afterS: 60 })).toEqual({ othersMb: 16 * GB, everyMs: 10_000 });
+    for (const bad of [{ othersGb: 0 }, { othersGb: "x" }, { everyS: 120 }, { everyS: 1 }, [12], 12, true]) {
+      const r = ramGuardOf(bad);
+      expect(r, JSON.stringify(bad)).toHaveProperty("problem");
+      expect(r).toMatchObject(def);
     }
   });
 });
@@ -90,74 +98,28 @@ describe("the process list", () => {
   });
 });
 
-describe("the pause and resume (RamWatch)", () => {
-  const o = { othersMb: 10 * GB, afterMs: 60_000, autoResume: true, resumeAfterMs: 600_000 };
+describe("the reading (RamWatch)", () => {
   const high = { othersMb: 14 * GB, who: "game.exe" };
   const low = { othersMb: 6 * GB, who: null };
 
-  it("above the line its claims stream nothing at once; it pauses only after afterMs with no job in hand", () => {
-    const r = new RamWatch(o);
-    r.update(high, false, 0);
-    expect(r.over).toBe(true);
-    expect(r.paused).toBe(false);
-    r.update(high, false, 59_999);
-    expect(r.paused).toBe(false);
-    r.update(high, false, 60_000);
-    expect(r).toMatchObject({ paused: true, who: "game.exe" });
-    expect(localPause({ paused: false }, { paused: false }, null, 0, [], r)).toEqual({ paused: true, why: "ram-busy:game.exe", until: null });
+  it("over the line at once and under it at once; it never pauses the worker", () => {
+    const r = new RamWatch({ othersMb: 10 * GB });
+    r.update(high);
+    expect(r).toMatchObject({ over: true, who: "game.exe", othersMb: 14 * GB });
+    expect(r).not.toHaveProperty("paused");
+    expect(localPause({ paused: false }, { paused: false }, null, 0, [])).toEqual({ paused: false, why: null, until: null });
+    r.update(low);
+    expect(r).toMatchObject({ over: false, who: null, othersMb: 6 * GB });
   });
 
-  it("its own job: the time above the line counts from the job's end, and the job is never stopped for it", () => {
-    const r = new RamWatch(o);
-    r.update(high, true, 0);
-    r.update(high, true, 300_000);
-    expect(r).toMatchObject({ over: true, paused: false });
-    r.update(high, false, 310_000);
-    expect(r.paused).toBe(false);
-    r.update(high, false, 370_000);
-    expect(r.paused).toBe(true);
-  });
-
-  it("resumes by itself only with the automatic resume, after the whole cool-down under the line; a spike starts it again", () => {
-    const r = new RamWatch(o);
-    r.update(high, false, 0);
-    r.update(high, false, 60_000);
-    r.update(low, false, 100_000);
-    expect(r).toMatchObject({ over: false, paused: true });
-    r.update(high, false, 500_000);
-    r.update(low, false, 510_000);
-    r.update(low, false, 1_109_999);
-    expect(r.paused).toBe(true);
-    r.update(low, false, 1_110_000);
-    expect(r.paused).toBe(false);
-
-    const off = new RamWatch({ ...o, autoResume: false });
-    off.update(high, false, 0);
-    off.update(high, false, 60_000);
-    off.update(low, false, 10_000_000);
-    expect(off.paused).toBe(true);
-    // A resume by hand.
-    off.clear();
-    expect(off.paused).toBe(false);
-  });
-
-  it("no reading counts as under the line: a guard that can't read never keeps it from people's jobs", () => {
-    const r = new RamWatch(o);
-    r.update(high, false, 0);
-    r.update(null, false, 1000);
+  it("no reading counts as under the line; the switch going off clears it", () => {
+    const r = new RamWatch({ othersMb: 10 * GB });
+    r.update(high);
+    r.update(null);
     expect(r.over).toBe(false);
-    r.update(high, false, 2000);
-    r.update(high, false, 61_999);
-    expect(r.paused).toBe(false);
-  });
-
-  it("a pause by hand and a busy GPU win over it", () => {
-    const r = new RamWatch(o);
-    r.update(high, false, 0);
-    r.update(high, false, 60_000);
-    expect(localPause({ paused: true }, { paused: false }, null, 0, [], r)?.why).toBe("here");
-    expect(localPause({ paused: false }, { paused: true, who: "game.exe" }, null, 0, [], r)?.why).toBe("gpu-busy:game.exe");
-    expect(localPause({ paused: false }, { paused: false }, null, 0, [], null)).toEqual({ paused: false, why: null, until: null });
+    r.update(high);
+    r.clear();
+    expect(r.over).toBe(false);
   });
 });
 
@@ -171,6 +133,8 @@ const tasks = await import("@/server/computer/tasks");
 const pool = await import("@/server/computer/pool");
 const { catalogVersion } = await import("@/server/computer/catalog-version");
 const { ComputerRunner } = await import("@/lib/computer-runner");
+const workersRoute = await import("@/app/api/admin/workers/[id]/route");
+const auth = await import("@/server/auth");
 
 const ROOT = path.resolve(__dirname, "..");
 const FAKE = path.join(ROOT, "tests/helpers/fake-local-comfy.ts");
@@ -254,16 +218,29 @@ function fakeRam(o: { gameMb: number }) {
   };
 }
 
+async function until<T>(fn: () => T | Promise<T>, ms = 60_000, every = 50): Promise<Exclude<T, false | null | undefined | 0 | "">> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v as Exclude<T, false | null | undefined | 0 | "">;
+    if (Date.now() > end) throw new Error(`Timed out after ${ms} ms`);
+    await sleep(every);
+  }
+}
+
 interface Started {
   logs: string[];
   claims: Record<string, unknown>[];
+  /** Its own ComfyUI's /free calls: { unload_models, free_memory } each, with the port they went to. */
+  frees: { port: string; body: Record<string, unknown> }[];
 }
 
-function start(w: W, ram: ReturnType<typeof fakeRam> | null, o: { guard?: boolean; stepMs?: number; afterMs?: number } = {}): Started {
+/** The worker, with the RAM guard's numbers its worker.json would give (a 10 GB line, a reading every 100 ms). */
+function start(w: W, ram: ReturnType<typeof fakeRam> | null, o: { stepMs?: number } = {}): Started {
   const base = tempDir("fuobe-worker-ram-pc-");
   const p = { home: path.join(base, "home"), workDir: path.join(base, "work"), comfyDir: path.join(base, "comfy") };
   for (const d of Object.values(p)) fs.mkdirSync(d, { recursive: true });
-  const s: Started = { logs: [], claims: [] };
+  const s: Started = { logs: [], claims: [], frees: [] };
   const api = apiAs(routes, null);
   const ctrl = new AbortController();
   const done = runWorker(
@@ -276,13 +253,14 @@ function start(w: W, ram: ReturnType<typeof fakeRam> | null, o: { guard?: boolea
       comfyCommand: [process.execPath, "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", FAKE, "--port", "{port}", "--cors", "off", "--steps", "4", "--step-ms", String(o.stepMs ?? 40), "--worker-guard", "1"],
       comfyGuard: true,
       ffmpeg: null,
-      autoResume: true,
-      // 1.2 s of cool-down.
-      resumeAfterMin: 0.02,
     },
     {
       fetch: async (url: string, init: RequestInit = {}) => {
-        if (!String(url).startsWith(SITE)) return realFetch(url, init);
+        if (!String(url).startsWith(SITE)) {
+          const u = new URL(url);
+          if (u.pathname === "/free" && init.method === "POST") s.frees.push({ port: u.port, body: JSON.parse(String(init.body ?? "{}")) });
+          return realFetch(url, init);
+        }
         const u = new URL(url);
         if (u.pathname === "/api/gpu/computer/inventory") return Response.json({ ok: true, lanes: ["small"], workflows: ["wf-test"], missing: [] });
         if (u.pathname === "/api/gpu/computer/claim" && typeof init.body === "string") s.claims.push(JSON.parse(init.body));
@@ -305,73 +283,135 @@ function start(w: W, ram: ReturnType<typeof fakeRam> | null, o: { guard?: boolea
       idleClaimMs: 200,
       readGpu: async () => ({ usedMb: 300, tempC: 40, apps: [] }),
       ...(ram && { readProcs: ram.readProcs, ramNow: ram.ramNow }),
-      ...(o.guard !== false && { ramGuard: { othersMb: 10 * GB, afterMs: o.afterMs ?? 800, everyMs: 100 } }),
+      ramGuard: { othersMb: 10 * GB, everyMs: 100 },
     },
   );
   running.push({ ctrl, done });
   return s;
 }
 
-async function until<T>(fn: () => T | Promise<T>, ms = 60_000, every = 50): Promise<Exclude<T, false | null | undefined | 0 | "">> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn();
-    if (v) return v as Exclude<T, false | null | undefined | 0 | "">;
-    if (Date.now() > end) throw new Error(`Timed out after ${ms} ms`);
-    await sleep(every);
-  }
-}
+const said = (s: Started, re: RegExp) => s.logs.some((l) => re.test(l));
 
-describe("the RAM guard in the worker, end to end", () => {
-  it("above the line: claims stream nothing, then a pause the studio names; under it for the cool-down: back to work", async () => {
+describe("the switch on the studio's side", () => {
+  const ownerCookie = () => `${auth.SESSION_COOKIE}=${auth.createSession().value}`;
+  const patch = (id: string, body: unknown) =>
+    workersRoute.PATCH(new Request(`http://localhost/api/admin/workers/${id}`, { method: "PATCH", headers: { cookie: ownerCookie(), "content-type": "application/json", origin: "http://localhost" }, body: JSON.stringify(body) }), {
+      params: Promise.resolve({ id }),
+    } as never);
+  const beatAnswer = (w: W) =>
+    pool.workerBeat(
+      workerRow(w),
+      pool.cleanBeat({ device: `wkr-${w.id}`, protocol: 5, version: "1.0.0", local: { paused: false, why: null, until: null }, gpu: {}, inventoryHash: null, running: [], stopped: [] }),
+      Date.now(),
+    );
+
+  it("off by default; the owner turns it on and off through the workers API; the view and the beat's answer say it", async () => {
     const w = addWorker();
-    const ram = fakeRam({ gameMb: 0 });
-    const s = start(w, ram, { afterMs: 1500 });
-    await until(() => s.claims.length > 0);
-    expect(s.claims[0]).not.toHaveProperty("noStream");
-    // A game starts. Others: the desktop and the game (15.9 GB), not its own 7.8 GB.
-    ram.o.gameMb = 12 * GB;
-    await until(() => s.claims.some((c) => c.noStream === true), 1500);
-    expect(s.logs.some((l) => /Other programs use 15\.9 GB of this PC's memory/.test(l))).toBe(true);
-    expect(workerRow(w).paused_local).toBe(0);
-    await until(() => workerRow(w).local_why === "ram-busy:game.exe");
-    expect(workerRow(w).paused_local).toBe(1);
-    expect(pool.workerState(workerRow(w))).toEqual({ state: "gpu-busy", words: "This PC's memory is in use (game.exe)" });
-    // The game ends: after the cool-down it resumes and claims as before.
-    ram.o.gameMb = 0;
-    await until(() => workerRow(w).paused_local === 0 && workerRow(w).local_why === null, 20_000);
-    expect(s.logs.some((l) => /stayed free for the whole cool-down: resuming/.test(l))).toBe(true);
-    const before = s.claims.length;
-    await until(() => s.claims.length > before);
-    expect(s.claims.at(-1)).not.toHaveProperty("noStream");
-    const id = addTask();
-    expect((await until(() => ["done", "failed"].includes(task(id).state) && task(id))).state).toBe("done");
+    expect(workerRow(w).ram_guard).toBe(0);
+    expect(pool.listWorkers().find((v) => v.id === w.id)?.ramGuard).toBe(false);
+    expect(beatAnswer(w).worker.ramGuard).toBe(false);
+    const on = await patch(w.id, { ramGuard: true });
+    expect(on.status).toBe(200);
+    expect(((await on.json()) as { worker: { ramGuard: boolean } }).worker.ramGuard).toBe(true);
+    expect(workerRow(w).ram_guard).toBe(1);
+    expect(beatAnswer(w).worker.ramGuard).toBe(true);
+    // Its timeline names the setting, never its value.
+    const edit = db().prepare("SELECT words FROM worker_events WHERE worker_id = ? AND kind = 'admin' ORDER BY id DESC LIMIT 1").get(w.id) as { words: string };
+    expect(edit.words).toBe("Settings changed: ramGuard");
+    expect((await patch(w.id, { ramGuard: false })).status).toBe(200);
+    expect(beatAnswer(w).worker.ramGuard).toBe(false);
   });
 
-  it("a job in hand goes on to its end; the pause comes after it", async () => {
+  it("refuses anything but true or false, and changes nothing", async () => {
     const w = addWorker();
+    pool.patchWorker(w.id, { ramGuard: true });
+    for (const ramGuard of ["yes", 1, null, { othersGb: 12 }]) {
+      const res = await patch(w.id, { ramGuard });
+      expect(res.status, JSON.stringify(ramGuard)).toBe(400);
+    }
+    expect(workerRow(w).ram_guard).toBe(1);
+  });
+});
+
+describe("the RAM guard in the worker, end to end", () => {
+  it("switched on, above the line: claims ask for no streamed job, its own ComfyUI lets go of its memory when idle and before each job, and it keeps working", async () => {
+    const w = addWorker();
+    pool.patchWorker(w.id, { ramGuard: true });
+    const ram = fakeRam({ gameMb: 0 });
+    const s = start(w, ram);
+    await until(() => said(s, /Its RAM guard is on/) && s.claims.length > 0);
+    expect(s.claims.every((c) => !("noStream" in c))).toBe(true);
+    expect(s.frees).toHaveLength(0);
+    // A game starts. Others: the desktop and the game (15.9 GB), not its own 7.8 GB.
+    ram.o.gameMb = 12 * GB;
+    await until(() => s.claims.some((c) => c.noStream === true), 5000);
+    expect(said(s, /Other programs use 15\.9 GB of this PC's memory \(the most: game\.exe\), above its RAM guard's line of 10 GB/)).toBe(true);
+    // Idle: its ComfyUI lets go of its memory once (models unloaded, caches emptied), on its own port only.
+    await until(() => s.frees.length === 1, 5000);
+    expect(s.frees[0].body).toEqual({ unload_models: true, free_memory: true });
+    await sleep(800);
+    expect(s.frees).toHaveLength(1);
+    // A job: freed again before it starts, and once more when it is idle after it. No pause at any time.
+    const id = addTask();
+    expect((await until(() => ["done", "failed"].includes(task(id).state) && task(id))).state).toBe("done");
+    await until(() => s.frees.length >= 3, 5000);
+    expect(new Set(s.frees.map((f) => f.port)).size).toBe(1);
+    expect(s.frees.every((f) => f.port !== "8188")).toBe(true);
+    expect(workerRow(w).paused_local).toBe(0);
+    expect(pool.workerState(workerRow(w)).state).not.toBe("gpu-busy");
+    expect(s.logs.some((l) => /pausing/i.test(l))).toBe(false);
+    // The game ends: its claims are as before, and its ComfyUI keeps what it loads.
+    ram.o.gameMb = 0;
+    await until(() => said(s, /under its RAM guard's line again/), 5000);
+    const before = s.claims.length;
+    await until(() => s.claims.length > before + 1);
+    expect(s.claims.at(-1)).not.toHaveProperty("noStream");
+    const freed = s.frees.length;
+    const next = addTask();
+    expect((await until(() => ["done", "failed"].includes(task(next).state) && task(next))).state).toBe("done");
+    expect(s.frees.length).toBe(freed);
+  });
+
+  it("a job in hand goes on to its end: never stopped for RAM", async () => {
+    const w = addWorker();
+    pool.patchWorker(w.id, { ramGuard: true });
     const ram = fakeRam({ gameMb: 0 });
     const s = start(w, ram, { stepMs: 600 });
+    await until(() => said(s, /Its RAM guard is on/));
     const id = addTask();
     await until(() => task(id).state === "running");
     ram.o.gameMb = 12 * GB;
-    await sleep(1500);
-    // Over afterMs above the line, but its job runs: no pause, the job isn't sent back.
-    expect(workerRow(w).paused_local).toBe(0);
+    await until(() => said(s, /Other programs use 15\.9 GB/), 5000);
+    await sleep(1000);
     expect(task(id).worker_id).toBe(w.id);
+    expect(workerRow(w).paused_local).toBe(0);
     expect((await until(() => ["done", "failed"].includes(task(id).state) && task(id))).state).toBe("done");
-    await until(() => workerRow(w).local_why === "ram-busy:game.exe");
-    expect(s.logs.some((l) => /This PC's memory is in use \(game\.exe, 15\.9 GB not its own\): pausing/.test(l))).toBe(true);
+    expect(task(id).requeues).toBe(0);
   });
 
-  it("off (no ramGuard): it never reads the process list, and its claims are as before", async () => {
+  it("off by default: it never reads the process list; switched on from the site it does; off again, its claims are as before", async () => {
     const w = addWorker();
     const ram = fakeRam({ gameMb: 20 * GB });
-    const s = start(w, ram, { guard: false });
+    const s = start(w, ram);
     await until(() => s.claims.length >= 2);
     await sleep(1000);
     expect(ram.reads.n).toBe(0);
     expect(s.claims.every((c) => !("noStream" in c))).toBe(true);
-    expect(workerRow(w).paused_local).toBe(0);
+    // On from the site: its next beat's answer carries it.
+    pool.patchWorker(w.id, { ramGuard: true });
+    await until(() => s.claims.some((c) => c.noStream === true), 30_000);
+    expect(ram.reads.n).toBeGreaterThan(0);
+    // Off again.
+    pool.patchWorker(w.id, { ramGuard: false });
+    await until(() => said(s, /Its RAM guard is off/), 30_000);
+    // Its claims reach the studio without it again (a claim on its way before may still carry it; its many quick claims
+    // here use up the claim rate, so the count starts again).
+    const offAt = Date.now();
+    resetRates();
+    await until(() => (workerRow(w).asked_at ?? 0) > offAt + 500 && workerRow(w).asked_no_stream === 0, 10_000);
+    const reads = ram.reads.n;
+    await sleep(800);
+    expect(ram.reads.n).toBeLessThanOrEqual(reads + 1);
+    expect(workerRow(w).asked_no_stream).toBe(0);
   });
 });

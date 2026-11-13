@@ -301,32 +301,38 @@ The worker obeys any one of these pauses. One pause never ends another pause.
   cool-down. A pause by hand is never ended by the automatic resume. Turn it on with `autoResume` in `worker.json`, or
   with **Resume by itself after another program used the GPU** in Settings → Workers. The website's switch wins over
   `worker.json`. With it on, a PC can serve whenever its owner isn't using the GPU.
-- **This PC's memory is in use** (the RAM guard, off by default). For a PC whose owner also works on it with programs
-  that need memory more than the GPU (an editor, a game, Python, another AI app). Turn it on in `worker.json` with
-  `"ramGuard": { "othersGb": 12 }` (also `afterS`, 60 by default, and `everyS`, 10). Other programs' RAM is the PC's
-  used memory minus what the worker's own processes hold: the worker, its ComfyUI, its CPU slot's ComfyUI, its text
-  slot's server, and the programs they started. Each process counts the larger of its working set and its private
-  bytes. The worker reads them every `everyS` seconds: on Windows with one PowerShell call (`Win32_Process`, about a
-  second, beside its loop), elsewhere with `ps`. No admin rights are needed.
-  - Above `othersGb`, its claims ask for no job that streams its weights from RAM (`noStream` in the claim). The studio
-    then offers it only jobs whose weights fit whole on its card, and the others go to another worker. A streamed job
-    keeps its weights in the PC's RAM for its whole run, and on a 32 GB PC the measured ones fill it. A job whose weights
-    fit on the card uses the RAM only while it loads.
-  - Above `othersGb` for `afterS` seconds with no GPU job in hand, it pauses: the state says "This PC's memory is in use
-    (editor.exe)" (`ram-busy:<program>`, the largest other program). Its ComfyUI and its text slot's server stop, so
-    their memory goes back to the PC. The automatic resume ends it, as for a busy GPU: `resumeAfterMin` minutes in a row
-    under the line. A resume by hand ends it too.
-  - A job in hand is never stopped for RAM alone. The time above the line counts from its end. If the PC really runs out
-    of memory, the studio's fallback for a streamed job that runs out of memory moves it to another worker
-    ([Streaming from RAM](#streaming-from-ram)).
-  - A reading that fails keeps the last good one for a minute. After that, the guard counts the memory as free: a guard
-    that can't read never keeps the worker from people's jobs.
 - **Hours:** outside its hours, the worker takes nothing new. Near the end of a window, it takes only a job that its
   estimate says will finish in time.
 
 On Windows, the pause shortcut (Ctrl+Alt+P, from `fuobe worker install`) runs `fuobe worker pause --choose`. It asks
 for 1, 2 or 4 hours, or until you resume, and then pauses at once: the job goes back to the queue at no cost, and its
 ComfyUI stops.
+
+### This PC's memory
+
+The RAM guard is for a PC that someone also works on, with programs that need memory more than the GPU (an editor, a
+game, Python, another AI app). It is off by default.
+
+- **The switch.** Turn it on or off for one worker in Settings → Workers with **RAM guard**
+  (`PATCH /api/admin/workers/{id}` with `ramGuard`). The worker learns it from the next beat's answer
+  (`worker.ramGuard`). The switch decides whether the guard runs. `worker.json` holds only its numbers:
+  `"ramGuard": { "othersGb": 12, "everyS": 10 }`. Both are optional, and those are the defaults. A number the worker
+  can't use keeps its default, and the worker says so in its log.
+- **The reading.** Other programs' RAM is the PC's used memory minus what the worker's own processes hold: the worker,
+  its ComfyUI, its CPU slot's ComfyUI, its text slot's server, and the programs they started. Each process counts the
+  larger of its working set and its private bytes. While the switch is on, the worker reads them every `everyS`
+  seconds: on Windows with one PowerShell call (`Win32_Process`, about a second, beside its loop), elsewhere with
+  `ps`. No admin rights are needed. With the switch off, it reads nothing.
+- **Above `othersGb`,** the worker does two things, and keeps taking work:
+  - Its own ComfyUI lets go of its memory before each GPU job, and once when it goes idle (its `/free`: models
+    unloaded, caches emptied). Only its own ComfyUI: it never asks another ComfyUI on the PC.
+  - Its claims send `noStream: true`: it prefers jobs whose weights fit whole on its card. A streamed job keeps its
+    weights in the PC's RAM for its whole run. A job whose weights fit on the card uses the RAM only while it loads.
+    This is a preference, never a wait: see [Streaming from RAM](#streaming-from-ram).
+- **Nothing pauses.** The guard never pauses the worker and never stops its ComfyUI or its text slot. A job in hand is
+  never stopped for RAM. If the PC really runs out of memory, the studio's fallback for a streamed job that runs out of
+  memory moves it to another worker.
+- **A reading that fails** keeps the last good one for a minute. After that, the guard counts the memory as free.
 
 ### Studio jobs first
 
@@ -760,9 +766,17 @@ Every other workflow streams by the computed rule.
   no other worker for it, or for a job taken with every weight on the card, or for any other error, the job fails as
   before. The worker still takes the workflow with every weight on its card. Settings → Workers shows the list on the
   worker's card, and the owner clears one entry or all of them (`PATCH /api/admin/workers/{id}` with `clearNoStream`).
-- **A PC whose memory is in use.** A worker's claim with `noStream` (its RAM guard, [Pauses](#pauses)) counts no RAM
-  for that claim: it takes only a job whose weights, or a model variant's, fit whole on its card. Its facts stay as they
-  are, and the claim's words add "its PC's memory is in use: only jobs that fit whole on its card".
+- **A PC whose memory is in use.** A worker's claim with `noStream` (its RAM guard, [This PC's memory](#this-pcs-memory))
+  prefers jobs that fit whole on its card. The studio picks its best job as always. When that job would stream its
+  weights from this worker's RAM, the studio looks at the other workers that are free now: each one may take work,
+  nothing holds it back, and its GPU's slot is empty, as for [first pick](#who-picks-first). For each one, it finds
+  the job that worker's own claim would take next. The jobs that would stream here and that another worker takes next
+  are left for that worker, and this worker takes its best job of the rest. A streamed job that no other worker could
+  take now is still its own, so nobody waits for it: it is marked streamed, and the fallback above applies. A worker
+  busy with a job doesn't count, as for first pick. Another worker whose own last claim also sent `noStream` counts
+  only with the jobs that fit whole on its card, so two such workers never leave a job to each other. A job that fits
+  whole goes with the files that fit (a model variant's too). Its facts stay as they are, and the claim's words add
+  "its PC's memory is in use" with what it did.
 - **Times.** A worker that streams runs slower. Its run limits come from its own measured runs in the lane (above), so
   they stay right for it.
 
@@ -1120,10 +1134,10 @@ its target), at most once an hour each.
 
 - `POST /api/gpu/computer/beat`: the browser's beat plus `{ protocol, version, canRotateToken?, local: { paused, why,
   until }, gpu: { otherApps, tempC }, inventoryHash, warmLane, held, slept?, catalogVersion?, ceiling?, holding?, log? }`. The answer
-  adds `worker: { paused, pauseNow, drain, autoResume, insideHours, nextChangeAt, lanes, lanesInside, minProtocol,
-  sendInventory, token?, tokenExpiresAt?, catalogVersion? }` (`token`: the next token, above; `tokenExpiresAt`: when
-  the token ends, for a token with a lifetime; `lanesInside`: the allowed lanes inside the PC's ceiling;
-  `catalogVersion`: the studio's).
+  adds `worker: { paused, pauseNow, drain, autoResume, ramGuard, insideHours, nextChangeAt, lanes, lanesInside,
+  minProtocol, sendInventory, token?, tokenExpiresAt?, catalogVersion? }` (`token`: the next token, above;
+  `tokenExpiresAt`: when the token ends, for a token with a lifetime; `lanesInside`: the allowed lanes inside the
+  PC's ceiling; `catalogVersion`: the studio's; `ramGuard`: the owner's RAM guard switch, see "This PC's memory").
   - `holding: { why, since, task? }` says why it doesn't start the line's work now although it may work, while work
     waits that it could take: `starting-comfy`, `waiting-for-yield`, `local-work` (the owner's job waits for local
     ComfyUI work to finish), `gpu-check`, `updating` (it restarts on new code after its job) or `sending-kept`;
@@ -1174,8 +1188,9 @@ its target), at most once an hour each.
   `stallMs` is how long the job may go with no progress before the worker gives it back (see "The stall limit"). A
   worker ignores a `stallMs` under one minute, and uses its own 10 minutes then.
   A worker's CPU slot sends `slot: "cpu"` and gets only work for that slot, with `slot: "cpu"` on the task. Its GPU's
-  slot sends `noStream: true` while its RAM guard says the PC's memory is in use: it then gets only a job whose weights
-  fit whole on its card. A finishing job carries `finish` (a finish ticket) in place of `graph` or `ticket`. `reportPreview: true` asks for live
+  slot sends `noStream: true` while its RAM guard says the PC's memory is in use: it then prefers a job whose weights
+  fit whole on its card, and gets a streamed one only when no other worker could take that job now
+  ([Streaming from RAM](#streaming-from-ram)). A finishing job carries `finish` (a finish ticket) in place of `graph` or `ticket`. `reportPreview: true` asks for live
   previews (see "Live previews").
 - `POST /api/gpu/computer/bench`: bench jobs for this worker only (none are defined yet). The times of every finished
   job also count: the last 20 jobs in each lane give the median and the 90th percentile.
@@ -1235,8 +1250,9 @@ Each worker counts against its own rate limits, so three workers that beat every
   newest row of its timeline other than a log line. `stats` is its PC's live hardware stats from its last beat, with
   `receivedAt` (null: none).
 - `GET /api/admin/workers/events`: the workers' timeline (above), newest first, by worker, kinds and run, in pages.
-- `PATCH /api/admin/workers/<id>`: `{ paused, pauseNow, drain, autoResume, hours, allow, claimAfterMs, switchAfterMs,
-  pickOrder, rotate, revoke }`. `pickOrder` is a whole number from -100 to 100 ("Who picks first" above). Hours are `{ "always": true }` or `{ "tz": "Asia/Kolkata", "days": { "mon": [["01:00", "09:00"]] } }`.
+- `PATCH /api/admin/workers/<id>`: `{ paused, pauseNow, drain, autoResume, ramGuard, hours, allow, claimAfterMs,
+  switchAfterMs, pickOrder, rotate, revoke }`. `pickOrder` is a whole number from -100 to 100 ("Who picks first"
+  above). `ramGuard` is `true` or `false` ("This PC's memory" above). Hours are `{ "always": true }` or `{ "tz": "Asia/Kolkata", "days": { "mon": [["01:00", "09:00"]] } }`.
   A window can go past midnight.
 - `GET /api/admin/queue`: the jobs that wait in each lane, the oldest job, the estimate, and which workers have the
   lane warm; and what the workers do now: `running` (each job a worker runs: its run, model, worker, step, progress,
@@ -1265,8 +1281,9 @@ routes.
   `tests/pool-model-variants.test.ts`, `tests/stream-needs.test.ts`, `tests/stream-oom-fallback.test.ts`,
   `tests/pool-first-pick.test.ts`, `tests/worker-build-loads.test.ts`, `tests/worker-ram-guard.test.ts`). The RAM guard
   tests read stand-in process lists (Windows' and `ps`), find the worker's own process trees, and run the worker with a
-  stand-in PC memory: a claim with `noStream`, the pause the studio names, the automatic resume, a job in hand that
-  goes on to its end, and no reading at all with the guard off. The model variant
+  stand-in PC memory: the site's switch reaching the worker, a claim with `noStream`, its own ComfyUI letting go of
+  its memory before a job and when idle, no pause, and no reading at all with the switch off. The streaming tests
+  check the `noStream` preference: a streamed job left for another free worker, and taken when no other worker can. The model variant
   tests check the build's refusals, which files a worker gets by its card and its files, the swapped graph and ticket,
   and an older worker program. The streaming tests check the build's refusals, the memory rule (VRAM only, VRAM and
   RAM, unknown RAM, dynamic VRAM off, the 3% allowance, the computed rule and its reserve, the workflows that never

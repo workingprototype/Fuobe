@@ -1,17 +1,18 @@
-// The RAM guard (worker.json `ramGuard`, docs/gpu-workers.md "This PC's memory"): for a PC whose owner also works on
-// it. Off unless worker.json sets it. Other programs' RAM is the PC's used memory less what the worker's own processes
-// hold: the worker itself, its ComfyUI, its CPU slot's ComfyUI, its text slot's server and anything they started. Above
-// the guard's line:
+// The RAM guard (docs/gpu-workers.md "This PC's memory"): for a PC whose owner also works on it. The owner switches it on
+// for one worker in Settings → Workers (the beat's answer, `worker.ramGuard`; off by default). worker.json `ramGuard`
+// holds only its numbers: { othersGb (12), everyS (10) }. Other programs' RAM is the PC's used memory less what the
+// worker's own processes hold: the worker itself, its ComfyUI, its CPU slot's ComfyUI, its text slot's server and
+// anything they started. Above `othersGb`:
 //
-// - its claims ask for no job that streams its weights from RAM (`noStream`): the studio offers it only jobs whose
-//   weights fit whole on its card, and leaves the others for another worker;
-// - after `afterS` seconds above the line with no GPU job of its own, it pauses ("ram-busy:<program>"), as for a busy
-//   GPU, and resumes by the same automatic resume (`autoResume`, `resumeAfterMin`). A job it runs is never stopped for
-//   RAM alone: the studio's fallback after running out of memory covers a real shortage.
+// - its claims ask for no job that streams its weights from RAM (`noStream`). That is a preference: the studio still gives
+//   it such a job when no other worker could take that job now, so nobody waits for it;
+// - its own ComfyUI lets go of its memory (its /free: models unloaded, caches emptied) before each GPU job and when it
+//   goes idle. Nothing pauses or stops: it keeps taking work, its text slot goes on, and a job in hand is never stopped
+//   for RAM (the studio's fallback after running out of memory covers a real shortage).
 //
-// One reading every `everyS` seconds (10): one PowerShell call on Windows (Win32_Process: each process's id, parent,
-// working set, private bytes and name), `ps` elsewhere. No admin rights: a process of another user may read 0, and
-// counts then only in the total.
+// One reading every `everyS` seconds: one PowerShell call on Windows (Win32_Process: each process's id, parent, working
+// set, private bytes and name), `ps` elsewhere. No admin rights: a process of another user may read 0, and counts then
+// only in the total.
 import { execFile } from "node:child_process";
 
 const MB = 2 ** 20;
@@ -25,11 +26,11 @@ export const PROCS_SCRIPT = [
 /** `ps` elsewhere: id, parent id, resident KB, name. */
 export const PS_ARGS = ["-A", "-o", "pid=,ppid=,rss=,comm="];
 
-/** The guard's defaults: seconds above the line before it pauses, and seconds between two readings. */
-export const RAM_AFTER_S = 60;
+/** The guard's defaults: other programs' GB of the PC's memory (its line), and seconds between two readings. */
+export const RAM_OTHERS_GB = 12;
 export const RAM_EVERY_S = 10;
 
-/** A reading that failed: the last good one stands in for this long, then the guard says nothing (never a pause). */
+/** A reading that failed: the last good one stands in for this long, then the guard counts the memory as free. */
 export const RAM_REUSE_MS = 60_000;
 
 /** The largest other process is named only from this size (MB): smaller ones say "other programs". */
@@ -44,20 +45,26 @@ const int = (v) => {
 };
 
 /**
- * worker.json's `ramGuard` → { othersMb, afterMs, everyMs }, null when it is off (not set, null or false), or
- * { problem } when it can't be used. `othersGb`: the line (GB, more than 0); `afterS` (10 to 3600, 60 by default);
- * `everyS` (5 to 60, 10 by default).
+ * worker.json's `ramGuard` → its numbers { othersMb, everyMs }. Not set (or null, false): the defaults. `othersGb`: the
+ * line (GB, more than 0; 12 by default); `everyS`: seconds between two readings (5 to 60; 10 by default). A value it
+ * can't use keeps its default and adds `problem`. Whether the guard runs is the site's switch, never this.
  */
 export function ramGuardOf(v) {
-  if (v === undefined || v === null || v === false) return null;
-  if (typeof v !== "object" || Array.isArray(v)) return { problem: "ramGuard in worker.json isn't { othersGb, afterS }" };
-  const gb = Number(v.othersGb);
-  if (!(gb > 0) || gb > 4096) return { problem: "ramGuard.othersGb in worker.json isn't a number of GB above 0" };
-  const after = v.afterS === undefined ? RAM_AFTER_S : Number(v.afterS);
-  if (!(after >= 10 && after <= 3600)) return { problem: "ramGuard.afterS in worker.json isn't 10 to 3600 seconds" };
-  const every = v.everyS === undefined ? RAM_EVERY_S : Number(v.everyS);
-  if (!(every >= 5 && every <= 60)) return { problem: "ramGuard.everyS in worker.json isn't 5 to 60 seconds" };
-  return { othersMb: Math.round(gb * 1024), afterMs: Math.round(after * 1000), everyMs: Math.round(every * 1000) };
+  const out = { othersMb: Math.round(RAM_OTHERS_GB * 1024), everyMs: RAM_EVERY_S * 1000 };
+  if (v === undefined || v === null || v === false) return out;
+  if (typeof v !== "object" || Array.isArray(v)) return { ...out, problem: "ramGuard in worker.json isn't { othersGb, everyS }" };
+  const problems = [];
+  if (v.othersGb !== undefined) {
+    const gb = Number(v.othersGb);
+    if (gb > 0 && gb <= 4096) out.othersMb = Math.round(gb * 1024);
+    else problems.push("ramGuard.othersGb in worker.json isn't a number of GB above 0");
+  }
+  if (v.everyS !== undefined) {
+    const every = Number(v.everyS);
+    if (every >= 5 && every <= 60) out.everyMs = Math.round(every * 1000);
+    else problems.push("ramGuard.everyS in worker.json isn't 5 to 60 seconds");
+  }
+  return problems.length ? { ...out, problem: problems.join("; ") } : out;
 }
 
 /**
@@ -131,49 +138,28 @@ export function ramSplit(usedMb, procs, roots) {
 }
 
 /**
- * The guard's pause and resume. `update` takes each reading: `over` says the last reading was above the line (its
- * claims ask for no streamed job), and `paused` whether the guard keeps the worker paused. It pauses once readings stayed
- * above the line for `afterMs` with no GPU job of its own (`job`: the time above the line counts from its job's end).
- * With `autoResume`, it resumes once readings stayed under the line for `resumeAfterMs`; without it, only `clear()` (a
- * resume by hand) ends it. A reading of null (none for RAM_REUSE_MS) counts as under the line: a guard that can't read
- * the memory never keeps the worker from people's jobs.
+ * The guard's state from each reading (`update`): `over` says the last reading was above the line (its claims ask for no
+ * streamed job, and its ComfyUI lets go of its memory before each GPU job and when idle); `who`, the largest other
+ * program then. A reading of null (none for RAM_REUSE_MS) counts as under the line: a guard that can't read the memory
+ * never changes how the worker works.
  */
 export class RamWatch {
   constructor(o) {
     this.o = o;
     this.over = false;
-    this.paused = false;
     this.who = null;
     this.othersMb = null;
-    this.overSince = null;
-    this.freeSince = null;
   }
 
-  update(reading, job, now) {
+  update(reading) {
     if (reading) this.othersMb = reading.othersMb;
-    if (reading && reading.othersMb > this.o.othersMb) {
-      this.over = true;
-      this.freeSince = null;
-      this.overSince = job ? null : (this.overSince ?? now);
-      if (this.paused || (this.overSince !== null && now - this.overSince >= this.o.afterMs)) {
-        this.paused = true;
-        this.who = reading.who ?? this.who;
-      }
-      return;
-    }
-    this.over = false;
-    this.overSince = null;
-    this.freeSince ??= now;
-    if (this.paused && this.o.autoResume && now - this.freeSince >= this.o.resumeAfterMs) {
-      this.paused = false;
-      this.who = null;
-    }
+    this.over = !!reading && reading.othersMb > this.o.othersMb;
+    this.who = this.over ? (reading.who ?? null) : null;
   }
 
-  /** A resume by hand clears it too. */
+  /** The site's switch went off: as under the line. */
   clear() {
-    this.paused = false;
+    this.over = false;
     this.who = null;
-    this.overSince = null;
   }
 }
