@@ -3,7 +3,9 @@ import { ENGINE_WORDS } from "@/lib/engine-error";
 import crypto from "node:crypto";
 import { FINISH_KINDS, type FinishTicket } from "@/lib/finish-ticket";
 import { ceilingProblem, cleanCeiling, insideCeiling, lanesInside, type Ceiling } from "@/lib/job-ticket";
-import { allLanes, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, needsOf, packKey, partLanes, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs } from "@/lib/lanes";
+import { allLanes, hasFile, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, minVramBytesFor, needsOf, packKey, partLanes, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs } from "@/lib/lanes";
+import { fileChoices, hasVariants, pickFiles, swapGraphFiles, type FileChoice } from "@/lib/gpu/model-variants";
+import type { FileKey } from "@/lib/gpu/types";
 import { POOL_WORDS, RELAY_TIMES, SENT_STATES, type BeatAnswer, type ClaimedTask, type ComputerFacts, type CpuSlot, type WorkerAnswer, type WorkerBeat, type WorkerHolding } from "@/lib/relay";
 import { runtimeFileKeys } from "@/lib/runtime-files";
 import { APPS, MODELS } from "@/lib/catalog";
@@ -47,6 +49,12 @@ export const TICKET_PROTOCOL = 3;
  * the worker is updated.
  */
 export const GRAPH_PROTOCOL = 4;
+/**
+ * The oldest worker program that runs a workflow with a model variant's files (src/lib/gpu/model-variants.ts): 5 composes
+ * a job ticket that names a variant with that variant's files, as its own catalog defines them. An older one gets the
+ * workflow's own files only.
+ */
+export const VARIANT_PROTOCOL = 5;
 /** A worker behind the studio's version for less than this is updating; past it, the owner is shown "Update now". */
 export const BEHIND_NOTICE_MS = 3 * 60_000;
 /** The owner's "Update now" goes with each beat answer until the worker is on new code, or this long at most. */
@@ -867,16 +875,29 @@ function noteAsked(w: WorkerRow, answer: "found" | "nothing" | "blocked", words:
 function claimed(t: TaskRow, w: WorkerRow, device: string, now: number): ClaimedTask {
   const needs = json<Needs | null>(t.needs_json, null);
   const bench = t.lane ? benchOf(w)[t.lane] : undefined;
-  if (t.state === "waiting") logWorkerJob("claimed", t, w.id, now);
+  // A workflow with model variants: the files this worker runs it with, chosen when it takes the task from the line and
+  // kept on the task (extra_json.variant), so a worker that lost track of its task gets the same files again.
+  const { preempted, variant: lastVariant, ...extra } = json<Record<string, unknown>>(t.extra_json, {});
+  const index = loadIndex();
+  const variantOf = !t.finish_json && needs?.workflowId && hasVariants(index, needs.workflowId) ? needs.workflowId : null;
+  const choice = !variantOf
+    ? null
+    : t.state === "waiting"
+      ? workerFiles(w, variantOf)
+      : (fileChoices(index, variantOf).find((c) => c.variant === (typeof lastVariant === "string" ? lastVariant : null)) ?? null);
+  const variant = choice?.variant ?? undefined;
+  if (t.state === "waiting") logWorkerJob("claimed", t, w.id, now, {}, { ...(variant && { variant }) });
   // A worker that lost track of its own task gets it again with its first claim's time, so the sending clock (SENDING_MS)
   // is never wound back by asking again.
   // A job ticket's task keeps the time of its claim before this one, and which claim that note is for (`claimFor`, this
   // claim's time): a refusal of the ticket on this same claim, before anything ran (another catalog, more than the PC
   // allows), puts it back as it was, so a task no worker ever ran keeps its wait limit.
   // A run given back for people (workerBeat) is no longer paused once a worker takes it again.
-  const { preempted, ...extra } = json<Record<string, unknown>>(t.extra_json, {});
   const ticketNote = !!t.ticket_json && t.state === "waiting";
-  const before = ticketNote || preempted !== undefined ? { extra_json: JSON.stringify({ ...extra, ...(ticketNote && { claimedBefore: t.claimed_at ?? null, claimFor: now }) }) } : {};
+  const before =
+    ticketNote || preempted !== undefined || variant !== lastVariant
+      ? { extra_json: JSON.stringify({ ...extra, ...(ticketNote && { claimedBefore: t.claimed_at ?? null, claimFor: now }), ...(variant && { variant }) }) }
+      : {};
   const c = takeTask(t, device, now, { worker_id: w.id, ...before, ...(t.state !== "waiting" && t.device === device && t.claimed_at && { claimed_at: t.claimed_at }) });
   // A GPU job taken by a worker with another model loaded (or none) loads its model first: it is "getting ready" until
   // its first step reports. A light CPU job and a finishing job load none.
@@ -887,18 +908,45 @@ function claimed(t: TaskRow, w: WorkerRow, device: string, now: number): Claimed
   // finishing job has its lane's run ceiling (queue-settings.ts, the owner's to set).
   const limit = t.finish_json || runLimitedOf(t) ? runCeilingMs(t.lane) : runLimitMs(bench?.p90Ms, t.lane, bench?.loadMs);
   const stall = Math.min(stallLimitMs(t.lane), limit);
+  // A variant's files: the owner's graph gets them in its model slots here; a job ticket names the variant and its files,
+  // and the worker composes the graph with them, as its own catalog defines the variant (src/lib/ticket-compose.ts).
+  const swap = choice?.variant ? choice.swap : null;
+  const fileOf = (k: FileKey): FileNeed[] => {
+    const f = index.files[k];
+    return f ? [{ folder: f.folder, name: f.file, size: f.sizeBytes, sha256: f.sha256 ?? null }] : [];
+  };
   return {
     ...c,
+    ...(swap && c.graph && { graph: swapGraphFiles(c.graph, swap, index) }),
     // A job ticket carries its run and stall limits too.
-    ...(c.ticket && { ticket: { ...c.ticket, runLimitMs: limit, stallMs: stall } }),
+    ...(c.ticket && { ticket: { ...c.ticket, runLimitMs: limit, stallMs: stall, ...(swap && variant && { variant: { id: variant, files: swap } }) } }),
     lane: t.lane ?? undefined,
     estMs: estOn(t, w),
     runLimitMs: limit,
     stallMs: stall,
     notAfter: t.not_after,
     attempt: t.requeues + 1,
-    models: needs?.files ?? [],
+    models: choice ? choice.files.flatMap(fileOf) : (needs?.files ?? []),
+    ...(variant && { variant }),
   };
+}
+
+/**
+ * The files this worker runs a workflow with (src/lib/gpu/model-variants.ts pickFiles): a model variant made for its
+ * card's generation (gpuGen in its facts), else the workflow's own files, else another variant, by the files it verified
+ * and its VRAM. Null when it has the files of none, or too little VRAM. A worker program older than VARIANT_PROTOCOL
+ * gets the workflow's own files only.
+ */
+export function workerFiles(w: Pick<WorkerRow, "id" | "inventory_json" | "inventory_hash" | "facts_json" | "protocol">, workflowId: string): FileChoice | null {
+  const index = loadIndex();
+  const inv = inventoryOf(w);
+  const facts = json<ComputerFacts>(w.facts_json, {});
+  const vram = facts.vramBytes ?? 0;
+  const has = (key: FileKey) => {
+    const f = index.files[key];
+    return !!f && hasFile(inv, { folder: f.folder, name: f.file, size: f.sizeBytes, sha256: f.sha256 ?? null });
+  };
+  return pickFiles(fileChoices(index, workflowId), { gpuGen: facts.gpuGen ?? null, has, fits: (gb) => minVramBytesFor(gb) <= vram, variants: (w.protocol ?? 0) >= VARIANT_PROTOCOL });
 }
 
 /** How long a task should take on this worker: the lane's bench median there, or the task's own estimate. */
@@ -931,8 +979,10 @@ function fits(t: TaskRow, w: WorkerRow, now: number): boolean {
   if (needs?.workflowId ? !cap.workflows.includes(needs.workflowId) : !cap.lanes.includes(lane)) return false;
   // The files the run adds beyond its workflow's own (a look's LoRAs): only a worker that verified each one.
   if (needs?.runtime?.length && !hasFiles(inventoryOf(w), needs.runtime)) return false;
-  const vram = factsOf(w).vramBytes ?? 0;
-  if ((needs?.minVramBytes ?? 0) > vram) return false;
+  // A workflow with model variants: the files (its own or a variant's) and the VRAM of the choice this worker would run.
+  if (needs?.workflowId && hasVariants(loadIndex(), needs.workflowId)) {
+    if (!workerFiles(w, needs.workflowId)) return false;
+  } else if ((needs?.minVramBytes ?? 0) > (factsOf(w).vramBytes ?? 0)) return false;
   if (now - t.created_at < w.claim_after_ms + (allow[lane]?.delayMs ?? 0)) return false;
   return true;
 }
@@ -1526,6 +1576,7 @@ function ableWorkers(workflowId: string | null, o: { size?: Needs["size"]; ticke
     if (workflowId === null) return cap.workflows.some((id) => poolLane(id) in allow && insideCeiling(ceiling, { workflowId: id, lane: poolLane(id) }));
     if (!needs || !(lane! in allow) || !cap.workflows.includes(workflowId) || ceilingProblem(ceiling, { workflowId, lane, size: o.size })) return false;
     if (o.files?.length && !hasFiles(inventoryOf(w), o.files)) return false;
+    if (hasVariants(loadIndex(), workflowId)) return !!workerFiles(w, workflowId);
     return needs.minVramBytes <= (factsOf(w).vramBytes ?? 0);
   });
 }

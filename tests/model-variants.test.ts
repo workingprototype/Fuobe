@@ -35,7 +35,7 @@ const TE_INT8 = "text_encoders/qwen3vl_4b_int8_convrot.safetensors" as FileKey;
 const VAE = "vae/qwen_image_vae.safetensors" as FileKey;
 
 /** The committed inputs with model-variants.json replaced. */
-const build = (variants: unknown[]) => buildIndex({ ...loadInputs(LIBRARY), variants: { variants } });
+const build = (variants: object[]) => buildIndex({ ...loadInputs(LIBRARY), variants: { variants } });
 const variant = (o: Record<string, unknown> = {}) => ({ id: "int8", gpuGen: { min: "8.0", max: "8.6" }, workflows: [KREA], files: { [FP8]: INT8 }, ...o });
 
 describe("the catalog's variants (build-requirements.mjs)", () => {
@@ -163,7 +163,7 @@ describe("the graph with a variant's files (swapGraphFiles)", () => {
 
   it("writes the variant's files into the loader inputs only, and leaves the graph it was given as it was", () => {
     const before = JSON.stringify(graph);
-    const withName = { ...graph, x: { class_type: "SaveImage", inputs: { filename_prefix: "krea2_turbo_fp8_scaled.safetensors" } } };
+    const withName: typeof graph = { ...graph, x: { class_type: "SaveImage", inputs: { filename_prefix: "krea2_turbo_fp8_scaled.safetensors" } } };
     const out = swapGraphFiles(withName, swap, idx);
     expect(out["10"].inputs.unet_name).toBe("krea2_turbo_int8_convrot.safetensors");
     expect(out["11"].inputs.clip_name).toBe("qwen3vl_4b_int8_convrot.safetensors");

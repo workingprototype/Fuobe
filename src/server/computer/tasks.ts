@@ -294,7 +294,7 @@ export function logWorkerJob(
   workerId: string | null,
   now = Date.now(),
   run: { execMs?: number; device?: string } = {},
-  info: { why?: string; tries?: number } = {},
+  info: { why?: string; tries?: number; variant?: string } = {},
 ): void {
   try {
     const name = workerId ? ((rdb().prepare("SELECT name FROM relay_workers WHERE id = ?").get(workerId) as { name: string } | undefined)?.name ?? null) : null;
@@ -309,7 +309,7 @@ export function logWorkerJob(
     console.warn(`[fuobe] Couldn't write the workers' log: ${(e as Error).message}`);
   }
   // The same handoff in the worker's timeline, in words (best-effort, as above).
-  const detail = { ...(run.execMs !== undefined && { execMs: run.execMs }), ...(run.device && { device: run.device }), ...(info.why && { why: info.why }), ...(info.tries !== undefined && { tries: info.tries }) };
+  const detail = { ...(run.execMs !== undefined && { execMs: run.execMs }), ...(run.device && { device: run.device }), ...(info.why && { why: info.why }), ...(info.tries !== undefined && { tries: info.tries }), ...(info.variant && { variant: info.variant }) };
   logWorkerEvent(
     { kind: "job", event, workerId, words: jobWords(event, t, { execMs: run.execMs, why: info.why, now }), taskId: t.id, generationId: t.generation_id, lane: t.lane ?? null, detail },
     now,

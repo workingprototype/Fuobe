@@ -202,6 +202,8 @@ export interface ClaimedTask {
   notAfter?: number | null;
   attempt?: number;
   models?: { folder: string; name: string; size: number; sha256: string | null }[];
+  /** A worker's task that runs with a model variant's files (src/lib/gpu/model-variants.ts): its id. Absent: the workflow's own files. */
+  variant?: string;
   /** A worker's task: its class in the line ("owner": the owner's own job), and its workflow. */
   class?: "paid" | "free" | "owner";
   workflowId?: string;
