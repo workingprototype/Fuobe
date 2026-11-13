@@ -12,7 +12,7 @@ import { refreshTicketsBeforeClaim } from "@/server/computer/ticket-refresh";
 export async function POST(request: Request) {
   const principal = principalOf(request);
   if (principal instanceof Response) return principal;
-  const body = (await request.json().catch(() => null)) as { device?: unknown; running?: unknown; slot?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { device?: unknown; running?: unknown; slot?: unknown; noStream?: unknown } | null;
   // Each of a worker's slots claims for itself, each counted on its own: an idle CPU slot never uses up its GPU's claims.
   const limited = rateOf(callerKey(request, principal), body?.slot === "cpu" ? "claim-cpu" : "claim", 60);
   if (limited) return limited;
@@ -22,8 +22,9 @@ export async function POST(request: Request) {
     // Job tickets made for the catalog before this version of the studio are made again first (ticket-refresh.ts).
     if (worker?.kind === "pool") await refreshTicketsBeforeClaim();
     // A shared GPU takes the best task it can run from its pool (pool.ts), for its GPU or for its CPU slot (`slot`:
-    // "cpu"); a person's computer, their own oldest.
-    const task = worker?.kind === "pool" ? workerClaim(worker, running, Date.now(), body?.slot === "cpu" ? "cpu" : "gpu") : claim(principal, String(body?.device ?? ""), running);
+    // "cpu"); a person's computer, their own oldest. A worker whose PC's memory is in use (`noStream`, its RAM guard)
+    // takes only a job whose weights fit whole on its card.
+    const task = worker?.kind === "pool" ? workerClaim(worker, running, Date.now(), body?.slot === "cpu" ? "cpu" : "gpu", { noStream: body?.noStream === true }) : claim(principal, String(body?.device ?? ""), running);
     if (!task) return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
     return Response.json({ task }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {

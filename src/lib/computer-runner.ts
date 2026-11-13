@@ -791,9 +791,10 @@ export class ComputerRunner {
 
   /**
    * Ask for a job and run it (one at a time). True when there was one. Only while ComfyUI here answers to this site: a
-   * computer whose ComfyUI is closed, or runs without Fuobe's setting, keeps its place but takes nothing.
+   * computer whose ComfyUI is closed, or runs without Fuobe's setting, keeps its place but takes nothing. `noStream`: a
+   * worker whose PC's memory is in use (its RAM guard) asks for no job that streams its weights from RAM.
    */
-  async claimAndRun(o: { onlyHeld?: boolean } = {}): Promise<boolean> {
+  async claimAndRun(o: { onlyHeld?: boolean; noStream?: boolean } = {}): Promise<boolean> {
     if (!this.alive || this.busy || this.o.access) return false;
     this.busy = true;
     try {
@@ -801,7 +802,7 @@ export class ComputerRunner {
       if (!o.onlyHeld && (await this.look()).comfy !== "ok") return false;
       const running = this.view.jobs.filter((j) => j.phase !== "done" && j.phase !== "failed").map((j) => j.taskId);
       // A worker's CPU slot claims for itself (`slot`): its work never waits for its GPU's job, nor holds it up.
-      const res = await this.deps.api("/api/gpu/computer/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device: this.o.device, running, ...(this.o.slot && { slot: this.o.slot }) }) });
+      const res = await this.deps.api("/api/gpu/computer/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device: this.o.device, running, ...(this.o.slot && { slot: this.o.slot }), ...(o.noStream && !o.onlyHeld && { noStream: true }) }) });
       if (res.status !== 200) {
         if (res.status === 401) this.stop("signed-out");
         if (res.status === 204) await this.deps.worker?.claimed(null, { onlyHeld: !!o.onlyHeld });

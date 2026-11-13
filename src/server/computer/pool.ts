@@ -223,6 +223,8 @@ export function workerState(w: WorkerRow, now = Date.now()): { state: WorkerStat
   const why = w.local_why ?? "";
   if (w.paused_local) {
     if (why.startsWith("gpu-busy")) return { state: "gpu-busy", words: `Your GPU is busy${why.includes(":") ? ` (${why.split(":").slice(1).join(":")})` : ""}` };
+    // Its RAM guard: other programs use the PC's memory. The same kind of pause as a busy GPU: it resumes by itself.
+    if (why.startsWith("ram-busy")) return { state: "gpu-busy", words: `This PC's memory is in use${why.includes(":") ? ` (${why.split(":").slice(1).join(":")})` : ""}` };
     if (why === "comfy-crashes") return { state: "comfy-down", words: "ComfyUI keeps stopping" };
     if (why === "port-busy") return { state: "comfy-down", words: "Its ComfyUI port is taken by another program" };
     if (why === "self-check") return { state: "comfy-down", words: "Its face check didn't pass after a restart: it checks again within 5 minutes" };
@@ -828,9 +830,10 @@ const slotWhere = (w: Pick<WorkerRow, "cpu_slot_json">, slot: WorkerSlot) => (sl
  * the owner's own jobs only: its warm lane goes first until another lane's best task has waited longer than
  * switch_after_ms (and is older). A person's run never waits for a warm lane.
  */
-export function workerClaim(w: WorkerRow, running: string[], now = Date.now(), slot: WorkerSlot = "gpu"): ClaimedTask | null {
+export function workerClaim(w: WorkerRow, running: string[], now = Date.now(), slot: WorkerSlot = "gpu", o: { noStream?: boolean } = {}): ClaimedTask | null {
   const d = db();
   const device = slotDevice(w, slot);
+  const noStream = !!o.noStream && slot === "gpu";
   return d.transaction((): ClaimedTask | null => {
     sweepPool(now);
     const fresh = d.prepare("SELECT * FROM relay_workers WHERE id = ?").get(w.id) as WorkerRow;
@@ -847,12 +850,24 @@ export function workerClaim(w: WorkerRow, running: string[], now = Date.now(), s
     // First pick: its GPU leaves a job for a free worker with a higher pick order that would take it next, for a short
     // grace (firstPicks), and takes its own next best.
     const left = slot === "gpu" ? firstPicks(fresh, now) : new Map<string, string>();
-    const { task: t, looked } = pick(fresh, now, slot, new Set(left.keys()));
+    // Its PC's memory is in use (the worker's RAM guard): this claim streams nothing from its RAM, so it takes only a job
+    // whose weights fit whole on its card (and a model variant that does), and leaves the rest for another worker.
+    const asking = noStream ? withoutStreaming(fresh) : fresh;
+    const { task: t, looked } = pick(asking, now, slot, new Set(left.keys()));
     const many = `${looked}${looked >= LOOK_AT ? "+" : ""}`;
     const none = left.size ? `Asked for work: ${many} waiting, ${left.size === 1 ? "1 left" : `${left.size} left`} for a worker that picks first` : `Asked for work: ${many} waiting, none it can run now`;
-    if (slot === "gpu") noteAsked(fresh, t ? "found" : "nothing", t ? `Asked for work: took 1 of ${many} waiting` : looked ? none : "Asked for work: nothing waiting", now, { waiting: looked, ...(left.size && { leftFor: [...new Set(left.values())] }) });
-    return t ? claimed(t, fresh, device, now) : null;
+    const memory = noStream ? " (its PC's memory is in use: only jobs that fit whole on its card)" : "";
+    if (slot === "gpu") noteAsked(fresh, t ? "found" : "nothing", `${t ? `Asked for work: took 1 of ${many} waiting` : looked ? none : "Asked for work: nothing waiting"}${memory}`, now, { waiting: looked, ...(left.size && { leftFor: [...new Set(left.values())] }), ...(noStream && { noStream: true }) });
+    return t ? claimed(t, asking, device, now) : null;
   }).immediate();
+}
+
+/**
+ * The worker as one claim sees it when its PC's memory is in use (its RAM guard, the claim's `noStream`): no RAM to
+ * stream weights from, so the memory rule (memoryFit) passes only what fits whole on its card. Nothing is saved.
+ */
+export function withoutStreaming(w: WorkerRow): WorkerRow {
+  return { ...w, facts_json: JSON.stringify({ ...factsOf(w), ramBytes: 0 }) };
 }
 
 /** Why a worker may not take work now, in a few words (its claim's answer). */

@@ -347,4 +347,19 @@ describe("which workers qualify on memory (the claim)", () => {
     job(KREA);
     expect(claim(worker("ampere-low-ram", KREA, { vramBytes: 10 * GB, ramBytes: 16 * GB, gpuGen: "8.6" }))).toBeNull();
   });
+
+  it("a claim that asks for no streaming (the worker's RAM guard): only a job whose weights fit whole on its card, said in its claim's words", () => {
+    const id = job(FLEX);
+    const small = worker("flex-shared-pc", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB });
+    expect(pool.workerClaim(row(small), [], clock, "gpu", { noStream: true })).toBeNull();
+    expect(row(small).asked_words).toMatch(/its PC's memory is in use: only jobs that fit whole on its card/);
+    expect(tasks.taskById(id)!.state).toBe("waiting");
+    // Its facts are as they were: the next claim without it streams as before.
+    expect(JSON.parse(row(small).facts_json ?? "{}").ramBytes).toBe(31.9 * GB);
+    expect(pool.workerClaim(row(small), [], clock)?.id).toBe(id);
+    expect(JSON.parse(tasks.taskById(id)!.extra_json ?? "{}").streamed).toBe(true);
+    // A card that holds it whole takes it whatever the claim says.
+    const whole = job(FLEX);
+    expect(pool.workerClaim(row(worker("flex-whole", FLEX, { vramBytes: 32 * GB, ramBytes: 16 * GB })), [], clock, "gpu", { noStream: true })?.id).toBe(whole);
+  });
 });
