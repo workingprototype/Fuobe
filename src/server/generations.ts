@@ -168,6 +168,7 @@ import { inDemoScope, outsideDemo } from "./demo-scope";
 import { moderationConfigured } from "./moderation";
 import { holdForCheck, sweepOutputChecks } from "./output-checks";
 import { absolutePath, adoptFile, contentTypeFor, deleteAsset, localHead, readRef, saveFile, scratchDir, scratchOutputFile } from "./storage";
+import { isSvgData, isSvgFile } from "./svg-file";
 
 interface Row {
   id: string;
@@ -5229,7 +5230,10 @@ const ACCOUNT_LIMITS_FILE_BYTES = 2 ** 30;
 /** An account's files are full (accountTotalBytes): the job fails with this message. */
 class AccountFilesFull extends Error {}
 
-/** Types an account's result is stored as; any other is stored as application/octet-stream (.bin), never served as a page. */
+/**
+ * Types an account's result is stored as, with image/svg+xml for a checked SVG (accountType); any other is stored as
+ * application/octet-stream (.bin), never served as a page.
+ */
 const ACCOUNT_OUTPUT_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -5252,8 +5256,10 @@ const ACCOUNT_OUTPUT_TYPES = new Set([
   "text/vtt",
 ]);
 
-const accountType = (t: string) => {
+/** The type an account's result is kept as. An SVG only when `svg()` says its bytes are a checked one (src/server/svg-file.ts). */
+const accountType = (t: string, svg: () => boolean) => {
   const bare = t.split(";")[0].trim().toLowerCase();
+  if (bare === "image/svg+xml") return svg() ? bare : "application/octet-stream";
   return ACCOUNT_OUTPUT_TYPES.has(bare) ? bare : "application/octet-stream";
 };
 
@@ -5296,7 +5302,7 @@ async function persistAccountOutput(o: RichOutput, generationId: string, account
   roomFor(account, fs.statSync(dest).size, dest);
   const header = res.headers.get("content-type")?.split(";")[0];
   const given = o.contentType ?? (header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url));
-  const asset = adoptFile({ from: dest, contentType: accountType(given), source: "generation", generationId, accountId: account });
+  const asset = adoptFile({ from: dest, contentType: accountType(given, () => isSvgFile(dest)), source: "generation", generationId, accountId: account });
   const meta = relinkMain(linked, o.url, asset.url);
   const text = o.text ?? (asset.kind === "text" && asset.size <= MAX_INLINE_TEXT * 4 ? fs.readFileSync(absolutePath(asset.relPath), "utf8") : undefined);
   return {
@@ -5327,7 +5333,7 @@ async function persistRelayOutput(o: RichOutput, generationId: string, account: 
   const contentType = o.contentType ?? file.contentType ?? "application/octet-stream";
   const size = fs.statSync(from).size;
   if (account) roomFor(account, size, o.url.startsWith("scratch:") ? from : undefined);
-  const asset = adoptFile({ from, contentType: account ? accountType(contentType) : contentType, source: "generation", generationId, ...(account && { accountId: account }) });
+  const asset = adoptFile({ from, contentType: account ? accountType(contentType, () => isSvgFile(from)) : contentType, source: "generation", generationId, ...(account && { accountId: account }) });
   const meta = relinkMain(linked, o.url, asset.url);
   const text = o.text ?? (asset.kind === "text" && asset.size <= MAX_INLINE_TEXT * 4 ? fs.readFileSync(absolutePath(asset.relPath), "utf8") : undefined);
   return {
@@ -5340,8 +5346,8 @@ async function persistRelayOutput(o: RichOutput, generationId: string, account: 
   };
 }
 
-/** Save one result. `pre`: the files it links to, kept already (persistArtifacts runs once for a copy tried again). */
-async function persistOutput(o: RichOutput, generationId: string, pre?: { linked: Record<string, unknown> | undefined }): Promise<OutputFile> {
+/** Save one result (exported for tests). `pre`: the files it links to, kept already (persistArtifacts runs once for a copy tried again). */
+export async function persistOutput(o: RichOutput, generationId: string, pre?: { linked: Record<string, unknown> | undefined }): Promise<OutputFile> {
   const linked = pre ? pre.linked : await persistArtifacts(o.meta, generationId, o.url);
   const account = tenantAccount();
   if (o.url?.startsWith("relay:") || o.url?.startsWith("scratch:")) return persistRelayOutput(o, generationId, account, linked);
@@ -5368,7 +5374,7 @@ async function persistOutput(o: RichOutput, generationId: string, pre?: { linked
   }
   if (account) {
     roomFor(account, data.length);
-    contentType = accountType(contentType!);
+    contentType = accountType(contentType!, () => isSvgData(data));
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
   const meta = relinkMain(linked, o.url, asset.url);

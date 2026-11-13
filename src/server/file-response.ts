@@ -4,6 +4,9 @@ import { pipeline, type Readable } from "node:stream";
 import { cachedPatches, patchStream } from "./media-clean";
 import { absolutePath, contentTypeFor } from "./storage";
 
+/** The policy every stored SVG is served with, whoever asks (an <img> of an SVG never runs scripts anyway). */
+export const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox";
+
 /**
  * A stored file as an HTTP response, with byte ranges (video seeking), a UTF-8 charset for text,
  * `nosniff`, a sandbox CSP (and a script-free one for SVG). `relPath` is under the files folder; traversal is
@@ -61,7 +64,8 @@ export function fileResponse(request: Request, relPath: string, opts: { cache?: 
     "Content-Security-Policy": "sandbox",
     ...opts.headers,
   };
-  if (type === "image/svg+xml") headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+  // An SVG opened on its own: its own styles and embedded (data:) pictures draw, nothing else loads or runs.
+  if (type === "image/svg+xml") Object.assign(headers, { "Content-Security-Policy": SVG_CSP, "X-Content-Type-Options": "nosniff" });
   const download = new URL(request.url).searchParams.get("download");
   if (download) headers["Content-Disposition"] = `attachment; filename="${download.replace(/[^\w.-]/g, "_")}"`;
   const range = request.headers.get("range");

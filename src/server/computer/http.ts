@@ -8,6 +8,7 @@ import { accountById, accountGpu, authEnabled, crossSite, hostAllowed, LoginGuar
 import { hit } from "../rate";
 import { getSetting } from "../settings";
 import { RelayError, type Principal } from "./tasks";
+import { isSvgFile } from "../svg-file";
 import { isWorkerAuth, workerFromAuth, type WorkerRow } from "./workers";
 
 /**
@@ -107,9 +108,6 @@ const notWhatWasAsked = (w: WantedFile) => `Couldn't save a result from your Com
 
 /** An SVG's first bytes: white space (a byte order mark is one), then its XML declaration, a comment or its <svg> tag. */
 const SVG_HEAD = /^\s*(<\?xml[\s?]|<!--|<svg[\s>/])/;
-/** What a kept SVG never holds: scripts, event handlers, a page inside it, entities. */
-const SVG_ACTIVE = /<script\b|<foreignObject\b|<!ENTITY|\son[a-z]+\s*=|javascript:/i;
-const SVG_MAX_BYTES = 64 * 2 ** 20;
 /** A Niantic splat's header, inside its gzip: "NGSP" (little-endian). */
 const SPZ_MAGIC = 0x5053474e;
 
@@ -170,22 +168,6 @@ export function checkWholeOutput(file: string, w: WantedFile, contentType: strin
             ? glb(file)
             : true;
   if (!ok) throw new Error(notWhatWasAsked(w));
-}
-
-/**
- * A real SVG: UTF-8, its root an <svg> in the SVG namespace after at most an XML declaration, comments and a DOCTYPE
- * with no internal subset, closed at its end, with nothing active in it (SVG_ACTIVE).
- */
-export function isSvgFile(file: string): boolean {
-  try {
-    if (fs.statSync(file).size > SVG_MAX_BYTES) return false;
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(file));
-    const body = text.replace(/^(?:\s|<\?xml[^>]*\?>|<!--[\s\S]*?-->|<!DOCTYPE\s+svg\b[^[>]*>)*/, "");
-    const root = /^<svg\b[^>]*>/.exec(body)?.[0];
-    return !!root && /\sxmlns\s*=\s*["']http:\/\/www\.w3\.org\/2000\/svg["']/.test(root) && /<\/svg\s*>\s*$/.test(body) && !SVG_ACTIVE.test(body);
-  } catch {
-    return false;
-  }
 }
 
 /** A real splat (.spz): gzip, and inside it the header: "NGSP", version 1 to 3, at least one point, SH degree 0 to 3. */
