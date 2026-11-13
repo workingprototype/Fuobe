@@ -2,8 +2,10 @@
   "streams": [
     {
       "workflows": [
+        "fibo2-dev-t2i",
         "flux3-klein-t2i",
         "krea2-turbo-t2i",
+        "ltx25-t2v",
         "minimax-h3-fast-flf2v",
         "minimax-h3-fast-i2v",
         "minimax-h3-fast-t2v",
@@ -14,7 +16,14 @@
         "minimax-h3-i2v",
         "minimax-h3-image-edit",
         "minimax-h3-image-t2i",
-        "qwen-image-21-relight"
+        "qwen-image-21-relight",
+        "video-character-swap-h3",
+        "video-fix-faces-h3",
+        "video-group-swap-h3",
+        "video-h3-t2v-2k",
+        "video-motion-transfer-h3",
+        "video-scene-edit-h3",
+        "z-image-turbo-t2i"
       ],
       "vramGb": 10,
       "ramGb": 32

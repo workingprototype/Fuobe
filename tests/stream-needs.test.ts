@@ -53,6 +53,15 @@ const STREAMED = [
   "minimax-h3-i2v",
   "minimax-h3-flex-ref2va",
   "qwen-image-21-relight",
+  "fibo2-dev-t2i",
+  "ltx25-t2v",
+  "video-character-swap-h3",
+  "video-fix-faces-h3",
+  "video-group-swap-h3",
+  "video-h3-t2v-2k",
+  "video-motion-transfer-h3",
+  "video-scene-edit-h3",
+  "z-image-turbo-t2i",
 ];
 
 /** The committed inputs with stream-needs.json replaced. */
@@ -63,7 +72,7 @@ describe("the catalog's streaming needs (build-requirements.mjs)", () => {
   it("puts each workflow's streaming need in requirements.json", () => {
     for (const id of STREAMED) expect(idx.workflows[id].stream, id).toEqual({ vramGb: 10, ramGb: 32 });
     // A workflow with none keeps no field.
-    expect("stream" in idx.workflows["z-image-turbo-t2i"]).toBe(false);
+    expect("stream" in idx.workflows["sdxl-t2i"]).toBe(false);
   });
 
   it("refuses numbers that aren't above 0, VRAM that isn't below the workflow's, and unknown or repeated workflows", () => {
