@@ -101,6 +101,54 @@ export function packsAsSeen(packs, loaded = {}) {
   });
 }
 
+/**
+ * The names a ComfyUI lists with "\" (a model file in a subfolder, on Windows), from its GET /object_info: for each
+ * node class and list input that has one, those names keyed by the same name with "/". A catalog graph names such a file
+ * with "/", and ComfyUI refuses a list value it doesn't list. Empty where no list has one.
+ * @returns {Map<string, Map<string, string>>} `${class}\u0000${input}` → (name with "/" → name as listed)
+ */
+export function listedNames(objectInfo) {
+  const out = new Map();
+  for (const [cls, def] of Object.entries(objectInfo && typeof objectInfo === "object" ? objectInfo : {})) {
+    const groups = def?.input;
+    if (!groups || typeof groups !== "object") continue;
+    for (const group of [groups.required, groups.optional]) {
+      if (!group || typeof group !== "object") continue;
+      for (const [input, spec] of Object.entries(group)) {
+        // ComfyUI's two forms of a list input: [[names…], {…}] and ["COMBO", { options: [names…] }].
+        const options = Array.isArray(spec?.[0]) ? spec[0] : spec?.[0] === "COMBO" && Array.isArray(spec?.[1]?.options) ? spec[1].options : null;
+        if (!options) continue;
+        let names = null;
+        for (const o of options) if (typeof o === "string" && o.includes("\\")) (names ??= new Map()).set(o.replaceAll("\\", "/"), o);
+        if (names) out.set(`${cls}\u0000${input}`, names);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * A job's graph with each list value that names a file with "/" written as its ComfyUI lists it (listedNames). Any
+ * other value stays as it is, and the graph passed in isn't changed.
+ */
+export function asListed(graph, listed) {
+  if (!listed?.size || !graph || typeof graph !== "object") return graph;
+  let out = graph;
+  for (const [id, node] of Object.entries(graph)) {
+    const inputs = node?.inputs;
+    if (!inputs || typeof inputs !== "object" || typeof node.class_type !== "string") continue;
+    for (const [input, v] of Object.entries(inputs)) {
+      if (typeof v !== "string" || !v.includes("/")) continue;
+      const name = listed.get(`${node.class_type}\u0000${input}`)?.get(v);
+      if (!name) continue;
+      if (out === graph) out = { ...graph };
+      if (out[id] === node) out[id] = { ...node, inputs: { ...inputs } };
+      out[id].inputs[input] = name;
+    }
+  }
+  return out;
+}
+
 /** Its last reading of what its ComfyUI loaded (loadedPacks), kept in its working folder across restarts. */
 export function readLoaded(file) {
   try {

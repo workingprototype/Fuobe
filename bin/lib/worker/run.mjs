@@ -30,7 +30,7 @@ import { folders, GuardMissing, OwnComfy, PortBusy, yamlFolders } from "./comfy.
 import { ffmpegOf, PROTOCOL, protocolOf, readControl, saveConfig, savedConfig, writeControl, writeStatus } from "./config.mjs";
 import { BRIEF_COOL_DOWN_MS, BRIEF_EVERY_MS, BRIEF_PAUSE_MS, GpuWatch, MID_JOB_GRACE_MS, othersOf, readGpu, readGpuGen, readGpuTotal } from "./gpu.mjs";
 import { Hold } from "./hold.mjs";
-import { inventoryHash, loadedPacks, missingModelDirs, modelFiles, packFolders, packsAsSeen, readLoaded, runtimeFileList, writeLoaded } from "./inventory.mjs";
+import { asListed, inventoryHash, listedNames, loadedPacks, missingModelDirs, modelFiles, packFolders, packsAsSeen, readLoaded, runtimeFileList, writeLoaded } from "./inventory.mjs";
 import { freeLocal, localIdle, readCounters, readListeners, readLock, splitMemory, unknownHolder } from "./local-work.mjs";
 import { takeLock, workerLives } from "./lock.mjs";
 import { finishers } from "./finish.mjs";
@@ -505,6 +505,8 @@ async function work(saved, deps, owner) {
   // failed there doesn't count for the workflows that need its nodes, whatever its folder says.
   const loadedFile = path.join(cfg.workDir, "loaded-packs.json");
   let loaded = readLoaded(loadedFile);
+  // The model names its ComfyUI lists with "\" (Windows), read with its nodes: a job's "/" names are sent as listed.
+  let listed = new Map();
   async function scan() {
     packs = packFolders(cfg.comfyDir, index);
     inv = { files: await modelFiles(cfg.modelDirs ?? [], index, path.join(cfg.workDir, "hash-cache.json"), deps.pins, { comfyDir: cfg.comfyDir, fileCheck: cfg.fileCheck, runtime }), nodePacks: packsAsSeen(packs, loaded), media: inv.media };
@@ -524,6 +526,7 @@ async function work(saved, deps, owner) {
       return;
     }
     if (!info || typeof info !== "object" || !Object.keys(info).length) return;
+    listed = listedNames(info);
     faceNodes = deps.faceNodes ?? (!!info.H3FaceTrackCrop && !!info.PreviewAny);
     const fresh = loadedPacks(packs, index, info);
     for (const [name, l] of Object.entries(fresh)) {
@@ -752,6 +755,7 @@ async function work(saved, deps, owner) {
       log(`Refused job ${t.id}: ${problem.reason} at node ${problem.node}${problem.cls ? ` (${problem.cls}${problem.input ? `.${problem.input}` : ""})` : ""}.`);
       return problem.reason;
     }
+    t.graph = asListed(t.graph, listed);
     if (o.faces && detectsFaces(t.graph) && !(await checkFaces("before a face job", { job: true }))) return { giveBack: "self-check" };
     if (o.faces) jobVetted = true;
     return null;

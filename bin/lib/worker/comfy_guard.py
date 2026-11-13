@@ -43,9 +43,10 @@ CHALLENGE = re.compile(r"^[0-9a-f]{16,128}$")
 # recordings and can send UDP) is left out of the pack the worker installs; this refuses it again if a full copy loads.
 # The same for ComfyUI-H3-FaceRefine's face picker (/h3_facerefine/*: it reads and serves a video from any path) and
 # ComfyUI-Impact-Pack's routes (/sam/*: SAM on an image read by a path the request gives; /impact/*: wildcards,
-# preview-bridge images by path, earlier jobs' crops; /view/validate: whether a file exists). ComfyUI's own /view
-# stays open.
-BLOCKED_ROUTES = ("/instanthmr", "/h3_facerefine", "/sam", "/impact", "/view/validate")
+# preview-bridge images by path, earlier jobs' crops; /view/validate: whether a file exists), kandinsky6's model
+# downloader (/kandinsky6/*: it fetches and writes model files) and h3-relay's staged runs and previews (/h3_relay/*).
+# ComfyUI's own /view stays open.
+BLOCKED_ROUTES = ("/instanthmr", "/h3_facerefine", "/sam", "/impact", "/view/validate", "/kandinsky6", "/h3_relay")
 
 
 def blocked(path: str) -> bool:
