@@ -1518,5 +1518,15 @@
   "revision": "7afd04f39d891b998fa7dd00559495e97fc44db5",
   "sizeBytes": 17590109680,
   "sha256": "f3071cba96dd9310b00ff9ba81842a0e6d44d47658dcab980d1031ac0481c11b"
+ },
+ "https://huggingface.co/black-forest-labs/FLUX.2-dev-NVFP4/resolve/main/flux2-dev-nvfp4-mixed.safetensors": {
+  "revision": "142b87e70bc3006937b7093d89ff287b5f59f071",
+  "sizeBytes": 22772036568,
+  "sha256": "283bf658945ea067f179088771900ee315491a29fb8e1f2826f8e4ab5dc497bf"
+ },
+ "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors": {
+  "revision": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7",
+  "sizeBytes": 18034640095,
+  "sha256": "e3467b7d912a234fb929cdf215dc08efdb011810b44bc21081c4234cc75b370e"
  }
 }

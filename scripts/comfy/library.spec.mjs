@@ -531,6 +531,8 @@ export const KNOWN_MODELS = {
   'flux-2-klein-4b-fp8.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/flux-2-klein-4b-fp8.safetensors' },
   'flux2-vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors' },
   'tryon-klein-4b.safetensors': { folder: 'loras', url: 'https://huggingface.co/xocialize/tryon-FLUX.2-klein-4B-lora/resolve/main/tryon-klein-4b.safetensors' },
+  'flux2-dev-nvfp4-mixed.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/black-forest-labs/FLUX.2-dev-NVFP4/resolve/main/flux2-dev-nvfp4-mixed.safetensors' },
+  'mistral_3_small_flux2_fp8.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors' },
   'krea2_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors', variants: ['krea2_turbo_fp8_scaled.safetensors', 'krea2_turbo_bf16.safetensors'] },
   'qwen3vl_4b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors', variants: ['qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_bf16.safetensors'] },
   'krea2_style_reference.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/loras/krea2_style_reference.safetensors' },
@@ -1005,6 +1007,7 @@ export const SPEC = [
   },
   {
     id: 'flux2-dev-t2i',
+    optionalModels: ['mistral_3_small_flux2_fp8.safetensors', 'flux2-dev-nvfp4-mixed.safetensors'],
     title: 'FLUX.2 [dev] Text to Image',
     capability: 't2i',
     export: 'image_flux2_text_to_image',
@@ -1024,6 +1027,7 @@ export const SPEC = [
   },
   {
     id: 'flux2-dev-t2i-turbo',
+    optionalModels: ['mistral_3_small_flux2_fp8.safetensors', 'flux2-dev-nvfp4-mixed.safetensors'],
     title: 'FLUX.2 [dev] Text to Image (Turbo LoRA, 8-step)',
     capability: 't2i',
     export: 'image_flux2_text_to_image',
@@ -1043,6 +1047,7 @@ export const SPEC = [
   },
   {
     id: 'flux2-dev-edit',
+    optionalModels: ['mistral_3_small_flux2_fp8.safetensors', 'flux2-dev-nvfp4-mixed.safetensors'],
     title: 'FLUX.2 [dev] Image Edit (1 reference)',
     capability: 'edit',
     export: 'image_flux2',
@@ -1061,6 +1066,7 @@ export const SPEC = [
   },
   {
     id: 'flux2-dev-multiref',
+    optionalModels: ['mistral_3_small_flux2_fp8.safetensors', 'flux2-dev-nvfp4-mixed.safetensors'],
     title: 'FLUX.2 [dev] Multi-Reference Edit (3 images)',
     capability: 'edit',
     export: 'image_flux2',

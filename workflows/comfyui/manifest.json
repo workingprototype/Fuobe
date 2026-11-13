@@ -390,6 +390,20 @@
           "folder": "text_encoders",
           "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors",
           "sizeGb": 35.58
+        },
+        {
+          "file": "flux2-dev-nvfp4-mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-dev-NVFP4/resolve/main/flux2-dev-nvfp4-mixed.safetensors",
+          "sizeGb": 22.77,
+          "optional": true
+        },
+        {
+          "file": "mistral_3_small_flux2_fp8.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors",
+          "sizeGb": 18.03,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -496,6 +510,20 @@
           "folder": "loras",
           "url": "https://huggingface.co/ByteZSzn/Flux.2-Turbo-ComfyUI/resolve/main/Flux_2-Turbo-LoRA_comfyui.safetensors",
           "sizeGb": 2.76
+        },
+        {
+          "file": "flux2-dev-nvfp4-mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-dev-NVFP4/resolve/main/flux2-dev-nvfp4-mixed.safetensors",
+          "sizeGb": 22.77,
+          "optional": true
+        },
+        {
+          "file": "mistral_3_small_flux2_fp8.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors",
+          "sizeGb": 18.03,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -579,6 +607,20 @@
           "folder": "text_encoders",
           "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors",
           "sizeGb": 35.58
+        },
+        {
+          "file": "flux2-dev-nvfp4-mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-dev-NVFP4/resolve/main/flux2-dev-nvfp4-mixed.safetensors",
+          "sizeGb": 22.77,
+          "optional": true
+        },
+        {
+          "file": "mistral_3_small_flux2_fp8.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors",
+          "sizeGb": 18.03,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -674,6 +716,20 @@
           "folder": "text_encoders",
           "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors",
           "sizeGb": 35.58
+        },
+        {
+          "file": "flux2-dev-nvfp4-mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-dev-NVFP4/resolve/main/flux2-dev-nvfp4-mixed.safetensors",
+          "sizeGb": 22.77,
+          "optional": true
+        },
+        {
+          "file": "mistral_3_small_flux2_fp8.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors",
+          "sizeGb": 18.03,
+          "optional": true
         }
       ],
       "customNodes": [],

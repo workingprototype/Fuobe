@@ -49,6 +49,23 @@
         "diffusion_models/wan2.1_vace_14B_fp16.safetensors": "diffusion_models/wan2.1_vace_14B_int8_convrot.safetensors",
         "text_encoders/umt5_xxl_fp16.safetensors": "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
       }
+    },
+    {
+      "id": "nvfp4",
+      "gpuGen": {
+        "min": "8.0",
+        "max": "8.6"
+      },
+      "workflows": [
+        "flux2-dev-edit",
+        "flux2-dev-multiref",
+        "flux2-dev-t2i",
+        "flux2-dev-t2i-turbo"
+      ],
+      "files": {
+        "diffusion_models/flux2_dev_fp8mixed.safetensors": "diffusion_models/flux2-dev-nvfp4-mixed.safetensors",
+        "text_encoders/mistral_3_small_flux2_bf16.safetensors": "text_encoders/mistral_3_small_flux2_fp8.safetensors"
+      }
     }
   ]
 }
