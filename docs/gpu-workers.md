@@ -439,7 +439,7 @@ A worker gets a job only when all of these are true, all in one SQLite transacti
 - it has the workflow's files and packs (from its inventory) and enough memory. The files are the workflow's own, or
   every file of one of its model variants (see "Model variants" below), and the VRAM is that of the files it would run.
   A workflow's need is its whole GB less 3%, because a card reports a little less than its size (a 32 GB card shows
-  about 31.8 GiB). A workflow with a streaming need also runs on a smaller card with enough system RAM (see
+  about 31.8 GiB). Most workflows also run on a smaller card with enough system RAM, with their weights streamed (see
   "Streaming from RAM" below);
 - it verified every run-time file the job loads (see "Run-time files" below);
 - the retry rule allows it: a worker that lost or failed the job gets it again only when no other worker that can run
@@ -696,25 +696,57 @@ the same model in another format.
 ### Streaming from RAM
 
 A workflow's VRAM need is for every model weight on the card. ComfyUI can keep part of the weights in system RAM and
-stream them to the card at each step (dynamic VRAM loading): slower, but a smaller card runs it. A workflow may have a
-streaming need, `{ vramGb, ramGb }` (`workflows/comfyui/stream-needs.json`, built into `requirements.json`;
-[adding-a-model.md](adding-a-model.md#streaming-from-ram) says how to add one).
+stream them to the card at each step (dynamic VRAM loading): slower, but a smaller card runs it.
+`workflows/comfyui/stream-needs.json` (built into `requirements.json` as each workflow's `stream`;
+[adding-a-model.md](adding-a-model.md#streaming-from-ram) says how to change it) holds two things:
 
-- **Which workers qualify.** A worker has the memory for a workflow when its VRAM covers the workflow's VRAM need (as
-  always), or when the workflow has a streaming need and the worker's VRAM covers the need's `vramGb` and its RAM covers
-  the need's `ramGb`. Both have the same 3% allowance as the VRAM need: a PC with 32 GB of RAM reports about 31.9 GiB.
-  The RAM is the one its ComfyUI reports (`ramBytes` in its facts, once its ComfyUI has started). A worker whose RAM
-  isn't known yet, or whose ComfyUI runs with dynamic VRAM off (`--disable-dynamic-vram`, `--highvram`, `--gpu-only`,
-  `--novram` or `--cpu`; `dynamicVramOff` in its facts), qualifies on VRAM only.
+- `streams`: measured streaming needs, `{ vramGb, ramGb }`. A workflow with one streams only when the GPU meets it.
+- `noStream`: the node packs and the workflows that never stream, because their models are loaded outside ComfyUI's
+  model management (a pack's own loader nodes and offloading). These workflows get `stream: false`. Isolated workflows
+  never stream either. The list starts with ComfyUI-WanVideoWrapper, ComfyUI-HunyuanVideo-Foley, ComfyUI-MMAudio,
+  ComfyUI-ThinkSound_Wrapper, ComfyUI-LatentSyncWrapper and kandinsky6-sr: in `requirements.json`, their model files
+  are read only by the pack's own loader nodes.
+
+Every other workflow streams by the computed rule.
+
+- **Which workers qualify.** A worker has the memory for a workflow when one of these is true:
+  1. Its VRAM covers the workflow's VRAM need (as always).
+  2. The workflow has a measured streaming need, and the worker's VRAM covers the need's `vramGb` and its RAM covers
+     the need's `ramGb`. A measured need decides alone: the computed rule doesn't apply to that workflow.
+  3. The computed rule. The workflow has no measured need and isn't `stream: false`, and all of these are true:
+     - The worker's card has 8 GB or more.
+     - Its VRAM covers the part of the workflow's VRAM need that isn't model files: activations, working buffers, and
+       any weights the catalog doesn't list, such as files a pack downloads itself.
+     - The model files it would load, plus the run-time files the run adds, plus a 2 GiB reserve, fit in its VRAM and
+       its RAM together. The files are the set the worker runs: the workflow's own, or a model variant's, with sizes
+       from `requirements.json`.
+
+  The reserve comes from measured runs on a 10 GB card with 32 GB of RAM (the card reports about 10 GiB, the RAM about
+  31.9 GiB). Workflows whose model files totalled 38.4 to 39.5 GiB ran with their weights streamed: the RAM was near
+  full, and the page file covered a few GB at the peak. 39.5 GiB plus the 2 GiB reserve is just under 10 + 31.9 GiB, so
+  those runs qualify, and anything larger doesn't. Each VRAM and RAM figure has the same 3% allowance as the VRAM need.
+  The RAM is the one the worker's ComfyUI reports (`ramBytes` in its facts, once its ComfyUI has started). A worker whose
+  RAM or VRAM isn't known yet, or whose ComfyUI runs with dynamic VRAM off (`--disable-dynamic-vram`, `--highvram`,
+  `--gpu-only`, `--novram` or `--cpu`; `dynamicVramOff` in its facts), qualifies on VRAM only.
 - **The same rule everywhere.** The claim, the check that some worker could ever run a run before it is queued, and the
   choice of a model variant's files all read it (`memoryFit` and `streamFits` in `src/lib/lanes.ts`). A variant's own
-  VRAM need counts as the VRAM need; the workflow's streaming need applies to whichever file set the worker runs.
+  VRAM need counts as the VRAM need, and its own files count for the computed rule.
+- **When a streamed job runs out of memory.** The claim notes on the task that the worker took it by streaming. If that
+  job then fails because it ran out of memory, the worker no longer takes that workflow by streaming. Out of memory
+  means CUDA out of memory, "Allocation on device", "The paging file is too small", Python's `MemoryError` or "not
+  enough memory", in the failed entry's execution error or the worker's reason. The workflow goes on the worker's list
+  (`no_stream_json` on the worker, with the time; `noStream` in `GET /api/admin/workers`). If another worker can run
+  the job, it goes back in line with its place kept, as a try that costs the run nothing. Its error doesn't show. With
+  no other worker for it, or for a job taken with every weight on the card, or for any other error, the job fails as
+  before. The worker still takes the workflow with every weight on its card. Settings → Workers shows the list on the
+  worker's card, and the owner clears one entry or all of them (`PATCH /api/admin/workers/{id}` with `clearNoStream`).
 - **Times.** A worker that streams runs slower. Its run limits come from its own measured runs in the lane (above), so
   they stay right for it.
 
-A person's own GPU (Fuobe Connect) reads the same rule from its check: a card short of the VRAM need, whose VRAM and RAM
-cover the streaming need with dynamic VRAM on, is ready, and its line says "Ready · uses system RAM, slower". A check
-that didn't read the RAM counts the VRAM need only.
+A person's own GPU (Fuobe Connect) reads the same rule from its check. A card short of the VRAM need, whose VRAM and RAM
+meet the measured need or the computed rule with dynamic VRAM on, is ready, and its line says "Ready · uses system RAM,
+slower". A check that didn't read the RAM counts the VRAM need only. A person's own GPU has no list of its own: a run
+there that runs out of memory fails as before.
 
 ### What the worker checks itself
 
@@ -1206,10 +1238,14 @@ routes.
   `tests/worker-runner.test.ts`, `tests/worker-recovery.test.ts`, `tests/worker-parts.test.ts`,
   `tests/worker-turns.test.ts`, `tests/worker-turns-run.test.ts`, `tests/worker-update.test.ts`, `tests/cpu-slot.test.ts`,
   `tests/worker-cpu-slot.test.ts`, `tests/fuobe-connect-nodes.test.ts`, `tests/model-variants.test.ts`,
-  `tests/pool-model-variants.test.ts`, `tests/stream-needs.test.ts`, `tests/pool-first-pick.test.ts`). The model variant
+  `tests/pool-model-variants.test.ts`, `tests/stream-needs.test.ts`, `tests/stream-oom-fallback.test.ts`,
+  `tests/pool-first-pick.test.ts`, `tests/worker-build-loads.test.ts`). The model variant
   tests check the build's refusals, which files a worker gets by its card and its files, the swapped graph and ticket,
   and an older worker program. The streaming tests check the build's refusals, the memory rule (VRAM only, VRAM and
-  RAM, unknown RAM, dynamic VRAM off, the 3% allowance) on the claim and on a person's own GPU. The first-pick tests
+  RAM, unknown RAM, dynamic VRAM off, the 3% allowance, the computed rule and its reserve, the workflows that never
+  stream) on the claim and on a person's own GPU, and a streamed job that runs out of memory going to another worker.
+  The worker build test builds the worker's parts into a new folder and imports every built module with Node, as
+  `scripts/check-worker-build.mjs` does in the deploy workflow before each build. The first-pick tests
   check that a job is left for a free worker that picks first, and taken at once when that worker is busy, paused,
   silent, outside its hours or can't run it, or after the grace. The CPU slot tests run a CPU task while a GPU job runs, refuse a GLB that names
   an outside file on the worker, bring a turntable back with its GLB, check that an account's picture reaches its

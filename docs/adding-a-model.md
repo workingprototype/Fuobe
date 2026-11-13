@@ -185,10 +185,25 @@ in system RAM and stream them to the card at each step (dynamic VRAM loading). T
 with enough RAM can run the workflow. How workers and a person's own GPU use it is in
 [Workers: Streaming from RAM](gpu-workers.md#streaming-from-ram).
 
+A new workflow needs nothing here to stream: the computed rule reads the size of its model files from
+`requirements.json`. Two cases need `workflows/comfyui/stream-needs.json`:
+
+- **The workflow can't stream.** Its node pack loads its models itself, outside ComfyUI's model management (a wrapper
+  pack with its own loader nodes and its own offloading), so dynamic VRAM loading can't move its weights. Add the pack
+  to `noStream.packs`, or the workflow to `noStream.workflows`. Isolated workflows never stream, with nothing to add.
+
+  ```json
+  {
+    "streams": [],
+    "noStream": { "packs": ["ComfyUI-WanVideoWrapper"], "workflows": [] }
+  }
+  ```
+
+- **You measured what it needs.** A measured need replaces the computed rule for that workflow. Follow these steps:
+
 1. Measure it first: run the workflow on a card smaller than its `vramGb`, with ComfyUI's dynamic VRAM on, and note the
    VRAM and the RAM the run needed.
-2. Add the workflow to `workflows/comfyui/stream-needs.json`, the one list of streaming needs. Workflows with the same
-   need share an entry:
+2. Add the workflow to `streams` in `workflows/comfyui/stream-needs.json`. Workflows with the same need share an entry:
 
    ```json
    {
@@ -202,9 +217,11 @@ with enough RAM can run the workflow. How workers and a person's own GPU use it 
    - `ramGb`: the system RAM it needs then, in GB.
    - A workflow is in one entry at most. The need applies to whichever file set a GPU runs (its own files or a
      variant's).
-3. Run `node scripts/comfy/build-requirements.mjs`. It writes each need into `requirements.json` (`stream`) and stops
-   when a number isn't above 0, when `vramGb` isn't below the workflow's own, when a workflow isn't in the manifest or
-   is named twice, or when an entry has a field it doesn't know.
+3. Run `node scripts/comfy/build-requirements.mjs`. It writes each need into `requirements.json` (`stream`), and
+   `stream: false` for each workflow that never streams. It stops when a number isn't above 0, when `vramGb` isn't
+   below the workflow's own, when a workflow isn't in the manifest or is named twice, when a pack in `noStream` isn't
+   in `packs.json`, when a workflow has a streaming need and never streams, or when an entry has a field it doesn't
+   know.
 
 Like every file of the catalog, a change to `stream-needs.json` (and so to `requirements.json`) changes the catalog
 version, so the workers update to it.
