@@ -106,6 +106,18 @@ export interface IndexWorkflow {
    * best first. A GPU runs the workflow with its own files or with a variant's (src/lib/gpu/model-variants.ts).
    */
   variants?: ModelVariant[];
+  /**
+   * Its streaming need (workflows/comfyui/stream-needs.json): a GPU with less VRAM than `vramGb` above runs it with part of
+   * its model weights kept in system RAM and streamed to the card at each step (ComfyUI's dynamic VRAM loading), slower.
+   * It needs this much VRAM and RAM then (src/lib/lanes.ts memoryFit).
+   */
+  stream?: StreamNeed;
+}
+
+/** The VRAM and the system RAM a workflow runs on with its weights streamed from RAM, in GB. */
+export interface StreamNeed {
+  vramGb: number;
+  ramGb: number;
 }
 
 /** One variant of a workflow's files (workflows/comfyui/model-variants.json, checked by scripts/comfy/build-requirements.mjs). */

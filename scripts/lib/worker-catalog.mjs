@@ -12,7 +12,7 @@ import { jsonStrings, loaderInput, MODEL_EXT, pathNamed, TEXT_NAME, textPathProb
 import { DENIED_NODES } from "../../bin/lib/worker/checks.mjs";
 import { builderSources } from "../../bin/lib/worker/stamp.mjs";
 
-const SKIP = new Set(["requirements.json", "manifest.json", "model-pins.json", "model-variants.json", "first-run-files.json"]);
+const SKIP = new Set(["requirements.json", "manifest.json", "model-pins.json", "model-variants.json", "stream-needs.json", "first-run-files.json"]);
 
 /**
  * The catalog: its workflow graphs by file name, its manifest, its requirement index, its model pins and its pinned

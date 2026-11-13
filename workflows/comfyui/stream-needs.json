@@ -1,0 +1,20 @@
+{
+  "streams": [
+    {
+      "workflows": [
+        "flux3-klein-t2i",
+        "krea2-turbo-t2i",
+        "minimax-h3-fast-flf2v",
+        "minimax-h3-fast-i2v",
+        "minimax-h3-fast-t2v",
+        "minimax-h3-flash-flf2v",
+        "minimax-h3-flash-i2v",
+        "minimax-h3-flash-t2v",
+        "minimax-h3-image-edit",
+        "minimax-h3-image-t2i"
+      ],
+      "vramGb": 10,
+      "ramGb": 32
+    }
+  ]
+}

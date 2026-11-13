@@ -7,8 +7,9 @@
  *
  * Built from the committed library alone, no ComfyUI and no network: manifest.json, the workflow graphs,
  * object_info.subset.json (which classes are core and which belong to a pack), packs.json (pins, kept by hand),
- * model-pins.json (revisions and sizes) and model-variants.json (other files of the same models, kept by hand). It runs
- * at the end of build-library.mjs and alone:
+ * model-pins.json (revisions and sizes), model-variants.json (other files of the same models, kept by hand) and
+ * stream-needs.json (the smaller card and the RAM a workflow runs on with its weights streamed from RAM, kept by hand). It
+ * runs at the end of build-library.mjs and alone:
  *
  *   node scripts/comfy/build-requirements.mjs                 # write requirements.json
  *   node scripts/comfy/build-requirements.mjs --refresh-pins  # maintainers: re-read model-pins.json from Hugging Face
@@ -98,10 +99,10 @@ export const cpuWork = (wf) => typeof wf.vramGb === 'number' && wf.vramGb === 0 
 
 /**
  * Build the index from the library's inputs. Pure: no file or network access.
- * @param {{ manifest: object, graphs: Record<string, object>, subset: Record<string, object | null>, packs: Record<string, object>, pins: Record<string, { revision: string, sizeBytes: number, sha256?: string }>, variants?: { variants: object[] }, packClasses?: Record<string, RegExp> }} inputs
+ * @param {{ manifest: object, graphs: Record<string, object>, subset: Record<string, object | null>, packs: Record<string, object>, pins: Record<string, { revision: string, sizeBytes: number, sha256?: string }>, variants?: { variants: object[] }, streams?: { streams: object[] }, packClasses?: Record<string, RegExp> }} inputs
  * @returns {import('../../src/lib/gpu/types').RequirementIndex}
  */
-export function buildIndex({ manifest, graphs, subset, packs, pins, variants = { variants: [] }, packClasses = PACK_CLASSES }) {
+export function buildIndex({ manifest, graphs, subset, packs, pins, variants = { variants: [] }, streams = { streams: [] }, packClasses = PACK_CLASSES }) {
   const problems = [];
   /** A class's owner: "core", or a pack name. */
   const ownerOf = (cls, wf) => {
@@ -233,6 +234,11 @@ export function buildIndex({ manifest, graphs, subset, packs, pins, variants = {
   const built = modelVariants({ variants, workflows, files, graphs, subset, pins });
   problems.push(...built.problems);
   for (const [id, list] of Object.entries(built.byWorkflow)) workflows[id] = { ...workflows[id], variants: list };
+
+  // Streaming needs: the smaller card and the RAM a workflow runs on with part of its weights in RAM (stream-needs.json).
+  const streamed = streamNeeds({ streams, workflows });
+  problems.push(...streamed.problems);
+  for (const [id, stream] of Object.entries(streamed.byWorkflow)) workflows[id] = { ...workflows[id], stream };
 
   // Packs: every pack a workflow uses, with its pins from packs.json.
   const usedPacks = uniq(Object.values(workflows).flatMap((w) => Object.keys(w.packs)));
@@ -380,6 +386,50 @@ export function modelVariants({ variants, workflows, files, graphs, subset, pins
   return { byWorkflow, problems };
 }
 
+/** The largest streaming need in GB, VRAM and RAM alike (a slip like 3200 for 32 is refused). */
+const STREAM_MAX_GB = 2048;
+
+/**
+ * Each workflow's streaming need from stream-needs.json: the graphics memory and the system RAM a GPU needs to run it with
+ * part of its model weights kept in RAM and streamed to the card at each step (ComfyUI's dynamic VRAM loading). It runs
+ * slower than with every weight on the card. `byWorkflow` (workflow id → { vramGb, ramGb }) and `problems` (the build
+ * stops on any). An entry is refused when a number isn't above 0, when its VRAM isn't below the workflow's own VRAM
+ * need, when it names a workflow the manifest doesn't have, and when a workflow is named twice.
+ *
+ * @param {{ streams: { streams?: object[] }, workflows: Record<string, { vramGb: number }> }} o
+ */
+export function streamNeeds({ streams, workflows }) {
+  const problems = [];
+  const byWorkflow = {};
+  const list = streams?.streams;
+  if (!Array.isArray(list)) return { byWorkflow, problems: ['stream-needs.json: "streams" must be a list'] };
+  const gb = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= STREAM_MAX_GB;
+  const known = new Set(['workflows', 'vramGb', 'ramGb']);
+  list.forEach((e, i) => {
+    const at = `stream-needs.json entry ${i + 1}`;
+    if (!e || typeof e !== 'object' || Array.isArray(e)) {
+      problems.push(`${at}: not an object`);
+      return;
+    }
+    for (const k of Object.keys(e)) if (!known.has(k)) problems.push(`${at}: unknown field ${k}`);
+    if (!gb(e.vramGb)) problems.push(`${at}: vramGb must be a number of GB above 0`);
+    if (!gb(e.ramGb)) problems.push(`${at}: ramGb must be a number of GB above 0`);
+    const ids = Array.isArray(e.workflows) ? e.workflows : [];
+    if (!ids.length) problems.push(`${at}: workflows must name at least one workflow`);
+    for (const id of ids) {
+      const wf = typeof id === 'string' ? workflows[id] : undefined;
+      if (!wf) {
+        problems.push(`${at}: ${id} isn't a workflow of the manifest`);
+        continue;
+      }
+      if (byWorkflow[id]) problems.push(`${at}: ${id} has a streaming need already`);
+      if (gb(e.vramGb) && !(e.vramGb < wf.vramGb)) problems.push(`${at}: ${id} needs ${wf.vramGb} GB of VRAM, so its streaming need must be below that (not ${e.vramGb} GB)`);
+      if (gb(e.vramGb) && gb(e.ramGb)) byWorkflow[id] = { vramGb: e.vramGb, ramGb: e.ramGb };
+    }
+  });
+  return { byWorkflow, problems };
+}
+
 /** The inputs as committed. */
 export function loadInputs(dir = LIBRARY) {
   const read = (f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -387,6 +437,7 @@ export function loadInputs(dir = LIBRARY) {
   const graphs = Object.fromEntries(manifest.workflows.map((w) => [w.id, read(w.file)]));
   const pinsFile = path.join(dir, 'model-pins.json');
   const variantsFile = path.join(dir, 'model-variants.json');
+  const streamsFile = path.join(dir, 'stream-needs.json');
   return {
     manifest,
     graphs,
@@ -394,6 +445,7 @@ export function loadInputs(dir = LIBRARY) {
     packs: read('packs.json'),
     pins: fs.existsSync(pinsFile) ? read('model-pins.json') : {},
     variants: fs.existsSync(variantsFile) ? read('model-variants.json') : { variants: [] },
+    streams: fs.existsSync(streamsFile) ? read('stream-needs.json') : { streams: [] },
     packClasses: PACK_CLASSES,
   };
 }
