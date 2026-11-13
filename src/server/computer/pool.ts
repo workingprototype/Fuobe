@@ -1447,14 +1447,15 @@ setPoolGiveBack((t, why) => {
   // anything ran on that claim, it waits as it did before that claim (a task no worker took keeps its wait limit). Once
   // a job of it was sent or ran, it keeps its claim's time: its wait limit is over for good. In one locked step with
   // going back in line, so a claim another app process makes meanwhile is never changed.
-  if (why === "update-worker" || why === "outside-ceiling") {
+  // Ran out of memory here, and its retry here froze too: the same, except that it ran (it counts as an attempt).
+  if (why === "update-worker" || why === "outside-ceiling" || why === "out-of-memory") {
     db()
       .transaction(() => {
         const w = t.worker_id ? (db().prepare("SELECT id, catalog_version, ceiling_json FROM relay_workers WHERE id = ?").get(t.worker_id) as Pick<WorkerRow, "id" | "catalog_version" | "ceiling_json"> | undefined) : undefined;
         const { claimedBefore, claimFor, ...rest } = json<Record<string, unknown>>(t.extra_json, {});
         const extra = { ...rest, refusedBy: [...new Set([...refusedBy(t), ...(w ? [refusalKey(w)] : [])])].slice(-64) };
         const untouched = typeof claimFor === "number" && claimFor === t.claimed_at && t.state === "sending" && !t.sent_at && !t.started_at;
-        const sentBack = why === "update-worker" ? "its graph is another on the worker's version (it waits for the worker's update)" : "more than its PC runs";
+        const sentBack = why === "update-worker" ? "its graph is another on the worker's version (it waits for the worker's update)" : why === "out-of-memory" ? GIVE_BACK_WORDS[why] : "more than its PC runs";
         if (!backInLine(t, untouched ? { blame: false, sentBack } : { blame: true, why: GAVE_BACK_WORDS, sentBack })) return;
         if (taskById(t.id)?.state !== "waiting") return;
         setTask(t.id, { extra_json: JSON.stringify(extra), ...(untouched && { claimed_at: typeof claimedBefore === "number" ? claimedBefore : null }) });
@@ -1529,6 +1530,7 @@ const GIVE_BACK_WORDS: Record<string, string> = {
   "run-limit": "it ran past its run limit",
   media: "the worker can't make its clips or sound again",
   "self-check": "the worker's check before the run didn't pass",
+  "out-of-memory": "it ran out of memory on that worker (another worker takes it)",
 };
 
 // ---------------------------------------------------------------------------

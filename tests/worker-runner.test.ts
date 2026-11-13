@@ -234,6 +234,20 @@ describe("a worker's runner", () => {
     expect(state(id2).state).toBe("failed");
   });
 
+  it("out of memory, then its retry doesn't move: given back as out of memory within minutes, never offered to this worker again", async () => {
+    const w = worker();
+    const id = task();
+    const s = studio(w);
+    fake.opts.failNext = "oom";
+    // The retry hangs; the PC's stall limit is an hour, so only the shorter limit for a retry after running out of memory ends it.
+    await runner(s, hooks({ stallLocalMs: 60 * 60_000, free: async () => void (fake.opts.failNext = "never") }), fastClock(600)).claimAndRun();
+    expect(s.reports.at(-1)).toEqual({ event: "give-back", why: "out-of-memory" });
+    expect(state(id)).toMatchObject({ state: "waiting", requeues: 1, worker_id: null });
+    expect(JSON.parse(String(state(id).extra_json)).refusedBy?.[0]).toMatch(new RegExp(`^${w.id}:`));
+    const q = (await (await realFetch(`${fake.url}/queue`)).json()) as { queue_running: unknown[]; queue_pending: unknown[] };
+    expect([...q.queue_running, ...q.queue_pending]).toEqual([]);
+  });
+
   it("a job that stalls goes back to the line within the stall limit, with its prompt taken off ComfyUI", async () => {
     const w = worker();
     const id = task();

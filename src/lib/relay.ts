@@ -45,7 +45,7 @@ export type TabFailure = (typeof TAB_FAILURES)[number];
  * nothing too: the worker's own check before the run failed ("self-check": its face detector read the fixed photo wrong,
  * bin/lib/worker/self-check.mjs), and the worker pauses itself.
  */
-export const GIVE_BACK = ["stalled", "run-limit", "media", "update-worker", "outside-ceiling", "self-check"] as const;
+export const GIVE_BACK = ["stalled", "run-limit", "media", "update-worker", "outside-ceiling", "self-check", "out-of-memory"] as const;
 export type GiveBackWhy = (typeof GIVE_BACK)[number];
 
 /**

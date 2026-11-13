@@ -302,6 +302,12 @@ export const MIN_RUN_LIMIT_MS = 10 * 60_000;
 /** The shortest stall limit a worker takes from a claim (a shorter one would give back jobs between two looks). */
 export const MIN_STALL_MS = 60_000;
 
+/**
+ * A worker's retry after its ComfyUI ran out of memory that doesn't move for this long (or runs past the run limit) is
+ * given back as out of memory: the job goes to another worker instead of waiting out the whole stall limit here.
+ */
+export const OOM_RETRY_STALL_MS = 5 * 60_000;
+
 const PROGRESS_EVERY_MS = 500;
 /** A finishing job tells the studio it still runs at least this often (and hears a stop in the answer). */
 const FINISH_BEAT_MS = 10_000;
@@ -1346,8 +1352,11 @@ export class ComputerRunner {
     for (;;) {
       if (!this.alive) throw new Stopped();
       if (worker) {
-        if (runLimit && runningSince !== null && this.now() - runningSince > runLimit) return { giveBack: "run-limit" };
-        if (this.now() - movedAt > stallMs) return { giveBack: "stalled" };
+        const over = !!runLimit && runningSince !== null && this.now() - runningSince > runLimit;
+        const still = this.now() - movedAt;
+        if (oomRetried && (over || still > Math.min(stallMs, OOM_RETRY_STALL_MS))) return { giveBack: "out-of-memory" };
+        if (over) return { giveBack: "run-limit" };
+        if (still > stallMs) return { giveBack: "stalled" };
       }
       if (following) {
         // A meta-batch: its passes run under new ids, all with its prefix.
