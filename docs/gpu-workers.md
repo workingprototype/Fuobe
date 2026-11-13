@@ -436,16 +436,19 @@ A worker gets a job only when all of these are true, all in one SQLite transacti
   30 seconds;
 - its worker program speaks protocol 2 or later (an older one takes nothing until it is updated);
 - the job is in its pool, in a lane that the owner allows for it, after the lane's delay and `claim_after_ms`;
-- it has the workflow's files and packs (from its inventory) and enough VRAM. The files are the workflow's own, or
+- it has the workflow's files and packs (from its inventory) and enough memory. The files are the workflow's own, or
   every file of one of its model variants (see "Model variants" below), and the VRAM is that of the files it would run.
   A workflow's need is its whole GB less 3%, because a card reports a little less than its size (a 32 GB card shows
-  about 31.8 GiB);
+  about 31.8 GiB). A workflow with a streaming need also runs on a smaller card with enough system RAM (see
+  "Streaming from RAM" below);
 - it verified every run-time file the job loads (see "Run-time files" below);
 - the retry rule allows it: a worker that lost or failed the job gets it again only when no other worker that can run
   the job was heard from in the last 10 minutes;
 - near the end of its hours, the job's estimate fits before the window closes;
 - it holds no other job. A worker runs one job at a time: while it holds one, a claim gives it that job again when
-  it lost track of it, and nothing new.
+  it lost track of it, and nothing new;
+- no free worker with a higher pick order would take the job next, for the first-pick grace (see "Who picks first"
+  below).
 
 Jobs go by class (`paid`, then `free`, then `owner`), then by the lowest `rank_at` (then the oldest). With the
 pick allowance at 0 (the default), that is the whole rule. Above 0, a worker may take one of the owner's own jobs in its
@@ -465,10 +468,13 @@ in that class came.
 | `ownerWaitLimitS` | How long the owner's own jobs may wait before a worker first takes them, in seconds. `null`: no limit | `null` |
 | `fairShare` | Each class goes round its accounts (above). Off: strict order | `false` |
 | `pickAllowanceMs` | How long a job in a worker's warm lane may go ahead of an older one (above). 0: strict order | `0` |
+| `firstPickGraceMs` | How long a job may be left for a free worker with a higher pick order before another worker takes it (see "Who picks first" below). 0: no job is left for anyone | `20000` (20 seconds) |
 | `pausedBudgetS` | How long, in all, a run that has started may spend back in line while its worker steps aside, and still be inside the deadline its hold asks for ([billing-hook.md](billing-hook.md)). A run past it still delivers its result | `7200` (2 hours) |
 
 A worker's run limit for one attempt is 3 times the lane's 90th percentile on that worker plus its model load, at
-least 10 minutes and never past the lane's run ceiling. With no measured run in the lane yet, it is the ceiling.
+least 10 minutes and never past the lane's run ceiling. With no measured run in the lane yet, it is the ceiling. Each
+worker's limits come from its own measured runs, so a slower worker gets longer limits than a faster one in the same
+lane.
 
 If a worker stops answering for 2 minutes, its ComfyUI is down for 2 minutes, or the job is still sending its files
 15 minutes after the worker claimed it (or after its ComfyUI lost the job and the worker sent it again), its job goes
@@ -518,6 +524,33 @@ in words: "Took a … run", "Sent back in line: went silent", "Delivered after 4
 `blocked`), `admin` (an action from the admin API, with who in `detail.by`), `version` (its program was updated) and
 `log` (its own log lines, from its beat). Log lines are kept 7 days, the rest 30 days. The owner reads it at
 `GET /api/admin/workers/events` ([admin-api.md](admin-api.md)).
+
+### Who picks first
+
+Each worker has a pick order, a whole number (0 by default; the owner sets it in Settings →
+Workers, "Picks first", or with `pickOrder` on `PATCH /api/admin/workers/<id>`). A worker with a higher pick order
+gets the first pick of every job it can run while it is free. When a worker claims, the studio looks at each worker
+with a higher pick order that is free now:
+
+- heard from in the last 30 seconds, paused neither on the website nor on its PC, not draining, inside its hours;
+- holding no job in its GPU's slot, and held back by nothing its beat says (`holding`: starting its ComfyUI, local work
+  first, an update…).
+
+For each, the studio works out the job that worker's own claim would take next, by the same rules as any claim (its
+pool, its allowed lanes after their delays, its files, packs and memory, the retry rule, its hours and its mode). The
+claiming worker leaves that job to it, and takes its own next best job, or nothing. It leaves the job only while the
+job has been there for that worker for less than the first-pick grace (`firstPickGraceMs`, 20 seconds by default):
+from when the job came, plus that worker's claim delay and its lane's delay. After the grace, any worker takes it, so
+no job waits longer than the grace for a worker that picks first. A job back in line after an attempt is past its grace
+already. When the preferred worker is off, paused, busy, outside its hours or can't run the job, the other workers
+take the job at once, with no added wait. (A lane's delay is different: it always waits, whether or not another worker
+is there.)
+
+A person's run left this way doesn't count for the other worker's `claimableNow`, so local work on its PC makes no
+room for it. Workers with a higher pick order are looked at from the highest down; one never leaves a job for a worker
+with a lower or equal pick order. The claim's words say when it left a job: "Asked for work: 1 waiting, 1 left for a
+worker that picks first". With every pick order 0, or a grace of 0, the line is as it was. It all happens inside the
+claim's one SQLite transaction; with no worker above the claiming one, it costs one query.
 
 ### Who goes first
 
@@ -659,6 +692,29 @@ says how to add one). The best file format depends on the card. A card with fast
 A person's own GPU counts a workflow as ready when its own files are there, or every file of one variant. A run there
 then loads the variant's files when the GPU check found them and not the workflow's own, so nobody downloads a file of
 the same model in another format.
+
+### Streaming from RAM
+
+A workflow's VRAM need is for every model weight on the card. ComfyUI can keep part of the weights in system RAM and
+stream them to the card at each step (dynamic VRAM loading): slower, but a smaller card runs it. A workflow may have a
+streaming need, `{ vramGb, ramGb }` (`workflows/comfyui/stream-needs.json`, built into `requirements.json`;
+[adding-a-model.md](adding-a-model.md#streaming-from-ram) says how to add one).
+
+- **Which workers qualify.** A worker has the memory for a workflow when its VRAM covers the workflow's VRAM need (as
+  always), or when the workflow has a streaming need and the worker's VRAM covers the need's `vramGb` and its RAM covers
+  the need's `ramGb`. Both have the same 3% allowance as the VRAM need: a PC with 32 GB of RAM reports about 31.9 GiB.
+  The RAM is the one its ComfyUI reports (`ramBytes` in its facts, once its ComfyUI has started). A worker whose RAM
+  isn't known yet, or whose ComfyUI runs with dynamic VRAM off (`--disable-dynamic-vram`, `--highvram`, `--gpu-only`,
+  `--novram` or `--cpu`; `dynamicVramOff` in its facts), qualifies on VRAM only.
+- **The same rule everywhere.** The claim, the check that some worker could ever run a run before it is queued, and the
+  choice of a model variant's files all read it (`memoryFit` and `streamFits` in `src/lib/lanes.ts`). A variant's own
+  VRAM need counts as the VRAM need; the workflow's streaming need applies to whichever file set the worker runs.
+- **Times.** A worker that streams runs slower. Its run limits come from its own measured runs in the lane (above), so
+  they stay right for it.
+
+A person's own GPU (Fuobe Connect) reads the same rule from its check: a card short of the VRAM need, whose VRAM and RAM
+cover the streaming need with dynamic VRAM on, is ready, and its line says "Ready · uses system RAM, slower". A check
+that didn't read the RAM counts the VRAM need only.
 
 ### What the worker checks itself
 
@@ -1124,7 +1180,7 @@ Each worker counts against its own rate limits, so three workers that beat every
   `receivedAt` (null: none).
 - `GET /api/admin/workers/events`: the workers' timeline (above), newest first, by worker, kinds and run, in pages.
 - `PATCH /api/admin/workers/<id>`: `{ paused, pauseNow, drain, autoResume, hours, allow, claimAfterMs, switchAfterMs,
-  rotate, revoke }`. Hours are `{ "always": true }` or `{ "tz": "Asia/Kolkata", "days": { "mon": [["01:00", "09:00"]] } }`.
+  pickOrder, rotate, revoke }`. `pickOrder` is a whole number from -100 to 100 ("Who picks first" above). Hours are `{ "always": true }` or `{ "tz": "Asia/Kolkata", "days": { "mon": [["01:00", "09:00"]] } }`.
   A window can go past midnight.
 - `GET /api/admin/queue`: the jobs that wait in each lane, the oldest job, the estimate, and which workers have the
   lane warm; and what the workers do now: `running` (each job a worker runs: its run, model, worker, step, progress,
@@ -1150,8 +1206,12 @@ routes.
   `tests/worker-runner.test.ts`, `tests/worker-recovery.test.ts`, `tests/worker-parts.test.ts`,
   `tests/worker-turns.test.ts`, `tests/worker-turns-run.test.ts`, `tests/worker-update.test.ts`, `tests/cpu-slot.test.ts`,
   `tests/worker-cpu-slot.test.ts`, `tests/fuobe-connect-nodes.test.ts`, `tests/model-variants.test.ts`,
-  `tests/pool-model-variants.test.ts`). The model variant tests check the build's refusals, which files a worker gets
-  by its card and its files, the swapped graph and ticket, and an older worker program. The CPU slot tests run a CPU task while a GPU job runs, refuse a GLB that names
+  `tests/pool-model-variants.test.ts`, `tests/stream-needs.test.ts`, `tests/pool-first-pick.test.ts`). The model variant
+  tests check the build's refusals, which files a worker gets by its card and its files, the swapped graph and ticket,
+  and an older worker program. The streaming tests check the build's refusals, the memory rule (VRAM only, VRAM and
+  RAM, unknown RAM, dynamic VRAM off, the 3% allowance) on the claim and on a person's own GPU. The first-pick tests
+  check that a job is left for a free worker that picks first, and taken at once when that worker is busy, paused,
+  silent, outside its hours or can't run it, or after the grace. The CPU slot tests run a CPU task while a GPU job runs, refuse a GLB that names
   an outside file on the worker, bring a turntable back with its GLB, check that an account's picture reaches its
   ComfyUI with no EXIF, and drop a preview over 64 KB. The turn tests use a fake port table, fake GPU
   counters and a fake lock file. With only local ComfyUI work on the GPU, the worker writes `siteWaiting` and claims

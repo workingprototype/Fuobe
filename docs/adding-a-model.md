@@ -178,6 +178,37 @@ one is in [Workers: Model variants](gpu-workers.md#model-variants).
 A variant never adds a node, an input or a file outside the catalog's pins: the worker still loads only files it
 verified, and runs all its checks on the graph with the variant's files.
 
+### Streaming from RAM
+
+A workflow's `vramGb` is what it needs with every model weight on the card. ComfyUI can also keep part of the weights
+in system RAM and stream them to the card at each step (dynamic VRAM loading). The run is slower, but a smaller card
+with enough RAM can run the workflow. How workers and a person's own GPU use it is in
+[Workers: Streaming from RAM](gpu-workers.md#streaming-from-ram).
+
+1. Measure it first: run the workflow on a card smaller than its `vramGb`, with ComfyUI's dynamic VRAM on, and note the
+   VRAM and the RAM the run needed.
+2. Add the workflow to `workflows/comfyui/stream-needs.json`, the one list of streaming needs. Workflows with the same
+   need share an entry:
+
+   ```json
+   {
+     "streams": [
+       { "workflows": ["minimax-h3-image-t2i", "krea2-turbo-t2i"], "vramGb": 10, "ramGb": 32 }
+     ]
+   }
+   ```
+
+   - `vramGb`: the card's memory it needs then, in GB. It must be below the workflow's own `vramGb`.
+   - `ramGb`: the system RAM it needs then, in GB.
+   - A workflow is in one entry at most. The need applies to whichever file set a GPU runs (its own files or a
+     variant's).
+3. Run `node scripts/comfy/build-requirements.mjs`. It writes each need into `requirements.json` (`stream`) and stops
+   when a number isn't above 0, when `vramGb` isn't below the workflow's own, when a workflow isn't in the manifest or
+   is named twice, or when an entry has a field it doesn't know.
+
+Like every file of the catalog, a change to `stream-needs.json` (and so to `requirements.json`) changes the catalog
+version, so the workers update to it.
+
 ## 7. The rest of the studio
 
 - Give each new studio or tool a row on the `/connect` board (`STUDIO_ROWS` in `src/server/gpu/tools.ts`).
