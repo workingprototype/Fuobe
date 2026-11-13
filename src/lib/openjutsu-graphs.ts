@@ -461,9 +461,14 @@ export interface PictureVideoSettings {
 /** The two renderers' fixed steps: Solar's four-step LoRA, H3's DMAD at six. */
 export const PICTURE_STEPS = { solar: 4, h3: 6 } as const;
 
+/** The canvas a picture brought to life on a clip makes: the clip's shape at the quality's short edge, at most 2048 px. */
+export function pictureCanvas(width: number, height: number, quality: string): [number, number] {
+  return clampCanvas(canvasSize(width, height, quality === "720p" ? "736p" : "480p"));
+}
+
 export function pictureVideo(source: ComfyWorkflow, s: PictureVideoSettings): ComfyWorkflow {
   const graph = clone(source);
-  const [width, height] = clampCanvas(canvasSize(s.width, s.height, s.quality === "720p" ? "736p" : "480p"));
+  const [width, height] = pictureCanvas(s.width, s.height, s.quality);
   const length = pictureFrames(s.seconds);
   if (s.renderer === "solar" && length < 22) throw new Error("Pick a part of at least one second.");
   graph["1"].inputs.frame_load_cap = length;

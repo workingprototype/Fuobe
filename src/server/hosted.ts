@@ -3,6 +3,7 @@ import { getModel } from "@/lib/catalog";
 import { computeDimensions, fitCanvas } from "@/lib/comfy";
 import { requestWorkflowId } from "@/lib/comfy-variants";
 import { h3Canvas, isH3Graph } from "@/lib/h3-prompt";
+import { pictureCanvas } from "@/lib/openjutsu-graphs";
 import { imageSize } from "@/lib/image-size";
 import type { GenerationRequest } from "@/lib/catalog/types";
 import type { Place } from "@/lib/place-name";
@@ -587,6 +588,21 @@ export function requestMegapixels(req: GenerationRequest, kind: RunFacts["kind"]
 }
 
 /**
+ * A Genjutsu run's own size, which its request keeps in params.extra.openjutsu: the part's length in seconds, and for a
+ * picture brought to life on a clip (op motion-transfer), the megapixels of the canvas it makes from the clip's size
+ * (params.sourceSize) at its quality. Null where the request names neither (not a Genjutsu run).
+ */
+export function genjutsuSize(req: GenerationRequest): { seconds: number | null; megapixels: number | null } | null {
+  const raw = (req.params?.extra as Record<string, unknown> | undefined)?.openjutsu;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const src = (req.params as { sourceSize?: { width?: unknown; height?: unknown } } | undefined)?.sourceSize;
+  const [w, h] = [positive(src?.width), positive(src?.height)];
+  const canvas = req.op === "motion-transfer" && w && h && typeof o.quality === "string" ? pictureCanvas(w, h, o.quality) : null;
+  return { seconds: positive(o.seconds), megapixels: canvas ? megapixelsOf({ width: canvas[0], height: canvas[1] }) : null };
+}
+
+/**
  * A run's own step, then the other steps it makes beside it (a 2K take's finish), each model and operation once with its
  * count: the shape of RunFacts.steps.
  */
@@ -625,6 +641,8 @@ export function runFacts(
   // The graph an open-engine run resolves to, its options' variant picked as the pre-flight and the provider pick it.
   const graphs = p.model.engine === "open" && p.providerId === "comfyui" && endpoint ? loadIndex().workflows : null;
   const workflow = graphs && endpoint ? requestWorkflowId(endpoint, req, { op: p.op, gpu: p.gpu ?? undefined, h3: p.h3 ?? undefined, has: (id) => !!graphs[id] }).id : null;
+  // A Genjutsu run states its own length and canvas (genjutsuSize); every other run, as its request and workflow say.
+  const genjutsu = genjutsuSize(req);
   return {
     place: "pool",
     model: p.model.id,
@@ -637,8 +655,8 @@ export function runFacts(
     provider: p.providerId,
     jobs: p.jobs,
     outputsPerJob: p.jobs > 0 ? Math.max(1, Math.round(p.outputs / p.jobs)) : 1,
-    megapixels: requestMegapixels(req, kind, p.model.id, p.providerId === "comfyui" ? endpoint : undefined),
-    seconds: req.params?.duration ?? (kind === "video" ? (model?.defaults?.duration ?? null) : null),
+    megapixels: genjutsu?.megapixels ?? requestMegapixels(req, kind, p.model.id, p.providerId === "comfyui" ? endpoint : undefined),
+    seconds: genjutsu?.seconds ?? req.params?.duration ?? (kind === "video" ? (model?.defaults?.duration ?? null) : null),
     fps: req.params?.fps ?? null,
     loras: p.loras.applied.length,
     inputs: inputCounts(req),
