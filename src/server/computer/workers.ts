@@ -61,6 +61,8 @@ export interface WorkerRow {
   switch_after_ms: number;
   /** Its pick order: a free worker with a higher one gets first pick of a job both can run (pool.ts firstPickOf). 0: none. */
   pick_order?: number;
+  /** The workflows it no longer takes by streaming from RAM, as JSON: workflow id → when (pool.ts noStreamOf). */
+  no_stream_json?: string | null;
   state: string;
   seen_at: number | null;
   /** A pool worker's next token (its SHA-256), offered in a beat answer and not used yet; its expiry; when it was made. */

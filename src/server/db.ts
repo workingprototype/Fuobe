@@ -1151,6 +1151,9 @@ const RELAY_COLUMNS: [string, string, string][] = [
   ["relay_workers", "stats_json", "TEXT"],
   // A worker's pick order (pool.ts firstPickOf): higher picks first among workers that are free and can run a job.
   ["relay_workers", "pick_order", "INTEGER NOT NULL DEFAULT 0"],
+  // The workflows a worker no longer takes by streaming its weights from RAM (a job of one ran out of memory that way):
+  // workflow id → when, as JSON (pool.ts noStreamOf). The owner clears it in Settings → Workers.
+  ["relay_workers", "no_stream_json", "TEXT"],
 ];
 
 declare global {

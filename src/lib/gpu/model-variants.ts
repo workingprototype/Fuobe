@@ -67,8 +67,11 @@ export interface ChoiceDevice {
   gpuGen?: string | null;
   /** Has it this file (a worker: verified against its pin; a person's ComfyUI: there, as its check read it)? */
   has: (key: FileKey) => boolean;
-  /** Its graphics memory: a choice that needs more is left out. Undefined: not checked here. */
-  fits?: (vramGb: number) => boolean;
+  /**
+   * Its memory: a choice that needs more is left out. Given the choice's VRAM need and the files it loads (whose total
+   * size the computed streaming rule reads: src/lib/lanes.ts streamFits). Undefined: not checked here.
+   */
+  fits?: (vramGb: number, files: readonly FileKey[]) => boolean;
   /** False: the workflow's own files only (a GPU that can't take a variant). */
   variants: boolean;
 }
@@ -80,7 +83,7 @@ export interface ChoiceDevice {
  * workflow's own files count.
  */
 export function pickFiles(choices: readonly FileChoice[], device: ChoiceDevice): FileChoice | null {
-  const whole = (c: FileChoice) => c.files.every((k) => device.has(k)) && (!device.fits || device.fits(c.vramGb));
+  const whole = (c: FileChoice) => c.files.every((k) => device.has(k)) && (!device.fits || device.fits(c.vramGb, c.files));
   const own = choices.find((c) => c.variant === null);
   const others = device.variants ? choices.filter((c) => c.variant !== null) : [];
   const forCard = others.filter((c) => genInside(device.gpuGen, c.gpuGen));

@@ -2,8 +2,8 @@ import { compareVersions, formatBytes, nameKey, splitKey, vramGb } from "./requi
 import { knownProblemNeed, knownProblems } from "./known-problems";
 import { fileChoices, pickFiles, type FileChoice } from "./model-variants";
 import { cardFits, GPU_NEED_TEXT, readCard, type GpuNeed } from "./rtx";
-import { streamFits } from "../lanes";
-import type { Badge, FileKey, GpuInventory, IndexFile, InventorySummary, Need, Readiness, RequirementIndex, StreamNeed, ToolReadiness, ToolRef, VramFit } from "./types";
+import { filesBytes, streamFits, type StreamLoad, type StreamRule } from "../lanes";
+import type { Badge, FileKey, GpuInventory, IndexFile, InventorySummary, Need, Readiness, RequirementIndex, ToolReadiness, ToolRef, VramFit } from "./types";
 
 /**
  * What can run on a viewer's ComfyUI (SPEC §7, review items 9 and 15). Pure: the same code runs on the
@@ -169,11 +169,12 @@ export function gpuVramGb(inv: GpuInventory): number | undefined {
 }
 
 /**
- * How the card holds a workflow of `needGb`. Short of VRAM, a workflow with a streaming need (`stream`,
- * stream-needs.json) still runs when the card and the system RAM cover that need (src/lib/lanes.ts streamFits, the
- * workers' rule): part of its weights stay in RAM, so it is "tight" (slower) with `stream`, never "no".
+ * How the card holds a workflow of `needGb`. Short of VRAM, a workflow still runs with part of its weights streamed from
+ * the system RAM when the card and the RAM allow it (src/lib/lanes.ts streamFits, the workers' rule): its streaming need
+ * (`stream`, stream-needs.json) when it has one, else the computed rule from the size of the files it loads (`load`);
+ * never a workflow whose `stream` is false. It is "tight" (slower) with `stream` then, never "no".
  */
-export function vramFit(needGb: number, inv: GpuInventory, stream?: StreamNeed): ToolReadiness["vram"] {
+export function vramFit(needGb: number, inv: GpuInventory, stream?: StreamRule, load?: StreamLoad): ToolReadiness["vram"] {
   const d = inv.devices[0];
   const cpu = onCpu(inv);
   const haveGb = gpuVramGb(inv) ?? 0;
@@ -183,7 +184,7 @@ export function vramFit(needGb: number, inv: GpuInventory, stream?: StreamNeed):
   else if (haveGb >= needGb) fit = "fits";
   else if (haveGb >= 0.66 * needGb) fit = "tight";
   else fit = "no";
-  const streams = (fit === "tight" || fit === "no") && !cpu && streamFits(stream, { vramBytes: d?.vramTotal, ramBytes: inv.ram?.total, dynamicVramOff: inv.comfy?.flags.dynamicVramOff });
+  const streams = (fit === "tight" || fit === "no") && !cpu && streamFits(stream, { vramBytes: d?.vramTotal, ramBytes: inv.ram?.total, dynamicVramOff: inv.comfy?.flags.dynamicVramOff }, load, needGb);
   if (streams) fit = "tight";
   return { needGb, haveGb, fit, ...(apple && { apple: true }), ...(streams && { stream: true }) };
 }
@@ -224,7 +225,7 @@ export function workflowReadiness(id: string, inv: GpuInventory, idx: Requiremen
   if (!w || !inv.reachable) return base;
   // Its own files, or a model variant's that are all there.
   const files = filesHere(id, inv, idx) ?? { files: w.files, vramGb: w.vramGb };
-  const out: WorkflowReadiness = { ...base, state: "ready", firstRun: w.firstRun, unvalidated: !w.validated, vram: vramFit(files.vramGb, inv, w.stream) };
+  const out: WorkflowReadiness = { ...base, state: "ready", firstRun: w.firstRun, unvalidated: !w.validated, vram: vramFit(files.vramGb, inv, w.stream, { fileBytes: filesBytes(idx, files.files) }) };
   if (w.isolated && ctx.computer) return { ...out, state: "unsupported", reason: "This one needs its own ComfyUI, so it can't run next to your other add-ons." };
   if (w.isolated && ctx.account) return { ...out, state: "unsupported", reason: "This one needs its own ComfyUI, so it can't run next to your other add-ons." };
   // The NVIDIA RTX Video nodes: only on an NVIDIA RTX card (frame generation: RTX 40 or later). A card the check can't

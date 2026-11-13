@@ -7,7 +7,7 @@ import { emptyInventory } from "@/lib/gpu/gather";
 import { stateLine, toolReadiness, vramFit, workflowReadiness } from "@/lib/gpu/readiness";
 import { parseIndex } from "@/lib/gpu/requirements";
 import type { GpuInventory, RequirementIndex } from "@/lib/gpu/types";
-import { memoryFit, minVramBytesFor, streamFits } from "@/lib/lanes";
+import { filesBytes, memoryFit, minVramBytesFor, STREAM_MIN_VRAM_GB, STREAM_RESERVE_BYTES, streamFits } from "@/lib/lanes";
 import { statsFacts } from "@/lib/local-comfy";
 import { tempDir } from "./helpers/temp-dir";
 
@@ -15,7 +15,9 @@ import { tempDir } from "./helpers/temp-dir";
  * Streaming needs (workflows/comfyui/stream-needs.json): a workflow a card can't hold whole still runs on it with part of
  * its weights kept in system RAM and streamed to the card each step (ComfyUI's dynamic VRAM loading). The build checks
  * the file; a worker qualifies on memory with the workflow's VRAM, or with the streaming need's VRAM and RAM (3%
- * allowance on both, never with unknown RAM or dynamic VRAM off); a person's own GPU reads the same rule.
+ * allowance on both, never with unknown RAM or dynamic VRAM off); a person's own GPU reads the same rule. A workflow with
+ * no streaming need of its own streams by the computed rule (the size of the files it loads against VRAM and RAM, less
+ * a reserve), unless it never streams (stream-needs.json noStream, isolated workflows).
  */
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -32,6 +34,10 @@ const idx: RequirementIndex = parseIndex(JSON.parse(fs.readFileSync(path.join(LI
 const GB = 2 ** 30;
 
 const H3 = "minimax-h3-image-t2i";
+/** No streaming need of its own: 39.5 GiB of model files, VRAM need 32 GB. */
+const FLEX = "minimax-h3-flex-i2v";
+/** Never streams: its node pack (ComfyUI-WanVideoWrapper) loads its models itself. */
+const WRAPPED = "lipsync-v2v-infinitetalk";
 const KREA = "krea2-turbo-t2i";
 const STREAMED = [
   "minimax-h3-image-t2i",
@@ -50,7 +56,7 @@ const STREAMED = [
 ];
 
 /** The committed inputs with stream-needs.json replaced. */
-const build = (streams: object[]) => buildIndex({ ...loadInputs(LIBRARY), streams: { streams } });
+const build = (streams: object[], noStream?: unknown) => buildIndex({ ...loadInputs(LIBRARY), streams: { streams, ...(noStream !== undefined && { noStream }) } as { streams: object[] } });
 const entry = (o: Record<string, unknown> = {}) => ({ workflows: [H3], vramGb: 10, ramGb: 32, ...o });
 
 describe("the catalog's streaming needs (build-requirements.mjs)", () => {
@@ -72,6 +78,30 @@ describe("the catalog's streaming needs (build-requirements.mjs)", () => {
     expect(() => buildIndex({ ...loadInputs(LIBRARY), streams: {} as { streams: object[] } })).toThrow(/"streams" must be a list/);
     // A good one builds.
     expect(build([entry({ vramGb: 12, ramGb: 48 })]).workflows[H3].stream).toEqual({ vramGb: 12, ramGb: 48 });
+  });
+
+  it("marks the workflows that never stream: noStream's packs and workflows, and isolated workflows", () => {
+    for (const id of ["infinitetalk-wanwrapper", WRAPPED, "sfx-hunyuan-foley", "sfx-mmaudio-t2a", "video-upscale-kandinsky6-vsr"]) expect(idx.workflows[id].stream, id).toBe(false);
+    const isolated = Object.keys(idx.workflows).filter((x) => idx.workflows[x].isolated);
+    expect(isolated.length).toBeGreaterThan(0);
+    for (const id of isolated) expect(idx.workflows[id].stream, id).toBe(false);
+    // The others have their streaming need, or no field (the computed rule).
+    expect("stream" in idx.workflows[FLEX]).toBe(false);
+    expect(build([], { packs: [], workflows: [FLEX] }).workflows[FLEX].stream).toBe(false);
+    expect("stream" in build([], { packs: [], workflows: [] }).workflows[WRAPPED]).toBe(false);
+  });
+
+  it("refuses names the catalog doesn't have, unknown fields, and a workflow that has a streaming need and never streams", () => {
+    expect(() => build([], { packs: ["No-Such-Pack"] })).toThrow("No-Such-Pack isn't a node pack of packs.json");
+    expect(() => build([], { workflows: ["no-such-workflow"] })).toThrow("no-such-workflow isn't a workflow of the manifest");
+    expect(() => build([], { packs: "ComfyUI-WanVideoWrapper" })).toThrow(/packs must be a list of node pack names/);
+    expect(() => build([], { workflows: [1] })).toThrow(/workflows must be a list of workflow ids/);
+    expect(() => build([], { note: "x" })).toThrow(/noStream: unknown field note/);
+    expect(() => build([], [])).toThrow(/"noStream" must be an object/);
+    expect(() => buildIndex({ ...loadInputs(LIBRARY), streams: { streams: [], other: 1 } as { streams: object[] } })).toThrow(/stream-needs.json: unknown field other/);
+    expect(() => build([entry({ workflows: [WRAPPED] })], { packs: ["ComfyUI-WanVideoWrapper"] })).toThrow(`${WRAPPED} has a streaming need, but it never streams (it uses ComfyUI-WanVideoWrapper)`);
+    expect(() => build([entry({ workflows: [FLEX] })], { workflows: [FLEX] })).toThrow(`${FLEX} has a streaming need, but it never streams (noStream names it)`);
+    expect(() => build([entry({ workflows: ["lipsync-latentsync16"] })])).toThrow("lipsync-latentsync16 has a streaming need, but it never streams (it runs isolated)");
   });
 });
 
@@ -102,11 +132,65 @@ describe("the memory rule (memoryFit, streamFits)", () => {
     expect(streamFits(stream, { vramBytes: 12 * GB, ramBytes: minVramBytesFor(32) - 1 })).toBe(false);
   });
 
+  it("a streaming need of its own decides, whatever the computed rule would say", () => {
+    const have = { vramBytes: 8 * GB, ramBytes: 64 * GB };
+    expect(memoryFit(32, undefined, have, { fileBytes: 30 * GB })).toBe("stream");
+    expect(memoryFit(32, stream, have, { fileBytes: 30 * GB })).toBeNull();
+  });
+
   it("a ComfyUI's facts say when its dynamic VRAM is off", () => {
     const stats = (argv: string[]) => statsFacts({ system: { argv, ram_total: 32 * GB }, devices: [] }, "https://studio.test");
     expect(stats(["main.py"]).dynamicVramOff).toBeUndefined();
     expect(stats(["main.py", "--disable-dynamic-vram"]).dynamicVramOff).toBe(true);
     expect(stats(["main.py", "--highvram"]).dynamicVramOff).toBe(true);
+  });
+});
+
+describe("the computed rule (a workflow with no streaming need of its own)", () => {
+  /** A 10 GB card and a PC with 32 GB of RAM, as they report themselves. */
+  const small = { vramBytes: 9.99 * GB, ramBytes: 31.9 * GB };
+  const fit = (needGb: number, fileGb: number, have: Parameters<typeof memoryFit>[2], extraGb = 0) => memoryFit(needGb, undefined, have, { fileBytes: fileGb * GB, extraBytes: extraGb * GB });
+
+  it("keeps a 2 GiB reserve and an 8 GB smallest card", () => {
+    expect(STREAM_RESERVE_BYTES).toBe(2 * GB);
+    expect(STREAM_MIN_VRAM_GB).toBe(8);
+  });
+
+  it("the files fit in VRAM and RAM with the reserve to spare: the measured workflows run on a 10 GB card with 32 GB of RAM", () => {
+    expect(fit(32, 39.5, small)).toBe("stream");
+    expect(fit(32, 39.5, { ...small, ramBytes: 31.8 * GB })).toBe("stream");
+    for (const id of ["minimax-h3-fast-t2v", "minimax-h3-i2v", "minimax-h3-flex-ref2va", "qwen-image-21-relight", FLEX]) {
+      const wf = idx.workflows[id];
+      expect(streamFits(undefined, small, { fileBytes: filesBytes(idx, wf.files) }, wf.vramGb), id).toBe(true);
+    }
+    // More than the room: no.
+    expect(fit(32, 40, small)).toBeNull();
+    expect(fit(32, 39.5, { ...small, ramBytes: 16 * GB })).toBeNull();
+    // The run-time files (a look's LoRAs) count too.
+    expect(fit(32, 39.5, small, 1)).toBeNull();
+  });
+
+  it("never on a card under 8 GB (3% allowed), with no files, or for a workflow that never streams", () => {
+    expect(fit(24, 20, { vramBytes: minVramBytesFor(8), ramBytes: 64 * GB })).toBe("stream");
+    expect(fit(24, 20, { vramBytes: minVramBytesFor(8) - 1, ramBytes: 64 * GB })).toBeNull();
+    expect(fit(24, 20, { vramBytes: 6 * GB, ramBytes: 128 * GB })).toBeNull();
+    expect(fit(24, 0, { vramBytes: 10 * GB, ramBytes: 64 * GB })).toBeNull();
+    expect(memoryFit(32, false, small, { fileBytes: 20 * GB })).toBeNull();
+  });
+
+  it("the part of the VRAM need that isn't model files stays on the card", () => {
+    // 24 GB for 4 GiB of files: about 19 GiB of activations and other weights, more than a 10 GB card holds.
+    expect(fit(24, 4, { vramBytes: 10 * GB, ramBytes: 64 * GB })).toBeNull();
+    expect(fit(24, 4, { vramBytes: 20 * GB, ramBytes: 64 * GB })).toBe("stream");
+    // 16 GB for 3.7 GiB: about 11.8 GiB stays on the card.
+    expect(fit(16, 3.7, { vramBytes: 11.5 * GB, ramBytes: 64 * GB })).toBeNull();
+    expect(fit(16, 3.7, { vramBytes: 12 * GB, ramBytes: 64 * GB })).toBe("stream");
+  });
+
+  it("never with unknown RAM, unknown VRAM, or dynamic VRAM off", () => {
+    expect(fit(32, 20, { vramBytes: 10 * GB })).toBeNull();
+    expect(streamFits(undefined, { ramBytes: 64 * GB }, { fileBytes: 20 * GB }, 32)).toBe(false);
+    expect(fit(32, 20, { ...small, dynamicVramOff: true })).toBeNull();
   });
 });
 
@@ -152,8 +236,18 @@ describe("a person's own GPU (readiness)", () => {
     expect(stateLine(toolReadiness(`workflow:${H3}`, "H3 Image", [H3], [], comfy(24, 16), idx, { account: true }))).toBe("Ready · slow on your GPU");
   });
 
+  it("a workflow with no streaming need of its own: the size of its files decides; one that never streams needs the bigger card", () => {
+    const r = workflowReadiness(FLEX, comfy(10, 31.9), idx, { account: true });
+    expect(r.state).toBe("ready");
+    expect(r.vram).toMatchObject({ needGb: 32, fit: "tight", stream: true });
+    expect(stateLine(toolReadiness(`workflow:${FLEX}`, "H3 Flex", [FLEX], [], comfy(10, 32), idx, { account: true }))).toBe("Ready · uses system RAM, slower");
+    expect(workflowReadiness(FLEX, comfy(10, 16), idx, { account: true }).state).toBe("gpu");
+    expect(workflowReadiness(WRAPPED, comfy(10, 128), idx, { account: true }).vram).toEqual({ needGb: 24, haveGb: 10, fit: "no" });
+  });
+
   it("a tool whose other part can't stream needs the bigger card", () => {
-    const noStream = Object.keys(idx.workflows).find((id) => !idx.workflows[id].stream && idx.workflows[id].vramGb >= 24 && !idx.workflows[id].isolated && !idx.workflows[id].gpu)!;
+    const noStream = WRAPPED;
+    expect(idx.workflows[noStream].stream).toBe(false);
     const t = toolReadiness(`workflow:${H3}`, "Two", [H3, noStream], [], comfy(10, 64), idx, { account: true });
     expect(t.state).toBe("gpu");
     expect(t.vram.stream).toBeUndefined();
@@ -233,6 +327,16 @@ describe("which workers qualify on memory (the claim)", () => {
     expect(claim(worker("small-card", H3, { vramBytes: 8 * GB, ramBytes: 64 * GB }))).toBeNull();
     expect(claim(worker("dyn-off", H3, { vramBytes: 10 * GB, ramBytes: 64 * GB, dynamicVramOff: true }))).toBeNull();
     expect(pool.workersCanRun(H3)).toBe(false);
+  });
+
+  it("no streaming need of its own: a 10 GB card with 32 GB of RAM takes a workflow of 39.5 GiB of files, and the claim notes it streams", () => {
+    const id = job(FLEX);
+    expect(claim(worker("flex-low-ram", FLEX, { vramBytes: 10 * GB, ramBytes: 16 * GB }))).toBeNull();
+    expect(claim(worker("flex", FLEX, { vramBytes: 10 * GB, ramBytes: 31.9 * GB }))?.id).toBe(id);
+    expect(JSON.parse(tasks.taskById(id)!.extra_json ?? "{}").streamed).toBe(true);
+    const whole = job(FLEX);
+    expect(claim(worker("flex-big", FLEX, { vramBytes: 32 * GB, ramBytes: 16 * GB }))?.id).toBe(whole);
+    expect(JSON.parse(tasks.taskById(whole)!.extra_json ?? "{}").streamed).toBeUndefined();
   });
 
   it("a workflow with model variants: the streaming need counts for the files the worker runs", () => {

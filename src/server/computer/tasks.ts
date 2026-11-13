@@ -1099,6 +1099,9 @@ function reportOnce(t: TaskRow, e: ReportEvent, plan: (entries: HistoryEntryLike
       }
       const entries = e.event === "finished" ? [e.entry] : e.entries;
       if (!Array.isArray(entries) || entries.some((x) => !x || typeof x !== "object")) throw new RelayError(400, "Bad history entry");
+      // A worker's job that ran out of memory: one it took by streaming its weights from RAM goes to another worker when
+      // one can run it, instead of failing (pool.ts sets this).
+      if (t.pools && t.worker_id && poolOutOfMemory && ranOutOfMemory(entries, e.why) && poolOutOfMemory(t, now)) return { ok: true };
       const p = plan(entries, e.event === "passes");
       // A worker's job ended on its ComfyUI: the workers' log keeps its measured run (the billing service settles with it,
       // and a lane's typical run is read from it). CPU work (light CPU work, a finishing job) uses no GPU: its time and
@@ -1370,6 +1373,31 @@ export const setPoolGiveBack = (fn: (t: TaskRow, why: GiveBackWhy) => void) => (
 /** A worker's ComfyUI lost its task again: it goes back in line as a lost attempt (pool.ts sets this too). */
 let poolLost: ((t: TaskRow) => void) | null = null;
 export const setPoolLost = (fn: (t: TaskRow) => void) => (poolLost = fn);
+
+/**
+ * A worker's job ran out of memory (pool.ts sets this too): true when it went back in line for another worker, false
+ * when it fails as any failed job does.
+ */
+let poolOutOfMemory: ((t: TaskRow, now: number) => boolean) | null = null;
+export const setPoolOutOfMemory = (fn: (t: TaskRow, now: number) => boolean) => (poolOutOfMemory = fn);
+
+/**
+ * The words for running out of memory: on the card (CUDA out of memory, torch's OutOfMemoryError, "Allocation on
+ * device"), in system RAM (Python's MemoryError, "not enough memory") or in Windows' page file ("The paging file is too
+ * small for this operation to complete").
+ */
+const OUT_OF_MEMORY = /out of memory|OutOfMemoryError|allocation on device|not enough memory|paging file is too small|MemoryError/i;
+
+/**
+ * Did a finished job end by running out of memory: one of its entries failed with an execution error in those words, or
+ * the worker's reason for its failure (`why`) says so.
+ */
+export function ranOutOfMemory(entries: readonly HistoryEntryLike[], why?: string): boolean {
+  const failed = entries.filter((x) => x?.status?.status_str === "error");
+  if (!failed.length) return false;
+  if (typeof why === "string" && OUT_OF_MEMORY.test(why)) return true;
+  return failed.some((x) => (x.status?.messages ?? []).some((m) => Array.isArray(m) && m[0] === "execution_error" && OUT_OF_MEMORY.test(`${m[1]?.exception_type ?? ""} ${m[1]?.exception_message ?? ""}`)));
+}
 
 /** The execution time (ms) and GPU name a worker reported with a finished job, as the workers' log keeps them. */
 export interface ExecFacts {

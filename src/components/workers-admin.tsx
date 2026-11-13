@@ -39,6 +39,8 @@ interface WorkerView {
   allow: Record<string, { delayMs: number }>;
   /** Its pick order: above 0, it gets first pick of the jobs it can run while it is free (a server from before sends none). */
   pickOrder?: number;
+  /** The workflows it takes only with every weight on its card, newest first (a server from before sends none). */
+  noStream?: { workflowId: string; at: number }[];
   /** The lanes it can run every workflow of. */
   lanes: string[];
   /** The lanes it can run only some workflows of (a server from before sends none). */
@@ -312,6 +314,46 @@ export function UpdateLine({ w, now }: { w: Pick<WorkerView, "id" | "words" | "u
   );
 }
 
+/** How long ago, in minutes, hours or days. */
+const agoWords = (ms: number) => {
+  const min = Math.max(0, Math.round(ms / 60_000));
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
+};
+
+/**
+ * The workflows a worker takes only with every weight on its card: a job of each ran out of memory there with its
+ * weights streamed from RAM, and went to another worker. Clearing one lets the worker stream it again.
+ */
+function NoStreamList({ list, now, busy, onClear }: { list: { workflowId: string; at: number }[]; now: number; busy: boolean; onClear: (ids: true | string[]) => void }) {
+  return (
+    <div className="space-y-1 text-[13px]">
+      <p>
+        Runs these only with every weight on its card
+        <span className="block text-[12px] text-muted-foreground">A job of each ran out of memory here with its weights streamed from RAM, and another worker took it. Clear one to let this worker stream it again.</span>
+      </p>
+      <ul className="space-y-0.5">
+        {list.map((n) => (
+          <li key={n.workflowId} className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate">
+              {n.workflowId} <span className="text-[12px] text-muted-foreground">· {agoWords(now - n.at)}</span>
+            </span>
+            <Button size="sm" variant="ghost" className="h-7 shrink-0" disabled={busy} onClick={() => onClear([n.workflowId])}>
+              Clear
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {list.length > 1 && (
+        <Button size="sm" variant="ghost" className="h-7" disabled={busy} onClick={() => onClear(true)}>
+          Clear all
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function WorkerCard({ w, lanes, onToken }: { w: WorkerView; lanes: Lane[]; onToken: (t: string) => void }) {
   const qc = useQueryClient();
   const now = useNow(10_000);
@@ -395,6 +437,7 @@ function WorkerCard({ w, lanes, onToken }: { w: WorkerView; lanes: Lane[]; onTok
           </span>
         </label>
       )}
+      {!!w.noStream?.length && <NoStreamList list={w.noStream} now={now} busy={patch.isPending} onClear={(clearNoStream) => patch.mutate({ clearNoStream })} />}
       <HoursEditor w={w} onSave={(hours) => patch.mutate({ hours })} />
       <LanesEditor key={JSON.stringify(w.allow)} w={w} lanes={lanes} onSave={(allow) => patch.mutate({ allow })} />
       <div className="flex flex-wrap gap-1.5 border-t pt-2">

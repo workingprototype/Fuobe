@@ -4,11 +4,11 @@ import { patchWorker, type WorkerPatch } from "@/server/computer/pool";
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /** The changes a worker takes: the log names which were sent, never their values (a rotate's token least of all). */
-const KEYS = ["paused", "pauseNow", "drain", "autoResume", "hours", "allow", "claimAfterMs", "switchAfterMs", "pickOrder", "rotate", "revoke"] as const;
+const KEYS = ["paused", "pauseNow", "drain", "autoResume", "hours", "allow", "claimAfterMs", "switchAfterMs", "pickOrder", "clearNoStream", "rotate", "revoke"] as const;
 
 /**
  * Change a worker (owner only, or an admin token with workers:write):
- * `{ paused, pauseNow, drain, autoResume, hours, allow, claimAfterMs, switchAfterMs, pickOrder, rotate, revoke }`.
+ * `{ paused, pauseNow, drain, autoResume, hours, allow, claimAfterMs, switchAfterMs, pickOrder, clearNoStream, rotate, revoke }`.
  * Each reaches the worker at its next beat. Rotate answers with the new token, once (an admin token needs
  * workers:tokens for it); revoke stops the old token at once and puts its job back in line.
  */

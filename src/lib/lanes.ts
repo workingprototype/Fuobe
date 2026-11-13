@@ -61,22 +61,76 @@ export interface MemoryFacts {
 }
 
 /**
- * Can a GPU run a workflow with its weights streamed from RAM (its streaming need, stream-needs.json): its VRAM covers the
- * need's VRAM and its RAM covers the need's RAM, each with the same 3% allowance as the VRAM test (a 32 GB PC reports
- * about 31.9 GiB). Never with no streaming need, unknown RAM, or dynamic VRAM off.
+ * A workflow's streaming rule as requirements.json gives it (`stream`): a streaming need of its own (stream-needs.json),
+ * `false` when it never streams (its node packs load models outside ComfyUI's model management, or it runs isolated),
+ * or none: the computed rule (streamLoadFits) decides from the files it loads.
  */
-export function streamFits(stream: StreamNeed | null | undefined, have: MemoryFacts): boolean {
-  if (!stream || have.dynamicVramOff || !have.ramBytes || !have.vramBytes) return false;
-  return minVramBytesFor(stream.vramGb) <= have.vramBytes && minVramBytesFor(stream.ramGb) <= have.ramBytes;
+export type StreamRule = StreamNeed | false | null | undefined;
+
+/** The model files a GPU would load for a workflow, in bytes, as the computed streaming rule reads them. */
+export interface StreamLoad {
+  /** The files of the choice it runs: the workflow's own, or a model variant's (src/lib/gpu/model-variants.ts). */
+  fileBytes: number;
+  /** The files the run adds beyond those (a look's LoRAs: src/lib/runtime-files.ts). */
+  extraBytes?: number;
+}
+
+/**
+ * The room the computed rule leaves in VRAM and RAM together, beyond the model files: the operating system, ComfyUI's own
+ * process, and the activations and buffers that live in RAM while the weights stream. Measured on a 10 GB card with
+ * 32 GB of RAM (the card reports about 10 GiB, the RAM about 31.9 GiB): workflows whose model files total 38.4 to
+ * 39.5 GiB ran with their weights streamed, RAM near full and the page file covering a few GB at the peak; one of
+ * 18.8 GiB used under 29 GB of RAM. 2 GiB keeps those runs in (39.5 + 2 is under 10 + 31.9) and leaves anything larger
+ * out.
+ */
+export const STREAM_RESERVE_BYTES = 2 * 2 ** 30;
+
+/**
+ * The smallest card the computed rule streams on, in whole GB (with the 3% allowance). The card still holds what the
+ * step computes: the block of weights in use, the activations and the decoder's working memory. The measured runs used a
+ * 10 GB card; 8 GB cards hold the same working set at the catalog's sizes with less to spare, and smaller cards run
+ * short of it.
+ */
+export const STREAM_MIN_VRAM_GB = 8;
+
+/**
+ * The computed streaming rule, for a workflow with no streaming need of its own: a card of STREAM_MIN_VRAM_GB or more,
+ * whose VRAM still covers the part of the workflow's VRAM need that isn't its model files (activations, working buffers,
+ * and any weights the catalog doesn't list, such as files a pack downloads itself), and whose VRAM and RAM together hold
+ * every model file it loads with STREAM_RESERVE_BYTES to spare. The caller has checked the facts are known.
+ */
+function streamLoadFits(needGb: number, load: StreamLoad | undefined, vramBytes: number, ramBytes: number): boolean {
+  if (!load || !(load.fileBytes > 0)) return false;
+  if (vramBytes < minVramBytesFor(STREAM_MIN_VRAM_GB)) return false;
+  if (minVramBytesFor(needGb) - load.fileBytes > vramBytes) return false;
+  return load.fileBytes + (load.extraBytes ?? 0) + STREAM_RESERVE_BYTES <= vramBytes + ramBytes;
+}
+
+/**
+ * Can a GPU run a workflow with its weights streamed from RAM? With a streaming need of its own (stream-needs.json), that
+ * need alone decides: its VRAM covers the need's VRAM and its RAM covers the need's RAM, each with the same 3% allowance
+ * as the VRAM test (a 32 GB PC reports about 31.9 GiB). With none, the computed rule (streamLoadFits) decides from
+ * `load`, the files it would load, and `needGb`, the workflow's VRAM need. Never for a workflow that doesn't stream
+ * (`false`), and never with unknown RAM, unknown VRAM, or dynamic VRAM off.
+ */
+export function streamFits(stream: StreamRule, have: MemoryFacts, load?: StreamLoad, needGb = 0): boolean {
+  if (stream === false || have.dynamicVramOff || !have.ramBytes || !have.vramBytes) return false;
+  if (stream) return minVramBytesFor(stream.vramGb) <= have.vramBytes && minVramBytesFor(stream.ramGb) <= have.ramBytes;
+  return streamLoadFits(needGb, load, have.vramBytes, have.ramBytes);
 }
 
 /**
  * How a GPU holds a workflow of `needGb`: every weight on its card ("vram"), part of them streamed from its RAM
- * ("stream", slower: streamFits), or not at all (null).
+ * ("stream", slower: streamFits, with `load` for the computed rule), or not at all (null).
  */
-export function memoryFit(needGb: number, stream: StreamNeed | null | undefined, have: MemoryFacts): "vram" | "stream" | null {
+export function memoryFit(needGb: number, stream: StreamRule, have: MemoryFacts, load?: StreamLoad): "vram" | "stream" | null {
   if (minVramBytesFor(needGb) <= (have.vramBytes ?? 0)) return "vram";
-  return streamFits(stream, have) ? "stream" : null;
+  return streamFits(stream, have, load, needGb) ? "stream" : null;
+}
+
+/** The total size of these catalog files in bytes (a key the index doesn't have counts 0). */
+export function filesBytes(index: Pick<RequirementIndex, "files">, keys: readonly string[]): number {
+  return keys.reduce((n, k) => n + (index.files[k as keyof RequirementIndex["files"]]?.sizeBytes ?? 0), 0);
 }
 
 type Sha = (text: string) => string;

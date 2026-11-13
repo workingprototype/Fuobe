@@ -3,7 +3,7 @@ import { ENGINE_WORDS } from "@/lib/engine-error";
 import crypto from "node:crypto";
 import { FINISH_KINDS, type FinishTicket } from "@/lib/finish-ticket";
 import { ceilingProblem, cleanCeiling, insideCeiling, lanesInside, type Ceiling } from "@/lib/job-ticket";
-import { allLanes, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, memoryFit, needsOf, packKey, partLanes, streamFits, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs } from "@/lib/lanes";
+import { allLanes, filesBytes, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, memoryFit, needsOf, packKey, partLanes, streamFits, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs, type StreamRule } from "@/lib/lanes";
 import { fileChoices, hasVariants, pickFiles, swapGraphFiles, type FileChoice } from "@/lib/gpu/model-variants";
 import type { FileKey } from "@/lib/gpu/types";
 import { POOL_WORDS, RELAY_TIMES, SENT_STATES, type BeatAnswer, type ClaimedTask, type ComputerFacts, type CpuSlot, type WorkerAnswer, type WorkerBeat, type WorkerHolding } from "@/lib/relay";
@@ -16,7 +16,7 @@ import { indexKey, loadIndex } from "../gpu/index-file";
 import { hostedRunsOn } from "../hosted-switch";
 import { heldView } from "../pool-holds";
 import { catalogVersion } from "./catalog-version";
-import { cleanFacts, dropProgress, endTask, json, logWorkerJob, noteCold, noteProgress, noteStage, setPoolClocks, setPoolGiveBack, setPoolLost, setTask, stageOf, takeTask, taskById, taskCold, taskProgress, jobNowOf, type JobNow, type TaskRow } from "./tasks";
+import { cleanFacts, dropProgress, endTask, json, logWorkerJob, noteCold, noteProgress, noteStage, setPoolClocks, setPoolGiveBack, setPoolLost, setPoolOutOfMemory, setTask, stageOf, takeTask, taskById, taskCold, taskProgress, jobNowOf, type JobNow, type TaskRow } from "./tasks";
 import { queueSettings, runCeilingMs } from "../queue-settings";
 import { createWorker, offerNextToken, revokeWorker, rotateWorker, type WorkerRow } from "./workers";
 import { modelLabel } from "./queue-live";
@@ -885,15 +885,19 @@ function claimed(t: TaskRow, w: WorkerRow, device: string, now: number): Claimed
   const bench = t.lane ? benchOf(w)[t.lane] : undefined;
   // A workflow with model variants: the files this worker runs it with, chosen when it takes the task from the line and
   // kept on the task (extra_json.variant), so a worker that lost track of its task gets the same files again.
-  const { preempted, variant: lastVariant, ...extra } = json<Record<string, unknown>>(t.extra_json, {});
+  const { preempted, variant: lastVariant, streamed: lastStreamed, ...extra } = json<Record<string, unknown>>(t.extra_json, {});
   const index = loadIndex();
   const variantOf = !t.finish_json && needs?.workflowId && hasVariants(index, needs.workflowId) ? needs.workflowId : null;
   const choice = !variantOf
     ? null
     : t.state === "waiting"
-      ? workerFiles(w, variantOf)
+      ? workerFiles(w, variantOf, bytesOf(needs?.runtime))
       : (fileChoices(index, variantOf).find((c) => c.variant === (typeof lastVariant === "string" ? lastVariant : null)) ?? null);
   const variant = choice?.variant ?? undefined;
+  // Taken with part of its weights streamed from this worker's RAM (not whole on its card): kept on the task
+  // (extra_json.streamed), so a run of it that runs out of memory goes to another worker (setPoolOutOfMemory). A worker
+  // that takes its own task again keeps what its claim said.
+  const streamed = t.state === "waiting" ? !t.finish_json && memoryWayOf(needs, w) === "stream" : lastStreamed === true;
   if (t.state === "waiting") logWorkerJob("claimed", t, w.id, now, {}, { ...(variant && { variant }) });
   // A worker that lost track of its own task gets it again with its first claim's time, so the sending clock (SENDING_MS)
   // is never wound back by asking again.
@@ -903,8 +907,8 @@ function claimed(t: TaskRow, w: WorkerRow, device: string, now: number): Claimed
   // A run given back for people (workerBeat) is no longer paused once a worker takes it again.
   const ticketNote = !!t.ticket_json && t.state === "waiting";
   const before =
-    ticketNote || preempted !== undefined || variant !== lastVariant
-      ? { extra_json: JSON.stringify({ ...extra, ...(ticketNote && { claimedBefore: t.claimed_at ?? null, claimFor: now }), ...(variant && { variant }) }) }
+    ticketNote || preempted !== undefined || variant !== lastVariant || streamed !== (lastStreamed === true)
+      ? { extra_json: JSON.stringify({ ...extra, ...(ticketNote && { claimedBefore: t.claimed_at ?? null, claimFor: now }), ...(variant && { variant }), ...(streamed && { streamed: true }) }) }
       : {};
   const c = takeTask(t, device, now, { worker_id: w.id, ...before, ...(t.state !== "waiting" && t.device === device && t.claimed_at && { claimed_at: t.claimed_at }) });
   // A GPU job taken by a worker with another model loaded (or none) loads its model first: it is "getting ready" until
@@ -942,29 +946,70 @@ function claimed(t: TaskRow, w: WorkerRow, device: string, now: number): Claimed
 /**
  * The files this worker runs a workflow with (src/lib/gpu/model-variants.ts pickFiles): a model variant made for its
  * card's generation (gpuGen in its facts), else the workflow's own files, else another variant, by the file sets it has
- * whole (its lanes' `sets`, from the files it verified) and its memory: the VRAM of the set, or the workflow's streaming
- * need in VRAM and RAM (memoryFit). Null when it has none of them, or too little memory. A worker program older than
+ * whole (its lanes' `sets`, from the files it verified) and its memory: the VRAM of the set, or streaming its weights
+ * from RAM (memoryFit: the workflow's streaming need, else the size of the set's files and `extraBytes`, the run-time
+ * files the run adds). Null when it has none of them, or too little memory. A worker program older than
  * VARIANT_PROTOCOL gets the workflow's own files only.
  */
-export function workerFiles(w: Pick<WorkerRow, "lanes_json" | "facts_json" | "protocol">, workflowId: string): FileChoice | null {
+export function workerFiles(w: Pick<WorkerRow, "lanes_json" | "facts_json" | "protocol" | "no_stream_json">, workflowId: string, extraBytes = 0): FileChoice | null {
   const cap = capableOf(w);
   if (!cap.workflows.includes(workflowId)) return null;
   const whole = cap.sets?.[workflowId] ?? [null];
   const facts = json<ComputerFacts>(w.facts_json, {});
   const index = loadIndex();
-  const stream = index.workflows[workflowId]?.stream;
+  const stream = streamRuleOf(w, workflowId);
   const choices = fileChoices(index, workflowId).filter((c) => whole.includes(c.variant));
-  return pickFiles(choices, { gpuGen: facts.gpuGen ?? null, has: () => true, fits: (gb) => memoryFit(gb, stream, facts) !== null, variants: (w.protocol ?? 0) >= VARIANT_PROTOCOL });
+  return pickFiles(choices, {
+    gpuGen: facts.gpuGen ?? null,
+    has: () => true,
+    fits: (gb, files) => memoryFit(gb, stream, facts, { fileBytes: filesBytes(index, files), extraBytes }) !== null,
+    variants: (w.protocol ?? 0) >= VARIANT_PROTOCOL,
+  });
 }
 
 /**
- * Has this worker the memory for a task's workflow with no model variants: the VRAM the task needs (with the 3%
- * allowance already in it), or the workflow's streaming need in VRAM and RAM (streamFits).
+ * The workflows this worker no longer takes by streaming its weights from RAM, each with when that was noted: a job of
+ * one ran out of memory on it that way (noteNoStream). It still takes them with every weight on its card.
  */
-function memoryFor(needs: Needs | null, w: Pick<WorkerRow, "facts_json">): boolean {
+export function noStreamOf(w: Pick<WorkerRow, "no_stream_json">): Record<string, number> {
+  const raw = json<Record<string, unknown>>(w.no_stream_json ?? null, {});
+  return Object.fromEntries(Object.entries(raw).filter((e): e is [string, number] => typeof e[1] === "number"));
+}
+
+/** A workflow's streaming rule on this worker: the catalog's (requirements.json `stream`), or none after it ran out of memory streaming it. */
+function streamRuleOf(w: Pick<WorkerRow, "no_stream_json">, workflowId: string): StreamRule {
+  return noStreamOf(w)[workflowId] !== undefined ? false : loadIndex().workflows[workflowId]?.stream;
+}
+
+/** The total size of these files in bytes (a task's own files, or the run-time files it adds: a look's LoRAs). */
+const bytesOf = (files: readonly FileNeed[] | undefined): number => (files ?? []).reduce((n, f) => n + (f.size || 0), 0);
+
+/**
+ * How this worker holds a task's workflow with no model variants: the VRAM the task needs (with the 3% allowance
+ * already in it: "vram"), or streaming its weights from RAM ("stream": the workflow's streaming need, else the size of
+ * its files and the run-time files), or not at all (null).
+ */
+function memoryWay(needs: Needs | null, w: Pick<WorkerRow, "facts_json" | "no_stream_json">, extraBytes = bytesOf(needs?.runtime)): "vram" | "stream" | null {
   const facts = json<ComputerFacts>(w.facts_json, {});
-  if ((needs?.minVramBytes ?? 0) <= (facts.vramBytes ?? 0)) return true;
-  return !!needs?.workflowId && streamFits(loadIndex().workflows[needs.workflowId]?.stream, facts);
+  if ((needs?.minVramBytes ?? 0) <= (facts.vramBytes ?? 0)) return "vram";
+  const wf = needs?.workflowId ? loadIndex().workflows[needs.workflowId] : undefined;
+  if (!needs?.workflowId || !wf) return null;
+  return streamFits(streamRuleOf(w, needs.workflowId), facts, { fileBytes: bytesOf(needs.files), extraBytes }, wf.vramGb) ? "stream" : null;
+}
+
+/** Has this worker the memory for a task's workflow with no model variants (memoryWay)? */
+const memoryFor = (needs: Needs | null, w: Pick<WorkerRow, "facts_json" | "no_stream_json">, extraBytes?: number): boolean => memoryWay(needs, w, extraBytes) !== null;
+
+/**
+ * How this worker would hold a task's workflow: whole on its card ("vram"), streamed from its RAM ("stream"), or not at
+ * all (null). With model variants, for the files it would run (workerFiles).
+ */
+function memoryWayOf(needs: Needs | null, w: WorkerRow): "vram" | "stream" | null {
+  const id = needs?.workflowId;
+  if (!id || !hasVariants(loadIndex(), id)) return memoryWay(needs, w);
+  const extraBytes = bytesOf(needs.runtime);
+  const c = workerFiles(w, id, extraBytes);
+  return c ? memoryFit(c.vramGb, streamRuleOf(w, id), json<ComputerFacts>(w.facts_json, {}), { fileBytes: filesBytes(loadIndex(), c.files), extraBytes }) : null;
 }
 
 /** How long a task should take on this worker: the lane's bench median there, or the task's own estimate. */
@@ -998,9 +1043,9 @@ function fits(t: TaskRow, w: WorkerRow, now: number): boolean {
   // The files the run adds beyond its workflow's own (a look's LoRAs): only a worker that verified each one.
   if (needs?.runtime?.length && !hasFiles(inventoryOf(w), needs.runtime)) return false;
   // A workflow with model variants: the files (its own or a variant's) and the memory of the choice this worker would
-  // run. Either way, the workflow's streaming need counts as well as its VRAM need.
+  // run. Either way, streaming from RAM counts as well as the VRAM need (memoryFit).
   if (needs?.workflowId && hasVariants(loadIndex(), needs.workflowId)) {
-    if (!workerFiles(w, needs.workflowId)) return false;
+    if (!workerFiles(w, needs.workflowId, bytesOf(needs.runtime))) return false;
   } else if (!memoryFor(needs, w)) return false;
   if (now - t.created_at < w.claim_after_ms + (allow[lane]?.delayMs ?? 0)) return false;
   return true;
@@ -1388,6 +1433,51 @@ setPoolGiveBack((t, why) => {
  */
 setPoolLost((t) => backInLine(t, { blame: true, sentBack: "its ComfyUI lost it twice" }));
 
+/**
+ * A worker's job ran out of memory. One it took by streaming its weights from RAM (extra_json.streamed, from its claim):
+ * the worker no longer takes that workflow by streaming (noteNoStream), and while another worker could run it, the job
+ * goes back in line with its place kept, at no cost to the run (no attempt counted: this worker can't take it that way
+ * again, so it can't come back to it). With no other worker for it, or taken with every weight on the card, it fails as
+ * any failed job does.
+ */
+setPoolOutOfMemory((t, now) => {
+  if (!t.worker_id || json<{ streamed?: unknown }>(t.extra_json, {}).streamed !== true) return false;
+  const needs = json<Needs | null>(t.needs_json, null);
+  if (!needs?.workflowId) return false;
+  noteNoStream(t.worker_id, needs.workflowId, now, t);
+  if (!workersCanRun(needs.workflowId, { size: needs.size, files: needs.runtime, tickets: !!needs.catalogVersion })) return false;
+  if (!backInLine(t, { blame: false, sentBack: "it ran out of memory with its weights streamed from RAM (another worker takes it)" })) return false;
+  setTask(t.id, { comfy_why: null });
+  return true;
+});
+
+/** The most workflows a worker's no-streaming list keeps (the oldest go first). */
+const NO_STREAM_MAX = 200;
+
+/**
+ * This worker no longer takes this workflow by streaming its weights from RAM: noted with the time on the worker
+ * (no_stream_json) and in its timeline. It still takes it with every weight on its card. The owner clears it in
+ * Settings → Workers (WorkerPatch.clearNoStream). Best-effort.
+ */
+export function noteNoStream(workerId: string, workflowId: string, now = Date.now(), t?: Pick<TaskRow, "id" | "generation_id" | "lane">): void {
+  try {
+    const d = db();
+    d.transaction(() => {
+      const w = d.prepare("SELECT no_stream_json FROM relay_workers WHERE id = ?").get(workerId) as Pick<WorkerRow, "no_stream_json"> | undefined;
+      if (!w) return;
+      const list = { ...noStreamOf(w), [workflowId]: now };
+      const kept = Object.entries(list).sort((a, b) => b[1] - a[1]).slice(0, NO_STREAM_MAX);
+      d.prepare("UPDATE relay_workers SET no_stream_json = ? WHERE id = ?").run(JSON.stringify(Object.fromEntries(kept)), workerId);
+    })();
+    logWorkerEvent(
+      { kind: "job", event: "no-stream", workerId, words: `Ran out of memory streaming ${workflowId} from RAM: it takes it only with every weight on its card`, taskId: t?.id ?? null, generationId: t?.generation_id ?? null, lane: t?.lane ?? null, detail: { workflowId } },
+      now,
+    );
+  } catch (e) {
+    console.warn(`[fuobe] Couldn't note a worker's streaming list: ${(e as Error).message}`);
+  }
+}
+
 /** Why a worker gave a job back, in the timeline's words. */
 const GIVE_BACK_WORDS: Record<string, string> = {
   stalled: "it stalled",
@@ -1656,8 +1746,8 @@ function ableWorkers(workflowId: string | null, o: { size?: Needs["size"]; ticke
     if (workflowId === null) return cap.workflows.some((id) => poolLane(id) in allow && insideCeiling(ceiling, { workflowId: id, lane: poolLane(id) }));
     if (!needs || !(lane! in allow) || !cap.workflows.includes(workflowId) || ceilingProblem(ceiling, { workflowId, lane, size: o.size })) return false;
     if (o.files?.length && !hasFiles(inventoryOf(w), o.files)) return false;
-    if (hasVariants(loadIndex(), workflowId)) return !!workerFiles(w, workflowId);
-    return memoryFor(needs, w);
+    if (hasVariants(loadIndex(), workflowId)) return !!workerFiles(w, workflowId, bytesOf(o.files));
+    return memoryFor(needs, w, bytesOf(o.files));
   });
 }
 
@@ -1917,6 +2007,11 @@ export interface WorkerView {
   switchAfterMs: number;
   /** Its pick order: higher gets first pick of a job that a worker with a lower one could take too, while it is free. 0: none. */
   pickOrder: number;
+  /**
+   * The workflows it no longer takes by streaming its weights from RAM (a job of one ran out of memory that way), newest
+   * first, each with when. It still takes them with every weight on its card. The owner clears them (clearNoStream).
+   */
+  noStream: { workflowId: string; at: number }[];
   warmLane: string | null;
   /** The lanes it can run every workflow of. */
   lanes: string[];
@@ -2163,6 +2258,7 @@ export function workerView(w: WorkerRow, now = Date.now(), typical: (lane: strin
     claimAfterMs: w.claim_after_ms,
     switchAfterMs: w.switch_after_ms,
     pickOrder: w.pick_order ?? 0,
+    noStream: Object.entries(noStreamOf(w)).map(([workflowId, at]) => ({ workflowId, at })).sort((a, b) => b.at - a.at),
     warmLane: w.warm_lane,
     lanes: capableOf(w).lanes,
     partLanes: partLanes(loadIndex(), capableOf(w).workflows, sha),
@@ -2222,6 +2318,8 @@ export interface WorkerPatch {
   switchAfterMs?: number;
   /** A whole number from PICK_ORDER_MIN to PICK_ORDER_MAX: higher picks first (firstPicks). 0: none. */
   pickOrder?: number;
+  /** Clear its no-streaming list (WorkerView.noStream): `true` for all of it, or a list of workflow ids. */
+  clearNoStream?: true | string[];
   rotate?: boolean;
   revoke?: boolean;
 }
@@ -2289,6 +2387,12 @@ export function patchWorker(id: string, p: WorkerPatch, now = Date.now(), by = "
     if (!Number.isInteger(p.pickOrder) || p.pickOrder < PICK_ORDER_MIN || p.pickOrder > PICK_ORDER_MAX) throw new Error(`The pick order is a whole number from ${PICK_ORDER_MIN} to ${PICK_ORDER_MAX}`);
     set.pick_order = p.pickOrder;
   }
+  if (p.clearNoStream !== undefined) {
+    const ids = p.clearNoStream;
+    if (ids !== true && !(Array.isArray(ids) && ids.every((x) => typeof x === "string"))) throw new Error("Say which workflows to clear, or all of them");
+    const left = ids === true ? {} : Object.fromEntries(Object.entries(noStreamOf(w)).filter(([k]) => !ids.includes(k)));
+    set.no_stream_json = Object.keys(left).length ? JSON.stringify(left) : null;
+  }
   const keys = Object.keys(set);
   if (keys.length) d.prepare(`UPDATE relay_workers SET ${keys.map((k) => `${k} = @${k}`).join(", ")} WHERE id = @id`).run({ ...set, id });
   const token = p.rotate ? rotateWorker(id) ?? undefined : undefined;
@@ -2302,6 +2406,10 @@ export function patchWorker(id: string, p: WorkerPatch, now = Date.now(), by = "
   else if (p.drain === false) actions.push(["undrain", "No longer pausing after its job"]);
   const edited = (["autoResume", "hours", "allow", "claimAfterMs", "switchAfterMs", "pickOrder"] as const).filter((k) => p[k] !== undefined);
   if (edited.length) actions.push(["edit", `Settings changed: ${edited.join(", ")}`, { keys: edited }]);
+  if (p.clearNoStream !== undefined) {
+    const cleared = p.clearNoStream === true ? Object.keys(noStreamOf(w)) : p.clearNoStream.filter((k) => noStreamOf(w)[k] !== undefined);
+    actions.push(["clear-no-stream", cleared.length ? `May stream from RAM again: ${cleared.join(", ")}` : "Its list of workflows not to stream was already clear", { workflows: cleared }]);
+  }
   if (token) actions.push(["rotate", "New token made"]);
   noteAdmin(id, actions, by, now);
   try {

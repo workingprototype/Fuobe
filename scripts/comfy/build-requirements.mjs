@@ -8,8 +8,8 @@
  * Built from the committed library alone, no ComfyUI and no network: manifest.json, the workflow graphs,
  * object_info.subset.json (which classes are core and which belong to a pack), packs.json (pins, kept by hand),
  * model-pins.json (revisions and sizes), model-variants.json (other files of the same models, kept by hand) and
- * stream-needs.json (the smaller card and the RAM a workflow runs on with its weights streamed from RAM, kept by hand). It
- * runs at the end of build-library.mjs and alone:
+ * stream-needs.json (the smaller card and the RAM a workflow runs on with its weights streamed from RAM, and the packs
+ * and workflows that never stream, kept by hand). It runs at the end of build-library.mjs and alone:
  *
  *   node scripts/comfy/build-requirements.mjs                 # write requirements.json
  *   node scripts/comfy/build-requirements.mjs --refresh-pins  # maintainers: re-read model-pins.json from Hugging Face
@@ -235,8 +235,9 @@ export function buildIndex({ manifest, graphs, subset, packs, pins, variants = {
   problems.push(...built.problems);
   for (const [id, list] of Object.entries(built.byWorkflow)) workflows[id] = { ...workflows[id], variants: list };
 
-  // Streaming needs: the smaller card and the RAM a workflow runs on with part of its weights in RAM (stream-needs.json).
-  const streamed = streamNeeds({ streams, workflows });
+  // Streaming needs: the smaller card and the RAM a workflow runs on with part of its weights in RAM (stream-needs.json),
+  // or false for a workflow that never streams.
+  const streamed = streamNeeds({ streams, workflows, packs });
   problems.push(...streamed.problems);
   for (const [id, stream] of Object.entries(streamed.byWorkflow)) workflows[id] = { ...workflows[id], stream };
 
@@ -396,13 +397,21 @@ const STREAM_MAX_GB = 2048;
  * stops on any). An entry is refused when a number isn't above 0, when its VRAM isn't below the workflow's own VRAM
  * need, when it names a workflow the manifest doesn't have, and when a workflow is named twice.
  *
- * @param {{ streams: { streams?: object[] }, workflows: Record<string, { vramGb: number }> }} o
+ * A workflow with no streaming need of its own may still stream by the computed rule (src/lib/lanes.ts streamFits: the
+ * size of the files it loads against the GPU's VRAM and RAM), unless it never streams: `noStream` names the node packs
+ * (`packs`) and the workflows (`workflows`) whose models are loaded outside ComfyUI's model management (a pack's own
+ * loader and offloading), which dynamic VRAM loading can't stream. An isolated workflow never streams either: it runs on
+ * a ComfyUI of its own. Each of these gets `false` in `byWorkflow`. A name the catalog doesn't have is refused, and so is
+ * a workflow that has a streaming need and never streams.
+ *
+ * @param {{ streams: { streams?: object[], noStream?: { packs?: string[], workflows?: string[] } }, workflows: Record<string, { vramGb: number, packs?: Record<string, string[]>, isolated?: boolean }>, packs?: Record<string, object> }} o
  */
-export function streamNeeds({ streams, workflows }) {
+export function streamNeeds({ streams, workflows, packs = {} }) {
   const problems = [];
   const byWorkflow = {};
   const list = streams?.streams;
   if (!Array.isArray(list)) return { byWorkflow, problems: ['stream-needs.json: "streams" must be a list'] };
+  for (const k of Object.keys(streams ?? {})) if (k !== 'streams' && k !== 'noStream') problems.push(`stream-needs.json: unknown field ${k}`);
   const gb = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= STREAM_MAX_GB;
   const known = new Set(['workflows', 'vramGb', 'ramGb']);
   list.forEach((e, i) => {
@@ -427,6 +436,30 @@ export function streamNeeds({ streams, workflows }) {
       if (gb(e.vramGb) && gb(e.ramGb)) byWorkflow[id] = { vramGb: e.vramGb, ramGb: e.ramGb };
     }
   });
+  // The workflows that never stream: noStream's packs and workflows, and every isolated workflow.
+  const no = streams.noStream ?? {};
+  const names = (k) => (Array.isArray(no[k]) && no[k].every((x) => typeof x === 'string') ? no[k] : null);
+  const noPacks = names('packs');
+  const noWorkflows = names('workflows');
+  if (!no || typeof no !== 'object' || Array.isArray(no)) problems.push('stream-needs.json: "noStream" must be an object');
+  else {
+    for (const k of Object.keys(no)) if (k !== 'packs' && k !== 'workflows') problems.push(`stream-needs.json noStream: unknown field ${k}`);
+    if (no.packs !== undefined && !noPacks) problems.push('stream-needs.json noStream: packs must be a list of node pack names');
+    if (no.workflows !== undefined && !noWorkflows) problems.push('stream-needs.json noStream: workflows must be a list of workflow ids');
+  }
+  for (const p of noPacks ?? []) if (!packs[p]) problems.push(`stream-needs.json noStream: ${p} isn't a node pack of packs.json`);
+  for (const id of noWorkflows ?? []) if (!workflows[id]) problems.push(`stream-needs.json noStream: ${id} isn't a workflow of the manifest`);
+  const packSet = new Set(noPacks ?? []);
+  const wfSet = new Set(noWorkflows ?? []);
+  for (const [id, wf] of Object.entries(workflows)) {
+    const why = wf.isolated ? 'it runs isolated' : wfSet.has(id) ? 'noStream names it' : Object.keys(wf.packs ?? {}).find((p) => packSet.has(p));
+    if (!why) continue;
+    if (byWorkflow[id]) {
+      problems.push(`stream-needs.json: ${id} has a streaming need, but it never streams (${packSet.has(why) ? `it uses ${why}` : why})`);
+      continue;
+    }
+    byWorkflow[id] = false;
+  }
   return { byWorkflow, problems };
 }
 

@@ -19,5 +19,16 @@
       "vramGb": 10,
       "ramGb": 32
     }
-  ]
+  ],
+  "noStream": {
+    "packs": [
+      "ComfyUI-HunyuanVideo-Foley",
+      "ComfyUI-LatentSyncWrapper",
+      "ComfyUI-MMAudio",
+      "ComfyUI-ThinkSound_Wrapper",
+      "ComfyUI-WanVideoWrapper",
+      "kandinsky6-sr"
+    ],
+    "workflows": []
+  }
 }
