@@ -174,16 +174,19 @@ export const hasFiles = (inv: Inventory, needs: readonly FileNeed[] | undefined)
 /**
  * What a worker can run with what it has: the workflows whose files (its own, or one of its variants') and packs are all
  * there (and whose packs' node classes its ComfyUI loaded, where it said), the lanes whose every workflow runs, and, for the other lanes, what it lacks. A task goes only to a worker that can run its workflow.
+ * `sets`: for each of those workflows that has model variants, the file sets it has whole (null: the workflow's own, else
+ * a variant's id).
  */
 export function lanesFor(
   index: RequirementIndex,
   inv: Inventory,
   sha: Sha,
-): { lanes: string[]; workflows: string[]; missing: { lane: string; label: string; files: string[]; bytes: number }[] } {
+): { lanes: string[]; workflows: string[]; missing: { lane: string; label: string; files: string[]; bytes: number }[]; sets: Record<string, (string | null)[]> } {
   const packs = new Map(inv.nodePacks.map((p) => [p.name, p]));
   const takes = new Set<string>(inv.media ?? ["image"]);
   const ok = new Map<string, boolean>();
   const workflows: string[] = [];
+  const sets: Record<string, (string | null)[]> = {};
   const lacking = new Map<string, Map<string, number>>();
   for (const id of Object.keys(index.workflows)) {
     if (index.workflows[id].isolated) continue;
@@ -191,12 +194,15 @@ export function lanesFor(
     const n = needsOf(index, id)!;
     // Its own files, or every file of one of its variants: a worker that has either may run it.
     let missingFiles = n.files.filter((f) => !hasFile(inv, f));
-    if (missingFiles.length && variantNeeds(index, id).some((v) => hasFiles(inv, v.files))) missingFiles = [];
+    const variants = variantNeeds(index, id);
+    const whole = [...(missingFiles.length ? [] : [null]), ...variants.filter((v) => hasFiles(inv, v.files)).map((v) => v.id)];
+    if (whole.length) missingFiles = [];
     const missingPacks = n.packs.filter((p) => !packs.has(p));
     const missingMedia = mediaOf(index.workflows[id]).filter((k) => !takes.has(k));
     const notLoaded = unloadedNodes(index.workflows[id], packs);
     const fine = !missingFiles.length && !missingPacks.length && !missingMedia.length && !notLoaded.length;
     if (fine) workflows.push(id);
+    if (fine && variants.length) sets[id] = whole;
     ok.set(lane, (ok.get(lane) ?? true) && fine);
     if (!fine) {
       const m = lacking.get(lane) ?? new Map<string, number>();
@@ -209,7 +215,7 @@ export function lanesFor(
   }
   const lanes = [...ok].filter(([, v]) => v).map(([k]) => k).sort();
   const missing = [...lacking].map(([lane, m]) => ({ lane, label: laneLabel(index, lane, sha), files: [...m.keys()].sort(), bytes: [...m.values()].reduce((a, b) => a + b, 0) }));
-  return { lanes, workflows: workflows.sort(), missing };
+  return { lanes, workflows: workflows.sort(), missing, sets };
 }
 
 /**

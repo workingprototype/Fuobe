@@ -3,7 +3,7 @@ import { ENGINE_WORDS } from "@/lib/engine-error";
 import crypto from "node:crypto";
 import { FINISH_KINDS, type FinishTicket } from "@/lib/finish-ticket";
 import { ceilingProblem, cleanCeiling, insideCeiling, lanesInside, type Ceiling } from "@/lib/job-ticket";
-import { allLanes, hasFile, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, minVramBytesFor, needsOf, packKey, partLanes, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs } from "@/lib/lanes";
+import { allLanes, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, minVramBytesFor, needsOf, packKey, partLanes, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs } from "@/lib/lanes";
 import { fileChoices, hasVariants, pickFiles, swapGraphFiles, type FileChoice } from "@/lib/gpu/model-variants";
 import type { FileKey } from "@/lib/gpu/types";
 import { POOL_WORDS, RELAY_TIMES, SENT_STATES, type BeatAnswer, type ClaimedTask, type ComputerFacts, type CpuSlot, type WorkerAnswer, type WorkerBeat, type WorkerHolding } from "@/lib/relay";
@@ -175,7 +175,8 @@ interface Allow {
 
 const allowOf = (w: WorkerRow) => json<Record<string, Allow>>(w.allow_json, {});
 /** The lanes and workflows its files let it run, and the requirements index they were worked out with (none: an older row). */
-const capableOf = (w: WorkerRow) => json<{ lanes: string[]; workflows: string[]; index?: string }>(w.lanes_json, { lanes: [], workflows: [] });
+/** `sets`: the file sets it has whole of each workflow with model variants (lanesFor). Lanes worked out without it: its own files only. */
+const capableOf = (w: Pick<WorkerRow, "lanes_json">) => json<{ lanes: string[]; workflows: string[]; index?: string; sets?: Record<string, (string | null)[]> }>(w.lanes_json, { lanes: [], workflows: [] });
 const factsOf = (w: WorkerRow) => json<ComputerFacts>(w.facts_json, {});
 /** The worker's verified files as its last list said (inventory_json), read once for each list it sends. */
 const inventories = new Map<string, { hash: string | null; inv: Inventory }>();
@@ -769,11 +770,11 @@ export function saveInventory(w: WorkerRow, raw: unknown): { lanes: string[]; wo
   // it pictures only (the list is kept as sent, so its hash stays the one the worker computes).
   const media = Array.isArray(o.media) ? MEDIA_KINDS.filter((k) => (o.media as unknown[]).includes(k)) : undefined;
   const inv: Inventory = { files, nodePacks, ...(media && { media }) };
-  const r = lanesFor(loadIndex(), inv, sha);
+  const { sets, ...r } = lanesFor(loadIndex(), inv, sha);
   const invHash = inventoryHash({ ...inv, files: sent });
   db()
     .prepare("UPDATE relay_workers SET inventory_json = ?, inventory_hash = ?, lanes_json = ? WHERE id = ?")
-    .run(JSON.stringify(inv), invHash, JSON.stringify({ lanes: r.lanes, workflows: r.workflows, index: indexKey() }), w.id);
+    .run(JSON.stringify(inv), invHash, JSON.stringify({ lanes: r.lanes, workflows: r.workflows, index: indexKey(), sets }), w.id);
   return r;
 }
 
@@ -789,7 +790,7 @@ export function refreshLanes(w: WorkerRow): boolean {
   const key = indexKey();
   if (capableOf(w).index === key) return false;
   const r = lanesFor(loadIndex(), inventoryOf(w), sha);
-  const lanesJson = JSON.stringify({ lanes: r.lanes, workflows: r.workflows, index: key });
+  const lanesJson = JSON.stringify({ lanes: r.lanes, workflows: r.workflows, index: key, sets: r.sets });
   db().prepare("UPDATE relay_workers SET lanes_json = ? WHERE id = ?").run(lanesJson, w.id);
   w.lanes_json = lanesJson;
   return true;
@@ -933,20 +934,18 @@ function claimed(t: TaskRow, w: WorkerRow, device: string, now: number): Claimed
 
 /**
  * The files this worker runs a workflow with (src/lib/gpu/model-variants.ts pickFiles): a model variant made for its
- * card's generation (gpuGen in its facts), else the workflow's own files, else another variant, by the files it verified
- * and its VRAM. Null when it has the files of none, or too little VRAM. A worker program older than VARIANT_PROTOCOL
- * gets the workflow's own files only.
+ * card's generation (gpuGen in its facts), else the workflow's own files, else another variant, by the file sets it has
+ * whole (its lanes' `sets`, from the files it verified) and its VRAM. Null when it has none of them, or too little VRAM.
+ * A worker program older than VARIANT_PROTOCOL gets the workflow's own files only.
  */
-export function workerFiles(w: Pick<WorkerRow, "id" | "inventory_json" | "inventory_hash" | "facts_json" | "protocol">, workflowId: string): FileChoice | null {
-  const index = loadIndex();
-  const inv = inventoryOf(w);
+export function workerFiles(w: Pick<WorkerRow, "lanes_json" | "facts_json" | "protocol">, workflowId: string): FileChoice | null {
+  const cap = capableOf(w);
+  if (!cap.workflows.includes(workflowId)) return null;
+  const whole = cap.sets?.[workflowId] ?? [null];
   const facts = json<ComputerFacts>(w.facts_json, {});
   const vram = facts.vramBytes ?? 0;
-  const has = (key: FileKey) => {
-    const f = index.files[key];
-    return !!f && hasFile(inv, { folder: f.folder, name: f.file, size: f.sizeBytes, sha256: f.sha256 ?? null });
-  };
-  return pickFiles(fileChoices(index, workflowId), { gpuGen: facts.gpuGen ?? null, has, fits: (gb) => minVramBytesFor(gb) <= vram, variants: (w.protocol ?? 0) >= VARIANT_PROTOCOL });
+  const choices = fileChoices(loadIndex(), workflowId).filter((c) => whole.includes(c.variant));
+  return pickFiles(choices, { gpuGen: facts.gpuGen ?? null, has: () => true, fits: (gb) => minVramBytesFor(gb) <= vram, variants: (w.protocol ?? 0) >= VARIANT_PROTOCOL });
 }
 
 /** How long a task should take on this worker: the lane's bench median there, or the task's own estimate. */

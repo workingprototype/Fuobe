@@ -198,6 +198,13 @@ describe("what a worker can run (lanesFor)", () => {
     // What it lacks is said in the workflow's own files.
     expect(part.missing.flatMap((m) => m.files)).toContain(FP8);
   });
+
+  it("says which file sets of a workflow with variants it has whole", () => {
+    expect(lanesFor(idx, workerInventory([FP8, TE_FP8, INT8, TE_INT8, VAE]), sha).sets[KREA]).toEqual([null, "int8"]);
+    expect(lanesFor(idx, workerInventory([INT8, TE_INT8, VAE]), sha).sets[KREA]).toEqual(["int8"]);
+    expect(lanesFor(idx, workerInventory([FP8, TE_FP8, VAE]), sha).sets[KREA]).toEqual([null]);
+    expect(lanesFor(idx, workerInventory([INT8, VAE]), sha).sets[KREA]).toBeUndefined();
+  });
 });
 
 /** A person's ComfyUI (as its GPU check reads it) with these files and every node class. */

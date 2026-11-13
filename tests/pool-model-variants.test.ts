@@ -202,6 +202,19 @@ describe("an older worker program (before protocol 5)", () => {
   });
 });
 
+describe("lanes worked out before model variants", () => {
+  it("count the workflow's own files only", () => {
+    ownerJob();
+    const w = worker("before", { files: BOTH, gpuGen: "8.6" });
+    const cap = JSON.parse(row(w).lanes_json!);
+    delete cap.sets;
+    db().prepare("UPDATE relay_workers SET lanes_json = ? WHERE id = ?").run(JSON.stringify(cap), w.id);
+    const c = claim(w)!;
+    expect(c.variant).toBeUndefined();
+    expect(c.graph).toEqual(GRAPH);
+  });
+});
+
 describe("VRAM", () => {
   it("a card with too little memory takes neither", () => {
     ownerJob();
