@@ -41,12 +41,11 @@ const variant = (o: Record<string, unknown> = {}) => ({ id: "int8", gpuGen: { mi
 describe("the catalog's variants (build-requirements.mjs)", () => {
   it("puts each workflow's variants in requirements.json, in the order of model-variants.json", () => {
     expect(idx.workflows[KREA].variants).toEqual([{ id: "int8", files: { [FP8]: INT8, [TE_FP8]: TE_INT8 }, gpuGen: { min: "8.0", max: "8.6" } }]);
-    // A Krea 2 workflow that already loads the int8 diffusion file swaps its text encoder only.
-    expect(idx.workflows["style-ref-krea2"].variants).toEqual([{ id: "int8", files: { [TE_FP8]: TE_INT8 }, gpuGen: { min: "8.0", max: "8.6" } }]);
-    expect(idx.workflows["ideogram4-t2i"].variants?.[0].files).toEqual({ "text_encoders/qwen3vl_8b_fp8_scaled.safetensors": "text_encoders/qwen3vl_8b_int8_convrot.safetensors" });
-    for (const id of ["flux3-klein-t2i", "flux3-klein-edit", "flux3-klein-base-t2i-lora"]) expect(idx.workflows[id].variants?.map((v) => v.id), id).toEqual(["int8"]);
+    // The Krea 2 workflows that load the fp8 diffusion file all carry it.
+    for (const id of ["krea2-edit-general", "krea2-inpaint", "krea2-turbo-i2i"]) expect(idx.workflows[id].variants?.map((v) => v.id), id).toEqual(["int8"]);
     // A workflow with none keeps no field.
     expect("variants" in idx.workflows["z-image-turbo-t2i"]).toBe(false);
+    expect("variants" in idx.workflows["ideogram4-t2i"]).toBe(false);
   });
 
   it("swaps only to pinned catalog files, each in the same model folder, read by the same loader inputs", () => {
