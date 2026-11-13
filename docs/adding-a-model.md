@@ -128,8 +128,9 @@ required rule is missing.
   lane, so a worker runs them one after another with no reload.
 - A worker takes a job when its card has the workflow's VRAM, less 3%, because a card reports a little less than its
   size.
-- NVFP4 files need a Blackwell card. The queue doesn't read a card's generation, so leave lanes with NVFP4 files off an
-  older card's allowed lanes. Give smaller and older cards an fp8 or GGUF workflow where one exists.
+- NVFP4 files need a Blackwell card. The queue reads a card's generation only to choose a model variant (below), so
+  leave lanes with NVFP4 files off an older card's allowed lanes. Give smaller and older cards an fp8 or GGUF workflow
+  where one exists, or a variant with files they run.
 - A workflow that loads no model file, fetches none on its first run, has `vramGb: 0` (the number 0, written in the
   entry) and names no card in `gpu` is CPU work: joins, trims, adding sound, Ken Burns, still to clip. The index marks
   it `"cpu": true`. The studio reads the marker: a run of CPU work only is free and never counted on this install's
@@ -138,6 +139,44 @@ required rule is missing.
   graphics memory.
 - Some nodes need a particular card but no graphics memory of their own (the NVIDIA RTX Video nodes). Set `gpu` for
   such a workflow (for example `"gpu": "nvidia-rtx"`), so it is never CPU work.
+
+### Model variants
+
+A model variant lets a workflow load other files of the same models in place of some of its own: for example int8
+ConvRot files on a card with fast int8 and no fp8 hardware (Ampere, compute capability 8.0 to 8.6). How a GPU picks
+one is in [Workers: Model variants](gpu-workers.md#model-variants).
+
+1. Add the new file to the catalog first: a workflow of the manifest must name it, and `model-pins.json` must pin its
+   size and SHA-256 (section 2).
+2. Add an entry to `workflows/comfyui/model-variants.json`, the one list of variants:
+
+   ```json
+   {
+     "id": "int8",
+     "gpuGen": { "min": "8.0", "max": "8.6" },
+     "workflows": ["krea2-turbo-t2i", "krea2-turbo-i2i"],
+     "files": {
+       "diffusion_models/krea2_turbo_fp8_scaled.safetensors": "diffusion_models/krea2_turbo_int8_convrot.safetensors",
+       "text_encoders/qwen3vl_4b_fp8_scaled.safetensors": "text_encoders/qwen3vl_4b_int8_convrot.safetensors"
+     }
+   }
+   ```
+
+   - `id`: lower case letters, digits and dashes. Two variants of one workflow have different ids.
+   - `files`: each workflow file (`folder/file`) and the file loaded in its place. Every listed workflow must have
+     every file on the left.
+   - `gpuGen`: the card generations the variant suits, by CUDA compute capability, both ends counted. Leave it out and
+     no card prefers the variant: a GPU runs it only when it lacks the workflow's own files.
+   - `vramGb` (optional): the variant's own graphics memory need, when it differs from the workflow's.
+   - Order: a workflow's variants go in the order of the file. The first one that suits a card and whose files it has
+     is the one it runs.
+3. Run `node scripts/comfy/build-requirements.mjs`. It writes the variants into `requirements.json` and stops when a
+   variant's new file is not a catalog file, has no pinned size and SHA-256, is in another model folder, or is not read
+   by each loader input that reads the old file in that workflow (the same loader input must read the new file in some
+   catalog workflow).
+
+A variant never adds a node, an input or a file outside the catalog's pins: the worker still loads only files it
+verified, and runs all its checks on the graph with the variant's files.
 
 ## 7. The rest of the studio
 

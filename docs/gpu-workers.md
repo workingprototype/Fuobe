@@ -436,8 +436,10 @@ A worker gets a job only when all of these are true, all in one SQLite transacti
   30 seconds;
 - its worker program speaks protocol 2 or later (an older one takes nothing until it is updated);
 - the job is in its pool, in a lane that the owner allows for it, after the lane's delay and `claim_after_ms`;
-- it has the workflow's files and packs (from its inventory) and enough VRAM. A workflow's need is its whole GB less
-  3%, because a card reports a little less than its size (a 32 GB card shows about 31.8 GiB);
+- it has the workflow's files and packs (from its inventory) and enough VRAM. The files are the workflow's own, or
+  every file of one of its model variants (see "Model variants" below), and the VRAM is that of the files it would run.
+  A workflow's need is its whole GB less 3%, because a card reports a little less than its size (a 32 GB card shows
+  about 31.8 GiB);
 - it verified every run-time file the job loads (see "Run-time files" below);
 - the retry rule allows it: a worker that lost or failed the job gets it again only when no other worker that can run
   the job was heard from in the last 10 minutes;
@@ -624,6 +626,39 @@ is. A process that has said nothing for 5 minutes no longer counts.
 An account's run needs a worker that takes this studio's job tickets now: protocol 3 or newer, built for this studio's
 catalog. While every worker that could run it is built from the catalog before the studio's update, Run is off and
 says the studio is busy, and the place in line counts no workers. The owner's own jobs still go to those workers.
+
+### Model variants
+
+A workflow of the catalog may have model variants: other files of the same models that it may load in place of some of
+its own (`workflows/comfyui/model-variants.json`, built into `requirements.json`; [adding-a-model.md](adding-a-model.md#model-variants)
+says how to add one). The best file format depends on the card. A card with fast int8 and no fp8 or FP4 hardware
+(Ampere, compute capability 8.0 to 8.6) runs int8 ConvRot files faster; a newer card keeps fp8 and NVFP4 files.
+
+- **Which workers qualify.** A worker may run the workflow when it verified every file of the workflow's own set, or
+  every file of one variant's set, and has the VRAM of that set. Part of a set is not enough.
+- **Which files a worker runs.** When a worker takes the job from the line, the studio picks for it, in this order: a
+  variant made for its card's generation (its beat's `gpuGen`) whose files it has, in the catalog's order; else the
+  workflow's own files, when it has them; else any other variant whose files it has. A worker that doesn't say its
+  card's generation gets the workflow's own files when it has them. A worker program older than protocol 5 gets the
+  workflow's own files only, and never a job it has only a variant's files for.
+- **What the job loads.** The owner's own job comes as its graph with the variant's files in its loader inputs: only an
+  input that reads a swapped file through that file's own loader changes. An account's job ticket names the variant
+  and its files (`variant: { id, files }`). The worker composes the graph from the ticket as always (and checks a
+  ticket made for another catalog against its fingerprint first), then writes in the variant as its own catalog
+  defines it. A ticket whose variant its catalog defines otherwise, or not at all, goes back in line for an updated
+  worker, at no cost to the run.
+- **The task keeps the variant** (`variant` in its extra facts), and the workers' timeline row for the claim says it. A
+  worker that lost track of its task gets the same files again. A job that goes back in line is chosen for again by
+  the next worker that takes it. A lane stays the workflow's own: a worker's times in a lane are its own, and it runs
+  the same files for that lane while its files and its card stay the same.
+- **Nothing outside the pins.** A variant only swaps a workflow's file for another catalog file in the same model folder,
+  with a pinned size and SHA-256, that the same loader input reads in some catalog workflow; the requirements build
+  stops otherwise. The worker still loads only files it verified, and every check below runs on the graph with the
+  variant's files.
+
+A person's own GPU counts a workflow as ready when its own files are there, or every file of one variant. A run there
+then loads the variant's files when the GPU check found them and not the workflow's own, so nobody downloads a file of
+the same model in another format.
 
 ### What the worker checks itself
 
@@ -987,10 +1022,12 @@ its target), at most once an hour each.
     without their query. Older studios ignore it.
   - `catalogVersion` and `ceiling` say the catalog its build composes job tickets for and what its PC may ever run
     (see "Job tickets and the PC's ceiling"). The facts it sends with its ComfyUI's add `gpuGen`, its GPU's
-    generation (compute capability), when nvidia-smi can say.
+    generation (compute capability, `nvidia-smi --query-gpu=compute_cap`), when nvidia-smi can say. The claim reads it
+    to choose a model variant; a worker that doesn't say gets the workflow's own files when it has them.
   - `protocol` is 2 for a worker that says which inputs it takes, makes clips and sound again, and keeps its ComfyUI
     behind the guard. It is 3 for a worker that also makes an account's pictures again (see "Pictures of an account's
-    run") and may have a CPU slot.
+    run") and may have a CPU slot, 4 for one that also checks a ticket's graph fingerprint, and 5 for one that also
+    composes a ticket that names a model variant. A worker older than 5 gets the workflow's own files only.
   - `cpuSlot` (optional) says its CPU slot and the finishing jobs it runs (`{ finishes: ["model3d", "path", "preview3d"] }`), and
     `cpuRunning` the task that slot works on, as `running` does for its GPU's. With no `cpuSlot`, it has none.
   - `held` (optional) names the jobs whose finished results the worker keeps on its disk. A pause now sends those
@@ -1014,8 +1051,10 @@ its target), at most once an hour each.
   library's pinned files, as `loras/<file>`), and hashes the list as it was sent, so its hash equals the worker's
   `inventoryHash`.
 - `POST /api/gpu/computer/claim`: the browser's claimed task plus
-  `{ lane, estMs, runLimitMs, stallMs, notAfter, attempt, models, class, workflowId }`. An account's job carries
-  `ticket` in place of `graph`, with its run and stall limits in it too. `class` is `owner` for the owner's own job,
+  `{ lane, estMs, runLimitMs, stallMs, notAfter, attempt, models, class, workflowId, variant? }`. An account's job carries
+  `ticket` in place of `graph`, with its run and stall limits in it too. `variant` names the model variant the job runs
+  with (absent: the workflow's own files); `models` lists the files it loads then. The owner's graph comes with the
+  variant's files in it, and a ticket carries `variant: { id, files }` (see "Model variants"). `class` is `owner` for the owner's own job,
   the only kind that comes with a graph. See "The run limit" above for `runLimitMs`. A worker treats a graph that
   names no class as the owner's own job only while the studio's beat answer names no catalog version (a studio older
   than job tickets, which sends no account's run to workers).
@@ -1108,7 +1147,9 @@ routes.
   `tests/worker-input-rules.test.ts`, `tests/worker-environment.test.ts`, `tests/worker-guard.test.ts`,
   `tests/worker-runner.test.ts`, `tests/worker-recovery.test.ts`, `tests/worker-parts.test.ts`,
   `tests/worker-turns.test.ts`, `tests/worker-turns-run.test.ts`, `tests/worker-update.test.ts`, `tests/cpu-slot.test.ts`,
-  `tests/worker-cpu-slot.test.ts`, `tests/fuobe-connect-nodes.test.ts`). The CPU slot tests run a CPU task while a GPU job runs, refuse a GLB that names
+  `tests/worker-cpu-slot.test.ts`, `tests/fuobe-connect-nodes.test.ts`, `tests/model-variants.test.ts`,
+  `tests/pool-model-variants.test.ts`). The model variant tests check the build's refusals, which files a worker gets
+  by its card and its files, the swapped graph and ticket, and an older worker program. The CPU slot tests run a CPU task while a GPU job runs, refuse a GLB that names
   an outside file on the worker, bring a turntable back with its GLB, check that an account's picture reaches its
   ComfyUI with no EXIF, and drop a preview over 64 KB. The turn tests use a fake port table, fake GPU
   counters and a fake lock file. With only local ComfyUI work on the GPU, the worker writes `siteWaiting` and claims
