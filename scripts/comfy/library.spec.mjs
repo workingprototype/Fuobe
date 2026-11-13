@@ -536,6 +536,7 @@ export const KNOWN_MODELS = {
   'flux2-dev-nvfp4-mixed.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/black-forest-labs/FLUX.2-dev-NVFP4/resolve/main/flux2-dev-nvfp4-mixed.safetensors' },
   'mistral_3_small_flux2_fp8.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors' },
   'flux1-dev-int8-convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/AX1Y2JP/FLUX.1-dev-INT8-ConvRot/resolve/main/flux1-dev-int8-convrot.safetensors' },
+  'ltx-2-19b-dev-fp4.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp4.safetensors' },
   'krea2_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors', variants: ['krea2_turbo_fp8_scaled.safetensors', 'krea2_turbo_bf16.safetensors'] },
   'qwen3vl_4b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors', variants: ['qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_bf16.safetensors'] },
   'krea2_style_reference.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/loras/krea2_style_reference.safetensors' },
@@ -1935,6 +1936,7 @@ export const SPEC = [
   },
   {
     id: 'ltx2-t2v',
+    optionalModels: ['ltx-2-19b-dev-fp4.safetensors'],
     title: 'LTX-2 Text to Video + Audio',
     capability: 't2v',
     export: 'video_ltx2_t2v',
@@ -1956,6 +1958,7 @@ export const SPEC = [
   },
   {
     id: 'ltx2-i2v',
+    optionalModels: ['ltx-2-19b-dev-fp4.safetensors'],
     title: 'LTX-2 Image to Video + Audio',
     capability: 'i2v',
     export: 'video_ltx2_i2v',

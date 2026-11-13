@@ -5512,6 +5512,13 @@
           "folder": "latent_upscale_models",
           "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors",
           "sizeGb": 1
+        },
+        {
+          "file": "ltx-2-19b-dev-fp4.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp4.safetensors",
+          "sizeGb": 19.99,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -5650,6 +5657,13 @@
           "folder": "latent_upscale_models",
           "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors",
           "sizeGb": 1
+        },
+        {
+          "file": "ltx-2-19b-dev-fp4.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp4.safetensors",
+          "sizeGb": 19.99,
+          "optional": true
         }
       ],
       "customNodes": [],

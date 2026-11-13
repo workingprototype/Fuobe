@@ -116,6 +116,20 @@
         "diffusion_models/flux1-dev.safetensors": "diffusion_models/flux1-dev-int8-convrot.safetensors",
         "text_encoders/t5xxl_fp16.safetensors": "text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors"
       }
+    },
+    {
+      "id": "fp4",
+      "gpuGen": {
+        "min": "8.0",
+        "max": "8.6"
+      },
+      "workflows": [
+        "ltx2-i2v",
+        "ltx2-t2v"
+      ],
+      "files": {
+        "checkpoints/ltx-2-19b-dev-fp8.safetensors": "checkpoints/ltx-2-19b-dev-fp4.safetensors"
+      }
     }
   ]
 }

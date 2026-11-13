@@ -1543,5 +1543,10 @@
   "revision": "01a17db182d52088b222d615ce54729fa090b378",
   "sizeBytes": 12339070170,
   "sha256": "6ce471dba256885b623f33697c80ceec42c19b2382a5ca022f7a84b4fdc70c4e"
+ },
+ "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp4.safetensors": {
+  "revision": "64f65d09e0b76c96202b5bc09997673184cf9b5d",
+  "sizeBytes": 19988416674,
+  "sha256": "08a28245d8412962a8f6a1437c7db4b07bd5c2acdb2b84f96793a9b7c8550751"
  }
 }
