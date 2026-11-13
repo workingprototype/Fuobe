@@ -266,7 +266,8 @@ export interface ToolReadiness {
   needs: Need[];
   have: Need[];
   downloadBytes: number;
-  vram: { needGb: number; haveGb?: number; fit: VramFit; apple?: boolean };
+  /** `stream`: short of VRAM, it runs with part of its weights streamed from system RAM (slower; fit "tight"). */
+  vram: { needGb: number; haveGb?: number; fit: VramFit; apple?: boolean; stream?: true };
   firstRun: string[];
   unvalidated: boolean;
   /** Files Fuobe can't see on this ComfyUI (they never block). */

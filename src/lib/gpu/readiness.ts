@@ -2,7 +2,8 @@ import { compareVersions, formatBytes, nameKey, splitKey, vramGb } from "./requi
 import { knownProblemNeed, knownProblems } from "./known-problems";
 import { fileChoices, pickFiles, type FileChoice } from "./model-variants";
 import { cardFits, GPU_NEED_TEXT, readCard, type GpuNeed } from "./rtx";
-import type { Badge, FileKey, GpuInventory, IndexFile, InventorySummary, Need, Readiness, RequirementIndex, ToolReadiness, ToolRef, VramFit } from "./types";
+import { streamFits } from "../lanes";
+import type { Badge, FileKey, GpuInventory, IndexFile, InventorySummary, Need, Readiness, RequirementIndex, StreamNeed, ToolReadiness, ToolRef, VramFit } from "./types";
 
 /**
  * What can run on a viewer's ComfyUI (SPEC §7, review items 9 and 15). Pure: the same code runs on the
@@ -167,7 +168,12 @@ export function gpuVramGb(inv: GpuInventory): number | undefined {
   return onCpu(inv) ? undefined : vramGb(inv.devices[0]?.vramTotal);
 }
 
-export function vramFit(needGb: number, inv: GpuInventory): ToolReadiness["vram"] {
+/**
+ * How the card holds a workflow of `needGb`. Short of VRAM, a workflow with a streaming need (`stream`,
+ * stream-needs.json) still runs when the card and the system RAM cover that need (src/lib/lanes.ts streamFits, the
+ * workers' rule): part of its weights stay in RAM, so it is "tight" (slower) with `stream`, never "no".
+ */
+export function vramFit(needGb: number, inv: GpuInventory, stream?: StreamNeed): ToolReadiness["vram"] {
   const d = inv.devices[0];
   const cpu = onCpu(inv);
   const haveGb = gpuVramGb(inv) ?? 0;
@@ -177,8 +183,12 @@ export function vramFit(needGb: number, inv: GpuInventory): ToolReadiness["vram"
   else if (haveGb >= needGb) fit = "fits";
   else if (haveGb >= 0.66 * needGb) fit = "tight";
   else fit = "no";
-  return { needGb, haveGb, fit, ...(apple && { apple: true }) };
+  const streams = (fit === "tight" || fit === "no") && !cpu && streamFits(stream, { vramBytes: d?.vramTotal, ramBytes: inv.ram?.total, dynamicVramOff: inv.comfy?.flags.dynamicVramOff });
+  if (streams) fit = "tight";
+  return { needGb, haveGb, fit, ...(apple && { apple: true }), ...(streams && { stream: true }) };
 }
+
+const FIT_RANK: Record<VramFit, number> = { any: 0, fits: 1, tight: 2, no: 3 };
 
 function fileNeed(key: FileKey, f: IndexFile, kind: "model" | "model-replace", ctx: ReadinessContext): Need {
   return {
@@ -214,7 +224,7 @@ export function workflowReadiness(id: string, inv: GpuInventory, idx: Requiremen
   if (!w || !inv.reachable) return base;
   // Its own files, or a model variant's that are all there.
   const files = filesHere(id, inv, idx) ?? { files: w.files, vramGb: w.vramGb };
-  const out: WorkflowReadiness = { ...base, state: "ready", firstRun: w.firstRun, unvalidated: !w.validated, vram: vramFit(files.vramGb, inv) };
+  const out: WorkflowReadiness = { ...base, state: "ready", firstRun: w.firstRun, unvalidated: !w.validated, vram: vramFit(files.vramGb, inv, w.stream) };
   if (w.isolated && ctx.computer) return { ...out, state: "unsupported", reason: "This one needs its own ComfyUI, so it can't run next to your other add-ons." };
   if (w.isolated && ctx.account) return { ...out, state: "unsupported", reason: "This one needs its own ComfyUI, so it can't run next to your other add-ons." };
   // The NVIDIA RTX Video nodes: only on an NVIDIA RTX card (frame generation: RTX 40 or later). A card the check can't
@@ -357,7 +367,10 @@ export function toolReadiness(
   out.needs = [...needs.values()];
   out.have = [...have.values()];
   out.downloadBytes = out.needs.filter((n) => n.kind === "model" || n.kind === "model-replace" || n.kind === "lora").reduce((a, n) => a + (n.sizeBytes ?? 0), 0);
-  out.vram = vramFit(needGb, inv);
+  // The hardest part's fit, at the most VRAM any part needs; slower with RAM streaming when each part short of VRAM streams.
+  const worst = parts.reduce((a, p) => (FIT_RANK[p.vram.fit] > FIT_RANK[a.fit] ? p.vram : a), parts[0].vram);
+  const streams = worst.fit === "tight" && parts.every((p) => FIT_RANK[p.vram.fit] < FIT_RANK.tight || p.vram.stream);
+  out.vram = { needGb, haveGb: worst.haveGb, fit: worst.fit, ...(worst.apple && { apple: true }), ...(streams && { stream: true }) };
   // A graph that needs an NVIDIA RTX card (no VRAM figure published) never reads "Runs on any computer".
   if (out.vram.fit === "any" && workflowIds.some((id) => idx.workflows[id]?.gpu)) out.vram = { ...out.vram, fit: "fits" };
   out.state = stateOf(out.needs, out.vram.fit);
@@ -399,7 +412,7 @@ export function summaryOf(inv: GpuInventory, idx: RequirementIndex): InventorySu
 
 /** The line under a chip or a board row: "1 download · 12.3 GB", "Needs 24 GB", "Ready". */
 export function stateLine(t: Pick<ToolReadiness, "state" | "needs" | "downloadBytes" | "vram" | "gpuNeed">): string {
-  if (t.state === "ready") return t.vram.fit === "any" ? "Runs on any computer" : t.vram.fit === "tight" ? "Ready · slow on your GPU" : "Ready";
+  if (t.state === "ready") return t.vram.fit === "any" ? "Runs on any computer" : t.vram.fit === "tight" ? (t.vram.stream ? "Ready · uses system RAM, slower" : "Ready · slow on your GPU") : "Ready";
   if (t.state === "gpu") return `Needs ${t.vram.needGb} GB`;
   if (t.state === "unsupported") return t.gpuNeed ? GPU_NEED_TEXT[t.gpuNeed] : "Needs a second ComfyUI";
   if (t.state === "unknown") return "Not checked";

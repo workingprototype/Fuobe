@@ -2,8 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildIndex, loadInputs } from "../scripts/comfy/build-requirements.mjs";
+import { parseArgv } from "@/lib/gpu/argv";
+import { emptyInventory } from "@/lib/gpu/gather";
+import { stateLine, toolReadiness, vramFit, workflowReadiness } from "@/lib/gpu/readiness";
 import { parseIndex } from "@/lib/gpu/requirements";
-import type { RequirementIndex } from "@/lib/gpu/types";
+import type { GpuInventory, RequirementIndex } from "@/lib/gpu/types";
 import { memoryFit, minVramBytesFor, streamFits } from "@/lib/lanes";
 import { statsFacts } from "@/lib/local-comfy";
 import { tempDir } from "./helpers/temp-dir";
@@ -12,7 +15,7 @@ import { tempDir } from "./helpers/temp-dir";
  * Streaming needs (workflows/comfyui/stream-needs.json): a workflow a card can't hold whole still runs on it with part of
  * its weights kept in system RAM and streamed to the card each step (ComfyUI's dynamic VRAM loading). The build checks
  * the file; a worker qualifies on memory with the workflow's VRAM, or with the streaming need's VRAM and RAM (3%
- * allowance on both, never with unknown RAM or dynamic VRAM off).
+ * allowance on both, never with unknown RAM or dynamic VRAM off); a person's own GPU reads the same rule.
  */
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -101,6 +104,56 @@ describe("the memory rule (memoryFit, streamFits)", () => {
     expect(stats(["main.py"]).dynamicVramOff).toBeUndefined();
     expect(stats(["main.py", "--disable-dynamic-vram"]).dynamicVramOff).toBe(true);
     expect(stats(["main.py", "--highvram"]).dynamicVramOff).toBe(true);
+  });
+});
+
+/** A person's ComfyUI with every file and node of the index, this card's VRAM and this RAM (none: not read). */
+function comfy(vramGb: number, ramGb?: number, argv: string[] = ["main.py"]): GpuInventory {
+  const inv = emptyInventory("server", 1);
+  inv.reachable = true;
+  inv.comfy = { version: "0.44.0", os: "posix", embeddedPython: false, deployEnv: "local-git", flags: parseArgv(argv) };
+  inv.devices = [{ name: "cuda:0 NVIDIA GeForce RTX 3080 : cudaMallocAsync", type: "cuda", index: 0, vramTotal: vramGb * GB, vramFree: 0 }];
+  if (ramGb) inv.ram = { total: ramGb * GB, free: 0 };
+  inv.manager = { api: "none" };
+  inv.nodes = { have: [], missing: [], total: 0, readAt: 1, how: "object_info" };
+  for (const folder of idx.folders) inv.models[folder] = { have: {}, total: 0 };
+  for (const f of Object.values(idx.files)) {
+    inv.models[f.folder] ??= { have: {}, total: 0 };
+    inv.models[f.folder].have[f.file] = f.sizeBytes;
+    for (const [cls, input] of f.loaders ?? []) (inv.combos[`${cls}.${input}`] ??= []).push(f.file);
+  }
+  return inv;
+}
+
+describe("a person's own GPU (readiness)", () => {
+  it("a smaller card with the RAM is ready, slower, in plain words", () => {
+    const r = workflowReadiness(H3, comfy(10, 31.9), idx, { account: true });
+    expect(r.state).toBe("ready");
+    expect(r.vram).toMatchObject({ needGb: 32, fit: "tight", stream: true });
+    const t = toolReadiness(`workflow:${H3}`, "H3 Image", [H3], [], comfy(10, 32), idx, { account: true });
+    expect(t.state).toBe("ready");
+    expect(t.vram.stream).toBe(true);
+    expect(stateLine(t)).toBe("Ready · uses system RAM, slower");
+  });
+
+  it("too little RAM, RAM not read, or dynamic VRAM off: it needs the bigger card, as before", () => {
+    expect(workflowReadiness(H3, comfy(10, 16), idx, { account: true }).state).toBe("gpu");
+    expect(workflowReadiness(H3, comfy(10), idx, { account: true }).state).toBe("gpu");
+    expect(workflowReadiness(H3, comfy(10, 64, ["main.py", "--disable-dynamic-vram"]), idx, { account: true }).state).toBe("gpu");
+    expect(workflowReadiness(H3, comfy(8, 64), idx, { account: true }).state).toBe("gpu");
+  });
+
+  it("a card that holds it whole says nothing of RAM; a workflow with no streaming need is as before", () => {
+    expect(vramFit(32, comfy(32, 64), { vramGb: 10, ramGb: 32 })).toEqual({ needGb: 32, haveGb: 32, fit: "fits" });
+    expect(vramFit(32, comfy(10, 64))).toEqual({ needGb: 32, haveGb: 10, fit: "no" });
+    expect(stateLine(toolReadiness(`workflow:${H3}`, "H3 Image", [H3], [], comfy(24, 16), idx, { account: true }))).toBe("Ready · slow on your GPU");
+  });
+
+  it("a tool whose other part can't stream needs the bigger card", () => {
+    const noStream = Object.keys(idx.workflows).find((id) => !idx.workflows[id].stream && idx.workflows[id].vramGb >= 24 && !idx.workflows[id].isolated && !idx.workflows[id].gpu)!;
+    const t = toolReadiness(`workflow:${H3}`, "Two", [H3, noStream], [], comfy(10, 64), idx, { account: true });
+    expect(t.state).toBe("gpu");
+    expect(t.vram.stream).toBeUndefined();
   });
 });
 
