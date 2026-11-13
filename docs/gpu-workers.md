@@ -871,7 +871,17 @@ takes about a second.
 
 - The worker checks after each start of its ComfyUI, and before each job that has `H3FaceTrackCrop` or
   `H3FaceSelect`. It checks only when its ComfyUI lists `H3FaceTrackCrop` and `PreviewAny`.
-- When a check fails, the worker starts its ComfyUI again and checks once more.
+- The check after a start comes before the worker's first claim: it takes no job until that check has passed or
+  given up. If a job was already in hand (its ComfyUI stopped during the job and started again), the worker does not
+  check under that job. It checks between jobs, once the job has ended.
+- The worker never starts its ComfyUI again under a job in hand. When the check before a face job fails, that job
+  goes back in line with its place kept, and the try does not count against it (give-back `self-check`). Then, with no
+  job in hand, the worker checks again before its next claim, and starts its ComfyUI again if that check fails too.
+- A check that times out while the GPU is busy is "not checked yet", not a fault of its ComfyUI. Busy means: its last
+  GPU job ended less than a minute ago, or its text slot answers a text job on the GPU. The worker does not start its
+  ComfyUI again and does not hold back face jobs. A face job in hand goes back in line the same way, and the worker
+  checks again between jobs once the GPU has settled.
+- When a check fails with no job in hand, the worker starts its ComfyUI again and checks once more.
 - When the second check fails too, the job goes back in line with its place kept, and the try does not count against
   it (give-back `self-check`). For 5 minutes after that, every face job it is given goes back in line the same way,
   without a check. Every other job goes on as usual: its ComfyUI keeps running. After the 5 minutes, the next face job

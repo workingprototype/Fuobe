@@ -70,6 +70,11 @@ const HOUR = 3_600_000;
 export const SELF_CHECK_RETRY_MS = 5_000;
 /** A face self-check that failed twice (once more after a restart of its ComfyUI): face jobs wait this long, then it checks again. */
 export const SELF_CHECK_PAUSE_MS = 5 * 60_000;
+/**
+ * A face self-check that times out less than this long after its last GPU job ended (or while its text slot answers on
+ * the GPU) only waited for a busy GPU: it is "not checked yet", never a fault of its ComfyUI.
+ */
+export const FACE_SETTLE_MS = 60_000;
 /** How long the last counters read that worked stands in for one that failed. */
 export const COUNTERS_REUSE_MS = 90_000;
 /** Busy readings in a row (5 s apart) that only the GPU's total decided, before they pause the worker. */
@@ -346,10 +351,17 @@ async function work(saved, deps, owner) {
   let comfyTrouble = null;
   let troubleAt = 0;
   // Its ComfyUI lists the nodes of its face detector's self-check (self-check.mjs), and how many checks it ran.
-  let faceNodes = false;
+  let faceNodes = !!deps.faceNodes;
   let faceChecks = 0;
   // When a face self-check last failed twice: face jobs go back in line until SELF_CHECK_PAUSE_MS later; other jobs go on.
   let facesDownAt = null;
+  // A face check it owes, done between jobs before its next claim: "check" (not checked yet: a job was in hand after a
+  // start, or a check timed out on a busy GPU; once FACE_SETTLE_MS after its last GPU job) or "restart" (a check before
+  // a face job failed: that job went back in line, and its ComfyUI may start again now that no job is in hand).
+  let facesOwed = null;
+  // When its last GPU job that reached its ComfyUI ended, and whether the job in hand passed its checks (so it runs).
+  let gpuJobEndedAt = -Infinity;
+  let jobVetted = false;
   let answer = null;
   let inv = { files: [], nodePacks: [], media: ffmpeg ? ["image", "video", "audio"] : ["image"] };
   let packs = [];
@@ -512,7 +524,7 @@ async function work(saved, deps, owner) {
       return;
     }
     if (!info || typeof info !== "object" || !Object.keys(info).length) return;
-    faceNodes = !!info.H3FaceTrackCrop && !!info.PreviewAny;
+    faceNodes = deps.faceNodes ?? (!!info.H3FaceTrackCrop && !!info.PreviewAny);
     const fresh = loadedPacks(packs, index, info);
     for (const [name, l] of Object.entries(fresh)) {
       if (!l.missing.length || JSON.stringify(loaded[name]) === JSON.stringify(l)) continue;
@@ -526,22 +538,46 @@ async function work(saved, deps, owner) {
     inv = { ...inv, nodePacks: packsAsSeen(packs, loaded) };
     invHash = inventoryHash(inv);
   }
+  // Its GPU is busy for a face check: its last GPU job ended less than FACE_SETTLE_MS ago, or its text slot answers there.
+  const faceSettleMs = deps.faceSettleMs ?? FACE_SETTLE_MS;
+  const faceGpuBusy = () => now() - gpuJobEndedAt < faceSettleMs || (!!text?.busy && text.server?.device === "gpu");
   /**
    * Its face detector's self-check (self-check.mjs) on its GPU ComfyUI, while that ComfyUI has the face nodes. A failure
    * starts its ComfyUI again and checks once more; a second failure holds back face jobs only (they go back in line,
    * "self-check") for SELF_CHECK_PAUSE_MS (5 minutes), while every other job goes on. True when it passed, or when there
    * is nothing to check.
+   *
+   * Its ComfyUI is never started again under a GPU job in hand: after a start with a job in hand it checks once that job
+   * has ended; before a face job, a failure gives that job back and its ComfyUI starts again between jobs. A check that
+   * times out on a busy GPU (FACE_SETTLE_MS) is "not checked yet": checked again between jobs, never held against it.
+   * `o.start`: the check after a start; `o.job`: the check before a job in hand (false: that job goes back in line).
    */
-  async function checkFaces(when) {
+  async function checkFaces(when, o = {}) {
     if (!faceNodes || !comfy.ready) return true;
     if (facesDownAt !== null) {
       if (now() - facesDownAt < SELF_CHECK_PAUSE_MS) return false;
       facesDownAt = null;
     }
-    const once = () => runSelfCheck((url, init) => comfy.fetch(url, init), comfy.base, { n: ++faceChecks, now, sleep });
+    const inHand = () => busyJob && jobUsesGpu;
+    if (o.start && inHand()) {
+      facesOwed ??= "check";
+      log(`Its face check ${when} waits: a job is in hand, and it checks once that job has ended.`);
+      return true;
+    }
+    const notYet = () => {
+      facesOwed ??= "check";
+      log(`Its face check ${when} timed out while its GPU was busy: not checked yet, and it checks again between jobs${o.job ? " (this face job goes back in line)" : ""}.`);
+      return !o.job;
+    };
+    const passed = () => {
+      facesOwed = null;
+      return true;
+    };
+    const once = () => (deps.selfCheck ?? runSelfCheck)((url, init) => comfy.fetch(url, init), comfy.base, { n: ++faceChecks, now, sleep });
     const read = (r) => `${r.height === null ? "no face" : `${Math.round(r.height)} px`} (${r.why}${r.detail ? `: ${r.detail}` : ""})`;
     let first = await once();
-    if (first.ok) return true;
+    if (first.ok) return passed();
+    if (first.why === "timeout" && faceGpuBusy()) return notYet();
     // A check that didn't run to the end (its graph failed, its photo didn't upload, it timed out) is often a ComfyUI
     // that has only just started: one more try after a few seconds, before it is started again.
     if (first.why !== "height" && first.why !== "no-report") {
@@ -550,8 +586,15 @@ async function work(saved, deps, owner) {
       first = await once();
       if (first.ok) {
         log(`Its face check passed on the second try (${Math.round(first.height)} px).`);
-        return true;
+        return passed();
       }
+      if (first.why === "timeout" && faceGpuBusy()) return notYet();
+    }
+    // A job in hand (the face job this check is for): it goes back in line, and its ComfyUI starts again between jobs.
+    if (inHand()) {
+      facesOwed = "restart";
+      log(`Its face check ${when} read ${read(first)}: this job goes back in line, and its ComfyUI starts again once no job is in hand.`);
+      return false;
     }
     log(`Its face check ${when} read ${read(first)}: starting its ComfyUI again.`);
     // While it starts again, the loop starts no ComfyUI of its own (a start under way already holds `starting`).
@@ -574,8 +617,9 @@ async function work(saved, deps, owner) {
     const second = comfy.ready ? await once() : { ok: false, height: null, why: "no-comfy" };
     if (second.ok) {
       log(`Its face check passed after the restart (${Math.round(second.height)} px).`);
-      return true;
+      return passed();
     }
+    facesOwed = null;
     facesDownAt = now();
     log(`Its face check failed again after the restart (${second.why}${second.detail ? `: ${second.detail}` : ""}): face jobs go back in line for ${Math.round(SELF_CHECK_PAUSE_MS / 60_000)} minutes, then it checks again first; other jobs go on.`);
     return false;
@@ -708,7 +752,8 @@ async function work(saved, deps, owner) {
       log(`Refused job ${t.id}: ${problem.reason} at node ${problem.node}${problem.cls ? ` (${problem.cls}${problem.input ? `.${problem.input}` : ""})` : ""}.`);
       return problem.reason;
     }
-    if (o.faces && detectsFaces(t.graph) && !(await checkFaces("before a face job"))) return { giveBack: "self-check" };
+    if (o.faces && detectsFaces(t.graph) && !(await checkFaces("before a face job", { job: true }))) return { giveBack: "self-check" };
+    if (o.faces) jobVetted = true;
     return null;
   }
 
@@ -1019,6 +1064,7 @@ async function work(saved, deps, owner) {
   const take = (o) => {
     busyJob = true;
     jobUsesGpu = !o?.onlyHeld;
+    jobVetted = false;
     // Other programs use the PC's memory (its RAM guard): a claim prefers no job that streams from RAM.
     job = runner
       .claimAndRun(!o?.onlyHeld && ramOn && ramWatch.over ? { ...o, noStream: true } : o)
@@ -1029,6 +1075,9 @@ async function work(saved, deps, owner) {
       })
       .catch((e) => log(comfy.task ? `A job stopped: ${failure(e)}` : `It can't ask the studio for a job: ${failure(e)}`))
       .finally(() => {
+        // A job that went to its ComfyUI: a face check just after it may still meet a busy GPU (FACE_SETTLE_MS).
+        if (jobVetted) gpuJobEndedAt = now();
+        jobVetted = false;
         busyJob = false;
         jobUsesGpu = false;
         comfy.task = null;
@@ -1320,7 +1369,8 @@ async function work(saved, deps, owner) {
                 { signal: stopStarts.signal },
               )
               .then(() => readLoadedNodes())
-              .then(() => checkFaces("after its start"))
+              // Its face check comes before its first claim: no claim while `starting` holds.
+              .then(() => checkFaces("after its start", { start: true }))
               .catch((e) => {
                 if (stopStarts.signal.aborted) return;
                 if (e instanceof PortBusy) {
@@ -1337,7 +1387,13 @@ async function work(saved, deps, owner) {
               .finally(() => (starting = null));
           }
         }
-        if (comfy.ready && answer?.runner && !busyJob && !holdBack && !heldFirst && claimDue(t, gpuMissedAt, siteOf(answer).claimable ?? 0, idleClaimMs)) take();
+        // A face check it owes, between jobs and before its next claim (it holds `starting`, so no claim meanwhile).
+        if (facesOwed && facesDownAt === null && comfy.ready && !starting && !busyJob && (facesOwed === "restart" || !faceGpuBusy())) {
+          starting = checkFaces("between jobs")
+            .catch((e) => log(`Its face check between jobs didn't run: ${e.message}`))
+            .finally(() => (starting = null));
+        }
+        if (comfy.ready && !starting && answer?.runner && !busyJob && !holdBack && !heldFirst && claimDue(t, gpuMissedAt, siteOf(answer).claimable ?? 0, idleClaimMs)) take();
       } else if (comfy.alive() && (stopNow || !busyJob)) {
         log("Stopping its own ComfyUI (paused).");
         await comfy.stop();
@@ -1386,7 +1442,7 @@ async function work(saved, deps, owner) {
           if (updating) why = "updating";
           else if ((busyJob && jobUsesGpu) || !mayWork() || !answer?.runner) why = null;
           else if (heldFirst || busyJob) why = "sending-kept";
-          else if (!comfy.ready) why = "starting-comfy";
+          else if (!comfy.ready || starting) why = "starting-comfy";
           else if (turn.waitForYield) why = "waiting-for-yield";
           else if (gpu.busyInARow > 0) why = "gpu-check";
           else if (holdBack) why = "local-work";
