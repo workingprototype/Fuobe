@@ -43,6 +43,19 @@ export interface HostedQuote {
   withoutLoras?: true;
 }
 
+/**
+ * A line of the balance (the service's words): a label and its words, and when the service sends them, a bar (0-100) in a
+ * tone, a note under it and a picture (a path on this site).
+ */
+export interface BalanceRow {
+  label: string;
+  text: string;
+  bar?: number;
+  tone?: "normal" | "warn" | "full" | "calm";
+  note?: string;
+  image?: string;
+}
+
 /** The billing service's words for an account's balance (the top bar's chip and the account menu). */
 export interface HostedBalance {
   amount: number;
@@ -50,7 +63,7 @@ export interface HostedBalance {
   text: string;
   sub?: string;
   refillAt?: number | null;
-  detail: { label: string; text: string }[];
+  detail: BalanceRow[];
   action?: BillingAction;
   offer?: BillingOffer;
 }

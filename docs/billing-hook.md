@@ -250,9 +250,13 @@ answers again.
 | `POST /v1/release` | `{ holdId, reason: "not-created" }` or `{ requestId, reason: "not-created" }` | `{ ok: true }` |
 | `POST /v1/settle` | `{ holdId, generationId, rows, status: "succeeded", final: { outputs, megapixels, seconds }, providerUsd, gpuMs, device, reachedProvider }` | `{ ok: true, charged }` |
 | `POST /v1/refund` | `{ holdId, generationId, rows, status: "failed" \| "canceled" \| "hidden" \| "unchecked", reason, reachedProvider, gpuMs, device }` | `{ ok: true, text }` |
-| `GET /v1/balance` | | `{ amount, chip, text, sub?, refillAt?, detail: { label, text }[], action?, offer? }` |
+| `GET /v1/balance` | | `{ amount, chip, text, sub?, refillAt?, detail: { label, text, bar?, tone?, note?, image? }[], action?, offer? }` |
 | `POST /v1/account-event` | `{ event: "created" \| "verified" \| "signed-in" \| "deleted", account: AccountFacts }` | `{ ok: true }` |
 | `POST /v1/interest` | `{ account, key }` | `{ ok: true, text }` |
+
+The balance menu shows each `detail` line as its `label` and `text`. A line can also carry `bar` (0 to 100, drawn as a
+bar), `tone` (`normal`, `warn`, `full` or `calm`: the bar's and the words' colour), `note` (a smaller line under it) and
+`image` (a picture, only a path on this site, such as `/_fuobe/...`). A line with none of these is one row, as before.
 
 The price check before Run shows the quote's `text` (and `sub`) as they are. Under the toolbar (and in the price's
 tooltip) it shows where a new run would stand in line and the wait, about: the quote's `etaS`, else the line's own

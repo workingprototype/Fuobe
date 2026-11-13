@@ -16,7 +16,7 @@ import { ownGpuOf, signInHref, useEngineMode, useHydrated, useStatus, useViewer,
 import { placeholdersOn } from "@/lib/demo-mode";
 import { deviceLabel } from "@/lib/gpu/readiness";
 import { shortState } from "@/lib/diagnose";
-import { safeLink, useInterest } from "@/lib/hosted";
+import { safeLink, useInterest, type BalanceRow } from "@/lib/hosted";
 import type { ViewerKind } from "@/lib/nav-model";
 import { barRuns, type BarRuns, type RunOnPick } from "@/lib/run-place";
 import { useSetRunOn } from "@/lib/run-on";
@@ -143,6 +143,43 @@ export function refillWords(at: number, now = Date.now()): string {
   return h >= 1 ? `refills in ${h} h` : `refills in ${Math.max(1, Math.round(ms / 60_000))} min`;
 }
 
+const TONE_BAR: Record<NonNullable<BalanceRow["tone"]>, string> = { normal: "bg-primary", warn: "bg-warning", full: "bg-destructive", calm: "bg-primary/50" };
+const TONE_TEXT: Record<NonNullable<BalanceRow["tone"]>, string> = { normal: "text-muted-foreground", warn: "font-medium text-warning", full: "font-medium text-destructive", calm: "font-medium text-primary" };
+
+/**
+ * A line of the balance menu: the label and its words; with a bar, a note or a picture, a small block (the bar in its
+ * tone, the note under it, the picture only from this site).
+ */
+function BalanceLine({ row }: { row: BalanceRow }) {
+  const bar = typeof row.bar === "number" && Number.isFinite(row.bar) ? Math.min(100, Math.max(0, row.bar)) : null;
+  const image = row.image && row.image.startsWith("/") && !row.image.startsWith("//") ? row.image : null;
+  const tone = row.tone && row.tone in TONE_BAR ? row.tone : "normal";
+  if (bar === null && !image && !row.note) {
+    return (
+      <div className="flex justify-between gap-3 px-2.5 py-1 text-[12px]">
+        <span className="text-muted-foreground">{row.label}</span>
+        <span className="text-right">{row.text}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1.5 px-2.5 py-1.5 text-[12px]">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="font-medium text-foreground">{row.label}</span>
+        <span className={cn("text-right tabular-nums", TONE_TEXT[tone])}>{row.text}</span>
+      </div>
+      {bar !== null && (
+        <div role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={bar} aria-label={`${row.label}: ${row.text}`} className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className={cn("h-full rounded-full motion-safe:transition-[width] motion-safe:duration-500", TONE_BAR[tone])} style={{ width: `${bar > 0 ? Math.max(3, bar) : 0}%` }} />
+        </div>
+      )}
+      {/* eslint-disable-next-line @next/next/no-img-element -- a small picture the service sends, a path on this site */}
+      {image && <img src={image} alt="" width={240} height={150} decoding="async" draggable={false} className="h-auto w-full rounded-lg" />}
+      {row.note && <span className="text-[11.5px] leading-snug text-muted-foreground">{row.note}</span>}
+    </div>
+  );
+}
+
 /**
  * The balance's menu items (a studio with a billing service, src/server/billing.ts): the service's own words for what
  * the account has left, its detail lines, its links, its offer, and the way to run for free on one's own GPU or keys.
@@ -156,10 +193,7 @@ function BalanceItems({ viewer, runs }: { viewer: Viewer; runs?: BarRuns }) {
       {runs && <RunsChoice viewer={viewer} runs={runs} />}
       <DropdownMenuLabel className="px-2.5 text-[12px] font-normal text-muted-foreground">{b.text}</DropdownMenuLabel>
       {b.detail.map((d, i) => (
-        <div key={i} className="flex justify-between gap-3 px-2.5 py-1 text-[12px]">
-          <span className="text-muted-foreground">{d.label}</span>
-          <span className="text-right">{d.text}</span>
-        </div>
+        <BalanceLine key={i} row={d} />
       ))}
       <DropdownMenuSeparator className="mx-2.5 my-1.5" />
       {action && b.action && (

@@ -249,13 +249,26 @@ export interface ReadyCard extends CardLook {
   action?: Action;
 }
 
+/**
+ * A line of the balance (the service's words): a label and its words, and when the service sends them, a bar (0-100) in a
+ * tone, a note under it and a picture (a path on this site).
+ */
+export interface BalanceRow {
+  label: string;
+  text: string;
+  bar?: number;
+  tone?: "normal" | "warn" | "full" | "calm";
+  note?: string;
+  image?: string;
+}
+
 export interface Balance {
   amount: number;
   chip: string;
   text: string;
   sub?: string;
   refillAt?: number | null;
-  detail: { label: string; text: string }[];
+  detail: BalanceRow[];
   action?: Action;
   offer?: Offer;
 }
