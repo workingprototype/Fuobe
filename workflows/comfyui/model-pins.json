@@ -1533,5 +1533,10 @@
   "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5",
   "sizeBytes": 6201001296,
   "sha256": "be517ebd47c912a5626a588e1aeea43e6be4a43c0cdcd2b48a2a780d9f358635"
+ },
+ "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors": {
+  "revision": "f68ace85e60b4a02a323e394253731947657b7d2",
+  "sizeBytes": 20499083752,
+  "sha256": "638402843782296122f42f2ff557a63a9535c4fbc3f6978308042c8d0f4012b4"
  }
 }

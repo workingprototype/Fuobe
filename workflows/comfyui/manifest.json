@@ -2090,6 +2090,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
           "sizeGb": 0.85
+        },
+        {
+          "file": "qwen_image_edit_2509_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors",
+          "sizeGb": 20.5,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -10281,6 +10288,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
           "sizeGb": 0.85
+        },
+        {
+          "file": "qwen_image_edit_2509_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors",
+          "sizeGb": 20.5,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -10390,6 +10404,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
           "sizeGb": 0.85
+        },
+        {
+          "file": "qwen_image_edit_2509_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors",
+          "sizeGb": 20.5,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -10505,6 +10526,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
           "sizeGb": 0.85
+        },
+        {
+          "file": "qwen_image_edit_2509_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors",
+          "sizeGb": 20.5,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -11814,6 +11842,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
           "sizeGb": 0.85
+        },
+        {
+          "file": "qwen_image_edit_2509_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors",
+          "sizeGb": 20.5,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -22270,6 +22305,13 @@
           "folder": "loras",
           "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
           "sizeGb": 0.85
+        },
+        {
+          "file": "qwen_image_edit_2509_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors",
+          "sizeGb": 20.5,
+          "optional": true
         }
       ],
       "customNodes": [],

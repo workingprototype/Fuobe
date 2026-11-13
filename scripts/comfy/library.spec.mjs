@@ -438,6 +438,7 @@ export const KNOWN_MODELS = {
   'wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors' },
   'wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors' },
   'qwen_image_edit_2509_fp8_e4m3fn.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors' },
+  'qwen_image_edit_2509_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors' },
   'qwen_2.5_vl_7b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors' },
   'qwen_image_vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors' },
   'Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors' },
@@ -1340,6 +1341,7 @@ export const SPEC = [
   },
   {
     id: 'qwen-image-edit-2509',
+    optionalModels: ['qwen_image_edit_2509_int8_convrot.safetensors'],
     title: 'Qwen-Image-Edit 2509 (Lightning 4-step)',
     capability: 'edit',
     export: 'image_qwen_image_edit_2509',
@@ -2978,6 +2980,7 @@ export const SPEC = [
   },
   {
     id: 'relight-qwen-edit-2509',
+    optionalModels: ['qwen_image_edit_2509_int8_convrot.safetensors'],
     title: 'Qwen-Image-Edit 2509 Relight (prompted lighting)',
     capability: 'edit',
     handBuilt: 'hand-built/relight-qwen-edit-2509.json',
@@ -3000,6 +3003,7 @@ export const SPEC = [
   },
   {
     id: 'qwen-image-edit-2509-angles',
+    optionalModels: ['qwen_image_edit_2509_int8_convrot.safetensors'],
     title: 'Qwen-Image-Edit 2509 Multiple Angles (Fuobe Angles: dx8152 LoRA + Qwen-Image-Lightning)',
     capability: 'edit',
     handBuilt: 'hand-built/qwen-image-edit-2509-angles.json',
@@ -3024,6 +3028,7 @@ export const SPEC = [
   },
   {
     id: 'relight-qwen-edit-2509-reference',
+    optionalModels: ['qwen_image_edit_2509_int8_convrot.safetensors'],
     title: 'Qwen-Image-Edit 2509 Relight from Reference (light migration)',
     capability: 'edit',
     handBuilt: 'hand-built/relight-qwen-edit-2509-reference.json',
@@ -3153,6 +3158,7 @@ export const SPEC = [
   // ---- storyboard ----------------------------------------------------------
   {
     id: 'storyboard-qwen-edit-2509-next-scene',
+    optionalModels: ['qwen_image_edit_2509_int8_convrot.safetensors'],
     title: 'Storyboard Next Scene (Qwen-Image-Edit 2509 + next-scene LoRA)',
     capability: 'edit',
     handBuilt: 'hand-built/storyboard-qwen-edit-2509-next-scene.json',
@@ -5102,6 +5108,7 @@ export const SPEC = [
   },
   {
     id: 'product-shot-qwen-edit-2509',
+    optionalModels: ['qwen_image_edit_2509_int8_convrot.safetensors'],
     title: 'Product shot: cut out (BiRefNet), put on white, relit into a scene (Qwen-Image-Edit 2509 + White_to_Scene LoRA)',
     capability: 'edit',
     handBuilt: 'hand-built/product-shot-qwen-edit-2509.json',

@@ -84,6 +84,24 @@
       "files": {
         "diffusion_models/z_image_turbo_bf16.safetensors": "diffusion_models/z_image_turbo_int8_convrot.safetensors"
       }
+    },
+    {
+      "id": "int8",
+      "gpuGen": {
+        "min": "8.0",
+        "max": "8.6"
+      },
+      "workflows": [
+        "product-shot-qwen-edit-2509",
+        "qwen-image-edit-2509",
+        "qwen-image-edit-2509-angles",
+        "relight-qwen-edit-2509",
+        "relight-qwen-edit-2509-reference",
+        "storyboard-qwen-edit-2509-next-scene"
+      ],
+      "files": {
+        "diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors": "diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors"
+      }
     }
   ]
 }
