@@ -37,6 +37,8 @@ interface WorkerView {
   autoResume: boolean | null;
   hours: Hours | null;
   allow: Record<string, { delayMs: number }>;
+  /** Its pick order: above 0, it gets first pick of the jobs it can run while it is free (a server from before sends none). */
+  pickOrder?: number;
   /** The lanes it can run every workflow of. */
   lanes: string[];
   /** The lanes it can run only some workflows of (a server from before sends none). */
@@ -376,6 +378,23 @@ function WorkerCard({ w, lanes, onToken }: { w: WorkerView; lanes: Lane[]; onTok
           </span>
         </span>
       </label>
+      {w.pickOrder !== undefined && (
+        <label className="flex items-start gap-2 text-[13px]">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 accent-[var(--primary)]"
+            checked={w.pickOrder > 0}
+            disabled={patch.isPending}
+            onChange={(e) => patch.mutate({ pickOrder: e.target.checked ? 1 : 0 })}
+          />
+          <span>
+            Picks first
+            <span className="block text-[12px] text-muted-foreground">
+              This worker gets a job before the others when it&apos;s free and can run it. When it&apos;s off, paused, busy or outside its hours, another worker takes the job at once.
+            </span>
+          </span>
+        </label>
+      )}
       <HoursEditor w={w} onSave={(hours) => patch.mutate({ hours })} />
       <LanesEditor key={JSON.stringify(w.allow)} w={w} lanes={lanes} onSave={(allow) => patch.mutate({ allow })} />
       <div className="flex flex-wrap gap-1.5 border-t pt-2">
