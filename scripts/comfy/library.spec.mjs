@@ -519,6 +519,7 @@ export const KNOWN_MODELS = {
   'flux2-vae_small.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/MOSS-Image/resolve/530a4c94f92c35ef6818b1b035a983fe9dcf5f54/vae/flux2-vae_small.safetensors' },
   'moss_image_sft_8stepdmd_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Spectrallic/MOSS-Image-SFT-8step-DMD-int8-convrot/resolve/8fdeb392c6322418687fc2519a7958c954497a22/moss_image_sft_8stepdmd_int8_convrot.safetensors' },
   'z_image_turbo_bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
+  'z_image_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors' },
   'qwen_3_4b.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors' },
   'ae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors' },
   'Z-Image-Turbo-Fun-Controlnet-Union.safetensors': { folder: 'model_patches', url: 'https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors' },
@@ -1144,6 +1145,7 @@ export const SPEC = [
   },
   {
     id: 'z-image-turbo-t2i',
+    optionalModels: ['z_image_turbo_int8_convrot.safetensors'],
     title: 'Z-Image Turbo Text to Image',
     capability: 't2i',
     export: 'image_z_image_turbo',
@@ -3637,6 +3639,7 @@ export const SPEC = [
   // ---- Soul HEX: palette-conditioned generation -------------------------------
   {
     id: 'palette-zimage-hex',
+    optionalModels: ['z_image_turbo_int8_convrot.safetensors'],
     title: 'Soul HEX: Z-Image Turbo with the hex palette in the prompt + ColorTransfer lock to a swatch',
     capability: 'palette',
     handBuilt: 'hand-built/palette-zimage-hex.json',
@@ -3658,6 +3661,7 @@ export const SPEC = [
   // ---- Fuobe Soul (Originals O2): restyle a picture with a look ----------------------
   {
     id: 'z-image-turbo-i2i',
+    optionalModels: ['z_image_turbo_int8_convrot.safetensors'],
     title: 'Z-Image Turbo image to image (Fuobe Soul edit: the look and its LoRAs on your picture)',
     capability: 'edit',
     handBuilt: 'hand-built/z-image-turbo-i2i.json',
@@ -4451,6 +4455,7 @@ export const SPEC = [
   },
   {
     id: 'mixed-media-zimage-frames',
+    optionalModels: ['z_image_turbo_int8_convrot.safetensors'],
     title: 'Mixed Media: per-frame stylisation at 4-24 fps (Z-Image Turbo img2img + Fun Union ControlNet canny)',
     capability: 'v2v',
     handBuilt: 'hand-built/mixed-media-zimage-frames.json',
@@ -5019,6 +5024,7 @@ export const SPEC = [
   // ---- Cinema Studio grid and Soul Cast -------------------------------------------
   {
     id: 'grid-zimage-contact-sheet',
+    optionalModels: ['z_image_turbo_int8_convrot.safetensors'],
     title: 'Image grid: one Z-Image Turbo contact sheet (2x2 / 3x3 / 4x4) + its tiles',
     capability: 'image-grid',
     handBuilt: 'hand-built/grid-zimage-contact-sheet.json',
@@ -5041,6 +5047,7 @@ export const SPEC = [
   },
   {
     id: 'soul-cast-sheet-zimage',
+    optionalModels: ['z_image_turbo_int8_convrot.safetensors'],
     title: 'Soul Cast: Z-Image Turbo character turnaround sheet (front, three-quarter, profile, back)',
     capability: 'character-sheet',
     handBuilt: 'hand-built/soul-cast-sheet-zimage.json',

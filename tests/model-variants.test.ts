@@ -44,7 +44,7 @@ describe("the catalog's variants (build-requirements.mjs)", () => {
     // The Krea 2 workflows that load the fp8 diffusion file all carry it.
     for (const id of ["krea2-edit-general", "krea2-inpaint", "krea2-turbo-i2i"]) expect(idx.workflows[id].variants?.map((v) => v.id), id).toEqual(["int8"]);
     // A workflow with none keeps no field.
-    expect("variants" in idx.workflows["z-image-turbo-t2i"]).toBe(false);
+    expect("variants" in idx.workflows["sdxl-t2i"]).toBe(false);
     expect("variants" in idx.workflows["ideogram4-t2i"]).toBe(false);
   });
 
@@ -140,8 +140,8 @@ describe("which files a GPU runs (pickFiles)", () => {
     expect(choices[1].files.sort()).toEqual([INT8, TE_INT8, VAE].sort());
     expect(choices[1].vramGb).toBe(idx.workflows[KREA].vramGb);
     expect(hasVariants(idx, KREA)).toBe(true);
-    expect(hasVariants(idx, "z-image-turbo-t2i")).toBe(false);
-    expect(fileChoices(idx, "z-image-turbo-t2i").map((c) => c.variant)).toEqual([null]);
+    expect(hasVariants(idx, "sdxl-t2i")).toBe(false);
+    expect(fileChoices(idx, "sdxl-t2i").map((c) => c.variant)).toEqual([null]);
   });
 
   it("a card of the variant's generation runs the variant when it has its files; another card runs the workflow's own", () => {

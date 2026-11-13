@@ -1038,6 +1038,13 @@
           "folder": "text_encoders",
           "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
           "sizeGb": 8.04
+        },
+        {
+          "file": "z_image_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+          "sizeGb": 6.2,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -13683,6 +13690,13 @@
           "folder": "vae",
           "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
           "sizeGb": 0.34
+        },
+        {
+          "file": "z_image_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+          "sizeGb": 6.2,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -13782,6 +13796,13 @@
           "folder": "vae",
           "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
           "sizeGb": 0.34
+        },
+        {
+          "file": "z_image_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+          "sizeGb": 6.2,
+          "optional": true
         }
       ],
       "customNodes": [],
@@ -19127,6 +19148,13 @@
           "folder": "model_patches",
           "url": "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors",
           "sizeGb": 3.1
+        },
+        {
+          "file": "z_image_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+          "sizeGb": 6.2,
+          "optional": true
         }
       ],
       "customNodes": [
@@ -21792,6 +21820,13 @@
           "folder": "vae",
           "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
           "sizeGb": 0.34
+        },
+        {
+          "file": "z_image_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+          "sizeGb": 6.2,
+          "optional": true
         }
       ],
       "customNodes": [
@@ -21913,6 +21948,13 @@
           "folder": "vae",
           "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
           "sizeGb": 0.34
+        },
+        {
+          "file": "z_image_turbo_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+          "sizeGb": 6.2,
+          "optional": true
         }
       ],
       "customNodes": [

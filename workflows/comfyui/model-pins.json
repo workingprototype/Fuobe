@@ -1528,5 +1528,10 @@
   "revision": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7",
   "sizeBytes": 18034640095,
   "sha256": "e3467b7d912a234fb929cdf215dc08efdb011810b44bc21081c4234cc75b370e"
+ },
+ "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors": {
+  "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5",
+  "sizeBytes": 6201001296,
+  "sha256": "be517ebd47c912a5626a588e1aeea43e6be4a43c0cdcd2b48a2a780d9f358635"
  }
 }

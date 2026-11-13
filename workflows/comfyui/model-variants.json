@@ -66,6 +66,24 @@
         "diffusion_models/flux2_dev_fp8mixed.safetensors": "diffusion_models/flux2-dev-nvfp4-mixed.safetensors",
         "text_encoders/mistral_3_small_flux2_bf16.safetensors": "text_encoders/mistral_3_small_flux2_fp8.safetensors"
       }
+    },
+    {
+      "id": "int8",
+      "gpuGen": {
+        "min": "8.0",
+        "max": "8.6"
+      },
+      "workflows": [
+        "grid-zimage-contact-sheet",
+        "mixed-media-zimage-frames",
+        "palette-zimage-hex",
+        "soul-cast-sheet-zimage",
+        "z-image-turbo-i2i",
+        "z-image-turbo-t2i"
+      ],
+      "files": {
+        "diffusion_models/z_image_turbo_bf16.safetensors": "diffusion_models/z_image_turbo_int8_convrot.safetensors"
+      }
     }
   ]
 }
