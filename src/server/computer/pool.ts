@@ -3,7 +3,7 @@ import { ENGINE_WORDS } from "@/lib/engine-error";
 import crypto from "node:crypto";
 import { FINISH_KINDS, type FinishTicket } from "@/lib/finish-ticket";
 import { ceilingProblem, cleanCeiling, insideCeiling, lanesInside, type Ceiling } from "@/lib/job-ticket";
-import { allLanes, filesBytes, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, memoryFit, needsOf, packKey, partLanes, streamFits, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs, type StreamRule } from "@/lib/lanes";
+import { allLanes, filesBytes, hasFiles, laneLabel, lanesFor, MEDIA_KINDS, memoryFit, minVramBytesFor, needsOf, packKey, partLanes, streamFits, unloadedNodes, type FileNeed, type Inventory, type NodePack, type Needs, type StreamRule } from "@/lib/lanes";
 import { fileChoices, hasVariants, pickFiles, swapGraphFiles, type FileChoice } from "@/lib/gpu/model-variants";
 import type { FileKey } from "@/lib/gpu/types";
 import { POOL_WORDS, RELAY_TIMES, SENT_STATES, type BeatAnswer, type ClaimedTask, type ComputerFacts, type CpuSlot, type WorkerAnswer, type WorkerBeat, type WorkerHolding } from "@/lib/relay";
@@ -1062,51 +1062,134 @@ function estOn(t: TaskRow, w: WorkerRow): number | null {
 }
 
 /**
+ * Why a worker can't run a task (fitWhy, fitSlotWhy), the first reason found: "pool" (not one of the task's pools),
+ * "elsewhere" (sent to another worker), "stopped", "lane-off" (its lane isn't allowed there), "ceiling" (beyond what its
+ * PC may ever run), "version" (its worker program or catalog doesn't take the job's ticket), "refused" (it refused the
+ * job before), "files" (it hasn't the workflow's files), "run-files" (it hasn't the files the run adds), "memory" (too
+ * little GPU memory, streaming from RAM counted), "finish" (no slot of it runs this finishing step), "delay" (its delays
+ * haven't passed yet).
+ */
+export type FitCode = "pool" | "elsewhere" | "stopped" | "lane-off" | "ceiling" | "version" | "refused" | "files" | "run-files" | "memory" | "finish" | "delay";
+
+/**
  * May this worker run this task: its pool, its lane allowed and capable, its PC's ceiling (the lanes or workflows it
  * may ever run, the largest picture, the longest clip, the most results), its build's catalog for a job ticket, its
- * files (the run-time files the run adds too), its VRAM, and the delays.
+ * files (the run-time files the run adds too), its VRAM, and the delays. Null: it may; else the first reason it may not.
  */
-function fits(t: TaskRow, w: WorkerRow, now: number): boolean {
-  if (!(t.pools ?? "").split(",").includes(w.pool)) return false;
-  if (t.only_worker && t.only_worker !== w.id) return false;
-  if (t.stop) return false;
+function fitWhy(t: TaskRow, w: WorkerRow, now: number): FitCode | null {
+  if (!(t.pools ?? "").split(",").includes(w.pool)) return "pool";
+  if (t.only_worker && t.only_worker !== w.id) return "elsewhere";
+  if (t.stop) return "stopped";
   const allow = allowOf(w);
   const lane = t.lane ?? "";
-  if (!(lane in allow)) return false;
+  if (!(lane in allow)) return "lane-off";
   const cap = capableOf(w);
   const needs = json<Needs | null>(t.needs_json, null);
-  if (ceilingProblem(ceilingOf(w), { workflowId: needs?.workflowId, lane, size: needs?.size })) return false;
+  if (ceilingProblem(ceilingOf(w), { workflowId: needs?.workflowId, lane, size: needs?.size })) return "ceiling";
   // A ticket made for another catalog than the worker's goes only to a worker that checks the graph itself
   // (GRAPH_PROTOCOL), with the ticket's graph fingerprint to check. One that found the graph changed gave the job back
   // (refusedBy, below) and isn't offered it again until it is updated.
-  if (needs?.catalogVersion && needs.catalogVersion !== w.catalog_version && !(needs.graphSha && !!w.catalog_version && (w.protocol ?? 0) >= GRAPH_PROTOCOL)) return false;
+  if (needs?.catalogVersion && needs.catalogVersion !== w.catalog_version && !(needs.graphSha && !!w.catalog_version && (w.protocol ?? 0) >= GRAPH_PROTOCOL)) return "version";
   // A ticket's pictures come as they were sent: only a worker that makes them again from their pixels takes it.
-  if (needs?.catalogVersion && (w.protocol ?? 0) < TICKET_PROTOCOL) return false;
-  if (refusedBy(t).includes(refusalKey(w))) return false;
-  if (needs?.workflowId ? !cap.workflows.includes(needs.workflowId) : !cap.lanes.includes(lane)) return false;
+  if (needs?.catalogVersion && (w.protocol ?? 0) < TICKET_PROTOCOL) return "version";
+  if (refusedBy(t).includes(refusalKey(w))) return "refused";
+  if (needs?.workflowId ? !cap.workflows.includes(needs.workflowId) : !cap.lanes.includes(lane)) return "files";
   // The files the run adds beyond its workflow's own (a look's LoRAs): only a worker that verified each one.
-  if (needs?.runtime?.length && !hasFiles(inventoryOf(w), needs.runtime)) return false;
+  if (needs?.runtime?.length && !hasFiles(inventoryOf(w), needs.runtime)) return "run-files";
   // A workflow with model variants: the files (its own or a variant's) and the memory of the choice this worker would
   // run. Either way, streaming from RAM counts as well as the VRAM need (memoryFit).
   if (needs?.workflowId && hasVariants(loadIndex(), needs.workflowId)) {
-    if (!workerFiles(w, needs.workflowId, bytesOf(needs.runtime))) return false;
-  } else if (!memoryFor(needs, w)) return false;
-  if (now - t.created_at < w.claim_after_ms + (allow[lane]?.delayMs ?? 0)) return false;
-  return true;
+    if (!workerFiles(w, needs.workflowId, bytesOf(needs.runtime))) return variantWhy(w, needs.workflowId);
+  } else if (!memoryFor(needs, w)) return "memory";
+  if (now - t.created_at < w.claim_after_ms + (allow[lane]?.delayMs ?? 0)) return "delay";
+  return null;
+}
+
+/**
+ * Why workerFiles has no choice for a workflow with model variants: "memory" when a file set it has would do with all
+ * the GPU memory there is, else "files". Asked only once the choice failed.
+ */
+function variantWhy(w: WorkerRow, workflowId: string): FitCode {
+  const roomy = { ...w, facts_json: JSON.stringify({ ...json<ComputerFacts>(w.facts_json, {}), vramBytes: Number.MAX_SAFE_INTEGER }) };
+  return workerFiles(roomy, workflowId) ? "memory" : "files";
 }
 
 /**
  * May this slot of this worker run this task: a finishing job only in a CPU slot that says it runs that kind (in the
  * task's pools, for its worker when it names one); light CPU work in its CPU slot when it has one, else in its GPU's
- * slot; anything else only in its GPU's slot. Then `fits` as for any task.
+ * slot; anything else only in its GPU's slot. Then `fitWhy` as for any task. Null: it may; else the first reason.
  */
-function fitsSlot(t: TaskRow, w: WorkerRow, now: number, slot: WorkerSlot): boolean {
-  if (slotFor(t, w) !== slot) return false;
+function fitSlotWhy(t: TaskRow, w: WorkerRow, now: number, slot: WorkerSlot): FitCode | null {
+  if (slotFor(t, w) !== slot) return "finish";
   const kind = finishKind(t);
-  if (kind === null) return fits(t, w, now);
-  if (!(t.pools ?? "").split(",").includes(w.pool) || (t.only_worker && t.only_worker !== w.id) || t.stop) return false;
-  if (refusedBy(t).includes(refusalKey(w))) return false;
-  return !!cpuSlotOf(w)?.finishes.includes(kind);
+  if (kind === null) return fitWhy(t, w, now);
+  if (!(t.pools ?? "").split(",").includes(w.pool)) return "pool";
+  if (t.only_worker && t.only_worker !== w.id) return "elsewhere";
+  if (t.stop) return "stopped";
+  if (refusedBy(t).includes(refusalKey(w))) return "refused";
+  return cpuSlotOf(w)?.finishes.includes(kind) ? null : "finish";
+}
+
+/** May this slot of this worker run this task (fitSlotWhy)? */
+function fitsSlot(t: TaskRow, w: WorkerRow, now: number, slot: WorkerSlot): boolean {
+  return fitSlotWhy(t, w, now, slot) === null;
+}
+
+/** Each reason a worker can't run a task, in plain words (a worker of another pool isn't listed). */
+export const FIT_WORDS: Record<Exclude<FitCode, "pool">, string> = {
+  elsewhere: "sent to another worker",
+  stopped: "stopped",
+  "lane-off": "not allowed this kind of job",
+  ceiling: "beyond what its PC may run",
+  version: "needs its worker program updated",
+  refused: "refused it before",
+  files: "lacks its model files",
+  "run-files": "lacks the files this run adds",
+  memory: "needs more GPU memory",
+  finish: "doesn't run this finishing step",
+  delay: "takes it after its delay",
+};
+
+/**
+ * A worker's state in one word for a run's fit: taking jobs ("idle": ready, or behind the site's version, when the fit
+ * says which jobs it takes), running one ("busy"), not taking any now ("paused": paused in either place, finishing its
+ * last job before a pause, outside its hours, its GPU or ComfyUI taken or down, local work first), or not heard from
+ * ("offline").
+ */
+export type FitState = "idle" | "busy" | "paused" | "offline";
+
+export const fitState = (s: WorkerState): FitState => (s === "idle" || s === "update-worker" ? "idle" : s === "busy" ? "busy" : s === "offline" || s === "new" ? "offline" : "paused");
+
+/** Whether one worker can run a run, why not (`code`, `words`: FIT_WORDS), and its state (`stateCode`, `stateWords`: workerState). */
+export interface WorkerFit {
+  name: string;
+  can: boolean;
+  code: Exclude<FitCode, "pool"> | null;
+  words: string | null;
+  state: FitState;
+  stateCode: WorkerState;
+  stateWords: string;
+}
+
+/** Which workers of a run's pools can run it and in what state they are, and the GPU memory it needs in whole GB (null: none named). */
+export interface RunFit {
+  needGb: number | null;
+  workers: WorkerFit[];
+}
+
+/**
+ * Which workers can run this task, by the claim's own rules (fitSlotWhy, for the slot each would take it in; delays
+ * aside), and the state each one is in. `workers`: each worker with its workerState, read once for a whole view.
+ */
+export function runFit(t: TaskRow, workers: readonly { w: WorkerRow; state: { state: WorkerState; words: string } }[], now = Date.now()): RunFit {
+  const fit: WorkerFit[] = [];
+  for (const { w, state } of workers) {
+    const code = fitSlotWhy({ ...t, created_at: 0 }, w, now, slotFor(t, w));
+    if (code === "pool") continue;
+    fit.push({ name: w.name, can: code === null, code, words: code ? FIT_WORDS[code] : null, state: fitState(state.state), stateCode: state.state, stateWords: state.words });
+  }
+  const need = json<Needs | null>(t.needs_json, null)?.minVramBytes ?? 0;
+  return { needGb: need > 0 ? Math.round(need / minVramBytesFor(1)) : null, workers: fit };
 }
 
 /** The retry rule: a worker that lost or failed this task takes it again only when no other capable worker is about. */

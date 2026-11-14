@@ -6,7 +6,7 @@ import { laneLabel } from "@/lib/lanes";
 import { HOLDING_OTHER, HOLDING_WHY, SENT_STATES, type WorkerHolding } from "@/lib/relay";
 import { db } from "../db";
 import { loadIndex } from "../gpu/index-file";
-import { claimableNow, controlledLine, firstClaimableNow, localWorkOf, ownerHandsOn, ownerWaitingNow, workerState } from "./pool";
+import { claimableNow, controlledLine, firstClaimableNow, localWorkOf, ownerHandsOn, ownerWaitingNow, runFit, workerState, type RunFit } from "./pool";
 import { controlWords, effectiveMode, liveOverrides, MODE_WORDS, overrideView, personKey, poolMode, poolModes, recentOverrides, sweepControls, workerModeOf, type EffectiveMode, type OverrideView, type QueueMode } from "./queue-controls";
 import type { LocalWork } from "@/lib/relay";
 import { json, taskCold, taskProgress, type TaskRow, jobNowOf, type JobNow } from "./tasks";
@@ -75,6 +75,11 @@ export interface QueuedJob {
   guest: boolean;
   /** The owner's hands-on run (pool.ts ownerHandsOn): it waits and runs as a person's run does. */
   handsOn?: true;
+  /**
+   * Which workers of its pools can run it, why the others can't ("lacks its model files", "needs more GPU memory"), and
+   * the state each one is in (pool.ts runFit), with the GPU memory it needs.
+   */
+  fit: RunFit;
 }
 
 /** A worker's mode and the local work on its PC, for the owner's Queue page. */
@@ -222,6 +227,8 @@ export function liveQueue(now = Date.now()): { running: RunningJob[]; holding: H
   const items = lines.flatMap((l) => l.items.map((x) => ({ ...x, mode: l.mode }))).filter((x) => !seen.has(x.task.id) && !!seen.add(x.task.id));
   const ordered = [...items.filter((x) => x.rank !== null), ...items.filter((x) => x.rank === null)];
   const nameOf = (id: string) => byId.get(id)?.name ?? null;
+  // Each worker's state, read once for the fit of every job listed.
+  const stateOf = workers.map((w) => ({ w, state: workerState(w, now) }));
   const queued: QueuedJob[] = ordered.slice(0, QUEUED_LIMIT).map(({ task: t, rank, base, control, mode }) => {
     const g = genOf(t.generation_id);
     const o = control.by;
@@ -242,6 +249,7 @@ export function liveQueue(now = Date.now()): { running: RunningJob[]; holding: H
       person: t.account ? personKey(t.account) : null,
       guest: !!t.account?.startsWith("guest"),
       ...(ownerHandsOn(t) && { handsOn: true as const }),
+      fit: runFit(t, stateOf, now),
     };
   });
 
