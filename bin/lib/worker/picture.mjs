@@ -4,7 +4,7 @@
 // Only one short-lived process at low priority ever reads the picture as it came (picture-child.mjs, with sharp), with
 // a cap on its pixels and a time limit. The studio sends an account's pictures as they came, so this is the only place
 // they are decoded.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -23,13 +23,38 @@ export function isPicture(input) {
   return PICTURE_EXT.has(extOf(input?.name));
 }
 
-/** Can this checkout make pictures again: is sharp installed beside it (pnpm install in the worker's checkout)? */
-export function canCleanPictures(resolve = (name) => createRequire(import.meta.url).resolve(name)) {
+/**
+ * Can this checkout make pictures again: is sharp installed beside it (pnpm install in the worker's checkout), and does
+ * it really make one (a tiny test picture, through the same process a job's picture goes through)? A copy of the
+ * checkout whose libraries lost their own parts finds sharp but can't load it: without the trial, every account job
+ * with a picture would fail there instead of going to another worker.
+ */
+export function canCleanPictures(resolve = (name) => createRequire(import.meta.url).resolve(name), trial = trialPicture) {
   try {
     resolve("sharp");
-    return true;
   } catch {
     return false;
+  }
+  return trial();
+}
+
+/** A 1x1 PNG: the test picture of the start-up trial. */
+const TRIAL_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+/** Make the test picture again with picture-child.mjs, in a folder of its own that is removed after. True when it made one. */
+export function trialPicture({ spawnSyncFn = spawnSync, node = process.execPath, timeoutMs = 60_000 } = {}) {
+  let dir;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-picture-"));
+    const src = path.join(dir, "in.png");
+    const dst = path.join(dir, "out.png");
+    fs.writeFileSync(src, TRIAL_PNG);
+    const r = spawnSyncFn(node, [path.join(here, "picture-child.mjs"), src, dst, String(PICTURE_MAX_PIXELS)], { stdio: "ignore", windowsHide: true, env: childEnv(), cwd: dir, timeout: timeoutMs });
+    return r.status === 0 && fs.statSync(dst).size > 0;
+  } catch {
+    return false;
+  } finally {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
