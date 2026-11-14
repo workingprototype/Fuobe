@@ -53,7 +53,7 @@ beforeAll(async () => {
   b = auth.createAccount("review-b@example.com", "long enough").id;
   auth.setAccountGpu(a, { url: fake.url });
   cookie = `${auth.SESSION_COOKIE}=${auth.createSession(a).value}`;
-  // Accounts past their first week, so their files may reach 3 GB (a new account keeps 1 GB).
+  // Accounts past their first week, so their files may reach 5 GB.
   for (const id of [a, b]) setAccountCreatedAt(id, auth.accountById(id)!.createdAt - 8 * 24 * 60 * 60_000);
 });
 afterAll(async () => {
@@ -209,7 +209,7 @@ describe("an account's ComfyUI can't make the server download without end", () =
     try {
       const before = fs.readdirSync(scratchDir()).filter((f) => f.endsWith(".zip")).length;
       const res = await pollAs("video-export-exr");
-      expect(res).toMatchObject({ state: "failed", error: expect.stringMatching(/reached 3 GB/) });
+      expect(res).toMatchObject({ state: "failed", error: expect.stringMatching(/reached 5 GB/) });
       expect(fs.readdirSync(scratchDir()).filter((f) => f.endsWith(".zip")).length).toBe(before);
     } finally {
       db().prepare("DELETE FROM assets WHERE id = ?").run(filler.id);
@@ -228,7 +228,7 @@ describe("an account's ComfyUI can't make the server download without end", () =
       const id = (await r.json()).items[0].id as string;
       const g = await settle(id);
       expect(g?.status).toBe("failed");
-      expect(g?.error).toMatch(/reached 3 GB/);
+      expect(g?.error).toMatch(/reached 5 GB/);
       expect(fs.readdirSync(scratchDir()).filter((f) => f.startsWith(`${id}-out-`))).toEqual([]);
     } finally {
       db().prepare("DELETE FROM assets WHERE id = ?").run(filler.id);

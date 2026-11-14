@@ -61,15 +61,15 @@ const upload = (account: string) =>
   );
 
 describe("M-6: accounts can't fill the server's disk", () => {
-  it("a new account keeps 1 GB in its first 7 days, then 3 GB", async () => {
-    expect(files.accountTotalBytes(fresh)).toBe(1 * GB);
-    expect(files.accountTotalBytes(old)).toBe(files.ACCOUNT_LIMITS.totalBytes);
+  it("every account keeps 5 GB of files, a new one from the day it signs up", async () => {
+    expect(files.accountTotalBytes(fresh)).toBe(5 * GB);
+    expect(files.accountTotalBytes(old)).toBe(5 * GB);
     weigh(fresh, 1 * GB - 10);
-    const r = await upload(fresh);
+    expect((await upload(fresh)).status).toBe(201);
+    weigh(old, 5 * GB - 10);
+    const r = await upload(old);
     expect(r.status).toBe(413);
-    expect((await r.json()).error).toMatch(/1 GB.*first 7 days/);
-    weigh(old, 1 * GB - 10);
-    expect((await upload(old)).status).toBe(201);
+    expect((await r.json()).error).toMatch(/reached 5 GB/);
   });
 
   it("all accounts together keep at most a share of the disk (FUOBE_ACCOUNTS_DISK_GB)", async () => {

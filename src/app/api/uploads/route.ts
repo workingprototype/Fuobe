@@ -25,7 +25,7 @@ import { adoptFile, contentTypeFor, saveFile, scratchDir } from "@/server/storag
  *   KINETIC_UPLOAD_HEADER: a Kinetic Motion clip or poster, a colour grade, a Relight blend; an MP4 or WebM clip, or a
  *   PNG picture), which no model makes. A picture up to 25 MB
  *   and 40 megapixels, a
- *   sound up to 50 MB, a clip up to 95 MB; its uploads up to 1 GB and all its files up to 3 GB; 60 uploads an hour,
+ *   sound up to 50 MB, a clip up to 95 MB; its uploads up to 1 GB and all its files up to 5 GB; 60 uploads an hour,
  *   300 a day, 2 at once. The stored type is read from the file's first bytes, never taken from the client.
  */
 

@@ -26,9 +26,9 @@ export const ACCOUNT_LIMITS = {
   multipartBytes: 26 * MB,
   /** Live uploads per account, and all its files (uploads and results). */
   uploadsBytes: 1 * GB,
-  totalBytes: 3 * GB,
-  /** All its files in its first days: accounts made in bulk can't fill the disk fast. */
-  newAccountBytes: 1 * GB,
+  totalBytes: 5 * GB,
+  /** All its files in its first days (accounts made in bulk can't fill the disk fast): the same 5 GB for now. */
+  newAccountBytes: 5 * GB,
   newAccountDays: 7,
   /** Uploads: per hour, per day, and at once. */
   uploadsPerHour: 60,
@@ -79,7 +79,7 @@ export const ACCOUNT_MESSAGES = {
   fileTooBig: "That file is over 95 MB. Make it smaller, then try again.",
   wrongType: "Fuobe takes PNG, JPEG or WebP pictures, MP4, MOV, WebM, MKV or AVI clips, and MP3, WAV, OGG, FLAC or M4A sound.",
   uploadsFull: "You've used your 1 GB for uploads. Older uploads clear after 14 days, or delete some to make room now.",
-  filesFull: "Your files have reached 3 GB. Delete some runs to make room.",
+  filesFull: "Your files have reached 5 GB. Delete some runs to make room.",
   uploadRate: "That's a lot of uploads at once. Try again in a few minutes.",
   uploadsBusy: "Lots of uploads right now. Try again in a moment.",
   uploadStalled: "The upload stopped arriving. Check your connection, then try again.",
@@ -100,7 +100,7 @@ export const ACCOUNT_MESSAGES = {
   zipBusy: "Your last download is still going. Try again when it finishes.",
 } as const;
 
-/** What an account may keep in all: 3 GB, or 1 GB in its first 7 days (`created`: when it signed up, when known). */
+/** What an account may keep in all: 5 GB, or newAccountBytes in its first 7 days when that is less (`created`: when it signed up). */
 export function accountTotalBytes(id: string, created = accountById(id)?.createdAt ?? 0): number {
   return Date.now() - created < ACCOUNT_LIMITS.newAccountDays * DAY ? ACCOUNT_LIMITS.newAccountBytes : ACCOUNT_LIMITS.totalBytes;
 }
@@ -108,7 +108,7 @@ export function accountTotalBytes(id: string, created = accountById(id)?.created
 /** What an account is told when its files are full. */
 export function filesFullMessage(id: string): string {
   return accountTotalBytes(id) < ACCOUNT_LIMITS.totalBytes
-    ? "Your files have reached 1 GB. A new account keeps up to 1 GB in its first 7 days, then 3 GB. Delete some runs to make room."
+    ? `Your files have reached ${Math.round(ACCOUNT_LIMITS.newAccountBytes / GB)} GB. A new account keeps up to ${Math.round(ACCOUNT_LIMITS.newAccountBytes / GB)} GB in its first 7 days, then ${Math.round(ACCOUNT_LIMITS.totalBytes / GB)} GB. Delete some runs to make room.`
     : ACCOUNT_MESSAGES.filesFull;
 }
 

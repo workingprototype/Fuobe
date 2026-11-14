@@ -159,8 +159,8 @@ describe("adding a key", () => {
       keys: { fal: { last4: "3f9a", addedAt: expect.any(Number), readable: true }, replicate: { last4: "5c21", addedAt: expect.any(Number), readable: true } },
       engineMode: "both",
       paidAllowed: true,
-      // A new account keeps 1 GB in its first week: the line says so (never "3 GB" alone).
-      limits: "4 runs at once, 60 an hour, up to 4 pictures a run, 1 GB of files in your first week, then 3 GB",
+      // Every account keeps 5 GB, a new one too.
+      limits: "4 runs at once, 60 an hour, up to 4 pictures a run, 5 GB of files",
     });
   });
 

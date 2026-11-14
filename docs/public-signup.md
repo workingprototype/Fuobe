@@ -213,8 +213,7 @@ so the callback address matches the one registered.
 The owner sees everyone who signed up in **Settings → Accounts**, the last section of Settings (the
 **Accounts** chip at the top of Settings and the link under Public sign-up lead there): email,
 whether its own GPU is connected, its runs (all time, in the last 7 days, running now, failed in the
-last 7 days), when it last ran, and the space its files take against its limit (1 GB in its first 7
-days, then 3 GB). On wide screens the list also shows when the account was created and its last
+last 7 days), when it last ran, and the space its files take against its limit (5 GB). On wide screens the list also shows when the account was created and its last
 log-in (the CSV always has them). Running now counts as the run limit does: a batch or a chain
 going is one run. A line above the list gives the runs of every account in the last 24 hours and 7
 days, the runs going now, and the space all accounts' files take against their share of the disk.
@@ -1037,8 +1036,8 @@ sent that way answers 403 `connect-gpu`, and a model run still needs the account
 
 - The type is read from the file's first bytes. A file that isn't one of these answers 415.
 - `Content-Length` is required (411), and a file over its size answers 413 before it is read.
-- An account keeps up to 1 GB of uploads and 3 GB of files in all (uploads and results); in its
-  first 7 days, 1 GB in all. Past that, uploads and runs answer 413: delete some runs to make room.
+- An account keeps up to 1 GB of uploads and 5 GB of files in all (uploads and results), from the
+  day it signs up, existing accounts too. Past that, uploads and runs answer 413: delete some runs to make room.
 - All accounts together keep at most a quarter of the data disk (`FUOBE_ACCOUNTS_DISK_GB` sets
   it), and the disk always keeps its free floor (`FUOBE_ACCOUNT_DISK_FREE_GB`). Past either,
   account uploads and runs answer 503 "short of space"; the owner's work is not affected.

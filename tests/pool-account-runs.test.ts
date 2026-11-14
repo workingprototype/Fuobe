@@ -506,8 +506,8 @@ describe("what an account reads about its run", () => {
     const owner = listAccountRuns({ account: accountId }).items.find((x) => x.id === id);
     expect(owner?.detail).toContain("Can't reach ComfyUI");
     // Fuobe's own words about the account's side stay as they are.
-    db().prepare("UPDATE generations SET error = ? WHERE id = ?").run("Your files have reached 3 GB. Delete some runs to make room.", id);
-    expect(getGeneration(id)!.error).toBe("Your files have reached 3 GB. Delete some runs to make room.");
+    db().prepare("UPDATE generations SET error = ? WHERE id = ?").run("Your files have reached 5 GB. Delete some runs to make room.", id);
+    expect(getGeneration(id)!.error).toBe("Your files have reached 5 GB. Delete some runs to make room.");
     for (const words of [ACCOUNT_MESSAGES.imageTooBig, ACCOUNT_MESSAGES.wrongType, ACCOUNT_MESSAGES.uploadsFull]) {
       db().prepare("UPDATE generations SET error = ? WHERE id = ?").run(words, id);
       expect(getGeneration(id)!.error).toBe(words);

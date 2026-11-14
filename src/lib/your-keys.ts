@@ -45,7 +45,7 @@ export interface YourKeys {
   engineMode: "open" | "both";
   /** The studio lets accounts use paid models with their own keys (it isn't open-source only). */
   paidAllowed: boolean;
-  /** The account limits its paid runs still count against, as it has them now: "4 runs at once, … 1 GB of files in your first week, then 3 GB". */
+  /** The account limits its paid runs still count against, as it has them now: "4 runs at once, … 5 GB of files". */
   limits: string;
 }
 

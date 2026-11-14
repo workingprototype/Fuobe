@@ -177,7 +177,7 @@ describe("Settings → Accounts: what accounts make", () => {
     const of = (id: string) => items.find((a) => a.id === id)!;
     const newest = (db().prepare("SELECT MAX(created_at) AS t FROM generations WHERE json_extract(request_json, '$.account') = ? AND feature = 'image'").get(A) as { t: number }).t;
     expect(accountUsage(A).total).toBe(kept.size + upload.size);
-    expect(of(A)).toMatchObject({ runs: 5, runsDay: 3, runsWeek: 4, running: 1, failedWeek: 1, bytes: accountUsage(A).total, capBytes: 2 ** 30 });
+    expect(of(A)).toMatchObject({ runs: 5, runsDay: 3, runsWeek: 4, running: 1, failedWeek: 1, bytes: accountUsage(A).total, capBytes: 5 * 2 ** 30 });
     expect(of(A).lastRunAt).toBe(newest);
     expect(of(B)).toMatchObject({ runs: 1, runsDay: 0, runsWeek: 1, running: 0, failedWeek: 0, bytes: 0, gpu: true, disabled: true });
     expect(of(C)).toMatchObject({ runs: 0, runsDay: 0, runsWeek: 0, running: 0, failedWeek: 0, lastRunAt: null, bytes: 0 });

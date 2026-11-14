@@ -670,7 +670,7 @@
     "fileTooBig": "That file is over 95 MB. Make it smaller, then try again.",
     "wrongType": "Fuobe takes PNG, JPEG or WebP pictures, MP4, MOV, WebM, MKV or AVI clips, and MP3, WAV, OGG, FLAC or M4A sound.",
     "uploadsFull": "You've used your 1 GB for uploads. Older uploads clear after 14 days, or delete some to make room now.",
-    "filesFull": "Your files have reached 3 GB. Delete some runs to make room.",
+    "filesFull": "Your files have reached 5 GB. Delete some runs to make room.",
     "uploadRate": "That's a lot of uploads at once. Try again in a few minutes.",
     "uploadsBusy": "Lots of uploads right now. Try again in a moment.",
     "uploadStalled": "The upload stopped arriving. Check your connection, then try again.",

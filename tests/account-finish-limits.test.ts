@@ -82,7 +82,7 @@ describe("M-5: an account's finished pictures count like its other files", () =>
     try {
       const r = await post(soulRun(a), cookie);
       expect(r.status).toBe(413);
-      expect((await r.json()).error).toMatch(/Your files have reached 1 GB/);
+      expect((await r.json()).error).toMatch(/Your files have reached 5 GB/);
     } finally {
       db().prepare("DELETE FROM assets WHERE id = ?").run(big.id);
     }
