@@ -35,7 +35,7 @@ export { prefetchHrefs } from "./nav-prefetch";
  *   room for everything   every item, no More
  *   less                  Canvas and Chat in More
  *   less again            Fuobe FX, Apps and Motions & effects in More too
- *   least                 Library in More too (only where the right side is very full)
+ *   least                 Library in More too, then Studios (only where the right side is very full)
  * Search is 280 px from 1600, 220 px at 1440-1599, 200 px below; an icon button below lg, as New creation. Below md the
  * phone tabs take over (phone-tabs.tsx).
  */
@@ -110,6 +110,8 @@ const MOTIONS_AREA_HREF = area("motions").href;
 
 /** Fuobe FX's own page, as More lists it where the bar has no room for its item. */
 const FX_ENTRY = entry(area("fx").entryId)!;
+/** Studios' own page, as More lists it where even Studios has no room (nav-fit.css). */
+const STUDIOS_ENTRY = entry(area("studios").entryId)!;
 
 /** Fuobe FX in More: its page, with an icon (it has no cover of its own) and its line. */
 function FxRow({ current, row }: { current: boolean; row: number }) {
@@ -127,12 +129,12 @@ function FxRow({ current, row }: { current: boolean; row: number }) {
 }
 
 /** Which of the bar's foldable groups are in More now: read from the bar itself (nav-fit.css decides by the nav's room). */
-export function foldedNow(): { min: boolean; mid: boolean; all: boolean } {
+export function foldedNow(): { tiny: boolean; min: boolean; mid: boolean; all: boolean } {
   const folded = (sel: string) => {
     const el = document.querySelector(`[data-top-bar] ${sel}`);
     return !el || getComputedStyle(el).display === "none";
   };
-  return { min: folded(".nav-fit-min"), mid: folded(".nav-fit-mid"), all: folded(".nav-fit-all") };
+  return { tiny: folded(".nav-fit-tiny"), min: folded(".nav-fit-min"), mid: folded(".nav-fit-mid"), all: folded(".nav-fit-all") };
 }
 
 function MoreItems() {
@@ -141,6 +143,17 @@ function MoreItems() {
   const [fold] = useState(foldedNow);
   return (
     <>
+      {fold.tiny && (
+        <IntentLink href={STUDIOS_ENTRY.href} aria-current={on(STUDIOS_ENTRY) ? "page" : undefined} data-col={0} data-row={-1} className={cn(CARD_ROW, MENU_ROW_2)}>
+          <span className="grid h-[27px] w-9 shrink-0 place-items-center rounded-[6px] bg-muted">
+            <NavIcon name={STUDIOS_ENTRY.icon} className="nav-icon size-4 text-muted-foreground" />
+          </span>
+          <span className="flex min-w-0 flex-col">
+            <span className={rowName(on(STUDIOS_ENTRY))}>{STUDIOS_ENTRY.label}</span>
+            <span className={ROW_LINE}>{STUDIOS_ENTRY.what}</span>
+          </span>
+        </IntentLink>
+      )}
       {fold.mid && (
         <>
           <FxRow current={on(FX_ENTRY)} row={0} />
@@ -200,7 +213,7 @@ function BarLinks({ active, onTap }: { active: Active; onTap?: (href: string) =>
     <>
       {/* An item is marked anywhere in its area, its own page (/create, /studios …) included. */}
       <MegaLauncher id="create" active={active.create || active.page === "create"} />
-      <MegaLauncher id="studios" active={active.studios || active.page === "studios"} />
+      <MegaLauncher id="studios" active={active.studios || active.page === "studios"} className="nav-fit-tiny" />
       <MegaLauncher id="fx" active={active.fx || active.page === "fx"} className="nav-fit-mid" />
       <MegaLauncher id="apps" active={active.apps || active.page === "apps"} className="nav-fit-mid" />
       <MegaLauncher id="motions" active={active.motions || active.page === "motions"} className="nav-fit-mid" />

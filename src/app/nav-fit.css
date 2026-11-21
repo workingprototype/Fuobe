@@ -4,6 +4,8 @@
  * Widths measured with the site's fonts (the wordmark 56 px and its 12 px margin, 2 px gaps), 8 px to spare:
  *   below 1600 px  every item 763 px; without Canvas and Chat, with More, 715 px
  *   from 1600 px   the items are 6 px wider a side: every item 815 px; without Canvas and Chat 760 px
+ *   the least      the wordmark, Create, Studios, Library and More 394 px; Library folds below it, then Studios below
+ *                  326 px (only where the right side is very full)
  * Unlayered, so these win over the items' own display utilities.
  */
 [data-main-nav] {
@@ -15,6 +17,11 @@
 }
 @container mainnav (max-width: 401.98px) {
   [data-top-bar] .nav-fit-min {
+    display: none;
+  }
+}
+@container mainnav (max-width: 333.98px) {
+  [data-top-bar] .nav-fit-tiny {
     display: none;
   }
 }
