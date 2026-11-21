@@ -1,52 +1,47 @@
 "use client";
 
-import { MoreHorizontal, Plus, Search } from "lucide-react";
+import { Aperture, Clapperboard, Film, Images, LayoutGrid, MessagesSquare, Network, Plus, Search, WandSparkles } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { IntentLink } from "@/components/intent-link";
 import { Kbd } from "@/components/ui/kbd";
 import { NEW_CREATION_HREF } from "@/lib/nav";
-import { area, areaOfPath, areaPageOf, type AreaId } from "@/lib/nav-areas";
-import { activeEntry, entry, type NavEntry } from "@/lib/nav-model";
+import { areaOfPath, areaPageOf, type AreaId } from "@/lib/nav-areas";
+import { activeEntry } from "@/lib/nav-model";
 import { isPlainClick, useTappedTab } from "@/lib/use-tapped-tab";
 import { cn } from "@/lib/utils";
-import { CoverThumb, NavIcon } from "./cover-thumb";
-import { CARD_ROW, MENU_ROW_2, ROW_LINE, rowName, SeeAllRow } from "./nav-row";
 import { useNavUi, useViewerKind } from "./nav-ui";
 import { useSearchPalette } from "./search-context";
 import { UpdateAvailable } from "@/components/update-available";
 import { BarPills } from "./status-chips";
-import { NavPrefetcher, warmNav } from "./nav-prefetch";
+import { NavPrefetcher } from "./nav-prefetch";
 import type { FetchedMegaId } from "@/lib/mega-menus";
 import { loadMenusNow, saveData } from "./mega-data";
 import { MegaLauncher, preloadMegaPanel, primeMegaPanels } from "./mega-launcher";
-import { BarCardMenu } from "./bar-split";
 import { BarIndicator, BarMenusProvider, BarScrim, BarStage, CloseMenusOnRoute, useBarController } from "./bar-menus";
 import { ViewerSlot } from "./viewer-slot";
 
 export { prefetchHrefs } from "./nav-prefetch";
 
 /*
- * The top bar (md and up): the wordmark, Create, Studios (the launcher), Fuobe FX, Apps, Motions & effects, Canvas, Chat and
- * Library; search; New creation; the pills and who is looking. 56 px on every page. What doesn't fit moves into More, by
- * CSS alone (nothing is measured, so nothing moves after the first paint), by the room the nav itself has (a container
- * query, nav-fit.css), so whatever the right side holds (a guest's Log in, an account's pills, the service's link) never
- * covers an item:
- *   room for everything   every item, no More
- *   less                  Canvas and Chat in More
- *   less again            Fuobe FX, Apps and Motions & effects in More too
- *   least                 Library in More too, then Studios (only where the right side is very full)
- * Search is 280 px from 1600, 220 px at 1440-1599, 200 px below; an icon button below lg, as New creation. Below md the
- * phone tabs take over (phone-tabs.tsx).
+ * The top bar (md and up): two rows that stay on screen as the page scrolls, 101 px on every page (--chrome-top,
+ * globals.css).
+ *   the top row     the wordmark; search in the middle of the room left (a field from 220 px of room, up to 520 px
+ *                   wide, else an icon button); the pills, New creation and who is looking
+ *   the second row  every item, centred, in three groups: Create and Studios; Fuobe FX, Apps and Motions & effects;
+ *                   Canvas, Chat and Library. Each with its icon from lg; the open page's item is a soft fill
+ *                   (nav-states.css).
+ * Every item shows at every width from md (the row needs about 750 px below lg and 930 px from lg), so nothing folds
+ * away; a row too narrow for them (a very large text size) scrolls sideways rather than wrap. Below md the phone tabs take
+ * over (phone-tabs.tsx).
  */
 
 /**
  * A plain bar link (Chat, Library). Its states are the nav's (nav-states.css): the highlight on hover or keyboard
- * focus, and for the open page (aria-current) a pip under the words, never a fill. The items with a menu are
- * BAR_TRIGGER (bar-split.tsx).
+ * focus, and for the open page (aria-current) the tab's soft fill. The items with a menu are BAR_TRIGGER (bar-split.tsx).
  */
 export const BAR_ITEM =
-  "nav-row nav-mark-under group/bar-item inline-flex h-10 shrink-0 [@media(pointer:coarse)]:h-11 items-center gap-1.5 rounded-[10px] px-2.5 text-[14px] whitespace-nowrap text-foreground/80 nav-hover:text-foreground focus-visible:text-foreground data-[state=open]:text-foreground data-[active]:font-semibold data-[active]:text-foreground aria-[current=page]:font-semibold aria-[current=page]:text-foreground min-[1600px]:px-3.5";
+  "nav-row group/bar-item inline-flex h-10 shrink-0 [@media(pointer:coarse)]:h-11 items-center gap-1.5 rounded-[10px] px-2.5 text-[14px] whitespace-nowrap text-foreground/80 nav-hover:text-foreground focus-visible:text-foreground data-[state=open]:text-foreground data-[active]:font-semibold data-[active]:text-foreground aria-[current=page]:font-semibold aria-[current=page]:text-foreground min-[1600px]:px-3.5";
 
 /**
  * Which bar item holds the open page, one item per page (areaOfPath): Create for the create tools, Studios for a studio
@@ -86,120 +81,12 @@ export function barActive(pathname: string): {
 type Active = ReturnType<typeof barActive>;
 const NONE: Active = barActive("");
 
-function RichItem({ e, current, row }: { e: NavEntry; current: boolean; row: number }) {
-  return (
-    <IntentLink href={e.href} aria-current={current ? "page" : undefined} data-col={0} data-row={row} className={cn(CARD_ROW, MENU_ROW_2)}>
-      <CoverThumb id={e.cover} size="row" icon={e.icon} eager />
-      <span className="flex min-w-0 flex-col">
-        <span className={rowName(current)}>{e.label}</span>
-        <span className={ROW_LINE}>{e.what}</span>
-      </span>
-    </IntentLink>
-  );
-}
+/** A tab's icon: from lg, where the row has room for them. The open page's turns the mark colour (nav-states.css). */
+const TAB_ICON = "nav-icon hidden size-4 shrink-0 text-muted-foreground group-hover/bar-item:text-foreground group-data-[open]/bar-item:text-foreground lg:block";
 
-const pick = (ids: string[]) => ids.map((id) => entry(id)).filter((e): e is NavEntry => !!e);
-
-/** The open page among the galleries and tools in a menu (the menu's content renders on the client only, when open). */
-function useOn(): (e: NavEntry) => boolean {
-  const pathname = usePathname();
-  return (e) => pathname === e.href || pathname.startsWith(`${e.href}/`);
-}
-
-const MOTIONS_AREA_HREF = area("motions").href;
-
-/** Fuobe FX's own page, as More lists it where the bar has no room for its item. */
-const FX_ENTRY = entry(area("fx").entryId)!;
-/** Studios' own page, as More lists it where even Studios has no room (nav-fit.css). */
-const STUDIOS_ENTRY = entry(area("studios").entryId)!;
-
-/** Fuobe FX in More: its page, with an icon (it has no cover of its own) and its line. */
-function FxRow({ current, row }: { current: boolean; row: number }) {
-  return (
-    <IntentLink href={FX_ENTRY.href} aria-current={current ? "page" : undefined} data-col={0} data-row={row} className={cn(CARD_ROW, MENU_ROW_2)}>
-      <span className="grid h-[27px] w-9 shrink-0 place-items-center rounded-[6px] bg-muted">
-        <NavIcon name={FX_ENTRY.icon} className="nav-icon size-4 text-muted-foreground" />
-      </span>
-      <span className="flex min-w-0 flex-col">
-        <span className={rowName(current)}>{FX_ENTRY.label}</span>
-        <span className={ROW_LINE}>{FX_ENTRY.what}</span>
-      </span>
-    </IntentLink>
-  );
-}
-
-/** Which of the bar's foldable groups are in More now: read from the bar itself (nav-fit.css decides by the nav's room). */
-export function foldedNow(): { tiny: boolean; min: boolean; mid: boolean; all: boolean } {
-  const folded = (sel: string) => {
-    const el = document.querySelector(`[data-top-bar] ${sel}`);
-    return !el || getComputedStyle(el).display === "none";
-  };
-  return { tiny: folded(".nav-fit-tiny"), min: folded(".nav-fit-min"), mid: folded(".nav-fit-mid"), all: folded(".nav-fit-all") };
-}
-
-function MoreItems() {
-  const on = useOn();
-  // read once as it opens; the bar doesn't change while the menu is open
-  const [fold] = useState(foldedNow);
-  return (
-    <>
-      {fold.tiny && (
-        <IntentLink href={STUDIOS_ENTRY.href} aria-current={on(STUDIOS_ENTRY) ? "page" : undefined} data-col={0} data-row={-1} className={cn(CARD_ROW, MENU_ROW_2)}>
-          <span className="grid h-[27px] w-9 shrink-0 place-items-center rounded-[6px] bg-muted">
-            <NavIcon name={STUDIOS_ENTRY.icon} className="nav-icon size-4 text-muted-foreground" />
-          </span>
-          <span className="flex min-w-0 flex-col">
-            <span className={rowName(on(STUDIOS_ENTRY))}>{STUDIOS_ENTRY.label}</span>
-            <span className={ROW_LINE}>{STUDIOS_ENTRY.what}</span>
-          </span>
-        </IntentLink>
-      )}
-      {fold.mid && (
-        <>
-          <FxRow current={on(FX_ENTRY)} row={0} />
-          {pick(["apps", "motions", "effects"]).map((e, i) => (
-            <RichItem key={e.id} e={e} current={on(e)} row={1 + i} />
-          ))}
-          <SeeAllRow href={MOTIONS_AREA_HREF} name="See all motions & effects" data-col={0} data-row={4} className="mt-1" />
-          <div role="separator" className="mx-2.5 my-1.5 h-px bg-border" />
-        </>
-      )}
-      {pick(fold.min ? ["canvas", "chat", "library"] : ["canvas", "chat"]).map((e, i) => (
-        <IntentLink key={e.id} href={e.href} eager={e.eager} aria-current={on(e) ? "page" : undefined} data-col={0} data-row={5 + i} className={cn(CARD_ROW, MENU_ROW_2)}>
-          <span className="grid h-[27px] w-9 shrink-0 place-items-center rounded-[6px] bg-muted">
-            <NavIcon name={e.icon} className="nav-icon size-4 text-muted-foreground" />
-          </span>
-          <span className="flex min-w-0 flex-col">
-            <span className={rowName(on(e))}>{e.label}</span>
-            <span className={ROW_LINE}>{e.what}</span>
-          </span>
-        </IntentLink>
-      ))}
-    </>
-  );
-}
-
-/** Opened: the routes its rows lead to start loading. */
-const warmMore = () => warmNav("more");
-
-/** More: the bar's items that don't fit at this width (each hides here where the bar shows it). One button, as every menu item. */
-function MoreMenu({ active }: { active: Active }) {
-  return (
-    <BarCardMenu
-      id="more"
-      label="More"
-      icon={<MoreHorizontal aria-hidden className="size-4" />}
-      onOpen={warmMore}
-      cardClassName="w-80"
-      className="nav-fit-more"
-      // Marked when it holds the open page: Canvas and Chat whenever More shows; Fuobe FX, Apps, Motions and Effects when
-      // they are folded too (nav-states.css, by the nav's room).
-      active={active.canvas || active.chat}
-      data-narrow={active.apps || active.motions || active.fx || undefined}
-    >
-      <MoreItems />
-    </BarCardMenu>
-  );
+/** The line between the row's groups. */
+function GroupLine() {
+  return <span aria-hidden data-bar-group-line="" className="mx-1.5 h-4 w-px shrink-0 bg-border" />;
 }
 
 /**
@@ -212,19 +99,22 @@ function BarLinks({ active, onTap }: { active: Active; onTap?: (href: string) =>
   return (
     <>
       {/* An item is marked anywhere in its area, its own page (/create, /studios …) included. */}
-      <MegaLauncher id="create" active={active.create || active.page === "create"} />
-      <MegaLauncher id="studios" active={active.studios || active.page === "studios"} className="nav-fit-tiny" />
-      <MegaLauncher id="fx" active={active.fx || active.page === "fx"} className="nav-fit-mid" />
-      <MegaLauncher id="apps" active={active.apps || active.page === "apps"} className="nav-fit-mid" />
-      <MegaLauncher id="motions" active={active.motions || active.page === "motions"} className="nav-fit-mid" />
-      <MegaLauncher id="canvas" active={active.canvas || active.canvasHome} className="nav-fit-all" />
-      <IntentLink href="/chat" eager data-bar-item="" onClick={tap("/chat")} aria-current={cur(active.chat)} className={cn(BAR_ITEM, "nav-fit-all")}>
+      <MegaLauncher id="create" icon={<WandSparkles aria-hidden className={cn(TAB_ICON, "mr-0.5")} />} active={active.create || active.page === "create"} />
+      <MegaLauncher id="studios" icon={<Clapperboard aria-hidden className={cn(TAB_ICON, "mr-0.5")} />} active={active.studios || active.page === "studios"} />
+      <GroupLine />
+      <MegaLauncher id="fx" icon={<Aperture aria-hidden className={cn(TAB_ICON, "mr-0.5")} />} active={active.fx || active.page === "fx"} />
+      <MegaLauncher id="apps" icon={<LayoutGrid aria-hidden className={cn(TAB_ICON, "mr-0.5")} />} active={active.apps || active.page === "apps"} />
+      <MegaLauncher id="motions" icon={<Film aria-hidden className={cn(TAB_ICON, "mr-0.5")} />} active={active.motions || active.page === "motions"} />
+      <GroupLine />
+      <MegaLauncher id="canvas" icon={<Network aria-hidden className={cn(TAB_ICON, "mr-0.5")} />} active={active.canvas || active.canvasHome} />
+      <IntentLink href="/chat" eager data-bar-item="" onClick={tap("/chat")} aria-current={cur(active.chat)} className={BAR_ITEM}>
+        <MessagesSquare aria-hidden className={TAB_ICON} />
         Chat
       </IntentLink>
-      <IntentLink href="/library" eager data-bar-item="" onClick={tap("/library")} aria-current={cur(active.library)} className={cn(BAR_ITEM, "nav-fit-min")}>
+      <IntentLink href="/library" eager data-bar-item="" onClick={tap("/library")} aria-current={cur(active.library)} className={BAR_ITEM}>
+        <Images aria-hidden className={TAB_ICON} />
         Library
       </IntentLink>
-      <MoreMenu active={active} />
     </>
   );
 }
@@ -236,7 +126,10 @@ function ActiveBarLinks() {
   return <BarLinks active={barActive(tapped ?? pathname)} onTap={onTap} />;
 }
 
-/** Search, styled as a field from lg (an icon button at md): opens the palette; hover or focus starts loading it. */
+/**
+ * Search, in the middle of the top row: a field from 220 px of room (its container, barsearch), up to 520 px wide; an
+ * icon button where the right side leaves less. Opens the palette; hover or focus starts loading it.
+ */
 function SearchField() {
   const search = useSearchPalette();
   return (
@@ -249,18 +142,18 @@ function SearchField() {
       onFocus={() => search.warm()}
       className={cn(
         "nav-focus inline-flex h-10 shrink-0 items-center gap-2 rounded-[10px] text-[13.5px] [@media(pointer:coarse)]:h-11 text-muted-foreground motion-safe:transition-colors",
-        "w-10 justify-center nav-hover:bg-[var(--nav-hi)] nav-hover:text-foreground active:bg-[var(--nav-press)] [@media(pointer:coarse)]:w-11",
-        "lg:max-[1439.98px]:w-[200px] lg:justify-start lg:border lg:border-input lg:bg-background/60 lg:px-3 lg:nav-hover:border-border-strong lg:nav-hover:bg-background lg:active:bg-background min-[1440px]:max-[1599.98px]:w-[220px] min-[1600px]:w-[280px]",
+        "w-10 justify-center nav-hover:bg-[var(--nav-hi)] nav-hover:text-foreground active:bg-[var(--nav-press)]",
+        "@min-[220px]/barsearch:w-full @min-[220px]/barsearch:max-w-[520px] @min-[220px]/barsearch:justify-start @min-[220px]/barsearch:border @min-[220px]/barsearch:border-input @min-[220px]/barsearch:bg-background/60 @min-[220px]/barsearch:px-3 @min-[220px]/barsearch:nav-hover:border-border-strong @min-[220px]/barsearch:nav-hover:bg-background @min-[220px]/barsearch:active:bg-background",
       )}
     >
       <Search aria-hidden className="size-[18px] shrink-0 lg:size-4" />
-      {/* Its name is the words it shows: "Search Fuobe" to 1599 px, the longer line from 1600 where the field is 280 px
-          wide (sr-only below lg). One line always: not-sr-only would let it wrap. */}
-      <span className="sr-only min-w-0 flex-1 truncate text-left lg:not-sr-only lg:whitespace-nowrap">
-        <span className="min-[1600px]:hidden">Search Fuobe</span>
-        <span className="hidden min-[1600px]:inline">Search studios, apps, effects…</span>
+      {/* Its name is the words it shows: "Search Fuobe", the longer line from 340 px of room (sr-only as an icon button).
+          One line always: not-sr-only would let it wrap. */}
+      <span className="sr-only min-w-0 flex-1 truncate text-left @min-[220px]/barsearch:not-sr-only @min-[220px]/barsearch:whitespace-nowrap">
+        <span className="@min-[340px]/barsearch:hidden">Search Fuobe</span>
+        <span className="hidden @min-[340px]/barsearch:inline">Search studios, apps, effects…</span>
       </span>
-      <Kbd aria-hidden className="hidden lg:inline-flex [@media(hover:none)]:hidden">
+      <Kbd aria-hidden className="hidden @min-[220px]/barsearch:inline-flex [@media(hover:none)]:hidden">
         /
       </Kbd>
     </button>
@@ -292,7 +185,6 @@ function RightCluster() {
     <>
       <BarPills kind={kind} />
       <UpdateAvailable />
-      <SearchField />
       <NewCreation />
       <ViewerSlot />
     </>
@@ -301,16 +193,13 @@ function RightCluster() {
 
 /**
  * Everything the bar's menus need before their first open: the panels' body (its own chunk), the data of the grouped
- * menus whose item the bar shows at this width, then each of those panels' first screen of pictures, decoded, so the
+ * menus, then each of those panels' first screen of pictures, decoded, so the
  * first open and every switch show whole (primeMegaPanels: nearest `x` first, the pointer's place when it came to the
  * bar). A phone loads none (its sheet asks when it shows one); a browser saving data loads only the code.
  */
 export function warmBar(x?: number): void {
   if (!window.matchMedia("(min-width: 768px)").matches) return;
-  const ids: FetchedMegaId[] = [];
-  const fold = foldedNow();
-  if (!fold.mid) ids.push("fx", "apps", "motions");
-  if (!fold.all) ids.push("canvas");
+  const ids: FetchedMegaId[] = ["fx", "apps", "motions", "canvas"];
   preloadMegaPanel();
   loadMenusNow(ids);
   if (!saveData()) primeMegaPanels(x);
@@ -343,8 +232,9 @@ function MenuPrefetch() {
 }
 
 /**
- * The main nav: its keys (Left and Right along the items); the first pointer or focus near it warms the menus (warmBar),
- * if the page's idle time has not already.
+ * The main nav, the bar's second row: its keys (Left and Right along the items); the first pointer or focus near it warms
+ * the menus (warmBar), if the page's idle time has not already. Centred (safe: a row wider than the window starts at its
+ * left edge and scrolls).
  */
 function MainNav({ children }: { children: React.ReactNode }) {
   const ctl = useBarController();
@@ -355,50 +245,56 @@ function MainNav({ children }: { children: React.ReactNode }) {
     warmBar(x);
   };
   return (
-    <nav aria-label="Main" data-main-nav className="flex min-w-0 flex-1 items-center gap-0.5" onKeyDown={(e) => ctl?.navKey(e)} onPointerEnter={(e) => warm(e.clientX)} onFocus={() => warm()}>
+    <nav
+      aria-label="Main"
+      data-main-nav
+      className="flex h-11 shrink-0 items-center justify-center-safe gap-0.5 overflow-x-auto px-4 [scrollbar-width:none] lg:max-[1439.98px]:px-5 min-[1440px]:px-6 [&::-webkit-scrollbar]:hidden"
+      onKeyDown={(e) => ctl?.navKey(e)}
+      onPointerEnter={(e) => warm(e.clientX)}
+      onFocus={() => warm()}
+    >
       {children}
     </nav>
   );
 }
 
-/** The bar's header: marked while a menu is open (the items' own hover fill steps aside for the open highlight). */
+/** The bar's header, two rows: marked while a menu is open (the items' own hover fill steps aside for the open highlight). */
 function BarHeader({ children }: { children: React.ReactNode }) {
   const { openMenu } = useNavUi();
   return (
     <header
       data-top-bar
       data-menu-open={openMenu ? "" : undefined}
-      className="sticky top-0 z-40 hidden h-14 items-center gap-1 border-b border-sidebar-border bg-sidebar/90 pr-4 pl-5 backdrop-blur-md md:flex lg:max-[1439.98px]:pr-5 min-[1440px]:pr-6 print:hidden"
+      className="sticky top-0 z-40 hidden flex-col border-b border-sidebar-border bg-sidebar/90 backdrop-blur-md md:flex print:hidden"
     >
       {children}
     </header>
   );
 }
 
-/** The bar. Hidden below md and in print; same height on every page, full-screen studios included. */
+/** The bar. Hidden below md and in print; same height on every page, full-screen studios included, and always on screen. */
 export function TopBar() {
   return (
     <BarMenusProvider>
       <BarHeader>
         <BarStage />
         <BarIndicator />
-        <MainNav>
-          <IntentLink
-            href="/"
-            eager
-            aria-label="Fuobe home"
-            className="nav-focus mr-1.5 inline-flex shrink-0 items-center self-stretch rounded-md px-1 font-heading text-[24px] leading-none lg:mr-3"
-          >
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border pr-4 pl-5 lg:max-[1439.98px]:pr-5 min-[1440px]:pr-6">
+          <IntentLink href="/" eager aria-label="Fuobe home" className="nav-focus inline-flex h-10 shrink-0 items-center rounded-md px-1 font-heading text-[24px] leading-none">
             Fuobe
           </IntentLink>
+          <div data-bar-search-room="" className="@container/barsearch flex min-w-10 flex-1 justify-center px-3 lg:px-6">
+            <SearchField />
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <RightCluster />
+          </div>
+        </div>
+        <MainNav>
           <Suspense fallback={<BarLinks active={NONE} />}>
             <ActiveBarLinks />
           </Suspense>
         </MainNav>
-        <span className="w-2 shrink-0" />
-        <div className="flex shrink-0 items-center gap-2">
-          <RightCluster />
-        </div>
       </BarHeader>
       <BarScrim />
       <Suspense fallback={null}>

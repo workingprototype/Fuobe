@@ -2,7 +2,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "./nav-states.css";
-@import "./nav-fit.css";
 @import "./nav-subs.css";
 @import "./motion.css";
 @import "./tab-row.css";
@@ -365,7 +364,7 @@
 }
 
 /* ---------------------------------------------------------------------------------------------
- * The app frame (components/nav): the top bar from md (56 px) and the phone's tab bar below it
+ * The app frame (components/nav): the top bar from md (two rows, 101 px) and the phone's tab bar below it
  * (64 px plus the home indicator's inset). Pages size themselves to what is left: h-content,
  * min-h-content; sticky headers sit under the bar (top-chrome) and sticky footers above the tabs
  * (bottom-chrome). A full-screen studio, and the on-screen keyboard, hide the phone's tabs.
@@ -376,7 +375,7 @@
   --content-h: calc(100svh - var(--chrome-top) - var(--chrome-bottom));
 }
 @media (min-width: 768px) {
-  :root { --chrome-top: 3.5rem; }
+  :root { --chrome-top: calc(6.25rem + 1px); }
 }
 @media (max-width: 767.98px) {
   :root { --chrome-bottom: calc(4rem + env(safe-area-inset-bottom)); }

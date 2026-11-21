@@ -123,7 +123,10 @@ describe("the Create menu's columns", () => {
 
 describe("the states stylesheet", () => {
   const all = rules(css);
-  const isCurrent = (sel: string) => /aria-current|data-current|data-active|data-narrow/.test(sel);
+  // A rule that leaves the open page's item out (:not([data-active])) is not one that marks it.
+  const isCurrent = (sel: string) => /aria-current|data-current|data-active/.test(sel.replaceAll(":not([data-active])", ""));
+  /** The top bar's tabs: the one place the open page is a fill (--nav-cur, never the highlight's). */
+  const isTab = (sel: string) => sel.includes("[data-main-nav]");
 
   it("is imported by the app's stylesheet, unlayered (it must win over a primitive's focus:bg-accent)", () => {
     const globals = readFileSync(path.join(ROOT, "src/app/globals.css"), "utf8");
@@ -147,15 +150,17 @@ describe("the states stylesheet", () => {
     expect(css).toMatch(/@media \(hover: hover\)\s*\{\s*html:not\(\[data-input="keyboard"\]\) \.nav-row[^{]*:hover/);
   });
 
-  it("never marks the open page with a fill or the highlight", () => {
+  it("never marks the open page with the highlight, and with a fill only on the top bar's tabs", () => {
     const current = all.filter(([s]) => isCurrent(s));
     expect(current.length).toBeGreaterThan(0);
     for (const [s, b] of current) {
       expect(b, s).not.toContain("--nav-hi");
       expect(b, s).not.toContain("--nav-press");
-      // Its only fill is the pip's own (a ::before 3 px wide or tall).
-      if (/background-color/.test(b)) expect(s, s).toContain("::before");
+      // Its only fill is the pip's own (a ::before 3 px wide or tall), or a top bar tab's --nav-cur.
+      if (/background-color/.test(b) && !isTab(s)) expect(s, s).toContain("::before");
+      if (/background-color/.test(b) && isTab(s)) expect(b, s).toContain("var(--nav-cur)");
     }
+    expect(current.some(([s, b]) => isTab(s) && b.includes("var(--nav-cur)"))).toBe(true);
     const pip = current.filter(([s, b]) => s.includes("::before") && /width/.test(b)).map(([, b]) => b);
     expect(pip.some((b) => b.includes("width: 3px"))).toBe(true);
     expect(pip.some((b) => b.includes("height: 3px"))).toBe(true);

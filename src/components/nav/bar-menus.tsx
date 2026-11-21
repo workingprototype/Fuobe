@@ -734,7 +734,7 @@ export function BarStage() {
       data-phase={phase}
       data-open={big ? "" : undefined}
       data-morph={morph ? "" : undefined}
-      className="pointer-events-none absolute inset-x-0 top-full h-[calc(100dvh-3.5rem)] overflow-hidden print:hidden"
+      className="pointer-events-none absolute inset-x-0 top-full h-[calc(100dvh-var(--chrome-top))] overflow-hidden print:hidden"
     >
       <div data-mega-backdrop className="absolute inset-0">
         <div data-mega-sheet className="absolute inset-0 border-b border-sidebar-border bg-popover shadow-heavy" />
@@ -746,5 +746,5 @@ export function BarStage() {
 /** Dims the page under any open menu (decoration: presses go through to the page, which closes the menu). */
 export function BarScrim() {
   const { openMenu } = useNavUi();
-  return <div aria-hidden data-bar-scrim data-open={openMenu ? "" : undefined} className="pointer-events-none fixed inset-x-0 top-14 bottom-0 z-[39] hidden bg-overlay md:block print:hidden" />;
+  return <div aria-hidden data-bar-scrim data-open={openMenu ? "" : undefined} className="pointer-events-none fixed inset-x-0 top-chrome bottom-0 z-[39] hidden bg-overlay md:block print:hidden" />;
 }

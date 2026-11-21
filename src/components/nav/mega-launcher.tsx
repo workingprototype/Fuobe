@@ -42,7 +42,7 @@ export function launcherCurrent(pathname: string): string | undefined {
  * the window's bottom, so some of the page shows under it: the way out for a pointer (resting there closes a menu the
  * pointer opened) and for a click (anywhere there closes any menu).
  */
-export const LAUNCHER_PANEL = "absolute inset-x-0 top-full max-h-[calc(100dvh-3.5rem-72px)] overflow-y-auto overscroll-contain text-popover-foreground";
+export const LAUNCHER_PANEL = "absolute inset-x-0 top-full max-h-[calc(100dvh-var(--chrome-top)-72px)] overflow-y-auto overscroll-contain text-popover-foreground";
 
 /** The routes a menu's links lead to that load ahead when it opens (each row also loads on hover: IntentLink). */
 const WARM: Record<MegaId, NavPanel> = { create: "create", studios: "studios", apps: "more", motions: "more", canvas: "more", fx: "fx" };
@@ -158,7 +158,7 @@ export function MegaSkeleton({ id }: { id?: MegaId }) {
  * closed; its body loads the first time the pointer or focus comes near (or soon after the page is ready).
  * `active`: one of the area's pages is open (its own page included).
  */
-export function MegaLauncher({ id, active, className }: { id: MegaId; active?: boolean; className?: string }) {
+export function MegaLauncher({ id, active, icon, className }: { id: MegaId; active?: boolean; icon?: React.ReactNode; className?: string }) {
   const area = MEGA_AREAS[id];
   const search = useSearchPalette();
   const [warm, setWarm] = useState(false);
@@ -225,6 +225,7 @@ export function MegaLauncher({ id, active, className }: { id: MegaId; active?: b
         panelId={megaPanelId(id)}
         href={area.href}
         label={area.label}
+        icon={icon}
         active={active}
         open={open}
         handlers={trigger}

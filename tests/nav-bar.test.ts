@@ -451,7 +451,7 @@ describe("menu items: one button each, the area's page inside its menu", () => {
   /** The opening tag of a menu item's button. */
   const item = (html: string, id: string) => new RegExp(`<button[^>]*data-bar-menu="${id}"[^>]*>`).exec(html)?.[0] ?? "";
 
-  it("gives Create, Studios, Fuobe FX, Apps, Motions & effects, Canvas and More one button each, named by its words", () => {
+  it("gives Create, Studios, Fuobe FX, Apps, Motions & effects and Canvas one button each, named by its words", () => {
     const html = render(createElement(TopBar));
     const hubs = [
       ["create", "/create"],
@@ -468,8 +468,8 @@ describe("menu items: one button each, the area's page inside its menu", () => {
       expect(item(html, id), id).toContain(`data-href="${href}"`);
       expect(linkTo(html, href), href).toBe("");
     }
-    expect(item(html, "more")).toContain('aria-expanded="false"');
-    expect(item(html, "more")).not.toContain("data-href");
+    // Every item is on the bar at every width: no More.
+    expect(item(html, "more")).toBe("");
     // Its name is its visible word: no label, and no count beside it.
     expect(item(html, "studios")).not.toContain("aria-label=");
     expect(item(html, "studios")).not.toContain("sr-only");
@@ -478,7 +478,7 @@ describe("menu items: one button each, the area's page inside its menu", () => {
     for (const name of ["Create menu", "Studios menu", "Fuobe FX menu", "Apps menu", "Motions &amp; effects menu", "Canvas menu"]) expect(html, name).not.toContain(`aria-label="${name}"`);
     expect(html).not.toContain("data-bar-split");
     expect(html).not.toMatch(/role="menu"|role="menuitem"|aria-haspopup="menu"/);
-    expect(count(html, "data-bar-menu=")).toBe(7);
+    expect(count(html, "data-bar-menu=")).toBe(6);
   });
 
   it("marks the item anywhere in its area, its own page included, and only that item", () => {

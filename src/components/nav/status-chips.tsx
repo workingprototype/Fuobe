@@ -575,7 +575,7 @@ export const PILL_W = { balance: "w-40 xl:w-[184px]", computer: "w-9 xl:w-[140px
 
 /**
  * The billing service's link for the bar (viewer.navLink, src/lib/nav-link.ts): a filled pill. `bar`: its words at
- * every width (the bar's items fold into More to make room, nav-fit.css). `wide`: the words always, full width (the phone's You sheet).
+ * every width. `wide`: the words always, full width (the phone's You sheet).
  * `phone`: the words always, 36 px tall with a 44 px tap area (the phone header, PhoneBar).
  */
 export function NavLinkPill({ link, variant = "bar", className }: { link: NavLink; variant?: "bar" | "wide" | "phone"; className?: string }) {
