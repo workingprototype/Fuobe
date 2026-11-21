@@ -2,7 +2,7 @@
 
 import { MoreHorizontal, Plus, Search } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { IntentLink } from "@/components/intent-link";
 import { Kbd } from "@/components/ui/kbd";
 import { NEW_CREATION_HREF } from "@/lib/nav";
@@ -28,15 +28,16 @@ export { prefetchHrefs } from "./nav-prefetch";
 
 /*
  * The top bar (md and up): the wordmark, Create, Studios (the launcher), Fuobe FX, Apps, Motions & effects, Canvas, Chat and
- * Library; search; New creation; who is looking. 56 px on every page. What doesn't fit moves into More, by CSS alone
- * (nothing is measured, so nothing moves after the first paint):
- *   1600 and up   everything, search 280 px, a guest's Log in
- *   1440-1599     the same, search 220 px, items 4 px narrower a side (Apps, Motions & effects and Canvas each carry a chevron)
- *   1280-1439     Canvas and Chat in More, search 200 px
- *   1024-1279     Fuobe FX, Apps and Motions & effects in More too
- *   768-1023      the same, search and New creation as icon buttons
- * Measured with the site's fonts for a guest, an account and the owner, a classic scrollbar's width to spare at every
- * width. Below md the phone tabs take over (phone-tabs.tsx).
+ * Library; search; New creation; the pills and who is looking. 56 px on every page. What doesn't fit moves into More, by
+ * CSS alone (nothing is measured, so nothing moves after the first paint), by the room the nav itself has (a container
+ * query, nav-fit.css), so whatever the right side holds (a guest's Log in, an account's pills, the service's link) never
+ * covers an item:
+ *   room for everything   every item, no More
+ *   less                  Canvas and Chat in More
+ *   less again            Fuobe FX, Apps and Motions & effects in More too
+ *   least                 Library in More too (only where the right side is very full)
+ * Search is 280 px from 1600, 220 px at 1440-1599, 200 px below; an icon button below lg, as New creation. Below md the
+ * phone tabs take over (phone-tabs.tsx).
  */
 
 /**
@@ -125,23 +126,32 @@ function FxRow({ current, row }: { current: boolean; row: number }) {
   );
 }
 
+/** Which of the bar's foldable groups are in More now: read from the bar itself (nav-fit.css decides by the nav's room). */
+export function foldedNow(): { min: boolean; mid: boolean; all: boolean } {
+  const folded = (sel: string) => {
+    const el = document.querySelector(`[data-top-bar] ${sel}`);
+    return !el || getComputedStyle(el).display === "none";
+  };
+  return { min: folded(".nav-fit-min"), mid: folded(".nav-fit-mid"), all: folded(".nav-fit-all") };
+}
+
 function MoreItems() {
   const on = useOn();
+  // read once as it opens; the bar doesn't change while the menu is open
+  const [fold] = useState(foldedNow);
   return (
     <>
-      <div className="xl:hidden">
-        <FxRow current={on(FX_ENTRY)} row={0} />
-      </div>
-      {pick(["apps", "motions", "effects"]).map((e, i) => (
-        <div key={e.id} className="xl:hidden">
-          <RichItem e={e} current={on(e)} row={1 + i} />
-        </div>
-      ))}
-      <div className="xl:hidden">
-        <SeeAllRow href={MOTIONS_AREA_HREF} name="See all motions & effects" data-col={0} data-row={4} className="mt-1" />
-        <div role="separator" className="mx-2.5 my-1.5 h-px bg-border" />
-      </div>
-      {pick(["canvas", "chat"]).map((e, i) => (
+      {fold.mid && (
+        <>
+          <FxRow current={on(FX_ENTRY)} row={0} />
+          {pick(["apps", "motions", "effects"]).map((e, i) => (
+            <RichItem key={e.id} e={e} current={on(e)} row={1 + i} />
+          ))}
+          <SeeAllRow href={MOTIONS_AREA_HREF} name="See all motions & effects" data-col={0} data-row={4} className="mt-1" />
+          <div role="separator" className="mx-2.5 my-1.5 h-px bg-border" />
+        </>
+      )}
+      {pick(fold.min ? ["canvas", "chat", "library"] : ["canvas", "chat"]).map((e, i) => (
         <IntentLink key={e.id} href={e.href} eager={e.eager} aria-current={on(e) ? "page" : undefined} data-col={0} data-row={5 + i} className={cn(CARD_ROW, MENU_ROW_2)}>
           <span className="grid h-[27px] w-9 shrink-0 place-items-center rounded-[6px] bg-muted">
             <NavIcon name={e.icon} className="nav-icon size-4 text-muted-foreground" />
@@ -168,8 +178,9 @@ function MoreMenu({ active }: { active: Active }) {
       icon={<MoreHorizontal aria-hidden className="size-4" />}
       onOpen={warmMore}
       cardClassName="w-80"
-      className="min-[1440px]:hidden"
-      // Marked when it holds the open page at this width: Canvas and Chat always; Fuobe FX, Apps, Motions and Effects below xl.
+      className="nav-fit-more"
+      // Marked when it holds the open page: Canvas and Chat whenever More shows; Fuobe FX, Apps, Motions and Effects when
+      // they are folded too (nav-states.css, by the nav's room).
       active={active.canvas || active.chat}
       data-narrow={active.apps || active.motions || active.fx || undefined}
     >
@@ -190,14 +201,14 @@ function BarLinks({ active, onTap }: { active: Active; onTap?: (href: string) =>
       {/* An item is marked anywhere in its area, its own page (/create, /studios …) included. */}
       <MegaLauncher id="create" active={active.create || active.page === "create"} />
       <MegaLauncher id="studios" active={active.studios || active.page === "studios"} />
-      <MegaLauncher id="fx" active={active.fx || active.page === "fx"} className="hidden xl:inline-flex" />
-      <MegaLauncher id="apps" active={active.apps || active.page === "apps"} className="hidden xl:inline-flex" />
-      <MegaLauncher id="motions" active={active.motions || active.page === "motions"} className="hidden xl:inline-flex" />
-      <MegaLauncher id="canvas" active={active.canvas || active.canvasHome} className="hidden min-[1440px]:inline-flex" />
-      <IntentLink href="/chat" eager data-bar-item="" onClick={tap("/chat")} aria-current={cur(active.chat)} className={cn(BAR_ITEM, "hidden min-[1440px]:inline-flex")}>
+      <MegaLauncher id="fx" active={active.fx || active.page === "fx"} className="nav-fit-mid" />
+      <MegaLauncher id="apps" active={active.apps || active.page === "apps"} className="nav-fit-mid" />
+      <MegaLauncher id="motions" active={active.motions || active.page === "motions"} className="nav-fit-mid" />
+      <MegaLauncher id="canvas" active={active.canvas || active.canvasHome} className="nav-fit-all" />
+      <IntentLink href="/chat" eager data-bar-item="" onClick={tap("/chat")} aria-current={cur(active.chat)} className={cn(BAR_ITEM, "nav-fit-all")}>
         Chat
       </IntentLink>
-      <IntentLink href="/library" eager data-bar-item="" onClick={tap("/library")} aria-current={cur(active.library)} className={BAR_ITEM}>
+      <IntentLink href="/library" eager data-bar-item="" onClick={tap("/library")} aria-current={cur(active.library)} className={cn(BAR_ITEM, "nav-fit-min")}>
         Library
       </IntentLink>
       <MoreMenu active={active} />
@@ -284,8 +295,9 @@ function RightCluster() {
 export function warmBar(x?: number): void {
   if (!window.matchMedia("(min-width: 768px)").matches) return;
   const ids: FetchedMegaId[] = [];
-  if (window.matchMedia("(min-width: 1280px)").matches) ids.push("fx", "apps", "motions");
-  if (window.matchMedia("(min-width: 1440px)").matches) ids.push("canvas");
+  const fold = foldedNow();
+  if (!fold.mid) ids.push("fx", "apps", "motions");
+  if (!fold.all) ids.push("canvas");
   preloadMegaPanel();
   loadMenusNow(ids);
   if (!saveData()) primeMegaPanels(x);
@@ -330,7 +342,7 @@ function MainNav({ children }: { children: React.ReactNode }) {
     warmBar(x);
   };
   return (
-    <nav aria-label="Main" className="flex min-w-0 items-center gap-0.5" onKeyDown={(e) => ctl?.navKey(e)} onPointerEnter={(e) => warm(e.clientX)} onFocus={() => warm()}>
+    <nav aria-label="Main" data-main-nav className="flex min-w-0 flex-1 items-center gap-0.5" onKeyDown={(e) => ctl?.navKey(e)} onPointerEnter={(e) => warm(e.clientX)} onFocus={() => warm()}>
       {children}
     </nav>
   );
@@ -370,7 +382,7 @@ export function TopBar() {
             <ActiveBarLinks />
           </Suspense>
         </MainNav>
-        <span className="min-w-2 flex-1" />
+        <span className="w-2 shrink-0" />
         <div className="flex shrink-0 items-center gap-2">
           <RightCluster />
         </div>

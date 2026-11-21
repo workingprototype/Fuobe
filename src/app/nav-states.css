@@ -120,8 +120,8 @@ html:not([data-input="pointer"]) .nav-focus-out:focus-visible {
 html [data-top-bar][data-menu-open] [data-bar-menu].nav-row:is(:hover, :focus-visible) {
   background-color: transparent;
 }
-/* More, below 1280 px, holds Fuobe FX, Apps and Motions & effects: their page marks it there. */
-@media (max-width: 1279.98px) {
+/* More, when it holds Fuobe FX, Apps and Motions & effects (folded by the nav's room, nav-fit.css): their page marks it. */
+@container mainnav (max-width: 723.98px) {
   .nav-row.nav-mark-under[data-narrow]::before {
     content: "";
     position: absolute;
@@ -133,6 +133,23 @@ html [data-top-bar][data-menu-open] [data-bar-menu].nav-row:is(:hover, :focus-vi
     border-radius: 9999px;
     background-color: var(--nav-mark);
     pointer-events: none;
+  }
+}
+/* From 1600 px the items are wider, so they fold sooner (nav-fit.css). */
+@media (min-width: 1600px) {
+  @container mainnav (max-width: 767.98px) {
+    .nav-row.nav-mark-under[data-narrow]::before {
+      content: "";
+      position: absolute;
+      bottom: 3px;
+      left: 50%;
+      width: 16px;
+      height: 3px;
+      margin-left: -8px;
+      border-radius: 9999px;
+      background-color: var(--nav-mark);
+      pointer-events: none;
+    }
   }
 }
 @media (forced-colors: active) {
