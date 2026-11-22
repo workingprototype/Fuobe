@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Cpu, Download, KeyRound, Pause, Play, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
+import { Copy, Cpu, Download, KeyRound, Pause, Pencil, Play, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -504,6 +504,18 @@ function WorkerCard({ w, lanes, onToken }: { w: WorkerView; lanes: Lane[]; onTok
       <HoursEditor w={w} onSave={(hours) => patch.mutate({ hours })} />
       <LanesEditor key={JSON.stringify(w.allow)} w={w} lanes={lanes} onSave={(allow) => patch.mutate({ allow })} />
       <div className="flex flex-wrap gap-1.5 border-t pt-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8"
+          disabled={patch.isPending}
+          onClick={() => {
+            const name = window.prompt("A new name for this worker", w.name)?.trim();
+            if (name && name !== w.name) patch.mutate({ name });
+          }}
+        >
+          <Pencil /> Rename
+        </Button>
         <Button size="sm" variant="ghost" className="h-8" disabled={patch.isPending} onClick={() => patch.mutate({ rotate: true })}>
           <RotateCw /> New token
         </Button>

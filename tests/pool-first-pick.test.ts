@@ -257,6 +257,28 @@ describe("setting the pick order", () => {
     expect(row(w).pick_order).toBe(1);
   });
 
+  it("renames a worker through the workers API: the view and its timeline say it", async () => {
+    const w = worker("3060-12GB");
+    const res = await patch(w.id, { name: "  3080   10 GB " });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { worker: { name: string } }).worker.name).toBe("3080 10 GB");
+    expect(row(w).name).toBe("3080 10 GB");
+    const said = db().prepare("SELECT words FROM worker_events WHERE worker_id = ? AND event = 'rename'").get(w.id) as { words: string } | undefined;
+    expect(said?.words).toBe("Renamed from 3060-12GB to 3080 10 GB");
+  });
+
+  it("refuses an empty, too long or taken name, and keeps the old one", async () => {
+    const w = worker("first");
+    worker("second");
+    for (const name of ["", "   ", "x".repeat(49), "second", 7]) {
+      const res = await patch(w.id, { name });
+      expect(res.status, JSON.stringify(name)).toBe(400);
+    }
+    expect(row(w).name).toBe("first");
+    // Its own name again is no change.
+    expect((await patch(w.id, { name: "first" })).status).toBe(200);
+  });
+
   it("refuses a value that isn't a whole number in range, and changes nothing", async () => {
     const w = worker("slow", 2);
     for (const pickOrder of [1.5, "1", 101, -101, null]) {

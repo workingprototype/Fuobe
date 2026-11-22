@@ -2700,11 +2700,26 @@ export function addWorker(name: string, pool = "pool"): { id: string; token: str
   return createWorker({ name: clean, kind: "pool", pool });
 }
 
+/** The longest name a worker may have (WorkerPatch.name). */
+export const WORKER_NAME_MAX = 48;
+
+/** A worker's new name, its spaces tidied; or why it can't have it. */
+function workerName(name: unknown, id: string): string {
+  if (typeof name !== "string") throw new Error("Name the worker");
+  const clean = name.replace(/\s+/g, " ").trim();
+  if (!clean) throw new Error("Name the worker");
+  if (clean.length > WORKER_NAME_MAX) throw new Error(`A worker's name is ${WORKER_NAME_MAX} characters at most`);
+  if (db().prepare("SELECT 1 FROM relay_workers WHERE kind = 'pool' AND revoked_at IS NULL AND name = ? AND id <> ?").get(clean, id)) throw new Error("A worker with that name exists");
+  return clean;
+}
+
 /** The pick order a worker may have (WorkerPatch.pickOrder). */
 export const PICK_ORDER_MIN = -100;
 export const PICK_ORDER_MAX = 100;
 
 export interface WorkerPatch {
+  /** A new name (WORKER_NAME_MAX characters at most, unlike any other worker's): shown wherever the worker is named. */
+  name?: string;
   paused?: boolean;
   pauseNow?: boolean;
   drain?: boolean;
@@ -2757,6 +2772,8 @@ export function patchWorker(id: string, p: WorkerPatch, now = Date.now(), by = "
     return { view: null };
   }
   const set: Record<string, unknown> = {};
+  const renamed = p.name !== undefined ? workerName(p.name, id) : undefined;
+  if (renamed !== undefined && renamed !== w.name) set.name = renamed;
   if (p.paused !== undefined) {
     set.paused_server = p.paused ? 1 : 0;
     if (!p.paused) set.drain = 0;
@@ -2811,6 +2828,7 @@ export function patchWorker(id: string, p: WorkerPatch, now = Date.now(), by = "
   const fresh = d.prepare("SELECT * FROM relay_workers WHERE id = ?").get(id) as WorkerRow;
   // The timeline: each action (an edit names its keys, never a value), then the state it leads to when it changed.
   const actions: [string, string, Record<string, unknown>?][] = [];
+  if (set.name !== undefined) actions.push(["rename", `Renamed from ${w.name} to ${renamed}`, { from: w.name, to: renamed }]);
   if (p.pauseNow) actions.push(["pause-now", "Paused now on the website: its jobs go back in line"]);
   else if (p.paused === true) actions.push(["pause", "Paused on the website"]);
   if (p.paused === false) actions.push(["resume", "Resumed on the website"]);
