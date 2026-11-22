@@ -77,7 +77,7 @@ import { pollTrainings } from "./training";
 import { createEndFrameClip, createExtendChain, createKeyframeFilm, createMosaicRun, createRefinedModel, createRelitClip, createShotFilm, createStillTo3d, createVoiceFirst, joinClips } from "./chains";
 import { chainedRefine } from "@/lib/av/hi3d";
 import { wantsVoiceFirst } from "@/lib/av/voice-first";
-import { FIX_FACES, FIX_FACES_AFTER_PARAM, fixFacesAfterStep, wantsFixFacesAfter } from "@/lib/catalog/fix-faces";
+import { FIX_FACES, FIX_FACES_AFTER_PARAM, fixFacesAfterFoundNoFace, fixFacesAfterStep, wantsFixFacesAfter } from "@/lib/catalog/fix-faces";
 import { createH3TwoKRun, createRegenerateRun, keepsH3Latent, regenHeld, regenSwitchedOff } from "./regenerate";
 import { H3_2K_STEPS_NOTE, h3TwoKRequests, REGEN_COPY, REGEN_MODEL, regenerateGraphLoras, wantsH3TwoK } from "@/lib/catalog/regenerate";
 import { enhancePrompt, enhanceSoulWords, ideogramCaption } from "./enhance";
@@ -4694,6 +4694,14 @@ async function pollOne(r: Row): Promise<void> {
     return;
   }
   if (res.state === "failed") {
+    // Fix faces after an H3 take that found no face in it: nothing to fix, so the step leaves the batch and the take
+    // stands as made, as with the switch off. The log keeps it for the owner.
+    if (fixFacesAfterFoundNoFace(r, [res.detail, res.error])) {
+      if (!claimFinish(r.id)) return;
+      recordRunEvent("fix-faces-no-face", { run: r.id, batch: r.batch_id ?? undefined, ...(account && { account }), provider: r.provider }, "info");
+      deleteGeneration(r.id);
+      return;
+    }
     // Its GPU restarted and lost the job: an account's run is sent again once, as a computer's tab does.
     if (own && res.lost && resend(r, own, RESENT_WORDS)) return;
     // A fallback making a run Ideogram 4 declined, or a run of Auto: the next model, or it fails as the declined run.

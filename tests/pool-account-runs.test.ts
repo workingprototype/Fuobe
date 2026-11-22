@@ -823,6 +823,28 @@ describe("an account's run that a worker can't finish", () => {
       expect(await visitorList()).not.toMatch(/RuntimeError|KSampler/);
     });
 
+    it("Fix faces after an H3 take that found no face: the step leaves the batch, with no failure", async () => {
+      const w = standInWorker();
+      beatAs(w);
+      const { id, taskId } = await accountRun();
+      // The run as the Fix faces step after a take (fixFacesAfterStep), its clip filled in.
+      const { fixFacesAfterStep } = await import("@/lib/catalog/fix-faces");
+      const was = JSON.parse((db().prepare("SELECT request_json FROM generations WHERE id = ?").get(id) as { request_json: string }).request_json);
+      const step = { ...was, ...fixFacesAfterStep({ modelId: "oss-minimax-h3", op: "i2v", feature: "studio", prompt: "", inputs: { images: ["/api/files/start.png"] }, params: {} } as never), chainFilled: true };
+      db().prepare("UPDATE generations SET model_id = 'oss-h3-fix-faces', op = 'face-fix-video', request_json = ? WHERE id = ?").run(JSON.stringify(step), id);
+      const api = workerApi(w.token);
+      const t = (await api.claim())!;
+      await api.report(t, { event: "sent", promptId: t.promptId });
+      const entry = { prompt: [1, t.promptId], status: { status_str: "error", completed: false, messages: [["execution_error", { node_type: "H3FaceTrackCrop", node_id: "6", exception_type: "ValueError", exception_message: "No face detected in any frame." }]] }, outputs: {} };
+      const why = "ValueError in H3FaceTrackCrop (node 6): No face detected in any frame. Lower `confidence`, or this video has no usable face and should be skipped. (at execution.py:315 process_inputs < nodes.py:1325 run)";
+      expect((await api.report(t, { event: "finished", entry, why })).status).toBe(200);
+      expect(rowOf(taskId).state).toBe("failed");
+      // Gone for good: not in the account's runs, its list or the Trash; nothing ended as failed.
+      expect(await until(() => (db().prepare("SELECT id FROM generations WHERE id = ?").get(id) ? null : true), 400)).toBe(true);
+      expect(getGeneration(id, { includeDeleted: true })).toBeNull();
+      expect(await visitorList()).not.toContain(id);
+    });
+
     it("with full details on, the person reads the cleaned reason under the plain sentence; nobody else does", async () => {
       setSetting("runFailureDetail", "full");
       const w = standInWorker();

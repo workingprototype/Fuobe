@@ -105,6 +105,25 @@ describe("Fix faces after an H3 video", () => {
     expect(wantsFixFacesAfter({ ...(h3 as object), params: { duration: 5 } } as never)).toBe(false);
   });
 
+  it("is not offered for an orbit (Product 360 and the other frozen-moment orbits)", async () => {
+    const { fixFacesAfterOffered, wantsFixFacesAfter } = await import("@/lib/catalog/fix-faces");
+    expect(fixFacesAfterOffered("oss-minimax-h3", "i2v", 3, true, true)).toBe(false);
+    expect(wantsFixFacesAfter({ ...(h3 as object), params: { duration: 3, extra: { fixFacesAfter: true, orbit: true } } } as never)).toBe(false);
+  });
+
+  it("knows the step that found no face in the take, and only that step", async () => {
+    const { fixFacesAfterFoundNoFace, fixFacesAfterStep } = await import("@/lib/catalog/fix-faces");
+    const step = { model_id: "oss-h3-fix-faces", op: "face-fix-video", request_json: JSON.stringify(fixFacesAfterStep(h3)) };
+    const why = "ValueError in H3FaceTrackCrop (node 6): No face detected in any frame. Lower `confidence`, or this video has no usable face and should be skipped.";
+    expect(fixFacesAfterFoundNoFace(step, [why, "That one didn't come out right"])).toBe(true);
+    expect(fixFacesAfterFoundNoFace(step, [undefined, "That one didn't come out right"])).toBe(false);
+    expect(fixFacesAfterFoundNoFace(step, ["CUDA out of memory"])).toBe(false);
+    // The Fix Faces app's own run (no take before it) keeps its ending.
+    const app = { ...step, request_json: JSON.stringify({ modelId: "oss-h3-fix-faces", op: "face-fix-video", inputs: { video: "/v.mp4" } }) };
+    expect(fixFacesAfterFoundNoFace(app, [why])).toBe(false);
+    expect(fixFacesAfterFoundNoFace({ ...step, model_id: "oss-minimax-h3" }, [why])).toBe(false);
+  });
+
   it("follows the take with Fix faces from its start picture, in Follow the mouth, waiting for the clip", async () => {
     const { fixFacesAfterStep } = await import("@/lib/catalog/fix-faces");
     const step = fixFacesAfterStep(h3);

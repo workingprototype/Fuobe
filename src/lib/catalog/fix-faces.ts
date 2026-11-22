@@ -76,14 +76,38 @@ export const FIX_FACES_AFTER_PARAM = "fixFacesAfter";
 /** The H3 models it follows: the full model and its fast and flash versions, on your GPU or the site's. */
 const H3_MODELS = new Set(["oss-minimax-h3", "oss-minimax-h3-fast", "oss-minimax-h3-flash"]);
 
-/** Whether the switch is offered: an H3 video from a start picture, no longer than one Fix faces run. */
-export function fixFacesAfterOffered(modelId: string | undefined, op: string | undefined, seconds: number | undefined, hasStart: boolean): boolean {
-  return !!modelId && H3_MODELS.has(modelId) && op === "i2v" && hasStart && !(seconds && seconds > FIX_FACES.maxSeconds);
+/**
+ * Whether the switch is offered: an H3 video from a start picture, no longer than one Fix faces run. Not for an orbit
+ * (params.extra.orbit: Product 360 and the other frozen-moment orbits): its picture is mostly a product, and its shot keeps
+ * every face still, which Follow the mouth would move.
+ */
+export function fixFacesAfterOffered(modelId: string | undefined, op: string | undefined, seconds: number | undefined, hasStart: boolean, orbit = false): boolean {
+  return !!modelId && H3_MODELS.has(modelId) && op === "i2v" && hasStart && !orbit && !(seconds && seconds > FIX_FACES.maxSeconds);
 }
 
 /** Whether a request asks for it, and may have it. */
 export function wantsFixFacesAfter(req: Pick<GenerationRequest, "modelId" | "op" | "params" | "inputs">): boolean {
-  return req.params?.extra?.[FIX_FACES_AFTER_PARAM] === true && fixFacesAfterOffered(req.modelId, req.op ?? "i2v", req.params?.duration, !!req.inputs?.images?.[0]);
+  return (
+    req.params?.extra?.[FIX_FACES_AFTER_PARAM] === true &&
+    fixFacesAfterOffered(req.modelId, req.op ?? "i2v", req.params?.duration, !!req.inputs?.images?.[0], req.params?.extra?.orbit === true)
+  );
+}
+
+/** The face tracker's words when the clip has no face it can follow (H3FaceTrackCrop: a product, a landscape). */
+const NO_FACE = /no face detected in any frame/i;
+
+/**
+ * Whether a failed run is the Fix faces step after an H3 take (fixFacesAfterStep) that found no face in the take: nothing
+ * to fix, so the step leaves the batch and the take stands as made, as with the switch off.
+ */
+export function fixFacesAfterFoundNoFace(r: { model_id: string; op?: string | null; request_json: string }, words: (string | undefined)[]): boolean {
+  if (r.model_id !== FIX_FACES.model || r.op !== "face-fix-video" || !words.some((w) => w && NO_FACE.test(w))) return false;
+  try {
+    const req = JSON.parse(r.request_json) as GenerationRequest;
+    return !!req.chain?.length && !!req.step;
+  } catch {
+    return false;
+  }
 }
 
 /**

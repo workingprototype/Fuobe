@@ -1295,8 +1295,10 @@ export function Composer({ docked }: { docked: boolean }) {
     preset?.userPrompt,
   );
   const effectiveOp = studioOp ?? op;
-  // Fix faces after the take: an H3 video from a start picture, no longer than one Fix faces run, and not at 2K.
-  const fixFacesShown = fixFacesAfterOffered(draft.modelId, effectiveOp ?? (typed.slots.image?.ref ? "i2v" : undefined), p.duration, !!typed.slots.image?.ref) && p.resolution !== "2K";
+  // Fix faces after the take: an H3 video from a start picture, no longer than one Fix faces run, not an orbit, and not at 2K.
+  const fixFacesShown =
+    fixFacesAfterOffered(draft.modelId, effectiveOp ?? (typed.slots.image?.ref ? "i2v" : undefined), p.duration, !!typed.slots.image?.ref, p.extra?.orbit === true) &&
+    p.resolution !== "2K";
   const fixFacesOn = fixFacesShown && fixFacesAsked;
   // Qwen-Image 2.1's Options → GPU on Small: what the small encoder can't do (or that a speed with its own graph wins).
   // MiniMax H3's GPU tier: what FastH3 V2 or Trim changes, picked or as Auto runs it on the card the GPU check read.
