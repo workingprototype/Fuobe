@@ -391,7 +391,7 @@ export function MegaPanel({ id, onClose, onDismiss, onSearch, onPrimed }: { id: 
     return () => ro.disconnect();
   }, []);
   return (
-    <div ref={root} className="max-w-[1680px] px-6 pb-6 lg:pb-7">
+    <div ref={root} className="mx-auto max-w-[1680px] px-6 pb-6 lg:pb-7">
       <div ref={head} className="sticky top-0 z-20 -mx-6 flex min-h-10 items-center gap-3 bg-popover px-6 pt-5 pb-3 lg:pt-6">
         <p className="text-[13px] text-muted-foreground" data-count-line>
           {model ? model.countLine : failed ? "Couldn't load this menu" : " "}

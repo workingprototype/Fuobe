@@ -254,7 +254,7 @@ export function MegaLauncher({ id, active, icon, className }: { id: MegaId; acti
           /* The body's place while its chunk loads: the count line's height, then the columns' skeleton. */
           <Suspense
             fallback={
-              <div className="max-w-[1680px] px-6 pt-5 pb-6 lg:pt-6 lg:pb-7">
+              <div className="mx-auto max-w-[1680px] px-6 pt-5 pb-6 lg:pt-6 lg:pb-7">
                 <div className="min-h-10 pb-3" />
                 <MegaSkeleton id={id} />
               </div>

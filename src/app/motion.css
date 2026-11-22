@@ -153,8 +153,9 @@
    Big panels (Studios, Apps, Motions & effects, Canvas) sit on one shared sheet under the bar ([data-mega-stage]):
    the sheet comes down from the bar (8 px, base, enter), solid from its first frame, with its content from half there
    (never an empty sheet), and goes back up (4 px, fast, exit); between two panels its bottom edge moves to the new height (transform only, base, standard) while the
-   old content leaves sideways (fast, exit) and the new one comes in from the side the pointer went at the same time,
-   from half there: a cross-fade over the one sheet, never a frame of empty sheet; every switch ends by 200 ms. The
+   old content fades where it stands (fast, exit) and the new one fades in where it stands at the same time, from half
+   there: a cross-fade over the one sheet, never a frame of empty sheet, nothing moving sideways; every switch ends by
+   200 ms. The
    columns follow 20 ms apart on a fresh open (3 steps at most: every column reads by 260 ms), never on a switch.
    Cards (Create, More) grow in from their item (scale 0.97, 4 px) and shrink out (0.98, fast, exit).
    data-phase: open | exit (inert, still painted) | gone (hidden). Under reduced motion every token is 0. ----- */
@@ -258,19 +259,14 @@
     translate: 0 calc(var(--motion-d1) * -1);
   }
 }
-/* The open item's highlight (BarIndicator): it shows in place, slides from item to item (translate, and scale from the
-   old item's width: transform only), fades out last. */
+/* The open item's highlight (BarIndicator): it shows in place on each item (it never slides across the bar), fades out
+   last. */
 [data-bar-indicator] {
   background-color: var(--nav-hi);
   transform-origin: left center;
   opacity: 0;
   transition: opacity var(--motion-fast) var(--ease-exit);
   &[data-on] { opacity: 1; transition: none; }
-  &[data-on][data-slide] {
-    transition:
-      translate var(--motion-base) var(--ease-standard),
-      scale var(--motion-base) var(--ease-standard);
-  }
 }
 /* The dimmed page under any open menu: in with the menu, out only once nothing has been open a moment (a switch never
    fades it). Half the overlay's strength: the page stays as context for a menu that opens on hover. */

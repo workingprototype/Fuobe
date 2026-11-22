@@ -26,8 +26,8 @@ export { prefetchHrefs } from "./nav-prefetch";
 /*
  * The top bar (md and up): two rows that stay on screen as the page scrolls, 101 px on every page (--chrome-top,
  * globals.css).
- *   the top row     the wordmark; search in the middle of the room left (a field from 220 px of room, up to 520 px
- *                   wide, else an icon button); the pills, New creation and who is looking
+ *   the top row     the wordmark; search in the page's middle (a field from 220 px of room, up to 520 px wide, else an
+ *                   icon button); the pills, New creation and who is looking
  *   the second row  every item, centred, in three groups: Create and Studios; Fuobe FX, Apps and Motions & effects;
  *                   Canvas, Chat and Library. Each with its icon from lg; the open page's item is a soft fill
  *                   (nav-states.css).
@@ -279,14 +279,16 @@ export function TopBar() {
       <BarHeader>
         <BarStage />
         <BarIndicator />
-        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border pr-4 pl-5 lg:max-[1439.98px]:pr-5 min-[1440px]:pr-6">
-          <IntentLink href="/" eager aria-label="Fuobe home" className="nav-focus inline-flex h-10 shrink-0 items-center rounded-md px-1 font-heading text-[24px] leading-none">
+        {/* Three columns: the sides share the room left equally (each at least its content), so search sits in the
+            page's middle, over the centred tabs, wherever the right side leaves room for that. */}
+        <div className="grid h-14 shrink-0 grid-cols-[minmax(max-content,1fr)_minmax(40px,520px)_minmax(max-content,1fr)] items-center gap-x-3 border-b border-sidebar-border pr-4 pl-5 lg:gap-x-6 lg:max-[1439.98px]:pr-5 min-[1440px]:pr-6">
+          <IntentLink href="/" eager aria-label="Fuobe home" className="nav-focus inline-flex h-10 items-center justify-self-start rounded-md px-1 font-heading text-[24px] leading-none">
             Fuobe
           </IntentLink>
-          <div data-bar-search-room="" className="@container/barsearch flex min-w-10 flex-1 justify-center px-3 lg:px-6">
+          <div data-bar-search-room="" className="@container/barsearch flex min-w-0 justify-center">
             <SearchField />
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-2 justify-self-end">
             <RightCluster />
           </div>
         </div>

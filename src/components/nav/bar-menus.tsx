@@ -7,7 +7,6 @@ import {
   restDue,
   restMove,
   restStart,
-  switchDirection,
   switchesAtOnce,
   travelling,
   type BarMenuAction,
@@ -624,24 +623,22 @@ export function useBarMenu(id: BarMenuId, { big = false, ready, warm }: { big?: 
   useEffect(() => ctl?.register(id, { big, ready, warm }), [ctl, id, big, ready, warm]);
   const triggerRef = useCallback((el: HTMLButtonElement | null) => ctl?.register(id, { trigger: el }), [ctl, id]);
   const surfaceRef = useCallback((el: HTMLElement | null) => ctl?.register(id, { surface: el }), [ctl, id]);
-  // How it comes in and goes out: a switch between two big panels slides sideways (the way the pointer went);
-  // anything else enters from the bar and leaves the same way.
+  // How it comes in and goes out: a switch between two big panels is a cross-fade where they stand (nothing moves
+  // sideways while the pointer crosses the bar); anything else enters from the bar and leaves the same way.
   const other = open ? menu.prev : menu.id;
-  const sideways = big && !!other && !!ctl?.part(other)?.big;
-  const dir = open ? switchDirection(menu.prev, id) : switchDirection(id, menu.id);
-  // A cross-fade: the new content comes in from half there (motion.css) as the old one leaves (two thirds of fast), so
-  // the sheet is never seen empty, even while the pointer sweeps across several items.
-  const motion =
-    sideways && dir
-      ? open
-        ? { "--enter-x": `calc(var(--motion-d2) * ${dir})`, "--enter-y": "0px" }
-        : { "--exit-x": `calc(var(--motion-d2) * ${-dir})`, "--exit-y": "0px", "--exit-fade": "calc(var(--motion-fast) * .67)" }
-      : {};
+  const switching = big && !!other && !!ctl?.part(other)?.big;
+  // The new content comes in from half there (motion.css) as the old one fades (two thirds of fast), so the sheet is
+  // never seen empty, even while the pointer sweeps across several items.
+  const motion = switching
+    ? open
+      ? { "--enter-x": "0px", "--enter-y": "0px" }
+      : { "--exit-x": "0px", "--exit-y": "0px", "--exit-fade": "calc(var(--motion-fast) * .67)" }
+    : {};
   return {
     open,
     phase,
     /** A switch from another panel: no column cascade, the content changes as one piece. */
-    entered: open && sideways ? ("switch" as const) : ("fresh" as const),
+    entered: open && switching ? ("switch" as const) : ("fresh" as const),
     style: motion as React.CSSProperties,
     triggerRef,
     surfaceRef,
@@ -651,7 +648,7 @@ export function useBarMenu(id: BarMenuId, { big = false, ready, warm }: { big?: 
   };
 }
 
-/** The open item's highlight: one fill that slides from item to item as the open menu changes. */
+/** The open item's highlight: one fill on the open menu's item, shown where the item stands (it never slides across). */
 export function BarIndicator() {
   const ctl = useBarController();
   const { menu } = useNavUi();
@@ -674,23 +671,7 @@ export function BarIndicator() {
       el.style.translate = `${r.left - host.left}px ${r.top - host.top}px`;
       return true;
     };
-    // Slides only from one open item to the next; from nothing it shows in place. The slide moves transform only: the
-    // box takes the new item's size at once and starts scaled to the old one's width, then settles (FLIP).
-    const slide = el.hasAttribute("data-on") && !!menu.prev;
-    const was = slide ? { w: parseFloat(el.style.width), t: el.style.translate } : null;
-    el.removeAttribute("data-slide");
-    const shown = place();
-    const w = parseFloat(el.style.width);
-    if (shown && was && w > 0 && was.w > 0) {
-      const to = el.style.translate;
-      el.style.translate = was.t;
-      el.style.scale = `${was.w / w} 1`;
-      void el.offsetWidth;
-      el.setAttribute("data-slide", "");
-      el.style.translate = to;
-      el.style.scale = "1 1";
-    } else el.style.scale = "1 1";
-    el.toggleAttribute("data-on", shown);
+    el.toggleAttribute("data-on", place());
     // No highlight left between the items that show when its item hides.
     const follow = () => el.toggleAttribute("data-on", place());
     const ro = new ResizeObserver(follow);
@@ -700,7 +681,7 @@ export function BarIndicator() {
       ro.disconnect();
       window.removeEventListener("resize", follow);
     };
-  }, [ctl, menu.id, menu.prev]);
+  }, [ctl, menu.id]);
   return <span ref={ref} aria-hidden data-bar-indicator className="pointer-events-none absolute top-0 left-0 rounded-[10px] print:hidden" />;
 }
 
