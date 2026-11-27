@@ -76,6 +76,18 @@ export const DEFAULTS = {
    * its memory before each GPU job and when idle.
    */
   ramGuard: null,
+  /**
+   * The free space (GB) it keeps on the drive of its worker folder (disk.mjs). Under it, it takes no new job and the job
+   * in hand goes on; it takes jobs again once the drive has 3 GB more than this. 0: off.
+   */
+  minFreeGb: 5,
+  /**
+   * Spill folders, in order (spill.mjs): each a folder, or { dir, minFreeGb }. The folders that grow with each job are
+   * junctions into the first one whose drive has room, moved between jobs only; the worker pauses only when none has
+   * room. Each one's floor: its own minFreeGb, else minFreeGb above, and at least 30 GB on the system drive. None: the
+   * folders stay in the worker folder, and minFreeGb applies to its drive.
+   */
+  spillDirs: null,
 };
 
 const file = (home, name) => path.join(home, name);

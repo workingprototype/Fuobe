@@ -640,6 +640,81 @@ describe("a worker whose model folder isn't there yet (a drive still locked afte
   });
 });
 
+describe("a worker whose worker folder's drive is almost full (its own disk-low pause)", () => {
+  const LOW = "disk-low:X:3.2:8";
+
+  it("takes no new job and says why in plain words; its job in hand goes on, never sent back; with room again it takes work", () => {
+    const id = task();
+    const w = worker("disk-low");
+    expect(claim(w)?.id).toBe(id);
+    tasks.setTask(id, { state: "running", sent_at: clock });
+    const a = beat(w, { paused: true, why: LOW }, [id]);
+    // Not a pause now: no stop, and the job keeps its worker.
+    expect(a.stops).toEqual([]);
+    expect(a.worker.pauseNow).toBe(false);
+    expect(a.runner).toBe(false);
+    expect(state(id)).toMatchObject({ state: "running", worker_id: w.id, requeues: 0 });
+    expect(pool.workerState(row(w), clock)).toEqual({ state: "disk-low", words: "Drive X: is almost full (3.2 GB free): no new jobs until it has 8 GB free" });
+    expect(pool.listWorkers(clock).find((x) => x.id === w.id)).toMatchObject({ state: "disk-low", words: "Drive X: is almost full (3.2 GB free): no new jobs until it has 8 GB free" });
+    expect(pool.eligible(row(w), clock)).toBe(false);
+    // Its timeline has the state once, with the words.
+    const ev = db().prepare("SELECT event, words FROM worker_events WHERE worker_id = ? AND kind = 'state' ORDER BY id DESC LIMIT 1").get(w.id) as { event: string; words: string };
+    expect(ev).toEqual({ event: "disk-low", words: "Drive X: is almost full (3.2 GB free): no new jobs until it has 8 GB free" });
+    // The job ends; a new one waits, still paused.
+    db().prepare("UPDATE relay_tasks SET state = 'done' WHERE id = ?").run(id);
+    const next = task({ account: "acct-1" });
+    beat(w, { paused: true, why: "disk-low:X:4.1:8" });
+    expect(claim(w)).toBeNull();
+    expect(state(next).state).toBe("waiting");
+    // People's runs still count for its PC (it reads them for its turns), but it doesn't ask for one while paused.
+    expect(beat(w, { paused: true, why: "disk-low:X:4.1:8" }).claimableNow).toBe(1);
+    // Room again: it takes the run.
+    expect(beat(w).runner).toBe(true);
+    expect(pool.workerState(row(w), clock).state).toBe("idle");
+    expect(claim(w)?.id).toBe(next);
+  });
+
+  it("words for every spill folder's drive short of room, off Windows (no drive letter), and for a reason it can't read", () => {
+    const w = worker("disk-words");
+    beat(w, { paused: true, why: "disk-low:XSC:3.2:8" });
+    expect(pool.workerState(row(w), clock)).toEqual({ state: "disk-low", words: "Drives X:, S: and C: are almost full: no new jobs until one of them has room" });
+    beat(w, { paused: true, why: "disk-low:XS:1:8" });
+    expect(pool.workerState(row(w), clock).words).toBe("Drives X: and S: are almost full: no new jobs until one of them has room");
+    beat(w, { paused: true, why: "disk-low::0.5:5.5" });
+    expect(pool.workerState(row(w), clock)).toEqual({ state: "disk-low", words: "The drive of its worker folder is almost full (0.5 GB free): no new jobs until it has 5.5 GB free" });
+    beat(w, { paused: true, why: "disk-low:<b>:x" });
+    expect(pool.workerState(row(w), clock)).toEqual({ state: "disk-low", words: "The drive of its worker folder is almost full: no new jobs until it has room" });
+    // Another code that only starts the same way is a plain pause.
+    beat(w, { paused: true, why: "disk-lowish" });
+    expect(pool.workerState(row(w), clock)).toEqual({ state: "paused", words: "Paused here" });
+  });
+
+  it("is not a free worker: another worker's owner job makes room for a person's run it can't take, and its own owner job never does", () => {
+    // Another worker that is ready keeps the owner's job going; the same worker with its drive almost full doesn't.
+    const w = worker("runs-owner-job");
+    const own = task({ rankAgoMs: 5 * MIN });
+    expect(claim(w)?.id).toBe(own);
+    const other = worker("other");
+    task({ account: "acct-p" });
+    expect(beat(w, {}, [own]).stops).toEqual([]);
+    beat(other, { paused: true, why: LOW });
+    expect(beat(w, {}, [own]).stops.map((x) => x.task)).toEqual([own]);
+    // Its own drive almost full, with no other worker free: its owner job goes on (it couldn't take the person's run
+    // anyway). The same beat without the pause makes room.
+    pool.patchWorker(w.id, { paused: true });
+    pool.patchWorker(other.id, { paused: true });
+    const v = worker("low-itself");
+    const own2 = task({ rankAgoMs: 4 * MIN });
+    db().prepare("UPDATE relay_tasks SET state = 'done' WHERE state = 'waiting' AND id != ?").run(own2);
+    expect(claim(v)?.id).toBe(own2);
+    tasks.setTask(own2, { state: "running", sent_at: clock });
+    task({ account: "acct-q" });
+    expect(beat(v, { paused: true, why: LOW }, [own2]).stops).toEqual([]);
+    expect(state(own2)).toMatchObject({ state: "running", worker_id: v.id });
+    expect(beat(v, {}, [own2]).stops.map((x) => x.task)).toEqual([own2]);
+  });
+});
+
 describe("a job its worker's ComfyUI keeps losing", () => {
   const unused = () => ({ error: "unused" });
   const say = (id: string, e: Parameters<typeof tasks.report>[1]) => tasks.report(state(id), e, unused, clock);

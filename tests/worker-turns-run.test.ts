@@ -8,6 +8,7 @@
  * - A game holds the GPU: the busy pause, and no turn is asked for.
  * - The studio doesn't say what the worker can take: local ComfyUI work pauses it, as before.
  * - Me first: the pause shortcut during a turn writes siteWaiting 0, and the job keeps its place.
+ * - Its worker folder's drive almost full: no turn is asked for until the drive has room again.
  * - Only the owner's own job waits: no turn. Local ComfyUI work that runs a job is left alone; once it runs nothing, it
  *   is asked to free its memory (its /queue read, then its /free) and the worker takes the job.
  * - The counters fail: a lock that names ComfyUI work leads to a turn.
@@ -213,7 +214,8 @@ function fakeLocal(o: { busy: boolean; onFree?: () => void }) {
   return { o, calls, fetch };
 }
 
-function start(w: W, p: Pc, gpu: ReturnType<typeof fakeGpu>, o: { lockOwners?: string[]; studio?: { older: boolean }; local?: ReturnType<typeof fakeLocal>; stepMs?: number; gpuGraceMs?: number } = {}) {
+/** `disk`: its worker folder's drive X: as a stand-in (a 5 GB floor, read every 100 ms); none: the floor is off. */
+function start(w: W, p: Pc, gpu: ReturnType<typeof fakeGpu>, o: { lockOwners?: string[]; studio?: { older: boolean }; local?: ReturnType<typeof fakeLocal>; stepMs?: number; gpuGraceMs?: number; disk?: { freeGb: number } } = {}) {
   const ctrl = new AbortController();
   const cfg = {
     site: SITE,
@@ -228,7 +230,9 @@ function start(w: W, p: Pc, gpu: ReturnType<typeof fakeGpu>, o: { lockOwners?: s
     desktopBaselineMb: 600,
     gpuLockFile: p.lock,
     gpuLockComfyOwners: o.lockOwners ?? [],
+    ...(o.disk && { minFreeGb: 5 }),
   };
+  const disk = o.disk;
   const done = runWorker(cfg, {
     fetch: router(w, o.studio ?? { older: false }),
     home: p.home,
@@ -249,6 +253,7 @@ function start(w: W, p: Pc, gpu: ReturnType<typeof fakeGpu>, o: { lockOwners?: s
     ...(o.gpuGraceMs !== undefined && { gpuGraceMs: o.gpuGraceMs }),
     // Local ComfyUI work is never a real port here: busy unless the test says otherwise.
     localFetch: (o.local ?? fakeLocal({ busy: true })).fetch,
+    ...(disk && { readDisk: () => ({ drive: "X", freeBytes: disk.freeGb * 2 ** 30, totalBytes: 2000 * 2 ** 30 }), diskEveryMs: 100 }),
     ...gpu,
   });
   const r = { ctrl, done };
@@ -448,6 +453,31 @@ describe("studio jobs first", () => {
     expect(site(p)?.siteWaiting).toBe(0);
     expect(await worker(["resume"], io)).toBe(0);
     await until(() => (site(p)?.siteWaiting ?? 0) >= 1);
+  });
+
+  it("its worker folder's drive almost full: it asks local ComfyUI work for no turn while a person's run waits; with room again it asks, and takes the run", async () => {
+    const w = addWorker();
+    const p = pc();
+    const id = addTask();
+    const disk = { freeGb: 2 };
+    start(w, p, fakeGpu(p, { workMb: 9000 }), { disk });
+    await until(() => workerRow(w).local_why === "disk-low:X:2:8");
+    // A person's run waits that it could take, yet site.json says none: local work keeps the GPU.
+    await until(() => site(p) !== null);
+    for (let i = 0; i < 30; i++) {
+      expect(site(p)?.siteWaiting).toBe(0);
+      expect(workerRow(w).local_why).toBe("disk-low:X:2:8");
+      await sleep(50);
+    }
+    expect(task(id).state).toBe("waiting");
+    expect(holdingWhy(w)).toBeNull();
+    expect(p.logs.some((l) => /asking it to make room/.test(l))).toBe(false);
+    // Room again: now it asks for a turn, and takes the run once local work made room.
+    disk.freeGb = 9;
+    await until(() => (site(p)?.siteWaiting ?? 0) >= 1);
+    await until(() => workerRow(w).local_why === "waiting-for-yield");
+    fs.writeFileSync(path.join(p.turns, "yielded.json"), JSON.stringify({ state: "yielded", at: Date.now() }));
+    expect((await until(() => ["done", "failed"].includes(task(id).state) && task(id), 60_000)).state).toBe("done");
   });
 
   it("the counters fail: a lock that names ComfyUI work leads to a turn, any other owner to the busy pause", async () => {

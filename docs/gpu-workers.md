@@ -301,6 +301,50 @@ The worker obeys any one of these pauses. One pause never ends another pause.
   cool-down. A pause by hand is never ended by the automatic resume. Turn it on with `autoResume` in `worker.json`, or
   with **Resume by itself after another program used the GPU** in Settings → Workers. The website's switch wins over
   `worker.json`. With it on, a PC can serve whenever its owner isn't using the GPU.
+- **The drive is almost full.** The worker folder holds its ComfyUI's input, output and temp folders and the kept
+  results. About once a minute, and after each job, the worker reads the free space of the drive that holds the worker
+  folder. This is one system call: no other program, no admin rights. With less than `minFreeGb` free (in
+  `worker.json`, 5 GB by default, 0 turns it off), the worker takes no new job, and other workers take the jobs. The job
+  in hand goes on to its end, and kept results still go up. Its ComfyUI stops once it has no job. The worker takes
+  jobs again once the drive has 3 GB more than `minFreeGb` (8 GB by default), so a drive near the line does not pause
+  it on and off. Its log says each change once, for example "Drive X: has only 3.2 GB free: pausing. It takes no new
+  jobs until the drive has 8 GB free. A job in hand goes on." The state says "Drive X: is almost full (3.2 GB free): no new jobs
+  until it has 8 GB free" (`local.why: "disk-low:X:3.2:8"`: the drive letter, the GB free and the GB it waits for; no
+  letter off Windows). While it waits for room, it asks local ComfyUI work for no turn. The text slot goes on, because
+  its jobs write almost nothing to the drive. With spill folders (below), the pause comes only when every spill
+  folder's drive is short of room.
+- **Spill folders** (`spillDirs` in `worker.json`, none by default). A list of folders on other drives, in order, for
+  example `"spillDirs": ["X:\\fuobe-worker\\work-spill", "S:\\fuobe-worker-spill", "C:\\fuobe-worker-spill"]`. An
+  entry can also be `{ "dir": "S:\\fuobe-worker-spill", "minFreeGb": 10 }`. Each folder keeps its own `minFreeGb`, else
+  the one of `worker.json`, and at least 30 GB on the system drive (C:).
+  - **What moves.** The folders that grow with each job become directory junctions in the worker folder: `input`,
+    `output`, `temp`, `cache` (the inputs it keeps while a job runs) and `hold` (the kept results), and with a CPU slot
+    `cpu\input`, `cpu\output`, `cpu\temp`, `cpu\cache`, `cpu\finish` and `hold-cpu`. A junction needs no admin rights.
+    ComfyUI keeps the same folder paths, and Windows follows the junction each time a file is opened, so neither
+    ComfyUI nor the worker restarts when a junction moves. Its other folders (`user`, `preview`, `text`, `guard`) stay
+    in the worker folder: they stay small.
+  - **When.** Each junction points into the first spill folder whose drive has room. The one in use keeps the junctions
+    while its drive has its floor free. Any other one takes them only with its floor and 3 GB more, also an earlier
+    one that has room again. A slot's junctions move only between its jobs: no job in hand, no ComfyUI start and no
+    face check. Its folders are empty then, because the worker empties them after every job. The drives are read
+    about once a minute and after each job, so the next claim waits for the move. Kept results that wait for the
+    studio stay where they are, and their folder follows once they are sent. Its log says each move once, for example
+    "Drive X: has only 3.2 GB free: its work folders now use S:\fuobe-worker-spill (120.5 GB free)."
+  - **No room anywhere.** The pause above, with words that name the drives: "Drives X:, S: and C: are almost full: no
+    new jobs until one of them has room" (`local.why: "disk-low:XSC:3.2:8"`, with the first folder's numbers).
+  - **Its own folders.** The worker makes each spill folder itself and gives it the rights of the worker folder: the
+    worker's account may change it, SYSTEM and Administrators have full control, nobody else has any right, and
+    nothing comes from the folder above. It is not content indexed. A file `.fuobe-worker-spill` marks it as this
+    worker's. A folder that it can't make (for example at the root of a drive where its account may not make
+    folders), can't lock, that holds other files, or that is another worker's, is skipped. The log says so once, and
+    the worker tries it again 10 minutes later. To use such a place (a PC whose setup closed its drives to the worker's
+    account), make the empty folder yourself, as an administrator, with the rights of the worker folder:
+    `icacls <folder> /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F <worker account>:(OI)(CI)M`.
+    The worker reads its rights (Get-Acl) and uses it as it is when nothing comes from the folder above and nobody but
+    the worker's account, SYSTEM and Administrators has a right in it. A folder in a cloud drive's folder (OneDrive and
+    the like), in the worker folder, or on a network share is refused.
+  - **Turned off.** Without `spillDirs`, the junctions become plain folders in the worker folder again at the next
+    start. A `hold` junction that still has kept results stays until they are sent.
 - **Hours:** outside its hours, the worker takes nothing new. Near the end of a window, it takes only a job that its
   estimate says will finish in time.
 
@@ -1059,6 +1103,8 @@ its beat as `stats` (src/lib/relay.ts `WorkerStats`, bin/lib/worker/stats.mjs). 
   `fansRpm: [{ name, rpm }]`). It is read only when its `at` is within 30 seconds. A missing or half-written file, or one
   with a byte order mark, is fine. It adds `cpuTempC` (`packageC`, else `coreMaxC`), `cpuPowerW`, `cpuClockMhz`,
   `vcoreV` and `board` (at most 8 temperatures and 8 fans, short plain names).
+- On Windows, the drive that holds the worker folder: `disks: [{ drive, freeBytes, totalBytes }]`, from the reading of
+  the drive-full pause (see "Pauses"), about once a minute.
 
 The studio keeps the newest per worker, cleaned and clamped, with its own receive time (`receivedAt`). A beat without
 `stats` (an older worker) leaves none. Only `GET /api/admin/workers` shows them.
@@ -1309,7 +1355,16 @@ routes.
   `tests/worker-turns.test.ts`, `tests/worker-turns-run.test.ts`, `tests/worker-update.test.ts`, `tests/cpu-slot.test.ts`,
   `tests/worker-cpu-slot.test.ts`, `tests/fuobe-connect-nodes.test.ts`, `tests/model-variants.test.ts`,
   `tests/pool-model-variants.test.ts`, `tests/stream-needs.test.ts`, `tests/stream-oom-fallback.test.ts`,
-  `tests/pool-first-pick.test.ts`, `tests/worker-build-loads.test.ts`, `tests/worker-ram-guard.test.ts`). The RAM guard
+  `tests/pool-first-pick.test.ts`, `tests/worker-build-loads.test.ts`, `tests/worker-ram-guard.test.ts`,
+  `tests/worker-disk-pause.test.ts`, `tests/worker-spill.test.ts`). The drive-full tests run the worker with a
+  stand-in drive: under the floor it takes no new job and the job in hand finishes, a drive over the floor but under
+  the gap keeps it paused, the drive is read again after each job, and with room again it takes the job. A worker in
+  that pause is no free worker for first pick or for making room, and it asks local ComfyUI work for no turn. The spill
+  tests use temp folders and stand-in free space: the junctions move between jobs and never during one (the job's
+  input lands in the new spill folder, on the same ComfyUI), the order and the floors (30 GB on C:), kept results that
+  stay until sent, the CPU slot's folders on their own, a folder it can't make, lock or link that is skipped, a drive
+  that is gone, the pause when every drive is short of room, the folder checks through a junction, and the rights
+  that `icacls` gives a spill folder (on Windows). The RAM guard
   tests read stand-in process lists (Windows' and `ps`), find the worker's own process trees, and run the worker with a
   stand-in PC memory: the site's switch reaching the worker, a claim with `noStream`, its own ComfyUI letting go of
   its memory before a job and when idle, no pause, and no reading at all with the switch off. The streaming tests

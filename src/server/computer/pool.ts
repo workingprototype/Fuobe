@@ -66,6 +66,26 @@ export const UPDATE_ASK_MS = 15 * 60_000;
 export const UPDATING_WORDS = "Updating to the new version · back in about a minute";
 /** A worker's own pause while a model folder of its isn't there yet: it keeps its last list of files. */
 export const MODELS_NOT_READY = "models-not-ready";
+/**
+ * A worker's own pause while the drive of its worker folder is almost full (bin/lib/worker/disk.mjs), or the drives of
+ * all its spill folders (bin/lib/worker/spill.mjs): "disk-low:<drive letters>:<GB free>:<GB it waits for>" (the first
+ * spill folder's numbers), no letter off Windows. It takes no new job; the job in hand goes on.
+ */
+export const DISK_LOW = "disk-low";
+
+/**
+ * A disk-low pause in words for the owner: "Drive X: is almost full (3.2 GB free): no new jobs until it has 8 GB free",
+ * or "Drives X:, S: and C: are almost full: no new jobs until one of them has room".
+ */
+export function diskLowWords(why: string): string {
+  const m = /^disk-low:([A-Z]{0,8}):(\d{1,7}(?:\.\d)?):(\d{1,7}(?:\.\d)?)$/.exec(why);
+  if (!m) return "The drive of its worker folder is almost full: no new jobs until it has room";
+  if (m[1].length > 1) {
+    const names = [...m[1]].map((l) => `${l}:`);
+    return `Drives ${names.slice(0, -1).join(", ")} and ${names.at(-1)} are almost full: no new jobs until one of them has room`;
+  }
+  return `${m[1] ? `Drive ${m[1]}:` : "The drive of its worker folder"} is almost full (${m[2]} GB free): no new jobs until it has ${m[3]} GB free`;
+}
 /** A task avoids workers that lost or failed it, unless no other worker that can run it beat this recently. */
 export const RETRY_WINDOW_MS = 10 * 60_000;
 /**
@@ -239,7 +259,7 @@ export const ticketReady = (w: Pick<WorkerRow, "protocol" | "catalog_version">):
 /** How long a worker has been behind the studio's catalog, as its beats said (0: it isn't). */
 export const behindFor = (w: Pick<WorkerRow, "behind_since">, now = Date.now()): number => (w.behind_since ? Math.max(0, now - w.behind_since) : 0);
 
-export type WorkerState = "new" | "idle" | "busy" | "draining" | "paused" | "outside-hours" | "gpu-busy" | "comfy-down" | "models-not-ready" | "waiting-for-yield" | "update-worker" | "offline";
+export type WorkerState = "new" | "idle" | "busy" | "draining" | "paused" | "outside-hours" | "gpu-busy" | "comfy-down" | "models-not-ready" | "disk-low" | "waiting-for-yield" | "update-worker" | "offline";
 
 /** The state in one word, and in words for the owner ("Paused here until 16:30", "Your GPU is busy (blender.exe)"). */
 export function workerState(w: WorkerRow, now = Date.now()): { state: WorkerState; words: string } {
@@ -255,6 +275,8 @@ export function workerState(w: WorkerRow, now = Date.now()): { state: WorkerStat
     if (why === "self-check") return { state: "comfy-down", words: "Its face check didn't pass after a restart: it checks again within 5 minutes" };
     // A model folder isn't there yet (a drive still locked after a restart): it waits for it, with its lanes as they were.
     if (why === MODELS_NOT_READY) return { state: "models-not-ready", words: "Waiting for its model folders" };
+    // The drive of its worker folder is almost full: no new job until it has room again. Its job in hand goes on.
+    if (why === DISK_LOW || why.startsWith(`${DISK_LOW}:`)) return { state: "disk-low", words: diskLowWords(why) };
     return { state: "paused", words: w.local_until ? `Paused here until ${clock(w.local_until, tz)}` : "Paused here" };
   }
   if (w.paused_server) return { state: "paused", words: "Paused on the website" };

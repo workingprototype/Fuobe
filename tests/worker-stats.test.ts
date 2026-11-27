@@ -213,4 +213,17 @@ describe("the beat's stats", () => {
     // No GPU, no sensors: the rest still goes.
     expect(statsOf({ at: 5, gpu: null, cpu: { busyPct: null, cores: 8 }, ram: { usedMb: 1, totalMb: 2 }, sensors: null })).toEqual({ at: 5, gpu: null, cpuPct: null, cpuCores: 8, ramUsedMb: 1, ramTotalMb: 2 });
   });
+
+  it("adds its drives when they have a letter (its worker folder's and its spill folders'), each once, as the studio keeps them", () => {
+    const base = { at: 5, gpu: null, cpu: null, ram: null, sensors: null };
+    const x = { drive: "X", freeBytes: 3.5 * 2 ** 30, totalBytes: 2e12 };
+    expect(statsOf({ ...base, disks: [x] }).disks).toEqual([{ drive: "X", freeBytes: Math.floor(3.5 * 2 ** 30), totalBytes: 2e12 }]);
+    // Two spill folders on S: and one on X: again: each drive once, the first reading of it; a reading with no total is left out.
+    const s = { drive: "S", freeBytes: 1e11, totalBytes: 4e12 };
+    expect(statsOf({ ...base, disks: [x, s, { ...s, freeBytes: 1 }, { drive: "C", freeBytes: 1 }, null] }).disks?.map((d: { drive: string }) => d.drive)).toEqual(["X", "S"]);
+    // Off Windows (no letter), or no reading yet: none.
+    expect(statsOf({ ...base, disks: [{ drive: null, freeBytes: 1, totalBytes: 2 }] })).not.toHaveProperty("disks");
+    expect(statsOf({ ...base, disks: [] })).not.toHaveProperty("disks");
+    expect(statsOf(base)).not.toHaveProperty("disks");
+  });
 });

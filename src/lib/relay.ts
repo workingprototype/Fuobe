@@ -321,7 +321,9 @@ export interface WorkerBeat {
   /**
    * Its own pause switch: by hand ("here", "here-until:<ms>", "here-now"), by itself ("gpu-busy:<process>",
    * "comfy-crashes", "port-busy", "models-not-ready": a model folder isn't there yet, "self-check": its face detector's
-   * check failed twice). Not paused, `why` may say that it waits for local ComfyUI work to make room
+   * check failed twice, "disk-low:<drive letters>:<GB free>:<GB it waits for>": the drive of its worker folder, or of
+   * every spill folder, is almost full, so it takes no new job and lets the one in hand finish). Not paused, `why` may
+   * say that it waits for local ComfyUI work to make room
    * ("waiting-for-yield", "waiting-for-yield:no-answer").
    */
   local: { paused: boolean; why: string | null; until: number | null };
@@ -399,7 +401,7 @@ export interface WorkerStats {
   cpuClockMhz?: number;
   vcoreV?: number;
   board?: { temps: { name: string; c: number }[]; fans: { name: string; rpm: number }[] };
-  /** Free space per drive, when a later worker sends it. */
+  /** Free space per drive: the worker program sends its worker folder's drive (read about once a minute, Windows only). */
   disks?: { drive: string; freeBytes: number; totalBytes: number }[];
 }
 

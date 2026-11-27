@@ -132,9 +132,20 @@ export function readSensors(file, now = Date.now(), read = (p) => fs.readFileSyn
 
 /**
  * The beat's `stats`: when it was read (this PC's clock), the GPU (null: no NVIDIA GPU, or no reading), the CPU's load
- * and cores, the memory, and the sensors file's readings when there are fresh ones.
+ * and cores, the memory, the sensors file's readings when there are fresh ones, and the free space of its drives (its
+ * worker folder's and its spill folders', disk.mjs and spill.mjs, read about once a minute): each drive letter once, the
+ * first reading of it, at most 8.
+ *
+ * @param {{ at: number; gpu?: any; cpu?: any; ram?: any; sensors?: any; disks?: ({ drive: string | null; freeBytes: number; totalBytes?: number } | null)[] }} o
  */
-export function statsOf({ at, gpu, cpu, ram, sensors }) {
+export function statsOf({ at, gpu, cpu, ram, sensors, disks }) {
+  const seen = new Set();
+  const drives = [];
+  for (const d of disks ?? []) {
+    if (!d?.drive || seen.has(d.drive) || !(d.freeBytes >= 0) || !(d.totalBytes > 0) || drives.length >= BOARD_MAX) continue;
+    seen.add(d.drive);
+    drives.push({ drive: d.drive, freeBytes: Math.floor(d.freeBytes), totalBytes: Math.floor(d.totalBytes) });
+  }
   return {
     at,
     gpu: gpu ?? null,
@@ -143,5 +154,6 @@ export function statsOf({ at, gpu, cpu, ram, sensors }) {
     ramUsedMb: ram?.usedMb ?? null,
     ramTotalMb: ram?.totalMb ?? null,
     ...(sensors ?? {}),
+    ...(drives.length > 0 && { disks: drives }),
   };
 }

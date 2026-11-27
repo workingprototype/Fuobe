@@ -79,11 +79,40 @@ export function vetGraph(graph, allowed, verified, o = {}) {
   return graphCheck(graph, allowed, verified, o)?.reason ?? null;
 }
 
+/**
+ * Delete everything in a folder of the worker's, never the folder itself: it may be a junction into a spill folder
+ * (spill.mjs), which deleting would turn back into a plain folder. Nothing when it isn't there.
+ */
+export function emptyDir(dir) {
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const e of names) fs.rmSync(path.join(dir, e), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+}
+
+/**
+ * Delete a folder of the worker's with everything in it (its kept inputs, a finishing job's files). A spill junction
+ * (spill.mjs) stays a junction and loses only what is in it, so the folder keeps its place on the spill folder's drive.
+ */
+export function clearDir(dir) {
+  let link = false;
+  try {
+    link = fs.lstatSync(dir).isSymbolicLink();
+  } catch {
+    return;
+  }
+  if (link) emptyDir(dir);
+  else fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+}
+
 /** Delete everything in the worker's own input, output and temp folders (at start: whatever a crash left). */
 export function emptyFolders(f) {
   for (const dir of [f.input, f.output, f.temp]) {
     fs.mkdirSync(dir, { recursive: true });
-    for (const e of fs.readdirSync(dir)) fs.rmSync(path.join(dir, e), { recursive: true, force: true });
+    emptyDir(dir);
   }
 }
 

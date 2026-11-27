@@ -1,6 +1,7 @@
 // `fuobe worker run`: the worker's loop (docs/gpu-workers.md). It beats to the studio, keeps its own ComfyUI running
 // only while it may work, takes one job at a time with the same runner the browser uses, checks each graph itself,
-// cleans up after each job, and pauses itself when another program uses the GPU.
+// cleans up after each job, and pauses itself when another program uses the GPU. While the drive of its worker folder is
+// almost full (disk.mjs), it takes no new job and lets the one in hand finish.
 //
 // It also keeps jobs going through trouble: finished results stay on its disk until the studio has them (hold.mjs), so a
 // stop before the upload never runs a job twice; every call to the studio follows one retry policy (retry.mjs); a job
@@ -25,7 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { StayAwake } from "./awake.mjs";
-import { allowedNodes, cleanJob, emptyFolders, graphCheck, inputRules } from "./checks.mjs";
+import { allowedNodes, cleanJob, clearDir, emptyFolders, graphCheck, inputRules } from "./checks.mjs";
 import { folders, GuardMissing, OwnComfy, PortBusy, yamlFolders } from "./comfy.mjs";
 import { ffmpegOf, PROTOCOL, protocolOf, readControl, saveConfig, savedConfig, writeControl, writeStatus } from "./config.mjs";
 import { BRIEF_COOL_DOWN_MS, BRIEF_EVERY_MS, BRIEF_PAUSE_MS, GpuWatch, MID_JOB_GRACE_MS, othersOf, readGpu, readGpuGen, readGpuTotal } from "./gpu.mjs";
@@ -44,6 +45,8 @@ import { LogRing } from "./log-ring.mjs";
 import { failure, Reach, retrying } from "./retry.mjs";
 import { builtCatalogVersion, ceilingOf, ceilingWords, graphInside, laneMap, readPcAnswers, workerCatalog } from "./tickets.mjs";
 import { TEXT_DRAIN_MS, TextSlot, textSlotOf, textTurn } from "./text.mjs";
+import { DISK_EVERY_MS, DISK_LOW, DiskWatch, minFreeOf, readDisk } from "./disk.mjs";
+import { Spill, spillDirsOf, unspill } from "./spill.mjs";
 import { CpuMeter, ramNow, readSensors, STATS_SEND_MS, statsOf } from "./stats.mjs";
 import { RAM_REUSE_MS, ramGuardOf, ramSplit, RamWatch, readProcs } from "./ram.mjs";
 import { readLocalWork, SiteTurns, writeMode, writeSite } from "./turns.mjs";
@@ -184,13 +187,18 @@ export function siteProblem(site, o = {}) {
 
 /**
  * The worker's local pause, from its switch (`worker pause`), the GPU, its model folders (`modelsMissing`: the ones that
- * aren't there) and its ComfyUI: { paused, why, until }. A pause by hand ("here", "here-until:<ms>", "here-now") always
- * wins over the GPU's. Its RAM guard never pauses it (ram.mjs).
+ * aren't there), its ComfyUI and its worker folder's drive (`diskLow`: DiskWatch's why while the drive is almost full,
+ * disk.mjs): { paused, why, until }. A pause by hand ("here", "here-until:<ms>", "here-now") always wins over the GPU's,
+ * and the GPU's (which stops the job in hand) over the drive's (which lets it finish). Its RAM guard never pauses it
+ * (ram.mjs).
+ *
+ * @param {string | null} [diskLow]
  */
-export function localPause(control, gpu, comfyTrouble, now, modelsMissing = []) {
+export function localPause(control, gpu, comfyTrouble, now, modelsMissing = [], diskLow = null) {
   if (control.paused && control.until && now >= control.until) return null; // its --for ran out: the caller clears it
   if (control.paused) return { paused: true, why: control.now ? "here-now" : control.until ? `here-until:${control.until}` : "here", until: control.until ?? null };
   if (gpu.paused) return { paused: true, why: `gpu-busy:${gpu.who ?? "another program"}`, until: null };
+  if (diskLow) return { paused: true, why: diskLow, until: null };
   if (modelsMissing.length) return { paused: true, why: "models-not-ready", until: null };
   if (comfyTrouble) return { paused: true, why: comfyTrouble, until: null };
   return { paused: false, why: null, until: null };
@@ -215,7 +223,8 @@ export function siteOf(answer) {
  * "signed-out" (the studio doesn't know its token) or "disconnected". `deps`: { fetch, now, sleep, readGpu, log, home, env,
  * signal, requirements, ComputerRunner, rules, pins, runtime (the run-time files it verifies: inventory.mjs
  * runtimeFileList), allowed, ffmpegVersion, reencode, awake, rescanMs, comfy (OwnComfy's own options), readCounters,
- * readListeners, readProcs, ramNow and ramGuard (the RAM guard's numbers, ram.mjs), gpuEveryMs, gpuGraceMs (MID_JOB_GRACE_MS), gpuBriefMs (BRIEF_PAUSE_MS), readGpuGen, idleClaimMs
+ * readListeners, readProcs, ramNow and ramGuard (the RAM guard's numbers, ram.mjs), readDisk and diskEveryMs (its worker
+ * folder's drive, disk.mjs), gpuEveryMs, gpuGraceMs (MID_JOB_GRACE_MS), gpuBriefMs (BRIEF_PAUSE_MS), readGpuGen, idleClaimMs
  * (IDLE_CLAIM_MS), canCleanPictures, and for job tickets: composer
  * (src/lib/ticket-compose.ts as built), catalogVersion, catalogDir, allLanes, codeWatch (update.mjs's CodeWatch: new
  * code on disk ends it with "update" once no person's job waits for it and its jobs are done) and updateDeferMs
@@ -264,10 +273,26 @@ async function work(saved, deps, owner) {
     const said = typeof why === "string" ? (redact ? redact(why) : why).replace(/\s+/g, " ").replace(/[\s.]+$/, "").slice(0, 600) : "";
     return `${what} ${t.id} ${phase}${said ? `: ${said}` : ""}.`;
   };
+  // Its worker folder's drive (disk.mjs), about once a minute and again after each job: almost full, it takes no new job
+  // (the job in hand goes on) until the drive has room again. worker.json `minFreeGb` (0: off).
+  const minFree = minFreeOf(cfg.minFreeGb);
+  if (minFree.problem) log(`${minFree.problem}: it keeps ${minFree.gb} GB free on the drive of its worker folder.`);
+  const diskWatch = new DiskWatch({ minFreeGb: minFree.gb });
+  // With spill folders (worker.json `spillDirs`, spill.mjs), the folders that grow with each job are junctions into the
+  // first spill folder whose drive has room, moved between jobs only; it pauses only when none has room. Set up before
+  // anything uses those folders (no job is in hand yet). Without them, a junction a spill left becomes a folder again.
+  const spillCfg = spillDirsOf(cfg.spillDirs, { workDir: cfg.workDir, minFreeGb: minFree.gb });
+  for (const p of spillCfg.problems) log(`${p}.`);
+  const spill = spillCfg.entries.length
+    ? new Spill({ workDir: cfg.workDir, entries: spillCfg.entries, groups: cfg.cpuSlot === true ? ["gpu", "cpu"] : ["gpu"], log, ...(deps.readFree && { readFree: deps.readFree }), ...(deps.lockFolder && { lock: deps.lockFolder }), ...(deps.privateFolder && { private: deps.privateFolder }) })
+    : null;
+  if (spill) spill.settle(now(), { gpu: true, cpu: true });
+  else unspill(cfg.workDir, log);
   emptyFolders(f);
-  // Inputs kept by their SHA-256 while their job runs here (a job sent again reads nothing from the studio twice).
+  // Inputs kept by their SHA-256 while their job runs here (a job sent again reads nothing from the studio twice). A
+  // spill junction keeps its link and loses only its contents (clearDir).
   const cacheDir = path.join(cfg.workDir, "cache");
-  const emptyCache = () => fs.rmSync(cacheDir, { recursive: true, force: true });
+  const emptyCache = () => clearDir(cacheDir);
   emptyCache();
   const hold = new Hold(path.join(cfg.workDir, "hold"));
   const allowed = deps.allowed ?? allowedNodes(cfg.allowNodesFile);
@@ -370,6 +395,12 @@ async function work(saved, deps, owner) {
   // The PC's live hardware stats (stats.mjs), read with the GPU: the last reading goes in each beat.
   let hwStats = null;
   const cpuMeter = new CpuMeter(deps.cpuTimes);
+  // Its drives' readings (diskWatch and spill, above).
+  const diskEveryMs = deps.diskEveryMs ?? DISK_EVERY_MS;
+  let diskReadAt = -Infinity;
+  let diskReadings = [];
+  // A job ended since the last reading: no claim until the drive is read again.
+  let diskAgain = false;
   let lastGpuAt = 0;
   // When the GPU was last read: a reading older than GPU_BUSY_FRESH_MS says nothing about how busy it is now.
   let gpuReadAt = 0;
@@ -768,9 +799,10 @@ async function work(saved, deps, owner) {
   const fc = folders(cpuDir);
   const cpuCacheDir = path.join(cpuDir, "cache");
   // Its kept inputs, and anything a finishing job left behind (a stop mid-job), go after each job, at start and at exit.
+  // A spill junction keeps its link and loses only its contents (clearDir).
   const emptyCpuCache = () => {
-    fs.rmSync(cpuCacheDir, { recursive: true, force: true });
-    fs.rmSync(path.join(cpuDir, "finish"), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    clearDir(cpuCacheDir);
+    clearDir(path.join(cpuDir, "finish"));
   };
   const cpuComfy = cpuOn
     ? new OwnComfy(
@@ -1033,6 +1065,8 @@ async function work(saved, deps, owner) {
       .claimAndRun()
       .then((had) => {
         cpuMissedAt = had ? -Infinity : now();
+        // Its results went to the same drive: read again before the next claim.
+        if (had) diskAgain = true;
       })
       // A claim the studio never answered (the retry policy gave up on it) had no job: none stopped.
       .catch((e) => log(cpuComfy.task ? `A CPU slot job stopped: ${failure(e)}` : `Its CPU slot can't ask the studio for a job: ${failure(e)}`))
@@ -1048,6 +1082,10 @@ async function work(saved, deps, owner) {
       ? "Finishing its job, then restarting on new code"
       : pause.why === "models-not-ready"
       ? "Waiting for its model folders"
+      : pause.why?.startsWith(DISK_LOW)
+      ? spill
+        ? "Paused: every drive for its work folders is almost full"
+        : "Paused: the drive of its worker folder is almost full"
       : pause.paused
         ? `Paused here (${pause.why})`
         : !answer
@@ -1076,6 +1114,8 @@ async function work(saved, deps, owner) {
         if (!o?.onlyHeld) gpuMissedAt = had ? -Infinity : now();
         // A GPU job ran: its ComfyUI may hold models again, let go of once it is idle.
         if (had && !o?.onlyHeld) ramIdleFreed = false;
+        // Its inputs and results went to its worker folder's drive: read again before the next claim.
+        if (had && !o?.onlyHeld) diskAgain = true;
       })
       .catch((e) => log(comfy.task ? `A job stopped: ${failure(e)}` : `It can't ask the studio for a job: ${failure(e)}`))
       .finally(() => {
@@ -1163,7 +1203,7 @@ async function work(saved, deps, owner) {
         const reading = await (deps.readGpu ?? readGpu)(cfg.nvidiaSmi);
         // The live stats from the same reading, with the CPU, the memory and the sensors file (never fails the turn).
         try {
-          hwStats = statsOf({ at: now(), gpu: reading?.stats ?? null, cpu: cpuMeter.read(), ram: (deps.ramNow ?? ramNow)(), sensors: readSensors(cfg.sensorsFile, Date.now(), deps.readSensorsFile) });
+          hwStats = statsOf({ at: now(), gpu: reading?.stats ?? null, cpu: cpuMeter.read(), ram: (deps.ramNow ?? ramNow)(), sensors: readSensors(cfg.sensorsFile, Date.now(), deps.readSensorsFile), disks: diskReadings });
         } catch {
           hwStats = null;
         }
@@ -1268,7 +1308,28 @@ async function work(saved, deps, owner) {
           });
         } else modelsMissing = missing;
       }
-      let next = localPause(control, gpu, comfyTrouble, t, modelsMissing) ?? { paused: false, why: null, until: null };
+      // Its worker folder's drive (or, with spill folders, theirs): about once a minute, and before the next claim after
+      // a job. A reading that fails keeps the state it has (it never pauses for no reason). Almost full (every spill
+      // folder's drive), it takes no new job; the job in hand goes on.
+      if (diskAgain || t - diskReadAt >= diskEveryMs) {
+        diskAgain = false;
+        diskReadAt = t;
+        const read = (deps.readDisk ?? readDisk)(cfg.workDir);
+        if (spill) {
+          spill.read(t);
+          diskReadings = [read, ...spill.readings];
+        } else {
+          if (read) diskReadings = [read];
+          const was = diskWatch.low;
+          diskWatch.update(read);
+          if (!was && diskWatch.low) log(diskWatch.words("pause"));
+          if (was && !diskWatch.low) log(diskWatch.words("back"));
+        }
+      }
+      // Spill folders: each slot's junctions move to the folder to use, only while that slot holds no job, starts no
+      // ComfyUI and runs no face check. Its next claim waits until they are there.
+      if (spill) spill.settle(t, { gpu: !busyJob && !starting, cpu: !busyCpu && !cpuStarting });
+      let next = localPause(control, gpu, comfyTrouble, t, modelsMissing, spill ? spill.why : diskWatch.why) ?? { paused: false, why: null, until: null };
       // Waiting for its turn is not a pause: its jobs keep their place in the line. The helper's estimate of the start
       // goes with it.
       if (!next.paused && turn.waitForYield) next = { paused: false, why: turn.late ? "waiting-for-yield:no-answer" : "waiting-for-yield", until: turn.startsAt };
@@ -1401,7 +1462,7 @@ async function work(saved, deps, owner) {
             .catch((e) => log(`Its face check between jobs didn't run: ${e.message}`))
             .finally(() => (starting = null));
         }
-        if (comfy.ready && !starting && answer?.runner && !busyJob && !holdBack && !heldFirst && claimDue(t, gpuMissedAt, siteOf(answer).claimable ?? 0, idleClaimMs)) take();
+        if (comfy.ready && !starting && answer?.runner && !busyJob && !holdBack && !heldFirst && !diskAgain && (!spill || spill.ready("gpu")) && claimDue(t, gpuMissedAt, siteOf(answer).claimable ?? 0, idleClaimMs)) take();
       } else if (comfy.alive() && (stopNow || !busyJob)) {
         log("Stopping its own ComfyUI (paused).");
         await comfy.stop();
@@ -1421,7 +1482,7 @@ async function work(saved, deps, owner) {
               })
               .finally(() => (cpuStarting = null));
           }
-          if (cpuComfy.ready && answer?.runner && !busyCpu && claimDue(t, cpuMissedAt, 0, idleClaimMs)) takeCpu();
+          if (cpuComfy.ready && answer?.runner && !busyCpu && !diskAgain && (!spill || spill.ready("cpu")) && claimDue(t, cpuMissedAt, 0, idleClaimMs)) takeCpu();
         } else if (cpuComfy.alive() && (!busyCpu || pause.why === "here-now" || answer?.worker?.pauseNow)) {
           await cpuComfy.stop();
         }

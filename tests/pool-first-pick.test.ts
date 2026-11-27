@@ -160,6 +160,7 @@ describe("a worker that picks first", () => {
     const away: [string, (w: W) => void][] = [
       ["paused on the website", (w) => pool.patchWorker(w.id, { paused: true })],
       ["paused on its PC", (w) => beat(w, { paused: true, why: "here" })],
+      ["its worker folder's drive almost full", (w) => beat(w, { paused: true, why: "disk-low:X:3.2:8" })],
       ["draining", (w) => pool.patchWorker(w.id, { drain: true })],
       ["silent", (w) => db().prepare("UPDATE relay_workers SET seen_at = ? WHERE id = ?").run(clock - 31_000, w.id)],
       ["outside its hours", (w) => pool.patchWorker(w.id, { hours: null })],
