@@ -91,8 +91,8 @@ describe("refusals (/prompt answered 400)", () => {
 
 describe("execution errors (/history or the websocket)", () => {
   const traceback = [
-    '  File "X:\\fuobe-worker\\ComfyUI\\execution.py", line 496, in execute\n    output_data, output_ui, has_subgraph = await get_output_data(...)\n',
-    '  File "X:\\fuobe-worker\\ComfyUI\\nodes.py", line 1525, in sample\n    return common_ksampler(model, seed, steps)\n',
+    '  File "D:\\fuobe-worker\\ComfyUI\\execution.py", line 496, in execute\n    output_data, output_ui, has_subgraph = await get_output_data(...)\n',
+    '  File "D:\\fuobe-worker\\ComfyUI\\nodes.py", line 1525, in sample\n    return common_ksampler(model, seed, steps)\n',
     '  File "/home/runner/ComfyUI/comfy/samplers.py", line 88, in apply_model\n    x = self.inner(x)\n',
   ];
 
@@ -107,7 +107,7 @@ describe("execution errors (/history or the websocket)", () => {
     const data = { node_id: "7", node_type: "KSampler", exception_type: "RuntimeError", exception_message: "mat1 and mat2 shapes cannot be multiplied (77x2048 and 4096x3072)\nmore lines", traceback };
     const why = executionReason(data)!;
     expect(why).toBe("RuntimeError in KSampler (node 7): mat1 and mat2 shapes cannot be multiplied (77x2048 and 4096x3072) (at nodes.py:1525 sample < samplers.py:88 apply_model)");
-    expect(why).not.toMatch(/fuobe-worker|X:\\|\/home\//);
+    expect(why).not.toMatch(/fuobe-worker|D:\\|\/home\//);
   });
 
   it("a history entry: its execution error, an interrupt, or only its status", () => {

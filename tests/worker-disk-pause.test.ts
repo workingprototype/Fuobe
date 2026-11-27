@@ -52,11 +52,11 @@ describe("its setting (minFreeGb)", () => {
 
 describe("the reading", () => {
   it("the drive letter on Windows only, never for a network folder", () => {
-    expect(driveOf("X:\\fuobe-worker\\work", "win32")).toBe("X");
+    expect(driveOf("D:\\FuobeWorker\\work", "win32")).toBe("D");
     expect(driveOf("c:/Users/me/work", "win32")).toBe("C");
     expect(driveOf("\\\\server\\share\\work", "win32")).toBeNull();
     expect(driveOf("/home/me/work", "linux")).toBeNull();
-    expect(driveOf("X:\\fuobe-worker\\work", "linux")).toBeNull();
+    expect(driveOf("D:\\FuobeWorker\\work", "linux")).toBeNull();
   });
 
   it("free (what this user may use) and total bytes from one statfs call; null when it can't be read", () => {
@@ -65,8 +65,8 @@ describe("the reading", () => {
       calls.push(p);
       return { bsize: 4096, bavail: 1000, bfree: 2000, blocks: 10_000 };
     };
-    expect(readDisk("X:\\fuobe-worker\\work", statfs as never, "win32")).toEqual({ drive: "X", freeBytes: 4096 * 1000, totalBytes: 4096 * 10_000 });
-    expect(calls).toEqual(["X:\\fuobe-worker\\work"]);
+    expect(readDisk("D:\\FuobeWorker\\work", statfs as never, "win32")).toEqual({ drive: "D", freeBytes: 4096 * 1000, totalBytes: 4096 * 10_000 });
+    expect(calls).toEqual(["D:\\FuobeWorker\\work"]);
     expect(
       readDisk("/w", (() => {
         throw new Error("ENOENT");

@@ -117,7 +117,7 @@ describe("one check against its ComfyUI", () => {
     const failing = standIn({ status: "error" });
     const fetchFn = async (url: string, init?: RequestInit) => {
       if (new URL(url).pathname === "/history/check-1") {
-        const messages = [["execution_start", {}], ["execution_error", { node_type: "LoadImage", exception_type: "PermissionError", exception_message: "[Errno 13] Permission denied: 'X:\\fuobe-worker\\work\\input\\fuobe-self-check.jpg'" }]];
+        const messages = [["execution_start", {}], ["execution_error", { node_type: "LoadImage", exception_type: "PermissionError", exception_message: "[Errno 13] Permission denied: 'D:\\fuobe-worker\\work\\input\\fuobe-self-check.jpg'" }]];
         return new Response(JSON.stringify({ "check-1": { status: { status_str: "error", completed: false, messages }, outputs: {} } }), { status: 200 });
       }
       return failing.fetchFn(url, init);

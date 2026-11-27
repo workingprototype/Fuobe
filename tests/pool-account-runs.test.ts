@@ -733,12 +733,12 @@ describe("an account's run that a worker can't finish", () => {
 
   it("a node that failed on the worker: the plain sentence for the account, the cleaned words for the owner only", async () => {
     const raw = [
-      "VHS failed to extract audio from X:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4:",
+      "VHS failed to extract audio from D:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4:",
       "ffmpeg version 7.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
       "  built with gcc 14.2.0 (Rev1, Built by MSYS2 project)",
       "  configuration: --enable-gpl --enable-version3 --enable-static",
       "  libavutil      59. 39.100 / 59. 39.100",
-      "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'X:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4':",
+      "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4':",
       "Stream map '0:a:0' matches no streams.",
     ].join("\n");
     const w = standInWorker();
@@ -758,7 +758,7 @@ describe("an account's run that a worker can't finish", () => {
     expect(stored.error).toBe(ENGINE_WORDS["no-sound"]);
     expect(stored.detail).toContain("VHS_LoadVideo: VHS failed to extract audio from fuobe_HFpqXpUDFs__.mp4");
     expect(stored.detail).toContain("matches no streams");
-    expect(stored.detail).not.toMatch(/fuobe-worker|X:\\|ffmpeg version|Copyright|configuration:|libavutil|Input #0/);
+    expect(stored.detail).not.toMatch(/fuobe-worker|D:\\|ffmpeg version|Copyright|configuration:|libavutil|Input #0/);
     const owner = listAccountRuns({ account: accountId }).items.find((x) => x.id === id);
     expect(owner?.error).toBe(ENGINE_WORDS["no-sound"]);
     expect(owner?.detail).toBe(stored.detail);
@@ -811,7 +811,7 @@ describe("an account's run that a worker can't finish", () => {
       await api.report(t, { event: "sent", promptId: t.promptId });
       const entry = { prompt: [1, t.promptId], status: { status_str: "error", completed: false, messages: [["execution_error", { node_type: "KSampler", node_id: "3", exception_type: "RuntimeError", exception_message: "shapes" }]] }, outputs: {} };
       // A worker that said too much: the server keeps none of it.
-      const why = "RuntimeError in KSampler (node 3): bad input a lighthouse at dusk with hf_abcdefghijklmnopqrstu from X:\\fuobe-worker\\ComfyUI\\nodes.py";
+      const why = "RuntimeError in KSampler (node 3): bad input a lighthouse at dusk with hf_abcdefghijklmnopqrstu from D:\\fuobe-worker\\ComfyUI\\nodes.py";
       expect((await api.report(t, { event: "finished", entry, why })).status).toBe(200);
       expect(rowOf(taskId).state).toBe("failed");
       const g = await ended(id);
@@ -853,7 +853,7 @@ describe("an account's run that a worker can't finish", () => {
       const api = workerApi(w.token);
       const t = (await api.claim())!;
       const body = { error: { type: "missing_node_type", message: "x", details: "Node ID '#12'", extra_info: { node_id: "12", class_type: "InstantHMRPredict" } }, node_errors: {} };
-      await api.report(t, { event: "refused", status: 400, body, why: `${refusalReason(body)} from X:\\fuobe-worker\\ComfyUI with hf_abcdefghijklmnopqrstu` });
+      await api.report(t, { event: "refused", status: 400, body, why: `${refusalReason(body)} from D:\\fuobe-worker\\ComfyUI with hf_abcdefghijklmnopqrstu` });
       const g = await ended(id);
       const why = "ComfyUI refused the job: node InstantHMRPredict (id 12) isn't installed from [folder] with [key]";
       // The plain sentence stays; the cleaned reason comes with it, in the run and the person's own list.
@@ -861,7 +861,7 @@ describe("an account's run that a worker can't finish", () => {
       expect(g.errorDetail).toBe(why);
       const mine = JSON.parse(await visitorList()) as { items: { id: string; errorDetail?: string }[] };
       expect(mine.items.find((x) => x.id === id)?.errorDetail).toBe(why);
-      expect(JSON.stringify(mine)).not.toMatch(/fuobe-worker|hf_abc|X:\\\\/);
+      expect(JSON.stringify(mine)).not.toMatch(/fuobe-worker|hf_abc|D:\\\\/);
       // Another account: not in its list, and its look at the run is refused.
       const theirs = await generationsRoute.GET(request("/api/generations?limit=50", { cookie: computerCookie }));
       expect(JSON.stringify(await theirs.json())).not.toMatch(/InstantHMR/);

@@ -11,13 +11,13 @@ import type { ReportEvent } from "@/lib/relay";
 
 /** What a worker's VHS_LoadVideo said for a clip with no sound (the ffmpeg banner as ffmpeg prints it). */
 const VHS_NO_AUDIO = [
-  "VHS failed to extract audio from X:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4:",
+  "VHS failed to extract audio from D:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4:",
   "ffmpeg version 7.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
   "  built with gcc 14.2.0 (Rev1, Built by MSYS2 project)",
   "  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --enable-libx264 --enable-cuda-llvm",
   "  libavutil      59. 39.100 / 59. 39.100",
   "  libavcodec     61. 19.100 / 61. 19.100",
-  "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'X:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4':",
+  "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4':",
   "  Metadata:",
   "    major_brand     : isom",
   "  Duration: 00:00:05.00, start: 0.000000, bitrate: 2400 kb/s",
@@ -152,12 +152,12 @@ describe("a worker's reports", () => {
       event: "finished",
       entry: {
         prompt: [1, "p"],
-        status: { status_str: "error", messages: [["execution_error", { node_type: "VHS_LoadVideo", exception_message: VHS_NO_AUDIO, current_inputs: { video: ["X:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4"] } }]] },
+        status: { status_str: "error", messages: [["execution_error", { node_type: "VHS_LoadVideo", exception_message: VHS_NO_AUDIO, current_inputs: { video: ["D:\\fuobe-worker\\work\\input\\fuobe_HFpqXpUDFs__.mp4"] } }]] },
         outputs: { "9": { gifs: [{ filename: "fuobe_out_00001.mp4", subfolder: "", type: "output" }] } },
       },
     };
     const out = JSON.stringify(withoutWorkerPaths(finished));
-    expect(out).not.toMatch(/fuobe-worker|X:\\\\/);
+    expect(out).not.toMatch(/fuobe-worker|D:\\\\/);
     expect(out).toContain("fuobe_HFpqXpUDFs__.mp4");
     // Results go as they were.
     expect((withoutWorkerPaths(finished) as Extract<ReportEvent, { event: "finished" }>).entry.outputs).toEqual(finished.entry.outputs);

@@ -314,8 +314,8 @@ The worker obeys any one of these pauses. One pause never ends another pause.
   its jobs write almost nothing to the drive. With spill folders (below), the pause comes only when every spill
   folder's drive is short of room.
 - **Spill folders** (`spillDirs` in `worker.json`, none by default). A list of folders on other drives, in order, for
-  example `"spillDirs": ["X:\\fuobe-worker\\work-spill", "S:\\fuobe-worker-spill", "C:\\fuobe-worker-spill"]`. An
-  entry can also be `{ "dir": "S:\\fuobe-worker-spill", "minFreeGb": 10 }`. Each folder keeps its own `minFreeGb`, else
+  example `"spillDirs": ["D:\\FuobeWorker\\spill", "E:\\FuobeSpill", "C:\\FuobeSpill"]`. An
+  entry can also be `{ "dir": "E:\\FuobeSpill", "minFreeGb": 10 }`. Each folder keeps its own `minFreeGb`, else
   the one of `worker.json`, and at least 30 GB on the system drive (C:).
   - **What moves.** The folders that grow with each job become directory junctions in the worker folder: `input`,
     `output`, `temp`, `cache` (the inputs it keeps while a job runs) and `hold` (the kept results), and with a CPU slot
@@ -329,7 +329,7 @@ The worker obeys any one of these pauses. One pause never ends another pause.
     face check. Its folders are empty then, because the worker empties them after every job. The drives are read
     about once a minute and after each job, so the next claim waits for the move. Kept results that wait for the
     studio stay where they are, and their folder follows once they are sent. Its log says each move once, for example
-    "Drive X: has only 3.2 GB free: its work folders now use S:\fuobe-worker-spill (120.5 GB free)."
+    "Drive D: has only 3.2 GB free: its work folders now use E:\FuobeSpill (120.5 GB free)."
   - **No room anywhere.** The pause above, with words that name the drives: "Drives X:, S: and C: are almost full: no
     new jobs until one of them has room" (`local.why: "disk-low:XSC:3.2:8"`, with the first folder's numbers).
   - **Its own folders.** The worker makes each spill folder itself and gives it the rights of the worker folder: the
